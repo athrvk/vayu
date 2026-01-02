@@ -469,6 +469,6 @@ TEST_F(EventSourceTest, ReceiveRealEvents)
     }
     else
     {
-        std::cout << "No events received (SSE test server may be unavailable)\n";
+        std::cerr << "No events received (SSE test server may be unavailable)\n";
     }
 }

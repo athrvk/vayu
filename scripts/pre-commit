@@ -3,6 +3,13 @@
 # Run clang-tidy on changed C++ files
 echo "Running clang-tidy on changed files..."
 
+# Add common Homebrew paths for LLVM on macOS to ensure clang-tidy is found
+if [ -d "/opt/homebrew/opt/llvm/bin" ]; then
+    export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+elif [ -d "/usr/local/opt/llvm/bin" ]; then
+    export PATH="/usr/local/opt/llvm/bin:$PATH"
+fi
+
 # Get list of changed C++ files
 FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "\.(cpp|hpp|c|h)$")
 

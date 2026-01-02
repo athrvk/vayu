@@ -1,0 +1,9 @@
+---
+Checks: '
+  -readability-implicit-bool-conversion,
+  -readability-function-cognitive-complexity,
+  -readability-identifier-length,
+  -readability-isolate-declaration
+'
+InheritParentConfig: true
+...
