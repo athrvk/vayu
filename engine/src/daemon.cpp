@@ -19,10 +19,16 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <cstring>
 
 namespace
 {
     std::atomic<bool> g_running{true};
+    int g_lock_fd = -1;
 
     void signal_handler(int signal)
     {
@@ -32,12 +38,51 @@ namespace
             g_running = false;
         }
     }
+
+    bool acquire_lock()
+    {
+        const char *lock_path = "/tmp/vayu.lock";
+        g_lock_fd = open(lock_path, O_RDWR | O_CREAT, 0666);
+        if (g_lock_fd < 0)
+        {
+            vayu::utils::log_error("Failed to open lock file: " + std::string(lock_path));
+            return false;
+        }
+
+        if (flock(g_lock_fd, LOCK_EX | LOCK_NB) < 0)
+        {
+            if (errno == EWOULDBLOCK)
+            {
+                vayu::utils::log_error("Error: Another instance of Vayu Engine is already running.");
+            }
+            else
+            {
+                vayu::utils::log_error("Error: Failed to acquire lock on " + std::string(lock_path) + ": " + strerror(errno));
+            }
+            close(g_lock_fd);
+            return false;
+        }
+
+        // Write PID
+        ftruncate(g_lock_fd, 0);
+        std::string pid = std::to_string(getpid()) + "\n";
+        write(g_lock_fd, pid.c_str(), pid.length());
+
+        // Do not close the fd, as that releases the lock
+        return true;
+    }
 } // namespace
 
 int main(int argc, char *argv[])
 {
     // Initialize logger first
     vayu::utils::Logger::instance().init(vayu::core::constants::logging::DIR);
+
+    // Check for single instance
+    if (!acquire_lock())
+    {
+        return 1;
+    }
 
     // Parse arguments
     int port = vayu::core::constants::defaults::PORT;

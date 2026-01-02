@@ -184,6 +184,15 @@ namespace vayu::core
                         break;
                     }
 
+                    // Backpressure: prevent OOM by limiting pending queue size
+                    // Limit to 5x concurrency or 1000, whichever is larger
+                    size_t max_pending = std::max(concurrency * 5, size_t(1000));
+                    if (context->event_loop->pending_count() > max_pending)
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                        continue;
+                    }
+
                     // Submit batch of requests
                     for (size_t i = 0; i < concurrency && !context->should_stop; ++i)
                     {
@@ -356,7 +365,15 @@ namespace vayu::core
             context->is_running = false;
 
             vayu::utils::log_error("Load test error: " + std::string(e.what()));
-            db.update_run_status(context->run_id, vayu::RunStatus::Failed);
+            try
+            {
+                db.update_run_status(context->run_id, vayu::RunStatus::Failed);
+            }
+            catch (const std::exception &ex)
+            {
+                vayu::utils::log_error("Failed to update run status: " + std::string(ex.what()));
+            }
+
             try
             {
                 db.add_metric({0, context->run_id, now_ms(), vayu::MetricName::Completed, 1.0, ""});
