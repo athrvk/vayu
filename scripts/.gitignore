@@ -1,0 +1,23 @@
+# Build artifacts
+*.o
+*.a
+*.exe
+*.dmg
+*.deb
+*.rpm
+
+# Logs from build scripts
+*.log
+build-*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+tmp/
+temp/
+
+# Downloaded dependencies
+downloads/

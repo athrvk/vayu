@@ -1,0 +1,24 @@
+# TypeScript build outputs
+*.d.ts.map
+*.tsbuildinfo
+dist/
+build/
+
+# Dependencies (if this becomes a package)
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+tmp/
+temp/
