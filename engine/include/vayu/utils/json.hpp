@@ -6,6 +6,7 @@
  */
 
 #include "vayu/types.hpp"
+#include "vayu/db/database.hpp"
 
 #include <nlohmann/json.hpp>
 #include <string>
@@ -27,6 +28,16 @@ namespace vayu::json
      * @brief Serialize a Request to JSON
      */
     [[nodiscard]] Json serialize(const Request &request);
+
+    /**
+     * @brief Serialize a Run to JSON
+     */
+    [[nodiscard]] Json serialize(const vayu::db::Run &run);
+
+    /**
+     * @brief Serialize a Metric to JSON
+     */
+    [[nodiscard]] Json serialize(const vayu::db::Metric &metric);
 
     /**
      * @brief Deserialize a Request from JSON

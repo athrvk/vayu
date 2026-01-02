@@ -80,6 +80,8 @@ endif()
 find_package(CURL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(httplib CONFIG REQUIRED)
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(SqliteOrm CONFIG REQUIRED)
 
 if(VAYU_BUILD_TESTS)
     find_package(GTest CONFIG REQUIRED)
@@ -125,6 +127,7 @@ add_library(vayu_core STATIC
     src/http/event_loop.cpp
     src/http/sse.cpp
     src/utils/json.cpp
+    src/db/database.cpp
 )
 
 target_include_directories(vayu_core PUBLIC
@@ -134,6 +137,8 @@ target_include_directories(vayu_core PUBLIC
 target_link_libraries(vayu_core PUBLIC
     CURL::libcurl
     nlohmann_json::nlohmann_json
+    unofficial::sqlite3::sqlite3
+    sqlite_orm::sqlite_orm
     vayu_warnings
     vayu_sanitizers
 )
@@ -160,9 +165,15 @@ if(VAYU_BUILD_CLI)
     add_executable(vayu-cli
         src/main.cpp
     )
+
+    target_include_directories(vayu-cli PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
     
     target_link_libraries(vayu-cli PRIVATE
         vayu_core
+        httplib::httplib
+        nlohmann_json::nlohmann_json
         vayu_warnings
         vayu_sanitizers
     )
@@ -202,6 +213,7 @@ if(VAYU_BUILD_TESTS)
         tests/script_engine_test.cpp
         tests/event_loop_test.cpp
         tests/sse_test.cpp
+        tests/db_test.cpp
     )
     
     target_link_libraries(vayu_tests PRIVATE

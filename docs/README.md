@@ -16,13 +16,14 @@ Welcome to the Vayu documentation. Choose a topic to get started.
 
 ### 🖥️ Engine Documentation
 
-Core C++ engine implementation and APIs.
+Core C++20 engine implementation and CLI tools.
 
 | Document | Description |
 |----------|-------------|
+| [CLI Reference](engine/cli.md) | vayu-cli command reference and usage |
 | [Building Engine](engine/building.md) | Compile the engine from source |
-| [Engine API Reference](engine/api-reference.md) | HTTP Control API endpoints |
-| [Engine Architecture](engine/architecture.md) | Internal engine components |
+| [Engine API Reference](engine/api-reference.md) | HTTP Control API endpoints (daemon) |
+| [Engine Architecture](engine/architecture.md) | Internal engine components and design |
 
 ### 📱 App Documentation  
 
@@ -54,9 +55,10 @@ docs/
 ├── architecture.md            ← System design
 ├── contributing.md            ← Contributing
 ├── engine/
-│   ├── building.md
-│   ├── api-reference.md
-│   └── architecture.md
+│   ├── cli.md                 ← CLI tool reference
+│   ├── building.md            ← Building from source
+│   ├── api-reference.md       ← HTTP API endpoints
+│   └── architecture.md        ← Engine internals
 └── app/
     ├── building.md
     ├── architecture.md

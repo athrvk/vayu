@@ -31,19 +31,34 @@
 - **Pretty printing** support
 - **Error handling** with descriptive messages
 
-#### CLI (`vayu-cli`)
-- **`request`** - Execute single HTTP requests from JSON files
-- **`batch`** - Execute multiple requests concurrently
-- **`daemon`** - Start background engine daemon
-- **Colored output** with status code highlighting
-- **Verbose mode** for debugging
-- **Timeout configuration**
+#### CLI (`vayu-cli`) ✅ FULLY IMPLEMENTED (THIN CLIENT)
+- **Architecture**: Thin client communicating with `vayu-engine` via HTTP
+- **`run <file.json>`** - Execute single request via daemon (Design Mode)
+- **`load <file.json>`** - Start load test via daemon (Load Mode)
+- **`status`** - Check daemon health
+- **Dependencies**: `httplib`, `nlohmann_json` (No core linkage)
 
-#### Daemon (`vayu-engine`)
-- **Unix domain socket** communication
-- **Background process** management
-- **Request/response** JSON protocol
-- **Health checks** and status reporting
+#### Daemon (`vayu-engine`) ✅ PHASE 1 COMPLETE
+- **HTTP Control Server** on `127.0.0.1:9876`
+- **Database Integration**: SQLite + sqlite_orm (`vayu.db`)
+- **Implemented Endpoints:**
+  - ✅ `GET /health` - Health check
+  - ✅ `POST /request` - Execute single request (Design Mode) + DB logging
+  - ✅ `POST /run` - Start load test (Load Mode) + DB logging
+  - ✅ `GET /config` - Configuration
+  - ✅ `GET/POST /collections` - Manage Collections
+  - ✅ `GET/POST /requests` - Manage Requests
+  - ✅ `GET/POST /environments` - Manage Environments
+  - ✅ `GET /runs` - List execution history
+  - ✅ `GET /run/:id` - Get run details
+  - ✅ `POST /run/:id/stop` - Stop active run
+  - ✅ `GET /stats/:id` - Get run metrics (SSE Stream)
+- **Infrastructure:**
+  - Thread pool (N = CPU cores) with curl_multi event loop
+  - Request dispatcher and queue management
+  - Pre-allocated QuickJS context pool (64 contexts)
+  - Lock-free statistics collection
+  - Reporter thread for metrics aggregation
 
 ---
 
@@ -119,6 +134,21 @@ es.on_error([](std::string err) { /* errors */ });
 es.on_state_change([](EventSourceState s) { /* state */ });
 ```
 
+### Phase 5: Persistence (Planned)
+
+#### Storage Layer (`vayu/db/database.hpp`)
+- **SQLite 3** embedded database
+- **sqlite_orm** for C++20 type-safe mapping
+- **Schema**:
+  - `runs`: Test execution state and config
+  - `metrics`: Time-series performance data
+  - `results`: Request/response logs
+  - `kv_store`: Global configuration
+- **Features**:
+  - WAL mode for concurrency
+  - Automatic schema migration
+  - Batched metric ingestion
+
 ---
 
 ## 📁 Project Structure
@@ -191,7 +221,39 @@ vayu/
 
 ---
 
-## 🚀 Potential Next Steps
+## 🔨 Phase 2: Advanced Load Testing (In Progress)
+
+### Currently In Progress
+
+1. **HTTP API Load Test Endpoint** (`POST /run`)
+   - Endpoint structure implemented (returns 501 Not Implemented)
+   - TODO: Implement async load test execution
+   - TODO: Connect to thread pool and event loop for concurrent execution
+   - TODO: Implement request queue and rate limiting
+
+### Planned for Phase 2
+
+1. **Real-time Statistics Streaming** (`GET /stats/:id` SSE)
+   - Server-Sent Events infrastructure ready
+   - TODO: Connect to /run endpoint
+   - TODO: Stream RPS, latency percentiles, error rates
+
+2. **Advanced Load Test Metrics**
+   - Requests per second (mean, max)
+   - Latency percentiles: p50, p90, p95, p99
+   - Error categorization and reporting
+
+3. **Async Load Test Management**
+   - `GET /run/:id` - Get test status and results
+   - `POST /run/:id/stop` - Cancel running test
+   - `GET /runs` - List recent test runs
+
+### Current Workaround
+Use CLI `batch` command for concurrent request execution until Phase 2 HTTP API is available.
+
+---
+
+## 🚀 Potential Future Enhancements
 
 ### High Priority
 
@@ -288,12 +350,14 @@ cd build && ctest --output-on-failure
 
 ### Single Request
 ```bash
-./vayu-cli request tests/fixtures/get-request.json
+./vayu-cli run tests/fixtures/simple-get.json
+./vayu-cli run tests/fixtures/simple-get.json --verbose
 ```
 
-### Batch Requests
+### Batch Requests (Concurrent)
 ```bash
-./vayu-cli batch tests/fixtures/batch-*.json --parallel 5
+./vayu-cli batch tests/fixtures/simple-get.json tests/fixtures/simple-post.json
+./vayu-cli batch tests/fixtures/*.json --concurrency 20 --verbose
 ```
 
 ### With Script Testing
@@ -301,10 +365,20 @@ cd build && ctest --output-on-failure
 {
   "method": "GET",
   "url": "https://api.example.com/users",
-  "scripts": {
-    "test": "pm.test('Status is 200', () => pm.expect(pm.response.status).to.equal(200));"
-  }
+  "tests": "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));"
 }
+```
+
+### Load Testing via CLI
+```bash
+# Run single request 100 times in parallel
+for i in {1..100}; do
+  ./vayu-cli run test.json &
+done
+wait
+
+# Run batch with high concurrency
+./vayu-cli batch test.json test.json test.json --concurrency 100
 ```
 
 ### SSE Connection (Programmatic)
@@ -331,3 +405,24 @@ The project is under active development. Key areas for contribution:
 ---
 
 *Built with ❤️ using modern C++17*
+
+### Phase 5: Persistence ✅ COMPLETED
+- **Technology**: SQLite 3 + `sqlite_orm`
+- **Schema Design**:
+  - **Project Management**: `collections`, `requests`, `environments`
+  - **Execution**: `runs`, `metrics`, `results`
+  - **Config**: `kv_store`
+- **Implementation**:
+  - `vayu::db::Database` class with WAL mode enabled
+  - Integrated into Daemon startup
+  - CRUD endpoints exposed via API
+  - Execution results automatically logged
+
+### Phase 6: UI Implementation (Next Step)
+- **Tech Stack**: Electron + React + TypeScript
+- **Goal**: Build the visual interface for Vayu
+- **Tasks**:
+  - Setup Electron project structure
+  - Implement "Design Mode" UI (Request Builder)
+  - Implement "Load Mode" UI (Graphs & Stats)
+  - Connect UI to Daemon API (`localhost:9876`)

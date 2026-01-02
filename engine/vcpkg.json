@@ -8,6 +8,8 @@
         "curl",
         "nlohmann-json",
         "cpp-httplib",
-        "gtest"
+        "gtest",
+        "sqlite3",
+        "sqlite-orm"
     ]
 }

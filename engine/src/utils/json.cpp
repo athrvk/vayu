@@ -116,6 +116,53 @@ namespace vayu::json
         return json;
     }
 
+    Json serialize(const vayu::db::Run &run)
+    {
+        Json json;
+        json["id"] = run.id;
+        json["type"] = run.type;
+        json["status"] = run.status;
+        json["startTime"] = run.start_time;
+        json["endTime"] = run.end_time;
+        // Try to parse configSnapshot as JSON if possible, otherwise string
+        if (auto parsed = try_parse_body(run.config_snapshot))
+        {
+            json["configSnapshot"] = *parsed;
+        }
+        else
+        {
+            json["configSnapshot"] = run.config_snapshot;
+        }
+
+        if (run.request_id)
+            json["requestId"] = *run.request_id;
+        if (run.environment_id)
+            json["environmentId"] = *run.environment_id;
+        return json;
+    }
+
+    Json serialize(const vayu::db::Metric &metric)
+    {
+        Json json;
+        json["id"] = metric.id;
+        json["runId"] = metric.run_id;
+        json["timestamp"] = metric.timestamp;
+        json["name"] = metric.name;
+        json["value"] = metric.value;
+        if (!metric.labels.empty())
+        {
+            if (auto parsed = try_parse_body(metric.labels))
+            {
+                json["labels"] = *parsed;
+            }
+            else
+            {
+                json["labels"] = metric.labels;
+            }
+        }
+        return json;
+    }
+
     Result<Request> deserialize_request(const Json &json)
     {
         try

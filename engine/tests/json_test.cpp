@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 #include "vayu/utils/json.hpp"
+#include "vayu/db/database.hpp"
 
 namespace vayu::json
 {
@@ -223,6 +224,50 @@ namespace vayu::json
                 ASSERT_TRUE(result.is_ok()) << "Failed for method: " << method_str;
                 EXPECT_EQ(result.value().method, method_enum);
             }
+        }
+
+        TEST(JsonTest, SerializesRun)
+        {
+            vayu::db::Run run;
+            run.id = "run_123";
+            run.type = "load";
+            run.status = "running";
+            run.start_time = 1000;
+            run.end_time = 2000;
+            run.config_snapshot = R"({"rps": 100})";
+            run.request_id = "req_1";
+            run.environment_id = "env_1";
+
+            auto json = serialize(run);
+
+            EXPECT_EQ(json["id"], "run_123");
+            EXPECT_EQ(json["type"], "load");
+            EXPECT_EQ(json["status"], "running");
+            EXPECT_EQ(json["startTime"], 1000);
+            EXPECT_EQ(json["endTime"], 2000);
+            EXPECT_EQ(json["configSnapshot"]["rps"], 100);
+            EXPECT_EQ(json["requestId"], "req_1");
+            EXPECT_EQ(json["environmentId"], "env_1");
+        }
+
+        TEST(JsonTest, SerializesMetric)
+        {
+            vayu::db::Metric metric;
+            metric.id = 1;
+            metric.run_id = "run_123";
+            metric.timestamp = 1000;
+            metric.name = "rps";
+            metric.value = 50.5;
+            metric.labels = R"({"region": "us-east-1"})";
+
+            auto json = serialize(metric);
+
+            EXPECT_EQ(json["id"], 1);
+            EXPECT_EQ(json["runId"], "run_123");
+            EXPECT_EQ(json["timestamp"], 1000);
+            EXPECT_EQ(json["name"], "rps");
+            EXPECT_EQ(json["value"], 50.5);
+            EXPECT_EQ(json["labels"]["region"], "us-east-1");
         }
 
     } // namespace

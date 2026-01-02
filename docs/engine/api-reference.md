@@ -9,9 +9,32 @@
 
 The Vayu Engine exposes a RESTful Control API for communication with the Manager (Electron app) or any HTTP client. All endpoints are local-only for security.
 
+### Implementation Status
+
+| Endpoint | Status | Details |
+|----------|--------|---------|
+| `GET /health` | ✅ Implemented | Server status and worker info |
+| `POST /request` | ✅ Implemented | Single request execution (Design Mode) |
+| `POST /run` | ✅ Implemented | Start load test (Load Mode) |
+| `GET /config` | ✅ Implemented | Configuration and system limits |
+| `GET /collections` | ✅ Implemented | List all collections |
+| `POST /collections` | ✅ Implemented | Create/Update collection |
+| `GET /requests` | ✅ Implemented | List requests in a collection |
+| `POST /requests` | ✅ Implemented | Save request definition |
+| `GET /environments` | ✅ Implemented | List all environments |
+| `POST /environments` | ✅ Implemented | Create/Update environment |
+| `GET /runs` | ✅ Implemented | List all execution runs |
+| `GET /run/:id` | ✅ Implemented | Get run details |
+| `POST /run/:id/stop` | ✅ Implemented | Stop a running test |
+| `GET /stats/:id` | ✅ Implemented | Get metrics for a run |
+
+**Current Usage:**
+- Use **CLI** (`vayu-cli`) to interact with the daemon
+- Use **HTTP API** for programmatic access (Manager App)
+
 ---
 
-## Endpoints
+## Implemented Endpoints
 
 ### Health Check
 
@@ -27,60 +50,173 @@ GET /health
 {
   "status": "ok",
   "version": "0.1.0",
-  "uptime": 3600,
   "workers": 8
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `status` | string | Always `"ok"` if responding |
-| `version` | string | Engine version (semver) |
-| `uptime` | number | Seconds since engine started |
-| `workers` | number | Number of worker threads |
+---
+
+### Run Management
+
+#### Runs
+
+**List All Runs:**
+```
+GET /runs
+```
+
+**Get Run Details:**
+```
+GET /run/:id
+```
+
+**Stop Run:**
+```
+POST /run/:id/stop
+```
+
+**Response:**
+```json
+{
+  "status": "stopped",
+  "runId": "run_1704200000000"
+}
+```
+
+### Statistics
+
+**Get Run Metrics (SSE):**
+```
+GET /stats/:id
+```
+
+**Response:**
+Stream of Server-Sent Events (`text/event-stream`).
+
+**Events:**
+- `data`: JSON object representing a `Metric`.
+- `: keep-alive`: Sent periodically to keep connection open.
+
+**Example Event:**
+```
+data: {"id":1,"runId":"run_1704200000000","timestamp":1704200001000,"requestsTotal":100,"requestsFailed":0,"requestsPerSecond":100.0,"latencyMin":10.0,"latencyMax":50.0,"latencyAvg":25.0,"latencyP95":45.0,"latencyP99":49.0,"bytesIn":10240,"bytesOut":5120}
+
+```    "requestsPerSec": 50.5,
+    "latencyP50": 120.5,
+    "latencyP99": 250.0,
+    "errorsTotal": 0
+  }
+]
+```
 
 ---
 
-### Execute Request (Design Mode)
+### Project Management
 
-Execute a single request and return the full response. Used for debugging/development.
+#### Collections
+
+**List Collections:**
+```
+GET /collections
+```
+
+**Create Collection:**
+```
+POST /collections
+```
+```json
+{
+  "id": "col_123",
+  "name": "User API",
+  "parentId": null,
+  "order": 1
+}
+```
+
+#### Requests
+
+**List Requests:**
+```
+GET /requests?collectionId=col_123
+```
+
+**Save Request:**
+```
+POST /requests
+```
+```json
+{
+  "id": "req_456",
+  "collectionId": "col_123",
+  "name": "Get Profile",
+  "method": "GET",
+  "url": "https://api.example.com/me",
+  "headers": {"Authorization": "Bearer token"},
+  "preRequestScript": "console.log('Pre')",
+  "postRequestScript": "pm.test('OK', () => pm.response.code === 200)"
+}
+```
+
+#### Environments
+
+**List Environments:**
+```
+GET /environments
+```
+
+**Save Environment:**
+```
+POST /environments
+```
+```json
+{
+  "id": "env_prod",
+  "name": "Production",
+  "variables": {
+    "BASE_URL": "https://api.example.com"
+  }
+}
+```
+
+---
+
+### Execution
+
+#### Execute Request (Design Mode)
+
+Execute a single request, save result to DB, and return full response.
 
 ```
 POST /request
 ```
 
 **Request Body:**
+Standard Vayu Request Object (see below). Optional fields:
+- `requestId`: Link execution to a saved request
+- `environmentId`: Link execution to an environment
 
-```json
-{
-  "method": "POST",
-  "url": "https://api.example.com/users",
-  "headers": {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer {{token}}"
-  },
-  "body": {
-    "mode": "json",
-    "content": {
-      "name": "John Doe",
-      "email": "john@example.com"
-    }
-  },
-  "timeout": 30000,
-  "followRedirects": true,
-  "maxRedirects": 5,
-  "environment": {
-    "token": "eyJhbGciOiJIUzI1NiIs..."
-  },
-  "script": {
-    "pre": "console.log('Starting request...')",
-    "post": "pm.test('Status OK', () => pm.response.code === 200)"
-  }
-}
+**Response:**
+Full HTTP response with timing metrics.
+
+#### Start Load Test (Load Mode)
+
+Queue a load test execution.
+
+```
+POST /run
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
+**Request Body:**
+Standard Vayu Request Object.
+
+**Response:**
+```json
+{
+  "runId": "run_1704200000000",
+  "status": "pending",
+  "message": "Run created"
+}
+```
 | `method` | string | ✅ | HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS) |
 | `url` | string | ✅ | Request URL (supports `{{variables}}`) |
 | `headers` | object | ❌ | Key-value headers |
@@ -177,7 +313,46 @@ POST /request
 
 ---
 
-### Start Load Test (Vayu Mode)
+### Get Configuration
+
+Get engine configuration and system limits.
+
+```
+GET /config
+```
+
+**Response (200 OK):**
+
+```json
+{
+  "workers": 8,
+  "maxConnections": 10000,
+  "defaultTimeout": 30000,
+  "statsInterval": 100,
+  "contextPoolSize": 64
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workers` | number | Number of worker threads (= CPU cores) |
+| `maxConnections` | number | Maximum concurrent connections |
+| `defaultTimeout` | number | Default request timeout in milliseconds |
+| `statsInterval` | number | Statistics update interval in milliseconds |
+| `contextPoolSize` | number | Pre-allocated QuickJS context pool size |
+
+---
+
+### Start Load Test (Vayu Mode) 🔨 IN PROGRESS
+
+> **Status:** Endpoint structure is in place but implementation is pending.
+> Currently returns HTTP 501 (Not Implemented) with placeholder response.
+>
+> **Current Workaround:** Use the CLI `batch` command for concurrent request execution:
+> ```bash
+> vayu-cli batch request.json request.json --concurrency 100
+> ```
+> See [CLI Reference](cli.md) for details.
 
 Start a high-concurrency load test. Returns immediately with a run ID.
 
@@ -241,7 +416,9 @@ POST /run
 
 ---
 
-### Get Run Status
+### Get Run Status ⏳ PLANNED
+
+> **Status:** This endpoint is designed but not yet implemented.
 
 Get current status and final results of a load test.
 
@@ -324,7 +501,9 @@ GET /run/:runId
 
 ---
 
-### Stream Stats (SSE)
+### Stream Stats (SSE) ⏳ PLANNED
+
+> **Status:** This endpoint is designed but not yet implemented.
 
 Real-time statistics stream via Server-Sent Events.
 
@@ -393,7 +572,9 @@ data: {"runId":"run_abc123def456","summary":{...}}
 
 ---
 
-### Stop Run
+### Stop Run ⏳ PLANNED
+
+> **Status:** This endpoint is designed but not yet implemented.
 
 Cancel a running load test.
 
@@ -413,7 +594,9 @@ POST /run/:runId/stop
 
 ---
 
-### List Runs
+### List Runs ⏳ PLANNED
+
+> **Status:** This endpoint is designed but not yet implemented.
 
 Get all recent runs (last 100).
 

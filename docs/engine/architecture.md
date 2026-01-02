@@ -10,15 +10,22 @@
 The Vayu Engine is a high-performance C++20 daemon optimized for concurrent HTTP execution with integrated JavaScript scripting.
 
 ```
-┌──────────────────────────────┐
-│        Control API            │
-│  (HTTP Server, Port 9876)     │
-└──────────────┬───────────────┘
-               │
-┌──────────────▼───────────────┐
-│      Request Dispatcher       │
-│  (Queue + Round-robin)        │
-└──────────────┬───────────────┘
+┌──────────────────────────────┐      ┌──────────────────────────────┐
+│        Manager App           │      │          Vayu CLI            │
+│      (Electron/React)        │      │        (Thin Client)         │
+└──────────────┬───────────────┘      └──────────────┬───────────────┘
+               │                                     │
+               └──────────────────┬──────────────────┘
+                                  │
+┌─────────────────────────────────▼──────────────────────────────────┐
+│                           Control API                              │
+│                     (HTTP Server, Port 9876)                       │
+└─────────────────────────────────┬──────────────────────────────────┘
+                                  │
+┌─────────────────────────────────▼──────────────────────────────────┐
+│                        Request Dispatcher                          │
+│                      (Queue + Round-robin)                         │
+└─────────────────────────────────┬──────────────────────────────────┘
                │
 ┌──────────────▼───────────────────────────────────┐
 │       Thread Pool (N = CPU Cores)                 │
@@ -61,6 +68,24 @@ Listens on `127.0.0.1:9876` for commands from the Manager.
 - `GET /stats/:id` (SSE) - Stream real-time stats
 - `POST /run/:id/stop` - Cancel test
 - `GET /health` - Health check
+
+---
+
+### Storage Layer (New)
+
+**File:** `src/db/database.cpp`
+
+Embedded SQLite database for persistence of projects, requests, and execution history.
+
+**Schema:**
+- **Project Management:** `collections`, `requests`, `environments`
+- **Execution:** `runs`, `metrics`, `results`
+- **Config:** `kv_store`
+
+**Features:**
+- **WAL Mode:** Write-Ahead Logging for high concurrency
+- **ORM:** `sqlite_orm` for type-safe C++ access
+- **Automatic Logging:** All executions are automatically recorded
 
 ---
 
@@ -206,6 +231,74 @@ Every 100ms, the Reporter Thread aggregates all worker stats and broadcasts via 
 
 ---
 
+## Storage Layer (New)
+
+### Technology Stack
+
+- **Database:** SQLite 3 (Embedded, Serverless)
+- **ORM:** `sqlite_orm` (Modern C++20 wrapper)
+- **Location:** `vayu.db` (in executable directory)
+
+### Why SQLite?
+
+1.  **Embedded:** No external dependencies or server process required.
+2.  **Reliable:** ACID compliance ensures state consistency (e.g., run status).
+3.  **JSON Support:** Native support for storing request/response bodies.
+4.  **Performance:** WAL (Write-Ahead Logging) mode supports high concurrency.
+
+### Schema Design
+
+#### 1. `runs` Table
+Stores the state and configuration of each test execution.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT (PK) | Unique Run ID (e.g., "run_123") |
+| `status` | TEXT | `pending`, `running`, `completed`, `failed` |
+| `start_time` | INTEGER | Unix timestamp |
+| `end_time` | INTEGER | Unix timestamp |
+| `config` | TEXT (JSON) | Full load test configuration |
+
+#### 2. `metrics` Table
+Time-series data points for reporting.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER (PK) | Auto-increment |
+| `run_id` | TEXT (FK) | Link to `runs` table |
+| `timestamp` | INTEGER | Metric time |
+| `rps` | INTEGER | Requests per second |
+| `latency_p50` | REAL | Median latency |
+| `latency_p99` | REAL | 99th percentile latency |
+| `errors` | INTEGER | Error count in this interval |
+
+#### 3. `results` Table
+Detailed request/response logs (only for failures or sampling).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER (PK) | Auto-increment |
+| `run_id` | TEXT (FK) | Link to `runs` table |
+| `request` | TEXT (JSON) | Full request object |
+| `response` | TEXT (JSON) | Full response object |
+| `error` | TEXT | Error message (if any) |
+
+#### 4. `kv_store` Table
+Global engine configuration.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `key` | TEXT (PK) | Config key (e.g., "max_workers") |
+| `value` | TEXT | Config value |
+
+### Persistence Strategy
+
+1.  **WAL Mode:** Enabled for better concurrency (readers don't block writers).
+2.  **Batching:** Metrics are buffered in memory and flushed to DB every 100ms-1s to avoid I/O bottlenecks.
+3.  **Sync Schema:** `sqlite_orm` automatically handles schema creation and migration on startup.
+
+---
+
 ## Request Execution Flow
 
 ### Design Mode (Single Request)
@@ -298,6 +391,166 @@ auto total = stats.requests_total.load(std::memory_order_relaxed);
 
 ---
 
+---
+
+## CLI vs HTTP API: Execution Paths
+
+### CLI Execution Path (`vayu-cli`)
+
+```
+vayu-cli run <file>
+    ↓
+    Parse JSON request
+    ↓
+    HTTP Client (libcurl)
+    ↓
+    Process response
+    ↓
+    Execute tests (QuickJS)
+    ↓
+    Display results
+```
+
+**Characteristics:**
+- Direct binary execution
+- Synchronous request/response
+- No daemon required
+- Per-command invocation
+- Suitable for: Scripts, CI/CD pipelines, one-off requests
+- Load testing: `batch` command with configurable concurrency
+
+### CLI Batch Execution Path (`vayu-cli batch`)
+
+```
+vayu-cli batch <files...>
+    ↓
+    Parse all JSON requests
+    ↓
+    EventLoop::execute_batch()
+    ├── curl_multi for async I/O
+    ├── Thread pool coordination
+    └── Non-blocking request handling
+    ↓
+    Collect response data
+    ↓
+    Display summary statistics
+```
+
+**Characteristics:**
+- Concurrent request execution
+- Event loop-based (curl_multi)
+- Non-blocking I/O
+- Per-request test execution
+- Concurrent limit: `--concurrency N` (default 10)
+- Throughput: 28+ RPS demonstrated on standard hardware
+
+### HTTP API Load Testing Path (`vayu-engine` daemon) ✅ Phase 1 Complete
+
+```
+HTTP Client
+    ↓
+    GET /health, POST /request, GET /config
+    ↓
+    Engine HTTP Server (127.0.0.1:9876)
+    ↓
+    Request Handler
+    ├── Parse JSON request
+    ├── Validate structure
+    ├── Log to DB (runs table)
+    └── Execute immediately (synchronous)
+    ↓
+    HTTP Client (libcurl)
+    ├── Non-blocking I/O
+    ├── Connection pooling
+    └── Timing metrics collection
+    ↓
+    Response back to client
+    ├── Full response with timing
+    ├── Test results if defined
+    └── JSON formatted
+    ↓
+    Log Result to DB (results table)
+```
+
+**Implemented Endpoints:**
+- ✅ `GET /health` - Server status (version, workers, uptime)
+- ✅ `POST /request` - Single request execution (Design Mode)
+- ✅ `GET /config` - Configuration and system limits
+- ✅ `GET /runs` - List execution history
+- ✅ `GET /run/:id` - Get run details
+- ✅ `POST /run/:id/stop` - Stop active run
+- ✅ `GET /stats/:id` - Get run metrics
+
+### HTTP API Load Testing Path (🔨 Phase 2 - In Progress)
+
+The `/run` endpoint has been added to the server and creates a DB entry, but full async execution logic is pending:
+
+```cpp
+// Current state in daemon.cpp:
+server.Post("/run", [](const httplib::Request &req, httplib::Response &res) {
+    // Creates "pending" run in DB
+    // Returns runId immediately
+    // TODO: Dispatch to worker pool
+});
+```
+
+When Phase 2 is fully implemented, `POST /run` will support:
+
+```
+HTTP Client
+    ↓
+    POST /run
+    ├── config: { concurrency, rps, duration }
+    └── request: { method, url, ... }
+    ↓
+    Returns immediately with runId (202 Accepted)
+    ↓
+    Client polls GET /run/:id OR streams GET /stats/:id (SSE)
+    ↓
+    Real-time metrics via SSE
+    ├── RPS updates (~100ms)
+    ├── Latency percentiles
+    ├── Error categorization
+    └── Throughput metrics
+    ↓
+    Final results on completion
+```
+
+**Implementation Roadmap:**
+1. **Phase 2.1** - Load test queue and async execution
+2. **Phase 2.2** - Real-time statistics collection
+3. **Phase 2.3** - SSE streaming and metrics aggregation
+4. **Phase 2.4** - Advanced features (ramp-up, ramp-down, RPS limiting)
+
+### Feature Comparison
+
+| Feature | CLI run | CLI batch | HTTP /request | HTTP /run (Phase 2) |
+|---------|---------|-----------|---------------|---------------------|
+| Single request | ✅ | ❌ | ✅ | ✅ |
+| Batch requests | ❌ | ✅ | ❌ | ✅ |
+| Concurrent execution | ❌ | ✅ | ❌ | ✅ |
+| Test scripts | ✅ | ✅ | ✅ | ✅ |
+| Configurable concurrency | ❌ | ✅ | ❌ | ✅ |
+| RPS limiting | ❌ | ❌ | ❌ | ✅ |
+| Real-time metrics | ❌ | Summary only | ❌ | ✅ SSE |
+| Latency percentiles | ❌ | Average | ❌ | ✅ |
+| Current Status | ✅ Ready | ✅ Ready | ✅ Ready | 🔨 In Progress |
+| Access method | CLI | CLI | HTTP | HTTP |
+
+### Recommendation for Load Testing
+
+**Until Phase 2 is available:**
+- Use `vayu-cli batch` command for concurrent request execution
+- Supports configurable concurrency: `--concurrency 100`
+- Built-in summary statistics and per-request details
+
+**When Phase 2 is available:**
+- Use HTTP API `POST /run` for async load testing
+- Stream results in real-time with `GET /stats/:id` (SSE)
+- Access advanced metrics (percentiles, error categorization)
+
+---
+
 ## Security
 
 ### JavaScript Sandbox
@@ -350,4 +603,4 @@ See [Building Engine](building.md) for compilation instructions.
 
 ---
 
-*See: [API Reference](api-reference.md) | [Building](building.md) →*
+*See: [CLI Reference](cli.md) | [API Reference](api-reference.md) | [Building](building.md) →*
