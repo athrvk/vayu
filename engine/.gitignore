@@ -43,3 +43,6 @@ Testing/
 *.gcda
 *.gcov
 coverage/
+
+# DB
+db/vayu.db

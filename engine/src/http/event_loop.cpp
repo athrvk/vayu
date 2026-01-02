@@ -5,6 +5,7 @@
 
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/rate_limiter.hpp"
 
 #include <curl/curl.h>
 
@@ -374,31 +375,35 @@ namespace vayu::http
     // EventLoop Implementation
     // ============================================================================
 
-    struct EventLoop::Impl
+    // Worker thread - each runs its own curl_multi event loop
+    struct EventLoopWorker
     {
-        EventLoopConfig config;
         CURLM *multi_handle = nullptr;
-
-        std::thread worker_thread;
+        std::thread thread;
         std::atomic<bool> running{false};
         std::atomic<bool> stop_requested{false};
 
-        mutable std::mutex queue_mutex_;
+        std::mutex queue_mutex;
         std::condition_variable queue_cv;
         std::queue<std::unique_ptr<TransferData>> pending_queue;
 
-        mutable std::mutex active_mutex_;
+        std::mutex active_mutex;
         std::unordered_map<CURL *, std::unique_ptr<TransferData>> active_transfers;
 
-        std::atomic<size_t> next_request_id{1};
-        std::atomic<size_t> total_processed{0};
+        // Thread-local stats (lock-free)
+        std::atomic<size_t> local_processed{0};
 
-        explicit Impl(EventLoopConfig cfg) : config(std::move(cfg))
+        EventLoopConfig config;
+        RateLimiter rate_limiter;
+
+        explicit EventLoopWorker(const EventLoopConfig &cfg)
+            : config(cfg),
+              rate_limiter(RateLimiterConfig{cfg.target_rps, cfg.burst_size})
         {
             multi_handle = curl_multi_init();
             if (!multi_handle)
             {
-                throw std::runtime_error("Failed to initialize curl_multi");
+                throw std::runtime_error("Failed to initialize curl_multi for worker");
             }
 
             // Set multi handle options
@@ -406,12 +411,13 @@ namespace vayu::http
                               static_cast<long>(config.max_concurrent));
             curl_multi_setopt(multi_handle, CURLMOPT_MAX_HOST_CONNECTIONS,
                               static_cast<long>(config.max_per_host));
+
+            // Enable connection reuse / keep-alive
+            curl_multi_setopt(multi_handle, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
         }
 
-        ~Impl()
+        ~EventLoopWorker()
         {
-            stop(false);
-
             if (multi_handle)
             {
                 curl_multi_cleanup(multi_handle);
@@ -422,11 +428,10 @@ namespace vayu::http
         {
             if (running.exchange(true))
             {
-                return; // Already running
+                return;
             }
-
             stop_requested = false;
-            worker_thread = std::thread(&Impl::run_loop, this);
+            thread = std::thread(&EventLoopWorker::run_loop, this);
         }
 
         void stop(bool wait_for_pending)
@@ -440,8 +445,7 @@ namespace vayu::http
 
             if (!wait_for_pending)
             {
-                // Cancel all pending requests
-                std::lock_guard<std::mutex> lock(queue_mutex_);
+                std::lock_guard<std::mutex> lock(queue_mutex);
                 while (!pending_queue.empty())
                 {
                     auto data = std::move(pending_queue.front());
@@ -464,9 +468,9 @@ namespace vayu::http
 
             queue_cv.notify_all();
 
-            if (worker_thread.joinable())
+            if (thread.joinable())
             {
-                worker_thread.join();
+                thread.join();
             }
 
             running = false;
@@ -476,36 +480,43 @@ namespace vayu::http
         {
             while (!stop_requested || !pending_queue.empty() || !active_transfers.empty())
             {
-                // Move pending requests to active
+                // Move pending requests to active (with rate limiting)
+                std::unique_ptr<TransferData> data;
                 {
-                    std::lock_guard<std::mutex> lock(queue_mutex_);
-                    while (!pending_queue.empty() &&
-                           active_transfers.size() < config.max_concurrent)
+                    std::lock_guard<std::mutex> lock(queue_mutex);
+                    if (!pending_queue.empty() &&
+                        active_transfers.size() < config.max_concurrent)
                     {
-                        auto data = std::move(pending_queue.front());
+                        data = std::move(pending_queue.front());
                         pending_queue.pop();
+                    }
+                }
 
-                        CURL *easy = setup_easy_handle(data.get(), config);
-                        if (easy)
+                // Apply rate limiting outside the lock
+                if (data)
+                {
+                    rate_limiter.acquire();
+
+                    CURL *easy = setup_easy_handle(data.get(), config);
+                    if (easy)
+                    {
+                        curl_multi_add_handle(multi_handle, easy);
+                        std::lock_guard<std::mutex> active_lock(active_mutex);
+                        active_transfers[easy] = std::move(data);
+                    }
+                    else
+                    {
+                        Error error;
+                        error.code = ErrorCode::InternalError;
+                        error.message = "Failed to create curl handle";
+
+                        if (data->callback)
                         {
-                            curl_multi_add_handle(multi_handle, easy);
-                            std::lock_guard<std::mutex> active_lock(active_mutex_);
-                            active_transfers[easy] = std::move(data);
+                            data->callback(data->request_id, error);
                         }
-                        else
+                        if (data->has_promise)
                         {
-                            Error error;
-                            error.code = ErrorCode::InternalError;
-                            error.message = "Failed to create curl handle";
-
-                            if (data->callback)
-                            {
-                                data->callback(data->request_id, error);
-                            }
-                            if (data->has_promise)
-                            {
-                                data->promise.set_value(error);
-                            }
+                            data->promise.set_value(error);
                         }
                     }
                 }
@@ -526,7 +537,7 @@ namespace vayu::http
 
                         std::unique_ptr<TransferData> data;
                         {
-                            std::lock_guard<std::mutex> lock(active_mutex_);
+                            std::lock_guard<std::mutex> lock(active_mutex);
                             auto it = active_transfers.find(easy);
                             if (it != active_transfers.end())
                             {
@@ -548,7 +559,7 @@ namespace vayu::http
                                 data->promise.set_value(std::move(response_result));
                             }
 
-                            total_processed++;
+                            local_processed.fetch_add(1, std::memory_order_relaxed);
                         }
 
                         curl_multi_remove_handle(multi_handle, easy);
@@ -564,7 +575,7 @@ namespace vayu::http
                 else if (!stop_requested)
                 {
                     // Wait for new requests
-                    std::unique_lock<std::mutex> lock(queue_mutex_);
+                    std::unique_lock<std::mutex> lock(queue_mutex);
                     queue_cv.wait_for(lock,
                                       std::chrono::milliseconds(config.poll_timeout_ms),
                                       [this]
@@ -575,29 +586,131 @@ namespace vayu::http
             }
         }
 
+        void submit(std::unique_ptr<TransferData> data)
+        {
+            {
+                std::lock_guard<std::mutex> lock(queue_mutex);
+                pending_queue.push(std::move(data));
+            }
+            queue_cv.notify_one();
+        }
+
+        size_t active_count() const
+        {
+            std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(active_mutex));
+            return active_transfers.size();
+        }
+
+        size_t pending_count() const
+        {
+            std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(queue_mutex));
+            return pending_queue.size();
+        }
+    };
+
+    struct EventLoop::Impl
+    {
+        EventLoopConfig config;
+        std::vector<std::unique_ptr<EventLoopWorker>> workers;
+        std::atomic<size_t> next_worker{0};
+        std::atomic<size_t> next_request_id{1};
+        std::atomic<bool> running{false};
+
+        explicit Impl(EventLoopConfig cfg) : config(std::move(cfg))
+        {
+            // Determine number of workers
+            size_t num_workers = config.num_workers;
+            if (num_workers == 0)
+            {
+                num_workers = std::thread::hardware_concurrency();
+                if (num_workers == 0)
+                {
+                    num_workers = 4; // Fallback
+                }
+            }
+
+            // Create workers
+            workers.reserve(num_workers);
+            for (size_t i = 0; i < num_workers; ++i)
+            {
+                workers.push_back(std::make_unique<EventLoopWorker>(config));
+            }
+        }
+
+        ~Impl()
+        {
+            stop(false);
+        }
+
+        void start()
+        {
+            if (running.exchange(true))
+            {
+                return; // Already running
+            }
+
+            // Start all workers
+            for (auto &worker : workers)
+            {
+                worker->start();
+            }
+        }
+
+        void stop(bool wait_for_pending)
+        {
+            if (!running)
+            {
+                return;
+            }
+
+            // Stop all workers
+            for (auto &worker : workers)
+            {
+                worker->stop(wait_for_pending);
+            }
+
+            running = false;
+        }
+
+        void submit(std::unique_ptr<TransferData> data)
+        {
+            // Round-robin sharding across workers
+            size_t worker_idx = next_worker.fetch_add(1, std::memory_order_relaxed) % workers.size();
+            workers[worker_idx]->submit(std::move(data));
+        }
+
+        EventLoopStats stats() const
+        {
+            EventLoopStats result;
+            result.total_requests = next_request_id.load() - 1;
+
+            for (const auto &worker : workers)
+            {
+                result.active_requests += worker->active_count();
+                result.pending_requests += worker->pending_count();
+                result.completed_requests += worker->local_processed.load(std::memory_order_relaxed);
+            }
+
+            return result;
+        }
+
         size_t submit(const Request &request, RequestCallback callback, ProgressCallback progress)
         {
             auto data = std::make_unique<TransferData>();
-            data->request_id = next_request_id++;
+            data->request_id = next_request_id.fetch_add(1, std::memory_order_relaxed);
             data->request = request;
             data->callback = std::move(callback);
             data->progress = std::move(progress);
 
             size_t id = data->request_id;
-
-            {
-                std::lock_guard<std::mutex> lock(queue_mutex_);
-                pending_queue.push(std::move(data));
-            }
-
-            queue_cv.notify_one();
+            submit(std::move(data));
             return id;
         }
 
         RequestHandle submit_async(const Request &request)
         {
             auto data = std::make_unique<TransferData>();
-            data->request_id = next_request_id++;
+            data->request_id = next_request_id.fetch_add(1, std::memory_order_relaxed);
             data->request = request;
             data->has_promise = true;
 
@@ -605,27 +718,23 @@ namespace vayu::http
             handle.id = data->request_id;
             handle.future = data->promise.get_future();
 
-            {
-                std::lock_guard<std::mutex> lock(queue_mutex_);
-                pending_queue.push(std::move(data));
-            }
-
-            queue_cv.notify_one();
+            submit(std::move(data));
             return handle;
         }
 
         bool cancel(size_t request_id)
         {
-            // Try to remove from pending queue
+            // Try to remove from pending queue in each worker
+            bool found = false;
+            for (auto &worker : workers)
             {
-                std::lock_guard<std::mutex> lock(queue_mutex_);
+                std::lock_guard<std::mutex> lock(worker->queue_mutex);
                 std::queue<std::unique_ptr<TransferData>> new_queue;
-                bool found = false;
 
-                while (!pending_queue.empty())
+                while (!worker->pending_queue.empty())
                 {
-                    auto data = std::move(pending_queue.front());
-                    pending_queue.pop();
+                    auto data = std::move(worker->pending_queue.front());
+                    worker->pending_queue.pop();
 
                     if (data->request_id == request_id)
                     {
@@ -649,15 +758,10 @@ namespace vayu::http
                     }
                 }
 
-                pending_queue = std::move(new_queue);
-                if (found)
-                {
-                    return true;
-                }
+                worker->pending_queue = std::move(new_queue);
             }
 
-            // Cannot cancel active transfers easily - would need to track and abort
-            return false;
+            return found;
         }
 
         BatchResult execute_batch(const std::vector<Request> &requests)
@@ -703,14 +807,32 @@ namespace vayu::http
 
         size_t active_count() const
         {
-            std::lock_guard<std::mutex> lock(active_mutex_);
-            return active_transfers.size();
+            size_t count = 0;
+            for (const auto &worker : workers)
+            {
+                count += worker->active_count();
+            }
+            return count;
         }
 
         size_t pending_count() const
         {
-            std::lock_guard<std::mutex> lock(queue_mutex_);
-            return pending_queue.size();
+            size_t count = 0;
+            for (const auto &worker : workers)
+            {
+                count += worker->pending_count();
+            }
+            return count;
+        }
+
+        size_t total_processed() const
+        {
+            size_t count = 0;
+            for (const auto &worker : workers)
+            {
+                count += worker->local_processed.load(std::memory_order_relaxed);
+            }
+            return count;
         }
     };
 
@@ -771,7 +893,12 @@ namespace vayu::http
 
     size_t EventLoop::total_processed() const
     {
-        return impl_->total_processed;
+        return impl_->total_processed();
+    }
+
+    EventLoopStats EventLoop::stats() const
+    {
+        return impl_->stats();
     }
 
     // ============================================================================

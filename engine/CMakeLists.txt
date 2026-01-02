@@ -125,9 +125,11 @@ endif()
 add_library(vayu_core STATIC
     src/http/client.cpp
     src/http/event_loop.cpp
+    src/http/rate_limiter.cpp
     src/http/sse.cpp
     src/utils/json.cpp
     src/db/database.cpp
+    src/core/run_manager.cpp
 )
 
 target_include_directories(vayu_core PUBLIC
@@ -214,15 +216,18 @@ if(VAYU_BUILD_TESTS)
         tests/event_loop_test.cpp
         tests/sse_test.cpp
         tests/db_test.cpp
+        tests/rate_limit_test.cpp
     )
     
     target_link_libraries(vayu_tests PRIVATE
         vayu_core
         GTest::gtest
         GTest::gtest_main
+        vayu_warnings
         vayu_sanitizers
     )
-    
+
+    # Discover tests for CTest
     include(GoogleTest)
     gtest_discover_tests(vayu_tests)
 endif()

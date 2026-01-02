@@ -83,23 +83,78 @@ POST /run/:id/stop
 }
 ```
 
-### Statistics
+### Statistics (Server-Sent Events)
+
+Stream real-time metrics from a running load test via Server-Sent Events.
 
 **Get Run Metrics (SSE):**
 ```
 GET /stats/:id
 ```
 
-**Response:**
-Stream of Server-Sent Events (`text/event-stream`).
+**Response:** `text/event-stream`
 
-**Events:**
-- `data`: JSON object representing a `Metric`.
-- `: keep-alive`: Sent periodically to keep connection open.
-
-**Example Event:**
+**Example Connection:**
+```bash
+curl -N http://127.0.0.1:9876/stats/run_1704200000000
 ```
-data: {"id":1,"runId":"run_1704200000000","timestamp":1704200001000,"requestsTotal":100,"requestsFailed":0,"requestsPerSecond":100.0,"latencyMin":10.0,"latencyMax":50.0,"latencyAvg":25.0,"latencyP95":45.0,"latencyP99":49.0,"bytesIn":10240,"bytesOut":5120}
+
+**Events Sent:**
+
+1. **Metric Events** (every 100ms during test)
+   ```
+   data: {"id":1,"runId":"run_1704200000000","timestamp":1704200001000,"name":"rps","value":150.5,"labels":{"percentile":"mean"}}
+   data: {"id":2,"runId":"run_1704200000000","timestamp":1704200001000,"name":"latency_ms","value":45.2,"labels":{"percentile":"p50"}}
+   data: {"id":3,"runId":"run_1704200000000","timestamp":1704200001000,"name":"latency_ms","value":125.8,"labels":{"percentile":"p99"}}
+   ```
+
+2. **Keep-Alive Comments** (every 30 seconds)
+   ```
+   : keep-alive
+   ```
+
+3. **Completion Event** (on test finish)
+   ```
+   data: {"id":100,"runId":"run_1704200000000","timestamp":1704200061000,"name":"test_complete","value":1,"labels":{"status":"success"}}
+   ```
+
+**Metric Object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | number | Metric sequence number |
+| `runId` | string | Parent run ID |
+| `timestamp` | number | Metric timestamp (milliseconds) |
+| `name` | string | Metric name (e.g., "rps", "latency_ms", "errors") |
+| `value` | number | Numeric value |
+| `labels` | object | Categorization metadata (e.g., `{"percentile": "p99"}`) |
+
+**Typical Metrics Emitted:**
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `rps` | `{"percentile": "mean"}` | Requests per second (mean) |
+| `latency_ms` | `{"percentile": "p50", "p95", "p99"}` | Latency percentiles |
+| `error_rate` | `{"percentile": "mean"}` | Error percentage |
+| `bytes_in` | - | Total bytes received |
+| `bytes_out` | - | Total bytes sent |
+| `connections_active` | - | Currently active connections |
+| `test_complete` | `{"status": "success"}` | Test finished |
+
+**JavaScript Example:**
+```javascript
+const es = new EventSource('http://127.0.0.1:9876/stats/run_1704200000000');
+
+es.onmessage = (event) => {
+    const metric = JSON.parse(event.data);
+    console.log(`${metric.name}: ${metric.value}`);
+};
+
+es.onerror = () => {
+    console.log('Connection closed');
+    es.close();
+};
+```
 
 ```    "requestsPerSec": 50.5,
     "latencyP50": 120.5,
@@ -109,9 +164,54 @@ data: {"id":1,"runId":"run_1704200000000","timestamp":1704200001000,"requestsTot
 ]
 ```
 
----
+## Database Integration
 
-### Project Management
+### Automatic Persistence
+
+All endpoint operations are automatically persisted to SQLite:
+
+| Endpoint | Database Table | Operation |
+|----------|----------------|-----------|
+| `POST /collections` | `collections` | INSERT/UPDATE |
+| `POST /requests` | `requests` | INSERT/UPDATE |
+| `POST /environments` | `environments` | INSERT/UPDATE |
+| `POST /request` | `runs`, `results` | INSERT (execution log) |
+| `POST /run` | `runs` | INSERT (with type='load') |
+| `GET /stats/:id` | `metrics` | INSERT (per metric) |
+
+### Schema Location
+
+Database file: `vayu.db` (created on first use)
+
+**Tables:**
+- **Project Management:** `collections`, `requests`, `environments`
+- **Execution:** `runs`, `results`, `metrics`
+- **Configuration:** `kv_store`
+
+See [Architecture - Storage Layer](architecture.md#storage-layer-database) for complete schema details.
+
+### Run Record
+
+When you create a run (via `POST /request` or `POST /run`), a record is saved:
+
+```json
+{
+  "id": "run_1704200000000",
+  "request_id": "req_123",
+  "environment_id": "env_prod",
+  "type": "design",
+  "status": "completed",
+  "config_snapshot": "{\"timeout\": 30000}",
+  "start_time": 1704200000000,
+  "end_time": 1704200000234
+}
+```
+
+Retrieve later via:
+```
+GET /runs              # List all runs
+GET /run/:id           # Get specific run details
+```
 
 #### Collections
 

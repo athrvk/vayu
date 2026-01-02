@@ -36,11 +36,14 @@ namespace vayu::http
      */
     struct EventLoopConfig
     {
-        /// Maximum number of concurrent connections (default: 50)
-        size_t max_concurrent = 50;
+        /// Number of worker event loops (0 = auto-detect CPU cores)
+        size_t num_workers = 0;
 
-        /// Maximum connections per host (default: 6)
-        size_t max_per_host = 6;
+        /// Maximum number of concurrent connections per worker (default: 1000)
+        size_t max_concurrent = 1000;
+
+        /// Maximum connections per host (default: 100)
+        size_t max_per_host = 100;
 
         /// Default user agent string
         std::string user_agent = "Vayu/0.1.0";
@@ -52,7 +55,13 @@ namespace vayu::http
         std::string proxy_url;
 
         /// Event loop poll timeout in milliseconds
-        int poll_timeout_ms = 100;
+        int poll_timeout_ms = 10;
+
+        /// Target requests per second (0 = unlimited, no rate limiting)
+        double target_rps = 0.0;
+
+        /// Maximum burst size for rate limiting (defaults to 2x target_rps)
+        double burst_size = 0.0;
     };
 
     /**
@@ -73,6 +82,17 @@ namespace vayu::http
         size_t successful = 0;
         size_t failed = 0;
         double total_time_ms = 0.0;
+    };
+
+    /**
+     * @brief Event loop statistics
+     */
+    struct EventLoopStats
+    {
+        size_t total_requests = 0;
+        size_t active_requests = 0;
+        size_t pending_requests = 0;
+        size_t completed_requests = 0;
     };
 
     /**
@@ -196,6 +216,11 @@ namespace vayu::http
          * @brief Get total requests processed since start
          */
         [[nodiscard]] size_t total_processed() const;
+
+        /**
+         * @brief Get comprehensive statistics about the event loop
+         */
+        [[nodiscard]] EventLoopStats stats() const;
 
     private:
         struct Impl;

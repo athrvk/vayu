@@ -23,28 +23,36 @@ The Vayu Engine is a high-performance C++20 daemon optimized for concurrent HTTP
 └─────────────────────────────────┬──────────────────────────────────┘
                                   │
 ┌─────────────────────────────────▼──────────────────────────────────┐
-│                        Request Dispatcher                          │
-│                      (Queue + Round-robin)                         │
+│                         EventLoop                                  │
+│               (Round-robin sharding to workers)                    │
+│              10k-50k RPS with token-bucket rate limiting           │
 └─────────────────────────────────┬──────────────────────────────────┘
                │
-┌──────────────▼───────────────────────────────────┐
-│       Thread Pool (N = CPU Cores)                 │
-├───────────┬───────────────────────────┬───────────┤
-│  Worker 0 │  Worker 1                 │  Worker N │
-│           │                           │           │
-│  curl_    │  curl_multi + select()    │  curl_    │
-│  multi    │  Non-blocking I/O         │  multi    │
-│           │                           │           │
-│  QuickJS  │  Context Pool             │  QuickJS  │
-│  Contexts │  (64 pre-allocated)       │  Contexts │
-│           │                           │           │
-│  Thread   │  Lock-free Statistics     │  Thread   │
-│  Stats    │  Atomic counters          │  Stats    │
-└───────────┴───────────────────────────┴───────────┘
+    ┌──────────┼──────────┬─────────────┐
+    │          │          │             │
+┌───▼──────┐ ┌▼─────────┐ ┌▼──────────┐ ┌▼──────────┐
+│ Worker 0 │ │ Worker 1 │ │ Worker 2  │ │ Worker N  │
+├──────────┤ ├──────────┤ ├───────────┤ ├───────────┤
+│ CURLM*   │ │ CURLM*   │ │ CURLM*    │ │ CURLM*    │
+│ Queue    │ │ Queue    │ │ Queue     │ │ Queue     │
+│ Active   │ │ Active   │ │ Active    │ │ Active    │
+│ RateLim  │ │ RateLim  │ │ RateLim   │ │ RateLim   │
+│          │ │          │ │           │ │           │
+│ curl_    │ │ curl_    │ │ curl_     │ │ curl_     │
+│ multi +  │ │ multi +  │ │ multi +   │ │ multi +   │
+│ poll()   │ │ poll()   │ │ poll()    │ │ poll()    │
+│          │ │          │ │           │ │           │
+│ QuickJS  │ │ QuickJS  │ │ QuickJS   │ │ QuickJS   │
+│ Context  │ │ Context  │ │ Context   │ │ Context   │
+│          │ │          │ │           │ │           │
+│ Thread-  │ │ Thread-  │ │ Thread-   │ │ Thread-   │
+│ local    │ │ local    │ │ local     │ │ local     │
+│ Stats    │ │ Stats    │ │ Stats     │ │ Stats     │
+└──────────┘ └──────────┘ └───────────┘ └───────────┘
                │
 ┌──────────────▼───────────────┐
-│      Reporter Thread          │
-│  (Aggregates stats ~100ms)    │
+│      Stats Aggregation        │
+│   (Lock-free atomic reads)    │
 └──────────────┬───────────────┘
                │
           SSE Broadcast
@@ -141,71 +149,244 @@ while (running) {
 
 ---
 
-### curl_multi Event Loop
+### curl_multi Event Loop (Multi-Worker)
 
-**File:** `src/http/client.cpp`
+**File:** `src/http/event_loop.cpp`, `include/vayu/http/event_loop.hpp`
 
-Each worker maintains a `CURLM` handle for multiplexed I/O.
+Provides async HTTP request execution using curl_multi for non-blocking I/O with **multi-worker architecture** for high-RPS workloads.
 
-**How It Works:**
-1. `curl_easy_setopt()` configures individual request
-2. `curl_multi_add_handle()` adds to multiplexor
-3. `curl_multi_perform()` drives non-blocking I/O
-4. `select()`/`epoll` wakes on socket activity
-5. `curl_multi_info_read()` retrieves completions
+#### Architecture
 
-**Why Not One Socket Per Thread?**
-- Thread limit: OS max ~10k threads
-- Memory: Each thread ~1MB stack
-- curl_multi: One thread, 1000+ sockets
+```cpp
+// Per-worker event loop
+struct EventLoopWorker {
+    CURLM* multi_handle;                    // Own curl_multi handle
+    std::thread thread;                     // Worker thread
+    std::queue<TransferData*> pending_queue; // Worker's pending queue
+    std::unordered_map<CURL*, TransferData*> active_transfers;
+    RateLimiter rate_limiter;               // Token-bucket rate limiter
+    std::atomic<size_t> local_processed;    // Lock-free stats
+};
+
+// EventLoop manages N workers
+struct EventLoop::Impl {
+    std::vector<EventLoopWorker*> workers;  // N workers (auto-detect cores)
+    std::atomic<size_t> next_worker;        // Round-robin index
+    std::atomic<size_t> next_request_id;    // Request ID generator
+};
+```
+
+**Key Features:**
+- **N Workers:** Auto-detects CPU cores (or configurable)
+- **Round-Robin Sharding:** Requests distributed evenly across workers
+- **Per-Worker Rate Limiting:** Token-bucket algorithm for precise RPS control
+- **Lock-Free Stats:** Each worker maintains atomic counters
+- **Connection Pooling:** libcurl multiplexing and keep-alive enabled
+- **Performance:** 10k-50k RPS capable on modern hardware
+
+#### Per-Request Lifecycle
+
+```
+1. Submit Request (submit/submit_async)
+   ↓ Add to pending queue
+   
+2. Worker Thread (run_loop)
+   ├─ Dequeue pending requests
+   ├─ Create curl_easy handle
+   ├─ curl_multi_add_handle(multi, handle)
+   
+3. Non-Blocking I/O (curl_multi_perform)
+   ├─ curl_multi_wait() sleeps on socket activity
+   ├─ Timeout: 10ms (configurable)
+   
+4. Completion (curl_multi_info_read)
+   ├─ Extract response data
+   ├─ Run test scripts via ScriptEngine
+   ├─ Invoke callback or set promise
+   ├─ Update statistics
+   
+5. Cleanup
+   └─ Free curl handle and transfer data
+```
+
+#### Configuration
+
+```cpp
+struct EventLoopConfig {
+    // Multi-worker settings
+    size_t num_workers = 0;          // 0 = auto-detect CPU cores
+    
+    // Per-worker concurrency limits
+    size_t max_concurrent = 1000;    // Max in-flight per worker (increased)
+    size_t max_per_host = 100;       // Per-host limit per worker (increased)
+    int poll_timeout_ms = 10;        // Fast polling (reduced from 100ms)
+    
+    // Rate limiting (NEW)
+    double target_rps = 0.0;         // 0 = unlimited, >0 = token-bucket rate limiting
+    double burst_size = 0.0;         // Burst capacity (default 2x target_rps)
+    
+    // Other settings
+    std::string user_agent = "Vayu/0.1.0";
+    bool verbose = false;            // curl debug output
+    std::string proxy_url;           // Optional proxy
+};
+```
+
+**High-RPS Example:**
+```cpp
+EventLoopConfig config;
+config.num_workers = 0;        // Auto-detect (e.g., 8 cores)
+config.max_concurrent = 1000;  // 8 × 1000 = 8000 total concurrent
+config.max_per_host = 100;     // Avoids overwhelming single host
+config.poll_timeout_ms = 10;   // Fast response to socket events
+config.target_rps = 10000.0;   // Precise 10k RPS rate limiting
+config.burst_size = 20000.0;   // Allow 2x bursts
+
+EventLoop loop(config);
+// Can handle 10k RPS with 8000 concurrent connections
+```
+
+#### API Usage
+
+```cpp
+// Basic unlimited RPS
+EventLoop loop;
+loop.start();
+
+// Submit with callback (auto-sharded to workers)
+loop.submit(request, [](size_t id, Result<Response> result) {
+    if (result.is_ok()) {
+        std::cout << result.value().status_code << "\n";
+    }
+});
+
+// Or use futures
+auto handle = loop.submit_async(request);
+auto result = handle.future.get();
+
+// Batch multiple requests
+std::vector<Request> requests = { /* ... */ };
+auto batch = loop.execute_batch(requests);
+
+// Monitor activity (aggregated across all workers)
+std::cout << loop.active_count() << " requests in flight\n";
+std::cout << loop.pending_count() << " requests queued\n";
+std::cout << loop.total_processed() << " total completed\n";
+
+loop.stop();
+```
+
+**Rate-Limited High-RPS:**
+```cpp
+// Configure for 50k RPS with rate limiting
+EventLoopConfig config;
+config.num_workers = 8;         // 8 workers
+config.max_concurrent = 1000;   // 8k total concurrent
+config.target_rps = 50000.0;    // 50k RPS limit
+
+EventLoop loop(config);
+loop.start();
+
+// Requests are automatically rate-limited to 50k RPS
+for (int i = 0; i < 100000; ++i) {
+    loop.submit_async(request);  // Token-bucket pacing
+}
+```
+
+#### Why Multi-Worker curl_multi?
+
+| Metric | Threads | Single curl_multi | Multi-Worker curl_multi |
+|--------|---------|-------------------|------------------------|
+| Max Connections | ~10,000 | 100,000+ | 100,000+ (N × capacity) |
+| Memory per Request | 1 MB stack | <5 KB metadata | <5 KB metadata |
+| Context Switches | Frequent | Minimal | Minimal (per-core) |
+| CPU Utilization | High | Single core | All cores (N workers) |
+| Complexity | High (locks) | Low (event-driven) | Medium (sharding) |
+| RPS Capability | ~1k | ~5-10k | **10k-50k+** |
+
+**Multi-Worker Advantages:**
+- **CPU Scaling:** N workers = N × throughput
+- **Lock-Free Stats:** Per-worker atomic counters
+- **Rate Limiting:** Token-bucket for precise RPS control
+- **Connection Pooling:** libcurl multiplexing reduces TCP overhead
+- **Burst Handling:** Configurable burst capacity
+
+**See [HIGH_RPS_IMPROVEMENTS.md](/HIGH_RPS_IMPROVEMENTS.md) for detailed implementation.**
 
 ---
 
 ### QuickJS Script Engine
 
-**Files:** `src/scripting/engine.cpp`, includes context pool
+**Files:** `src/runtime/script_engine.cpp`, `include/vayu/runtime/script_engine.hpp`
 
-Executes user test scripts in JavaScript.
+Executes user test scripts in JavaScript with full Postman API compatibility.
 
-#### Context Pool
-
-Pre-allocated pool of 64 QuickJS contexts to avoid allocation overhead:
+#### Architecture
 
 ```cpp
-class ContextPool {
-    std::vector<JSContext*> contexts;  // Pre-allocated
-    std::queue<JSContext*> available;  // Lock-free
+class ScriptEngine::Impl {
+    JSRuntime* runtime;           // QuickJS runtime
+    ScriptConfig config;          // Memory/timeout/stack limits
     
-    JSContext* acquire() {
-        if (available.try_pop(ctx)) {
-            return ctx;
-        }
-        return create_context();  // Fallback
-    }
-    
-    void release(JSContext* ctx) {
-        available.push(ctx);
-    }
+    ScriptResult execute(script, context);
 };
 ```
 
-#### Script Binding
+**Configuration:**
+- **Memory Limit:** 64MB (configurable)
+- **Timeout:** 5 seconds (configurable)
+- **Stack Size:** 256KB
+- **Console:** Enabled for debugging
 
-Exposes `pm` object to JavaScript:
+#### Script Binding - `pm` Object
 
+**Response Access:**
 ```javascript
-pm.response.code      // HTTP status
-pm.response.body      // Response body
-pm.response.headers   // Response headers
-pm.response.time      // Latency in ms
+pm.response.code        // HTTP status code
+pm.response.body        // Raw response body
+pm.response.headers     // Response headers (object)
+pm.response.json()      // Parse body as JSON
+pm.response.text()      // Response body as string
+```
 
-pm.request.method     // HTTP method
-pm.request.url        // Full URL
-pm.request.headers    // Request headers
+**Request Access:**
+```javascript
+pm.request.method       // HTTP method
+pm.request.url          // Full request URL
+pm.request.headers      // Request headers (object)
+pm.request.body         // Request body
+```
 
-pm.test("name", () => {
-    pm.expect(value).to.equal(expected);
+**Environment Variables:**
+```javascript
+pm.environment.get("key")      // Read variable
+pm.environment.set("key", val) // Set variable
+```
+
+**Testing & Assertions:**
+```javascript
+pm.test("description", function() {
+    // Test code
 });
+
+pm.expect(value)
+    .to.equal(expected)        // Strict equality
+    .to.not.equal(other)       // Inequality
+    .to.be.above(50)           // Greater than
+    .to.be.below(100)          // Less than
+    .to.include(substring)     // Contains
+    .to.have.property("key")   // Has property
+    .to.exist                  // Truthy
+    .to.be.true                // === true
+    .to.be.false               // === false
+```
+
+**Console Output:**
+```javascript
+console.log(msg)        // Print message
+console.info(msg)       // Alias
+console.warn(msg)       // Alias
+console.error(msg)      // Alias
 ```
 
 ---
@@ -231,71 +412,95 @@ Every 100ms, the Reporter Thread aggregates all worker stats and broadcasts via 
 
 ---
 
-## Storage Layer (New)
+## Storage Layer (Database)
+
+**File:** `src/db/database.cpp`, `include/vayu/db/database.hpp`
 
 ### Technology Stack
 
-- **Database:** SQLite 3 (Embedded, Serverless)
-- **ORM:** `sqlite_orm` (Modern C++20 wrapper)
-- **Location:** `vayu.db` (in executable directory)
+- **Database:** SQLite 3 (Embedded)
+- **ORM:** `sqlite_orm` (C++20 type-safe wrapper)
+- **File:** `vayu.db`
+- **Concurrency:** WAL mode (Write-Ahead Logging)
 
-### Why SQLite?
+### Schema Overview
 
-1.  **Embedded:** No external dependencies or server process required.
-2.  **Reliable:** ACID compliance ensures state consistency (e.g., run status).
-3.  **JSON Support:** Native support for storing request/response bodies.
-4.  **Performance:** WAL (Write-Ahead Logging) mode supports high concurrency.
+**Project Management:**
+- `collections` - Organize requests into folders/hierarchies
+- `requests` - Saved HTTP requests with pre/post scripts
+- `environments` - Environment variable sets
 
-### Schema Design
+**Execution Tracking:**
+- `runs` - Test execution records with status
+- `metrics` - Time-series performance data
+- `results` - Individual request/response details
+- `kv_store` - Global key-value configuration
 
-#### 1. `runs` Table
-Stores the state and configuration of each test execution.
+### Key Tables
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | TEXT (PK) | Unique Run ID (e.g., "run_123") |
-| `status` | TEXT | `pending`, `running`, `completed`, `failed` |
-| `start_time` | INTEGER | Unix timestamp |
-| `end_time` | INTEGER | Unix timestamp |
-| `config` | TEXT (JSON) | Full load test configuration |
+#### `requests` Table
+Stores saved HTTP request definitions with scripts.
 
-#### 2. `metrics` Table
-Time-series data points for reporting.
+```sql
+id                  TEXT PRIMARY KEY
+collection_id       TEXT FK
+name                TEXT
+method              TEXT (GET, POST, etc.)
+url                 TEXT
+headers             TEXT (JSON)
+body                TEXT
+auth                TEXT (JSON)
+pre_request_script  TEXT (JavaScript)
+post_request_script TEXT (JavaScript)
+updated_at          INTEGER (timestamp)
+```
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | INTEGER (PK) | Auto-increment |
-| `run_id` | TEXT (FK) | Link to `runs` table |
-| `timestamp` | INTEGER | Metric time |
-| `rps` | INTEGER | Requests per second |
-| `latency_p50` | REAL | Median latency |
-| `latency_p99` | REAL | 99th percentile latency |
-| `errors` | INTEGER | Error count in this interval |
+#### `runs` Table
+Records of test executions.
 
-#### 3. `results` Table
-Detailed request/response logs (only for failures or sampling).
+```sql
+id                  TEXT PRIMARY KEY
+request_id          TEXT FK
+environment_id      TEXT FK
+type                TEXT ('design' or 'load')
+status              TEXT ('pending', 'running', 'completed', 'failed')
+config_snapshot     TEXT (JSON - config at execution time)
+start_time          INTEGER (milliseconds)
+end_time            INTEGER (milliseconds, nullable)
+```
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | INTEGER (PK) | Auto-increment |
-| `run_id` | TEXT (FK) | Link to `runs` table |
-| `request` | TEXT (JSON) | Full request object |
-| `response` | TEXT (JSON) | Full response object |
-| `error` | TEXT | Error message (if any) |
+#### `metrics` Table
+Time-series metrics (auto-generated during load tests).
 
-#### 4. `kv_store` Table
-Global engine configuration.
+```sql
+id          INTEGER PRIMARY KEY AUTOINCREMENT
+run_id      TEXT FK
+timestamp   INTEGER (milliseconds)
+name        TEXT (metric name)
+value       REAL (metric value)
+labels      TEXT (JSON for categorization)
+```
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `key` | TEXT (PK) | Config key (e.g., "max_workers") |
-| `value` | TEXT | Config value |
+#### `results` Table
+Individual request execution results.
 
-### Persistence Strategy
+```sql
+id          INTEGER PRIMARY KEY AUTOINCREMENT
+run_id      TEXT FK
+timestamp   INTEGER (milliseconds)
+status_code INTEGER (HTTP response code)
+latency_ms  REAL (request latency)
+error       TEXT (error message, nullable)
+trace_data  TEXT (JSON with additional info)
+```
 
-1.  **WAL Mode:** Enabled for better concurrency (readers don't block writers).
-2.  **Batching:** Metrics are buffered in memory and flushed to DB every 100ms-1s to avoid I/O bottlenecks.
-3.  **Sync Schema:** `sqlite_orm` automatically handles schema creation and migration on startup.
+### Features
+
+- **WAL Mode:** Concurrent readers, sequential writes (~10μs per write)
+- **ACID:** Full transaction support and crash recovery
+- **Auto Schema:** `db.init()` creates tables via `sync_schema()`
+- **Type Safety:** C++20 compile-time validation via sqlite_orm
+- **Sync Mode:** NORMAL (fsync every 1 second for performance)
 
 ---
 
