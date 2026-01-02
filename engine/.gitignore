@@ -45,7 +45,7 @@ Testing/
 coverage/
 
 # DB
-db/
+db/vayu.*
 
 
 # Logs
