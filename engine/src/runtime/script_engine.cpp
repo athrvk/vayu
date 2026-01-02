@@ -6,7 +6,9 @@
 #include "vayu/runtime/script_engine.hpp"
 
 #include <algorithm>
+#include <mutex>
 #include <sstream>
+#include <vector>
 
 #include "vayu/utils/json.hpp"
 
@@ -514,7 +516,7 @@ void setup_pm_response(JSContext* ctx, JSValue pm) {
     auto* data = get_context_data(ctx);
     JSValue response = JS_NewObject(ctx);
 
-    if (data->response) {
+    if (data && data->response) {
         // pm.response.code
         JS_SetPropertyStr(ctx, response, "code", JS_NewInt32(ctx, data->response->status_code));
 
@@ -546,7 +548,7 @@ void setup_pm_request(JSContext* ctx, JSValue pm) {
     auto* data = get_context_data(ctx);
     JSValue request = JS_NewObject(ctx);
 
-    if (data->request) {
+    if (data && data->request) {
         // pm.request.url
         JS_SetPropertyStr(ctx, request, "url", JS_NewString(ctx, data->request->url.c_str()));
 
@@ -648,42 +650,76 @@ void setup_pm_object(JSContext* ctx) {
 
 class ScriptEngine::Impl {
 public:
-    JSRuntime* runtime = nullptr;
     ScriptConfig config;
+    // Pool of Runtime+Context pairs
+    // We need separate runtimes because QuickJS JSRuntime is not thread-safe
+    using ContextPair = std::pair<JSRuntime*, JSContext*>;
+    std::vector<ContextPair> context_pool;
+    std::mutex pool_mutex;
 
-    explicit Impl(const ScriptConfig& cfg) : config(cfg) {
-        runtime = JS_NewRuntime();
-        if (runtime) {
-            JS_SetMemoryLimit(runtime, config.memory_limit);
-            JS_SetMaxStackSize(runtime, config.stack_size);
-        }
-    }
+    explicit Impl(const ScriptConfig& cfg) : config(cfg) {}
 
     ~Impl() {
-        if (runtime) {
-            // Register Expectation class
-            if (expect_class_id == 0) {
-                JS_NewClassID(&expect_class_id);
-            }
-            JS_NewClass(runtime, expect_class_id, &expect_class);
-            JS_FreeRuntime(runtime);
+        std::lock_guard<std::mutex> lock(pool_mutex);
+        for (auto& pair : context_pool) {
+            JS_FreeContext(pair.second);
+            JS_FreeRuntime(pair.first);
         }
+        context_pool.clear();
+    }
+
+    ContextPair acquire_context() {
+        std::lock_guard<std::mutex> lock(pool_mutex);
+        if (!context_pool.empty()) {
+            ContextPair pair = context_pool.back();
+            context_pool.pop_back();
+            return pair;
+        }
+
+        // Create new runtime and context
+        JSRuntime* rt = JS_NewRuntime();
+        if (!rt) return {nullptr, nullptr};
+
+        JS_SetMemoryLimit(rt, config.memory_limit);
+        JS_SetMaxStackSize(rt, config.stack_size);
+
+        // Register Expectation class
+        if (expect_class_id == 0) {
+            JS_NewClassID(&expect_class_id);
+        }
+        JS_NewClass(rt, expect_class_id, &expect_class);
+
+        JSContext* ctx = JS_NewContext(rt);
+        if (ctx) {
+            if (config.enable_console) {
+                setup_console(ctx);
+            }
+            setup_pm_object(ctx);
+        } else {
+            JS_FreeRuntime(rt);
+            return {nullptr, nullptr};
+        }
+
+        return {rt, ctx};
+    }
+
+    void release_context(ContextPair pair) {
+        if (!pair.first || !pair.second) return;
+        std::lock_guard<std::mutex> lock(pool_mutex);
+        context_pool.push_back(pair);
     }
 
     ScriptResult execute(const std::string& script, const ScriptContext& ctx) {
         ScriptResult result;
 
-        if (!runtime) {
-            result.success = false;
-            result.error_message = "QuickJS runtime not initialized";
-            return result;
-        }
+        // Acquire runtime/context pair
+        ContextPair pair = acquire_context();
+        JSRuntime* rt = pair.first;
+        JSContext* js_ctx = pair.second;
 
-        // Create new context for this execution
-        JSContext* js_ctx = JS_NewContext(runtime);
-        if (!js_ctx) {
+        if (!rt || !js_ctx) {
             result.success = false;
-            result.error_message = "Failed to create QuickJS context";
+            result.error_message = "Failed to create QuickJS runtime/context";
             return result;
         }
 
@@ -694,15 +730,22 @@ public:
         ctx_data.environment = ctx.environment;
         JS_SetContextOpaque(js_ctx, &ctx_data);
 
-        // Set up global objects
-        if (config.enable_console) {
-            setup_console(js_ctx);
+        // Refresh pm.request and pm.response with new data
+        JSValue global = JS_GetGlobalObject(js_ctx);
+        JSValue pm = JS_GetPropertyStr(js_ctx, global, "pm");
+        if (!JS_IsUndefined(pm)) {
+            setup_pm_response(js_ctx, pm);
+            setup_pm_request(js_ctx, pm);
         }
-        setup_pm_object(js_ctx);
+        JS_FreeValue(js_ctx, pm);
+        JS_FreeValue(js_ctx, global);
+
+        // Wrap script in IIFE to avoid global scope pollution
+        std::string wrapped_script = "(function() { " + script + " \n})()";
 
         // Execute script
-        JSValue eval_result =
-            JS_Eval(js_ctx, script.c_str(), script.size(), "<script>", JS_EVAL_TYPE_GLOBAL);
+        JSValue eval_result = JS_Eval(
+            js_ctx, wrapped_script.c_str(), wrapped_script.size(), "<script>", JS_EVAL_TYPE_GLOBAL);
 
         if (JS_IsException(eval_result)) {
             JSValue exc = JS_GetException(js_ctx);
@@ -727,7 +770,8 @@ public:
             }
         }
 
-        JS_FreeContext(js_ctx);
+        // Return context to pool
+        release_context(pair);
         return result;
     }
 };

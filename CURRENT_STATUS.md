@@ -13,13 +13,12 @@
 
 ## 🚀 High-RPS Improvements
 
-**See [HIGH_RPS_IMPROVEMENTS.md](HIGH_RPS_IMPROVEMENTS.md) for detailed documentation.**
-
-### Completed (4/5)
+### Completed
 - ✅ **Multiple event-loop workers** - N workers (auto-detect cores), round-robin sharding
 - ✅ **Token-bucket rate limiter** - Precise RPS control (10k-50k RPS)
 - ✅ **Connection reuse** - libcurl multiplexing and keep-alive enabled
 - ✅ **Thread-local stats** - Lock-free aggregation across workers
+- ✅ **Context Pooling** - Reusing QuickJS contexts to reduce initialization overhead
 
 ### Configuration
 ```cpp
@@ -45,7 +44,6 @@ config.burst_size = 20000.0;   // Burst capacity
 - [docs/engine/api-reference.md](docs/engine/api-reference.md) — expanded SSE `/stats/:id` streaming docs and DB persistence notes
 - [docs/engine/building.md](docs/engine/building.md) — simplified to script-first workflow using [build-and-test.sh](scripts/build-and-test.sh)
 - [docs/engine/scripting.md](docs/engine/scripting.md) — new Postman-compatible scripting guide covering `pm` API and assertions
-- [HIGH_RPS_IMPROVEMENTS.md](HIGH_RPS_IMPROVEMENTS.md) — **NEW** comprehensive guide to multi-worker architecture and rate limiting
 
 ---
 

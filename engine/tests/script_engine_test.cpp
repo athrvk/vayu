@@ -557,3 +557,21 @@ TEST_F(ScriptEngineTest, MixedPassFail) {
     EXPECT_FALSE(result.tests[1].passed);
     EXPECT_TRUE(result.tests[2].passed);
 }
+
+TEST_F(ScriptEngineTest, ContextPooling) {
+    // Run multiple executions to verify context pooling works and doesn't crash
+    for (int i = 0; i < 10; ++i) {
+        auto result = engine.execute_test(R"(
+            pm.test("Pooling test", function() {
+                pm.expect(1).to.equal(1);
+            });
+        )",
+                                          request,
+                                          response,
+                                          env);
+
+        EXPECT_TRUE(result.success);
+        ASSERT_EQ(result.tests.size(), 1);
+        EXPECT_TRUE(result.tests[0].passed);
+    }
+}
