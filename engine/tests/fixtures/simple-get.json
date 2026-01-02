@@ -1,0 +1,10 @@
+{
+    "method": "GET",
+    "url": "https://httpbin.org/get",
+    "headers": {
+        "Accept": "application/json",
+        "X-Vayu-Test": "true"
+    },
+    "timeout": 30000,
+    "followRedirects": true
+}

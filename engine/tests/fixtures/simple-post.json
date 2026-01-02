@@ -1,0 +1,17 @@
+{
+    "method": "POST",
+    "url": "https://httpbin.org/post",
+    "headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    },
+    "body": {
+        "mode": "json",
+        "content": {
+            "name": "John Doe",
+            "email": "john@example.com",
+            "age": 30
+        }
+    },
+    "timeout": 30000
+}

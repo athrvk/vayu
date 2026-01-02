@@ -1,0 +1,45 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+
+# Executables
+vayu-cli
+vayu-engine
+*.exe
+
+# vcpkg
+vcpkg_installed/
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# macOS
+.DS_Store
+
+# Coverage
+*.gcno
+*.gcda
+*.gcov
+coverage/

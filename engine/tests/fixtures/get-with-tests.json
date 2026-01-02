@@ -1,0 +1,8 @@
+{
+    "method": "GET",
+    "url": "https://httpbin.org/json",
+    "headers": {
+        "Accept": "application/json"
+    },
+    "tests": "pm.test('Status code is 200', function() {\n    pm.expect(pm.response.code).to.equal(200);\n});\n\npm.test('Response is JSON', function() {\n    var json = pm.response.json();\n    pm.expect(json).to.have.property('slideshow');\n});\n\npm.test('Slideshow has title', function() {\n    var json = pm.response.json();\n    pm.expect(json.slideshow.title).to.exist;\n});"
+}

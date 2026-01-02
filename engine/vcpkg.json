@@ -1,0 +1,13 @@
+{
+    "name": "vayu-engine",
+    "version": "0.1.0",
+    "description": "High-performance API execution engine",
+    "homepage": "https://github.com/vayu/vayu",
+    "license": "MIT",
+    "dependencies": [
+        "curl",
+        "nlohmann-json",
+        "cpp-httplib",
+        "gtest"
+    ]
+}
