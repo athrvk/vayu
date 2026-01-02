@@ -340,6 +340,8 @@ void execute_load_test(std::shared_ptr<RunContext> context,
             vayu::utils::log_info("  Errors: " + std::to_string(errors) + " (" +
                                   std::to_string(error_rate) + "%)");
             vayu::utils::log_info("  Duration: " + std::to_string(total_duration_s) + " s");
+            vayu::utils::log_info("  Target RPS: " +
+                                  (target_rps > 0 ? std::to_string(target_rps) : "unlimited"));
             vayu::utils::log_info("  Actual RPS: " + std::to_string(actual_rps));
             vayu::utils::log_info("  Avg latency: " + std::to_string(avg_latency) + " ms");
             vayu::utils::log_info("  P50/P95/P99: " + std::to_string(p50) + "/" +

@@ -118,24 +118,6 @@ constexpr int DEFAULT_INDENT = 2;
  * @brief Metrics constants
  */
 namespace vayu::core::metrics {
-/// Requests per second metric name
-constexpr const char* RPS = "rps";
-/// Average latency metric name
-constexpr const char* LATENCY_AVG = "latency_avg";
-/// 50th percentile latency metric name
-constexpr const char* LATENCY_P50 = "latency_p50";
-/// 95th percentile latency metric name
-constexpr const char* LATENCY_P95 = "latency_p95";
-/// 99th percentile latency metric name
-constexpr const char* LATENCY_P99 = "latency_p99";
-/// Error rate metric name
-constexpr const char* ERROR_RATE = "error_rate";
-/// Total requests metric name
-constexpr const char* TOTAL_REQUESTS = "total_requests";
-/// Completed requests metric name
-constexpr const char* COMPLETED = "completed";
-/// Active connections metric name
-constexpr const char* CONNECTIONS_ACTIVE = "connections_active";
 /// Multiplier for converting ratios to percentages
 constexpr double PERCENTAGE_MULTIPLIER = 100.0;
 }  // namespace vayu::core::metrics

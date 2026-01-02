@@ -51,7 +51,7 @@ struct EventLoopConfig {
     std::string user_agent = vayu::core::constants::defaults::DEFAULT_USER_AGENT;
 
     /// Enable verbose curl output for debugging
-    bool verbose = false;
+    bool verbose = vayu::core::constants::defaults::VERBOSE;
 
     /// Proxy URL (optional)
     std::string proxy_url;
