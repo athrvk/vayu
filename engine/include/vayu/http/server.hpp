@@ -1,35 +1,38 @@
 #pragma once
 
-#include "vayu/db/database.hpp"
-#include "vayu/core/run_manager.hpp"
 #include <httplib.h>
-#include <thread>
+
 #include <atomic>
 #include <memory>
+#include <thread>
 
-namespace vayu::http
-{
+#include "vayu/core/run_manager.hpp"
+#include "vayu/db/database.hpp"
 
-    class Server
-    {
-    public:
-        Server(vayu::db::Database &db, vayu::core::RunManager &run_manager, int port, bool verbose = false);
-        ~Server();
+namespace vayu::http {
 
-        void start();
-        void stop();
-        bool is_running() const;
+class Server {
+public:
+    Server(vayu::db::Database& db,
+           vayu::core::RunManager& run_manager,
+           int port,
+           bool verbose = false);
+    ~Server();
 
-    private:
-        void setup_routes();
+    void start();
+    void stop();
+    bool is_running() const;
 
-        vayu::db::Database &db_;
-        vayu::core::RunManager &run_manager_;
-        int port_;
-        bool verbose_;
-        httplib::Server server_;
-        std::thread server_thread_;
-        std::atomic<bool> is_running_{false};
-    };
+private:
+    void setup_routes();
 
-} // namespace vayu::http
+    vayu::db::Database& db_;
+    vayu::core::RunManager& run_manager_;
+    int port_;
+    bool verbose_;
+    httplib::Server server_;
+    std::thread server_thread_;
+    std::atomic<bool> is_running_{false};
+};
+
+}  // namespace vayu::http

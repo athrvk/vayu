@@ -4,36 +4,33 @@
  */
 
 #include "vayu/runtime/script_engine.hpp"
-#include "vayu/types.hpp"
+
 #include <gtest/gtest.h>
+
+#include "vayu/types.hpp"
 
 using namespace vayu;
 using namespace vayu::runtime;
 
-class ScriptEngineTest : public ::testing::Test
-{
+class ScriptEngineTest : public ::testing::Test {
 protected:
     ScriptEngine engine;
     Request request;
     Response response;
     Environment env;
 
-    void SetUp() override
-    {
+    void SetUp() override {
         // Setup default request
         request.method = HttpMethod::GET;
         request.url = "https://api.example.com/users";
-        request.headers = {
-            {"Content-Type", "application/json"},
-            {"Authorization", "Bearer token123"}};
+        request.headers = {{"Content-Type", "application/json"},
+                           {"Authorization", "Bearer token123"}};
 
         // Setup default response
         response.status_code = 200;
         response.status_text = "OK";
         response.body = R"({"id": 1, "name": "John Doe", "email": "john@example.com"})";
-        response.headers = {
-            {"Content-Type", "application/json"},
-            {"X-Request-Id", "abc123"}};
+        response.headers = {{"Content-Type", "application/json"}, {"X-Request-Id", "abc123"}};
         response.timing.total_ms = 150.5;
 
         // Setup environment
@@ -46,8 +43,7 @@ protected:
 // Basic Engine Tests
 // ============================================================================
 
-TEST_F(ScriptEngineTest, IsAvailable)
-{
+TEST_F(ScriptEngineTest, IsAvailable) {
 #ifdef VAYU_HAS_QUICKJS
     EXPECT_TRUE(ScriptEngine::is_available());
     EXPECT_FALSE(ScriptEngine::version().empty());
@@ -57,8 +53,7 @@ TEST_F(ScriptEngineTest, IsAvailable)
 #endif
 }
 
-TEST_F(ScriptEngineTest, ExecuteEmptyScript)
-{
+TEST_F(ScriptEngineTest, ExecuteEmptyScript) {
     ScriptContext ctx;
     ctx.response = &response;
 
@@ -67,8 +62,7 @@ TEST_F(ScriptEngineTest, ExecuteEmptyScript)
     EXPECT_TRUE(result.tests.empty());
 }
 
-TEST_F(ScriptEngineTest, ExecuteSimpleExpression)
-{
+TEST_F(ScriptEngineTest, ExecuteSimpleExpression) {
     ScriptContext ctx;
     auto result = engine.execute("1 + 1", ctx);
     EXPECT_TRUE(result.success);
@@ -78,14 +72,15 @@ TEST_F(ScriptEngineTest, ExecuteSimpleExpression)
 // pm.test() Tests
 // ============================================================================
 
-TEST_F(ScriptEngineTest, PmTestPassing)
-{
+TEST_F(ScriptEngineTest, PmTestPassing) {
     auto result = engine.execute_test(R"(
         pm.test("Always passes", function() {
             // Empty test should pass
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
     ASSERT_EQ(result.tests.size(), 1);
@@ -93,14 +88,15 @@ TEST_F(ScriptEngineTest, PmTestPassing)
     EXPECT_TRUE(result.tests[0].passed);
 }
 
-TEST_F(ScriptEngineTest, PmTestFailing)
-{
+TEST_F(ScriptEngineTest, PmTestFailing) {
     auto result = engine.execute_test(R"(
         pm.test("Always fails", function() {
             throw new Error("Intentional failure");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_FALSE(result.success);
     ASSERT_EQ(result.tests.size(), 1);
@@ -108,8 +104,7 @@ TEST_F(ScriptEngineTest, PmTestFailing)
     EXPECT_FALSE(result.tests[0].passed);
 }
 
-TEST_F(ScriptEngineTest, PmTestMultiple)
-{
+TEST_F(ScriptEngineTest, PmTestMultiple) {
     auto result = engine.execute_test(R"(
         pm.test("First test", function() {
             pm.expect(true).to.be.true;
@@ -123,7 +118,9 @@ TEST_F(ScriptEngineTest, PmTestMultiple)
             pm.expect("hello").to.include("ell");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
     ASSERT_EQ(result.tests.size(), 3);
@@ -136,8 +133,7 @@ TEST_F(ScriptEngineTest, PmTestMultiple)
 // pm.expect() Assertion Tests
 // ============================================================================
 
-TEST_F(ScriptEngineTest, ExpectEqual)
-{
+TEST_F(ScriptEngineTest, ExpectEqual) {
     auto result = engine.execute_test(R"(
         pm.test("Equal numbers", function() {
             pm.expect(42).to.equal(42);
@@ -147,19 +143,22 @@ TEST_F(ScriptEngineTest, ExpectEqual)
             pm.expect("hello").to.equal("hello");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, ExpectEqualFails)
-{
+TEST_F(ScriptEngineTest, ExpectEqualFails) {
     auto result = engine.execute_test(R"(
         pm.test("Should fail", function() {
             pm.expect(42).to.equal(43);
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_FALSE(result.success);
     ASSERT_EQ(result.tests.size(), 1);
@@ -167,20 +166,20 @@ TEST_F(ScriptEngineTest, ExpectEqualFails)
     EXPECT_FALSE(result.tests[0].error_message.empty());
 }
 
-TEST_F(ScriptEngineTest, ExpectNotEqual)
-{
+TEST_F(ScriptEngineTest, ExpectNotEqual) {
     auto result = engine.execute_test(R"(
         pm.test("Not equal", function() {
             pm.expect(42).to.not.equal(43);
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, ExpectExist)
-{
+TEST_F(ScriptEngineTest, ExpectExist) {
     auto result = engine.execute_test(R"(
         pm.test("Value exists", function() {
             pm.expect("something").to.exist;
@@ -190,13 +189,14 @@ TEST_F(ScriptEngineTest, ExpectExist)
             pm.expect(0).to.exist;
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, ExpectAboveBelow)
-{
+TEST_F(ScriptEngineTest, ExpectAboveBelow) {
     auto result = engine.execute_test(R"(
         pm.test("Above check", function() {
             pm.expect(10).to.be.above(5);
@@ -206,25 +206,27 @@ TEST_F(ScriptEngineTest, ExpectAboveBelow)
             pm.expect(5).to.be.below(10);
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, ExpectInclude)
-{
+TEST_F(ScriptEngineTest, ExpectInclude) {
     auto result = engine.execute_test(R"(
         pm.test("String includes", function() {
             pm.expect("hello world").to.include("world");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, ExpectProperty)
-{
+TEST_F(ScriptEngineTest, ExpectProperty) {
     auto result = engine.execute_test(R"(
         pm.test("Has property", function() {
             var obj = {name: "John", age: 30};
@@ -236,13 +238,14 @@ TEST_F(ScriptEngineTest, ExpectProperty)
             pm.expect(obj).to.have.property("age", 30);
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, ExpectTrueFalse)
-{
+TEST_F(ScriptEngineTest, ExpectTrueFalse) {
     auto result = engine.execute_test(R"(
         pm.test("True check", function() {
             pm.expect(true).to.be.true;
@@ -252,7 +255,9 @@ TEST_F(ScriptEngineTest, ExpectTrueFalse)
             pm.expect(false).to.be.false;
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
@@ -261,8 +266,7 @@ TEST_F(ScriptEngineTest, ExpectTrueFalse)
 // pm.response Tests
 // ============================================================================
 
-TEST_F(ScriptEngineTest, ResponseStatusCode)
-{
+TEST_F(ScriptEngineTest, ResponseStatusCode) {
     auto result = engine.execute_test(R"(
         pm.test("Status code is 200", function() {
             pm.expect(pm.response.code).to.equal(200);
@@ -272,13 +276,14 @@ TEST_F(ScriptEngineTest, ResponseStatusCode)
             pm.expect(pm.response.status).to.equal(200);
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, ResponseJson)
-{
+TEST_F(ScriptEngineTest, ResponseJson) {
     auto result = engine.execute_test(R"(
         pm.test("Response has correct name", function() {
             var json = pm.response.json();
@@ -290,13 +295,14 @@ TEST_F(ScriptEngineTest, ResponseJson)
             pm.expect(json.id).to.equal(1);
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, ResponseHeaders)
-{
+TEST_F(ScriptEngineTest, ResponseHeaders) {
     auto result = engine.execute_test(R"(
         pm.test("Content-Type header", function() {
             pm.expect(pm.response.headers["Content-Type"]).to.equal("application/json");
@@ -306,32 +312,36 @@ TEST_F(ScriptEngineTest, ResponseHeaders)
             pm.expect(pm.response.headers["X-Request-Id"]).to.exist;
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, ResponseTime)
-{
+TEST_F(ScriptEngineTest, ResponseTime) {
     auto result = engine.execute_test(R"(
         pm.test("Response time is reasonable", function() {
             pm.expect(pm.response.responseTime).to.be.below(1000);
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, ResponseText)
-{
+TEST_F(ScriptEngineTest, ResponseText) {
     auto result = engine.execute_test(R"(
         pm.test("Response text contains name", function() {
             var text = pm.response.text();
             pm.expect(text).to.include("John Doe");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
@@ -340,38 +350,41 @@ TEST_F(ScriptEngineTest, ResponseText)
 // pm.request Tests
 // ============================================================================
 
-TEST_F(ScriptEngineTest, RequestUrl)
-{
+TEST_F(ScriptEngineTest, RequestUrl) {
     auto result = engine.execute_test(R"(
         pm.test("Request URL", function() {
             pm.expect(pm.request.url).to.include("example.com");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, RequestMethod)
-{
+TEST_F(ScriptEngineTest, RequestMethod) {
     auto result = engine.execute_test(R"(
         pm.test("Request method is GET", function() {
             pm.expect(pm.request.method).to.equal("GET");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, RequestHeaders)
-{
+TEST_F(ScriptEngineTest, RequestHeaders) {
     auto result = engine.execute_test(R"(
         pm.test("Request has auth header", function() {
             pm.expect(pm.request.headers["Authorization"]).to.include("Bearer");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
@@ -380,28 +393,30 @@ TEST_F(ScriptEngineTest, RequestHeaders)
 // pm.environment Tests
 // ============================================================================
 
-TEST_F(ScriptEngineTest, EnvironmentGet)
-{
+TEST_F(ScriptEngineTest, EnvironmentGet) {
     auto result = engine.execute_test(R"(
         pm.test("Can get env var", function() {
             var baseUrl = pm.environment.get("base_url");
             pm.expect(baseUrl).to.equal("https://api.example.com");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
 }
 
-TEST_F(ScriptEngineTest, EnvironmentSet)
-{
+TEST_F(ScriptEngineTest, EnvironmentSet) {
     auto result = engine.execute_test(R"(
         pm.environment.set("new_var", "new_value");
         pm.test("Can set env var", function() {
             pm.expect(pm.environment.get("new_var")).to.equal("new_value");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
     EXPECT_EQ(env["new_var"].value, "new_value");
@@ -411,14 +426,15 @@ TEST_F(ScriptEngineTest, EnvironmentSet)
 // Console Output Tests
 // ============================================================================
 
-TEST_F(ScriptEngineTest, ConsoleLog)
-{
+TEST_F(ScriptEngineTest, ConsoleLog) {
     auto result = engine.execute_test(R"(
         console.log("Hello, World!");
         console.log("Value:", 42);
         pm.test("dummy", function() {});
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
     ASSERT_GE(result.console_output.size(), 2);
@@ -430,27 +446,29 @@ TEST_F(ScriptEngineTest, ConsoleLog)
 // Error Handling Tests
 // ============================================================================
 
-TEST_F(ScriptEngineTest, SyntaxError)
-{
+TEST_F(ScriptEngineTest, SyntaxError) {
     auto result = engine.execute_test(R"(
         pm.test("Bad syntax", function() {
             var x = ;  // Syntax error
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_FALSE(result.success);
     EXPECT_FALSE(result.error_message.empty());
 }
 
-TEST_F(ScriptEngineTest, RuntimeError)
-{
+TEST_F(ScriptEngineTest, RuntimeError) {
     auto result = engine.execute_test(R"(
         pm.test("Runtime error", function() {
             undefinedFunction();  // Reference error
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_FALSE(result.success);
     ASSERT_EQ(result.tests.size(), 1);
@@ -461,8 +479,7 @@ TEST_F(ScriptEngineTest, RuntimeError)
 // Pre-request Script Tests
 // ============================================================================
 
-TEST_F(ScriptEngineTest, PreRequestScript)
-{
+TEST_F(ScriptEngineTest, PreRequestScript) {
     Request req;
     req.method = HttpMethod::GET;
     req.url = "https://api.example.com";
@@ -471,7 +488,8 @@ TEST_F(ScriptEngineTest, PreRequestScript)
         console.log("Pre-request script running");
         pm.environment.set("timestamp", Date.now().toString());
     )",
-                                            req, env);
+                                            req,
+                                            env);
 
     EXPECT_TRUE(result.success);
     EXPECT_TRUE(env.find("timestamp") != env.end());
@@ -481,8 +499,7 @@ TEST_F(ScriptEngineTest, PreRequestScript)
 // Complex Script Tests
 // ============================================================================
 
-TEST_F(ScriptEngineTest, ComplexTestScript)
-{
+TEST_F(ScriptEngineTest, ComplexTestScript) {
     auto result = engine.execute_test(R"(
         // Multiple assertions in complex test
         pm.test("Comprehensive response check", function() {
@@ -505,18 +522,18 @@ TEST_F(ScriptEngineTest, ComplexTestScript)
             pm.expect(pm.response.headers["Content-Type"]).to.include("json");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
     EXPECT_TRUE(result.success);
     EXPECT_EQ(result.tests.size(), 3);
-    for (const auto &test : result.tests)
-    {
+    for (const auto& test : result.tests) {
         EXPECT_TRUE(test.passed) << "Failed: " << test.name;
     }
 }
 
-TEST_F(ScriptEngineTest, MixedPassFail)
-{
+TEST_F(ScriptEngineTest, MixedPassFail) {
     auto result = engine.execute_test(R"(
         pm.test("This passes", function() {
             pm.expect(200).to.equal(200);
@@ -530,9 +547,11 @@ TEST_F(ScriptEngineTest, MixedPassFail)
             pm.expect("ok").to.equal("ok");
         });
     )",
-                                      request, response, env);
+                                      request,
+                                      response,
+                                      env);
 
-    EXPECT_FALSE(result.success); // Overall should fail
+    EXPECT_FALSE(result.success);  // Overall should fail
     ASSERT_EQ(result.tests.size(), 3);
     EXPECT_TRUE(result.tests[0].passed);
     EXPECT_FALSE(result.tests[1].passed);

@@ -4,10 +4,10 @@
  */
 
 #include <gtest/gtest.h>
+
 #include "vayu/http/client.hpp"
 
-int main(int argc, char **argv)
-{
+int main(int argc, char** argv) {
     // Initialize curl globally for all tests
     vayu::http::global_init();
 

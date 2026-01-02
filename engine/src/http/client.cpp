@@ -4,255 +4,232 @@
  */
 
 #include "vayu/http/client.hpp"
-#include "vayu/version.hpp"
-#include "vayu/utils/logger.hpp"
 
 #include <curl/curl.h>
+
 #include <cstring>
 #include <stdexcept>
 
-namespace vayu::http
-{
+#include "vayu/utils/logger.hpp"
+#include "vayu/version.hpp"
 
-    // ============================================================================
-    // Helper Functions
-    // ============================================================================
+namespace vayu::http {
 
-    namespace
-    {
-        int debug_callback(CURL *handle, curl_infotype type, char *data, size_t size, void *userptr)
-        {
-            (void)handle;
-            (void)userptr;
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
-            std::string text(data, size);
-            // Remove trailing newlines
-            while (!text.empty() && (text.back() == '\n' || text.back() == '\r'))
-            {
-                text.pop_back();
-            }
+namespace {
+int debug_callback(CURL* handle, curl_infotype type, char* data, size_t size, void* userptr) {
+    (void) handle;
+    (void) userptr;
 
-            switch (type)
-            {
-            case CURLINFO_TEXT:
-                vayu::utils::log_info("* " + text);
-                break;
-            case CURLINFO_HEADER_OUT:
-                vayu::utils::log_info("> " + text);
-                break;
-            case CURLINFO_HEADER_IN:
-                vayu::utils::log_info("< " + text);
-                break;
-            default:
-                break;
-            }
-            return 0;
+    std::string text(data, size);
+    // Remove trailing newlines
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
+        text.pop_back();
+    }
+
+    switch (type) {
+        case CURLINFO_TEXT:
+            vayu::utils::log_info("* " + text);
+            break;
+        case CURLINFO_HEADER_OUT:
+            vayu::utils::log_info("> " + text);
+            break;
+        case CURLINFO_HEADER_IN:
+            vayu::utils::log_info("< " + text);
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
+/**
+ * @brief Callback for writing response body
+ */
+size_t write_callback(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    auto* response_body = static_cast<std::string*>(userdata);
+    size_t total_size = size * nmemb;
+    response_body->append(ptr, total_size);
+    return total_size;
+}
+
+/**
+ * @brief Callback for writing response headers
+ */
+size_t header_callback(char* buffer, size_t size, size_t nitems, void* userdata) {
+    auto* headers = static_cast<Headers*>(userdata);
+    size_t total_size = size * nitems;
+
+    std::string line(buffer, total_size);
+
+    // Remove trailing \r\n
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+        line.pop_back();
+    }
+
+    // Skip empty lines and status line
+    if (line.empty() || line.starts_with("HTTP/")) {
+        return total_size;
+    }
+
+    // Parse header: "Key: Value"
+    auto colon_pos = line.find(':');
+    if (colon_pos != std::string::npos) {
+        std::string key = line.substr(0, colon_pos);
+        std::string value = line.substr(colon_pos + 1);
+
+        // Trim leading whitespace from value
+        while (!value.empty() && value.front() == ' ') {
+            value.erase(0, 1);
         }
 
-        /**
-         * @brief Callback for writing response body
-         */
-        size_t write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
-        {
-            auto *response_body = static_cast<std::string *>(userdata);
-            size_t total_size = size * nmemb;
-            response_body->append(ptr, total_size);
-            return total_size;
+        // Convert key to lowercase for consistency
+        for (auto& c : key) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         }
 
-        /**
-         * @brief Callback for writing response headers
-         */
-        size_t header_callback(char *buffer, size_t size, size_t nitems, void *userdata)
-        {
-            auto *headers = static_cast<Headers *>(userdata);
-            size_t total_size = size * nitems;
+        (*headers)[key] = value;
+    }
 
-            std::string line(buffer, total_size);
+    return total_size;
+}
 
-            // Remove trailing \r\n
-            while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
-            {
-                line.pop_back();
-            }
+/**
+ * @brief Convert curl error code to our ErrorCode
+ */
+Error curl_to_error(CURLcode code, const char* error_buffer) {
+    Error error;
+    error.message = error_buffer[0] ? error_buffer : curl_easy_strerror(code);
 
-            // Skip empty lines and status line
-            if (line.empty() || line.starts_with("HTTP/"))
-            {
-                return total_size;
-            }
+    switch (code) {
+        case CURLE_OK:
+            error.code = ErrorCode::None;
+            break;
+        case CURLE_OPERATION_TIMEDOUT:
+            error.code = ErrorCode::Timeout;
+            break;
+        case CURLE_COULDNT_CONNECT:
+        case CURLE_COULDNT_RESOLVE_HOST:
+        case CURLE_COULDNT_RESOLVE_PROXY:
+            error.code = ErrorCode::ConnectionFailed;
+            break;
+        case CURLE_SSL_CONNECT_ERROR:
+        case CURLE_SSL_CERTPROBLEM:
+        case CURLE_SSL_CIPHER:
+        case CURLE_PEER_FAILED_VERIFICATION:
+            error.code = ErrorCode::SslError;
+            break;
+        case CURLE_URL_MALFORMAT:
+            error.code = ErrorCode::InvalidUrl;
+            break;
+        default:
+            error.code = ErrorCode::InternalError;
+            break;
+    }
 
-            // Parse header: "Key: Value"
-            auto colon_pos = line.find(':');
-            if (colon_pos != std::string::npos)
-            {
-                std::string key = line.substr(0, colon_pos);
-                std::string value = line.substr(colon_pos + 1);
+    return error;
+}
 
-                // Trim leading whitespace from value
-                while (!value.empty() && value.front() == ' ')
-                {
-                    value.erase(0, 1);
-                }
+/**
+ * @brief Get HTTP status text from code
+ */
+const char* status_text(int code) {
+    switch (code) {
+        case 200:
+            return "OK";
+        case 201:
+            return "Created";
+        case 204:
+            return "No Content";
+        case 301:
+            return "Moved Permanently";
+        case 302:
+            return "Found";
+        case 304:
+            return "Not Modified";
+        case 400:
+            return "Bad Request";
+        case 401:
+            return "Unauthorized";
+        case 403:
+            return "Forbidden";
+        case 404:
+            return "Not Found";
+        case 405:
+            return "Method Not Allowed";
+        case 408:
+            return "Request Timeout";
+        case 429:
+            return "Too Many Requests";
+        case 500:
+            return "Internal Server Error";
+        case 502:
+            return "Bad Gateway";
+        case 503:
+            return "Service Unavailable";
+        case 504:
+            return "Gateway Timeout";
+        default:
+            return "Unknown";
+    }
+}
 
-                // Convert key to lowercase for consistency
-                for (auto &c : key)
-                {
-                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                }
+}  // namespace
 
-                (*headers)[key] = value;
-            }
+// ============================================================================
+// Client Implementation
+// ============================================================================
 
-            return total_size;
+struct Client::Impl {
+    CURL* curl = nullptr;
+    ClientConfig config;
+    char error_buffer[CURL_ERROR_SIZE] = {0};
+
+    explicit Impl(ClientConfig cfg) : config(std::move(cfg)) {
+        curl = curl_easy_init();
+        if (!curl) {
+            throw std::runtime_error("Failed to initialize curl");
         }
+    }
 
-        /**
-         * @brief Convert curl error code to our ErrorCode
-         */
-        Error curl_to_error(CURLcode code, const char *error_buffer)
-        {
-            Error error;
-            error.message = error_buffer[0] ? error_buffer : curl_easy_strerror(code);
-
-            switch (code)
-            {
-            case CURLE_OK:
-                error.code = ErrorCode::None;
-                break;
-            case CURLE_OPERATION_TIMEDOUT:
-                error.code = ErrorCode::Timeout;
-                break;
-            case CURLE_COULDNT_CONNECT:
-            case CURLE_COULDNT_RESOLVE_HOST:
-            case CURLE_COULDNT_RESOLVE_PROXY:
-                error.code = ErrorCode::ConnectionFailed;
-                break;
-            case CURLE_SSL_CONNECT_ERROR:
-            case CURLE_SSL_CERTPROBLEM:
-            case CURLE_SSL_CIPHER:
-            case CURLE_PEER_FAILED_VERIFICATION:
-                error.code = ErrorCode::SslError;
-                break;
-            case CURLE_URL_MALFORMAT:
-                error.code = ErrorCode::InvalidUrl;
-                break;
-            default:
-                error.code = ErrorCode::InternalError;
-                break;
-            }
-
-            return error;
+    ~Impl() {
+        if (curl) {
+            curl_easy_cleanup(curl);
         }
+    }
 
-        /**
-         * @brief Get HTTP status text from code
-         */
-        const char *status_text(int code)
-        {
-            switch (code)
-            {
-            case 200:
-                return "OK";
-            case 201:
-                return "Created";
-            case 204:
-                return "No Content";
-            case 301:
-                return "Moved Permanently";
-            case 302:
-                return "Found";
-            case 304:
-                return "Not Modified";
-            case 400:
-                return "Bad Request";
-            case 401:
-                return "Unauthorized";
-            case 403:
-                return "Forbidden";
-            case 404:
-                return "Not Found";
-            case 405:
-                return "Method Not Allowed";
-            case 408:
-                return "Request Timeout";
-            case 429:
-                return "Too Many Requests";
-            case 500:
-                return "Internal Server Error";
-            case 502:
-                return "Bad Gateway";
-            case 503:
-                return "Service Unavailable";
-            case 504:
-                return "Gateway Timeout";
-            default:
-                return "Unknown";
-            }
-        }
+    void reset() {
+        curl_easy_reset(curl);
+        std::memset(error_buffer, 0, sizeof(error_buffer));
+    }
+};
 
-    } // namespace
+Client::Client(ClientConfig config) : impl_(std::make_unique<Impl>(std::move(config))) {}
 
-    // ============================================================================
-    // Client Implementation
-    // ============================================================================
+Client::~Client() = default;
 
-    struct Client::Impl
-    {
-        CURL *curl = nullptr;
-        ClientConfig config;
-        char error_buffer[CURL_ERROR_SIZE] = {0};
+Client::Client(Client&&) noexcept = default;
+Client& Client::operator=(Client&&) noexcept = default;
 
-        explicit Impl(ClientConfig cfg) : config(std::move(cfg))
-        {
-            curl = curl_easy_init();
-            if (!curl)
-            {
-                throw std::runtime_error("Failed to initialize curl");
-            }
-        }
+Result<Response> Client::send(const Request& request) {
+    impl_->reset();
+    CURL* curl = impl_->curl;
 
-        ~Impl()
-        {
-            if (curl)
-            {
-                curl_easy_cleanup(curl);
-            }
-        }
+    // Response data
+    Response response;
+    std::string response_body;
 
-        void reset()
-        {
-            curl_easy_reset(curl);
-            std::memset(error_buffer, 0, sizeof(error_buffer));
-        }
-    };
+    // Set error buffer
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, impl_->error_buffer);
 
-    Client::Client(ClientConfig config)
-        : impl_(std::make_unique<Impl>(std::move(config))) {}
+    // Set URL
+    curl_easy_setopt(curl, CURLOPT_URL, request.url.c_str());
 
-    Client::~Client() = default;
-
-    Client::Client(Client &&) noexcept = default;
-    Client &Client::operator=(Client &&) noexcept = default;
-
-    Result<Response> Client::send(const Request &request)
-    {
-        impl_->reset();
-        CURL *curl = impl_->curl;
-
-        // Response data
-        Response response;
-        std::string response_body;
-
-        // Set error buffer
-        curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, impl_->error_buffer);
-
-        // Set URL
-        curl_easy_setopt(curl, CURLOPT_URL, request.url.c_str());
-
-        // Set method
-        switch (request.method)
-        {
+    // Set method
+    switch (request.method) {
         case HttpMethod::GET:
             curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
             break;
@@ -274,156 +251,141 @@ namespace vayu::http
         case HttpMethod::OPTIONS:
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "OPTIONS");
             break;
-        }
-
-        // Set request body
-        if (request.body.mode != BodyMode::None && !request.body.content.empty())
-        {
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request.body.content.c_str());
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,
-                             static_cast<long>(request.body.content.size()));
-        }
-
-        // Set headers
-        struct curl_slist *headers_list = nullptr;
-        for (const auto &[key, value] : request.headers)
-        {
-            std::string header = key + ": " + value;
-            headers_list = curl_slist_append(headers_list, header.c_str());
-        }
-
-        // Add User-Agent if not set
-        bool has_user_agent = request.headers.contains("User-Agent") ||
-                              request.headers.contains("user-agent");
-        if (!has_user_agent)
-        {
-            std::string ua = "User-Agent: " + impl_->config.user_agent;
-            headers_list = curl_slist_append(headers_list, ua.c_str());
-        }
-
-        if (headers_list)
-        {
-            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers_list);
-        }
-
-        // Set callbacks
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
-        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
-        curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
-
-        // Set timeout
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(request.timeout_ms));
-
-        // Set redirect options
-        if (request.follow_redirects)
-        {
-            curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-            curl_easy_setopt(curl, CURLOPT_MAXREDIRS,
-                             static_cast<long>(request.max_redirects));
-        }
-
-        // SSL verification
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, request.verify_ssl ? 1L : 0L);
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, request.verify_ssl ? 2L : 0L);
-
-        // Verbose output for debugging
-        if (impl_->config.verbose)
-        {
-            curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-            curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, debug_callback);
-        }
-
-        // Proxy
-        if (!impl_->config.proxy_url.empty())
-        {
-            curl_easy_setopt(curl, CURLOPT_PROXY, impl_->config.proxy_url.c_str());
-        }
-
-        // Perform the request
-        CURLcode res = curl_easy_perform(curl);
-
-        // Cleanup headers
-        if (headers_list)
-        {
-            curl_slist_free_all(headers_list);
-        }
-
-        // Check for errors
-        if (res != CURLE_OK)
-        {
-            return curl_to_error(res, impl_->error_buffer);
-        }
-
-        // Get response info
-        long http_code = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-        response.status_code = static_cast<int>(http_code);
-        response.status_text = status_text(response.status_code);
-
-        // Get timing info
-        double total_time = 0, namelookup_time = 0, connect_time = 0;
-        double appconnect_time = 0, starttransfer_time = 0;
-
-        curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
-        curl_easy_getinfo(curl, CURLINFO_NAMELOOKUP_TIME, &namelookup_time);
-        curl_easy_getinfo(curl, CURLINFO_CONNECT_TIME, &connect_time);
-        curl_easy_getinfo(curl, CURLINFO_APPCONNECT_TIME, &appconnect_time);
-        curl_easy_getinfo(curl, CURLINFO_STARTTRANSFER_TIME, &starttransfer_time);
-
-        response.timing.total_ms = total_time * 1000.0;
-        response.timing.dns_ms = namelookup_time * 1000.0;
-        response.timing.connect_ms = (connect_time - namelookup_time) * 1000.0;
-        response.timing.tls_ms = (appconnect_time - connect_time) * 1000.0;
-        response.timing.first_byte_ms = (starttransfer_time - appconnect_time) * 1000.0;
-        response.timing.download_ms = (total_time - starttransfer_time) * 1000.0;
-
-        // Set body
-        response.body = std::move(response_body);
-        response.body_size = response.body.size();
-
-        return response;
     }
 
-    Result<Response> Client::get(const std::string &url, const Headers &headers)
-    {
-        Request request;
-        request.method = HttpMethod::GET;
-        request.url = url;
-        request.headers = headers;
-        return send(request);
+    // Set request body
+    if (request.body.mode != BodyMode::None && !request.body.content.empty()) {
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request.body.content.c_str());
+        curl_easy_setopt(
+            curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(request.body.content.size()));
     }
 
-    Result<Response> Client::post(const std::string &url,
-                                  const std::string &body,
-                                  const Headers &headers)
-    {
-        Request request;
-        request.method = HttpMethod::POST;
-        request.url = url;
-        request.body.mode = BodyMode::Text;
-        request.body.content = body;
-        request.headers = headers;
-        return send(request);
+    // Set headers
+    struct curl_slist* headers_list = nullptr;
+    for (const auto& [key, value] : request.headers) {
+        std::string header = key + ": " + value;
+        headers_list = curl_slist_append(headers_list, header.c_str());
     }
 
-    std::string Client::last_error() const
-    {
-        return impl_->error_buffer;
+    // Add User-Agent if not set
+    bool has_user_agent =
+        request.headers.contains("User-Agent") || request.headers.contains("user-agent");
+    if (!has_user_agent) {
+        std::string ua = "User-Agent: " + impl_->config.user_agent;
+        headers_list = curl_slist_append(headers_list, ua.c_str());
     }
 
-    // ============================================================================
-    // Global Functions
-    // ============================================================================
-
-    void global_init()
-    {
-        curl_global_init(CURL_GLOBAL_ALL);
+    if (headers_list) {
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers_list);
     }
 
-    void global_cleanup()
-    {
-        curl_global_cleanup();
+    // Set callbacks
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
+
+    // Set timeout
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(request.timeout_ms));
+
+    // Set redirect options
+    if (request.follow_redirects) {
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, static_cast<long>(request.max_redirects));
     }
 
-} // namespace vayu::http
+    // SSL verification
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, request.verify_ssl ? 1L : 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, request.verify_ssl ? 2L : 0L);
+
+    // Verbose output for debugging
+    if (impl_->config.verbose) {
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+        curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, debug_callback);
+    }
+
+    // Proxy
+    if (!impl_->config.proxy_url.empty()) {
+        curl_easy_setopt(curl, CURLOPT_PROXY, impl_->config.proxy_url.c_str());
+    }
+
+    // Perform the request
+    CURLcode res = curl_easy_perform(curl);
+
+    // Cleanup headers
+    if (headers_list) {
+        curl_slist_free_all(headers_list);
+    }
+
+    // Check for errors
+    if (res != CURLE_OK) {
+        return curl_to_error(res, impl_->error_buffer);
+    }
+
+    // Get response info
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    response.status_code = static_cast<int>(http_code);
+    response.status_text = status_text(response.status_code);
+
+    // Get timing info
+    double total_time = 0, namelookup_time = 0, connect_time = 0;
+    double appconnect_time = 0, starttransfer_time = 0;
+
+    curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
+    curl_easy_getinfo(curl, CURLINFO_NAMELOOKUP_TIME, &namelookup_time);
+    curl_easy_getinfo(curl, CURLINFO_CONNECT_TIME, &connect_time);
+    curl_easy_getinfo(curl, CURLINFO_APPCONNECT_TIME, &appconnect_time);
+    curl_easy_getinfo(curl, CURLINFO_STARTTRANSFER_TIME, &starttransfer_time);
+
+    response.timing.total_ms = total_time * 1000.0;
+    response.timing.dns_ms = namelookup_time * 1000.0;
+    response.timing.connect_ms = (connect_time - namelookup_time) * 1000.0;
+    response.timing.tls_ms = (appconnect_time - connect_time) * 1000.0;
+    response.timing.first_byte_ms = (starttransfer_time - appconnect_time) * 1000.0;
+    response.timing.download_ms = (total_time - starttransfer_time) * 1000.0;
+
+    // Set body
+    response.body = std::move(response_body);
+    response.body_size = response.body.size();
+
+    return response;
+}
+
+Result<Response> Client::get(const std::string& url, const Headers& headers) {
+    Request request;
+    request.method = HttpMethod::GET;
+    request.url = url;
+    request.headers = headers;
+    return send(request);
+}
+
+Result<Response> Client::post(const std::string& url,
+                              const std::string& body,
+                              const Headers& headers) {
+    Request request;
+    request.method = HttpMethod::POST;
+    request.url = url;
+    request.body.mode = BodyMode::Text;
+    request.body.content = body;
+    request.headers = headers;
+    return send(request);
+}
+
+std::string Client::last_error() const {
+    return impl_->error_buffer;
+}
+
+// ============================================================================
+// Global Functions
+// ============================================================================
+
+void global_init() {
+    curl_global_init(CURL_GLOBAL_ALL);
+}
+
+void global_cleanup() {
+    curl_global_cleanup();
+}
+
+}  // namespace vayu::http

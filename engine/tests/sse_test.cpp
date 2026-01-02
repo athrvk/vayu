@@ -3,47 +3,43 @@
  * @brief Tests for Server-Sent Events implementation
  */
 
-#include <gtest/gtest.h>
-
 #include "vayu/http/sse.hpp"
-#include "vayu/http/client.hpp"
+
+#include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
 #include <thread>
 #include <vector>
 
-namespace
-{
+#include "vayu/http/client.hpp"
 
-    // Public SSE test endpoint
-    const std::string SSE_TEST_URL = "https://sse.dev/test";
+namespace {
 
-} // namespace
+// Public SSE test endpoint
+const std::string SSE_TEST_URL = "https://sse.dev/test";
+
+}  // namespace
 
 // ============================================================================
 // SseParser Tests
 // ============================================================================
 
-class SseParserTest : public ::testing::Test
-{
+class SseParserTest : public ::testing::Test {
 protected:
     std::vector<vayu::http::SseEvent> events;
 
-    void SetUp() override
-    {
+    void SetUp() override {
         events.clear();
     }
 
-    vayu::http::SseParser create_parser()
-    {
-        return vayu::http::SseParser([this](vayu::http::SseEvent event)
-                                     { events.push_back(std::move(event)); });
+    vayu::http::SseParser create_parser() {
+        return vayu::http::SseParser(
+            [this](vayu::http::SseEvent event) { events.push_back(std::move(event)); });
     }
 };
 
-TEST_F(SseParserTest, ParseSimpleEvent)
-{
+TEST_F(SseParserTest, ParseSimpleEvent) {
     auto parser = create_parser();
 
     parser.feed("data: hello world\n\n");
@@ -54,8 +50,7 @@ TEST_F(SseParserTest, ParseSimpleEvent)
     EXPECT_FALSE(events[0].id.has_value());
 }
 
-TEST_F(SseParserTest, ParseEventWithType)
-{
+TEST_F(SseParserTest, ParseEventWithType) {
     auto parser = create_parser();
 
     parser.feed("event: custom\ndata: test data\n\n");
@@ -65,8 +60,7 @@ TEST_F(SseParserTest, ParseEventWithType)
     EXPECT_EQ(events[0].data, "test data");
 }
 
-TEST_F(SseParserTest, ParseEventWithId)
-{
+TEST_F(SseParserTest, ParseEventWithId) {
     auto parser = create_parser();
 
     parser.feed("id: 123\ndata: with id\n\n");
@@ -77,8 +71,7 @@ TEST_F(SseParserTest, ParseEventWithId)
     EXPECT_EQ(*events[0].id, "123");
 }
 
-TEST_F(SseParserTest, ParseEventWithRetry)
-{
+TEST_F(SseParserTest, ParseEventWithRetry) {
     auto parser = create_parser();
 
     parser.feed("retry: 5000\ndata: with retry\n\n");
@@ -89,8 +82,7 @@ TEST_F(SseParserTest, ParseEventWithRetry)
     EXPECT_EQ(parser.retry_ms(), 5000);
 }
 
-TEST_F(SseParserTest, ParseMultilineData)
-{
+TEST_F(SseParserTest, ParseMultilineData) {
     auto parser = create_parser();
 
     parser.feed("data: line 1\ndata: line 2\ndata: line 3\n\n");
@@ -99,8 +91,7 @@ TEST_F(SseParserTest, ParseMultilineData)
     EXPECT_EQ(events[0].data, "line 1\nline 2\nline 3");
 }
 
-TEST_F(SseParserTest, ParseMultipleEvents)
-{
+TEST_F(SseParserTest, ParseMultipleEvents) {
     auto parser = create_parser();
 
     parser.feed("data: event 1\n\ndata: event 2\n\ndata: event 3\n\n");
@@ -111,8 +102,7 @@ TEST_F(SseParserTest, ParseMultipleEvents)
     EXPECT_EQ(events[2].data, "event 3");
 }
 
-TEST_F(SseParserTest, IgnoreComments)
-{
+TEST_F(SseParserTest, IgnoreComments) {
     auto parser = create_parser();
 
     parser.feed(": this is a comment\ndata: actual data\n\n");
@@ -121,8 +111,7 @@ TEST_F(SseParserTest, IgnoreComments)
     EXPECT_EQ(events[0].data, "actual data");
 }
 
-TEST_F(SseParserTest, HandleCRLFLineEndings)
-{
+TEST_F(SseParserTest, HandleCRLFLineEndings) {
     auto parser = create_parser();
 
     parser.feed("data: crlf data\r\n\r\n");
@@ -131,8 +120,7 @@ TEST_F(SseParserTest, HandleCRLFLineEndings)
     EXPECT_EQ(events[0].data, "crlf data");
 }
 
-TEST_F(SseParserTest, HandleChunkedInput)
-{
+TEST_F(SseParserTest, HandleChunkedInput) {
     auto parser = create_parser();
 
     // Feed data in chunks
@@ -145,8 +133,7 @@ TEST_F(SseParserTest, HandleChunkedInput)
     EXPECT_EQ(events[0].data, "chunked");
 }
 
-TEST_F(SseParserTest, IgnoreUnknownFields)
-{
+TEST_F(SseParserTest, IgnoreUnknownFields) {
     auto parser = create_parser();
 
     parser.feed("unknown: field\ndata: known data\n\n");
@@ -155,8 +142,7 @@ TEST_F(SseParserTest, IgnoreUnknownFields)
     EXPECT_EQ(events[0].data, "known data");
 }
 
-TEST_F(SseParserTest, RemoveLeadingSpaceFromValue)
-{
+TEST_F(SseParserTest, RemoveLeadingSpaceFromValue) {
     auto parser = create_parser();
 
     parser.feed("data: with leading space\n\n");
@@ -165,8 +151,7 @@ TEST_F(SseParserTest, RemoveLeadingSpaceFromValue)
     EXPECT_EQ(events[0].data, "with leading space");
 }
 
-TEST_F(SseParserTest, FieldWithNoColonValue)
-{
+TEST_F(SseParserTest, FieldWithNoColonValue) {
     auto parser = create_parser();
 
     // Per SSE spec: "data" alone with no colon is equivalent to "data:" (empty value)
@@ -184,8 +169,7 @@ TEST_F(SseParserTest, FieldWithNoColonValue)
     EXPECT_EQ(events[0].data, "first line\n\nlast line");
 }
 
-TEST_F(SseParserTest, TrackLastEventId)
-{
+TEST_F(SseParserTest, TrackLastEventId) {
     auto parser = create_parser();
 
     parser.feed("id: first\ndata: event 1\n\n");
@@ -199,8 +183,7 @@ TEST_F(SseParserTest, TrackLastEventId)
     EXPECT_EQ(parser.last_event_id(), "second");
 }
 
-TEST_F(SseParserTest, RejectIdWithNullCharacter)
-{
+TEST_F(SseParserTest, RejectIdWithNullCharacter) {
     auto parser = create_parser();
 
     std::string data_with_null = "id: bad";
@@ -210,11 +193,10 @@ TEST_F(SseParserTest, RejectIdWithNullCharacter)
     parser.feed(data_with_null);
 
     ASSERT_EQ(events.size(), 1u);
-    EXPECT_FALSE(events[0].id.has_value()); // ID with null should be rejected
+    EXPECT_FALSE(events[0].id.has_value());  // ID with null should be rejected
 }
 
-TEST_F(SseParserTest, RejectInvalidRetry)
-{
+TEST_F(SseParserTest, RejectInvalidRetry) {
     auto parser = create_parser();
 
     parser.feed("retry: not-a-number\ndata: test\n\n");
@@ -223,8 +205,7 @@ TEST_F(SseParserTest, RejectInvalidRetry)
     EXPECT_FALSE(parser.retry_ms().has_value());
 }
 
-TEST_F(SseParserTest, ResetClearsState)
-{
+TEST_F(SseParserTest, ResetClearsState) {
     auto parser = create_parser();
 
     parser.feed("id: 123\nretry: 5000\ndata: test\n\n");
@@ -238,8 +219,7 @@ TEST_F(SseParserTest, ResetClearsState)
     EXPECT_FALSE(parser.retry_ms().has_value());
 }
 
-TEST_F(SseParserTest, EmptyDataLinesNotDispatched)
-{
+TEST_F(SseParserTest, EmptyDataLinesNotDispatched) {
     auto parser = create_parser();
 
     // Just an empty line shouldn't dispatch an event
@@ -253,8 +233,7 @@ TEST_F(SseParserTest, EmptyDataLinesNotDispatched)
     EXPECT_EQ(events.size(), 1u);
 }
 
-TEST_F(SseParserTest, ComplexEvent)
-{
+TEST_F(SseParserTest, ComplexEvent) {
     auto parser = create_parser();
 
     parser.feed("event: update\n");
@@ -275,8 +254,7 @@ TEST_F(SseParserTest, ComplexEvent)
 // EventSource State Tests
 // ============================================================================
 
-TEST(EventSourceStateTest, ToStringConversion)
-{
+TEST(EventSourceStateTest, ToStringConversion) {
     EXPECT_STREQ(vayu::to_string(vayu::http::EventSourceState::Connecting), "CONNECTING");
     EXPECT_STREQ(vayu::to_string(vayu::http::EventSourceState::Open), "OPEN");
     EXPECT_STREQ(vayu::to_string(vayu::http::EventSourceState::Closed), "CLOSED");
@@ -286,22 +264,18 @@ TEST(EventSourceStateTest, ToStringConversion)
 // EventSource Basic Tests
 // ============================================================================
 
-class EventSourceTest : public ::testing::Test
-{
+class EventSourceTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
+    void SetUp() override {
         vayu::http::global_init();
     }
 
-    void TearDown() override
-    {
+    void TearDown() override {
         vayu::http::global_cleanup();
     }
 };
 
-TEST_F(EventSourceTest, InitialState)
-{
+TEST_F(EventSourceTest, InitialState) {
     vayu::http::EventSource source("https://example.com/events");
 
     EXPECT_EQ(source.state(), vayu::http::EventSourceState::Closed);
@@ -309,8 +283,7 @@ TEST_F(EventSourceTest, InitialState)
     EXPECT_FALSE(source.last_event_id().has_value());
 }
 
-TEST_F(EventSourceTest, ConnectAndClose)
-{
+TEST_F(EventSourceTest, ConnectAndClose) {
     vayu::http::EventSourceConfig config;
     config.auto_reconnect = false;
     config.connect_timeout_ms = 5000;
@@ -321,24 +294,20 @@ TEST_F(EventSourceTest, ConnectAndClose)
     std::atomic<bool> state_changed{false};
     std::atomic<int> event_count{0};
 
-    source.on_open([&opened]()
-                   { opened = true; });
+    source.on_open([&opened]() { opened = true; });
 
-    source.on_state_change([&state_changed](vayu::http::EventSourceState state)
-                           {
-                               state_changed = true;
-                               // State should change to Connecting first
-                           });
+    source.on_state_change([&state_changed](vayu::http::EventSourceState state) {
+        state_changed = true;
+        // State should change to Connecting first
+    });
 
-    source.on_event([&event_count](const vayu::http::SseEvent &)
-                    { event_count++; });
+    source.on_event([&event_count](const vayu::http::SseEvent&) { event_count++; });
 
     source.connect();
 
     // Wait for connection
     auto start = std::chrono::steady_clock::now();
-    while (!opened && std::chrono::steady_clock::now() - start < std::chrono::seconds(10))
-    {
+    while (!opened && std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
@@ -354,8 +323,7 @@ TEST_F(EventSourceTest, ConnectAndClose)
     // But we don't require opened to be true since the endpoint may not work
 }
 
-TEST_F(EventSourceTest, TypedEventCallback)
-{
+TEST_F(EventSourceTest, TypedEventCallback) {
     vayu::http::SseParser parser([](vayu::http::SseEvent) {});
 
     // Create a mock EventSource to test typed callbacks
@@ -364,11 +332,9 @@ TEST_F(EventSourceTest, TypedEventCallback)
     std::atomic<int> message_count{0};
     std::atomic<int> custom_count{0};
 
-    source.on("message", [&message_count](const vayu::http::SseEvent &)
-              { message_count++; });
+    source.on("message", [&message_count](const vayu::http::SseEvent&) { message_count++; });
 
-    source.on("custom", [&custom_count](const vayu::http::SseEvent &)
-              { custom_count++; });
+    source.on("custom", [&custom_count](const vayu::http::SseEvent&) { custom_count++; });
 
     // Note: We can't easily test this without a real SSE server
     // The callbacks are registered but won't be triggered without connection
@@ -376,8 +342,7 @@ TEST_F(EventSourceTest, TypedEventCallback)
     EXPECT_EQ(custom_count, 0);
 }
 
-TEST_F(EventSourceTest, ErrorCallback)
-{
+TEST_F(EventSourceTest, ErrorCallback) {
     vayu::http::EventSourceConfig config;
     config.auto_reconnect = false;
     config.connect_timeout_ms = 3000;
@@ -388,17 +353,16 @@ TEST_F(EventSourceTest, ErrorCallback)
     std::atomic<bool> error_received{false};
     vayu::ErrorCode error_code = vayu::ErrorCode::None;
 
-    source.on_error([&error_received, &error_code](const vayu::Error &error)
-                    {
+    source.on_error([&error_received, &error_code](const vayu::Error& error) {
         error_received = true;
-        error_code = error.code; });
+        error_code = error.code;
+    });
 
     source.connect();
 
     // Wait for error
     auto start = std::chrono::steady_clock::now();
-    while (!error_received && std::chrono::steady_clock::now() - start < std::chrono::seconds(10))
-    {
+    while (!error_received && std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
@@ -408,8 +372,7 @@ TEST_F(EventSourceTest, ErrorCallback)
     EXPECT_NE(error_code, vayu::ErrorCode::None);
 }
 
-TEST_F(EventSourceTest, CustomHeaders)
-{
+TEST_F(EventSourceTest, CustomHeaders) {
     vayu::http::EventSourceConfig config;
     config.headers["Authorization"] = "Bearer test-token";
     config.headers["X-Custom-Header"] = "custom-value";
@@ -425,8 +388,7 @@ TEST_F(EventSourceTest, CustomHeaders)
 // Integration Tests with Real SSE Server
 // ============================================================================
 
-TEST_F(EventSourceTest, ReceiveRealEvents)
-{
+TEST_F(EventSourceTest, ReceiveRealEvents) {
     // Use httpbin's SSE endpoint or a public SSE test server
     // Note: This test may be flaky depending on network conditions
 
@@ -441,21 +403,19 @@ TEST_F(EventSourceTest, ReceiveRealEvents)
     std::vector<std::string> received_data;
     std::mutex data_mutex;
 
-    source.on_open([&opened]()
-                   { opened = true; });
+    source.on_open([&opened]() { opened = true; });
 
-    source.on_event([&event_count, &received_data, &data_mutex](const vayu::http::SseEvent &event)
-                    {
+    source.on_event([&event_count, &received_data, &data_mutex](const vayu::http::SseEvent& event) {
         event_count++;
         std::lock_guard<std::mutex> lock(data_mutex);
-        received_data.push_back(event.data); });
+        received_data.push_back(event.data);
+    });
 
     source.connect();
 
     // Wait up to 5 seconds for events
     auto start = std::chrono::steady_clock::now();
-    while (event_count < 3 && std::chrono::steady_clock::now() - start < std::chrono::seconds(5))
-    {
+    while (event_count < 3 && std::chrono::steady_clock::now() - start < std::chrono::seconds(5)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
@@ -463,12 +423,9 @@ TEST_F(EventSourceTest, ReceiveRealEvents)
 
     // We expect to have received at least some events if the server is working
     // Don't fail the test if the server is down, just log
-    if (event_count > 0)
-    {
+    if (event_count > 0) {
         std::cout << "Received " << event_count << " events from SSE test server\n";
-    }
-    else
-    {
+    } else {
         std::cerr << "No events received (SSE test server may be unavailable)\n";
     }
 }

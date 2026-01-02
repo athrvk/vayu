@@ -3,23 +3,24 @@
  * @brief Google Test cases for rate limiting functionality
  */
 
+#include <gtest/gtest.h>
+
+#include <atomic>
+#include <chrono>
+
 #include "vayu/http/event_loop.hpp"
 #include "vayu/types.hpp"
-#include <gtest/gtest.h>
-#include <chrono>
-#include <atomic>
 
 using namespace vayu::http;
 using namespace vayu;
 
-TEST(RateLimiterTest, EnforcesTargetRPS)
-{
+TEST(RateLimiterTest, EnforcesTargetRPS) {
     // Configure for 100 RPS
     EventLoopConfig config;
     config.target_rps = 100.0;
-    config.burst_size = 10.0;    // Small burst to force rate limiting
-    config.num_workers = 1;      // Single worker for simpler testing
-    config.max_concurrent = 200; // Allow all requests to be in flight
+    config.burst_size = 10.0;     // Small burst to force rate limiting
+    config.num_workers = 1;       // Single worker for simpler testing
+    config.max_concurrent = 200;  // Allow all requests to be in flight
 
     EventLoop loop(config);
     loop.start();
@@ -34,27 +35,24 @@ TEST(RateLimiterTest, EnforcesTargetRPS)
 
     // Submit all requests quickly - rate limiter will pace them
     std::vector<RequestHandle> handles;
-    for (int i = 0; i < 200; ++i)
-    {
+    for (int i = 0; i < 200; ++i) {
         handles.push_back(loop.submit_async(req));
     }
 
     // Wait for all to be submitted (not completed)
-    while (loop.pending_count() > 0)
-    {
+    while (loop.pending_count() > 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
     auto submission_end = std::chrono::steady_clock::now();
-    auto submission_duration = std::chrono::duration<double>(submission_end - submission_start).count();
+    auto submission_duration =
+        std::chrono::duration<double>(submission_end - submission_start).count();
 
     // Wait for all and count results
     size_t completed = 0;
-    for (auto &handle : handles)
-    {
+    for (auto& handle : handles) {
         auto result = handle.future.get();
-        if (result.is_ok())
-        {
+        if (result.is_ok()) {
             completed++;
         }
     }

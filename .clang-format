@@ -1,0 +1,13 @@
+BasedOnStyle: Google
+IndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Empty
+BinPackArguments: false
+BinPackParameters: false
+BreakBeforeBraces: Attach
+KeepEmptyLinesAtTheStartOfBlocks: false
+PointerAlignment: Left
+SpaceAfterCStyleCast: true
+TabWidth: 4
+UseTab: Never
