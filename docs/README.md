@@ -4,33 +4,35 @@ Welcome to the Vayu documentation. Choose a topic to get started.
 
 ---
 
-## 📚 Documentation Index
+## 📚 Documentation Structure
 
-### Getting Started
-
-| Document | Description |
-|----------|-------------|
-| [Getting Started](getting-started.md) | Installation, first request, basics |
-| [Building from Source](building.md) | Compile Vayu yourself |
-
-### Reference
+### 🏢 Overall Project
 
 | Document | Description |
 |----------|-------------|
-| [API Reference](api-reference.md) | Engine Control API (REST + SSE) |
-| [Architecture](architecture.md) | System design and internals |
-
-### Migration
-
-| Document | Description |
-|----------|-------------|
-| [Postman Migration](postman-migration.md) | Move from Postman to Vayu |
-
-### Contributing
-
-| Document | Description |
-|----------|-------------|
+| [Getting Started](getting-started.md) | Installation and first steps |
+| [Architecture](architecture.md) | System design and sidecar pattern |
 | [Contributing Guide](contributing.md) | How to contribute to Vayu |
+
+### 🖥️ Engine Documentation
+
+Core C++ engine implementation and APIs.
+
+| Document | Description |
+|----------|-------------|
+| [Building Engine](engine/building.md) | Compile the engine from source |
+| [Engine API Reference](engine/api-reference.md) | HTTP Control API endpoints |
+| [Engine Architecture](engine/architecture.md) | Internal engine components |
+
+### 📱 App Documentation  
+
+Electron/React manager application.
+
+| Document | Description |
+|----------|-------------|
+| [Building App](app/building.md) | Compile the manager application |
+| [UI Architecture](app/architecture.md) | Manager UI structure |
+| [Postman Migration](app/postman-migration.md) | Move from Postman to Vayu |
 
 ---
 
@@ -47,17 +49,27 @@ Welcome to the Vayu documentation. Choose a topic to get started.
 
 ```
 docs/
-├── README.md              ← You are here
-├── getting-started.md     # Installation & basics
-├── building.md            # Build from source
-├── architecture.md        # System design
-├── api-reference.md       # REST API docs
-├── postman-migration.md   # Postman → Vayu
-└── contributing.md        # Contribution guide
+├── README.md                  ← You are here
+├── getting-started.md         ← Start here
+├── architecture.md            ← System design
+├── contributing.md            ← Contributing
+├── engine/
+│   ├── building.md
+│   ├── api-reference.md
+│   └── architecture.md
+└── app/
+    ├── building.md
+    ├── architecture.md
+    └── postman-migration.md
 ```
 
 ---
 
-## Version
+## Next Steps
+
+1. **New User?** Start with [Getting Started](getting-started.md)
+2. **Building from Source?** See [Engine Building](engine/building.md) or [App Building](app/building.md)
+3. **Understanding the Architecture?** Read [Architecture](architecture.md)
+4. **Coming from Postman?** Check [Postman Migration](app/postman-migration.md)
 
 This documentation is for **Vayu v0.1.0** (unreleased).
