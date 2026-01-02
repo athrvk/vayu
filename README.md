@@ -110,10 +110,18 @@ See [Architecture Documentation](docs/architecture.md) for details.
 ## Roadmap
 
 - [x] Project design & planning
-- [ ] **Phase 1:** Engine prototype (CLI with libcurl + QuickJS)
-- [ ] **Phase 2:** Core engine (50k RPS, Control API, SSE)
+- [x] **Phase 1:** Engine prototype (CLI with libcurl + QuickJS)
+- [x] **Phase 2:** Core engine (50k RPS, Control API, SSE streaming, Load testing)
 - [ ] **Phase 3:** Electron app (UI integration)
 - [ ] **Phase 4:** Polish (Postman import, packaging, releases)
+
+**Current Status:** Phase 2 Complete - Fully functional load testing engine with:
+- ✅ HTTP Control API on port 9876
+- ✅ Real-time metrics streaming via SSE
+- ✅ Three load strategies (constant/rate-limited, iterations, ramp-up)
+- ✅ 11 metric types including progress tracking
+- ✅ SQLite persistence for runs and metrics
+- ✅ Precise RPS rate limiting (e.g., 50 RPS = 20ms intervals)
 
 See [PLAN.md](PLAN.md) for detailed roadmap.
 

@@ -28,6 +28,8 @@ struct RunContext {
     std::atomic<size_t> total_requests{0};
     std::atomic<size_t> total_errors{0};
     std::atomic<double> total_latency_ms{0.0};
+    std::atomic<size_t> requests_sent{0};      // Number of requests submitted to event loop
+    std::atomic<size_t> requests_expected{0};  // Total expected requests for this run
     std::mutex latencies_mutex;
     std::vector<double> latencies;  // For percentile calculation
 

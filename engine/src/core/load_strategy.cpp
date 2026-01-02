@@ -143,39 +143,104 @@ public:
             duration_ms = 60000;
         }
 
-        size_t concurrency = static_cast<size_t>(config.value("concurrency", 100));
+        // Check for targetRps - if specified, use rate-limited mode
+        double target_rps = config.value("rps", 0.0);
+        if (target_rps == 0.0) target_rps = config.value("targetRps", 0.0);
 
-        vayu::utils::log_info("Starting Constant Load Test");
-        vayu::utils::log_info("  Duration: " + std::to_string(duration_ms) + " ms");
-        vayu::utils::log_info("  Concurrency: " + std::to_string(concurrency));
+        if (target_rps > 0.0) {
+            // Rate-limited mode
+            vayu::utils::log_info("Starting Constant Load Test (Rate-Limited)");
+            vayu::utils::log_info("  Duration: " + std::to_string(duration_ms) + " ms");
+            vayu::utils::log_info("  Target RPS: " + std::to_string(target_rps));
 
-        auto test_start = std::chrono::steady_clock::now();
+            // Calculate expected requests
+            size_t expected = static_cast<size_t>((duration_ms / 1000.0) * target_rps);
+            context->requests_expected = expected;
 
-        while (!context->should_stop) {
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::steady_clock::now() - test_start)
-                               .count();
+            // Calculate interval between requests
+            int64_t interval_us = static_cast<int64_t>(1'000'000.0 / target_rps);
 
-            if (elapsed >= duration_ms) {
-                break;
+            auto test_start = std::chrono::steady_clock::now();
+            auto next_request_time = test_start;
+            size_t submitted = 0;
+
+            while (!context->should_stop) {
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(now - test_start).count();
+
+                if (elapsed >= duration_ms) {
+                    break;
+                }
+
+                // Check if it's time to submit next request
+                if (now >= next_request_time) {
+                    // Backpressure check
+                    size_t max_pending =
+                        std::max(static_cast<size_t>(target_rps * 10), size_t(1000));
+                    if (context->event_loop->pending_count() < max_pending) {
+                        context->event_loop->submit(
+                            request, [context, &db](size_t, vayu::Result<vayu::Response> result) {
+                                handle_result(context, db, std::move(result));
+                            });
+                        submitted++;
+                        context->requests_sent++;
+
+                        // Schedule next request
+                        next_request_time += std::chrono::microseconds(interval_us);
+                    } else {
+                        // If we're backed up, skip ahead to avoid flooding
+                        next_request_time = now + std::chrono::microseconds(interval_us);
+                    }
+                }
+
+                // Sleep for a small amount to avoid busy waiting
+                auto sleep_time =
+                    std::chrono::duration_cast<std::chrono::microseconds>(next_request_time - now)
+                        .count();
+                if (sleep_time > 100) {
+                    std::this_thread::sleep_for(std::chrono::microseconds(sleep_time / 2));
+                }
             }
 
-            // Backpressure
-            size_t max_pending = std::max(concurrency * 5, size_t(1000));
-            if (context->event_loop->pending_count() > max_pending) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                continue;
-            }
+            vayu::utils::log_info("Submitted " + std::to_string(submitted) + " requests");
+        } else {
+            // Concurrency-based mode (legacy behavior)
+            size_t concurrency = static_cast<size_t>(config.value("concurrency", 100));
 
-            // Submit batch
-            for (size_t i = 0; i < concurrency && !context->should_stop; ++i) {
-                context->event_loop->submit(
-                    request, [context, &db](size_t, vayu::Result<vayu::Response> result) {
-                        handle_result(context, db, std::move(result));
-                    });
-            }
+            vayu::utils::log_info("Starting Constant Load Test (Concurrency-Based)");
+            vayu::utils::log_info("  Duration: " + std::to_string(duration_ms) + " ms");
+            vayu::utils::log_info("  Concurrency: " + std::to_string(concurrency));
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            auto test_start = std::chrono::steady_clock::now();
+
+            while (!context->should_stop) {
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - test_start)
+                                   .count();
+
+                if (elapsed >= duration_ms) {
+                    break;
+                }
+
+                // Backpressure
+                size_t max_pending = std::max(concurrency * 5, size_t(1000));
+                if (context->event_loop->pending_count() > max_pending) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    continue;
+                }
+
+                // Submit batch
+                for (size_t i = 0; i < concurrency && !context->should_stop; ++i) {
+                    context->event_loop->submit(
+                        request, [context, &db](size_t, vayu::Result<vayu::Response> result) {
+                            handle_result(context, db, std::move(result));
+                        });
+                    context->requests_sent++;
+                }
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
         }
     }
 };
@@ -199,6 +264,8 @@ public:
         vayu::utils::log_info("  Iterations: " + std::to_string(iterations));
         vayu::utils::log_info("  Concurrency: " + std::to_string(concurrency));
 
+        context->requests_expected = iterations;
+
         size_t submitted = 0;
         while (submitted < iterations && !context->should_stop) {
             // Backpressure - don't submit too many at once
@@ -216,6 +283,7 @@ public:
                         handle_result(context, db, std::move(result));
                     });
                 submitted++;
+                context->requests_sent++;
             }
 
             // Small sleep to pace submissions
@@ -297,6 +365,7 @@ public:
                     request, [context, &db](size_t, vayu::Result<vayu::Response> result) {
                         handle_result(context, db, std::move(result));
                     });
+                context->requests_sent++;
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(10));

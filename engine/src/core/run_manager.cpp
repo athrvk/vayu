@@ -283,6 +283,18 @@ void collect_metrics(std::shared_ptr<RunContext> context, vayu::db::Database* db
                                vayu::MetricName::ConnectionsActive,
                                static_cast<double>(context->event_loop->active_count()),
                                ""});
+                db.add_metric({0,
+                               context->run_id,
+                               timestamp,
+                               vayu::MetricName::RequestsSent,
+                               static_cast<double>(context->requests_sent.load()),
+                               ""});
+                db.add_metric({0,
+                               context->run_id,
+                               timestamp,
+                               vayu::MetricName::RequestsExpected,
+                               static_cast<double>(context->requests_expected.load()),
+                               ""});
             } catch (const std::exception& e) {
                 // Continue on error
             }

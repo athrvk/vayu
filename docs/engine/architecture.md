@@ -311,7 +311,185 @@ for (int i = 0; i < 100000; ++i) {
 - **Connection Pooling:** libcurl multiplexing reduces TCP overhead
 - **Burst Handling:** Configurable burst capacity
 
-**See [HIGH_RPS_IMPROVEMENTS.md](/HIGH_RPS_IMPROVEMENTS.md) for detailed implementation.**
+
+---
+
+### RunManager and Load Strategies
+
+**Files:** `src/core/run_manager.cpp`, `src/core/load_strategy.cpp`, `include/vayu/core/run_manager.hpp`
+
+Manages load test execution with multiple strategies for different testing scenarios.
+
+#### RunManager Architecture
+
+```cpp
+class RunManager {
+    Database& db;
+    EventLoop& event_loop;
+    std::unordered_map<std::string, RunContext> active_runs;
+    std::thread metrics_thread;
+    
+public:
+    void start_run(const std::string& run_id, const LoadConfig& config);
+    void stop_run(const std::string& run_id);
+    RunStatus get_status(const std::string& run_id);
+};
+
+struct RunContext {
+    std::string run_id;
+    LoadConfig config;
+    std::atomic<bool> should_stop{false};
+    std::atomic<size_t> requests_sent{0};      // Progress tracking
+    std::atomic<size_t> requests_expected{0};  // Total expected
+    std::thread worker_thread;
+    // ... metrics tracking ...
+};
+```
+
+**Key Responsibilities:**
+- Async load test execution in separate threads
+- Real-time metrics collection (every 1 second)
+- Progress tracking with sent/expected counters
+- Graceful termination via stop signals
+
+#### Load Strategies
+
+Three strategies for different load testing patterns:
+
+##### 1. ConstantLoadStrategy - Rate-Limited
+
+Maintains constant RPS using precise interval-based scheduling.
+
+```cpp
+// Configuration
+{
+  "mode": "constant",
+  "duration": 30,        // 30 seconds
+  "targetRps": 50        // 50 requests per second
+}
+
+// Implementation
+interval_us = 1,000,000 / target_rps;  // 20,000µs for 50 RPS
+for each request:
+    submit to event_loop
+    sleep(interval_us)
+    requests_sent++
+```
+
+**Characteristics:**
+- Precise timing: 20ms intervals for 50 RPS
+- No concurrency limit needed
+- Rate-limited by time, not connections
+- Best for: Sustained load testing, API rate limit testing
+
+##### 2. ConstantLoadStrategy - Concurrency-Based
+
+Maintains constant concurrent connections (legacy mode when targetRps not specified).
+
+```cpp
+// Configuration
+{
+  "mode": "constant",
+  "duration": 30,
+  "concurrency": 100   // 100 parallel connections
+}
+
+// Implementation
+maintain 100 active requests at all times
+when one completes, submit another immediately
+```
+
+**Characteristics:**
+- Connection-based throttling
+- Maximum throughput limited by server response time
+- Best for: Max throughput testing, connection stress testing
+
+##### 3. IterationsStrategy
+
+Executes fixed number of iterations with optional concurrency.
+
+```cpp
+// Configuration
+{
+  "mode": "iterations",
+  "iterations": 1000,     // Execute 1000 times
+  "concurrency": 10       // 10 at a time
+}
+
+// Implementation
+total_iterations = 1000
+requests_expected = 1000
+execute in batches of 10 until all complete
+```
+
+**Characteristics:**
+- Predictable total request count
+- Batch execution with concurrency control
+- Best for: Functional testing, data seeding, fixed-count operations
+
+##### 4. RampUpStrategy
+
+Gradually increases load from start RPS to target RPS.
+
+```cpp
+// Configuration
+{
+  "mode": "ramp_up",
+  "stages": [
+    { "duration": 10, "targetRps": 10 },   // 10s @ 10 RPS
+    { "duration": 20, "targetRps": 50 },   // 20s @ 50 RPS
+    { "duration": 30, "targetRps": 100 }   // 30s @ 100 RPS
+  ]
+}
+
+// Implementation
+for each stage:
+    interval_us = 1,000,000 / stage.targetRps
+    execute for stage.duration seconds
+    requests_expected += stage.duration * stage.targetRps
+```
+
+**Characteristics:**
+- Multi-stage load patterns
+- Smooth transition between RPS levels
+- Best for: Soak testing, capacity planning, gradual stress testing
+
+#### Metrics Collection
+
+RunManager collects metrics every 1 second and streams via SSE:
+
+```cpp
+void RunManager::collect_metrics(RunContext& ctx) {
+    while (!ctx.should_stop) {
+        // Collect from event_loop stats
+        auto rps = calculate_current_rps();
+        auto latency_avg = calculate_avg_latency();
+        auto error_rate = calculate_error_rate();
+        
+        // Progress tracking
+        auto sent = ctx.requests_sent.load();
+        auto expected = ctx.requests_expected.load();
+        
+        // Write to database
+        db.insert_metric(ctx.run_id, "rps", rps, timestamp);
+        db.insert_metric(ctx.run_id, "requests_sent", sent, timestamp);
+        db.insert_metric(ctx.run_id, "requests_expected", expected, timestamp);
+        // ... more metrics ...
+        
+        std::this_thread::sleep_for(1s);
+    }
+}
+```
+
+**Available Metrics:**
+- `rps` - Requests per second (calculated over 1s window)
+- `latency_avg` - Average latency in milliseconds
+- `latency_p50`, `latency_p95`, `latency_p99` - Latency percentiles
+- `error_rate` - Percentage of failed requests
+- `total_requests` - Cumulative completed requests
+- `connections_active` - Current active connections
+- `requests_sent` - Total submitted to event loop (progress)
+- `requests_expected` - Expected total for this run (progress)
 
 ---
 
@@ -687,73 +865,92 @@ HTTP Client
 - ✅ `POST /run/:id/stop` - Stop active run
 - ✅ `GET /stats/:id` - Get run metrics
 
-### HTTP API Load Testing Path (🔨 Phase 2 - In Progress)
+### HTTP API Load Testing Path (✅ Fully Implemented)
 
-The `/run` endpoint has been added to the server and creates a DB entry, but full async execution logic is pending:
+The `/run` endpoint creates a DB entry and executes load tests asynchronously via `RunManager`:
 
 ```cpp
-// Current state in daemon.cpp:
-server.Post("/run", [](const httplib::Request &req, httplib::Response &res) {
-    // Creates "pending" run in DB
-    // Returns runId immediately
-    // TODO: Dispatch to worker pool
+// Implemented in server.cpp:
+server.Post("/run", [&run_mgr](const httplib::Request &req, httplib::Response &res) {
+    // Parse load test configuration
+    auto config = parse_load_config(req.body);
+    
+    // Create run in DB with "pending" status
+    std::string run_id = generate_run_id();
+    
+    // Execute asynchronously via RunManager
+    run_mgr.start_run(run_id, config);
+    
+    // Return runId immediately
+    res.set_content(json_response(run_id), "application/json");
 });
 ```
 
-When Phase 2 is fully implemented, `POST /run` will support:
+`POST /run` now supports:
 
 ```
 HTTP Client
     ↓
     POST /run
-    ├── config: { concurrency, rps, duration }
-    └── request: { method, url, ... }
+    ├── config: { mode, duration, targetRps/iterations/stages }
+    └── request: { method, url, headers, scripts, ... }
     ↓
     Returns immediately with runId (202 Accepted)
     ↓
-    Client polls GET /run/:id OR streams GET /stats/:id (SSE)
+    RunManager executes LoadStrategy asynchronously
+    ├── ConstantLoadStrategy (rate-limited or concurrency-based)
+    ├── IterationsStrategy (N fixed iterations)
+    └── RampUpStrategy (gradual load increase)
     ↓
-    Real-time metrics via SSE
-    ├── RPS updates (~100ms)
-    ├── Latency percentiles
-    ├── Error categorization
-    └── Throughput metrics
+    Client streams GET /stats/:id (SSE) for real-time metrics
+    ├── RPS (requests per second)
+    ├── Latency (avg, p50, p95, p99)
+    ├── Error rate
+    ├── Active connections
+    ├── Requests sent & expected (progress tracking)
+    └── Metrics streamed every 1 second
     ↓
-    Final results on completion
+    Client calls GET /run/:id/report for final aggregated results
+    └── Percentiles, status code distribution, error summary
 ```
 
-**Implementation Roadmap:**
-1. **Phase 2.1** - Load test queue and async execution
-2. **Phase 2.2** - Real-time statistics collection
-3. **Phase 2.3** - SSE streaming and metrics aggregation
-4. **Phase 2.4** - Advanced features (ramp-up, ramp-down, RPS limiting)
+**Implemented Features:**
+1. ✅ Async load test execution via RunManager
+2. ✅ Real-time statistics collection and streaming
+3. ✅ SSE metrics streaming with 11 metric types
+4. ✅ Three load strategies: constant (rate-limited), iterations, ramp-up
+5. ✅ Precise RPS rate limiting (e.g., 20ms intervals for 50 RPS)
+6. ✅ Progress tracking with requests_sent/requests_expected
 
 ### Feature Comparison
 
-| Feature | CLI run | CLI batch | HTTP /request | HTTP /run (Phase 2) |
-|---------|---------|-----------|---------------|---------------------|
+| Feature | CLI run | CLI batch | HTTP /request | HTTP /run |
+|---------|---------|-----------|---------------|------------|
 | Single request | ✅ | ❌ | ✅ | ✅ |
 | Batch requests | ❌ | ✅ | ❌ | ✅ |
 | Concurrent execution | ❌ | ✅ | ❌ | ✅ |
 | Test scripts | ✅ | ✅ | ✅ | ✅ |
 | Configurable concurrency | ❌ | ✅ | ❌ | ✅ |
-| RPS limiting | ❌ | ❌ | ❌ | ✅ |
+| RPS rate limiting | ❌ | ❌ | ❌ | ✅ |
+| Load strategies | ❌ | ❌ | ❌ | ✅ (3 modes) |
 | Real-time metrics | ❌ | Summary only | ❌ | ✅ SSE |
+| Progress tracking | ❌ | ❌ | ❌ | ✅ (sent/expected) |
 | Latency percentiles | ❌ | Average | ❌ | ✅ |
-| Current Status | ✅ Ready | ✅ Ready | ✅ Ready | 🔨 In Progress |
+| Current Status | ✅ Ready | ✅ Ready | ✅ Ready | ✅ Ready |
 | Access method | CLI | CLI | HTTP | HTTP |
 
 ### Recommendation for Load Testing
 
-**Until Phase 2 is available:**
-- Use `vayu-cli batch` command for concurrent request execution
-- Supports configurable concurrency: `--concurrency 100`
-- Built-in summary statistics and per-request details
+**For simple concurrent execution:**
+- Use `vayu-cli batch` command with `--concurrency N`
+- Quick one-off tests with summary statistics
 
-**When Phase 2 is available:**
-- Use HTTP API `POST /run` for async load testing
-- Stream results in real-time with `GET /stats/:id` (SSE)
-- Access advanced metrics (percentiles, error categorization)
+**For advanced load testing:**
+- Use HTTP API `POST /run` for full-featured load testing
+- Stream real-time metrics with `GET /stats/:id` (SSE)
+- Choose from 3 load strategies: constant (rate-limited), iterations, ramp-up
+- Track progress with requests_sent/requests_expected metrics
+- Get detailed percentile analysis with `GET /run/:id/report`
 
 ---
 

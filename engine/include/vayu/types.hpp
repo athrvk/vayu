@@ -480,7 +480,9 @@ enum class MetricName {
     ErrorRate,
     TotalRequests,
     Completed,
-    ConnectionsActive
+    ConnectionsActive,
+    RequestsSent,
+    RequestsExpected
 };
 
 inline const char* to_string(MetricName name) {
@@ -503,6 +505,10 @@ inline const char* to_string(MetricName name) {
             return "completed";
         case MetricName::ConnectionsActive:
             return "connections_active";
+        case MetricName::RequestsSent:
+            return "requests_sent";
+        case MetricName::RequestsExpected:
+            return "requests_expected";
     }
     return "unknown";
 }
@@ -517,6 +523,8 @@ inline std::optional<MetricName> parse_metric_name(const std::string& str) {
     if (str == "total_requests") return MetricName::TotalRequests;
     if (str == "completed") return MetricName::Completed;
     if (str == "connections_active") return MetricName::ConnectionsActive;
+    if (str == "requests_sent") return MetricName::RequestsSent;
+    if (str == "requests_expected") return MetricName::RequestsExpected;
     return std::nullopt;
 }
 

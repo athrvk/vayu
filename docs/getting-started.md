@@ -195,7 +195,7 @@ After sending, check the **Tests** tab in the response panel:
 
 ## Load Testing (Vayu Mode)
 
-Vayu's killer feature: run the same request at massive scale.
+Vayu's killer feature: run the same request at massive scale with precise control.
 
 ### Starting a Load Test
 
@@ -203,35 +203,77 @@ Vayu's killer feature: run the same request at massive scale.
 2. Click **Vayu** button (lightning bolt icon)
 3. Configure load test:
    ```
+   Mode:        Constant (Rate-Limited)
    Duration:    60 seconds
-   Concurrency: 100 connections
-   Ramp-up:     10 seconds
+   Target RPS:  50
    ```
 4. Click **Start Test**
 
-### Load Test Configuration
+### Load Test Modes
 
-| Setting | Description | Example |
-|---------|-------------|---------|
-| Duration | How long to run | `60s`, `5m` |
-| Concurrency | Parallel connections | `100` |
-| Ramp-up | Time to reach full load | `10s` |
-| RPS Limit | Max requests per second | `5000` |
+| Mode | Description | Configuration | Use Case |
+|------|-------------|---------------|----------|
+| **Constant (Rate-Limited)** | Precise RPS control | `targetRps`, `duration` | API rate limit testing, sustained load |
+| **Constant (Concurrency)** | Max concurrent connections | `concurrency`, `duration` | Throughput testing, connection stress |
+| **Iterations** | Fixed request count | `iterations`, `concurrency` | Functional testing, data operations |
+| **Ramp-Up** | Gradual load increase | `stages` with RPS/duration | Soak testing, capacity planning |
+
+### Configuration Examples
+
+**Rate-Limited Test (50 RPS for 2 minutes):**
+```json
+{
+  "mode": "constant",
+  "duration": 120,
+  "targetRps": 50
+}
+```
+
+**Iterations Test (1000 requests, 10 at a time):**
+```json
+{
+  "mode": "iterations",
+  "iterations": 1000,
+  "concurrency": 10
+}
+```
+
+**Ramp-Up Test (gradually increase from 10 to 100 RPS):**
+```json
+{
+  "mode": "ramp_up",
+  "stages": [
+    { "duration": 10, "targetRps": 10 },
+    { "duration": 20, "targetRps": 50 },
+    { "duration": 30, "targetRps": 100 }
+  ]
+}
+```
+
+### Real-Time Metrics
+
+Watch live metrics stream as your test runs:
+- **RPS** - Current requests per second
+- **Latency** - Average, P50, P95, P99 percentiles
+- **Error Rate** - Percentage of failed requests
+- **Progress** - Requests sent vs expected (e.g., 52/100)
+- **Active Connections** - Currently in-flight requests
 
 ### Reading Results
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Load Test Results                                              │
+│  Load Test Results - run_1767386768697                          │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  Duration:        60.0s          Total Requests:     589,234    │
-│  Avg RPS:         9,820          Success Rate:       99.79%     │
+│  Duration:        60.0s          Total Requests:     3,000      │
+│  Avg RPS:         50.0           Success Rate:       100.0%     │
+│  Progress:        3000/3000      Status:              Completed │
 │                                                                 │
 │  Latency (ms)                                                   │
 │  ─────────────────────────────────────────────────────────────  │
-│  min      avg      p50      p90      p95      p99      max      │
-│  0.8      10.2     8.5      18.3     25.7     45.2     234.5    │
+│  avg      p50      p95      p99      max                        │
+│  10.2     8.5      25.7     45.2     234.5                      │
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │    ████                                                   │  │
@@ -244,6 +286,13 @@ Vayu's killer feature: run the same request at massive scale.
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Key Metrics:**
+- **Duration:** Actual test runtime (should match configured duration)
+- **Total Requests:** Number of completed requests
+- **Avg RPS:** Measured requests per second (should match targetRps)
+- **Success Rate:** Percentage of 2xx responses
+- **Progress:** Shows requests_sent/requests_expected for tracking
 
 ---
 
@@ -305,36 +354,178 @@ Organize requests into collections for better management.
 
 ## CLI Usage
 
-The Vayu CLI can run requests without the GUI.
+The Vayu CLI (`vayu-cli`) provides command-line access to the engine for automation and CI/CD pipelines.
 
-### Basic Usage
+**Prerequisite:** The Vayu Engine daemon must be running (`./vayu-engine`).
+
+### Starting the Engine
 
 ```bash
-# Run a single request
+# Start the daemon (runs on port 9876)
+./vayu-engine &
+
+# Check if it's running
+vayu-cli status
+```
+
+### Basic Commands
+
+#### Run Single Request
+
+```bash
+# Execute a single request
 vayu-cli run request.json
 
-# Run with environment
-vayu-cli run request.json --env production.json
+# With verbose output
+vayu-cli run request.json --verbose
 
-# Run collection
-vayu-cli run-collection ./my-api/
-
-# Load test
-vayu-cli load request.json --concurrency 100 --duration 60s
+# Specify daemon port
+vayu-cli run request.json --port 9876
 ```
 
-### Output Formats
+**Request File Example:**
+```json
+{
+  "method": "GET",
+  "url": "https://api.example.com/users",
+  "headers": {
+    "Authorization": "Bearer token123"
+  },
+  "timeout": 30000,
+  "tests": "pm.test('Status 200', () => pm.expect(pm.response.code).to.equal(200));"
+}
+```
+
+#### Start Load Test
 
 ```bash
-# JSON output
-vayu-cli run request.json --format json
-
-# JUnit XML (for CI)
-vayu-cli run-collection ./my-api/ --format junit --output results.xml
-
-# TAP format
-vayu-cli run-collection ./my-api/ --format tap
+# Run a load test
+vayu-cli load load-test-config.json
 ```
+
+**Load Test Config Example:**
+```json
+{
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.com/health"
+  },
+  "mode": "constant",
+  "duration": 60,
+  "targetRps": 50
+}
+```
+
+#### Check Daemon Status
+
+```bash
+# Verify daemon is running
+vayu-cli status
+
+# Output:
+# Engine Status: Running
+# Version: 0.1.0
+# Port: 9876
+# Uptime: 120 seconds
+```
+
+### Use Cases
+
+**CI/CD Integration:**
+```bash
+#!/bin/bash
+# Start engine
+./vayu-engine &
+ENGINE_PID=$!
+
+# Wait for startup
+sleep 2
+
+# Run API tests
+vayu-cli run tests/api-health.json
+vayu-cli run tests/api-login.json
+vayu-cli run tests/api-users.json
+
+# Cleanup
+kill $ENGINE_PID
+```
+
+**Quick API Testing:**
+```bash
+# Test multiple endpoints quickly
+vayu-cli run health.json
+vayu-cli run login.json
+vayu-cli run data.json
+```
+
+**Load Testing:**
+```bash
+# Start engine
+./vayu-engine &
+
+# Run 50 RPS load test for 2 minutes
+vayu-cli load load-test.json
+
+# Monitor with real-time metrics via API:
+# GET http://localhost:9876/stats/{runId} (SSE)
+```
+
+### Output Format
+
+**Success:**
+```
+Request:
+  Method: GET
+  URL: https://httpbin.org/json
+  Timeout: 10000 ms
+
+200 OK
+Time: 234.5 ms
+Size: 1024 bytes
+
+Tests:
+  ✓ Status code is 200
+  ✓ Response is JSON
+```
+
+**Failure:**
+```
+Request:
+  Method: GET
+  URL: https://api.example.com/broken
+
+✗ 500 Internal Server Error
+Time: 156.3 ms
+
+Tests:
+  ✗ Status code is 200
+    AssertionError: expected 500 to equal 200
+```
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (all tests passed) |
+| `1` | Failure (request failed or tests failed) |
+
+Use in scripts:
+```bash
+if vayu-cli run test.json; then
+  echo "✓ Tests passed"
+else
+  echo "✗ Tests failed"
+  exit 1
+fi
+```
+
+---
+
+## Advanced Features
+
+For more CLI options and advanced usage, see:
+- [CLI Reference](engine/cli.md) - Complete command documentation
+- [API Reference](engine/api-reference.md) - HTTP API for load testing
 
 ---
 

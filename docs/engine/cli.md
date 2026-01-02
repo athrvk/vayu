@@ -432,18 +432,29 @@ fi
 | Feature | CLI | HTTP API |
 |---------|-----|----------|
 | Single request | ✅ `run` | ✅ `POST /request` |
-| Batch requests | ✅ `batch` | ⏳ `POST /run` (Phase 2) |
+| Batch requests | ✅ `batch` | ✅ `POST /run` |
 | Test scripts | ✅ Yes | ✅ Yes |
-| Real-time stats | ❌ | ⏳ SSE (Phase 2) |
-| RPS limiting | ❌ | ⏳ Phase 2 |
-| Latency percentiles | ❌ | ⏳ Phase 2 |
+| Load strategies | ❌ | ✅ (3 modes) |
+| Real-time stats | ❌ | ✅ SSE streaming |
+| RPS rate limiting | ❌ | ✅ Precise timing |
+| Progress tracking | ❌ | ✅ sent/expected |
+| Latency percentiles | ❌ Summary | ✅ Full percentiles |
 | Access method | Command line | HTTP requests |
 
 **Current Status:**
-- **Phase 1 (Complete):** CLI `run` and `batch` commands fully implemented
-- **Phase 2 (Planned):** HTTP API `/run` endpoint with async load testing, real-time statistics streaming, and advanced metrics
+- **CLI:** Fully implemented with `run` (single) and `batch` (concurrent) commands
+- **HTTP API:** Fully implemented load testing with async execution, real-time metrics streaming, and multiple load strategies
 
-For advanced load testing features, use the HTTP API when Phase 2 is available. Until then, the CLI `batch` command provides concurrent request execution with configurable concurrency levels.
+**Recommendations:**
+- **Simple testing:** Use CLI `run` for quick single requests
+- **Concurrent execution:** Use CLI `batch` for straightforward parallel testing
+- **Advanced load testing:** Use HTTP API `POST /run` for:
+  - Precise RPS rate limiting (e.g., exactly 50 RPS)
+  - Real-time metrics streaming via SSE
+  - Multiple load strategies (constant, iterations, ramp-up)
+  - Progress tracking (requests sent vs expected)
+  - Detailed percentile analysis
+  - Asynchronous execution with long-running tests
 
 ---
 
