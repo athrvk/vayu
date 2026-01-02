@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Run clang-tidy on changed C++ files
+echo "Running clang-tidy on changed files..."
+
+# Get list of changed C++ files
+FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "\.(cpp|hpp|c|h)$")
+
+if [ -z "$FILES" ]; then
+    exit 0
+fi
+
+# Check if clang-tidy is installed
+if ! command -v clang-tidy &> /dev/null; then
+    echo "clang-tidy not found. Skipping linting."
+    exit 0
+fi
+
+# Run clang-tidy
+for FILE in $FILES; do
+    # Skip vendor files
+    if [[ "$FILE" == *"vendor/"* ]]; then
+        continue
+    fi
+    
+    # Check if file exists
+    if [ ! -f "$FILE" ]; then
+        continue
+    fi
+
+    echo "Linting $FILE..."
+    # We need compilation database for clang-tidy to work correctly with includes
+    # Assuming build directory is engine/build
+    if [ -f "engine/build/compile_commands.json" ]; then
+        clang-tidy -p engine/build "$FILE"
+    else
+        echo "Warning: compile_commands.json not found in engine/build. clang-tidy might report false positives."
+        # Fallback: try to include common directories
+        clang-tidy "$FILE" -- -Iengine/include -Iengine/vendor/quickjs
+    fi
+done
+
+exit 0

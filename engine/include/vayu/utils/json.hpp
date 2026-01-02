@@ -7,6 +7,7 @@
 
 #include "vayu/types.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/core/constants.hpp"
 
 #include <nlohmann/json.hpp>
 #include <string>
@@ -57,7 +58,7 @@ namespace vayu::json
     /**
      * @brief Serialize a Response to JSON string
      */
-    [[nodiscard]] std::string serialize_string(const Response &response, int indent = 2);
+    [[nodiscard]] std::string serialize_string(const Response &response, int indent = vayu::core::constants::json::DEFAULT_INDENT);
 
     /**
      * @brief Serialize an Error to JSON

@@ -25,6 +25,7 @@ The Vayu Engine exposes a RESTful Control API for communication with the Manager
 | `POST /environments` | ✅ Implemented | Create/Update environment |
 | `GET /runs` | ✅ Implemented | List all execution runs |
 | `GET /run/:id` | ✅ Implemented | Get run details |
+| `GET /run/:id/report` | ✅ Implemented | Get detailed run report |
 | `POST /run/:id/stop` | ✅ Implemented | Stop a running test |
 | `GET /stats/:id` | ✅ Implemented | Get metrics for a run |
 
@@ -70,12 +71,43 @@ GET /runs
 GET /run/:id
 ```
 
+**Get Detailed Report:**
+```
+GET /run/:id/report
+```
+
 **Stop Run:**
 ```
 POST /run/:id/stop
 ```
 
-**Response:**
+**Response (Report):**
+```json
+{
+  "summary": {
+    "totalRequests": 1000,
+    "successfulRequests": 995,
+    "failedRequests": 5,
+    "errorRate": 0.5,
+    "avgRps": 150.5
+  },
+  "latency": {
+    "min": 10,
+    "max": 500,
+    "avg": 45,
+    "p50": 40,
+    "p90": 80,
+    "p95": 120,
+    "p99": 200
+  },
+  "statusCodes": {
+    "200": 995,
+    "500": 5
+  }
+}
+```
+
+**Response (Stop):**
 ```json
 {
   "status": "stopped",
@@ -115,7 +147,7 @@ curl -N http://127.0.0.1:9876/stats/run_1704200000000
 
 3. **Completion Event** (on test finish)
    ```
-   data: {"id":100,"runId":"run_1704200000000","timestamp":1704200061000,"name":"test_complete","value":1,"labels":{"status":"success"}}
+   data: {"id":100,"runId":"run_1704200000000","timestamp":1704200061000,"name":"completed","value":1,"labels":{"status":"success"}}
    ```
 
 **Metric Object:**
@@ -139,7 +171,7 @@ curl -N http://127.0.0.1:9876/stats/run_1704200000000
 | `bytes_in` | - | Total bytes received |
 | `bytes_out` | - | Total bytes sent |
 | `connections_active` | - | Currently active connections |
-| `test_complete` | `{"status": "success"}` | Test finished |
+| `completed` | `{"status": "success"}` | Test finished |
 
 **JavaScript Example:**
 ```javascript

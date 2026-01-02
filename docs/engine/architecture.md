@@ -683,6 +683,7 @@ HTTP Client
 - ✅ `GET /config` - Configuration and system limits
 - ✅ `GET /runs` - List execution history
 - ✅ `GET /run/:id` - Get run details
+- ✅ `GET /run/:id/report` - Get detailed run report
 - ✅ `POST /run/:id/stop` - Stop active run
 - ✅ `GET /stats/:id` - Get run metrics
 

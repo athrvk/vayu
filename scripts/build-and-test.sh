@@ -89,8 +89,12 @@ install_deps() {
     local deps=$(grep -A 20 '"dependencies"' "$ENGINE_DIR/vcpkg.json" | grep '"' | grep -v 'dependencies' | tr -d ' ",' | grep -v '^$')
     
     for dep in $deps; do
-        vcpkg install "$dep:$triplet" 2>&1 | grep -q "is already installed" && continue
+        if [ -n "$(vcpkg list "${dep}:${triplet}")" ]; then
+            continue
+        fi
+        
         info "  Installing $dep..."
+        vcpkg install "$dep:$triplet"
     done
     
     success "Dependencies ready"
@@ -100,7 +104,6 @@ install_deps() {
 build() {
     info "Configuring CMake ($BUILD_TYPE)..."
     
-    [ "$CLEAN" = true ] && rm -rf "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
     
@@ -114,6 +117,7 @@ build() {
     cmake -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
           -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
           -DVCPKG_TARGET_TRIPLET="$triplet" \
+          -DVCPKG_MANIFEST_MODE=OFF \
           ..
     
     info "Building..."
@@ -145,6 +149,8 @@ main() {
     echo "Build: $BUILD_TYPE | Tests: $RUN_TESTS"
     echo ""
     
+    [ "$CLEAN" = true ] && info "Cleaning build directory..." && rm -rf "$BUILD_DIR"
+
     check_vcpkg
     
     if [ "$TESTS_ONLY" = true ]; then
@@ -159,8 +165,8 @@ main() {
     
     echo ""
     success "Done! Executables in: $BUILD_DIR"
-    echo "  • vayu-cli"
-    echo "  • vayu-engine"
+    echo "  - vayu-cli"
+    echo "  - vayu-engine"
 }
 
 main

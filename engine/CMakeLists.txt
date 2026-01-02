@@ -29,6 +29,25 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # ============================================================================
+# Static Analysis
+# ============================================================================
+
+# Add common Homebrew paths for LLVM on macOS
+if(APPLE)
+    list(APPEND CMAKE_PROGRAM_PATH "/opt/homebrew/opt/llvm/bin" "/usr/local/opt/llvm/bin")
+endif()
+
+find_program(CLANG_TIDY_EXE NAMES "clang-tidy")
+
+if(CLANG_TIDY_EXE)
+    message(STATUS "clang-tidy found: ${CLANG_TIDY_EXE}")
+    # Set clang-tidy for all C++ targets created after this point
+    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+else()
+    message(WARNING "clang-tidy not found. Static analysis will be disabled.")
+endif()
+
+# ============================================================================
 # Compiler Warnings
 # ============================================================================
 
@@ -112,6 +131,10 @@ if(EXISTS ${QUICKJS_DIR}/quickjs.c)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(quickjs PRIVATE -w)
     endif()
+
+    # Disable clang-tidy for vendored code
+    set_target_properties(quickjs PROPERTIES C_CLANG_TIDY "" CXX_CLANG_TIDY "")
+
     set(QUICKJS_FOUND TRUE)
 else()
     message(WARNING "QuickJS not found in vendor/quickjs. Scripting will be disabled.")
@@ -128,6 +151,8 @@ add_library(vayu_core STATIC
     src/http/rate_limiter.cpp
     src/http/sse.cpp
     src/utils/json.cpp
+    src/utils/logger.cpp
+    src/utils/metrics_helper.cpp
     src/db/database.cpp
     src/core/run_manager.cpp
 )
@@ -165,7 +190,7 @@ endif()
 
 if(VAYU_BUILD_CLI)
     add_executable(vayu-cli
-        src/main.cpp
+        src/cli.cpp
     )
 
     target_include_directories(vayu-cli PRIVATE
@@ -217,12 +242,14 @@ if(VAYU_BUILD_TESTS)
         tests/sse_test.cpp
         tests/db_test.cpp
         tests/rate_limit_test.cpp
+        tests/metrics_helper_test.cpp
     )
     
     target_link_libraries(vayu_tests PRIVATE
         vayu_core
         GTest::gtest
         GTest::gtest_main
+        httplib::httplib
         vayu_warnings
         vayu_sanitizers
     )

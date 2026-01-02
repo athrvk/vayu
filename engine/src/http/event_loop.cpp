@@ -6,6 +6,7 @@
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/rate_limiter.hpp"
+#include "vayu/utils/logger.hpp"
 
 #include <curl/curl.h>
 
@@ -23,6 +24,34 @@ namespace vayu::http
 
     namespace
     {
+        int debug_callback(CURL *handle, curl_infotype type, char *data, size_t size, void *userptr)
+        {
+            (void)handle;
+            (void)userptr;
+
+            std::string text(data, size);
+            // Remove trailing newlines
+            while (!text.empty() && (text.back() == '\n' || text.back() == '\r'))
+            {
+                text.pop_back();
+            }
+
+            switch (type)
+            {
+            case CURLINFO_TEXT:
+                vayu::utils::log_info("* " + text);
+                break;
+            case CURLINFO_HEADER_OUT:
+                vayu::utils::log_info("> " + text);
+                break;
+            case CURLINFO_HEADER_IN:
+                vayu::utils::log_info("< " + text);
+                break;
+            default:
+                break;
+            }
+            return 0;
+        }
 
         /**
          * @brief Data associated with each transfer
@@ -313,6 +342,7 @@ namespace vayu::http
             if (config.verbose)
             {
                 curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+                curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, debug_callback);
             }
 
             // Proxy
@@ -484,19 +514,29 @@ namespace vayu::http
                 std::unique_ptr<TransferData> data;
                 {
                     std::lock_guard<std::mutex> lock(queue_mutex);
-                    if (!pending_queue.empty() &&
-                        active_transfers.size() < config.max_concurrent)
+
+                    // Check concurrency limit safely
+                    size_t active_count = 0;
                     {
-                        data = std::move(pending_queue.front());
-                        pending_queue.pop();
+                        std::lock_guard<std::mutex> active_lock(active_mutex);
+                        active_count = active_transfers.size();
+                    }
+
+                    if (!pending_queue.empty() &&
+                        active_count < config.max_concurrent)
+                    {
+                        // Try to acquire token without blocking
+                        if (rate_limiter.try_acquire())
+                        {
+                            data = std::move(pending_queue.front());
+                            pending_queue.pop();
+                        }
                     }
                 }
 
                 // Apply rate limiting outside the lock
                 if (data)
                 {
-                    rate_limiter.acquire();
-
                     CURL *easy = setup_easy_handle(data.get(), config);
                     if (easy)
                     {

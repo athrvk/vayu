@@ -124,14 +124,24 @@ namespace vayu::runtime
             auto *state = static_cast<ExpectState *>(JS_GetOpaque(val, expect_class_id));
             if (state)
             {
-                // Note: actual value should be freed before this
+                JS_FreeValueRT(rt, state->actual);
                 delete state;
+            }
+        }
+
+        void expect_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
+        {
+            auto *state = static_cast<ExpectState *>(JS_GetOpaque(val, expect_class_id));
+            if (state)
+            {
+                JS_MarkValue(rt, state->actual, mark_func);
             }
         }
 
         JSClassDef expect_class = {
             "Expectation",
             .finalizer = expect_finalizer,
+            .gc_mark = expect_gc_mark,
         };
 
         JSValue expect_to_getter(JSContext *ctx, JSValueConst this_val,
@@ -476,14 +486,11 @@ namespace vayu::runtime
 
         JSValue create_expectation(JSContext *ctx, JSValue actual)
         {
-            // Initialize class ID once
-            if (expect_class_id == 0)
-            {
-                JS_NewClassID(&expect_class_id);
-                JS_NewClass(JS_GetRuntime(ctx), expect_class_id, &expect_class);
-            }
-
             JSValue obj = JS_NewObjectClass(ctx, static_cast<int>(expect_class_id));
+            if (JS_IsException(obj))
+            {
+                return obj;
+            }
 
             auto *state = new ExpectState{JS_DupValue(ctx, actual), false};
             JS_SetOpaque(obj, state);
@@ -805,6 +812,13 @@ namespace vayu::runtime
         {
             if (runtime)
             {
+
+                // Register Expectation class
+                if (expect_class_id == 0)
+                {
+                    JS_NewClassID(&expect_class_id);
+                }
+                JS_NewClass(runtime, expect_class_id, &expect_class);
                 JS_FreeRuntime(runtime);
             }
         }

@@ -11,14 +11,46 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <httplib.h>
 
 namespace
 {
-
-    // Test URL that returns JSON
-    const std::string TEST_URL = "https://httpbin.org/get";
-    const std::string TEST_DELAY_URL = "https://httpbin.org/delay/1";
     const std::string INVALID_URL = "https://invalid.test.local/";
+
+    class MockServer
+    {
+    public:
+        MockServer()
+        {
+            svr.Get("/get", [](const httplib::Request &, httplib::Response &res)
+                    { res.set_content(R"({"args":{},"headers":{},"origin":"127.0.0.1","url":"http://127.0.0.1/get"})", "application/json"); });
+
+            svr.Get("/delay/1", [](const httplib::Request &, httplib::Response &res)
+                    {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                res.set_content(R"({"args":{},"headers":{},"origin":"127.0.0.1","url":"http://127.0.0.1/delay/1"})", "application/json"); });
+
+            port = svr.bind_to_any_port("127.0.0.1");
+            thread = std::thread([this]()
+                                 { svr.listen_after_bind(); });
+        }
+
+        ~MockServer()
+        {
+            svr.stop();
+            if (thread.joinable())
+                thread.join();
+        }
+
+        std::string base_url() const
+        {
+            return "http://127.0.0.1:" + std::to_string(port);
+        }
+
+        httplib::Server svr;
+        std::thread thread;
+        int port;
+    };
 
 } // namespace
 
@@ -32,12 +64,20 @@ protected:
     void SetUp() override
     {
         vayu::http::global_init();
+        mock_server = std::make_unique<MockServer>();
+        test_url = mock_server->base_url() + "/get";
+        test_delay_url = mock_server->base_url() + "/delay/1";
     }
 
     void TearDown() override
     {
+        mock_server.reset();
         vayu::http::global_cleanup();
     }
+
+    std::unique_ptr<MockServer> mock_server;
+    std::string test_url;
+    std::string test_delay_url;
 };
 
 TEST_F(EventLoopTest, StartAndStop)
@@ -59,7 +99,7 @@ TEST_F(EventLoopTest, SubmitSingleRequest)
 
     vayu::Request request;
     request.method = vayu::HttpMethod::GET;
-    request.url = TEST_URL;
+    request.url = test_url;
 
     std::atomic<bool> completed{false};
     vayu::Result<vayu::Response> result_holder{vayu::Error{vayu::ErrorCode::InternalError, "Not set"}};
@@ -90,7 +130,7 @@ TEST_F(EventLoopTest, SubmitAsyncWithFuture)
 
     vayu::Request request;
     request.method = vayu::HttpMethod::GET;
-    request.url = TEST_URL;
+    request.url = test_url;
 
     auto handle = loop.submit_async(request);
     EXPECT_GT(handle.id, 0u);
@@ -112,7 +152,7 @@ TEST_F(EventLoopTest, BatchExecution)
     {
         vayu::Request req;
         req.method = vayu::HttpMethod::GET;
-        req.url = TEST_URL;
+        req.url = test_url;
         requests.push_back(req);
     }
 
@@ -145,7 +185,7 @@ TEST_F(EventLoopTest, ConcurrentRequests)
     {
         vayu::Request request;
         request.method = vayu::HttpMethod::GET;
-        request.url = TEST_URL;
+        request.url = test_url;
 
         loop.submit(request, [&](size_t, vayu::Result<vayu::Response> result)
                     {
@@ -195,7 +235,7 @@ TEST_F(EventLoopTest, CounterStats)
 
     vayu::Request request;
     request.method = vayu::HttpMethod::GET;
-    request.url = TEST_URL;
+    request.url = test_url;
 
     auto handle = loop.submit_async(request);
     handle.future.wait();
@@ -215,13 +255,13 @@ TEST_F(EventLoopTest, CancelPendingRequest)
     // Submit a slow request first
     vayu::Request slow_request;
     slow_request.method = vayu::HttpMethod::GET;
-    slow_request.url = TEST_DELAY_URL;
+    slow_request.url = test_delay_url;
     loop.submit(slow_request);
 
     // Submit another request that should be queued
     vayu::Request request;
     request.method = vayu::HttpMethod::GET;
-    request.url = TEST_URL;
+    request.url = test_url;
 
     std::atomic<bool> callback_called{false};
     std::atomic<bool> was_error{false};
@@ -256,12 +296,18 @@ protected:
     void SetUp() override
     {
         vayu::http::global_init();
+        mock_server = std::make_unique<MockServer>();
+        test_url = mock_server->base_url() + "/get";
     }
 
     void TearDown() override
     {
+        mock_server.reset();
         vayu::http::global_cleanup();
     }
+
+    std::unique_ptr<MockServer> mock_server;
+    std::string test_url;
 };
 
 TEST_F(ThreadPoolTest, CreateWithDefaultThreads)
@@ -324,7 +370,7 @@ TEST_F(ThreadPoolTest, BatchExecution)
     {
         vayu::Request req;
         req.method = vayu::HttpMethod::GET;
-        req.url = TEST_URL;
+        req.url = test_url;
         requests.push_back(req);
     }
 
@@ -351,7 +397,7 @@ TEST_F(ThreadPoolTest, MixedSuccessAndFailure)
     // Add successful request
     vayu::Request good_req;
     good_req.method = vayu::HttpMethod::GET;
-    good_req.url = TEST_URL;
+    good_req.url = test_url;
     requests.push_back(good_req);
 
     // Add failing request
@@ -390,7 +436,7 @@ TEST_F(EventLoopTest, EventLoopFasterThanSequential)
     {
         vayu::Request req;
         req.method = vayu::HttpMethod::GET;
-        req.url = TEST_URL;
+        req.url = test_url;
         requests.push_back(req);
     }
 
@@ -437,7 +483,7 @@ TEST_F(EventLoopTest, ProgressCallback)
 
     vayu::Request request;
     request.method = vayu::HttpMethod::GET;
-    request.url = TEST_URL;
+    request.url = test_url;
 
     std::atomic<int> progress_calls{0};
     std::atomic<bool> completed{false};

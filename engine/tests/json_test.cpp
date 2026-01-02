@@ -230,8 +230,8 @@ namespace vayu::json
         {
             vayu::db::Run run;
             run.id = "run_123";
-            run.type = "load";
-            run.status = "running";
+            run.type = vayu::RunType::Load;
+            run.status = vayu::RunStatus::Running;
             run.start_time = 1000;
             run.end_time = 2000;
             run.config_snapshot = R"({"rps": 100})";
@@ -256,7 +256,7 @@ namespace vayu::json
             metric.id = 1;
             metric.run_id = "run_123";
             metric.timestamp = 1000;
-            metric.name = "rps";
+            metric.name = vayu::MetricName::Rps;
             metric.value = 50.5;
             metric.labels = R"({"region": "us-east-1"})";
 

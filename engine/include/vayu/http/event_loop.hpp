@@ -6,6 +6,7 @@
  */
 
 #include "vayu/types.hpp"
+#include "vayu/core/constants.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -31,6 +32,9 @@ namespace vayu::http
      */
     using ProgressCallback = std::function<void(size_t request_id, size_t downloaded, size_t total)>;
 
+    using BatchResult = vayu::BatchResult;
+    using EventLoopStats = vayu::EventLoopStats;
+
     /**
      * @brief Event loop configuration
      */
@@ -40,13 +44,13 @@ namespace vayu::http
         size_t num_workers = 0;
 
         /// Maximum number of concurrent connections per worker (default: 1000)
-        size_t max_concurrent = 1000;
+        size_t max_concurrent = vayu::core::constants::event_loop::MAX_CONCURRENT;
 
         /// Maximum connections per host (default: 100)
-        size_t max_per_host = 100;
+        size_t max_per_host = vayu::core::constants::event_loop::MAX_PER_HOST;
 
         /// Default user agent string
-        std::string user_agent = "Vayu/0.1.0";
+        std::string user_agent = vayu::core::constants::defaults::DEFAULT_USER_AGENT;
 
         /// Enable verbose curl output for debugging
         bool verbose = false;
@@ -55,7 +59,7 @@ namespace vayu::http
         std::string proxy_url;
 
         /// Event loop poll timeout in milliseconds
-        int poll_timeout_ms = 10;
+        int poll_timeout_ms = vayu::core::constants::event_loop::POLL_TIMEOUT_MS;
 
         /// Target requests per second (0 = unlimited, no rate limiting)
         double target_rps = 0.0;
@@ -71,28 +75,6 @@ namespace vayu::http
     {
         size_t id;
         std::future<Result<Response>> future;
-    };
-
-    /**
-     * @brief Batch execution result
-     */
-    struct BatchResult
-    {
-        std::vector<Result<Response>> responses;
-        size_t successful = 0;
-        size_t failed = 0;
-        double total_time_ms = 0.0;
-    };
-
-    /**
-     * @brief Event loop statistics
-     */
-    struct EventLoopStats
-    {
-        size_t total_requests = 0;
-        size_t active_requests = 0;
-        size_t pending_requests = 0;
-        size_t completed_requests = 0;
     };
 
     /**

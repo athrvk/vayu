@@ -206,7 +206,7 @@ cmake -B build -G Ninja \
 ```
 
 **Key files:**
-- `src/main.cpp` - CLI entry point
+- `src/cli.cpp` - CLI entry point
 - `src/http/client.cpp` - HTTP implementation
 - `include/vayu/http/client.hpp` - Client interface
 

@@ -6,7 +6,7 @@
  */
 
 #include "vayu/types.hpp"
-#include "vayu/version.hpp"
+#include "vayu/core/constants.hpp"
 
 #include <memory>
 
@@ -18,8 +18,8 @@ namespace vayu::http
      */
     struct ClientConfig
     {
-        std::string user_agent = "Vayu/" VAYU_VERSION_STRING;
-        bool verbose = false;
+        std::string user_agent = vayu::core::constants::defaults::DEFAULT_USER_AGENT;
+        bool verbose = vayu::core::constants::defaults::VERBOSE;
         std::string proxy_url;
         std::string ca_bundle_path;
     };

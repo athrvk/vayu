@@ -120,8 +120,8 @@ namespace vayu::json
     {
         Json json;
         json["id"] = run.id;
-        json["type"] = run.type;
-        json["status"] = run.status;
+        json["type"] = to_string(run.type);
+        json["status"] = to_string(run.status);
         json["startTime"] = run.start_time;
         json["endTime"] = run.end_time;
         // Try to parse configSnapshot as JSON if possible, otherwise string
@@ -147,7 +147,7 @@ namespace vayu::json
         json["id"] = metric.id;
         json["runId"] = metric.run_id;
         json["timestamp"] = metric.timestamp;
-        json["name"] = metric.name;
+        json["name"] = to_string(metric.name);
         json["value"] = metric.value;
         if (!metric.labels.empty())
         {

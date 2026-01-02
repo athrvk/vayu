@@ -5,6 +5,7 @@
 
 #include "vayu/http/client.hpp"
 #include "vayu/version.hpp"
+#include "vayu/utils/logger.hpp"
 
 #include <curl/curl.h>
 #include <cstring>
@@ -19,6 +20,34 @@ namespace vayu::http
 
     namespace
     {
+        int debug_callback(CURL *handle, curl_infotype type, char *data, size_t size, void *userptr)
+        {
+            (void)handle;
+            (void)userptr;
+
+            std::string text(data, size);
+            // Remove trailing newlines
+            while (!text.empty() && (text.back() == '\n' || text.back() == '\r'))
+            {
+                text.pop_back();
+            }
+
+            switch (type)
+            {
+            case CURLINFO_TEXT:
+                vayu::utils::log_info("* " + text);
+                break;
+            case CURLINFO_HEADER_OUT:
+                vayu::utils::log_info("> " + text);
+                break;
+            case CURLINFO_HEADER_IN:
+                vayu::utils::log_info("< " + text);
+                break;
+            default:
+                break;
+            }
+            return 0;
+        }
 
         /**
          * @brief Callback for writing response body
@@ -302,6 +331,7 @@ namespace vayu::http
         if (impl_->config.verbose)
         {
             curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+            curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, debug_callback);
         }
 
         // Proxy

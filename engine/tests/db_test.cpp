@@ -67,8 +67,8 @@ namespace vayu::db
 
             vayu::db::Run run;
             run.id = "run_1";
-            run.type = "load";
-            run.status = "pending";
+            run.type = vayu::RunType::Load;
+            run.status = vayu::RunStatus::Pending;
             run.start_time = 1000;
             run.config_snapshot = "{}";
 
@@ -77,8 +77,8 @@ namespace vayu::db
             auto retrieved = db.get_run("run_1");
             ASSERT_TRUE(retrieved.has_value());
             EXPECT_EQ(retrieved->id, "run_1");
-            EXPECT_EQ(retrieved->type, "load");
-            EXPECT_EQ(retrieved->status, "pending");
+            EXPECT_EQ(retrieved->type, vayu::RunType::Load);
+            EXPECT_EQ(retrieved->status, vayu::RunStatus::Pending);
         }
 
         TEST_F(DatabaseTest, UpdatesRunStatus)
@@ -88,17 +88,17 @@ namespace vayu::db
 
             vayu::db::Run run;
             run.id = "run_1";
-            run.type = "load";
-            run.status = "pending";
+            run.type = vayu::RunType::Load;
+            run.status = vayu::RunStatus::Pending;
             run.start_time = 1000;
             run.config_snapshot = "{}";
 
             db.create_run(run);
-            db.update_run_status("run_1", "completed");
+            db.update_run_status("run_1", vayu::RunStatus::Completed);
 
             auto retrieved = db.get_run("run_1");
             ASSERT_TRUE(retrieved.has_value());
-            EXPECT_EQ(retrieved->status, "completed");
+            EXPECT_EQ(retrieved->status, vayu::RunStatus::Completed);
         }
 
         TEST_F(DatabaseTest, AddsAndRetrievesMetrics)
@@ -108,8 +108,8 @@ namespace vayu::db
 
             vayu::db::Run run;
             run.id = "run_1";
-            run.type = "load";
-            run.status = "running";
+            run.type = vayu::RunType::Load;
+            run.status = vayu::RunStatus::Running;
             run.start_time = 1000;
             run.config_snapshot = "{}";
             db.create_run(run);
@@ -117,13 +117,13 @@ namespace vayu::db
             vayu::db::Metric m1;
             m1.run_id = "run_1";
             m1.timestamp = 1001;
-            m1.name = "requests_total";
+            m1.name = vayu::MetricName::TotalRequests;
             m1.value = 10.0;
 
             vayu::db::Metric m2;
             m2.run_id = "run_1";
             m2.timestamp = 1002;
-            m2.name = "requests_total";
+            m2.name = vayu::MetricName::TotalRequests;
             m2.value = 20.0;
 
             db.add_metric(m1);
@@ -142,15 +142,15 @@ namespace vayu::db
 
             vayu::db::Run r1;
             r1.id = "run_1";
-            r1.type = "load";
-            r1.status = "completed";
+            r1.type = vayu::RunType::Load;
+            r1.status = vayu::RunStatus::Completed;
             r1.start_time = 1000;
             r1.config_snapshot = "{}";
 
             vayu::db::Run r2;
             r2.id = "run_2";
-            r2.type = "design";
-            r2.status = "failed";
+            r2.type = vayu::RunType::Design;
+            r2.status = vayu::RunStatus::Failed;
             r2.start_time = 2000;
             r2.config_snapshot = "{}";
 

@@ -9,6 +9,7 @@
  */
 
 #include "vayu/types.hpp"
+#include "vayu/core/constants.hpp"
 
 #include <atomic>
 #include <functional>
@@ -21,53 +22,11 @@ namespace vayu::http
 {
 
     /**
-     * @brief A single Server-Sent Event
-     */
-    struct SseEvent
-    {
-        /// Event type (defaults to "message" if not specified)
-        std::string type = "message";
-
-        /// Event data (may contain multiple lines joined by newlines)
-        std::string data;
-
-        /// Optional event ID for reconnection
-        std::optional<std::string> id;
-
-        /// Server-suggested retry interval in milliseconds
-        std::optional<int> retry_ms;
-    };
-
-    /**
-     * @brief EventSource connection state
-     */
-    enum class EventSourceState
-    {
-        Connecting, ///< Connection is being established
-        Open,       ///< Connection is open and receiving events
-        Closed      ///< Connection is closed
-    };
-
-    /**
-     * @brief Convert state to string
-     */
-    inline const char *to_string(EventSourceState state)
-    {
-        switch (state)
-        {
-        case EventSourceState::Connecting:
-            return "CONNECTING";
-        case EventSourceState::Open:
-            return "OPEN";
-        case EventSourceState::Closed:
-            return "CLOSED";
-        }
-        return "UNKNOWN";
-    }
-
-    /**
      * @brief Callback types for EventSource
      */
+    using SseEvent = vayu::SseEvent;
+    using EventSourceState = vayu::EventSourceState;
+
     using OnEventCallback = std::function<void(const SseEvent &event)>;
     using OnOpenCallback = std::function<void()>;
     using OnErrorCallback = std::function<void(const Error &error)>;
@@ -88,16 +47,16 @@ namespace vayu::http
         int retry_ms = 3000;
 
         /// Maximum retry interval in milliseconds
-        int max_retry_ms = 30000;
+        int max_retry_ms = vayu::core::constants::sse::MAX_RETRY_MS;
 
         /// Connection timeout in milliseconds
-        int connect_timeout_ms = 30000;
+        int connect_timeout_ms = vayu::core::constants::sse::CONNECT_TIMEOUT_MS;
 
         /// Whether to send Last-Event-ID on reconnect
-        bool send_last_event_id = true;
+        bool send_last_event_id = vayu::core::constants::sse::SEND_LAST_EVENT_ID;
 
         /// User agent string
-        std::string user_agent = "Vayu/0.1.0";
+        std::string user_agent = vayu::core::constants::defaults::DEFAULT_USER_AGENT;
     };
 
     /**

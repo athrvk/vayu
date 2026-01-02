@@ -9,8 +9,10 @@
 #include "vayu/http/server.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/core/run_manager.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/version.hpp"
+#include "vayu/utils/logger.hpp"
 
 #include <atomic>
 #include <csignal>
@@ -26,7 +28,7 @@ namespace
     {
         if (signal == SIGINT || signal == SIGTERM)
         {
-            std::cout << "\nShutting down...\n";
+            vayu::utils::log_info("Shutting down...");
             g_running = false;
         }
     }
@@ -34,15 +36,18 @@ namespace
 
 int main(int argc, char *argv[])
 {
+    // Initialize logger first
+    vayu::utils::Logger::instance().init(vayu::core::constants::logging::DIR);
+
     // Parse arguments
-    int port = 9876;
+    int port = vayu::core::constants::defaults::PORT;
     bool verbose = false;
 
     for (int i = 1; i < argc; ++i)
     {
         std::string arg = argv[i];
 
-        if (arg == "-p" || arg == "--port")
+        if (arg == vayu::core::constants::cli::ARG_PORT_SHORT || arg == vayu::core::constants::cli::ARG_PORT_LONG)
         {
             if (i + 1 < argc)
             {
@@ -65,6 +70,8 @@ int main(int argc, char *argv[])
         }
     }
 
+    vayu::utils::Logger::instance().set_verbose(verbose);
+
     // Setup signal handlers
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
@@ -74,11 +81,11 @@ int main(int argc, char *argv[])
     try
     {
         db.init();
-        std::cout << "Database initialized at engine/db/vayu.db\n";
+        vayu::utils::log_info("Database initialized at engine/db/vayu.db");
     }
     catch (const std::exception &e)
     {
-        std::cerr << "Failed to initialize database: " << e.what() << "\n";
+        vayu::utils::log_error("Failed to initialize database: " + std::string(e.what()));
         return 1;
     }
 
@@ -99,7 +106,7 @@ int main(int argc, char *argv[])
     }
 
     // Graceful shutdown
-    std::cout << "Shutting down gracefully...\n";
+    vayu::utils::log_info("Shutting down gracefully...");
 
     // Stop the HTTP server first
     server.stop();
@@ -108,7 +115,7 @@ int main(int argc, char *argv[])
     size_t active = run_manager.active_count();
     if (active > 0)
     {
-        std::cout << "Stopping " << active << " active load tests...\n";
+        vayu::utils::log_info("Stopping " + std::to_string(active) + " active load tests...");
 
         auto active_runs = run_manager.get_all_active_runs();
         for (const auto &context : active_runs)
@@ -126,19 +133,19 @@ int main(int argc, char *argv[])
 
             if (elapsed >= 5)
             {
-                std::cout << "Warning: " << run_manager.active_count()
-                          << " tests still running after 5s, forcing shutdown\n";
+                vayu::utils::log_warning("Warning: " + std::to_string(run_manager.active_count()) +
+                                         " tests still running after 5s, forcing shutdown");
                 break;
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
-        std::cout << "All load tests stopped\n";
+        vayu::utils::log_info("All load tests stopped");
     }
 
     vayu::http::global_cleanup();
 
-    std::cout << "Goodbye!\n";
+    vayu::utils::log_info("Goodbye!");
     return 0;
 }

@@ -3,6 +3,177 @@
 #include <iostream>
 #include <chrono>
 
+namespace sqlite_orm
+{
+    // HttpMethod
+    template <>
+    struct type_printer<vayu::HttpMethod>
+    {
+        const std::string &print()
+        {
+            static const std::string res = "TEXT";
+            return res;
+        }
+    };
+    template <>
+    struct statement_binder<vayu::HttpMethod>
+    {
+        int bind(sqlite3_stmt *stmt, int index, const vayu::HttpMethod &value)
+        {
+            return sqlite3_bind_text(stmt, index, vayu::to_string(value), -1, SQLITE_TRANSIENT);
+        }
+    };
+    template <>
+    struct field_printer<vayu::HttpMethod>
+    {
+        std::string operator()(const vayu::HttpMethod &t) const
+        {
+            return vayu::to_string(t);
+        }
+    };
+    template <>
+    struct row_extractor<vayu::HttpMethod>
+    {
+        vayu::HttpMethod extract(const char *row_value) const
+        {
+            if (auto val = vayu::parse_method(row_value))
+                return *val;
+            return vayu::HttpMethod::GET;
+        }
+        vayu::HttpMethod extract(sqlite3_stmt *stmt, int columnIndex) const
+        {
+            const char *str = (const char *)sqlite3_column_text(stmt, columnIndex);
+            return this->extract(str ? str : "");
+        }
+    };
+
+    // RunType
+    template <>
+    struct type_printer<vayu::RunType>
+    {
+        const std::string &print()
+        {
+            static const std::string res = "TEXT";
+            return res;
+        }
+    };
+    template <>
+    struct statement_binder<vayu::RunType>
+    {
+        int bind(sqlite3_stmt *stmt, int index, const vayu::RunType &value)
+        {
+            return sqlite3_bind_text(stmt, index, vayu::to_string(value), -1, SQLITE_TRANSIENT);
+        }
+    };
+    template <>
+    struct field_printer<vayu::RunType>
+    {
+        std::string operator()(const vayu::RunType &t) const
+        {
+            return vayu::to_string(t);
+        }
+    };
+    template <>
+    struct row_extractor<vayu::RunType>
+    {
+        vayu::RunType extract(const char *row_value) const
+        {
+            if (auto val = vayu::parse_run_type(row_value))
+                return *val;
+            return vayu::RunType::Design;
+        }
+        vayu::RunType extract(sqlite3_stmt *stmt, int columnIndex) const
+        {
+            const char *str = (const char *)sqlite3_column_text(stmt, columnIndex);
+            return this->extract(str ? str : "");
+        }
+    };
+
+    // RunStatus
+    template <>
+    struct type_printer<vayu::RunStatus>
+    {
+        const std::string &print()
+        {
+            static const std::string res = "TEXT";
+            return res;
+        }
+    };
+    template <>
+    struct statement_binder<vayu::RunStatus>
+    {
+        int bind(sqlite3_stmt *stmt, int index, const vayu::RunStatus &value)
+        {
+            return sqlite3_bind_text(stmt, index, vayu::to_string(value), -1, SQLITE_TRANSIENT);
+        }
+    };
+    template <>
+    struct field_printer<vayu::RunStatus>
+    {
+        std::string operator()(const vayu::RunStatus &t) const
+        {
+            return vayu::to_string(t);
+        }
+    };
+    template <>
+    struct row_extractor<vayu::RunStatus>
+    {
+        vayu::RunStatus extract(const char *row_value) const
+        {
+            if (auto val = vayu::parse_run_status(row_value))
+                return *val;
+            return vayu::RunStatus::Pending;
+        }
+        vayu::RunStatus extract(sqlite3_stmt *stmt, int columnIndex) const
+        {
+            const char *str = (const char *)sqlite3_column_text(stmt, columnIndex);
+            return this->extract(str ? str : "");
+        }
+    };
+
+    // MetricName
+    template <>
+    struct type_printer<vayu::MetricName>
+    {
+        const std::string &print()
+        {
+            static const std::string res = "TEXT";
+            return res;
+        }
+    };
+    template <>
+    struct statement_binder<vayu::MetricName>
+    {
+        int bind(sqlite3_stmt *stmt, int index, const vayu::MetricName &value)
+        {
+            return sqlite3_bind_text(stmt, index, vayu::to_string(value), -1, SQLITE_TRANSIENT);
+        }
+    };
+    template <>
+    struct field_printer<vayu::MetricName>
+    {
+        std::string operator()(const vayu::MetricName &t) const
+        {
+            return vayu::to_string(t);
+        }
+    };
+    template <>
+    struct row_extractor<vayu::MetricName>
+    {
+        vayu::MetricName extract(const char *row_value) const
+        {
+            if (auto val = vayu::parse_metric_name(row_value))
+                return *val;
+            return vayu::MetricName::Rps;
+        }
+        vayu::MetricName extract(sqlite3_stmt *stmt, int columnIndex) const
+        {
+            const char *str = (const char *)sqlite3_column_text(stmt, columnIndex);
+            return this->extract(str ? str : "");
+        }
+    };
+}
+
 using namespace sqlite_orm;
 
 namespace vayu::db
@@ -154,7 +325,7 @@ namespace vayu::db
         return runs.front();
     }
 
-    void Database::update_run_status(const std::string &id, const std::string &status)
+    void Database::update_run_status(const std::string &id, RunStatus status)
     {
         auto run = get_run(id);
         if (run)

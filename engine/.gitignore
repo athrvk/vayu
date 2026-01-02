@@ -46,3 +46,8 @@ coverage/
 
 # DB
 db/vayu.db
+
+
+# Logs
+logs/
+*.log

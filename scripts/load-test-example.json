@@ -1,0 +1,12 @@
+{
+    "request": {
+        "method": "GET",
+        "url": "https://httpbin.org/get",
+        "headers": {
+            "Accept": "application/json"
+        }
+    },
+    "mode": "constant",
+    "duration": "5s",
+    "targetRps": 5
+}

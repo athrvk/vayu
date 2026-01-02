@@ -1,6 +1,9 @@
 #include "vayu/http/server.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/utils/json.hpp"
+#include "vayu/utils/logger.hpp"
+#include "vayu/utils/metrics_helper.hpp"
 #include "vayu/version.hpp"
 #include <nlohmann/json.hpp>
 #include <iostream>
@@ -34,7 +37,7 @@ namespace vayu::http
                 {"id", r.id},
                 {"collectionId", r.collection_id},
                 {"name", r.name},
-                {"method", r.method},
+                {"method", to_string(r.method)},
                 {"url", r.url},
                 {"headers", r.headers.empty() ? nlohmann::json::object() : nlohmann::json::parse(r.headers)},
                 {"body", r.body.empty() ? nlohmann::json() : nlohmann::json::parse(r.body)},
@@ -73,8 +76,27 @@ namespace vayu::http
         is_running_ = true;
         server_thread_ = std::thread([this]()
                                      {
-        std::cout << "Vayu Engine " << vayu::Version::string << "\n";
-        std::cout << "Listening on http://127.0.0.1:" << port_ << "\n";
+        vayu::utils::log_info("Vayu Engine " + std::string(vayu::Version::string));
+        
+        // Load and display config
+        nlohmann::json config;
+        auto stored_config = db_.get_config("global_settings");
+        if (stored_config) {
+            try {
+                config = nlohmann::json::parse(*stored_config);
+            } catch (...) {}
+        }
+        if (config.empty()) {
+            config["workers"] = std::thread::hardware_concurrency();
+            config["maxConnections"] = vayu::core::constants::server::MAX_CONNECTIONS;
+            config["defaultTimeout"] = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
+            config["statsInterval"] = vayu::core::constants::server::STATS_INTERVAL_MS;
+            config["contextPoolSize"] = vayu::core::constants::server::CONTEXT_POOL_SIZE;
+        }
+        config["verbose"] = verbose_;
+        vayu::utils::log_info("Configuration: " + config.dump());
+
+        vayu::utils::log_info("Listening on http://127.0.0.1:" + std::to_string(port_));
         server_.listen("127.0.0.1", port_);
         is_running_ = false; });
     }
@@ -99,7 +121,15 @@ namespace vayu::http
 
     void Server::setup_routes()
     {
-        // Health check endpoint
+        // ==========================================
+        // Health Check Endpoint
+        // ==========================================
+
+        /**
+         * GET /health
+         * Returns server health status, version, and available worker threads.
+         * Used to verify the server is running and responsive.
+         */
         server_.Get("/health", [](const httplib::Request &, httplib::Response &res)
                     {
         nlohmann::json response;
@@ -113,7 +143,12 @@ namespace vayu::http
         // Project Management Endpoints
         // ==========================================
 
-        // Collections
+        /**
+         * GET /collections
+         * Retrieves all collections from the database.
+         * Collections are folders that organize requests in a hierarchy.
+         * Returns: Array of collection objects with id, name, parentId, order, and timestamps.
+         */
         server_.Get("/collections", [this](const httplib::Request &, httplib::Response &res)
                     {
         auto collections = db_.get_collections();
@@ -123,6 +158,12 @@ namespace vayu::http
         }
         res.set_content(response.dump(), "application/json"); });
 
+        /**
+         * POST /collections
+         * Creates a new collection in the database.
+         * Body params: id (string), name (string), parentId (optional string), order (optional int)
+         * Returns: The created collection object.
+         */
         server_.Post("/collections", [this](const httplib::Request &req, httplib::Response &res)
                      {
         try {
@@ -143,7 +184,12 @@ namespace vayu::http
             res.set_content(nlohmann::json{{"error", e.what()}}.dump(), "application/json");
         } });
 
-        // Requests
+        /**
+         * GET /requests
+         * Retrieves all requests belonging to a specific collection.
+         * Query params: collectionId (required) - The collection ID to fetch requests from.
+         * Returns: Array of request objects with method, url, headers, body, scripts, etc.
+         */
         server_.Get("/requests", [this](const httplib::Request &req, httplib::Response &res)
                     {
         if (req.has_param("collectionId")) {
@@ -158,6 +204,13 @@ namespace vayu::http
             res.set_content(nlohmann::json{{"error", "collectionId required"}}.dump(), "application/json");
         } });
 
+        /**
+         * POST /requests
+         * Creates or updates a request in the database.
+         * Body params: id, collectionId, name, method, url, headers (object), body (any),
+         *              auth (object), preRequestScript (string), postRequestScript (string)
+         * Returns: The saved request object.
+         */
         server_.Post("/requests", [this](const httplib::Request &req, httplib::Response &res)
                      {
         try {
@@ -166,7 +219,13 @@ namespace vayu::http
             r.id = json["id"];
             r.collection_id = json["collectionId"];
             r.name = json["name"];
-            r.method = json["method"];
+            
+            auto method = vayu::parse_method(json["method"].get<std::string>());
+            if (!method) {
+                throw std::runtime_error("Invalid HTTP method");
+            }
+            r.method = *method;
+            
             r.url = json["url"];
             r.headers = json.value("headers", nlohmann::json::object()).dump();
             r.body = json.value("body", nlohmann::json()).dump();
@@ -182,7 +241,12 @@ namespace vayu::http
             res.set_content(nlohmann::json{{"error", e.what()}}.dump(), "application/json");
         } });
 
-        // Environments
+        /**
+         * GET /environments
+         * Retrieves all saved environments from the database.
+         * Environments contain variables that can be used in requests (e.g., API keys, base URLs).
+         * Returns: Array of environment objects with id, name, variables, and timestamps.
+         */
         server_.Get("/environments", [this](const httplib::Request &, httplib::Response &res)
                     {
         auto envs = db_.get_environments();
@@ -192,6 +256,12 @@ namespace vayu::http
         }
         res.set_content(response.dump(), "application/json"); });
 
+        /**
+         * POST /environments
+         * Creates or updates an environment in the database.
+         * Body params: id (string), name (string), variables (object of key-value pairs)
+         * Returns: The saved environment object.
+         */
         server_.Post("/environments", [this](const httplib::Request &req, httplib::Response &res)
                      {
         try {
@@ -213,7 +283,16 @@ namespace vayu::http
         // Execution Endpoints
         // ==========================================
 
-        // Single request endpoint (Design Mode)
+        /**
+         * POST /request
+         * Executes a single HTTP request (Design Mode).
+         * Used for testing individual requests with immediate response.
+         * Body params: method, url, headers (object), body (any), auth (object),
+         *              preRequestScript (string), postRequestScript (string),
+         *              requestId (optional), environmentId (optional)
+         * Creates a "design" type run in the database and stores full response trace.
+         * Returns: The HTTP response with status, headers, body, and timing information.
+         */
         server_.Post("/request", [this](const httplib::Request &req, httplib::Response &res)
                      {
         try {
@@ -233,8 +312,8 @@ namespace vayu::http
             std::string run_id = "run_" + std::to_string(now_ms());
             vayu::db::Run run;
             run.id = run_id;
-            run.type = "design";
-            run.status = "running";
+            run.type = vayu::RunType::Design;
+            run.status = vayu::RunStatus::Running;
             run.start_time = now_ms();
             run.config_snapshot = req.body;
             
@@ -255,7 +334,7 @@ namespace vayu::http
             auto response_result = client.send(request_result.value());
             
             if (response_result.is_error()) {
-                db_.update_run_status(run_id, "failed");
+                db_.update_run_status(run_id, vayu::RunStatus::Failed);
                 res.status = 502;
                 res.set_content(vayu::json::serialize(response_result.error()).dump(),
                                "application/json");
@@ -277,9 +356,9 @@ namespace vayu::http
                 db_result.trace_data = trace.dump();
                 
                 db_.add_result(db_result);
-                db_.update_run_status(run_id, "completed");
+                db_.update_run_status(run_id, vayu::RunStatus::Completed);
             } catch (const std::exception& e) {
-                std::cerr << "Failed to save result: " << e.what() << "\n";
+                vayu::utils::log_error("Failed to save result: " + std::string(e.what()));
             }
             
             // Return response
@@ -294,7 +373,17 @@ namespace vayu::http
             res.set_content(error.dump(), "application/json");
         } });
 
-        // Load test endpoint (Vayu Mode)
+        /**
+         * POST /run
+         * Starts a load test run (Vayu Mode).
+         * Executes multiple requests concurrently based on the specified load profile.
+         * Body params: request (object), mode (object with duration/iterations and workers),
+         *              or duration (ms) and iterations (count),
+         *              requestId (optional), environmentId (optional)
+         * Creates a "load" type run and returns immediately with 202 Accepted.
+         * The actual load test runs asynchronously via RunManager.
+         * Returns: 202 Accepted with runId and status "pending".
+         */
         server_.Post("/run", [this](const httplib::Request &req, httplib::Response &res)
                      {
         // Create run entry
@@ -325,8 +414,8 @@ namespace vayu::http
             // Create DB run record
             vayu::db::Run run;
             run.id = run_id;
-            run.type = "load";
-            run.status = "pending";
+            run.type = vayu::RunType::Load;
+            run.status = vayu::RunStatus::Pending;
             run.config_snapshot = req.body;
             run.start_time = now_ms();
             run.end_time = run.start_time;
@@ -346,7 +435,7 @@ namespace vayu::http
             // Return 202 Accepted
             nlohmann::json response;
             response["runId"] = run_id;
-            response["status"] = "pending";
+            response["status"] = to_string(vayu::RunStatus::Pending);
             response["message"] = "Load test started";
             
             res.status = 202;
@@ -360,7 +449,14 @@ namespace vayu::http
             return;
         } });
 
-        // Configuration endpoint
+        /**
+         * GET /config
+         * Retrieves the global configuration settings.
+         * Returns stored configuration from database or defaults if none exists.
+         * Default config includes: workers, maxConnections, defaultTimeout,
+         *                          statsInterval, contextPoolSize
+         * Returns: Configuration object with all settings.
+         */
         server_.Get("/config", [this](const httplib::Request &, httplib::Response &res)
                     {
         nlohmann::json config;
@@ -377,15 +473,21 @@ namespace vayu::http
 
         if (config.empty()) {
             config["workers"] = std::thread::hardware_concurrency();
-            config["maxConnections"] = 10000;
-            config["defaultTimeout"] = 30000;
-            config["statsInterval"] = 100;
-            config["contextPoolSize"] = 64;
+            config["maxConnections"] = vayu::core::constants::server::MAX_CONNECTIONS;
+            config["defaultTimeout"] = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
+            config["statsInterval"] = vayu::core::constants::server::STATS_INTERVAL_MS;
+            config["contextPoolSize"] = vayu::core::constants::server::CONTEXT_POOL_SIZE;
         }
         
         res.set_content(config.dump(2), "application/json"); });
 
-        // Get all runs
+        /**
+         * GET /runs
+         * Retrieves all test runs from the database.
+         * Returns both "design" mode single requests and "load" mode test runs.
+         * Each run includes: id, type, status, timestamps, config snapshot, and associated IDs.
+         * Returns: Array of run objects.
+         */
         server_.Get("/runs", [this](const httplib::Request &, httplib::Response &res)
                     {
         try {
@@ -402,7 +504,12 @@ namespace vayu::http
             res.set_content(error.dump(), "application/json");
         } });
 
-        // Get specific run
+        /**
+         * GET /run/:runId
+         * Retrieves details for a specific test run by its ID.
+         * Path params: runId - The unique identifier of the run.
+         * Returns: Run object with all details, or 404 if not found.
+         */
         server_.Get(R"(/run/([^/]+))", [this](const httplib::Request &req, httplib::Response &res)
                     {
         std::string run_id = req.matches[1];
@@ -423,7 +530,73 @@ namespace vayu::http
             res.set_content(error.dump(), "application/json");
         } });
 
-        // Stop a run
+        /**
+         * GET /run/:runId/report
+         * Retrieves a detailed statistical report for a specific test run.
+         * Path params: runId - The unique identifier of the run.
+         * Calculates aggregate metrics including percentiles, error rates, and status code distribution.
+         * Returns: DetailedReport object, or 404 if not found.
+         */
+        server_.Get(R"(/run/([^/]+)/report)", [this](const httplib::Request &req, httplib::Response &res)
+                    {
+        std::string run_id = req.matches[1];
+        try {
+            auto run = db_.get_run(run_id);
+            if (!run) {
+                res.status = 404;
+                nlohmann::json error;
+                error["error"] = "Run not found";
+                res.set_content(error.dump(), "application/json");
+                return;
+            }
+
+            auto results = db_.get_results(run_id);
+            
+            double duration_s = 0;
+            if (run->start_time > 0) {
+                int64_t end = run->end_time > 0 ? run->end_time : now_ms();
+                duration_s = (end - run->start_time) / 1000.0;
+            }
+
+            auto report = vayu::utils::MetricsHelper::calculate_detailed_report(results, duration_s);
+
+            nlohmann::json json_report;
+            json_report["summary"] = {
+                {"totalRequests", report.total_requests},
+                {"successfulRequests", report.successful_requests},
+                {"failedRequests", report.failed_requests},
+                {"errorRate", report.error_rate},
+                {"totalDurationSeconds", report.total_duration_s},
+                {"avgRps", report.avg_rps}
+            };
+            json_report["latency"] = {
+                {"min", report.latency_min},
+                {"max", report.latency_max},
+                {"avg", report.latency_avg},
+                {"p50", report.latency_p50},
+                {"p90", report.latency_p90},
+                {"p95", report.latency_p95},
+                {"p99", report.latency_p99}
+            };
+            json_report["statusCodes"] = report.status_codes;
+
+            res.set_content(json_report.dump(), "application/json");
+
+        } catch (const std::exception& e) {
+            res.status = 500;
+            nlohmann::json error;
+            error["error"] = e.what();
+            res.set_content(error.dump(), "application/json");
+        } });
+
+        /**
+         * POST /run/:runId/stop
+         * Stops an active load test run gracefully.
+         * Path params: runId - The unique identifier of the run to stop.
+         * Signals the running thread to stop and waits up to 5 seconds for graceful shutdown.
+         * If run is already completed/stopped/failed, returns current status.
+         * Returns: Status object with summary metrics (totalRequests, errors, errorRate, avgLatency).
+         */
         server_.Post(R"(/run/([^/]+)/stop)", [this](const httplib::Request &req, httplib::Response &res)
                      {
         std::string run_id = req.matches[1];
@@ -439,12 +612,9 @@ namespace vayu::http
             }
             
             // Check if run is already completed or stopped
-            if (run->status == "completed" || run->status == "stopped" || run->status == "failed")
+            if (run->status == vayu::RunStatus::Completed || run->status == vayu::RunStatus::Stopped || run->status == vayu::RunStatus::Failed)
             {
-                nlohmann::json response;
-                response["status"] = run->status;
-                response["runId"] = run_id;
-                response["message"] = "Run already " + run->status;
+                auto response = vayu::utils::MetricsHelper::create_already_stopped_response(run_id, to_string(run->status));
                 res.set_content(response.dump(), "application/json");
                 return;
             }
@@ -456,48 +626,21 @@ namespace vayu::http
                 // Signal the running thread to stop
                 context->should_stop = true;
                 
-                // Wait briefly for graceful shutdown (max 5 seconds)
-                auto wait_start = std::chrono::steady_clock::now();
-                while (context->is_running)
-                {
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::steady_clock::now() - wait_start).count();
-                    
-                    if (elapsed >= 5)
-                    {
-                        break;  // Timeout
-                    }
-                    
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
+                // Wait for graceful shutdown
+                vayu::utils::MetricsHelper::wait_for_graceful_stop(*context, 5);
                 
                 // Calculate summary metrics
-                size_t completed = context->total_requests.load();
-                size_t errors = context->total_errors.load();
-                double avg_latency = completed > 0 ? context->total_latency_ms.load() / completed : 0.0;
-                double error_rate = completed > 0 ? (errors * 100.0 / completed) : 0.0;
-                
-                nlohmann::json response;
-                response["status"] = "stopped";
-                response["runId"] = run_id;
-                response["summary"] = {
-                    {"totalRequests", completed},
-                    {"errors", errors},
-                    {"errorRate", error_rate},
-                    {"avgLatencyMs", avg_latency}
-                };
+                auto summary = vayu::utils::MetricsHelper::calculate_summary(*context);
+                auto response = vayu::utils::MetricsHelper::create_stop_response(run_id, summary);
                 
                 res.set_content(response.dump(), "application/json");
             }
             else
             {
                 // Run not active, just update DB
-                db_.update_run_status(run_id, "stopped");
+                db_.update_run_status(run_id, vayu::RunStatus::Stopped);
                 
-                nlohmann::json response;
-                response["status"] = "stopped";
-                response["runId"] = run_id;
-                response["message"] = "Run was not active";
+                auto response = vayu::utils::MetricsHelper::create_inactive_response(run_id);
                 res.set_content(response.dump(), "application/json");
             }
             
@@ -508,7 +651,16 @@ namespace vayu::http
             res.set_content(error.dump(), "application/json");
         } });
 
-        // Get stats for a run (SSE)
+        /**
+         * GET /stats/:runId
+         * Streams real-time statistics for a load test run using Server-Sent Events (SSE).
+         * Path params: runId - The unique identifier of the run to monitor.
+         * Continuously streams metric events as they are recorded in the database.
+         * Sends periodic keep-alive messages to prevent connection timeout.
+         * Automatically closes connection when run completes/stops/fails.
+         * Event types: "metric" (performance data), "complete" (test finished)
+         * Content-Type: text/event-stream
+         */
         server_.Get(R"(/stats/([^/]+))", [this](const httplib::Request &req, httplib::Response &res)
                     {
         std::string run_id = req.matches[1];
@@ -548,20 +700,6 @@ namespace vayu::http
                         
                         if (!metrics.empty()) {
                             for (const auto &metric : metrics) {
-                                // Check for test completion
-                                if (metric.name == "test_complete")
-                                {
-                                    test_completed = true;
-                                    
-                                    // Send completion event
-                                    nlohmann::json completion_event;
-                                    completion_event["event"] = "complete";
-                                    completion_event["runId"] = run_id;
-                                    std::string payload = "event: complete\ndata: " + completion_event.dump() + "\n\n";
-                                    sink.write(payload.data(), payload.size());
-                                    break;
-                                }
-                                
                                 // Send metric as SSE event
                                 nlohmann::json json_metric = vayu::json::serialize(metric);
                                 std::string event_name = "metric";
@@ -571,18 +709,32 @@ namespace vayu::http
                                     return false;
                                 }
                                 last_id = metric.id;
+
+                                // Check for test completion
+                                if (metric.name == vayu::MetricName::Completed)
+                                {
+                                    test_completed = true;
+                                    
+                                    // Send completion event
+                                    nlohmann::json completion_event;
+                                    completion_event["event"] = "complete";
+                                    completion_event["runId"] = run_id;
+                                    std::string completion_payload = "event: complete\ndata: " + completion_event.dump() + "\n\n";
+                                    sink.write(completion_payload.data(), completion_payload.size());
+                                    break;
+                                }
                             }
                         } else {
                             // Check if run is completed/stopped/failed in DB
                             auto run = db_.get_run(run_id);
-                            if (run && (run->status == "completed" || run->status == "stopped" || run->status == "failed"))
+                            if (run && (run->status == vayu::RunStatus::Completed || run->status == vayu::RunStatus::Stopped || run->status == vayu::RunStatus::Failed))
                             {
                                 test_completed = true;
                                 
                                 nlohmann::json completion_event;
                                 completion_event["event"] = "complete";
                                 completion_event["runId"] = run_id;
-                                completion_event["status"] = run->status;
+                                completion_event["status"] = to_string(run->status);
                                 std::string payload = "event: complete\ndata: " + completion_event.dump() + "\n\n";
                                 sink.write(payload.data(), payload.size());
                                 break;
@@ -609,7 +761,7 @@ namespace vayu::http
                 }
                 
                 // Connection closed successfully
-                return true;
+                return false;
             }
         ); });
     }

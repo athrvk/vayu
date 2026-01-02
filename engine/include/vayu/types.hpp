@@ -286,6 +286,122 @@ namespace vayu
     };
 
     // ============================================================================
+    // SSE Types
+    // ============================================================================
+
+    /**
+     * @brief A single Server-Sent Event
+     */
+    struct SseEvent
+    {
+        /// Event type (defaults to "message" if not specified)
+        std::string type = "message";
+
+        /// Event data (may contain multiple lines joined by newlines)
+        std::string data;
+
+        /// Optional event ID for reconnection
+        std::optional<std::string> id;
+
+        /// Server-suggested retry interval in milliseconds
+        std::optional<int> retry_ms;
+    };
+
+    /**
+     * @brief EventSource connection state
+     */
+    enum class EventSourceState
+    {
+        Connecting, ///< Connection is being established
+        Open,       ///< Connection is open and receiving events
+        Closed      ///< Connection is closed
+    };
+
+    /**
+     * @brief Convert state to string
+     */
+    inline const char *to_string(EventSourceState state)
+    {
+        switch (state)
+        {
+        case EventSourceState::Connecting:
+            return "CONNECTING";
+        case EventSourceState::Open:
+            return "OPEN";
+        case EventSourceState::Closed:
+            return "CLOSED";
+        }
+        return "UNKNOWN";
+    }
+
+    // ============================================================================
+    // Event Loop Types
+    // ============================================================================
+
+    /**
+     * @brief Batch execution result
+     */
+    struct BatchResult
+    {
+        std::vector<Result<Response>> responses;
+        size_t successful = 0;
+        size_t failed = 0;
+        double total_time_ms = 0.0;
+    };
+
+    /**
+     * @brief Event loop statistics
+     */
+    struct EventLoopStats
+    {
+        size_t total_requests = 0;
+        size_t active_requests = 0;
+        size_t pending_requests = 0;
+        size_t completed_requests = 0;
+    };
+
+    // ============================================================================
+    // Metrics Types
+    // ============================================================================
+
+    /**
+     * Summary metrics for a stopped or completed run.
+     */
+    struct RunSummary
+    {
+        size_t total_requests;
+        size_t errors;
+        double error_rate;
+        double avg_latency_ms;
+    };
+
+    /**
+     * Detailed report containing comprehensive statistics for a run.
+     */
+    struct DetailedReport
+    {
+        // Summary
+        size_t total_requests;
+        size_t successful_requests;
+        size_t failed_requests;
+        double error_rate;
+        double total_duration_s;
+        double avg_rps;
+
+        // Latency Statistics (ms)
+        double latency_min;
+        double latency_max;
+        double latency_avg;
+        double latency_p50;
+        double latency_p90;
+        double latency_p95;
+        double latency_p99;
+
+        // Distribution
+        std::map<int, size_t> status_codes;
+    };
+
+    // ============================================================================
     // Script Types
     // ============================================================================
 
@@ -328,5 +444,218 @@ namespace vayu
      * @brief Environment (collection of variables)
      */
     using Environment = std::map<std::string, Variable>;
+
+    // ============================================================================
+    // Database Enums
+    // ============================================================================
+
+    enum class RunType
+    {
+        Design,
+        Load
+    };
+
+    inline const char *to_string(RunType type)
+    {
+        switch (type)
+        {
+        case RunType::Design:
+            return "design";
+        case RunType::Load:
+            return "load";
+        }
+        return "unknown";
+    }
+
+    inline std::optional<RunType> parse_run_type(const std::string &str)
+    {
+        if (str == "design")
+            return RunType::Design;
+        if (str == "load")
+            return RunType::Load;
+        return std::nullopt;
+    }
+
+    enum class RunStatus
+    {
+        Pending,
+        Running,
+        Completed,
+        Failed,
+        Stopped
+    };
+
+    inline const char *to_string(RunStatus status)
+    {
+        switch (status)
+        {
+        case RunStatus::Pending:
+            return "pending";
+        case RunStatus::Running:
+            return "running";
+        case RunStatus::Completed:
+            return "completed";
+        case RunStatus::Failed:
+            return "failed";
+        case RunStatus::Stopped:
+            return "stopped";
+        }
+        return "unknown";
+    }
+
+    inline std::optional<RunStatus> parse_run_status(const std::string &str)
+    {
+        if (str == "pending")
+            return RunStatus::Pending;
+        if (str == "running")
+            return RunStatus::Running;
+        if (str == "completed")
+            return RunStatus::Completed;
+        if (str == "failed")
+            return RunStatus::Failed;
+        if (str == "stopped")
+            return RunStatus::Stopped;
+        return std::nullopt;
+    }
+
+    enum class MetricName
+    {
+        Rps,
+        LatencyAvg,
+        LatencyP50,
+        LatencyP95,
+        LatencyP99,
+        ErrorRate,
+        TotalRequests,
+        Completed,
+        ConnectionsActive
+    };
+
+    inline const char *to_string(MetricName name)
+    {
+        switch (name)
+        {
+        case MetricName::Rps:
+            return "rps";
+        case MetricName::LatencyAvg:
+            return "latency_avg";
+        case MetricName::LatencyP50:
+            return "latency_p50";
+        case MetricName::LatencyP95:
+            return "latency_p95";
+        case MetricName::LatencyP99:
+            return "latency_p99";
+        case MetricName::ErrorRate:
+            return "error_rate";
+        case MetricName::TotalRequests:
+            return "total_requests";
+        case MetricName::Completed:
+            return "completed";
+        case MetricName::ConnectionsActive:
+            return "connections_active";
+        }
+        return "unknown";
+    }
+
+    inline std::optional<MetricName> parse_metric_name(const std::string &str)
+    {
+        if (str == "rps")
+            return MetricName::Rps;
+        if (str == "latency_avg")
+            return MetricName::LatencyAvg;
+        if (str == "latency_p50")
+            return MetricName::LatencyP50;
+        if (str == "latency_p95")
+            return MetricName::LatencyP95;
+        if (str == "latency_p99")
+            return MetricName::LatencyP99;
+        if (str == "error_rate")
+            return MetricName::ErrorRate;
+        if (str == "total_requests")
+            return MetricName::TotalRequests;
+        if (str == "completed")
+            return MetricName::Completed;
+        if (str == "connections_active")
+            return MetricName::ConnectionsActive;
+        return std::nullopt;
+    }
+
+    // ============================================================================
+    // Database Types
+    // ============================================================================
+
+    namespace db
+    {
+        struct Collection
+        {
+            std::string id;
+            std::optional<std::string> parent_id;
+            std::string name;
+            int order;
+            int64_t created_at;
+        };
+
+        struct Request
+        {
+            std::string id;
+            std::string collection_id;
+            std::string name;
+            HttpMethod method;
+            std::string url;
+            std::string headers;             // JSON
+            std::string body;                // JSON/Text
+            std::string auth;                // JSON
+            std::string pre_request_script;  // JS Code
+            std::string post_request_script; // JS Code (Tests)
+            int64_t updated_at;
+        };
+
+        struct Environment
+        {
+            std::string id;
+            std::string name;
+            std::string variables; // JSON
+            int64_t updated_at;
+        };
+
+        struct Run
+        {
+            std::string id;
+            std::optional<std::string> request_id;     // Linked request (if design mode)
+            std::optional<std::string> environment_id; // Environment used
+            RunType type;                              // "design" or "load"
+            RunStatus status;                          // "pending", "running", "completed", "failed"
+            std::string config_snapshot;               // JSON string (Full copy of request/env)
+            int64_t start_time;
+            int64_t end_time;
+        };
+
+        struct Metric
+        {
+            int id;
+            std::string run_id;
+            int64_t timestamp;
+            MetricName name; // "rps", "latency", "error_rate"
+            double value;
+            std::string labels; // JSON string
+        };
+
+        struct Result
+        {
+            int id;
+            std::string run_id;
+            int64_t timestamp;
+            int status_code;
+            double latency_ms;
+            std::string error;
+            std::string trace_data; // JSON (Headers/Body - only for Design Mode or Errors)
+        };
+
+        struct KVStore
+        {
+            std::string key;
+            std::string value;
+        };
+    }
 
 } // namespace vayu

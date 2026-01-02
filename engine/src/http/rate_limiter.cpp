@@ -1,4 +1,5 @@
 #include "vayu/http/rate_limiter.hpp"
+#include "vayu/core/constants.hpp"
 #include <algorithm>
 #include <thread>
 
@@ -12,7 +13,7 @@ namespace vayu::http
         // Set default burst size if not specified
         if (config_.burst_size == 0.0 && config_.target_rps > 0.0)
         {
-            config_.burst_size = config_.target_rps * 2.0;
+            config_.burst_size = config_.target_rps * vayu::core::constants::http::BURST_MULTIPLIER;
         }
 
         // Start with full burst capacity
@@ -44,9 +45,9 @@ namespace vayu::http
         {
             refill_tokens();
 
-            if (tokens_ >= 1.0)
+            if (tokens_ >= vayu::core::constants::http::TOKEN_COST)
             {
-                tokens_ -= 1.0;
+                tokens_ -= vayu::core::constants::http::TOKEN_COST;
                 return;
             }
 

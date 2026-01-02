@@ -107,6 +107,7 @@ config.burst_size = 20000.0;   // Burst capacity
   - ✅ `GET/POST /environments` - Manage Environments
   - ✅ `GET /runs` - List execution history
   - ✅ `GET /run/:id` - Get run details
+  - ✅ `GET /run/:id/report` - Get detailed run report (percentiles, status codes)
   - ✅ `POST /run/:id/stop` - Stop active run
   - ✅ `GET /stats/:id` - Get run metrics (SSE Stream)
 - **Infrastructure:**

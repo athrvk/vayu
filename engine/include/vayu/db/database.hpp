@@ -4,89 +4,10 @@
 #include <vector>
 #include <optional>
 #include <memory>
+#include "vayu/types.hpp"
 
 namespace vayu::db
 {
-
-    // ==========================================
-    // Project Management (CMS Layer)
-    // ==========================================
-
-    struct Collection
-    {
-        std::string id;
-        std::optional<std::string> parent_id;
-        std::string name;
-        int order;
-        int64_t created_at;
-    };
-
-    struct Request
-    {
-        std::string id;
-        std::string collection_id;
-        std::string name;
-        std::string method;
-        std::string url;
-        std::string headers;             // JSON
-        std::string body;                // JSON/Text
-        std::string auth;                // JSON
-        std::string pre_request_script;  // JS Code
-        std::string post_request_script; // JS Code (Tests)
-        int64_t updated_at;
-    };
-
-    struct Environment
-    {
-        std::string id;
-        std::string name;
-        std::string variables; // JSON
-        int64_t updated_at;
-    };
-
-    // ==========================================
-    // Execution Engine (Runtime Layer)
-    // ==========================================
-
-    struct Run
-    {
-        std::string id;
-        std::optional<std::string> request_id;     // Linked request (if design mode)
-        std::optional<std::string> environment_id; // Environment used
-        std::string type;                          // "design" or "load"
-        std::string status;                        // "pending", "running", "completed", "failed"
-        std::string config_snapshot;               // JSON string (Full copy of request/env)
-        int64_t start_time;
-        int64_t end_time;
-    };
-
-    struct Metric
-    {
-        int id;
-        std::string run_id;
-        int64_t timestamp;
-        std::string name; // "rps", "latency", "error_rate"
-        double value;
-        std::string labels; // JSON string
-    };
-
-    struct Result
-    {
-        int id;
-        std::string run_id;
-        int64_t timestamp;
-        int status_code;
-        double latency_ms;
-        std::string error;
-        std::string trace_data; // JSON (Headers/Body - only for Design Mode or Errors)
-    };
-
-    struct KVStore
-    {
-        std::string key;
-        std::string value;
-    };
-
     class Database
     {
     public:
@@ -111,7 +32,7 @@ namespace vayu::db
         // Execution
         void create_run(const Run &run);
         std::optional<Run> get_run(const std::string &id);
-        void update_run_status(const std::string &id, const std::string &status);
+        void update_run_status(const std::string &id, RunStatus status);
         std::vector<Run> get_all_runs();
 
         // Metrics

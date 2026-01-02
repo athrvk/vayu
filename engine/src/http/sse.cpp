@@ -4,6 +4,7 @@
  */
 
 #include "vayu/http/sse.hpp"
+#include "vayu/core/constants.hpp"
 
 #include <curl/curl.h>
 
@@ -39,7 +40,7 @@ namespace vayu::http
         while (pos < buffer_.size())
         {
             // Find end of line (CR, LF, or CRLF)
-            size_t eol = buffer_.find_first_of("\r\n", pos);
+            size_t eol = buffer_.find_first_of(vayu::core::constants::http::EOL_CHARS, pos);
             if (eol == std::string::npos)
             {
                 // No complete line yet

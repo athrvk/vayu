@@ -1,0 +1,14 @@
+---
+Checks: '
+  bugprone-*,
+  clang-analyzer-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -modernize-use-trailing-return-type,
+  -readability-magic-numbers
+'
+WarningsAsErrors: ''
+HeaderFilterRegex: 'src/.*|include/.*'
+FormatStyle: file
+...

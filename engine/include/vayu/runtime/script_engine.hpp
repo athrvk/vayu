@@ -9,6 +9,7 @@
  */
 
 #include "vayu/types.hpp"
+#include "vayu/core/constants.hpp"
 #include <functional>
 #include <memory>
 #include <string>
@@ -22,10 +23,10 @@ namespace vayu::runtime
      */
     struct ScriptConfig
     {
-        size_t memory_limit = 64 * 1024 * 1024; // 64MB default
-        uint64_t timeout_ms = 5000;             // 5 second default
-        size_t stack_size = 256 * 1024;         // 256KB stack
-        bool enable_console = true;
+        size_t memory_limit = vayu::core::constants::script_engine::MEMORY_LIMIT;
+        uint64_t timeout_ms = vayu::core::constants::script_engine::TIMEOUT_MS;
+        size_t stack_size = vayu::core::constants::script_engine::STACK_SIZE;
+        bool enable_console = vayu::core::constants::script_engine::ENABLE_CONSOLE;
     };
 
     /**

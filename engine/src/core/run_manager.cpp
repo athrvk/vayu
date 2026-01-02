@@ -1,5 +1,7 @@
 #include "vayu/core/run_manager.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/utils/json.hpp"
+#include "vayu/utils/logger.hpp"
 #include <iostream>
 #include <chrono>
 #include <algorithm>
@@ -100,7 +102,7 @@ namespace vayu::core
         try
         {
             // Update status to running
-            db.update_run_status(context->run_id, "running");
+            db.update_run_status(context->run_id, vayu::RunStatus::Running);
 
             // Parse load test configuration
             std::string mode = config.value("mode", "duration"); // "duration" or "iterations"
@@ -128,7 +130,8 @@ namespace vayu::core
             loop_config.max_concurrent = std::max(concurrency, size_t(100));
             loop_config.target_rps = target_rps;
             loop_config.burst_size = target_rps > 0 ? target_rps * 2.0 : 0.0;
-            loop_config.verbose = verbose;
+            // Only enable curl verbose if explicitly requested in config, independent of server verbose mode
+            loop_config.verbose = config.value("verbose", false);
 
             // Create EventLoop
             context->event_loop = std::make_unique<vayu::http::EventLoop>(loop_config);
@@ -139,7 +142,7 @@ namespace vayu::core
             auto request_result = vayu::json::deserialize_request(request_json);
             if (request_result.is_error())
             {
-                db.update_run_status(context->run_id, "failed");
+                db.update_run_status(context->run_id, vayu::RunStatus::Failed);
                 context->is_running = false;
                 return;
             }
@@ -149,18 +152,18 @@ namespace vayu::core
 
             if (verbose)
             {
-                std::cout << "Starting load test: " << context->run_id << "\n";
-                std::cout << "  Mode: " << mode << "\n";
+                vayu::utils::log_info("Starting load test: " + context->run_id);
+                vayu::utils::log_info("  Mode: " + mode);
                 if (mode == "duration")
                 {
-                    std::cout << "  Duration: " << duration_ms << " ms\n";
+                    vayu::utils::log_info("  Duration: " + std::to_string(duration_ms) + " ms");
                 }
                 else
                 {
-                    std::cout << "  Iterations: " << iterations << "\n";
+                    vayu::utils::log_info("  Iterations: " + std::to_string(iterations));
                 }
-                std::cout << "  Concurrency: " << concurrency << "\n";
-                std::cout << "  Target RPS: " << (target_rps > 0 ? std::to_string(target_rps) : "unlimited") << "\n";
+                vayu::utils::log_info("  Concurrency: " + std::to_string(concurrency));
+                vayu::utils::log_info("  Target RPS: " + (target_rps > 0 ? std::to_string(target_rps) : "unlimited"));
             }
 
             // Submit requests
@@ -279,11 +282,14 @@ namespace vayu::core
 
             if (verbose)
             {
-                std::cout << "Submitted " << submitted << " requests, waiting for completion...\n";
+                vayu::utils::log_info("Submitted " + std::to_string(submitted) + " requests, waiting for completion...");
             }
 
             // Wait for all requests to complete
             context->event_loop->stop(true); // Wait for pending
+
+            // Stop background metrics collection to ensure COMPLETED is the last metric
+            context->is_running = false;
 
             // Calculate final metrics
             auto test_end = std::chrono::steady_clock::now();
@@ -315,39 +321,49 @@ namespace vayu::core
             try
             {
                 auto timestamp = now_ms();
-                db.add_metric({0, context->run_id, timestamp, "rps", actual_rps, ""});
-                db.add_metric({0, context->run_id, timestamp, "latency_avg", avg_latency, ""});
-                db.add_metric({0, context->run_id, timestamp, "latency_p50", p50, R"({"percentile":"p50"})"});
-                db.add_metric({0, context->run_id, timestamp, "latency_p95", p95, R"({"percentile":"p95"})"});
-                db.add_metric({0, context->run_id, timestamp, "latency_p99", p99, R"({"percentile":"p99"})"});
-                db.add_metric({0, context->run_id, timestamp, "error_rate", error_rate, ""});
-                db.add_metric({0, context->run_id, timestamp, "total_requests", static_cast<double>(completed), ""});
-                db.add_metric({0, context->run_id, timestamp, "test_complete", 1.0, ""});
+                db.add_metric({0, context->run_id, timestamp, vayu::MetricName::Rps, actual_rps, ""});
+                db.add_metric({0, context->run_id, timestamp, vayu::MetricName::LatencyAvg, avg_latency, ""});
+                db.add_metric({0, context->run_id, timestamp, vayu::MetricName::LatencyP50, p50, R"({"percentile":"p50"})"});
+                db.add_metric({0, context->run_id, timestamp, vayu::MetricName::LatencyP95, p95, R"({"percentile":"p95"})"});
+                db.add_metric({0, context->run_id, timestamp, vayu::MetricName::LatencyP99, p99, R"({"percentile":"p99"})"});
+                db.add_metric({0, context->run_id, timestamp, vayu::MetricName::ErrorRate, error_rate, ""});
+                db.add_metric({0, context->run_id, timestamp, vayu::MetricName::TotalRequests, static_cast<double>(completed), ""});
+                db.add_metric({0, context->run_id, timestamp, vayu::MetricName::Completed, 1.0, ""});
             }
             catch (const std::exception &e)
             {
-                std::cerr << "Failed to store final metrics: " << e.what() << "\n";
+                vayu::utils::log_error("Failed to store final metrics: " + std::string(e.what()));
             }
 
             // Update run status
-            std::string final_status = context->should_stop ? "stopped" : "completed";
+            vayu::RunStatus final_status = context->should_stop ? vayu::RunStatus::Stopped : vayu::RunStatus::Completed;
             db.update_run_status(context->run_id, final_status);
 
             if (verbose)
             {
-                std::cout << "Load test " << context->run_id << " " << final_status << "\n";
-                std::cout << "  Total requests: " << completed << "\n";
-                std::cout << "  Errors: " << errors << " (" << error_rate << "%)\n";
-                std::cout << "  Duration: " << total_duration_s << " s\n";
-                std::cout << "  Actual RPS: " << actual_rps << "\n";
-                std::cout << "  Avg latency: " << avg_latency << " ms\n";
-                std::cout << "  P50/P95/P99: " << p50 << "/" << p95 << "/" << p99 << " ms\n";
+                vayu::utils::log_info("Load test " + context->run_id + " " + vayu::to_string(final_status));
+                vayu::utils::log_info("  Total requests: " + std::to_string(completed));
+                vayu::utils::log_info("  Errors: " + std::to_string(errors) + " (" + std::to_string(error_rate) + "%)");
+                vayu::utils::log_info("  Duration: " + std::to_string(total_duration_s) + " s");
+                vayu::utils::log_info("  Actual RPS: " + std::to_string(actual_rps));
+                vayu::utils::log_info("  Avg latency: " + std::to_string(avg_latency) + " ms");
+                vayu::utils::log_info("  P50/P95/P99: " + std::to_string(p50) + "/" + std::to_string(p95) + "/" + std::to_string(p99) + " ms");
             }
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Load test error: " << e.what() << "\n";
-            db.update_run_status(context->run_id, "failed");
+            // Stop background metrics collection
+            context->is_running = false;
+
+            vayu::utils::log_error("Load test error: " + std::string(e.what()));
+            db.update_run_status(context->run_id, vayu::RunStatus::Failed);
+            try
+            {
+                db.add_metric({0, context->run_id, now_ms(), vayu::MetricName::Completed, 1.0, ""});
+            }
+            catch (...)
+            {
+            }
         }
 
         context->is_running = false;
@@ -380,9 +396,9 @@ namespace vayu::core
                 try
                 {
                     auto timestamp = now_ms();
-                    db.add_metric({0, context->run_id, timestamp, "rps", current_rps, ""});
-                    db.add_metric({0, context->run_id, timestamp, "error_rate", error_rate, ""});
-                    db.add_metric({0, context->run_id, timestamp, "connections_active",
+                    db.add_metric({0, context->run_id, timestamp, vayu::MetricName::Rps, current_rps, ""});
+                    db.add_metric({0, context->run_id, timestamp, vayu::MetricName::ErrorRate, error_rate, ""});
+                    db.add_metric({0, context->run_id, timestamp, vayu::MetricName::ConnectionsActive,
                                    static_cast<double>(context->event_loop->active_count()), ""});
                 }
                 catch (const std::exception &e)

@@ -277,9 +277,9 @@ TEST_F(SseParserTest, ComplexEvent)
 
 TEST(EventSourceStateTest, ToStringConversion)
 {
-    EXPECT_STREQ(vayu::http::to_string(vayu::http::EventSourceState::Connecting), "CONNECTING");
-    EXPECT_STREQ(vayu::http::to_string(vayu::http::EventSourceState::Open), "OPEN");
-    EXPECT_STREQ(vayu::http::to_string(vayu::http::EventSourceState::Closed), "CLOSED");
+    EXPECT_STREQ(vayu::to_string(vayu::http::EventSourceState::Connecting), "CONNECTING");
+    EXPECT_STREQ(vayu::to_string(vayu::http::EventSourceState::Open), "OPEN");
+    EXPECT_STREQ(vayu::to_string(vayu::http::EventSourceState::Closed), "CLOSED");
 }
 
 // ============================================================================
