@@ -1,0 +1,14 @@
+{
+    "request": {
+        "method": "GET",
+        "url": "https://httpbin.org/get",
+        "headers": {
+            "Accept": "application/json"
+        }
+    },
+    "mode": "ramp_up",
+    "duration": "10s",
+    "rampUpDuration": "5s",
+    "startConcurrency": 1,
+    "concurrency": 20
+}

@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/load_strategy.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -95,21 +96,11 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         // Update status to running
         db.update_run_status(context->run_id, vayu::RunStatus::Running);
 
-        // Parse load test configuration
-        std::string mode = config.value("mode", "duration");  // "duration" or "iterations"
-        int64_t duration_ms = 0;
-        size_t iterations = 0;
-
-        if (mode == "duration") {
-            std::string duration_str = config.value("duration", "60s");
-            // Parse duration (simple: just handle "Ns" format)
-            duration_ms = std::stoll(duration_str.substr(0, duration_str.length() - 1)) * 1000;
-        } else {
-            iterations = static_cast<size_t>(config.value("iterations", 1000));
-        }
-
         size_t concurrency = static_cast<size_t>(config.value("concurrency", 100));
         double target_rps = config.value("rps", 0.0);  // 0 = unlimited
+        if (target_rps == 0.0) {
+            target_rps = config.value("targetRps", 0.0);
+        }
         int timeout_ms = config.value("timeout", 30000);
 
         // Configure EventLoop
@@ -138,126 +129,17 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         auto request = request_result.value();
         request.timeout_ms = timeout_ms;
 
-        if (verbose) {
-            vayu::utils::log_info("Starting load test: " + context->run_id);
-            vayu::utils::log_info("  Mode: " + mode);
-            if (mode == "duration") {
-                vayu::utils::log_info("  Duration: " + std::to_string(duration_ms) + " ms");
-            } else {
-                vayu::utils::log_info("  Iterations: " + std::to_string(iterations));
-            }
-            vayu::utils::log_info("  Concurrency: " + std::to_string(concurrency));
-            vayu::utils::log_info("  Target RPS: " +
-                                  (target_rps > 0 ? std::to_string(target_rps) : "unlimited"));
-        }
-
-        // Submit requests
+        // Execute Load Strategy
         auto test_start = std::chrono::steady_clock::now();
-        size_t submitted = 0;
 
-        if (mode == "duration") {
-            // Duration-based: submit continuously until duration expires
-            while (!context->should_stop) {
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                   std::chrono::steady_clock::now() - test_start)
-                                   .count();
-
-                if (elapsed >= duration_ms) {
-                    break;
-                }
-
-                // Backpressure: prevent OOM by limiting pending queue size
-                // Limit to 5x concurrency or 1000, whichever is larger
-                size_t max_pending = std::max(concurrency * 5, size_t(1000));
-                if (context->event_loop->pending_count() > max_pending) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                    continue;
-                }
-
-                // Submit batch of requests
-                for (size_t i = 0; i < concurrency && !context->should_stop; ++i) {
-                    context->event_loop->submit(
-                        request,
-                        [context, &db](size_t req_id, vayu::Result<vayu::Response> result) {
-                            context->total_requests++;
-
-                            if (result.is_ok()) {
-                                double latency = result.value().timing.total_ms;
-                                context->total_latency_ms += latency;
-
-                                // Store latency for percentiles
-                                {
-                                    std::lock_guard<std::mutex> lock(context->latencies_mutex);
-                                    context->latencies.push_back(latency);
-                                }
-
-                                // Store result in DB (sampled - every 100th request to avoid DB
-                                // overload)
-                                if (context->total_requests % 100 == 0) {
-                                    try {
-                                        vayu::db::Result db_result;
-                                        db_result.run_id = context->run_id;
-                                        db_result.timestamp = now_ms();
-                                        db_result.status_code = result.value().status_code;
-                                        db_result.latency_ms = latency;
-                                        db.add_result(db_result);
-                                    } catch (const std::exception& e) {
-                                        // Continue on DB error
-                                    }
-                                }
-                            } else {
-                                context->total_errors++;
-                            }
-                        });
-                    submitted++;
-                }
-
-                // Small delay to allow processing
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-        } else {
-            // Iteration-based: submit exact number of requests
-            for (size_t i = 0; i < iterations && !context->should_stop; ++i) {
-                context->event_loop->submit(
-                    request, [context, &db](size_t req_id, vayu::Result<vayu::Response> result) {
-                        context->total_requests++;
-
-                        if (result.is_ok()) {
-                            double latency = result.value().timing.total_ms;
-                            context->total_latency_ms += latency;
-
-                            {
-                                std::lock_guard<std::mutex> lock(context->latencies_mutex);
-                                context->latencies.push_back(latency);
-                            }
-
-                            if (context->total_requests % 100 == 0) {
-                                try {
-                                    vayu::db::Result db_result;
-                                    db_result.run_id = context->run_id;
-                                    db_result.timestamp = now_ms();
-                                    db_result.status_code = result.value().status_code;
-                                    db_result.latency_ms = latency;
-                                    db.add_result(db_result);
-                                } catch (const std::exception& e) {
-                                }
-                            }
-                        } else {
-                            context->total_errors++;
-                        }
-                    });
-                submitted++;
-
-                // Rate limiting check
-                if (target_rps > 0 && submitted % 100 == 0) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                }
-            }
-        }
-
-        if (verbose) {
-            vayu::utils::log_info("Submitted " + std::to_string(submitted) +
-                                  " requests, waiting for completion...");
+        try {
+            auto strategy = LoadStrategy::create(config);
+            strategy->execute(context, db, request);
+        } catch (const std::exception& e) {
+            vayu::utils::log_error("Load test failed: " + std::string(e.what()));
+            db.update_run_status(context->run_id, vayu::RunStatus::Failed);
+            context->is_running = false;
+            return;
         }
 
         // Wait for all requests to complete

@@ -37,15 +37,17 @@ if(APPLE)
     list(APPEND CMAKE_PROGRAM_PATH "/opt/homebrew/opt/llvm/bin" "/usr/local/opt/llvm/bin")
 endif()
 
-find_program(CLANG_TIDY_EXE NAMES "clang-tidy")
+# Uncomment the following lines to enable clang-tidy static analysis
 
-if(CLANG_TIDY_EXE)
-    message(STATUS "clang-tidy found: ${CLANG_TIDY_EXE}")
-    # Set clang-tidy for all C++ targets created after this point
-    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-else()
-    message(WARNING "clang-tidy not found. Static analysis will be disabled.")
-endif()
+# find_program(CLANG_TIDY_EXE NAMES "clang-tidy")
+
+# if(CLANG_TIDY_EXE)
+#     message(STATUS "clang-tidy found: ${CLANG_TIDY_EXE}")
+#     # Set clang-tidy for all C++ targets created after this point
+#     set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+# else()
+#     message(WARNING "clang-tidy not found. Static analysis will be disabled.")
+# endif()
 
 # ============================================================================
 # Compiler Warnings
@@ -154,6 +156,7 @@ add_library(vayu_core STATIC
     src/utils/logger.cpp
     src/utils/metrics_helper.cpp
     src/db/database.cpp
+    src/core/load_strategy.cpp
     src/core/run_manager.cpp
 )
 

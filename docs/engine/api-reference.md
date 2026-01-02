@@ -59,6 +59,111 @@ GET /health
 
 ### Run Management
 
+#### Start Load Test
+
+**Start Load Test:**
+```
+POST /run
+```
+
+**Request Body:**
+
+```json
+{
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.com/endpoint",
+    "headers": {
+      "Authorization": "Bearer token",
+      "Accept": "application/json"
+    },
+    "body": "{\"key\": \"value\"}"  // Optional, for POST/PUT
+  },
+  "mode": "constant",  // "constant" | "iterations" | "ramp_up"
+  
+  // Mode-specific parameters (see below)
+  
+  // Optional: Data capture settings
+  "success_sample_rate": 10,        // Save 10% of successful requests
+  "slow_threshold_ms": 1000,        // Auto-save requests slower than 1s
+  "save_timing_breakdown": true,    // Capture DNS, TLS, TTFB timing
+  
+  // Optional: Metadata
+  "requestId": "req_123",           // Link to request definition
+  "environmentId": "env_prod",      // Link to environment
+  "comment": "API performance test"  // Test description
+}
+```
+
+**Load Test Modes:**
+
+**1. Constant Load (Fixed RPS)**
+```json
+{
+  "mode": "constant",
+  "duration": "30s",     // "10s", "5m", "1h"
+  "targetRps": 100       // Target requests per second
+}
+```
+
+**2. Iterations (Fixed Count)**
+```json
+{
+  "mode": "iterations",
+  "iterations": 1000,    // Total requests to execute
+  "concurrency": 10      // Concurrent requests
+}
+```
+
+**3. Ramp-Up (Gradual Increase)**
+```json
+{
+  "mode": "ramp_up",
+  "duration": "60s",           // Total test duration
+  "rampUpDuration": "30s",     // Time to reach target
+  "startConcurrency": 1,       // Starting concurrent requests
+  "concurrency": 50            // Target concurrent requests
+}
+```
+
+**Data Capture Settings:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `success_sample_rate` | number (0-100) | 0 | Percentage of successful requests to save to database |
+| `slow_threshold_ms` | number | 0 | Automatically save requests slower than this threshold (ms) |
+| `save_timing_breakdown` | boolean | false | Capture detailed timing: DNS, connect, TLS, TTFB, download |
+
+**Response (202 Accepted):**
+```json
+{
+  "runId": "run_1704200000000",
+  "status": "pending",
+  "message": "Load test started"
+}
+```
+
+**Errors:**
+- `400 Bad Request`: Missing required fields or invalid mode
+- `500 Internal Server Error`: Failed to create run
+
+**Example: High-Performance Test with Sampling**
+```json
+{
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.com/users"
+  },
+  "mode": "constant",
+  "duration": "60s",
+  "targetRps": 1000,
+  "success_sample_rate": 5,
+  "slow_threshold_ms": 500,
+  "save_timing_breakdown": true,
+  "comment": "Production load test with smart sampling"
+}
+```
+
 #### Runs
 
 **List All Runs:**
@@ -89,20 +194,41 @@ POST /run/:id/stop
     "successfulRequests": 995,
     "failedRequests": 5,
     "errorRate": 0.5,
+    "totalDurationSeconds": 10.5,
     "avgRps": 150.5
   },
   "latency": {
-    "min": 10,
-    "max": 500,
-    "avg": 45,
-    "p50": 40,
-    "p90": 80,
-    "p95": 120,
-    "p99": 200
+    "min": 10.2,
+    "max": 501.8,
+    "avg": 45.3,
+    "p50": 40.1,
+    "p90": 80.5,
+    "p95": 120.3,
+    "p99": 200.7
   },
   "statusCodes": {
     "200": 995,
     "500": 5
+  },
+  "errors": {
+    "total": 5,
+    "withDetails": 5,
+    "types": {
+      "timeout": 3,
+      "connection_failed": 2
+    }
+  },
+  "timingBreakdown": {  // Only if save_timing_breakdown was enabled
+    "avgDnsMs": 15.3,
+    "avgConnectMs": 45.7,
+    "avgTlsMs": 78.2,
+    "avgFirstByteMs": 120.5,
+    "avgDownloadMs": 5.1
+  },
+  "slowRequests": {  // Only if slow_threshold_ms was set
+    "count": 12,
+    "thresholdMs": 500,
+    "percentage": 1.2
   }
 }
 ```

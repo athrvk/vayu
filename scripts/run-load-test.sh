@@ -71,19 +71,31 @@ format_json() {
     fi
 }
 
-# Stream the SSE output
-curl -N -s "$STATS_URL" | while read -r line; do
+# Track if we've seen the complete event
+COMPLETE_SEEN=false
+
+# Stream the SSE output - we need to keep reading until we see the complete event
+curl -N -s "$STATS_URL" 2>/dev/null | while IFS= read -r line; do
     # Handle SSE lines
     if [[ "$line" == "event: complete" ]]; then
+        COMPLETE_SEEN=true
         echo ""
         echo "Test Completed!"
-        # The next data line will contain the summary, we want to print that too
+        # Continue reading to get the final data line
         continue
     elif [[ "$line" == "data: "* ]]; then
         JSON_DATA="${line#data: }"
         
-        # Check if it's the completion summary (usually follows event: complete)
-        # or just a metric update
+        # Format and display the JSON data
         echo "$JSON_DATA" | format_json
+        
+        # If we just saw a complete event and printed the final data, we can exit
+        if [ "$COMPLETE_SEEN" = true ]; then
+            echo "----------------------------------------"
+            exit 0
+        fi
     fi
 done
+
+echo "----------------------------------------"
+echo "Stream ended."

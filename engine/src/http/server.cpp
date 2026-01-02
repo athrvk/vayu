@@ -365,9 +365,44 @@ void Server::setup_routes() {
      * POST /run
      * Starts a load test run (Vayu Mode).
      * Executes multiple requests concurrently based on the specified load profile.
-     * Body params: request (object), mode (object with duration/iterations and workers),
-     *              or duration (ms) and iterations (count),
-     *              requestId (optional), environmentId (optional)
+     *
+     * Request Body Parameters:
+     *   - request (object, required): HTTP request configuration
+     *     - method (string): GET, POST, PUT, DELETE, etc.
+     *     - url (string): Target URL
+     *     - headers (object, optional): HTTP headers
+     *     - body (string, optional): Request body
+     *
+     *   - mode (string, required): Load test strategy
+     *     - "constant": Fixed RPS for duration
+     *     - "iterations": Fixed number of iterations with concurrency
+     *     - "ramp_up": Gradually increase concurrency
+     *
+     *   Mode-specific parameters:
+     *   For "constant" mode:
+     *     - duration (string): Duration (e.g., "10s", "2m")
+     *     - targetRps (number): Target requests per second
+     *
+     *   For "iterations" mode:
+     *     - iterations (number): Total number of requests
+     *     - concurrency (number): Number of concurrent requests
+     *
+     *   For "ramp_up" mode:
+     *     - duration (string): Total duration
+     *     - rampUpDuration (string): Time to reach target concurrency
+     *     - startConcurrency (number): Initial concurrency level
+     *     - concurrency (number): Target concurrency level
+     *
+     *   Data Capture (optional):
+     *     - success_sample_rate (number, 0-100): % of successful requests to save
+     *     - slow_threshold_ms (number): Threshold for auto-capturing slow requests
+     *     - save_timing_breakdown (boolean): Capture detailed timing (DNS, TLS, etc.)
+     *
+     *   Optional:
+     *     - requestId (string): Link to request definition
+     *     - environmentId (string): Link to environment
+     *     - comment (string): Test description
+     *
      * Creates a "load" type run and returns immediately with 202 Accepted.
      * The actual load test runs asynchronously via RunManager.
      * Returns: 202 Accepted with runId and status "pending".
@@ -563,6 +598,31 @@ void Server::setup_routes() {
                                           {"p95", report.latency_p95},
                                           {"p99", report.latency_p99}};
                 json_report["statusCodes"] = report.status_codes;
+
+                // Error details
+                json_report["errors"] = {{"total", report.failed_requests},
+                                         {"withDetails", report.errors_with_details},
+                                         {"types", report.error_types}};
+
+                // Timing breakdown (only if available)
+                if (report.has_timing_data) {
+                    json_report["timingBreakdown"] = {{"avgDnsMs", report.avg_dns_ms},
+                                                      {"avgConnectMs", report.avg_connect_ms},
+                                                      {"avgTlsMs", report.avg_tls_ms},
+                                                      {"avgFirstByteMs", report.avg_first_byte_ms},
+                                                      {"avgDownloadMs", report.avg_download_ms}};
+                }
+
+                // Slow requests (only if threshold was set)
+                if (report.slow_threshold_ms > 0) {
+                    json_report["slowRequests"] = {
+                        {"count", report.slow_requests_count},
+                        {"thresholdMs", report.slow_threshold_ms},
+                        {"percentage",
+                         report.total_requests > 0
+                             ? (report.slow_requests_count * 100.0 / report.total_requests)
+                             : 0.0}};
+                }
 
                 res.set_content(json_report.dump(), "application/json");
 

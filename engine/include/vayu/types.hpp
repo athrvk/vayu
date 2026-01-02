@@ -342,6 +342,22 @@ struct DetailedReport {
 
     // Distribution
     std::map<int, size_t> status_codes;
+
+    // Error Details
+    size_t errors_with_details;                 // Count of errors with trace data
+    std::map<std::string, size_t> error_types;  // e.g., {"timeout": 3, "connection_failed": 2}
+
+    // Timing Breakdown (averages in ms) - only if timing data captured
+    bool has_timing_data;
+    double avg_dns_ms;
+    double avg_connect_ms;
+    double avg_tls_ms;
+    double avg_first_byte_ms;
+    double avg_download_ms;
+
+    // Slow Requests
+    size_t slow_requests_count;
+    size_t slow_threshold_ms;  // The threshold used (0 if not set)
 };
 
 // ============================================================================
@@ -404,6 +420,27 @@ inline const char* to_string(RunType type) {
 inline std::optional<RunType> parse_run_type(const std::string& str) {
     if (str == "design") return RunType::Design;
     if (str == "load") return RunType::Load;
+    return std::nullopt;
+}
+
+enum class LoadTestType { Constant, RampUp, Iterations };
+
+inline const char* to_string(LoadTestType type) {
+    switch (type) {
+        case LoadTestType::Constant:
+            return "constant";
+        case LoadTestType::RampUp:
+            return "ramp_up";
+        case LoadTestType::Iterations:
+            return "iterations";
+    }
+    return "unknown";
+}
+
+inline std::optional<LoadTestType> parse_load_test_type(const std::string& str) {
+    if (str == "constant" || str == "duration") return LoadTestType::Constant;
+    if (str == "ramp_up") return LoadTestType::RampUp;
+    if (str == "iterations") return LoadTestType::Iterations;
     return std::nullopt;
 }
 
