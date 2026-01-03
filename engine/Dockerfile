@@ -12,6 +12,13 @@ RUN apt-get update && apt-get install -y \
     git \
     pkg-config \
     linux-libc-dev \
+    autoconf \
+    automake \
+    libtool \
+    perl \
+    bison \
+    flex \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install vcpkg
