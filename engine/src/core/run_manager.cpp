@@ -113,6 +113,11 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         // mode
         loop_config.verbose = config.value("verbose", false);
 
+        vayu::utils::log_debug("EventLoop config: workers=auto, max_concurrent=" +
+                               std::to_string(loop_config.max_concurrent) +
+                               ", target_rps=" + std::to_string(target_rps) +
+                               ", timeout=" + std::to_string(timeout_ms) + "ms");
+
         // Create EventLoop
         context->event_loop = std::make_unique<vayu::http::EventLoop>(loop_config);
         context->event_loop->start();
@@ -269,6 +274,11 @@ void collect_metrics(std::shared_ptr<RunContext> context, vayu::db::Database* db
 
             double current_rps = elapsed > 0 ? delta / elapsed : 0.0;
             double error_rate = current_total > 0 ? (current_errors * 100.0 / current_total) : 0.0;
+
+            vayu::utils::log_debug("Metrics: rps=" + std::to_string(current_rps) + ", error_rate=" +
+                                   std::to_string(error_rate) + "%" + ", active=" +
+                                   std::to_string(context->event_loop->active_count()) +
+                                   ", sent=" + std::to_string(context->requests_sent.load()));
 
             // Store metrics
             try {

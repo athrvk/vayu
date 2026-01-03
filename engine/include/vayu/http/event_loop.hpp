@@ -21,6 +21,12 @@
 
 namespace vayu::http {
 
+// Forward declarations for Pimpl idiom
+namespace detail {
+class EventLoopImpl;
+class ThreadPoolImpl;
+}  // namespace detail
+
 /**
  * @brief Callback invoked when a request completes
  */
@@ -201,8 +207,7 @@ public:
     [[nodiscard]] EventLoopStats stats() const;
 
 private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::unique_ptr<detail::EventLoopImpl> impl_;
 };
 
 /**
@@ -263,8 +268,7 @@ public:
 private:
     void submit_impl(std::function<void()> task);
 
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::unique_ptr<detail::ThreadPoolImpl> impl_;
 };
 
 }  // namespace vayu::http

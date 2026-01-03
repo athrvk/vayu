@@ -33,6 +33,10 @@ void handle_result(std::shared_ptr<RunContext> context,
         double latency = response.timing.total_ms;
         context->total_latency_ms += latency;
 
+        // Log successful response details at debug level
+        vayu::utils::log_debug("Request completed: status=" + std::to_string(response.status_code) +
+                               ", latency=" + std::to_string(latency) + "ms");
+
         // Store latency for percentiles
         {
             std::lock_guard<std::mutex> lock(context->latencies_mutex);
@@ -77,6 +81,11 @@ void handle_result(std::shared_ptr<RunContext> context,
     } else {
         // CRITICAL: Save all errors with full details
         context->total_errors++;
+
+        const auto& error = result.error();
+        vayu::utils::log_debug(
+            "Request failed: code=" + std::to_string(static_cast<int>(error.code)) +
+            ", message=" + error.message);
 
         try {
             const auto& error = result.error();

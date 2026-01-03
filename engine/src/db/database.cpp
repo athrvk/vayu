@@ -5,6 +5,8 @@
 #include <chrono>
 #include <iostream>
 
+#include "vayu/utils/logger.hpp"
+
 namespace sqlite_orm {
 // HttpMethod
 template <>
@@ -210,10 +212,12 @@ Database::Database(const std::string& db_path) : impl_(std::make_unique<Impl>(db
 Database::~Database() = default;
 
 void Database::init() {
+    vayu::utils::log_debug("Initializing database, syncing schema...");
     impl_->storage.sync_schema();
     // Enable WAL mode for better concurrency
     impl_->storage.pragma.journal_mode(journal_mode::WAL);
     impl_->storage.pragma.synchronous(1);  // NORMAL
+    vayu::utils::log_debug("Database initialized with WAL mode");
 }
 
 // ==========================================
@@ -221,6 +225,7 @@ void Database::init() {
 // ==========================================
 
 void Database::create_collection(const Collection& c) {
+    vayu::utils::log_debug("Creating collection: id=" + c.id + ", name=" + c.name);
     impl_->storage.replace(c);
 }
 
@@ -229,6 +234,7 @@ std::vector<Collection> Database::get_collections() {
 }
 
 void Database::save_request(const Request& r) {
+    vayu::utils::log_debug("Saving request: id=" + r.id + ", name=" + r.name);
     impl_->storage.replace(r);
 }
 
@@ -243,6 +249,7 @@ std::vector<Request> Database::get_requests_in_collection(const std::string& col
 }
 
 void Database::save_environment(const Environment& e) {
+    vayu::utils::log_debug("Saving environment: id=" + e.id + ", name=" + e.name);
     impl_->storage.replace(e);
 }
 
@@ -261,6 +268,8 @@ std::optional<Environment> Database::get_environment(const std::string& id) {
 // ==========================================
 
 void Database::create_run(const Run& run) {
+    vayu::utils::log_debug("Creating run: id=" + run.id +
+                           ", type=" + std::string(vayu::to_string(run.type)));
     impl_->storage.replace(run);
 }
 
@@ -271,6 +280,8 @@ std::optional<Run> Database::get_run(const std::string& id) {
 }
 
 void Database::update_run_status(const std::string& id, RunStatus status) {
+    vayu::utils::log_debug("Updating run status: id=" + id +
+                           ", status=" + std::string(vayu::to_string(status)));
     auto run = get_run(id);
     if (run) {
         run->status = status;

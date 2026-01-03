@@ -49,7 +49,7 @@ COMMANDS:
 OPTIONS:
     -h, --help          Show this help message
     -v, --version       Show version information
-    --verbose           Enable verbose output
+    --verbose [LEVEL]   Enable verbose output (0=warn/error, 1=info, 2=debug, default: 1)
     --no-color          Disable colored output
     --daemon <url>      Vayu Engine URL (default: http://127.0.0.1:9876)
 
@@ -161,7 +161,7 @@ vayu::Response parse_daemon_response(const std::string& json_str) {
 
 int run_via_daemon(const std::string& daemon_url,
                    const std::string& filepath,
-                   bool verbose,
+                   int verbosity,
                    bool color) {
     // Read request file
     std::string content;
@@ -187,7 +187,7 @@ int run_via_daemon(const std::string& daemon_url,
     httplib::Client cli(daemon_url);
     cli.set_connection_timeout(5);  // 5s connection timeout
 
-    if (verbose) {
+    if (verbosity >= 1) {
         vayu::utils::log_info("Connecting to daemon at " + daemon_url + "...");
     }
 
@@ -253,6 +253,9 @@ int run_via_daemon(const std::string& daemon_url,
 }  // namespace
 
 int main(int argc, char* argv[]) {
+    // Initialize logger
+    vayu::utils::Logger::instance().init(vayu::core::constants::logging::DIR);
+
     // Parse arguments
     if (argc < 2) {
         print_help();
@@ -260,7 +263,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::string command = argv[1];
-    bool verbose = false;
+    int verbosity = 0;  // 0=warn/error, 1=info+, 2=debug+
     bool color = true;
     std::string filepath;
     std::string daemon_url = DEFAULT_DAEMON_URL;
@@ -280,7 +283,15 @@ int main(int argc, char* argv[]) {
         }
 
         if (arg == "--verbose") {
-            verbose = true;
+            // Check if next arg is a number (verbosity level)
+            if (i + 1 < argc && std::isdigit(argv[i + 1][0])) {
+                verbosity = std::stoi(argv[++i]);
+                // Clamp to valid range [0, 2]
+                verbosity = std::max(0, std::min(2, verbosity));
+            } else {
+                // No level specified, default to 1 (info level)
+                verbosity = 1;
+            }
             continue;
         }
 
@@ -310,6 +321,9 @@ int main(int argc, char* argv[]) {
     // use other vayu components. However, we are not using vayu::http::Client anymore.
     // vayu::http::global_init();
 
+    // Set logger verbosity
+    vayu::utils::Logger::instance().set_verbosity(verbosity);
+
     int result = 0;
 
     if (command == "run") {
@@ -320,7 +334,7 @@ int main(int argc, char* argv[]) {
             vayu::utils::log_error(msg);
             result = 1;
         } else {
-            result = run_via_daemon(daemon_url, filepath, verbose, color);
+            result = run_via_daemon(daemon_url, filepath, verbosity, color);
         }
     } else if (command[0] == '-') {
         // Already handled flags above

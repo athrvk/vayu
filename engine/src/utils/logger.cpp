@@ -47,8 +47,21 @@ void Logger::log(Level level, const std::string& message) {
         log_file_->flush();
     }
 
-    // Also write to console if verbose or if it's an error/warning
-    if (verbose_ || level >= Level::WARNING) {
+    // Console output based on verbosity level:
+    // Level 0: Only ERROR and WARNING
+    // Level 1: ERROR, WARNING, INFO
+    // Level 2: ERROR, WARNING, INFO, DEBUG
+    bool should_print_to_console = false;
+
+    if (level == Level::ERROR || level == Level::WARNING) {
+        should_print_to_console = true;  // Always show errors and warnings
+    } else if (level == Level::INFO && verbosity_level_ >= 1) {
+        should_print_to_console = true;
+    } else if (level == Level::DEBUG && verbosity_level_ >= 2) {
+        should_print_to_console = true;
+    }
+
+    if (should_print_to_console) {
         if (level == Level::ERROR) {
             std::cerr << log_message << "\n";
         } else {

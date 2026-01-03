@@ -1,12 +1,12 @@
 {
     "request": {
         "method": "GET",
-        "url": "https://httpbin.org/get",
+        "url": "https://tokindle.in/api/health",
         "headers": {
             "Accept": "application/json"
         }
     },
     "mode": "constant",
-    "duration": "5s",
-    "targetRps": 5
+    "duration": "1s",
+    "targetRps": 10000
 }

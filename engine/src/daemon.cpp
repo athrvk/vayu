@@ -77,7 +77,7 @@ int main(int argc, char* argv[]) {
 
     // Parse arguments
     int port = vayu::core::constants::defaults::PORT;
-    bool verbose = false;
+    int verbosity = 0;  // 0=warn/error, 1=info+, 2=debug+
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -88,19 +88,28 @@ int main(int argc, char* argv[]) {
                 port = std::stoi(argv[++i]);
             }
         } else if (arg == "-v" || arg == "--verbose") {
-            verbose = true;
+            // Check if next arg is a number (verbosity level)
+            if (i + 1 < argc && std::isdigit(argv[i + 1][0])) {
+                verbosity = std::stoi(argv[++i]);
+                // Clamp to valid range [0, 2]
+                verbosity = std::max(0, std::min(2, verbosity));
+            } else {
+                // No level specified, default to 1 (info level)
+                verbosity = 1;
+            }
         } else if (arg == "-h" || arg == "--help") {
             std::cout << "Vayu Engine " << vayu::Version::string << "\n\n";
             std::cout << "Usage: vayu-engine [OPTIONS]\n\n";
             std::cout << "Options:\n";
-            std::cout << "  -p, --port <PORT>  Port to listen on (default: 9876)\n";
-            std::cout << "  -v, --verbose      Enable verbose output\n";
-            std::cout << "  -h, --help         Show this help message\n";
+            std::cout << "  -p, --port <PORT>     Port to listen on (default: 9876)\n";
+            std::cout << "  -v, --verbose [LEVEL] Enable verbose output (0=warn/error, 1=info, "
+                         "2=debug, default: 1)\n";
+            std::cout << "  -h, --help            Show this help message\n";
             return 0;
         }
     }
 
-    vayu::utils::Logger::instance().set_verbose(verbose);
+    vayu::utils::Logger::instance().set_verbosity(verbosity);
 
     // Setup signal handlers
     std::signal(SIGINT, signal_handler);
@@ -123,7 +132,9 @@ int main(int argc, char* argv[]) {
     vayu::core::RunManager run_manager;
 
     // Create and start HTTP server
-    vayu::http::Server server(db, run_manager, port, verbose);
+    // verbose parameter is kept for backward compatibility with server internals
+    bool verbose_legacy = (verbosity >= 1);
+    vayu::http::Server server(db, run_manager, port, verbose_legacy);
     server.start();
 
     // Wait for shutdown signal

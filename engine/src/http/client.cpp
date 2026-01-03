@@ -32,13 +32,13 @@ int debug_callback(CURL* handle, curl_infotype type, char* data, size_t size, vo
 
     switch (type) {
         case CURLINFO_TEXT:
-            vayu::utils::log_info("* " + text);
+            vayu::utils::log_debug("* " + text);
             break;
         case CURLINFO_HEADER_OUT:
-            vayu::utils::log_info("> " + text);
+            vayu::utils::log_debug("> " + text);
             break;
         case CURLINFO_HEADER_IN:
-            vayu::utils::log_info("< " + text);
+            vayu::utils::log_debug("< " + text);
             break;
         default:
             break;

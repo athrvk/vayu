@@ -109,6 +109,18 @@ bool Server::is_running() const {
 
 void Server::setup_routes() {
     // ==========================================
+    // CORS Configuration
+    // ==========================================
+    server_.set_default_headers(
+        {{"Access-Control-Allow-Origin", "*"},
+         {"Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS"},
+         {"Access-Control-Allow-Headers", "Content-Type, Authorization"}});
+
+    // Handle OPTIONS preflight requests
+    server_.Options(".*",
+                    [](const httplib::Request&, httplib::Response& res) { res.status = 204; });
+
+    // ==========================================
     // Health Check Endpoint
     // ==========================================
 
@@ -154,12 +166,20 @@ void Server::setup_routes() {
     server_.Post("/collections", [this](const httplib::Request& req, httplib::Response& res) {
         try {
             auto json = nlohmann::json::parse(req.body);
-            vayu::db::Collection c;
-            c.id = json["id"];
-            if (json.contains("parentId") && !json["parentId"].is_null()) {
-                c.parent_id = json["parentId"];
+
+            if (!json.contains("name") || json["name"].is_null()) {
+                res.status = 400;
+                res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
+                                "application/json");
+                return;
             }
-            c.name = json["name"];
+
+            vayu::db::Collection c;
+            c.id = "col_" + std::to_string(now_ms());
+            if (json.contains("parentId") && !json["parentId"].is_null()) {
+                c.parent_id = json["parentId"].get<std::string>();
+            }
+            c.name = json["name"].get<std::string>();
             c.order = json.value("order", 0);
             c.created_at = now_ms();
 
@@ -202,10 +222,37 @@ void Server::setup_routes() {
     server_.Post("/requests", [this](const httplib::Request& req, httplib::Response& res) {
         try {
             auto json = nlohmann::json::parse(req.body);
+
+            if (!json.contains("collectionId") || json["collectionId"].is_null()) {
+                res.status = 400;
+                res.set_content(
+                    nlohmann::json{{"error", "Missing required field: collectionId"}}.dump(),
+                    "application/json");
+                return;
+            }
+            if (!json.contains("name") || json["name"].is_null()) {
+                res.status = 400;
+                res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
+                                "application/json");
+                return;
+            }
+            if (!json.contains("method") || json["method"].is_null()) {
+                res.status = 400;
+                res.set_content(nlohmann::json{{"error", "Missing required field: method"}}.dump(),
+                                "application/json");
+                return;
+            }
+            if (!json.contains("url") || json["url"].is_null()) {
+                res.status = 400;
+                res.set_content(nlohmann::json{{"error", "Missing required field: url"}}.dump(),
+                                "application/json");
+                return;
+            }
+
             vayu::db::Request r;
-            r.id = json["id"];
-            r.collection_id = json["collectionId"];
-            r.name = json["name"];
+            r.id = "req_" + std::to_string(now_ms());
+            r.collection_id = json["collectionId"].get<std::string>();
+            r.name = json["name"].get<std::string>();
 
             auto method = vayu::parse_method(json["method"].get<std::string>());
             if (!method) {
@@ -213,7 +260,7 @@ void Server::setup_routes() {
             }
             r.method = *method;
 
-            r.url = json["url"];
+            r.url = json["url"].get<std::string>();
             r.headers = json.value("headers", nlohmann::json::object()).dump();
             r.body = json.value("body", nlohmann::json()).dump();
             r.auth = json.value("auth", nlohmann::json::object()).dump();
@@ -253,9 +300,17 @@ void Server::setup_routes() {
     server_.Post("/environments", [this](const httplib::Request& req, httplib::Response& res) {
         try {
             auto json = nlohmann::json::parse(req.body);
+
+            if (!json.contains("name") || json["name"].is_null()) {
+                res.status = 400;
+                res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
+                                "application/json");
+                return;
+            }
+
             vayu::db::Environment e;
-            e.id = json["id"];
-            e.name = json["name"];
+            e.id = "env_" + std::to_string(now_ms());
+            e.name = json["name"].get<std::string>();
             e.variables = json.value("variables", nlohmann::json::object()).dump();
             e.updated_at = now_ms();
 
@@ -282,6 +337,7 @@ void Server::setup_routes() {
      * Returns: The HTTP response with status, headers, body, and timing information.
      */
     server_.Post("/request", [this](const httplib::Request& req, httplib::Response& res) {
+        vayu::utils::log_debug("Received POST /request");
         try {
             // Parse request body
             auto json = nlohmann::json::parse(req.body);
@@ -297,6 +353,7 @@ void Server::setup_routes() {
 
             // Create Run (Design Mode)
             std::string run_id = "run_" + std::to_string(now_ms());
+            vayu::utils::log_debug("Creating run: id=" + run_id + ", type=Design");
             vayu::db::Run run;
             run.id = run_id;
             run.type = vayu::RunType::Design;
@@ -410,9 +467,12 @@ void Server::setup_routes() {
     server_.Post("/run", [this](const httplib::Request& req, httplib::Response& res) {
         // Create run entry
         std::string run_id = "run_" + std::to_string(now_ms());
+        vayu::utils::log_debug("Received POST /run, run_id=" + run_id);
 
         try {
             auto json = nlohmann::json::parse(req.body);
+
+            vayu::utils::log_debug("Load test config: mode=" + json.value("mode", "unspecified"));
 
             // Validate required fields
             if (!json.contains("request")) {

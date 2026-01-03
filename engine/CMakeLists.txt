@@ -150,6 +150,12 @@ endif()
 add_library(vayu_core STATIC
     src/http/client.cpp
     src/http/event_loop.cpp
+    src/http/event_loop/curl_callbacks.cpp
+    src/http/event_loop/transfer_context.cpp
+    src/http/event_loop/curl_utils.cpp
+    src/http/event_loop/event_loop_worker.cpp
+    src/http/event_loop/event_loop_impl.cpp
+    src/http/thread_pool.cpp
     src/http/rate_limiter.cpp
     src/http/sse.cpp
     src/utils/json.cpp

@@ -23,11 +23,19 @@ public:
     void warning(const std::string& message);
     void error(const std::string& message);
 
+    void set_verbosity(int level) {
+        verbosity_level_ = level;
+    }
+    int get_verbosity() const {
+        return verbosity_level_;
+    }
+
+    // Legacy support
     void set_verbose(bool verbose) {
-        verbose_ = verbose;
+        verbosity_level_ = verbose ? 1 : 0;
     }
     bool is_verbose() const {
-        return verbose_;
+        return verbosity_level_ > 0;
     }
 
 private:
@@ -40,7 +48,7 @@ private:
 
     std::unique_ptr<std::ofstream> log_file_;
     std::mutex mutex_;
-    bool verbose_ = false;
+    int verbosity_level_ = 0;  // 0=warn/error, 1=info+, 2=debug+
     std::string log_dir_;
 };
 
