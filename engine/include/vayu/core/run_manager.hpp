@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 
+#include "vayu/core/metrics_collector.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
 
@@ -24,14 +25,24 @@ struct RunContext {
     nlohmann::json config;
     int64_t start_time_ms;
 
-    // Metrics accumulation
-    std::atomic<size_t> total_requests{0};
-    std::atomic<size_t> total_errors{0};
-    std::atomic<double> total_latency_ms{0.0};
+    // High-performance in-memory metrics collector
+    // Replaces direct DB writes for individual results during load tests
+    std::unique_ptr<MetricsCollector> metrics_collector;
+
+    // Real-time counters (also tracked by MetricsCollector, but kept for backward compat)
     std::atomic<size_t> requests_sent{0};      // Number of requests submitted to event loop
     std::atomic<size_t> requests_expected{0};  // Total expected requests for this run
-    std::mutex latencies_mutex;
-    std::vector<double> latencies;  // For percentile calculation
+
+    // Legacy accessors for backward compatibility (delegate to metrics_collector)
+    [[nodiscard]] size_t total_requests() const {
+        return metrics_collector ? metrics_collector->total_requests() : 0;
+    }
+    [[nodiscard]] size_t total_errors() const {
+        return metrics_collector ? metrics_collector->total_errors() : 0;
+    }
+    [[nodiscard]] double total_latency_ms() const {
+        return metrics_collector ? metrics_collector->total_latency_sum() : 0.0;
+    }
 
     RunContext(const std::string& id, nlohmann::json cfg);
     ~RunContext();

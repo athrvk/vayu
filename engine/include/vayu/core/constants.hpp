@@ -63,6 +63,12 @@ constexpr size_t MAX_CONCURRENT = 1000;
 constexpr size_t MAX_PER_HOST = 100;
 /// Timeout for event loop polling in milliseconds
 constexpr int POLL_TIMEOUT_MS = 10;
+/// DNS cache timeout in seconds (avoids DNS resolver saturation)
+constexpr long DNS_CACHE_TIMEOUT_SECONDS = 300;
+/// TCP keep-alive idle time in seconds
+constexpr long TCP_KEEPALIVE_IDLE_SECONDS = 60;
+/// TCP keep-alive probe interval in seconds
+constexpr long TCP_KEEPALIVE_INTERVAL_SECONDS = 30;
 }  // namespace event_loop
 
 /**
@@ -112,6 +118,22 @@ namespace json {
 /// Default indentation level for JSON serialization
 constexpr int DEFAULT_INDENT = 2;
 }  // namespace json
+
+/**
+ * @brief Metrics collector configuration for high-RPS load testing
+ */
+namespace metrics_collector {
+/// Default expected requests for pre-allocation
+constexpr size_t DEFAULT_EXPECTED_REQUESTS = 100000;
+/// Maximum errors to store (0 = unlimited) (prevents OOM at high error rates)
+constexpr size_t DEFAULT_MAX_ERRORS = 0;
+/// Maximum success results to store (0 = unlimited)
+constexpr size_t DEFAULT_MAX_SUCCESS_RESULTS = 1000;
+/// Default sample rate for success traces (1 in N)
+constexpr size_t DEFAULT_SUCCESS_SAMPLE_RATE = 100;
+/// Whether to store success trace data by default
+constexpr bool DEFAULT_STORE_SUCCESS_TRACES = false;
+}  // namespace metrics_collector
 }  // namespace vayu::core::constants
 
 /**

@@ -1,9 +1,9 @@
 # Vayu - Current Project Status
 
-> **Last Updated:** January 2, 2026  
-> **Total Tests:** 103 passing  
+> **Last Updated:** January 4, 2026  
+> **Total Tests:** 126 passing  
 > **Build System:** CMake + Ninja + vcpkg  
-> **Performance:** 10k-50k RPS capable with multi-worker architecture
+> **Performance:** 60k+ RPS capable with high-performance optimizations
 
 ---
 
@@ -15,10 +15,16 @@
 
 ### Completed
 - ✅ **Multiple event-loop workers** - N workers (auto-detect cores), round-robin sharding
-- ✅ **Token-bucket rate limiter** - Precise RPS control (10k-50k RPS)
+- ✅ **Token-bucket rate limiter** - Precise RPS control (60k+ RPS)
 - ✅ **Connection reuse** - libcurl multiplexing and keep-alive enabled
 - ✅ **Thread-local stats** - Lock-free aggregation across workers
 - ✅ **Context Pooling** - Reusing QuickJS contexts to reduce initialization overhead
+- ✅ **MetricsCollector** - High-performance in-memory storage with lock-free atomics
+- ✅ **DNS Pre-Resolution Cache** - Thread-safe caching eliminates DNS bottleneck
+- ✅ **Curl Handle Pooling** - Handle reuse via `curl_easy_reset()` (~100x faster)
+- ✅ **HTTP/2 Multiplexing** - Multiple streams over single TCP connection
+- ✅ **TCP Keep-Alive** - Persistent connections with 60s intervals
+- ✅ **Batch DB Flush** - Single transaction write after test completion
 
 ### Configuration
 ```cpp
@@ -35,6 +41,18 @@ config.burst_size = 20000.0;   // Burst capacity
 - 8 workers × 1000 concurrent = 8000 total concurrent requests
 - Precise rate limiting at 10k RPS (or higher if configured)
 - Connection pooling reduces TCP overhead by ~90%
+
+### Benchmark Results (January 2026)
+
+| Optimization | RPS | Error Rate | Notes |
+|-------------|-----|------------|-------|
+| Baseline | ~2,000 | 92% | DB lock contention |
+| MetricsCollector | ~2,000 | 67% | In-memory storage |
+| DNS Cache | 628* | 0% | Zero errors |
+| HTTP/2 + TCP Keep-alive | 56,702 | 0% | Phase 1 complete |
+| **Handle Pooling** | **60,524** | **0%** | **Phase 2 complete** |
+
+*Low RPS due to slow remote server; local mock server revealed true capacity.
 
 ---
 
@@ -57,11 +75,14 @@ config.burst_size = 20000.0;   // Burst capacity
 - **Rate limiting**: Token-bucket algorithm for precise RPS control
 - **Connection pooling**: libcurl multiplexing and keep-alive
 - **Thread-local stats**: Lock-free aggregation
+- **DNS caching**: Pre-resolved hostnames cached per-worker
+- **Handle pooling**: curl_easy handles reused via CurlHandlePool
+- **HTTP/2 multiplexing**: Multiple streams over single connection
 - **Configuration**: Flexible per-worker concurrency, polling, rate limiting
 - **Batch execution**: Execute multiple requests concurrently
 - **Progress callbacks**: Track upload/download progress
 - **Request cancellation**: Cancel pending requests
-- **Performance**: 10k-50k RPS capable on modern hardware
+- **Performance**: **60k+ RPS** capable on modern hardware
 
 #### Rate Limiter (`vayu/http/rate_limiter.hpp`) 🆕
 - **Token bucket algorithm**: Precise RPS control

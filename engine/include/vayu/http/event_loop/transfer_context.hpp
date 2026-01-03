@@ -33,6 +33,7 @@ struct TransferData {
     bool has_promise = false;
     char error_buffer[CURL_ERROR_SIZE] = {0};
     struct curl_slist* headers_list = nullptr;
+    struct curl_slist* resolve_list = nullptr;  // DNS pre-resolution list
 
     ~TransferData();
 };

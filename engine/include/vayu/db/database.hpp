@@ -41,7 +41,13 @@ public:
 
     // Results
     void add_result(const Result& result);
+    void add_results_batch(const std::vector<Result>& results);  // Transactional batch insert
     std::vector<Result> get_results(const std::string& run_id);
+
+    // Transaction helpers
+    void begin_transaction();
+    void commit_transaction();
+    void rollback_transaction();
 
     // KV Store
     void set_config(const std::string& key, const std::string& value);

@@ -11,125 +11,82 @@
 namespace vayu::core {
 
 namespace {
-inline int64_t now_ms() {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-               std::chrono::system_clock::now().time_since_epoch())
-        .count();
-}
-
+/**
+ * @brief Handle a completed HTTP request result
+ *
+ * This function records metrics to the in-memory MetricsCollector instead of
+ * writing directly to the database. This enables high-throughput load testing
+ * (60k+ RPS) by avoiding database contention during the test.
+ *
+ * Results are batch-written to the database after test completion.
+ */
 void handle_result(std::shared_ptr<RunContext> context,
-                   vayu::db::Database& db,
+                   vayu::db::Database& /* db - unused, kept for API compat */,
                    vayu::Result<vayu::Response> result) {
-    context->total_requests++;
-
-    // Get sampling configuration from context config
-    size_t success_sample_rate =
-        static_cast<size_t>(context->config.value("success_sample_rate", 100));
+    // Get configuration
     int slow_threshold_ms = context->config.value("slow_threshold_ms", 1000);
     bool save_timing_breakdown = context->config.value("save_timing_breakdown", false);
 
     if (result.is_ok()) {
         const auto& response = result.value();
         double latency = response.timing.total_ms;
-        context->total_latency_ms += latency;
 
-        // Log successful response details at debug level
-        vayu::utils::log_debug("Request completed: status=" + std::to_string(response.status_code) +
-                               ", latency=" + std::to_string(latency) + "ms");
-
-        // Store latency for percentiles
-        {
-            std::lock_guard<std::mutex> lock(context->latencies_mutex);
-            context->latencies.push_back(latency);
-        }
-
-        // Determine if we should save this result
+        // Build trace data if configured
+        std::string trace_data;
         bool is_slow = latency >= slow_threshold_ms;
-        bool should_sample = (context->total_requests % success_sample_rate == 0);
-        bool should_save = is_slow || should_sample;
 
-        if (should_save) {
-            try {
-                vayu::db::Result db_result;
-                db_result.run_id = context->run_id;
-                db_result.timestamp = now_ms();
-                db_result.status_code = response.status_code;
-                db_result.latency_ms = latency;
+        if (save_timing_breakdown || is_slow) {
+            nlohmann::json timing_json = {{"total_ms", response.timing.total_ms},
+                                          {"dns_ms", response.timing.dns_ms},
+                                          {"connect_ms", response.timing.connect_ms},
+                                          {"tls_ms", response.timing.tls_ms},
+                                          {"first_byte_ms", response.timing.first_byte_ms},
+                                          {"download_ms", response.timing.download_ms}};
 
-                // Save detailed timing breakdown if enabled
-                if (save_timing_breakdown) {
-                    nlohmann::json timing_json = {{"total_ms", response.timing.total_ms},
-                                                  {"dns_ms", response.timing.dns_ms},
-                                                  {"connect_ms", response.timing.connect_ms},
-                                                  {"tls_ms", response.timing.tls_ms},
-                                                  {"first_byte_ms", response.timing.first_byte_ms},
-                                                  {"download_ms", response.timing.download_ms}};
-
-                    if (is_slow) {
-                        timing_json["is_slow"] = true;
-                        timing_json["threshold_ms"] = slow_threshold_ms;
-                    }
-
-                    db_result.trace_data = timing_json.dump();
-                }
-
-                db.add_result(db_result);
-            } catch (const std::exception& e) {
-                // Continue on DB error
+            if (is_slow) {
+                timing_json["is_slow"] = true;
+                timing_json["threshold_ms"] = slow_threshold_ms;
             }
+
+            trace_data = timing_json.dump();
         }
+
+        // Record to in-memory collector (high-performance, no DB writes)
+        context->metrics_collector->record_success(response.status_code, latency, trace_data);
+
     } else {
-        // CRITICAL: Save all errors with full details
-        context->total_errors++;
-
+        // Record error to in-memory collector (all errors are preserved)
         const auto& error = result.error();
-        vayu::utils::log_debug(
-            "Request failed: code=" + std::to_string(static_cast<int>(error.code)) +
-            ", message=" + error.message);
 
-        try {
-            const auto& error = result.error();
-            vayu::db::Result error_result;
-            error_result.run_id = context->run_id;
-            error_result.timestamp = now_ms();
-            error_result.status_code = 0;   // 0 indicates error (not HTTP status)
-            error_result.latency_ms = 0.0;  // Could track time until error if needed
-            error_result.error = error.message;
+        // Build detailed error trace data
+        nlohmann::json error_json = {{"error_code", static_cast<int>(error.code)},
+                                     {"error_type",
+                                      [&error]() {
+                                          switch (error.code) {
+                                              case vayu::ErrorCode::Timeout:
+                                                  return "timeout";
+                                              case vayu::ErrorCode::ConnectionFailed:
+                                                  return "connection_failed";
+                                              case vayu::ErrorCode::DnsError:
+                                                  return "dns_failed";
+                                              case vayu::ErrorCode::SslError:
+                                                  return "ssl_error";
+                                              case vayu::ErrorCode::InvalidUrl:
+                                                  return "invalid_url";
+                                              case vayu::ErrorCode::InvalidMethod:
+                                                  return "invalid_method";
+                                              case vayu::ErrorCode::ScriptError:
+                                                  return "script_error";
+                                              case vayu::ErrorCode::InternalError:
+                                                  return "internal_error";
+                                              default:
+                                                  return "unknown";
+                                          }
+                                      }()},
+                                     {"message", error.message},
+                                     {"request_number", context->total_requests()}};
 
-            // Save detailed error information
-            nlohmann::json error_json = {{"error_code", static_cast<int>(error.code)},
-                                         {"error_type",
-                                          [&error]() {
-                                              switch (error.code) {
-                                                  case vayu::ErrorCode::Timeout:
-                                                      return "timeout";
-                                                  case vayu::ErrorCode::ConnectionFailed:
-                                                      return "connection_failed";
-                                                  case vayu::ErrorCode::DnsError:
-                                                      return "dns_failed";
-                                                  case vayu::ErrorCode::SslError:
-                                                      return "ssl_error";
-                                                  case vayu::ErrorCode::InvalidUrl:
-                                                      return "invalid_url";
-                                                  case vayu::ErrorCode::InvalidMethod:
-                                                      return "invalid_method";
-                                                  case vayu::ErrorCode::ScriptError:
-                                                      return "script_error";
-                                                  case vayu::ErrorCode::InternalError:
-                                                      return "internal_error";
-                                                  default:
-                                                      return "unknown";
-                                              }
-                                          }()},
-                                         {"message", error.message},
-                                         {"request_number", context->total_requests.load()}};
-
-            error_result.trace_data = error_json.dump();
-            db.add_result(error_result);
-        } catch (const std::exception& e) {
-            // Continue even if we can't save error details
-            vayu::utils::log_error("Failed to save error details: " + std::string(e.what()));
-        }
+        context->metrics_collector->record_error(error.code, error.message, error_json.dump());
     }
 }
 }  // namespace

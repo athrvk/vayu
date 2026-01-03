@@ -164,6 +164,7 @@ add_library(vayu_core STATIC
     src/db/database.cpp
     src/core/load_strategy.cpp
     src/core/run_manager.cpp
+    src/core/metrics_collector.cpp
 )
 
 target_include_directories(vayu_core PUBLIC
@@ -252,6 +253,7 @@ if(VAYU_BUILD_TESTS)
         tests/db_test.cpp
         tests/rate_limit_test.cpp
         tests/metrics_helper_test.cpp
+        tests/metrics_collector_test.cpp
     )
     
     target_link_libraries(vayu_tests PRIVATE

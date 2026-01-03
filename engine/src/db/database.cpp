@@ -315,8 +315,33 @@ void Database::add_result(const Result& result) {
     impl_->storage.insert(result);
 }
 
+void Database::add_results_batch(const std::vector<Result>& results) {
+    if (results.empty()) return;
+
+    // Use transaction for batch insert - much faster and prevents WAL growth
+    impl_->storage.transaction([&] {
+        for (const auto& result : results) {
+            impl_->storage.insert(result);
+        }
+        return true;  // Commit
+    });
+}
+
 std::vector<Result> Database::get_results(const std::string& run_id) {
     return impl_->storage.get_all<Result>(where(c(&Result::run_id) == run_id));
+}
+
+// Transaction helpers
+void Database::begin_transaction() {
+    impl_->storage.begin_transaction();
+}
+
+void Database::commit_transaction() {
+    impl_->storage.commit();
+}
+
+void Database::rollback_transaction() {
+    impl_->storage.rollback();
 }
 
 // KV Store

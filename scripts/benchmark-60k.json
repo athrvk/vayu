@@ -1,12 +1,12 @@
 {
     "request": {
         "method": "GET",
-        "url": "https://httpbin.org/get",
+        "url": "http://localhost:8080/fast",
         "headers": {
             "Accept": "application/json"
         }
     },
     "mode": "constant",
-    "duration": "2s",
-    "targetRps": 50
+    "duration": "10s",
+    "targetRps": 60000
 }

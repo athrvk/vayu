@@ -6,6 +6,9 @@ TransferData::~TransferData() {
     if (headers_list) {
         curl_slist_free_all(headers_list);
     }
+    if (resolve_list) {
+        curl_slist_free_all(resolve_list);
+    }
 }
 
 }  // namespace vayu::http::detail

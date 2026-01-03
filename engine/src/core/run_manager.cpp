@@ -20,7 +20,32 @@ inline int64_t now_ms() {
 }  // namespace
 
 RunContext::RunContext(const std::string& id, nlohmann::json cfg)
-    : run_id(id), config(std::move(cfg)), start_time_ms(0) {}
+    : run_id(id), config(std::move(cfg)), start_time_ms(0) {
+    // Initialize MetricsCollector with configuration from test config
+    MetricsCollectorConfig mc_config;
+
+    // Calculate expected requests from duration and RPS
+    std::string duration_str = config.value("duration", "60s");
+    int64_t duration_ms = 60000;  // default 60s
+    try {
+        duration_ms = std::stoll(duration_str.substr(0, duration_str.length() - 1)) * 1000;
+    } catch (...) {
+    }
+
+    double target_rps = config.value("rps", 0.0);
+    if (target_rps == 0.0) target_rps = config.value("targetRps", 0.0);
+    if (target_rps == 0.0) target_rps = 1000.0;  // default estimate
+
+    // Pre-allocate with 20% buffer
+    mc_config.expected_requests = static_cast<size_t>((duration_ms / 1000.0) * target_rps * 1.2);
+    mc_config.expected_requests = std::max(mc_config.expected_requests, size_t(10000));
+
+    // Get sampling config
+    mc_config.success_sample_rate = static_cast<size_t>(config.value("success_sample_rate", 100));
+    mc_config.store_success_traces = config.value("save_timing_breakdown", false);
+
+    metrics_collector = std::make_unique<MetricsCollector>(id, mc_config);
+}
 
 RunContext::~RunContext() {
     should_stop = true;
@@ -157,26 +182,17 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         auto test_end = std::chrono::steady_clock::now();
         double total_duration_s = std::chrono::duration<double>(test_end - test_start).count();
 
-        size_t completed = context->total_requests.load();
-        size_t errors = context->total_errors.load();
-        double avg_latency = completed > 0 ? context->total_latency_ms.load() / completed : 0.0;
+        size_t completed = context->total_requests();
+        size_t errors = context->total_errors();
+        double avg_latency = context->metrics_collector->average_latency();
         double actual_rps = total_duration_s > 0 ? completed / total_duration_s : 0.0;
-        double error_rate = completed > 0 ? (errors * 100.0 / completed) : 0.0;
+        double error_rate = context->metrics_collector->error_rate();
 
-        // Calculate percentiles
-        std::vector<double> sorted_latencies;
-        {
-            std::lock_guard<std::mutex> lock(context->latencies_mutex);
-            sorted_latencies = context->latencies;
-        }
-        std::sort(sorted_latencies.begin(), sorted_latencies.end());
-
-        double p50 = 0, p95 = 0, p99 = 0;
-        if (!sorted_latencies.empty()) {
-            p50 = sorted_latencies[sorted_latencies.size() * 50 / 100];
-            p95 = sorted_latencies[sorted_latencies.size() * 95 / 100];
-            p99 = sorted_latencies[sorted_latencies.size() * 99 / 100];
-        }
+        // Calculate percentiles using MetricsCollector
+        auto percentiles = context->metrics_collector->calculate_percentiles();
+        double p50 = percentiles.p50;
+        double p95 = percentiles.p95;
+        double p99 = percentiles.p99;
 
         // Store final summary metrics
         try {
@@ -213,6 +229,17 @@ void execute_load_test(std::shared_ptr<RunContext> context,
             db.add_metric({0, context->run_id, timestamp, vayu::MetricName::Completed, 1.0, ""});
         } catch (const std::exception& e) {
             vayu::utils::log_error("Failed to store final metrics: " + std::string(e.what()));
+        }
+
+        // Batch flush all results to database (errors and sampled successes)
+        try {
+            size_t flushed = context->metrics_collector->flush_to_database(db);
+            if (verbose && flushed > 0) {
+                vayu::utils::log_info("  Flushed " + std::to_string(flushed) +
+                                      " results to database");
+            }
+        } catch (const std::exception& e) {
+            vayu::utils::log_error("Failed to flush results to database: " + std::string(e.what()));
         }
 
         // Update run status
@@ -268,8 +295,8 @@ void collect_metrics(std::shared_ptr<RunContext> context, vayu::db::Database* db
 
         if (elapsed >= 1.0)  // Update every second
         {
-            size_t current_total = context->total_requests.load();
-            size_t current_errors = context->total_errors.load();
+            size_t current_total = context->total_requests();
+            size_t current_errors = context->total_errors();
             size_t delta = current_total - last_total;
 
             double current_rps = elapsed > 0 ? delta / elapsed : 0.0;

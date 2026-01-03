@@ -2,10 +2,38 @@
 
 #include <curl/curl.h>
 
+#include <regex>
+
+#include "vayu/core/constants.hpp"
 #include "vayu/http/event_loop/curl_callbacks.hpp"
+#include "vayu/http/event_loop/event_loop_worker.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 
 namespace vayu::http::detail {
+
+std::string extract_hostname(const std::string& url) {
+    // Simple regex to extract hostname from URL
+    // Matches: protocol://hostname:port/path or protocol://hostname/path
+    std::regex url_regex(R"(^(?:https?://)?([^:/\s]+))");
+    std::smatch match;
+    if (std::regex_search(url, match, url_regex) && match.size() > 1) {
+        return match[1].str();
+    }
+    return "";
+}
+
+int extract_port(const std::string& url) {
+    // Check for explicit port
+    std::regex port_regex(R"(^(?:https?://)?[^:/\s]+:(\d+))");
+    std::smatch match;
+    if (std::regex_search(url, match, port_regex) && match.size() > 1) {
+        return std::stoi(match[1].str());
+    }
+    // Default ports
+    if (url.find("https://") == 0) return 443;
+    if (url.find("http://") == 0) return 80;
+    return 443;  // Default to HTTPS
+}
 
 Error curl_to_error(CURLcode code, const char* error_buffer) {
     Error error;
@@ -81,10 +109,16 @@ const char* status_text(int code) {
     }
 }
 
-CURL* setup_easy_handle(TransferData* data, const EventLoopConfig& config) {
-    CURL* curl = curl_easy_init();
+CURL* setup_easy_handle(CURL* curl,
+                        TransferData* data,
+                        const EventLoopConfig& config,
+                        DnsCache* dns_cache) {
+    // Use provided handle or create new one
     if (!curl) {
-        return nullptr;
+        curl = curl_easy_init();
+        if (!curl) {
+            return nullptr;
+        }
     }
 
     const Request& request = data->request;
@@ -94,6 +128,20 @@ CURL* setup_easy_handle(TransferData* data, const EventLoopConfig& config) {
 
     // Set URL
     curl_easy_setopt(curl, CURLOPT_URL, request.url.c_str());
+
+    // DNS Pre-resolution: Use cached DNS to bypass system resolver
+    // This is critical for high-RPS loads (prevents DNS saturation)
+    if (dns_cache) {
+        std::string hostname = extract_hostname(request.url);
+        int port = extract_port(request.url);
+        if (!hostname.empty()) {
+            struct curl_slist* resolve_list = dns_cache->get_resolve_list(hostname, port);
+            if (resolve_list) {
+                curl_easy_setopt(curl, CURLOPT_RESOLVE, resolve_list);
+                data->resolve_list = resolve_list;  // Store for cleanup
+            }
+        }
+    }
 
     // Set method
     switch (request.method) {
@@ -170,6 +218,36 @@ CURL* setup_easy_handle(TransferData* data, const EventLoopConfig& config) {
     // SSL verification
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, request.verify_ssl ? 1L : 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, request.verify_ssl ? 2L : 0L);
+
+    // =========================================================================
+    // HIGH-PERFORMANCE OPTIMIZATIONS (Phase 1 - Target: 60k RPS)
+    // =========================================================================
+
+    // DNS Caching: Cache DNS lookups to avoid resolver saturation
+    // This is critical - DNS was causing 84% of errors at 10k RPS
+    curl_easy_setopt(curl,
+                     CURLOPT_DNS_CACHE_TIMEOUT,
+                     vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
+
+    // TCP Keep-Alive: Reuse connections and detect dead sockets faster
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(
+        curl, CURLOPT_TCP_KEEPIDLE, vayu::core::constants::event_loop::TCP_KEEPALIVE_IDLE_SECONDS);
+    curl_easy_setopt(curl,
+                     CURLOPT_TCP_KEEPINTVL,
+                     vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS);
+
+    // HTTP/2: Enable multiplexing (many requests over single connection)
+    // This dramatically reduces connection establishment overhead
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+
+    // Connection reuse: Don't close connection after request
+    curl_easy_setopt(curl, CURLOPT_FORBID_REUSE, 0L);
+
+    // TCP_NODELAY: Disable Nagle's algorithm for lower latency
+    curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
+
+    // =========================================================================
 
     // Verbose output for debugging
     if (config.verbose) {

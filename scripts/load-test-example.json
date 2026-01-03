@@ -1,7 +1,7 @@
 {
     "request": {
         "method": "GET",
-        "url": "https://tokindle.in/api/health",
+        "url": "https://api.tokindle.in/health",
         "headers": {
             "Accept": "application/json"
         }
