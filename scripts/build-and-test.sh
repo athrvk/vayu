@@ -72,29 +72,45 @@ check_vcpkg() {
     fi
     VCPKG_ROOT="$(dirname "$(which vcpkg)")"
     info "Using vcpkg: $VCPKG_ROOT"
+
+    # Detect triplet
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        TRIPLET=$([ "$(uname -m)" = "arm64" ] && echo "arm64-osx" || echo "x64-osx")
+    else
+        # Linux / WSL
+        local arch=$(uname -m)
+        if [[ "$arch" == "aarch64" ]] || [[ "$arch" == "arm64" ]]; then
+            TRIPLET="arm64-linux"
+        else
+            TRIPLET="x64-linux"
+        fi
+    fi
+    info "Target triplet: $TRIPLET"
+
+    # Check for WSL performance issues
+    if grep -q "Microsoft" /proc/version 2>/dev/null; then
+        if [[ "$PWD" == /mnt/* ]]; then
+            echo -e "${RED}Warning:${NC} You are running in WSL 2 but your project is on the Windows filesystem."
+            echo -e "         This will severely impact build performance."
+            echo -e "         Move the project to the Linux filesystem (e.g., ~/projects/vayu)."
+        fi
+    fi
 }
 
 # Parse and install dependencies from vcpkg.json
 install_deps() {
     info "Installing dependencies..."
     
-    local triplet
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        triplet=$([ "$(uname -m)" = "arm64" ] && echo "arm64-osx" || echo "x64-osx")
-    else
-        triplet="x64-linux"
-    fi
-    
     # Parse dependencies from vcpkg.json
     local deps=$(grep -A 20 '"dependencies"' "$ENGINE_DIR/vcpkg.json" | grep '"' | grep -v 'dependencies' | tr -d ' ",' | grep -v '^$')
     
     for dep in $deps; do
-        if [ -n "$(vcpkg list "${dep}:${triplet}")" ]; then
+        if [ -n "$(vcpkg list "${dep}:${TRIPLET}")" ]; then
             continue
         fi
         
         info "  Installing $dep..."
-        vcpkg install "$dep:$triplet"
+        vcpkg install "$dep:$TRIPLET"
     done
     
     success "Dependencies ready"
@@ -102,23 +118,38 @@ install_deps() {
 
 # Build
 build() {
-    info "Configuring CMake ($BUILD_TYPE)..."
-    
     mkdir -p "$BUILD_DIR"
-    cd "$BUILD_DIR"
     
-    local triplet
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        triplet=$([ "$(uname -m)" = "arm64" ] && echo "arm64-osx" || echo "x64-osx")
-    else
-        triplet="x64-linux"
+    # Check if we need to reconfigure
+    local reconfigure=true
+    if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
+        local current_type=$(grep "CMAKE_BUILD_TYPE:STRING" "$BUILD_DIR/CMakeCache.txt" | cut -d= -f2)
+        if [ "$current_type" == "$BUILD_TYPE" ]; then
+            reconfigure=false
+            info "Build directory already configured for $BUILD_TYPE. Skipping configuration."
+        fi
     fi
-    
-    cmake -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-          -DVCPKG_TARGET_TRIPLET="$triplet" \
-          -DVCPKG_MANIFEST_MODE=OFF \
-          ..
+
+    if [ "$reconfigure" = true ]; then
+        info "Configuring CMake ($BUILD_TYPE)..."
+        cd "$BUILD_DIR"
+        
+        # Try to use Ninja if available
+        local generator=""
+        if command -v ninja &>/dev/null; then
+            generator="-GNinja"
+            info "Using Ninja generator"
+        fi
+        
+        cmake $generator \
+              -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
+              -DVCPKG_MANIFEST_MODE=OFF \
+              ..
+    else
+        cd "$BUILD_DIR"
+    fi
     
     info "Building..."
     cmake --build . -j $(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)

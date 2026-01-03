@@ -112,8 +112,44 @@ Json serialize(const vayu::db::Run& run) {
         json["configSnapshot"] = run.config_snapshot;
     }
 
-    if (run.request_id) json["requestId"] = *run.request_id;
-    if (run.environment_id) json["environmentId"] = *run.environment_id;
+    json["requestId"] = run.request_id.has_value() ? Json(run.request_id.value()) : Json(nullptr);
+    json["environmentId"] =
+        run.environment_id.has_value() ? Json(run.environment_id.value()) : Json(nullptr);
+    return json;
+}
+
+Json serialize(const vayu::db::Collection& c) {
+    Json json;
+    json["id"] = c.id;
+    json["parentId"] = c.parent_id.has_value() ? Json(c.parent_id.value()) : Json(nullptr);
+    json["name"] = c.name;
+    json["order"] = c.order;
+    json["createdAt"] = c.created_at;
+    return json;
+}
+
+Json serialize(const vayu::db::Request& r) {
+    Json json;
+    json["id"] = r.id;
+    json["collectionId"] = r.collection_id;
+    json["name"] = r.name;
+    json["method"] = to_string(r.method);
+    json["url"] = r.url;
+    json["headers"] = r.headers.empty() ? Json::object() : Json::parse(r.headers);
+    json["body"] = r.body.empty() ? Json() : Json::parse(r.body);
+    json["auth"] = r.auth.empty() ? Json::object() : Json::parse(r.auth);
+    json["preRequestScript"] = r.pre_request_script;
+    json["postRequestScript"] = r.post_request_script;
+    json["updatedAt"] = r.updated_at;
+    return json;
+}
+
+Json serialize(const vayu::db::Environment& e) {
+    Json json;
+    json["id"] = e.id;
+    json["name"] = e.name;
+    json["variables"] = e.variables.empty() ? Json::object() : Json::parse(e.variables);
+    json["updatedAt"] = e.updated_at;
     return json;
 }
 

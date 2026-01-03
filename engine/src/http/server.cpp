@@ -19,37 +19,6 @@ inline int64_t now_ms() {
                std::chrono::system_clock::now().time_since_epoch())
         .count();
 }
-
-nlohmann::json to_json(const vayu::db::Collection& c) {
-    return {{"id", c.id},
-            {"parentId", c.parent_id ? *c.parent_id : nullptr},
-            {"name", c.name},
-            {"order", c.order},
-            {"createdAt", c.created_at}};
-}
-
-nlohmann::json to_json(const vayu::db::Request& r) {
-    return {{"id", r.id},
-            {"collectionId", r.collection_id},
-            {"name", r.name},
-            {"method", to_string(r.method)},
-            {"url", r.url},
-            {"headers",
-             r.headers.empty() ? nlohmann::json::object() : nlohmann::json::parse(r.headers)},
-            {"body", r.body.empty() ? nlohmann::json() : nlohmann::json::parse(r.body)},
-            {"auth", r.auth.empty() ? nlohmann::json::object() : nlohmann::json::parse(r.auth)},
-            {"preRequestScript", r.pre_request_script},
-            {"postRequestScript", r.post_request_script},
-            {"updatedAt", r.updated_at}};
-}
-
-nlohmann::json to_json(const vayu::db::Environment& e) {
-    return {{"id", e.id},
-            {"name", e.name},
-            {"variables",
-             e.variables.empty() ? nlohmann::json::object() : nlohmann::json::parse(e.variables)},
-            {"updatedAt", e.updated_at}};
-}
 }  // namespace
 
 Server::Server(vayu::db::Database& db, vayu::core::RunManager& run_manager, int port, bool verbose)
@@ -152,7 +121,7 @@ void Server::setup_routes() {
         auto collections = db_.get_collections();
         nlohmann::json response = nlohmann::json::array();
         for (const auto& c : collections) {
-            response.push_back(to_json(c));
+            response.push_back(vayu::json::serialize(c));
         }
         res.set_content(response.dump(), "application/json");
     });
@@ -184,7 +153,7 @@ void Server::setup_routes() {
             c.created_at = now_ms();
 
             db_.create_collection(c);
-            res.set_content(to_json(c).dump(), "application/json");
+            res.set_content(vayu::json::serialize(c).dump(), "application/json");
         } catch (const std::exception& e) {
             res.status = 400;
             res.set_content(nlohmann::json{{"error", e.what()}}.dump(), "application/json");
@@ -202,7 +171,7 @@ void Server::setup_routes() {
             auto requests = db_.get_requests_in_collection(req.get_param_value("collectionId"));
             nlohmann::json response = nlohmann::json::array();
             for (const auto& r : requests) {
-                response.push_back(to_json(r));
+                response.push_back(vayu::json::serialize(r));
             }
             res.set_content(response.dump(), "application/json");
         } else {
@@ -269,7 +238,7 @@ void Server::setup_routes() {
             r.updated_at = now_ms();
 
             db_.save_request(r);
-            res.set_content(to_json(r).dump(), "application/json");
+            res.set_content(vayu::json::serialize(r).dump(), "application/json");
         } catch (const std::exception& e) {
             res.status = 400;
             res.set_content(nlohmann::json{{"error", e.what()}}.dump(), "application/json");
@@ -286,7 +255,7 @@ void Server::setup_routes() {
         auto envs = db_.get_environments();
         nlohmann::json response = nlohmann::json::array();
         for (const auto& e : envs) {
-            response.push_back(to_json(e));
+            response.push_back(vayu::json::serialize(e));
         }
         res.set_content(response.dump(), "application/json");
     });
@@ -315,7 +284,7 @@ void Server::setup_routes() {
             e.updated_at = now_ms();
 
             db_.save_environment(e);
-            res.set_content(to_json(e).dump(), "application/json");
+            res.set_content(vayu::json::serialize(e).dump(), "application/json");
         } catch (const std::exception& e) {
             res.status = 400;
             res.set_content(nlohmann::json{{"error", e.what()}}.dump(), "application/json");
@@ -337,7 +306,6 @@ void Server::setup_routes() {
      * Returns: The HTTP response with status, headers, body, and timing information.
      */
     server_.Post("/request", [this](const httplib::Request& req, httplib::Response& res) {
-        vayu::utils::log_debug("Received POST /request");
         try {
             // Parse request body
             auto json = nlohmann::json::parse(req.body);
@@ -353,7 +321,6 @@ void Server::setup_routes() {
 
             // Create Run (Design Mode)
             std::string run_id = "run_" + std::to_string(now_ms());
-            vayu::utils::log_debug("Creating run: id=" + run_id + ", type=Design");
             vayu::db::Run run;
             run.id = run_id;
             run.type = vayu::RunType::Design;
@@ -361,11 +328,11 @@ void Server::setup_routes() {
             run.start_time = now_ms();
             run.config_snapshot = req.body;
 
-            if (json.contains("requestId")) {
-                run.request_id = json["requestId"];
+            if (json.contains("requestId") && !json["requestId"].is_null()) {
+                run.request_id = json["requestId"].get<std::string>();
             }
-            if (json.contains("environmentId")) {
-                run.environment_id = json["environmentId"];
+            if (json.contains("environmentId") && !json["environmentId"].is_null()) {
+                run.environment_id = json["environmentId"].get<std::string>();
             }
 
             db_.create_run(run);
@@ -501,11 +468,11 @@ void Server::setup_routes() {
             run.start_time = now_ms();
             run.end_time = run.start_time;
 
-            if (json.contains("requestId")) {
-                run.request_id = json["requestId"];
+            if (json.contains("requestId") && !json["requestId"].is_null()) {
+                run.request_id = json["requestId"].get<std::string>();
             }
-            if (json.contains("environmentId")) {
-                run.environment_id = json["environmentId"];
+            if (json.contains("environmentId") && !json["environmentId"].is_null()) {
+                run.environment_id = json["environmentId"].get<std::string>();
             }
 
             db_.create_run(run);

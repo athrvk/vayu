@@ -30,6 +30,21 @@ using Json = nlohmann::json;
 [[nodiscard]] Json serialize(const Request& request);
 
 /**
+ * @brief Serialize a Collection to JSON
+ */
+[[nodiscard]] Json serialize(const vayu::db::Collection& collection);
+
+/**
+ * @brief Serialize a Request (db) to JSON
+ */
+[[nodiscard]] Json serialize(const vayu::db::Request& request);
+
+/**
+ * @brief Serialize an Environment to JSON
+ */
+[[nodiscard]] Json serialize(const vayu::db::Environment& environment);
+
+/**
  * @brief Serialize a Run to JSON
  */
 [[nodiscard]] Json serialize(const vayu::db::Run& run);
