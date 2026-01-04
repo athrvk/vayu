@@ -1,11 +1,6 @@
-# Use the official Microsoft C++ Dev Container image
-# This image comes pre-installed with:
-# - GCC/Clang
-# - CMake
-# - Ninja
-# - vcpkg (at /usr/local/vcpkg)
-# - git, curl, etc.
-FROM mcr.microsoft.com/devcontainers/cpp:1-ubuntu-22.04
+# Use the official Microsoft C++ Dev Container image (Debian 12 Bookworm)
+# Debian 12 includes CMake 3.25.1+, meeting our requirement without manual upgrades.
+FROM mcr.microsoft.com/devcontainers/cpp:1-debian-12
 
 # Set environment variables for vcpkg
 ENV VCPKG_ROOT=/usr/local/vcpkg
