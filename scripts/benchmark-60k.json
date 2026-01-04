@@ -7,6 +7,8 @@
         }
     },
     "mode": "constant",
-    "duration": "10s",
-    "targetRps": 60000
+    "duration": "5s",
+    "targetRps": 60000,
+    "tests": "pm.test('Status code is 200', function() {\n    pm.expect(pm.response.code).to.equal(200);\n});\n\npm.test('Response is JSON', function() {\n    var json = pm.response.json();\n    pm.expect(json).to.have.property('ok');\n});\n\npm.test('Ok is true', function() {\n    var json = pm.response.json();\n    pm.expect(json.ok).to.be.true;\n});"
+
 }
