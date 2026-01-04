@@ -41,7 +41,10 @@ COPY engine/vcpkg.json .
 
 # Install dependencies for the target triplet
 # This creates the vcpkg_installed directory which CMake will later use
-RUN vcpkg install --triplet x64-linux
+# Use a cache mount for vcpkg downloads and binary cache to speed up builds
+RUN --mount=type=cache,target=/root/.cache/vcpkg/archives \
+    --mount=type=cache,target=/root/.cache/vcpkg/downloads \
+    vcpkg install --triplet x64-linux
 
 # 5. Copy the rest of the source code
 # This layer is invalidated whenever any file in 'engine/' changes
