@@ -647,7 +647,8 @@ void Server::setup_routes() {
                         {"thresholdMs", report.slow_threshold_ms},
                         {"percentage",
                          report.total_requests > 0
-                             ? (report.slow_requests_count * 100.0 / report.total_requests)
+                             ? (static_cast<double>(report.slow_requests_count) * 100.0 /
+                                static_cast<double>(report.total_requests))
                              : 0.0}};
                 }
 

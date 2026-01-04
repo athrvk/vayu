@@ -37,7 +37,8 @@ RunContext::RunContext(const std::string& id, nlohmann::json cfg)
     if (target_rps == 0.0) target_rps = 1000.0;  // default estimate
 
     // Pre-allocate with 20% buffer
-    mc_config.expected_requests = static_cast<size_t>((duration_ms / 1000.0) * target_rps * 1.2);
+    mc_config.expected_requests =
+        static_cast<size_t>((static_cast<double>(duration_ms) / 1000.0) * target_rps * 1.2);
     mc_config.expected_requests = std::max(mc_config.expected_requests, size_t(10000));
 
     // Get sampling config
@@ -185,7 +186,8 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         size_t completed = context->total_requests();
         size_t errors = context->total_errors();
         double avg_latency = context->metrics_collector->average_latency();
-        double actual_rps = total_duration_s > 0 ? completed / total_duration_s : 0.0;
+        double actual_rps =
+            total_duration_s > 0 ? static_cast<double>(completed) / total_duration_s : 0.0;
         double error_rate = context->metrics_collector->error_rate();
 
         // Calculate percentiles using MetricsCollector
@@ -299,8 +301,10 @@ void collect_metrics(std::shared_ptr<RunContext> context, vayu::db::Database* db
             size_t current_errors = context->total_errors();
             size_t delta = current_total - last_total;
 
-            double current_rps = elapsed > 0 ? delta / elapsed : 0.0;
-            double error_rate = current_total > 0 ? (current_errors * 100.0 / current_total) : 0.0;
+            double current_rps = elapsed > 0 ? static_cast<double>(delta) / elapsed : 0.0;
+            double error_rate = current_total > 0 ? (static_cast<double>(current_errors) * 100.0 /
+                                                     static_cast<double>(current_total))
+                                                  : 0.0;
 
             vayu::utils::log_debug("Metrics: rps=" + std::to_string(current_rps) + ", error_rate=" +
                                    std::to_string(error_rate) + "%" + ", active=" +

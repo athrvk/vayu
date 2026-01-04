@@ -120,7 +120,8 @@ public:
             vayu::utils::log_info("  Target RPS: " + std::to_string(target_rps));
 
             // Calculate expected requests
-            size_t expected = static_cast<size_t>((duration_ms / 1000.0) * target_rps);
+            size_t expected =
+                static_cast<size_t>((static_cast<double>(duration_ms) / 1000.0) * target_rps);
             context->requests_expected = expected;
 
             // Calculate interval between requests
@@ -313,9 +314,11 @@ public:
             // Calculate current concurrency
             size_t current_concurrency = target_concurrency;
             if (elapsed < ramp_duration_ms) {
-                double progress = static_cast<double>(elapsed) / ramp_duration_ms;
+                double progress =
+                    static_cast<double>(elapsed) / static_cast<double>(ramp_duration_ms);
                 current_concurrency = static_cast<size_t>(
-                    start_concurrency + (target_concurrency - start_concurrency) * progress);
+                    static_cast<double>(start_concurrency) +
+                    (static_cast<double>(target_concurrency - start_concurrency) * progress));
             }
 
             // Backpressure

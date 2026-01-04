@@ -141,7 +141,7 @@ MetricsCollector::Percentiles MetricsCollector::calculate_percentiles() {
 
     auto percentile = [&sorted](double p) -> double {
         if (sorted.empty()) return 0.0;
-        size_t idx = static_cast<size_t>(sorted.size() * p / 100.0);
+        size_t idx = static_cast<size_t>(static_cast<double>(sorted.size()) * p / 100.0);
         if (idx >= sorted.size()) idx = sorted.size() - 1;
         return sorted[idx];
     };
