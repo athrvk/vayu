@@ -144,7 +144,11 @@ void Server::setup_routes() {
             }
 
             vayu::db::Collection c;
-            c.id = "col_" + std::to_string(now_ms());
+            if (json.contains("id") && !json["id"].is_null()) {
+                c.id = json["id"].get<std::string>();
+            } else {
+                c.id = "col_" + std::to_string(now_ms());
+            }
             if (json.contains("parentId") && !json["parentId"].is_null()) {
                 c.parent_id = json["parentId"].get<std::string>();
             }
@@ -167,17 +171,22 @@ void Server::setup_routes() {
      * Returns: Array of request objects with method, url, headers, body, scripts, etc.
      */
     server_.Get("/requests", [this](const httplib::Request& req, httplib::Response& res) {
-        if (req.has_param("collectionId")) {
-            auto requests = db_.get_requests_in_collection(req.get_param_value("collectionId"));
-            nlohmann::json response = nlohmann::json::array();
-            for (const auto& r : requests) {
-                response.push_back(vayu::json::serialize(r));
+        try {
+            if (req.has_param("collectionId")) {
+                auto requests = db_.get_requests_in_collection(req.get_param_value("collectionId"));
+                nlohmann::json response = nlohmann::json::array();
+                for (const auto& r : requests) {
+                    response.push_back(vayu::json::serialize(r));
+                }
+                res.set_content(response.dump(), "application/json");
+            } else {
+                res.status = 400;
+                res.set_content(nlohmann::json{{"error", "collectionId required"}}.dump(),
+                                "application/json");
             }
-            res.set_content(response.dump(), "application/json");
-        } else {
-            res.status = 400;
-            res.set_content(nlohmann::json{{"error", "collectionId required"}}.dump(),
-                            "application/json");
+        } catch (const std::exception& e) {
+            res.status = 500;
+            res.set_content(nlohmann::json{{"error", e.what()}}.dump(), "application/json");
         }
     });
 
@@ -219,7 +228,11 @@ void Server::setup_routes() {
             }
 
             vayu::db::Request r;
-            r.id = "req_" + std::to_string(now_ms());
+            if (json.contains("id") && !json["id"].is_null()) {
+                r.id = json["id"].get<std::string>();
+            } else {
+                r.id = "req_" + std::to_string(now_ms());
+            }
             r.collection_id = json["collectionId"].get<std::string>();
             r.name = json["name"].get<std::string>();
 
@@ -278,7 +291,11 @@ void Server::setup_routes() {
             }
 
             vayu::db::Environment e;
-            e.id = "env_" + std::to_string(now_ms());
+            if (json.contains("id") && !json["id"].is_null()) {
+                e.id = json["id"].get<std::string>();
+            } else {
+                e.id = "env_" + std::to_string(now_ms());
+            }
             e.name = json["name"].get<std::string>();
             e.variables = json.value("variables", nlohmann::json::object()).dump();
             e.updated_at = now_ms();

@@ -126,7 +126,7 @@ Retrieves all collections from the database. Collections are folders that organi
 
 ### POST /collections
 
-Creates a new collection in the database.
+Creates or updates a collection in the database.
 
 **Request Body:**
 ```json
@@ -139,10 +139,10 @@ Creates a new collection in the database.
 ```
 
 **Required Fields:**
-- `id` (string): Unique collection identifier
 - `name` (string): Collection name
 
 **Optional Fields:**
+- `id` (string): Unique collection identifier (if provided, updates existing; if missing, creates new)
 - `parentId` (string|null): Parent collection ID
 - `order` (number): Display order (default: 0)
 
@@ -239,13 +239,13 @@ Creates or updates a request definition in the database.
 ```
 
 **Required Fields:**
-- `id` (string): Unique request identifier
 - `collectionId` (string): Parent collection ID
 - `name` (string): Request display name
 - `method` (string): HTTP method
 - `url` (string): Request URL
 
 **Optional Fields:**
+- `id` (string): Unique request identifier (if provided, updates existing; if missing, creates new)
 - `headers` (object): HTTP headers
 - `body` (any): Request body
 - `auth` (object): Authentication config
@@ -318,10 +318,10 @@ Creates or updates an environment in the database.
 ```
 
 **Required Fields:**
-- `id` (string): Unique environment identifier
 - `name` (string): Environment display name
 
 **Optional Fields:**
+- `id` (string): Unique environment identifier (if provided, updates existing; if missing, creates new)
 - `variables` (object): Variable key-value pairs (default: {})
 
 **Response (200 OK):**
