@@ -21,10 +21,13 @@ RUN apt-get update && apt-get install -y \
     git \
     pkg-config \
     ninja-build \
-    cmake \
     python3 \
+    python3-pip \
     linux-libc-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Install latest CMake via pip
+RUN pip3 install cmake --upgrade
 
 # Set up workspace
 WORKDIR /app
