@@ -1,0 +1,22 @@
+# Lightweight Dockerfile using pre-built binaries
+FROM debian:12-slim
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y \
+    libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up workspace
+WORKDIR /app
+
+# Copy the built binary
+COPY engine/build/vayu-engine .
+
+# Create database directory
+RUN mkdir -p db
+
+# Expose the port
+EXPOSE 9876
+
+# Set the entrypoint
+ENTRYPOINT ["./vayu-engine", "-v", "2"]

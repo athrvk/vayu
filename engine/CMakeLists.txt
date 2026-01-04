@@ -76,6 +76,14 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     )
 endif()
 
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_SYSTEM_NAME MATCHES "Linux")
+    target_compile_options(vayu_warnings INTERFACE
+        -Wno-deprecated-declarations
+        -Wno-missing-designated-field-initializers
+        -Wno-implicit-int-float-conversion
+    )
+endif()
+
 # ============================================================================
 # Sanitizers
 # ============================================================================
