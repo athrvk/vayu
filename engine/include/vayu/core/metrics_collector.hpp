@@ -135,12 +135,14 @@ public:
 
     [[nodiscard]] double average_latency() const {
         size_t count = success_count();
-        return count > 0 ? total_latency_sum() / count : 0.0;
+        return count > 0 ? total_latency_sum() / static_cast<double>(count) : 0.0;
     }
 
     [[nodiscard]] double error_rate() const {
         size_t total = total_requests();
-        return total > 0 ? (total_errors() * 100.0 / total) : 0.0;
+        return total > 0
+                   ? (static_cast<double>(total_errors()) * 100.0 / static_cast<double>(total))
+                   : 0.0;
     }
 
     // ========================================================================

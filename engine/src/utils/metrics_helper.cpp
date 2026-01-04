@@ -18,10 +18,10 @@ MetricsHelper::RunSummary MetricsHelper::calculate_summary(const vayu::core::Run
         summary.total_requests > 0
             ? context.total_latency_ms() / static_cast<double>(summary.total_requests)
             : 0.0;
-    summary.error_rate =
-        summary.total_requests > 0
-            ? (summary.errors * vayu::core::metrics::PERCENTAGE_MULTIPLIER / summary.total_requests)
-            : 0.0;
+    summary.error_rate = summary.total_requests > 0 ? (static_cast<double>(summary.errors) *
+                                                       vayu::core::metrics::PERCENTAGE_MULTIPLIER /
+                                                       static_cast<double>(summary.total_requests))
+                                                    : 0.0;
 
     return summary;
 }
@@ -96,21 +96,23 @@ MetricsHelper::DetailedReport MetricsHelper::calculate_detailed_report(
     }
 
     // Calculate averages and rates
-    report.error_rate =
-        report.total_requests > 0
-            ? (static_cast<double>(report.failed_requests) * 100.0 / report.total_requests)
-            : 0.0;
+    report.error_rate = report.total_requests > 0
+                            ? (static_cast<double>(report.failed_requests) * 100.0 /
+                               static_cast<double>(report.total_requests))
+                            : 0.0;
 
-    report.avg_rps = duration_s > 0 ? report.total_requests / duration_s : 0.0;
-    report.latency_avg = report.total_requests > 0 ? total_latency / report.total_requests : 0.0;
+    report.avg_rps = duration_s > 0 ? static_cast<double>(report.total_requests) / duration_s : 0.0;
+    report.latency_avg = report.total_requests > 0
+                             ? total_latency / static_cast<double>(report.total_requests)
+                             : 0.0;
 
     // Calculate timing breakdown averages
     if (timing_samples > 0) {
-        report.avg_dns_ms = total_dns / timing_samples;
-        report.avg_connect_ms = total_connect / timing_samples;
-        report.avg_tls_ms = total_tls / timing_samples;
-        report.avg_first_byte_ms = total_first_byte / timing_samples;
-        report.avg_download_ms = total_download / timing_samples;
+        report.avg_dns_ms = total_dns / static_cast<double>(timing_samples);
+        report.avg_connect_ms = total_connect / static_cast<double>(timing_samples);
+        report.avg_tls_ms = total_tls / static_cast<double>(timing_samples);
+        report.avg_first_byte_ms = total_first_byte / static_cast<double>(timing_samples);
+        report.avg_download_ms = total_download / static_cast<double>(timing_samples);
     }
 
     // Calculate percentiles
@@ -120,7 +122,8 @@ MetricsHelper::DetailedReport MetricsHelper::calculate_detailed_report(
         report.latency_max = latencies.back();
 
         auto get_percentile = [&](double p) {
-            size_t idx = static_cast<size_t>(std::ceil(p * latencies.size())) - 1;
+            size_t idx =
+                static_cast<size_t>(std::ceil(p * static_cast<double>(latencies.size()))) - 1;
             // Clamp index to valid range
             idx = std::max(size_t(0), std::min(idx, latencies.size() - 1));
             return latencies[idx];

@@ -30,7 +30,7 @@ std::optional<Json> try_parse_body(const std::string& body) {
         return std::nullopt;
     }
     try {
-        return Json::parse(body);
+        return std::make_optional(Json::parse(body));
     } catch (...) {
         return std::nullopt;
     }
