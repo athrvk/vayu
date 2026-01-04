@@ -131,8 +131,8 @@ void Server::setup_routes() {
      * Creates or updates a collection in the database.
      * If 'id' is provided and exists, performs a partial update.
      * Otherwise, creates a new collection (requires 'name').
-     * Body params: id (optional string), name (string), parentId (optional string), order (optional int)
-     * Returns: The saved collection object.
+     * Body params: id (optional string), name (string), parentId (optional string), order (optional
+     * int) Returns: The saved collection object.
      */
     server_.Post("/collections", [this](const httplib::Request& req, httplib::Response& res) {
         try {
@@ -153,8 +153,9 @@ void Server::setup_routes() {
             } else {
                 if (!json.contains("name") || json["name"].is_null()) {
                     res.status = 400;
-                    res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
-                                    "application/json");
+                    res.set_content(
+                        nlohmann::json{{"error", "Missing required field: name"}}.dump(),
+                        "application/json");
                     return;
                 }
                 c.id = id;
@@ -165,7 +166,7 @@ void Server::setup_routes() {
             if (json.contains("name") && !json["name"].is_null()) {
                 c.name = json["name"].get<std::string>();
             }
-            
+
             if (json.contains("parentId")) {
                 if (json["parentId"].is_null()) {
                     c.parent_id = std::nullopt;
@@ -173,7 +174,7 @@ void Server::setup_routes() {
                     c.parent_id = json["parentId"].get<std::string>();
                 }
             }
-            
+
             if (json.contains("order") && !json["order"].is_null()) {
                 c.order = json["order"].get<int>();
             }
@@ -247,14 +248,16 @@ void Server::setup_routes() {
                 }
                 if (!json.contains("name") || json["name"].is_null()) {
                     res.status = 400;
-                    res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
-                                    "application/json");
+                    res.set_content(
+                        nlohmann::json{{"error", "Missing required field: name"}}.dump(),
+                        "application/json");
                     return;
                 }
                 if (!json.contains("method") || json["method"].is_null()) {
                     res.status = 400;
-                    res.set_content(nlohmann::json{{"error", "Missing required field: method"}}.dump(),
-                                    "application/json");
+                    res.set_content(
+                        nlohmann::json{{"error", "Missing required field: method"}}.dump(),
+                        "application/json");
                     return;
                 }
                 if (!json.contains("url") || json["url"].is_null()) {
@@ -283,9 +286,11 @@ void Server::setup_routes() {
             if (json.contains("headers")) r.headers = json["headers"].dump();
             if (json.contains("body")) r.body = json["body"].dump();
             if (json.contains("auth")) r.auth = json["auth"].dump();
-            if (json.contains("preRequestScript")) r.pre_request_script = json["preRequestScript"].get<std::string>();
-            if (json.contains("postRequestScript")) r.post_request_script = json["postRequestScript"].get<std::string>();
-            
+            if (json.contains("preRequestScript"))
+                r.pre_request_script = json["preRequestScript"].get<std::string>();
+            if (json.contains("postRequestScript"))
+                r.post_request_script = json["postRequestScript"].get<std::string>();
+
             r.updated_at = now_ms();
 
             db_.save_request(r);
@@ -338,8 +343,9 @@ void Server::setup_routes() {
             } else {
                 if (!json.contains("name") || json["name"].is_null()) {
                     res.status = 400;
-                    res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
-                                    "application/json");
+                    res.set_content(
+                        nlohmann::json{{"error", "Missing required field: name"}}.dump(),
+                        "application/json");
                     return;
                 }
                 e.id = id;
@@ -351,7 +357,7 @@ void Server::setup_routes() {
             if (json.contains("variables")) {
                 e.variables = json["variables"].dump();
             }
-            
+
             e.updated_at = now_ms();
 
             db_.save_environment(e);
