@@ -12,9 +12,6 @@ WORKDIR /app
 # Copy the built binary
 COPY engine/build/vayu-engine .
 
-# Create database directory
-RUN mkdir -p db
-
 # Expose the port
 EXPOSE 9876
 

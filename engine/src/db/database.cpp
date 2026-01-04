@@ -3,6 +3,7 @@
 #include <sqlite_orm/sqlite_orm.h>
 
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 
 #include "vayu/utils/logger.hpp"
@@ -204,7 +205,13 @@ using Storage = decltype(make_storage(""));
 struct Database::Impl {
     Storage storage;
 
-    Impl(const std::string& path) : storage(make_storage(path)) {}
+    Impl(const std::string& path) : storage(make_storage(path)) {
+        // Ensure parent directory exists
+        std::filesystem::path db_path(path);
+        if (db_path.has_parent_path()) {
+            std::filesystem::create_directories(db_path.parent_path());
+        }
+    }
 };
 
 Database::Database(const std::string& db_path) : impl_(std::make_unique<Impl>(db_path)) {}
