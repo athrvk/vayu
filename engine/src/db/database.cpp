@@ -233,6 +233,12 @@ std::vector<Collection> Database::get_collections() {
     return impl_->storage.get_all<Collection>(order_by(&Collection::order));
 }
 
+std::optional<Collection> Database::get_collection(const std::string& id) {
+    auto cols = impl_->storage.get_all<Collection>(where(c(&Collection::id) == id));
+    if (cols.empty()) return std::nullopt;
+    return cols.front();
+}
+
 void Database::save_request(const Request& r) {
     vayu::utils::log_debug("Saving request: id=" + r.id + ", name=" + r.name);
     impl_->storage.replace(r);

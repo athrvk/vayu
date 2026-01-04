@@ -19,6 +19,7 @@ public:
     // Project Management
     void create_collection(const Collection& c);
     std::vector<Collection> get_collections();
+    std::optional<Collection> get_collection(const std::string& id);
 
     void save_request(const Request& r);
     std::optional<Request> get_request(const std::string& id);

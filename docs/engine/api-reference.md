@@ -139,10 +139,10 @@ Creates or updates a collection in the database.
 ```
 
 **Required Fields:**
-- `name` (string): Collection name
+- `name` (string): Collection name (Required for creation)
 
 **Optional Fields:**
-- `id` (string): Unique collection identifier (if provided, updates existing; if missing, creates new)
+- `id` (string): Unique collection identifier. If provided and exists, performs a partial update. If missing or not found, creates a new collection.
 - `parentId` (string|null): Parent collection ID
 - `order` (number): Display order (default: 0)
 
@@ -239,13 +239,13 @@ Creates or updates a request definition in the database.
 ```
 
 **Required Fields:**
-- `collectionId` (string): Parent collection ID
-- `name` (string): Request display name
-- `method` (string): HTTP method
-- `url` (string): Request URL
+- `collectionId` (string): Parent collection ID (Required for creation)
+- `name` (string): Request display name (Required for creation)
+- `method` (string): HTTP method (Required for creation)
+- `url` (string): Request URL (Required for creation)
 
 **Optional Fields:**
-- `id` (string): Unique request identifier (if provided, updates existing; if missing, creates new)
+- `id` (string): Unique request identifier. If provided and exists, performs a partial update. If missing or not found, creates a new request.
 - `headers` (object): HTTP headers
 - `body` (any): Request body
 - `auth` (object): Authentication config
@@ -318,10 +318,10 @@ Creates or updates an environment in the database.
 ```
 
 **Required Fields:**
-- `name` (string): Environment display name
+- `name` (string): Environment display name (Required for creation)
 
 **Optional Fields:**
-- `id` (string): Unique environment identifier (if provided, updates existing; if missing, creates new)
+- `id` (string): Unique environment identifier. If provided and exists, performs a partial update. If missing or not found, creates a new environment.
 - `variables` (object): Variable key-value pairs (default: {})
 
 **Response (200 OK):**

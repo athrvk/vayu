@@ -128,33 +128,55 @@ void Server::setup_routes() {
 
     /**
      * POST /collections
-     * Creates a new collection in the database.
-     * Body params: id (string), name (string), parentId (optional string), order (optional int)
-     * Returns: The created collection object.
+     * Creates or updates a collection in the database.
+     * If 'id' is provided and exists, performs a partial update.
+     * Otherwise, creates a new collection (requires 'name').
+     * Body params: id (optional string), name (string), parentId (optional string), order (optional int)
+     * Returns: The saved collection object.
      */
     server_.Post("/collections", [this](const httplib::Request& req, httplib::Response& res) {
         try {
             auto json = nlohmann::json::parse(req.body);
 
-            if (!json.contains("name") || json["name"].is_null()) {
-                res.status = 400;
-                res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
-                                "application/json");
-                return;
+            std::string id;
+            if (json.contains("id") && !json["id"].is_null()) {
+                id = json["id"].get<std::string>();
+            } else {
+                id = "col_" + std::to_string(now_ms());
             }
 
             vayu::db::Collection c;
-            if (json.contains("id") && !json["id"].is_null()) {
-                c.id = json["id"].get<std::string>();
+            auto existing = db_.get_collection(id);
+
+            if (existing) {
+                c = *existing;
             } else {
-                c.id = "col_" + std::to_string(now_ms());
+                if (!json.contains("name") || json["name"].is_null()) {
+                    res.status = 400;
+                    res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
+                                    "application/json");
+                    return;
+                }
+                c.id = id;
+                c.created_at = now_ms();
+                c.order = 0;
             }
-            if (json.contains("parentId") && !json["parentId"].is_null()) {
-                c.parent_id = json["parentId"].get<std::string>();
+
+            if (json.contains("name") && !json["name"].is_null()) {
+                c.name = json["name"].get<std::string>();
             }
-            c.name = json["name"].get<std::string>();
-            c.order = json.value("order", 0);
-            c.created_at = now_ms();
+            
+            if (json.contains("parentId")) {
+                if (json["parentId"].is_null()) {
+                    c.parent_id = std::nullopt;
+                } else {
+                    c.parent_id = json["parentId"].get<std::string>();
+                }
+            }
+            
+            if (json.contains("order") && !json["order"].is_null()) {
+                c.order = json["order"].get<int>();
+            }
 
             db_.create_collection(c);
             res.set_content(vayu::json::serialize(c).dump(), "application/json");
@@ -193,6 +215,8 @@ void Server::setup_routes() {
     /**
      * POST /requests
      * Creates or updates a request in the database.
+     * If 'id' is provided and exists, performs a partial update.
+     * Otherwise, creates a new request (requires 'collectionId', 'name', 'method', 'url').
      * Body params: id, collectionId, name, method, url, headers (object), body (any),
      *              auth (object), preRequestScript (string), postRequestScript (string)
      * Returns: The saved request object.
@@ -201,53 +225,67 @@ void Server::setup_routes() {
         try {
             auto json = nlohmann::json::parse(req.body);
 
-            if (!json.contains("collectionId") || json["collectionId"].is_null()) {
-                res.status = 400;
-                res.set_content(
-                    nlohmann::json{{"error", "Missing required field: collectionId"}}.dump(),
-                    "application/json");
-                return;
-            }
-            if (!json.contains("name") || json["name"].is_null()) {
-                res.status = 400;
-                res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
-                                "application/json");
-                return;
-            }
-            if (!json.contains("method") || json["method"].is_null()) {
-                res.status = 400;
-                res.set_content(nlohmann::json{{"error", "Missing required field: method"}}.dump(),
-                                "application/json");
-                return;
-            }
-            if (!json.contains("url") || json["url"].is_null()) {
-                res.status = 400;
-                res.set_content(nlohmann::json{{"error", "Missing required field: url"}}.dump(),
-                                "application/json");
-                return;
+            std::string id;
+            if (json.contains("id") && !json["id"].is_null()) {
+                id = json["id"].get<std::string>();
+            } else {
+                id = "req_" + std::to_string(now_ms());
             }
 
             vayu::db::Request r;
-            if (json.contains("id") && !json["id"].is_null()) {
-                r.id = json["id"].get<std::string>();
+            auto existing = db_.get_request(id);
+
+            if (existing) {
+                r = *existing;
             } else {
-                r.id = "req_" + std::to_string(now_ms());
+                if (!json.contains("collectionId") || json["collectionId"].is_null()) {
+                    res.status = 400;
+                    res.set_content(
+                        nlohmann::json{{"error", "Missing required field: collectionId"}}.dump(),
+                        "application/json");
+                    return;
+                }
+                if (!json.contains("name") || json["name"].is_null()) {
+                    res.status = 400;
+                    res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
+                                    "application/json");
+                    return;
+                }
+                if (!json.contains("method") || json["method"].is_null()) {
+                    res.status = 400;
+                    res.set_content(nlohmann::json{{"error", "Missing required field: method"}}.dump(),
+                                    "application/json");
+                    return;
+                }
+                if (!json.contains("url") || json["url"].is_null()) {
+                    res.status = 400;
+                    res.set_content(nlohmann::json{{"error", "Missing required field: url"}}.dump(),
+                                    "application/json");
+                    return;
+                }
+                r.id = id;
             }
-            r.collection_id = json["collectionId"].get<std::string>();
-            r.name = json["name"].get<std::string>();
 
-            auto method = vayu::parse_method(json["method"].get<std::string>());
-            if (!method) {
-                throw std::runtime_error("Invalid HTTP method");
+            if (json.contains("collectionId") && !json["collectionId"].is_null()) {
+                r.collection_id = json["collectionId"].get<std::string>();
             }
-            r.method = *method;
-
-            r.url = json["url"].get<std::string>();
-            r.headers = json.value("headers", nlohmann::json::object()).dump();
-            r.body = json.value("body", nlohmann::json()).dump();
-            r.auth = json.value("auth", nlohmann::json::object()).dump();
-            r.pre_request_script = json.value("preRequestScript", "");
-            r.post_request_script = json.value("postRequestScript", "");
+            if (json.contains("name") && !json["name"].is_null()) {
+                r.name = json["name"].get<std::string>();
+            }
+            if (json.contains("method") && !json["method"].is_null()) {
+                auto method = vayu::parse_method(json["method"].get<std::string>());
+                if (!method) throw std::runtime_error("Invalid HTTP method");
+                r.method = *method;
+            }
+            if (json.contains("url") && !json["url"].is_null()) {
+                r.url = json["url"].get<std::string>();
+            }
+            if (json.contains("headers")) r.headers = json["headers"].dump();
+            if (json.contains("body")) r.body = json["body"].dump();
+            if (json.contains("auth")) r.auth = json["auth"].dump();
+            if (json.contains("preRequestScript")) r.pre_request_script = json["preRequestScript"].get<std::string>();
+            if (json.contains("postRequestScript")) r.post_request_script = json["postRequestScript"].get<std::string>();
+            
             r.updated_at = now_ms();
 
             db_.save_request(r);
@@ -276,28 +314,44 @@ void Server::setup_routes() {
     /**
      * POST /environments
      * Creates or updates an environment in the database.
-     * Body params: id (string), name (string), variables (object of key-value pairs)
+     * If 'id' is provided and exists, performs a partial update.
+     * Otherwise, creates a new environment (requires 'name').
+     * Body params: id (optional string), name (string), variables (optional object)
      * Returns: The saved environment object.
      */
     server_.Post("/environments", [this](const httplib::Request& req, httplib::Response& res) {
         try {
             auto json = nlohmann::json::parse(req.body);
 
-            if (!json.contains("name") || json["name"].is_null()) {
-                res.status = 400;
-                res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
-                                "application/json");
-                return;
+            std::string id;
+            if (json.contains("id") && !json["id"].is_null()) {
+                id = json["id"].get<std::string>();
+            } else {
+                id = "env_" + std::to_string(now_ms());
             }
 
             vayu::db::Environment e;
-            if (json.contains("id") && !json["id"].is_null()) {
-                e.id = json["id"].get<std::string>();
+            auto existing = db_.get_environment(id);
+
+            if (existing) {
+                e = *existing;
             } else {
-                e.id = "env_" + std::to_string(now_ms());
+                if (!json.contains("name") || json["name"].is_null()) {
+                    res.status = 400;
+                    res.set_content(nlohmann::json{{"error", "Missing required field: name"}}.dump(),
+                                    "application/json");
+                    return;
+                }
+                e.id = id;
             }
-            e.name = json["name"].get<std::string>();
-            e.variables = json.value("variables", nlohmann::json::object()).dump();
+
+            if (json.contains("name") && !json["name"].is_null()) {
+                e.name = json["name"].get<std::string>();
+            }
+            if (json.contains("variables")) {
+                e.variables = json["variables"].dump();
+            }
+            
             e.updated_at = now_ms();
 
             db_.save_environment(e);
