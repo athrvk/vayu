@@ -11,21 +11,7 @@ ENV VCPKG_BINARY_SOURCES=clear
 # Set up workspace
 WORKDIR /app/engine
 
-# 1. Install vcpkg dependencies
-# We copy ONLY the manifest file first to leverage Docker layer caching.
-# This step will only re-run if vcpkg.json changes.
-COPY engine/vcpkg.json .
-
-# Install dependencies for the target triplet
-# We use cache mounts to speed up downloads and binary caching across builds
-RUN --mount=type=cache,target=/root/.cache/vcpkg/archives \
-    --mount=type=cache,target=/root/.cache/vcpkg/downloads \
-    # Ensure vcpkg is up to date or usable (the image might have an older version, but it's stable)
-    # We just run install. The vcpkg executable is already in PATH.
-    vcpkg install --triplet x64-linux
-
-# 2. Copy the rest of the source code
-# This layer is invalidated whenever any file in 'engine/' changes
+# 1. Copy the source code first
 COPY engine .
 
 # Create database directory
@@ -36,6 +22,13 @@ RUN mkdir -p db
 RUN sed -i 's/server_.listen("127.0.0.1", port_);/server_.listen("0.0.0.0", port_);/g' src/http/server.cpp && \
     sed -i 's/Listening on http:\/\/127.0.0.1:/Listening on http:\/\/0.0.0.0:/g' src/http/server.cpp && \
     sed -i 's/-Werror//g' CMakeLists.txt
+
+# 2. Install vcpkg dependencies AFTER copying source
+# This ensures vcpkg_installed directory is not overwritten
+# Use cache mounts to speed up downloads and binary caching across builds
+RUN --mount=type=cache,target=/root/.cache/vcpkg/archives \
+    --mount=type=cache,target=/root/.cache/vcpkg/downloads \
+    vcpkg install --triplet x64-linux
 
 # 3. Build
 # We point CMake to the vcpkg toolchain. It will detect the pre-installed packages in vcpkg_installed.
