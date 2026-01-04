@@ -3,15 +3,8 @@ FROM ubuntu:22.04
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install build dependencies
-# - build-essential: GCC/G++ and standard tools
-# - curl, zip, unzip, tar: Required by vcpkg
-# - git: Required by vcpkg
-# - pkg-config: Helper for library path resolution
-# - ninja-build: Fast build system
-# - cmake: Build configuration
-# - python3: Required by some vcpkg ports
-# - linux-libc-dev: System headers
+# 1. Install system dependencies
+# These layers will be cached unless the package list changes
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
@@ -26,34 +19,43 @@ RUN apt-get update && apt-get install -y \
     linux-libc-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install latest CMake via pip
+# 2. Install CMake
 RUN pip3 install cmake --upgrade
 
-# Set up workspace
-WORKDIR /app
-
-# Install vcpkg
-RUN git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg
-RUN /opt/vcpkg/bootstrap-vcpkg.sh
+# 3. Install vcpkg
 ENV VCPKG_ROOT=/opt/vcpkg
 ENV PATH="${VCPKG_ROOT}:${PATH}"
+# Set VCPKG_BINARY_SOURCES to clear it, ensuring we don't try to use nuget or other sources by default if not configured
+ENV VCPKG_BINARY_SOURCES=clear
 
-# Copy engine source
-COPY engine /app/engine
+RUN git clone https://github.com/microsoft/vcpkg.git ${VCPKG_ROOT} \
+    && ${VCPKG_ROOT}/bootstrap-vcpkg.sh
 
-# Create database directory
-RUN mkdir -p /app/engine/db
-
-# Patch server to listen on 0.0.0.0 instead of 127.0.0.1
-# This is critical for Docker networking as 127.0.0.1 is loopback only
-RUN sed -i 's/server_.listen("127.0.0.1", port_);/server_.listen("0.0.0.0", port_);/g' /app/engine/src/http/server.cpp && \
-    sed -i 's/Listening on http:\/\/127.0.0.1:/Listening on http:\/\/0.0.0.0:/g' /app/engine/src/http/server.cpp
-
-# Configure and build
+# Set up workspace
 WORKDIR /app/engine
 
-# 1. Configure CMake (this will also trigger vcpkg to install dependencies)
-# 2. Build the 'vayu-engine' target
+# 4. Install vcpkg dependencies
+# We copy ONLY the manifest file first.
+# This ensures that 'vcpkg install' is only re-run if vcpkg.json changes.
+COPY engine/vcpkg.json .
+
+# Install dependencies for the target triplet
+# This creates the vcpkg_installed directory which CMake will later use
+RUN vcpkg install --triplet x64-linux
+
+# 5. Copy the rest of the source code
+# This layer is invalidated whenever any file in 'engine/' changes
+COPY engine .
+
+# Create database directory
+RUN mkdir -p db
+
+# Patch server to listen on 0.0.0.0 instead of 127.0.0.1
+RUN sed -i 's/server_.listen("127.0.0.1", port_);/server_.listen("0.0.0.0", port_);/g' src/http/server.cpp && \
+    sed -i 's/Listening on http:\/\/127.0.0.1:/Listening on http:\/\/0.0.0.0:/g' src/http/server.cpp
+
+# 6. Build
+# We point CMake to the vcpkg toolchain. It will detect the pre-installed packages in vcpkg_installed.
 RUN cmake -S . -B build -GNinja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake \
@@ -64,7 +66,4 @@ RUN cmake -S . -B build -GNinja \
 EXPOSE 9876
 
 # Set the entrypoint
-# The binary is typically located in build/ or build/bin/ depending on configuration
-# We use a shell form to ensure we can find it, or just point to it.
-# Standard CMake add_executable puts it in build/ unless CMAKE_RUNTIME_OUTPUT_DIRECTORY is set.
 ENTRYPOINT ["./build/vayu-engine", "-v", "2"]
