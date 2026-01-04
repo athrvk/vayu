@@ -30,7 +30,7 @@ MetricsCollector::MetricsCollector(const std::string& run_id, MetricsCollectorCo
 
     // Reserve errors vector (assume ~5% error rate max)
     size_t error_reserve =
-        config_.max_errors > 0 ? config_.max_errors : std::max(expected / 20, size_t(10000));
+        config_.max_errors > 0 ? config_.max_errors : std::max(expected / 20U, size_t(10000));
     errors_.reserve(error_reserve);
 
     // Reserve success results if storing traces

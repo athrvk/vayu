@@ -157,8 +157,9 @@ EventLoopWorker::EventLoopWorker(const EventLoopConfig& cfg)
 
     // Set max total connections (connection pool size)
     // Higher value = more reusable connections available
-    curl_multi_setopt(
-        multi_handle, CURLMOPT_MAX_TOTAL_CONNECTIONS, static_cast<long>(config.max_concurrent * 2));
+    curl_multi_setopt(multi_handle,
+                      CURLMOPT_MAX_TOTAL_CONNECTIONS,
+                      static_cast<long>(config.max_concurrent * 2U));
 }
 
 EventLoopWorker::~EventLoopWorker() {

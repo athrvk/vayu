@@ -33,7 +33,7 @@ void handle_result(std::shared_ptr<RunContext> context,
 
         // Build trace data if configured
         std::string trace_data;
-        bool is_slow = latency >= slow_threshold_ms;
+        bool is_slow = latency >= static_cast<double>(slow_threshold_ms);
 
         if (save_timing_breakdown || is_slow) {
             nlohmann::json timing_json = {{"total_ms", response.timing.total_ms},
@@ -144,7 +144,7 @@ public:
                 if (now >= next_request_time) {
                     // Backpressure check
                     size_t max_pending =
-                        std::max(static_cast<size_t>(target_rps * 10), size_t(1000));
+                        std::max(static_cast<size_t>(target_rps * 10.0), size_t(1000));
                     if (context->event_loop->pending_count() < max_pending) {
                         context->event_loop->submit(
                             request, [context, &db](size_t, vayu::Result<vayu::Response> result) {
@@ -191,7 +191,7 @@ public:
                 }
 
                 // Backpressure
-                size_t max_pending = std::max(concurrency * 5, size_t(1000));
+                size_t max_pending = std::max(concurrency * 5U, size_t(1000));
                 if (context->event_loop->pending_count() > max_pending) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
                     continue;
@@ -236,7 +236,7 @@ public:
         size_t submitted = 0;
         while (submitted < iterations && !context->should_stop) {
             // Backpressure - don't submit too many at once
-            size_t max_pending = std::max(concurrency * 5, size_t(100));
+            size_t max_pending = std::max(concurrency * 5U, size_t(100));
             if (context->event_loop->pending_count() > max_pending) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
@@ -322,7 +322,7 @@ public:
             }
 
             // Backpressure
-            size_t max_pending = std::max(target_concurrency * 5, size_t(1000));
+            size_t max_pending = std::max(target_concurrency * 5U, size_t(1000));
             if (context->event_loop->pending_count() > max_pending) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 continue;

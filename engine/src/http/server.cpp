@@ -682,7 +682,7 @@ void Server::setup_routes() {
                 double duration_s = 0;
                 if (run->start_time > 0) {
                     int64_t end = run->end_time > 0 ? run->end_time : now_ms();
-                    duration_s = (end - run->start_time) / 1000.0;
+                    duration_s = static_cast<double>(end - run->start_time) / 1000.0;
                 }
 
                 auto report =
