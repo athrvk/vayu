@@ -83,7 +83,8 @@ void Server::setup_routes() {
     server_.set_default_headers(
         {{"Access-Control-Allow-Origin", "*"},
          {"Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS"},
-         {"Access-Control-Allow-Headers", "Content-Type, Authorization"}});
+         {"Access-Control-Allow-Headers",
+          "Content-Type, Authorization, ngrok-skip-browser-warning"}});
 
     // Handle OPTIONS preflight requests
     server_.Options(".*",
