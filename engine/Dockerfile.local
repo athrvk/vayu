@@ -4,6 +4,7 @@ FROM debian:12-slim
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y \
     libstdc++6 \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up workspace
@@ -12,8 +13,9 @@ WORKDIR /app
 # Copy the built binary
 COPY engine/build/vayu-engine .
 
-# Expose the port
+# Expose the port (Render will override with PORT env var)
 EXPOSE 9876
 
-# Set the entrypoint
-ENTRYPOINT ["./vayu-engine", "-v", "2"]
+# Use a shell to read the PORT environment variable provided by Render
+# Default to 9876 if PORT is not set
+ENTRYPOINT ["/bin/sh", "-c", "./vayu-engine -p ${PORT:-9876} -v 2"]
