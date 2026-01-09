@@ -1,7 +1,8 @@
 # Vayu Engine API Reference
 
-**Version:** 0.1.0  
+**Version:** 0.2.1  
 **Base URL:** `http://127.0.0.1:9876`
+
 
 ---
 
@@ -473,22 +474,31 @@ Starts a load test run that executes multiple requests concurrently based on the
 
 **Load Test Modes:**
 
-#### 1. Constant Load (Rate-Limited)
-Maintains a target requests per second for a specified duration.
+#### 1. Constant Load (Rate-Limited) - Recommended for High RPS
+Maintains a target requests per second for a specified duration using batched submission.
 
 ```json
 {
   "mode": "constant",
   "duration": "30s",
-  "targetRps": 100
+  "targetRps": 60000,
+  "concurrency": 200
 }
 ```
 
 **Parameters:**
 - `duration` (string): Test duration (e.g., "10s", "5m", "1h")
-- `targetRps` (number): Target requests per second
+- `targetRps` (number): Target requests per second (tested up to 60k+ RPS)
+- `concurrency` (number): Max concurrent connections per worker (default: 100)
 
-**Note:** If `targetRps` is specified, uses precise rate limiting (20ms intervals for 50 RPS). Otherwise falls back to concurrency-based mode.
+**Implementation Details:**
+- Uses batched submission (e.g., 90 requests/ms for 90k RPS target)
+- Lock-free SPSC queues distribute requests to workers
+- Token-bucket rate limiting with `try_acquire_unlocked()` (no mutex)
+- Achieves **60k+ RPS** on commodity hardware
+
+**Note:** If `targetRps` is specified, uses batched rate-limited mode. The `concurrency` parameter controls the per-worker connection limit (total = workers × concurrency).
+
 
 #### 2. Constant Load (Concurrency-Based)
 Submits requests in batches based on concurrency level.
@@ -548,6 +558,33 @@ These optional fields control how much data is stored during the test:
 | `success_sample_rate` | number (1-100) | 100 | Percentage of successful requests to save (reduces DB size) |
 | `slow_threshold_ms` | number | 1000 | Auto-save requests slower than this threshold (ms) |
 | `save_timing_breakdown` | boolean | false | Capture detailed timing (DNS, TLS, TTFB, etc.) |
+
+**Script Validation Settings (Deferred Validation):**
+
+Test scripts can be included in load tests. Scripts are executed **after** the test completes on sampled responses to avoid impacting throughput.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `request.tests` | string | "" | JavaScript test script (pm.test/pm.expect) |
+| `max_response_samples` | number | 1000 | Maximum responses to sample for validation |
+| `response_sample_rate` | number | 100 | Sample 1 in N responses (100 = 1%) |
+
+**Example: Load Test with Script Validation**
+```json
+{
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.com/health",
+    "tests": "pm.test('Status 200', function() { pm.expect(pm.response.code).to.equal(200); });"
+  },
+  "mode": "constant",
+  "duration": "30s",
+  "targetRps": 5000,
+  "max_response_samples": 500,
+  "response_sample_rate": 50
+}
+```
+This samples 2% of responses (1 in 50) and validates up to 500 samples after the test.
 
 **Example: High-Performance Test with Smart Sampling**
 ```json
@@ -779,6 +816,28 @@ Object mapping HTTP status codes to their occurrence count.
 | `thresholdMs` | number | Slow threshold in milliseconds |
 | `percentage` | number | Percentage of total requests |
 
+**Test Validation:** (only if `request.tests` was provided - deferred validation)
+| Field | Type | Description |
+|-------|------|-------------|
+| `samplesTested` | number | Number of response samples validated |
+| `testsPassed` | number | Total test assertions that passed |
+| `testsFailed` | number | Total test assertions that failed |
+| `successRate` | number | Percentage of tests that passed |
+
+**Example Response with Test Validation:**
+```json
+{
+  "summary": { "totalRequests": 5000, "avgRps": 166.67, ... },
+  "latency": { "avg": 45.2, "p99": 120.5, ... },
+  "testValidation": {
+    "samplesTested": 50,
+    "testsPassed": 98,
+    "testsFailed": 2,
+    "successRate": 98.0
+  }
+}
+```
+
 **Errors:**
 - `404 Not Found`: Run with specified ID does not exist
 - `500 Internal Server Error`: Database query or calculation failed
@@ -943,6 +1002,10 @@ data: {"event":"complete","runId":"run_1704200000000","status":"completed"}
 | `latency_p99` | 99th percentile latency | Final summary |
 | `total_requests` | Total completed requests | Final summary |
 | `completed` | Test completion indicator (value: 1.0) | Once at end |
+| `tests_validating` | Script validation started | After test (if scripts) |
+| `tests_sampled` | Number of responses sampled for validation | After test (if scripts) |
+| `tests_passed` | Test assertions passed | After validation |
+| `tests_failed` | Test assertions failed | After validation |
 
 **Completion Event Data:**
 

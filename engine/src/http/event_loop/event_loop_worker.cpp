@@ -7,6 +7,7 @@
 #include <chrono>
 #include <regex>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 
@@ -87,13 +88,13 @@ CurlHandlePool::CurlHandlePool(size_t initial_size) {
         CURL* handle = curl_easy_init();
         if (handle) {
             pool_.push(handle);
-            total_created_.fetch_add(1, std::memory_order_relaxed);
+            total_created_++;
         }
     }
 }
 
 CurlHandlePool::~CurlHandlePool() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    // No lock needed - destructor runs after worker thread stops
     while (!pool_.empty()) {
         CURL* handle = pool_.front();
         pool_.pop();
@@ -102,35 +103,27 @@ CurlHandlePool::~CurlHandlePool() {
 }
 
 CURL* CurlHandlePool::acquire() {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!pool_.empty()) {
-            CURL* handle = pool_.front();
-            pool_.pop();
-            curl_easy_reset(handle);  // Reset is ~100x faster than init
-            total_reused_.fetch_add(1, std::memory_order_relaxed);
-            return handle;
-        }
+    // No lock needed - single-threaded access
+    if (!pool_.empty()) {
+        CURL* handle = pool_.front();
+        pool_.pop();
+        curl_easy_reset(handle);  // Reset is ~100x faster than init
+        total_reused_++;
+        return handle;
     }
 
     // Pool empty - create new handle
     CURL* handle = curl_easy_init();
     if (handle) {
-        total_created_.fetch_add(1, std::memory_order_relaxed);
+        total_created_++;
     }
     return handle;
 }
 
 void CurlHandlePool::release(CURL* handle) {
     if (!handle) return;
-
-    std::lock_guard<std::mutex> lock(mutex_);
+    // No lock needed - single-threaded access
     pool_.push(handle);
-}
-
-size_t CurlHandlePool::pool_size() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return pool_.size();
 }
 
 // ============================================================================
@@ -138,7 +131,8 @@ size_t CurlHandlePool::pool_size() const {
 // ============================================================================
 
 EventLoopWorker::EventLoopWorker(const EventLoopConfig& cfg)
-    : config(cfg),
+    : pending_queue(core::constants::queue::CAPACITY),  // 64K capacity ring buffer
+      config(cfg),
       rate_limiter(RateLimiterConfig{cfg.target_rps, cfg.burst_size}),
       handle_pool_(config.max_concurrent) {  // Pre-allocate handles
     multi_handle = curl_multi_init();
@@ -182,13 +176,14 @@ void EventLoopWorker::stop(bool wait_for_pending) {
     }
 
     stop_requested = true;
+    queue_has_items.store(true,
+                          std::memory_order_release);  // Wake up worker if spinning on empty queue
+    queue_has_items.notify_one();
 
     if (!wait_for_pending) {
-        std::lock_guard<std::mutex> lock(queue_mutex);
-        while (!pending_queue.empty()) {
-            auto data = std::move(pending_queue.front());
-            pending_queue.pop();
-
+        // Drain SPSC queue
+        std::unique_ptr<TransferData> data;
+        while (pending_queue.pop(data)) {
             Error error;
             error.code = ErrorCode::InternalError;
             error.message = "Request cancelled";
@@ -202,8 +197,6 @@ void EventLoopWorker::stop(bool wait_for_pending) {
         }
     }
 
-    queue_cv.notify_all();
-
     if (thread.joinable()) {
         thread.join();
     }
@@ -212,121 +205,174 @@ void EventLoopWorker::stop(bool wait_for_pending) {
 }
 
 void EventLoopWorker::run_loop() {
+    // Adaptive spinning parameters
+    constexpr int SPIN_COUNT = core::constants::queue::SPIN_COUNT;
+
+    // Core loop optimized for latency and throughput
     while (!stop_requested || !pending_queue.empty() || !active_transfers.empty()) {
-        // Move pending requests to active (with rate limiting)
+        bool did_work = false;
+
+        // 1. Process pending queue (Lock-free Consumer)
+        // We avoid blocking acquisition of rate limiter tokens to keep IO loop moving
+
+        // Use atomic load for active count check (Lock-free hot path)
+        // The check is "loose" (data race only leads to trying to add and finding map full, which
+        // is fine)
+        size_t local_active = current_active_count.load(std::memory_order_relaxed);
+
         std::unique_ptr<TransferData> data;
-        {
-            std::lock_guard<std::mutex> lock(queue_mutex);
 
-            // Check concurrency limit safely
-            size_t active_count = 0;
-            {
-                std::lock_guard<std::mutex> active_lock(active_mutex);
-                active_count = active_transfers.size();
+        // Fetch Phase: Get up to max_concurrent items, BUT only if tokens available.
+        // We prioritize DRIVING IO over accepting new work if rate limited.
+        while (local_active < config.max_concurrent) {
+            // Check rate limiter WITHOUT blocking (single-threaded access, no lock needed)
+            if (!rate_limiter.try_acquire_unlocked()) {
+                // Rate limit reached. Stop fetching new work.
+                // Go drive the IO machinery for existing requests.
+                break;
             }
 
-            if (!pending_queue.empty() && active_count < config.max_concurrent) {
-                // Try to acquire token without blocking
-                if (rate_limiter.try_acquire()) {
-                    data = std::move(pending_queue.front());
-                    pending_queue.pop();
-                }
+            // Have token, try get data
+            if (!pending_queue.pop(data)) {
+                // Queue empty, but we acquired a token.
+                // It's a small inefficiency (wasted token) but simpler code path.
+                // Given 60k RPS, a few wasted tokens are negligible noise.
+                break;
             }
-        }
 
-        // Apply rate limiting outside the lock
-        if (data) {
-            // Acquire handle from pool (much faster than curl_easy_init)
+            did_work = true;
+
+            // Acquire handle from pool (lock-free or specialized pool)
             CURL* easy = handle_pool_.acquire();
+            // Note: setup_easy_handle might take time, good to do it outside locks
             easy = setup_easy_handle(easy, data.get(), config, &dns_cache_);
+
             if (easy) {
+                // Add to multi handle - this is fast
                 curl_multi_add_handle(multi_handle, easy);
-                std::lock_guard<std::mutex> active_lock(active_mutex);
-                active_transfers[easy] = std::move(data);
+
+                // Track active transfer
+                {
+                    // No lock needed - private resource
+                    active_transfers[easy] = std::move(data);
+                    // Update atomic size
+                    current_active_count.store(active_transfers.size(), std::memory_order_relaxed);
+                    local_active++;  // Local cache update for loop condition
+                }
             } else {
+                // Handle creation failure
                 Error error;
                 error.code = ErrorCode::InternalError;
                 error.message = "Failed to create curl handle";
-
-                if (data->callback) {
-                    data->callback(data->request_id, error);
-                }
-                if (data->has_promise) {
-                    data->promise.set_value(error);
-                }
+                if (data->callback) data->callback(data->request_id, error);
+                if (data->has_promise) data->promise.set_value(error);
             }
         }
 
-        // Perform transfers
+        // 2. Drive CURL state machine
         int still_running = 0;
-        curl_multi_perform(multi_handle, &still_running);
+        CURLMcode mc = curl_multi_perform(multi_handle, &still_running);
+        if (mc == CURLM_OK) {
+            // curl_multi_perform is non-blocking, but might do some work
+        }
 
-        // Check for completed transfers
+        // 3. Process completions
+        // Check often to free up slots
         int msgs_left = 0;
         CURLMsg* msg = nullptr;
         while ((msg = curl_multi_info_read(multi_handle, &msgs_left))) {
+            did_work = true;
+
             if (msg->msg == CURLMSG_DONE) {
                 CURL* easy = msg->easy_handle;
                 CURLcode result = msg->data.result;
 
                 std::unique_ptr<TransferData> data;
                 {
-                    std::lock_guard<std::mutex> lock(active_mutex);
+                    // No lock needed - private resource
                     auto it = active_transfers.find(easy);
                     if (it != active_transfers.end()) {
                         data = std::move(it->second);
                         active_transfers.erase(it);
+                        // Update atomic size
+                        current_active_count.store(active_transfers.size(),
+                                                   std::memory_order_relaxed);
                     }
                 }
 
                 if (data) {
                     auto response_result = extract_response(easy, data.get(), result);
-
-                    if (data->callback) {
-                        data->callback(data->request_id, response_result);
-                    }
-                    if (data->has_promise) {
-                        data->promise.set_value(std::move(response_result));
-                    }
-
+                    if (data->callback) data->callback(data->request_id, response_result);
+                    if (data->has_promise) data->promise.set_value(std::move(response_result));
                     local_processed.fetch_add(1, std::memory_order_relaxed);
                 }
 
                 curl_multi_remove_handle(multi_handle, easy);
-                // Return handle to pool instead of destroying it (100x faster)
                 handle_pool_.release(easy);
             }
         }
 
-        // Wait for activity or timeout
-        if (still_running > 0) {
-            curl_multi_poll(multi_handle, nullptr, 0, config.poll_timeout_ms, nullptr);
-        } else if (!stop_requested) {
-            // Wait for new requests
-            std::unique_lock<std::mutex> lock(queue_mutex);
-            queue_cv.wait_for(lock, std::chrono::milliseconds(config.poll_timeout_ms), [this] {
-                return stop_requested || !pending_queue.empty();
-            });
+        // 4. Wait Strategy
+        if (!did_work) {
+            if (still_running > 0) {
+                // Wait for IO activity, but allow interruption via curl_multi_wakeup
+                // Use a short timeout to keep checking the queue even if no IO events
+                // 1ms is generally fine IF we use wakeup
+                curl_multi_poll(multi_handle, nullptr, 0, 1, nullptr);
+            } else if (!stop_requested) {
+                // No active transfers, and no pending items recently.
+                // This is the idle storage.
+                // Use atomic wait instead of Condition Variable for lower latency wakeup
+                // We wait on queue_has_items flag
+
+                // Adaptive spinning before sleeping
+                for (int i = 0; i < SPIN_COUNT; ++i) {
+                    if (pending_queue.read_available() > 0) break;
+                    // Busy-wait / pause to avoid context switch
+                    // std::this_thread::yield(); // REMOVED: Yield causes too much latency
+                }
+
+                if (pending_queue.read_available() == 0) {
+                    // Check again before sleep
+                    queue_has_items.wait(false, std::memory_order_acquire);
+                }
+                // Reset flag consumption is partly implicit by checking queue size
+                // But we can reset it if queue is empty to allow next wait
+                if (pending_queue.read_available() == 0) {
+                    queue_has_items.store(false, std::memory_order_release);
+                }
+            }
         }
     }
 }
 
 void EventLoopWorker::submit(std::unique_ptr<TransferData> data) {
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex);
-        pending_queue.push(std::move(data));
+    // SPSC Queue is safe for single producer.
+    while (!pending_queue.push(data)) {
+        // Queue full.
+        // Spin/Yield. This is backpressure to the producer.
+        std::this_thread::yield();
     }
-    queue_cv.notify_one();
+
+    // Signal the worker
+    bool was_empty = !queue_has_items.exchange(true, std::memory_order_release);
+    // Always wake up curl_multi_poll, even if queue wasn't empty
+    // (because worker might be sleeping in poll despite having items if it just processed a batch)
+    curl_multi_wakeup(multi_handle);
+
+    if (was_empty) {
+        queue_has_items.notify_one();
+    }
 }
 
 size_t EventLoopWorker::active_count() const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(active_mutex));
-    return active_transfers.size();
+    // Use atomic count for lock-free read
+    return current_active_count.load(std::memory_order_relaxed);
 }
 
 size_t EventLoopWorker::pending_count() const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(queue_mutex));
-    return pending_queue.size();
+    // SPSC size is thread-safe for approximation
+    return pending_queue.read_available();
 }
 
 }  // namespace vayu::http::detail

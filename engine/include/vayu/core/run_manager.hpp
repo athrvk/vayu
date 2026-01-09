@@ -25,6 +25,9 @@ struct RunContext {
     nlohmann::json config;
     int64_t start_time_ms;
 
+    // Test script for deferred validation
+    std::string test_script;
+
     // High-performance in-memory metrics collector
     // Replaces direct DB writes for individual results during load tests
     std::unique_ptr<MetricsCollector> metrics_collector;

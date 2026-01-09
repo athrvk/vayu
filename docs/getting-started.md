@@ -1,7 +1,7 @@
 # Getting Started with Vayu
 
-**Version:** 1.0  
-**Last Updated:** January 2, 2026
+**Version:** 1.1  
+**Last Updated:** January 10, 2026
 
 ---
 
@@ -195,7 +195,7 @@ After sending, check the **Tests** tab in the response panel:
 
 ## Load Testing (Vayu Mode)
 
-Vayu's killer feature: run the same request at massive scale with precise control.
+Vayu's killer feature: run the same request at massive scale with precise control. The engine features a **lock-free architecture** capable of 60,000+ RPS with sub-100ms P99 latency.
 
 ### Starting a Load Test
 
@@ -213,12 +213,22 @@ Vayu's killer feature: run the same request at massive scale with precise contro
 
 | Mode | Description | Configuration | Use Case |
 |------|-------------|---------------|----------|
-| **Constant (Rate-Limited)** | Precise RPS control | `targetRps`, `duration` | API rate limit testing, sustained load |
+| **Constant (Rate-Limited)** | Precise RPS control | `targetRps`, `duration`, `concurrency` | API rate limit testing, high-throughput load |
 | **Constant (Concurrency)** | Max concurrent connections | `concurrency`, `duration` | Throughput testing, connection stress |
 | **Iterations** | Fixed request count | `iterations`, `concurrency` | Functional testing, data operations |
 | **Ramp-Up** | Gradual load increase | `stages` with RPS/duration | Soak testing, capacity planning |
 
 ### Configuration Examples
+
+**High-Throughput Test (60k RPS for 30 seconds):**
+```json
+{
+  "mode": "constant",
+  "duration": 30,
+  "targetRps": 60000,
+  "concurrency": 200
+}
+```
 
 **Rate-Limited Test (50 RPS for 2 minutes):**
 ```json
@@ -553,7 +563,8 @@ For more CLI options and advanced usage, see:
   },
   "engine": {
     "workers": 8,
-    "maxConnections": 10000
+    "maxConnections": 10000,
+    "queueCapacity": 8192
   },
   "proxy": {
     "enabled": false,
@@ -561,6 +572,8 @@ For more CLI options and advanced usage, see:
   }
 }
 ```
+
+> **Performance Note:** Each worker uses a lock-free SPSC queue and dedicated connection pool. For high-throughput tests (60k+ RPS), ensure `concurrency` is set (e.g., 200) to enable parallel request processing.
 
 ---
 

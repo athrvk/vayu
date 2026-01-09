@@ -730,6 +730,32 @@ void Server::setup_routes() {
                              : 0.0}};
                 }
 
+                // Test validation results (from deferred script validation)
+                auto metrics = db_.get_metrics(run_id);
+                int tests_passed = 0, tests_failed = 0, tests_sampled = 0;
+                bool has_test_results = false;
+                for (const auto& m : metrics) {
+                    if (m.name == vayu::MetricName::TestsPassed) {
+                        tests_passed = static_cast<int>(m.value);
+                        has_test_results = true;
+                    } else if (m.name == vayu::MetricName::TestsFailed) {
+                        tests_failed = static_cast<int>(m.value);
+                        has_test_results = true;
+                    } else if (m.name == vayu::MetricName::TestsSampled) {
+                        tests_sampled = static_cast<int>(m.value);
+                    }
+                }
+                if (has_test_results) {
+                    json_report["testValidation"] = {
+                        {"samplesTested", tests_sampled},
+                        {"testsPassed", tests_passed},
+                        {"testsFailed", tests_failed},
+                        {"successRate",
+                         tests_sampled > 0 ? (static_cast<double>(tests_passed) * 100.0 /
+                                              static_cast<double>(tests_passed + tests_failed))
+                                           : 0.0}};
+                }
+
                 res.set_content(json_report.dump(), "application/json");
 
             } catch (const std::exception& e) {

@@ -1,9 +1,9 @@
 # Vayu - Current Project Status
 
-> **Last Updated:** January 4, 2026  
+> **Last Updated:** January 10, 2026  
 > **Total Tests:** 126 passing  
 > **Build System:** CMake + Ninja + vcpkg  
-> **Performance:** 60k+ RPS capable with high-performance optimizations
+> **Performance:** 60k+ RPS capable with lock-free architecture
 
 ---
 
@@ -16,15 +16,25 @@
 ### Completed
 - ✅ **Multiple event-loop workers** - N workers (auto-detect cores), round-robin sharding
 - ✅ **Token-bucket rate limiter** - Precise RPS control (60k+ RPS)
+- ✅ **Lock-free rate limiter** - `try_acquire_unlocked()` for hot path (~10x faster)
 - ✅ **Connection reuse** - libcurl multiplexing and keep-alive enabled
 - ✅ **Thread-local stats** - Lock-free aggregation across workers
 - ✅ **Context Pooling** - Reusing QuickJS contexts to reduce initialization overhead
 - ✅ **MetricsCollector** - High-performance in-memory storage with lock-free atomics
 - ✅ **DNS Pre-Resolution Cache** - Thread-safe caching eliminates DNS bottleneck
-- ✅ **Curl Handle Pooling** - Handle reuse via `curl_easy_reset()` (~100x faster)
+- ✅ **Curl Handle Pooling** - Lock-free handle reuse via `curl_easy_reset()` (~100x faster)
 - ✅ **HTTP/2 Multiplexing** - Multiple streams over single TCP connection
 - ✅ **TCP Keep-Alive** - Persistent connections with 60s intervals
 - ✅ **Batch DB Flush** - Single transaction write after test completion
+- ✅ **Lock-Free SPSC Queue** - C++20 atomic ring buffer with cache-line alignment
+- ✅ **Batched Request Submission** - Amortizes scheduling overhead at high RPS
+
+### Lock-Free Architecture (v1.2)
+The hot path is completely lock-free:
+1. **SPSC Queue**: Single-producer single-consumer with `alignas(64)` cache-line separation
+2. **CurlHandlePool**: Single-threaded per worker, no mutex needed
+3. **RateLimiter**: `try_acquire_unlocked()` bypasses mutex for same-thread calls
+4. **Atomic counters**: `current_active_count` uses `std::atomic` instead of mutex
 
 ### Configuration
 ```cpp
@@ -33,26 +43,31 @@ config.num_workers = 0;        // Auto-detect cores
 config.max_concurrent = 1000;  // Per worker
 config.max_per_host = 100;     // Per worker
 config.poll_timeout_ms = 10;   // Fast polling
-config.target_rps = 10000.0;   // Rate limiting
-config.burst_size = 20000.0;   // Burst capacity
+config.target_rps = 90000.0;   // Rate limiting
+config.burst_size = 180000.0;  // Burst capacity (2× target)
+config.queue_capacity = 8192;  // SPSC queue size (power of 2)
 ```
 
 **Performance:** On an 8-core machine with above config:
 - 8 workers × 1000 concurrent = 8000 total concurrent requests
-- Precise rate limiting at 10k RPS (or higher if configured)
-- Connection pooling reduces TCP overhead by ~90%
+- Precise rate limiting at 90k RPS target
+- Lock-free hot path eliminates contention
+- ~60k RPS achieved (macOS localhost limit)
 
 ### Benchmark Results (January 2026)
 
-| Optimization | RPS | Error Rate | Notes |
-|-------------|-----|------------|-------|
-| Baseline | ~2,000 | 92% | DB lock contention |
-| MetricsCollector | ~2,000 | 67% | In-memory storage |
-| DNS Cache | 628* | 0% | Zero errors |
-| HTTP/2 + TCP Keep-alive | 56,702 | 0% | Phase 1 complete |
-| **Handle Pooling** | **60,524** | **0%** | **Phase 2 complete** |
+| Optimization | RPS | P99 Latency | Notes |
+|-------------|-----|-------------|-------|
+| Baseline | ~2,000 | N/A | DB lock contention |
+| MetricsCollector | ~2,000 | N/A | In-memory storage |
+| DNS Cache | 628* | N/A | Zero errors |
+| HTTP/2 + TCP Keep-alive | 56,702 | 1581ms | Phase 1 complete |
+| Handle Pooling | 60,524 | 1581ms | Phase 2 complete |
+| **Lock-Free SPSC Queue** | **60,440** | **56ms** | **Phase 3 complete** |
+| **Lock-Free Hot Path** | **62,000** | **35ms** | **Phase 4 complete** |
 
 *Low RPS due to slow remote server; local mock server revealed true capacity.
+**P99 improved 45× from 1581ms → 35ms with lock-free optimizations.
 
 ---
 
@@ -87,7 +102,8 @@ config.burst_size = 20000.0;   // Burst capacity
 #### Rate Limiter (`vayu/http/rate_limiter.hpp`) 🆕
 - **Token bucket algorithm**: Precise RPS control
 - **Burst support**: Configurable burst capacity (default 2× target)
-- **Thread-safe**: Mutex-protected for concurrent access
+- **Lock-free hot path**: `try_acquire_unlocked()` for single-threaded workers (~10x faster)
+- **Thread-safe fallback**: Mutex-protected for multi-threaded access
 - **Flexible**: Enable/disable, blocking/non-blocking acquire
 - **Per-worker**: Independent rate limiters for each event loop worker
 

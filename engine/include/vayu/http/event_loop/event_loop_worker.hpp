@@ -12,6 +12,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include "vayu/core/spsc_queue.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/rate_limiter.hpp"
 
@@ -48,11 +49,14 @@ private:
 };
 
 /**
- * @brief High-performance CURL handle pool
+ * @brief High-performance CURL handle pool (Single-Threaded)
  *
  * Reuses curl_easy handles instead of creating new ones for each request.
  * curl_easy_init() takes ~100µs, curl_easy_reset() takes ~1µs.
  * At 60k RPS, this saves ~6 seconds per second of CPU time.
+ *
+ * NOTE: This pool is NOT thread-safe. It is designed to be used by a single
+ * EventLoopWorker thread. Each worker has its own pool instance.
  */
 class CurlHandlePool {
 public:
@@ -65,25 +69,29 @@ public:
 
     /// Acquire a handle from the pool (or create new if empty)
     /// The handle is reset and ready for configuration
+    /// NOTE: Not thread-safe - call only from owning worker thread
     CURL* acquire();
 
     /// Return a handle to the pool for reuse
+    /// NOTE: Not thread-safe - call only from owning worker thread
     void release(CURL* handle);
 
     /// Get pool statistics
-    size_t pool_size() const;
+    size_t pool_size() const {
+        return pool_.size();
+    }
     size_t total_created() const {
-        return total_created_.load();
+        return total_created_;
     }
     size_t total_reused() const {
-        return total_reused_.load();
+        return total_reused_;
     }
 
 private:
-    mutable std::mutex mutex_;
+    // No mutex needed - single-threaded access per worker
     std::queue<CURL*> pool_;
-    std::atomic<size_t> total_created_{0};
-    std::atomic<size_t> total_reused_{0};
+    size_t total_created_{0};
+    size_t total_reused_{0};
 };
 
 /**
@@ -125,11 +133,16 @@ private:
     std::atomic<bool> running{false};
     std::atomic<bool> stop_requested{false};
 
-    std::mutex queue_mutex;
-    std::condition_variable queue_cv;
-    std::queue<std::unique_ptr<TransferData>> pending_queue;
+    // Lock-free queue for high performance
+    vayu::core::SPSCQueue<std::unique_ptr<TransferData>> pending_queue;
 
-    std::mutex active_mutex;
+    // Notification for worker when queue is empty
+    std::atomic<bool> queue_has_items{false};
+
+    // Atomic counter for active transfers to avoid locking in hot loop
+    std::atomic<size_t> current_active_count{0};
+
+    // Only accessed by worker thread - no mutex needed
     std::unordered_map<CURL*, std::unique_ptr<TransferData>> active_transfers;
 
     EventLoopConfig config;

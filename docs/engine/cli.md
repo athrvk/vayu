@@ -1,7 +1,7 @@
 # Vayu CLI Reference
 
-**Version:** 1.0  
-**Last Updated:** January 2, 2026
+**Version:** 1.1  
+**Last Updated:** January 10, 2026
 
 ---
 
@@ -201,9 +201,9 @@ Average: 41.57 ms/request
 **Concurrency & Performance:**
 
 - **Default concurrency:** 10 (can be adjusted with `--concurrency`)
-- **Execution model:** Non-blocking I/O using curl_multi and event loop
-- **Per-worker:** Each CPU core has a worker thread that can handle multiple concurrent requests
-- **Max throughput:** Depends on target server, network, and timeout settings
+- **Execution model:** Lock-free SPSC queues with curl_multi event loop
+- **Per-worker:** Each worker thread has its own lock-free connection pool
+- **Max throughput:** 60,000+ RPS (system dependent, see architecture docs)
 
 **Performance Testing:**
 

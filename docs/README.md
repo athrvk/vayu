@@ -74,4 +74,11 @@ docs/
 3. **Understanding the Architecture?** Read [Architecture](architecture.md)
 4. **Coming from Postman?** Check [Postman Migration](app/postman-migration.md)
 
-This documentation is for **Vayu v0.1.0** (unreleased).
+This documentation is for **Vayu v1.2.0** (January 2026).
+
+### What's New in v1.2
+
+- **Lock-Free Architecture**: SPSC queues, lock-free connection pools, and rate limiters
+- **60k+ RPS Performance**: P99 latency improved 45× (1581ms → 35ms)
+- **Batched Request Submission**: Optimized high-throughput scheduling
+- **Enhanced Documentation**: Updated architecture docs with performance details

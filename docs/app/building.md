@@ -1,7 +1,7 @@
 # Building Vayu Manager from Source
 
-**Version:** 1.0  
-**Last Updated:** January 2, 2026
+**Version:** 1.1  
+**Last Updated:** January 10, 2026
 
 ---
 

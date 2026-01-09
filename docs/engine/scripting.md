@@ -1,7 +1,7 @@
 # Vayu Scripting Guide
 
-**Version:** 1.0  
-**Last Updated:** January 2, 2026
+**Version:** 1.2  
+**Last Updated:** January 10, 2026
 
 ---
 
@@ -397,6 +397,116 @@ pm.test("Response is JSON", function() {
     pm.expect(contentType).to.include("application/json");
 });
 ```
+
+---
+
+## Scripts in Load Tests (Deferred Validation)
+
+When running load tests at high RPS (60k+), executing JavaScript for every response would significantly impact throughput. Vayu uses **deferred validation** to run scripts after the test completes.
+
+### How It Works
+
+1. **During load test:** Responses are sampled (default: 1% = 1 in 100 requests)
+2. **After test completes:** Test scripts are executed on all sampled responses
+3. **Results streamed:** Validation metrics sent via SSE in real-time
+4. **Results stored:** Pass/fail counts available in the report API
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Load Test with Scripts                           │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  During Test (60k+ RPS):                                            │
+│  ├─ Responses sampled at 1% rate (configurable)                     │
+│  ├─ Sample stored: status, headers, body, latency                   │
+│  └─ No script execution (zero overhead)                             │
+│                                                                     │
+│  After Test Completes:                                              │
+│  ├─ ScriptEngine created                                            │
+│  ├─ Each sample validated with test script                          │
+│  ├─ Metrics streamed: tests_validating, tests_passed, tests_failed  │
+│  └─ Results stored in database                                      │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Example: Load Test with Validation
+
+```bash
+curl -X POST http://localhost:9876/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mode": "constant",
+    "duration": "30s",
+    "targetRps": 1000,
+    "request": {
+      "method": "GET",
+      "url": "https://api.example.com/health",
+      "tests": "pm.test(\"Status 200\", function() { pm.expect(pm.response.code).to.equal(200); }); pm.test(\"Has status field\", function() { pm.expect(pm.response.json()).to.have.property(\"status\"); });"
+    }
+  }'
+```
+
+### Configuration Options
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `max_response_samples` | 1000 | Maximum responses to store for validation |
+| `response_sample_rate` | 100 | Sample 1 in N responses (100 = 1%) |
+
+**Example with custom sampling:**
+```json
+{
+  "mode": "constant",
+  "duration": "60s",
+  "targetRps": 5000,
+  "max_response_samples": 500,
+  "response_sample_rate": 50,
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.com/users",
+    "tests": "pm.test('OK', function() { pm.expect(pm.response.code).to.equal(200); });"
+  }
+}
+```
+
+### SSE Metrics for Script Validation
+
+During deferred validation, these metrics are streamed:
+
+| Metric | Description |
+|--------|-------------|
+| `tests_validating` | Validation started (value: 1, metadata: sample count) |
+| `tests_sampled` | Number of responses sampled |
+| `tests_passed` | Number of test assertions passed |
+| `tests_failed` | Number of test assertions failed |
+
+### Report API Response
+
+The `/run/:id/report` endpoint includes validation results:
+
+```json
+{
+  "summary": { ... },
+  "latency": { ... },
+  "testValidation": {
+    "samplesTested": 100,
+    "testsPassed": 198,
+    "testsFailed": 2,
+    "successRate": 99.0
+  }
+}
+```
+
+### Memory Overhead
+
+| Samples | Avg Response Size | Memory |
+|---------|-------------------|--------|
+| 100     | 1 KB              | ~100 KB |
+| 1000    | 1 KB              | ~1 MB |
+| 1000    | 10 KB             | ~10 MB |
+
+**Note:** Only response body, headers, and status are stored. Timing data is minimal.
 
 ---
 

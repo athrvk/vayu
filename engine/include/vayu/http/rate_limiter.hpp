@@ -69,15 +69,27 @@ public:
      *
      * Blocks the calling thread until a token is available.
      * Returns immediately if rate limiting is disabled.
+     * Thread-safe.
      */
     void acquire();
 
     /**
-     * @brief Try to acquire a token without blocking
+     * @brief Try to acquire a token without blocking (thread-safe)
      *
      * @return true if token acquired, false if no tokens available
      */
     bool try_acquire();
+
+    /**
+     * @brief Try to acquire a token without blocking (NOT thread-safe)
+     *
+     * Use this only when the rate limiter is accessed from a single thread
+     * (e.g., per-worker rate limiters in EventLoopWorker).
+     * This is ~10x faster than try_acquire() as it avoids mutex overhead.
+     *
+     * @return true if token acquired, false if no tokens available
+     */
+    bool try_acquire_unlocked();
 
     /**
      * @brief Reset the rate limiter state

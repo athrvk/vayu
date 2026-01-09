@@ -69,6 +69,22 @@ bool RateLimiter::try_acquire() {
     return false;
 }
 
+bool RateLimiter::try_acquire_unlocked() {
+    if (!config_.enabled()) {
+        return true;
+    }
+
+    // No lock - caller guarantees single-threaded access
+    refill_tokens();
+
+    if (tokens_ >= 1.0) {
+        tokens_ -= 1.0;
+        return true;
+    }
+
+    return false;
+}
+
 void RateLimiter::reset() {
     std::lock_guard<std::mutex> lock(mutex_);
     tokens_ = config_.burst_size;

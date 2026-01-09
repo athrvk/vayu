@@ -54,6 +54,11 @@ void handle_result(std::shared_ptr<RunContext> context,
         // Record to in-memory collector (high-performance, no DB writes)
         context->metrics_collector->record_success(response.status_code, latency, trace_data);
 
+        // Sample response for deferred script validation if test script is present
+        if (!context->test_script.empty()) {
+            context->metrics_collector->record_response_sample(response);
+        }
+
     } else {
         // Record error to in-memory collector (all errors are preserved)
         const auto& error = result.error();
@@ -124,11 +129,16 @@ public:
                 static_cast<size_t>((static_cast<double>(duration_ms) / 1000.0) * target_rps);
             context->requests_expected = expected;
 
-            // Calculate interval between requests
-            int64_t interval_us = static_cast<int64_t>(1'000'000.0 / target_rps);
+            // For high RPS, submit in batches to reduce loop overhead
+            // Batch interval: 1ms = 1000us, batch_size = target_rps / 1000
+            constexpr int64_t BATCH_INTERVAL_US = 1000;  // 1ms batches
+            size_t batch_size = std::max(static_cast<size_t>(target_rps / 1000.0), size_t(1));
+
+            vayu::utils::log_debug("Submission config: batch_size=" + std::to_string(batch_size) +
+                                   ", batch_interval_us=" + std::to_string(BATCH_INTERVAL_US));
 
             auto test_start = std::chrono::steady_clock::now();
-            auto next_request_time = test_start;
+            auto next_batch_time = test_start;
             size_t submitted = 0;
 
             while (!context->should_stop) {
@@ -140,30 +150,35 @@ public:
                     break;
                 }
 
-                // Check if it's time to submit next request
-                if (now >= next_request_time) {
+                // Check if it's time to submit next batch
+                if (now >= next_batch_time) {
                     // Backpressure check
                     size_t max_pending =
                         std::max(static_cast<size_t>(target_rps * 10.0), size_t(1000));
-                    if (context->event_loop->pending_count() < max_pending) {
-                        context->event_loop->submit(
-                            request, [context, &db](size_t, vayu::Result<vayu::Response> result) {
-                                handle_result(context, db, std::move(result));
-                            });
-                        submitted++;
-                        context->requests_sent++;
 
-                        // Schedule next request
-                        next_request_time += std::chrono::microseconds(interval_us);
+                    if (context->event_loop->pending_count() < max_pending) {
+                        // Submit batch of requests
+                        for (size_t i = 0; i < batch_size && !context->should_stop; ++i) {
+                            context->event_loop->submit(
+                                request,
+                                [context, &db](size_t, vayu::Result<vayu::Response> result) {
+                                    handle_result(context, db, std::move(result));
+                                });
+                            submitted++;
+                            context->requests_sent++;
+                        }
+
+                        // Schedule next batch
+                        next_batch_time += std::chrono::microseconds(BATCH_INTERVAL_US);
                     } else {
                         // If we're backed up, skip ahead to avoid flooding
-                        next_request_time = now + std::chrono::microseconds(interval_us);
+                        next_batch_time = now + std::chrono::microseconds(BATCH_INTERVAL_US);
                     }
                 }
 
-                // Sleep for a small amount to avoid busy waiting
+                // Sleep for remaining time until next batch
                 auto sleep_time =
-                    std::chrono::duration_cast<std::chrono::microseconds>(next_request_time - now)
+                    std::chrono::duration_cast<std::chrono::microseconds>(next_batch_time - now)
                         .count();
                 if (sleep_time > 100) {
                     std::this_thread::sleep_for(std::chrono::microseconds(sleep_time / 2));
@@ -171,6 +186,7 @@ public:
             }
 
             vayu::utils::log_info("Submitted " + std::to_string(submitted) + " requests");
+
         } else {
             // Concurrency-based mode (legacy behavior)
             size_t concurrency = static_cast<size_t>(config.value("concurrency", 100));

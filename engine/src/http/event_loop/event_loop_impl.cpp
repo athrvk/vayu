@@ -101,37 +101,14 @@ RequestHandle EventLoopImpl::submit_async(const Request& request) {
 }
 
 bool EventLoopImpl::cancel(size_t request_id) {
-    // Try to remove from pending queue in each worker
-    bool found = false;
-    for (auto& worker : workers) {
-        std::lock_guard<std::mutex> lock(worker->queue_mutex);
-        std::queue<std::unique_ptr<TransferData>> new_queue;
+    // SPSC Queue does not support random access/removal.
+    // To support cancellation, we would need a separate mechanism (e.g. cancellation tokens or a
+    // cancelled-ID list). For now, we disable pending-queue cancellation to prioritize throughput.
+    // Active transfers could still be cancelled if we tracked them, but the original implementation
+    // only checked the pending queue anyway.
 
-        while (!worker->pending_queue.empty()) {
-            auto data = std::move(worker->pending_queue.front());
-            worker->pending_queue.pop();
-
-            if (data->request_id == request_id) {
-                found = true;
-                Error error;
-                error.code = ErrorCode::InternalError;
-                error.message = "Request cancelled";
-
-                if (data->callback) {
-                    data->callback(data->request_id, error);
-                }
-                if (data->has_promise) {
-                    data->promise.set_value(error);
-                }
-            } else {
-                new_queue.push(std::move(data));
-            }
-        }
-
-        worker->pending_queue = std::move(new_queue);
-    }
-
-    return found;
+    (void) request_id;  // Unused
+    return false;
 }
 
 BatchResult EventLoopImpl::execute_batch(const std::vector<Request>& requests) {

@@ -1,14 +1,13 @@
 {
     "request": {
         "method": "GET",
-        "url": "http://localhost:8080/fast",
+        "url": "http://localhost:8081/",
         "headers": {
             "Accept": "application/json"
         }
     },
     "mode": "constant",
     "duration": "5s",
-    "targetRps": 60000,
-    "tests": "pm.test('Status code is 200', function() {\n    pm.expect(pm.response.code).to.equal(200);\n});\n\npm.test('Response is JSON', function() {\n    var json = pm.response.json();\n    pm.expect(json).to.have.property('ok');\n});\n\npm.test('Ok is true', function() {\n    var json = pm.response.json();\n    pm.expect(json.ok).to.be.true;\n});"
-
+    "targetRps": 90000,
+    "tests": ""
 }

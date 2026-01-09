@@ -482,7 +482,12 @@ enum class MetricName {
     Completed,
     ConnectionsActive,
     RequestsSent,
-    RequestsExpected
+    RequestsExpected,
+    // Script validation metrics
+    TestsValidating,
+    TestsPassed,
+    TestsFailed,
+    TestsSampled
 };
 
 inline const char* to_string(MetricName name) {
@@ -509,6 +514,14 @@ inline const char* to_string(MetricName name) {
             return "requests_sent";
         case MetricName::RequestsExpected:
             return "requests_expected";
+        case MetricName::TestsValidating:
+            return "tests_validating";
+        case MetricName::TestsPassed:
+            return "tests_passed";
+        case MetricName::TestsFailed:
+            return "tests_failed";
+        case MetricName::TestsSampled:
+            return "tests_sampled";
     }
     return "unknown";
 }
@@ -525,6 +538,10 @@ inline std::optional<MetricName> parse_metric_name(const std::string& str) {
     if (str == "connections_active") return MetricName::ConnectionsActive;
     if (str == "requests_sent") return MetricName::RequestsSent;
     if (str == "requests_expected") return MetricName::RequestsExpected;
+    if (str == "tests_validating") return MetricName::TestsValidating;
+    if (str == "tests_passed") return MetricName::TestsPassed;
+    if (str == "tests_failed") return MetricName::TestsFailed;
+    if (str == "tests_sampled") return MetricName::TestsSampled;
     return std::nullopt;
 }
 

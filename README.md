@@ -31,15 +31,15 @@ In the current API development landscape, engineers maintain **two separate work
 
 **Vayu** is a hybrid API tool that combines:
 - 🎨 **Design Mode:** Postman-like UI for building and debugging requests
-- ⚡ **Vayu Mode:** C++ engine capable of 50,000+ requests per second
+- ⚡ **Vayu Mode:** Lock-free C++ engine capable of **60,000+ requests per second**
 
-**One tool. One test suite. Debug at 1 RPS. Load test at 50,000 RPS.**
+**One tool. One test suite. Debug at 1 RPS. Load test at 60,000 RPS.**
 
 ---
 
 ## Features
 
-- 🚀 **High Performance** - C++ engine with non-blocking I/O (libcurl + curl_multi)
+- 🚀 **High Performance** - Lock-free C++ engine with 60k+ RPS (P99 < 50ms)
 - 📝 **Postman Compatible** - Import collections, use familiar `pm.test()` syntax
 - 🔒 **Privacy First** - 100% local, no cloud sync, your data stays yours
 - 🆓 **Open Source** - MIT licensed, free forever
@@ -83,10 +83,10 @@ open https://github.com/vayu/vayu/releases
 │   THE MANAGER      │  HTTP  │    THE ENGINE      │
 │  (Electron/React)  │◄──────►│      (C++)         │
 │                    │        │                    │
-│  • Request Builder │        │  • libcurl         │
+│  • Request Builder │        │  • Lock-free SPSC  │
 │  • Response Viewer │        │  • QuickJS         │
-│  • Dashboard       │        │  • Thread Pool     │
-│  • Collections     │        │  • 50k+ RPS        │
+│  • Dashboard       │        │  • Multi-Worker    │
+│  • Collections     │        │  • 60k+ RPS        │
 └────────────────────┘        └────────────────────┘
 ```
 
@@ -116,12 +116,14 @@ See [Architecture Documentation](docs/architecture.md) for details.
 - [ ] **Phase 4:** Polish (Postman import, packaging, releases)
 
 **Current Status:** Phase 2 Complete - Fully functional load testing engine with:
+- ✅ Lock-free architecture (SPSC queues, atomic counters)
 - ✅ HTTP Control API on port 9876
 - ✅ Real-time metrics streaming via SSE
 - ✅ Three load strategies (constant/rate-limited, iterations, ramp-up)
 - ✅ 11 metric types including progress tracking
 - ✅ SQLite persistence for runs and metrics
-- ✅ Precise RPS rate limiting (e.g., 50 RPS = 20ms intervals)
+- ✅ Precise RPS rate limiting with batched submission
+- ✅ **60k+ RPS with P99 < 50ms latency**
 
 See [PLAN.md](PLAN.md) for detailed roadmap.
 
@@ -148,9 +150,10 @@ cd ../app && pnpm install && pnpm dev
 
 | Component | Technology | Why |
 |-----------|------------|-----|
-| Engine | C++20 | Maximum performance, manual memory control |
+| Engine | C++20 | Lock-free atomics, cache-line alignment, maximum performance |
 | Networking | libcurl | Battle-tested, HTTP/1.1, H/2, H/3 support |
 | Scripting | QuickJS | 500KB, microsecond startup, Postman-compatible |
+| Queuing | SPSC | Lock-free single-producer single-consumer ring buffer |
 | UI | Electron + React | Fast development, familiar ecosystem |
 | Build | CMake + vcpkg | Industry standard C++ tooling |
 

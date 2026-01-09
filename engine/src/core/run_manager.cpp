@@ -6,6 +6,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/load_strategy.hpp"
+#include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -16,6 +17,146 @@ inline int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch())
         .count();
+}
+
+/**
+ * @brief Validate sampled responses using test scripts (deferred validation)
+ * This runs after the load test completes to avoid impacting throughput.
+ * Results are streamed to the database for SSE consumption.
+ */
+void validate_scripts(std::shared_ptr<RunContext> context, vayu::db::Database& db, bool verbose) {
+    if (context->test_script.empty()) {
+        return;  // No script to validate
+    }
+
+    const auto& samples = context->metrics_collector->response_samples();
+    if (samples.empty()) {
+        if (verbose) {
+            vayu::utils::log_info("No response samples collected for script validation");
+        }
+        return;
+    }
+
+    if (verbose) {
+        vayu::utils::log_info("Validating " + std::to_string(samples.size()) +
+                              " response samples with test script...");
+    }
+
+    // Send "validating" metric to indicate script validation has started
+    db.add_metric({0,
+                   context->run_id,
+                   now_ms(),
+                   vayu::MetricName::TestsValidating,
+                   1.0,
+                   R"({"samples":)" + std::to_string(samples.size()) + "}"});
+
+    // Stream the number of samples being validated
+    db.add_metric({0,
+                   context->run_id,
+                   now_ms(),
+                   vayu::MetricName::TestsSampled,
+                   static_cast<double>(samples.size()),
+                   ""});
+
+    // Create script engine for validation
+    vayu::runtime::ScriptEngine engine;
+    vayu::Environment env;
+
+    // Build a dummy request for script context
+    vayu::Request dummy_request;
+    if (context->config.contains("request")) {
+        auto request_result = vayu::json::deserialize_request(context->config["request"]);
+        if (request_result.is_ok()) {
+            dummy_request = request_result.value();
+        }
+    }
+
+    size_t passed = 0;
+    size_t failed = 0;
+    std::vector<std::string> failure_messages;
+
+    for (const auto& sample : samples) {
+        // Build Response from sample
+        vayu::Response response;
+        response.status_code = sample.status_code;
+        response.status_text = sample.status_text;
+        response.body = sample.body;
+        response.headers = sample.headers;
+        response.timing.total_ms = sample.latency_ms;
+
+        try {
+            auto result = engine.execute_test(context->test_script, dummy_request, response, env);
+
+            if (result.success) {
+                // Check individual test results
+                for (const auto& test : result.tests) {
+                    if (test.passed) {
+                        passed++;
+                    } else {
+                        failed++;
+                        if (failure_messages.size() <
+                            vayu::core::constants::script_validation::MAX_FAILURE_MESSAGES) {
+                            failure_messages.push_back(test.name + ": " + test.error_message);
+                        }
+                    }
+                }
+                if (result.tests.empty()) {
+                    // Script ran but had no pm.test() calls - count as passed
+                    passed++;
+                }
+            } else {
+                failed++;
+                if (failure_messages.size() <
+                    vayu::core::constants::script_validation::MAX_FAILURE_MESSAGES) {
+                    failure_messages.push_back("Script error: " + result.error_message);
+                }
+            }
+        } catch (const std::exception& e) {
+            failed++;
+            if (failure_messages.size() <
+                vayu::core::constants::script_validation::MAX_FAILURE_MESSAGES) {
+                failure_messages.push_back("Exception: " + std::string(e.what()));
+            }
+        }
+    }
+
+    // Store test validation results
+    auto timestamp = now_ms();
+    db.add_metric({0,
+                   context->run_id,
+                   timestamp,
+                   vayu::MetricName::TestsPassed,
+                   static_cast<double>(passed),
+                   ""});
+    db.add_metric({0,
+                   context->run_id,
+                   timestamp,
+                   vayu::MetricName::TestsFailed,
+                   static_cast<double>(failed),
+                   ""});
+
+    // Store failure summary as a result record
+    if (!failure_messages.empty()) {
+        nlohmann::json failure_json;
+        failure_json["failures"] = failure_messages;
+        failure_json["total_failed"] = failed;
+        failure_json["total_passed"] = passed;
+
+        vayu::db::Result validation_result;
+        validation_result.run_id = context->run_id;
+        validation_result.timestamp = timestamp;
+        validation_result.status_code = failed > 0 ? 0 : 200;  // 0 indicates test failures
+        validation_result.latency_ms = 0;
+        validation_result.error = failed > 0 ? "Script validation failures" : "";
+        validation_result.trace_data = failure_json.dump();
+
+        db.add_result(validation_result);
+    }
+
+    if (verbose) {
+        vayu::utils::log_info("  Script validation: " + std::to_string(passed) + " passed, " +
+                              std::to_string(failed) + " failed");
+    }
 }
 }  // namespace
 
@@ -44,6 +185,20 @@ RunContext::RunContext(const std::string& id, nlohmann::json cfg)
     // Get sampling config
     mc_config.success_sample_rate = static_cast<size_t>(config.value("success_sample_rate", 100));
     mc_config.store_success_traces = config.value("save_timing_breakdown", false);
+
+    // Configure response sampling for script validation
+    mc_config.max_response_samples =
+        static_cast<size_t>(config.value("max_response_samples", 1000));
+    mc_config.response_sample_rate = static_cast<size_t>(config.value("response_sample_rate", 100));
+
+    // Extract test script from request if present
+    if (config.contains("request") && config["request"].contains("tests")) {
+        test_script = config["request"]["tests"].get<std::string>();
+    }
+    // Also check top-level tests field
+    if (test_script.empty() && config.contains("tests")) {
+        test_script = config["tests"].get<std::string>();
+    }
 
     metrics_collector = std::make_unique<MetricsCollector>(id, mc_config);
 }
@@ -242,6 +397,13 @@ void execute_load_test(std::shared_ptr<RunContext> context,
             }
         } catch (const std::exception& e) {
             vayu::utils::log_error("Failed to flush results to database: " + std::string(e.what()));
+        }
+
+        // Run deferred script validation if test script is present
+        try {
+            validate_scripts(context, db, verbose);
+        } catch (const std::exception& e) {
+            vayu::utils::log_error("Script validation failed: " + std::string(e.what()));
         }
 
         // Update run status

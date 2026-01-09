@@ -133,7 +133,29 @@ constexpr size_t DEFAULT_MAX_SUCCESS_RESULTS = 1000;
 constexpr size_t DEFAULT_SUCCESS_SAMPLE_RATE = 100;
 /// Whether to store success trace data by default
 constexpr bool DEFAULT_STORE_SUCCESS_TRACES = false;
+/// Maximum response samples to store for deferred script validation
+constexpr size_t DEFAULT_MAX_RESPONSE_SAMPLES = 1000;
+/// Sample rate for response storage (1 = all, 100 = 1%, etc.)
+constexpr size_t DEFAULT_RESPONSE_SAMPLE_RATE = 100;
 }  // namespace metrics_collector
+
+/**
+ * @brief Script validation configuration
+ */
+namespace script_validation {
+/// Maximum failure messages to store in validation results
+constexpr size_t MAX_FAILURE_MESSAGES = 10;
+}  // namespace script_validation
+
+/**
+ * @brief Queue and Event Loop configuration
+ */
+namespace queue {
+/// Default capacity for the SPSC queue (must be power of 2)
+constexpr size_t CAPACITY = 65536;
+/// Number of spins before sleeping in the worker loop
+constexpr int SPIN_COUNT = 2000;
+}  // namespace queue
 }  // namespace vayu::core::constants
 
 /**

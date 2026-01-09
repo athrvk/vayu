@@ -40,6 +40,9 @@ MetricsCollector::MetricsCollector(const std::string& run_id, MetricsCollectorCo
                                      : expected / config_.success_sample_rate;
         success_results_.reserve(success_reserve);
     }
+
+    // Reserve response samples for script validation
+    response_samples_.reserve(config_.max_response_samples);
 }
 
 void MetricsCollector::atomic_add_double(std::atomic<double>& target, double value) {
@@ -94,6 +97,19 @@ void MetricsCollector::record_success(int status_code,
                 success_results_.push_back(std::move(record));
             }
         }
+    }
+}
+
+void MetricsCollector::record_response_sample(const Response& response) {
+    // Only sample based on configured rate
+    size_t counter = response_sample_counter_.fetch_add(1, std::memory_order_relaxed);
+    if (counter % config_.response_sample_rate != 0) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(response_samples_mutex_);
+    if (response_samples_.size() < config_.max_response_samples) {
+        response_samples_.emplace_back(response, now_ms());
     }
 }
 

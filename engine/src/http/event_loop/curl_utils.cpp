@@ -14,7 +14,7 @@ namespace vayu::http::detail {
 std::string extract_hostname(const std::string& url) {
     // Simple regex to extract hostname from URL
     // Matches: protocol://hostname:port/path or protocol://hostname/path
-    std::regex url_regex(R"(^(?:https?://)?([^:/\s]+))");
+    static const std::regex url_regex(R"(^(?:https?://)?([^:/\s]+))", std::regex::optimize);
     std::smatch match;
     if (std::regex_search(url, match, url_regex) && match.size() > 1) {
         return match[1].str();
@@ -24,7 +24,7 @@ std::string extract_hostname(const std::string& url) {
 
 int extract_port(const std::string& url) {
     // Check for explicit port
-    std::regex port_regex(R"(^(?:https?://)?[^:/\s]+:(\d+))");
+    static const std::regex port_regex(R"(^(?:https?://)?[^:/\s]+:(\d+))", std::regex::optimize);
     std::smatch match;
     if (std::regex_search(url, match, port_regex) && match.size() > 1) {
         return std::stoi(match[1].str());

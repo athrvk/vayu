@@ -27,6 +27,28 @@
 namespace vayu::core {
 
 /**
+ * @brief Sampled response for deferred script validation
+ * Stores minimal data needed to run test scripts after load test completes
+ */
+struct ResponseSample {
+    int status_code;
+    std::string status_text;
+    std::string body;
+    Headers headers;
+    double latency_ms;
+    int64_t timestamp;
+
+    ResponseSample() = default;
+    ResponseSample(const Response& resp, int64_t ts)
+        : status_code(resp.status_code),
+          status_text(resp.status_text),
+          body(resp.body),
+          headers(resp.headers),
+          latency_ms(resp.timing.total_ms),
+          timestamp(ts) {}
+};
+
+/**
  * @brief Record for a single request result (lighter than db::Result)
  */
 struct ResultRecord {
@@ -74,6 +96,12 @@ struct MetricsCollectorConfig {
 
     /// Whether to store detailed trace data for successes
     bool store_success_traces = constants::metrics_collector::DEFAULT_STORE_SUCCESS_TRACES;
+
+    /// Maximum response samples to store for script validation
+    size_t max_response_samples = constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLES;
+
+    /// Sample rate for response storage (1 = all, 100 = 1%, etc.)
+    size_t response_sample_rate = constants::metrics_collector::DEFAULT_RESPONSE_SAMPLE_RATE;
 };
 
 /**
@@ -98,6 +126,12 @@ public:
      * Thread-safe, optimized for high-throughput
      */
     void record_success(int status_code, double latency_ms, const std::string& trace_data = "");
+
+    /**
+     * @brief Record a response sample for deferred script validation
+     * Thread-safe, stores sampled responses for post-test script execution
+     */
+    void record_response_sample(const Response& response);
 
     /**
      * @brief Record a failed request
@@ -185,6 +219,20 @@ public:
         return latencies_;
     }
 
+    /**
+     * @brief Get stored response samples for script validation
+     */
+    [[nodiscard]] const std::vector<ResponseSample>& response_samples() const {
+        return response_samples_;
+    }
+
+    /**
+     * @brief Get count of stored response samples
+     */
+    [[nodiscard]] size_t response_sample_count() const {
+        return response_samples_.size();
+    }
+
     // ========================================================================
     // Database persistence
     // ========================================================================
@@ -226,6 +274,11 @@ private:
     mutable std::mutex success_mutex_;
     std::vector<ResultRecord> success_results_;
     std::atomic<size_t> success_sample_counter_{0};
+
+    // Response samples for deferred script validation
+    mutable std::mutex response_samples_mutex_;
+    std::vector<ResponseSample> response_samples_;
+    std::atomic<size_t> response_sample_counter_{0};
 
     // Detailed status code tracking
     mutable std::mutex status_codes_mutex_;

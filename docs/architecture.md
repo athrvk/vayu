@@ -1,7 +1,8 @@
 # Vayu System Architecture
 
-**Document Version:** 1.0  
-**Last Updated:** January 2, 2026
+**Document Version:** 1.1  
+**Last Updated:** January 10, 2026
+
 
 ---
 
