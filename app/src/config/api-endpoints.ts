@@ -1,0 +1,42 @@
+/**
+ * API Endpoints Configuration
+ *
+ * All backend API endpoints in one place.
+ * Change these if the backend API routes change.
+ */
+
+// const BASE_URL = "https://71bb7ff8ef44.ngrok-free.app";
+const BASE_URL = "https://vayu-engine-latest.onrender.com";
+
+export const API_ENDPOINTS = {
+	// Base
+	BASE_URL,
+
+	// Health & Config
+	HEALTH: `/health`,
+	CONFIG: `/config`,
+
+	// Collections
+	COLLECTIONS: `/collections`,
+	COLLECTION_BY_ID: (id: string) => `/collections/${id}`,
+
+	// Requests
+	REQUESTS: `/requests`,
+	REQUEST_BY_ID: (id: string) => `/requests/${id}`,
+
+	// Environments
+	ENVIRONMENTS: `/environments`,
+	ENVIRONMENT_BY_ID: (id: string) => `/environments/${id}`,
+	// Execution
+	EXECUTE_REQUEST: `/request`,
+	START_LOAD_TEST: `/run`,
+
+	// Runs
+	RUNS: `/runs`,
+	RUN_BY_ID: (id: string) => `/run/${id}`,
+	RUN_REPORT: (id: string) => `/run/${id}/report`,
+	RUN_STOP: (id: string) => `/run/${id}/stop`,
+
+	// Real-time stats (SSE)
+	STATS_STREAM: (runId: string) => `/stats/${runId}`,
+} as const;
