@@ -1,5 +1,5 @@
 {
-    "cmake.sourceDirectory": "/Users/athrv.k/personal/repositories/vayu/engine",
+    "cmake.sourceDirectory": "${workspaceFolder}/engine",
     "C_Cpp.clang_format_style": "file",
     "editor.formatOnSave": true,
     "[cpp]": {

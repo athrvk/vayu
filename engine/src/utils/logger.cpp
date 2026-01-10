@@ -45,6 +45,8 @@ void Logger::log(Level level, const std::string& message) {
     if (log_file_ && log_file_->is_open()) {
         *log_file_ << log_message << "\n";
         log_file_->flush();
+    } else {
+        std::cerr << "Log file is not open." << "\n";
     }
 
     // Console output based on verbosity level:
