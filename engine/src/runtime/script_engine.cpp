@@ -14,15 +14,21 @@
 
 #ifdef VAYU_HAS_QUICKJS
 // Disable warnings for QuickJS C header in C++ code
+#if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
+#if defined(__clang__)
 #pragma GCC diagnostic ignored "-Wc99-extensions"
 #pragma GCC diagnostic ignored "-Wcast-function-type-mismatch"
 #pragma GCC diagnostic ignored "-Wshorten-64-to-32"
+#endif
 #pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
 extern "C" {
 #include "quickjs.h"
 }
+#if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
 #endif
 
 namespace vayu::runtime {
@@ -120,11 +126,11 @@ void expect_gc_mark(JSRuntime* rt, JSValueConst val, JS_MarkFunc* mark_func) {
     }
 }
 
-JSClassDef expect_class = {
-    "Expectation",
-    .finalizer = expect_finalizer,
-    .gc_mark = expect_gc_mark,
-};
+JSClassDef expect_class = {.class_name = "Expectation",
+                           .finalizer = expect_finalizer,
+                           .gc_mark = expect_gc_mark,
+                           .call = nullptr,
+                           .exotic = nullptr};
 
 JSValue expect_to_getter(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void) argc;
@@ -512,6 +518,178 @@ JSValue js_response_text(JSContext* ctx, JSValueConst this_val, int argc, JSValu
     return JS_NewString(ctx, data->response->body.c_str());
 }
 
+// ============================================================================
+// pm.response.to.have Assertions (Postman-compatible)
+// ============================================================================
+
+JSValue js_response_have_status(JSContext* ctx,
+                                JSValueConst this_val,
+                                int argc,
+                                JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "status() requires an expected status code");
+    }
+
+    auto* data = get_context_data(ctx);
+    if (!data->response) {
+        return JS_ThrowInternalError(ctx, "No response available");
+    }
+
+    int32_t expected_status;
+    if (JS_ToInt32(ctx, &expected_status, argv[0]) < 0) {
+        return JS_ThrowTypeError(ctx, "status() expects a number");
+    }
+
+    if (data->response->status_code != expected_status) {
+        std::string msg = "Expected status code " + std::to_string(expected_status) + " but got " +
+                          std::to_string(data->response->status_code);
+        return JS_ThrowTypeError(ctx, "%s", msg.c_str());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue js_response_have_header(JSContext* ctx,
+                                JSValueConst this_val,
+                                int argc,
+                                JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "header() requires a header name");
+    }
+
+    auto* data = get_context_data(ctx);
+    if (!data->response) {
+        return JS_ThrowInternalError(ctx, "No response available");
+    }
+
+    std::string header_name = js_to_string(ctx, argv[0]);
+
+    // Case-insensitive header lookup
+    bool found = false;
+    std::string found_value;
+    for (const auto& [key, value] : data->response->headers) {
+        std::string lower_key = key;
+        std::string lower_name = header_name;
+        std::transform(lower_key.begin(), lower_key.end(), lower_key.begin(), ::tolower);
+        std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+        if (lower_key == lower_name) {
+            found = true;
+            found_value = value;
+            break;
+        }
+    }
+
+    if (!found) {
+        std::string msg = "Expected response to have header '" + header_name + "'";
+        return JS_ThrowTypeError(ctx, "%s", msg.c_str());
+    }
+
+    // If a second argument is provided, check the value
+    if (argc >= 2) {
+        std::string expected_value = js_to_string(ctx, argv[1]);
+        if (found_value != expected_value) {
+            std::string msg = "Expected header '" + header_name + "' to be '" + expected_value +
+                              "' but got '" + found_value + "'";
+            return JS_ThrowTypeError(ctx, "%s", msg.c_str());
+        }
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue js_response_have_body(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "body() requires expected content");
+    }
+
+    auto* data = get_context_data(ctx);
+    if (!data->response) {
+        return JS_ThrowInternalError(ctx, "No response available");
+    }
+
+    std::string expected = js_to_string(ctx, argv[0]);
+
+    if (data->response->body.find(expected) == std::string::npos) {
+        std::string msg = "Expected response body to contain '" + expected + "'";
+        return JS_ThrowTypeError(ctx, "%s", msg.c_str());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue js_response_have_jsonBody(JSContext* ctx,
+                                  JSValueConst this_val,
+                                  int argc,
+                                  JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "jsonBody() requires a property path");
+    }
+
+    auto* data = get_context_data(ctx);
+    if (!data->response) {
+        return JS_ThrowInternalError(ctx, "No response available");
+    }
+
+    std::string prop_path = js_to_string(ctx, argv[0]);
+
+    // Parse body as JSON
+    JSValue json =
+        JS_ParseJSON(ctx, data->response->body.c_str(), data->response->body.size(), "<response>");
+    if (JS_IsException(json)) {
+        return JS_ThrowTypeError(ctx, "Response body is not valid JSON");
+    }
+
+    // Navigate to the property
+    JSValue current = JS_DupValue(ctx, json);
+    std::string::size_type start = 0;
+    std::string::size_type end;
+
+    while ((end = prop_path.find('.', start)) != std::string::npos || start < prop_path.size()) {
+        std::string key = (end != std::string::npos) ? prop_path.substr(start, end - start)
+                                                     : prop_path.substr(start);
+
+        if (key.empty()) break;
+
+        JSValue next = JS_GetPropertyStr(ctx, current, key.c_str());
+        JS_FreeValue(ctx, current);
+        current = next;
+
+        if (JS_IsUndefined(current)) {
+            JS_FreeValue(ctx, json);
+            std::string msg = "Expected response body to have property '" + prop_path + "'";
+            return JS_ThrowTypeError(ctx, "%s", msg.c_str());
+        }
+
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+
+    JS_FreeValue(ctx, current);
+    JS_FreeValue(ctx, json);
+    return JS_UNDEFINED;
+}
+
+// Create the pm.response.to.have chain object
+JSValue create_response_have_object(JSContext* ctx) {
+    JSValue have = JS_NewObject(ctx);
+    JS_SetPropertyStr(
+        ctx, have, "status", JS_NewCFunction(ctx, js_response_have_status, "status", 1));
+    JS_SetPropertyStr(
+        ctx, have, "header", JS_NewCFunction(ctx, js_response_have_header, "header", 2));
+    JS_SetPropertyStr(ctx, have, "body", JS_NewCFunction(ctx, js_response_have_body, "body", 1));
+    JS_SetPropertyStr(
+        ctx, have, "jsonBody", JS_NewCFunction(ctx, js_response_have_jsonBody, "jsonBody", 1));
+    return have;
+}
+
+// Create the pm.response.to chain object
+JSValue create_response_to_object(JSContext* ctx) {
+    JSValue to = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, to, "have", create_response_have_object(ctx));
+    JS_SetPropertyStr(ctx, to, "be", JS_NewObject(ctx));  // placeholder for future assertions
+    return to;
+}
+
 void setup_pm_response(JSContext* ctx, JSValue pm) {
     auto* data = get_context_data(ctx);
     JSValue response = JS_NewObject(ctx);
@@ -539,6 +717,9 @@ void setup_pm_response(JSContext* ctx, JSValue pm) {
             JS_SetPropertyStr(ctx, headers, key.c_str(), JS_NewString(ctx, value.c_str()));
         }
         JS_SetPropertyStr(ctx, response, "headers", headers);
+
+        // pm.response.to.have chain for Postman-compatible assertions
+        JS_SetPropertyStr(ctx, response, "to", create_response_to_object(ctx));
     }
 
     JS_SetPropertyStr(ctx, pm, "response", response);

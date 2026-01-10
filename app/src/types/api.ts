@@ -5,7 +5,6 @@ import type {
 	Request,
 	Environment,
 	Run,
-	LoadTestConfig,
 	SanityResult,
 	RunReport,
 	EngineHealth,
@@ -115,15 +114,52 @@ export interface ExecuteRequestRequest {
 
 export interface ExecuteRequestResponse extends SanityResult {}
 
+/**
+ * StartLoadTestRequest - Matches POST /run backend endpoint
+ * The backend expects:
+ * - request: HTTP request configuration object
+ * - mode: "constant" | "iterations" | "ramp_up"
+ * - Mode-specific params (duration, targetRps, iterations, concurrency, etc.)
+ */
 export interface StartLoadTestRequest {
-	request_id: string;
-	environment_id?: string;
-	config: LoadTestConfig;
+	// The HTTP request to execute
+	request: {
+		method: string;
+		url: string;
+		headers?: Record<string, string>;
+		body?: any;
+	};
+
+	// Load test strategy
+	mode: "constant" | "iterations" | "ramp_up";
+
+	// For "constant" mode
+	duration?: string; // e.g., "10s", "2m"
+	targetRps?: number;
+
+	// For "iterations" mode
+	iterations?: number;
+	concurrency?: number;
+
+	// For "ramp_up" mode
+	rampUpDuration?: string;
+	startConcurrency?: number;
+
+	// Optional linking
+	requestId?: string;
+	environmentId?: string;
+	comment?: string;
+
+	// Data capture options
+	success_sample_rate?: number; // 0-100
+	slow_threshold_ms?: number;
+	save_timing_breakdown?: boolean;
 }
 
 export interface StartLoadTestResponse {
-	run_id: string;
+	runId: string;
 	status: string;
+	message?: string;
 }
 
 // Run Management API
@@ -147,8 +183,15 @@ export interface GetRunResponse {
 export interface GetRunReportResponse extends RunReport {}
 
 export interface StopRunResponse {
-	run_id: string;
+	runId: string;
 	status: string;
+	message?: string;
+	summary?: {
+		totalRequests: number;
+		errors: number;
+		errorRate: number;
+		avgLatency: number;
+	};
 }
 
 // Health & Config API

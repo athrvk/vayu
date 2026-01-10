@@ -28,12 +28,19 @@
 
 namespace {
 std::atomic<bool> g_running{true};
+std::atomic<bool> g_shutdown_requested{false};
 int g_lock_fd = -1;
 
 void signal_handler(int signal) {
     if (signal == SIGINT || signal == SIGTERM) {
+        if (g_shutdown_requested.load()) {
+            // Second signal - force immediate exit
+            vayu::utils::log_warning("Force shutdown requested, exiting immediately");
+            std::exit(1);
+        }
         vayu::utils::log_info("Shutting down...");
-        g_running = false;
+        g_shutdown_requested.store(true);
+        g_running.store(false);
     }
 }
 
@@ -57,9 +64,18 @@ bool acquire_lock() {
     }
 
     // Write PID
-    ftruncate(g_lock_fd, 0);
+    if (ftruncate(g_lock_fd, 0) == -1) {
+        perror("ftruncate failed");
+        close(g_lock_fd);
+        return false;
+    }
     std::string pid = std::to_string(getpid()) + "\n";
-    write(g_lock_fd, pid.c_str(), pid.length());
+    ssize_t written = write(g_lock_fd, pid.c_str(), pid.length());
+    if (written != (ssize_t) pid.length()) {
+        perror("write failed");
+        close(g_lock_fd);
+        return false;
+    }
 
     // Do not close the fd, as that releases the lock
     return true;
@@ -116,10 +132,10 @@ int main(int argc, char* argv[]) {
     std::signal(SIGTERM, signal_handler);
 
     // Initialize database
-    vayu::db::Database db("engine/db/vayu.db");
+    vayu::db::Database db("db/vayu.db");
     try {
         db.init();
-        vayu::utils::log_info("Database initialized at engine/db/vayu.db");
+        vayu::utils::log_info("Database initialized at db/vayu.db");
     } catch (const std::exception& e) {
         vayu::utils::log_error("Failed to initialize database: " + std::string(e.what()));
         return 1;
@@ -145,8 +161,13 @@ int main(int argc, char* argv[]) {
     // Graceful shutdown
     vayu::utils::log_info("Shutting down gracefully...");
 
-    // Stop the HTTP server first
+    // Stop the HTTP server first (with timeout)
+    auto server_stop_start = std::chrono::steady_clock::now();
     server.stop();
+    auto server_stop_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - server_stop_start)
+                                   .count();
+    vayu::utils::log_debug("Server stopped in " + std::to_string(server_stop_elapsed) + "ms");
 
     // Signal all active runs to stop
     size_t active = run_manager.active_count();
@@ -179,6 +200,16 @@ int main(int argc, char* argv[]) {
 
     vayu::http::global_cleanup();
 
+    // Release lock file
+    if (g_lock_fd >= 0) {
+        flock(g_lock_fd, LOCK_UN);
+        close(g_lock_fd);
+    }
+
     vayu::utils::log_info("Goodbye!");
+
+    // Force flush logs
+    vayu::utils::Logger::instance().flush();
+
     return 0;
 }

@@ -11,27 +11,36 @@ import type {
 	EngineHealth,
 	EngineConfig,
 	SanityResult,
+	ScriptCompletionsResponse,
 	CreateCollectionRequest,
 	UpdateCollectionRequest,
 	ListRequestsParams,
 	CreateRequestRequest,
 	UpdateRequestRequest,
-	ListEnvironmentsResponse,
 	CreateEnvironmentRequest,
 	UpdateEnvironmentRequest,
 	ExecuteRequestRequest,
-	ExecuteRequestResponse,
 	StartLoadTestRequest,
 	StartLoadTestResponse,
-	ListRunsParams,
-	ListRunsResponse,
-	GetRunResponse,
 	GetRunReportResponse,
 	StopRunResponse,
 	GetHealthResponse,
 	GetConfigResponse,
 	UpdateConfigRequest,
 } from "@/types";
+
+// Transform backend request (camelCase) to frontend request (snake_case)
+function transformRequest(backendRequest: any): Request {
+	return {
+		...backendRequest,
+		collection_id: backendRequest.collectionId,
+		created_at: backendRequest.createdAt || backendRequest.created_at,
+		updated_at: backendRequest.updatedAt || backendRequest.updated_at,
+		body_type: backendRequest.bodyType || backendRequest.body_type,
+		pre_request_script: backendRequest.preRequestScript || backendRequest.pre_request_script,
+		test_script: backendRequest.postRequestScript || backendRequest.test_script,
+	};
+}
 
 export const apiService = {
 	// Health & Configuration
@@ -80,15 +89,16 @@ export const apiService = {
 		const queryParams = params?.collection_id
 			? { collectionId: params.collection_id }
 			: undefined;
-		const response = await httpClient.get<Request[]>(
+		const response = await httpClient.get<any[]>(
 			API_ENDPOINTS.REQUESTS,
 			queryParams
 		);
-		return response;
+		return response.map(transformRequest);
 	},
 
 	async getRequest(id: string): Promise<Request> {
-		return await httpClient.get<Request>(API_ENDPOINTS.REQUEST_BY_ID(id));
+		const response = await httpClient.get<any>(API_ENDPOINTS.REQUEST_BY_ID(id));
+		return transformRequest(response);
 	},
 
 	async createRequest(data: CreateRequestRequest): Promise<Request> {
@@ -109,7 +119,8 @@ export const apiService = {
 		if (data.test_script) backendData.postRequestScript = data.test_script;
 
 		console.log("Creating request with data:", backendData);
-		return await httpClient.post<Request>(API_ENDPOINTS.REQUESTS, backendData);
+		const response = await httpClient.post<any>(API_ENDPOINTS.REQUESTS, backendData);
+		return transformRequest(response);
 	},
 
 	async updateRequest(data: UpdateRequestRequest): Promise<Request> {
@@ -132,7 +143,8 @@ export const apiService = {
 		if (data.body_type !== undefined) backendData.bodyType = data.body_type;
 
 		console.log("Updating request with data:", backendData);
-		return await httpClient.post<Request>(API_ENDPOINTS.REQUESTS, backendData);
+		const response = await httpClient.post<any>(API_ENDPOINTS.REQUESTS, backendData);
+		return transformRequest(response);
 	},
 
 	async deleteRequest(id: string): Promise<void> {
@@ -141,10 +153,8 @@ export const apiService = {
 
 	// Environments
 	async listEnvironments(): Promise<Environment[]> {
-		const response = await httpClient.get<ListEnvironmentsResponse>(
-			API_ENDPOINTS.ENVIRONMENTS
-		);
-		return response.environments;
+		// Backend returns flat array directly
+		return await httpClient.get<Environment[]>(API_ENDPOINTS.ENVIRONMENTS);
 	},
 
 	async getEnvironment(id: string): Promise<Environment> {
@@ -171,7 +181,7 @@ export const apiService = {
 
 	// Execution
 	async executeRequest(data: ExecuteRequestRequest): Promise<SanityResult> {
-		return await httpClient.post<ExecuteRequestResponse>(
+		return await httpClient.post<SanityResult>(
 			API_ENDPOINTS.EXECUTE_REQUEST,
 			data
 		);
@@ -187,27 +197,14 @@ export const apiService = {
 	},
 
 	// Run Management
-	async listRuns(
-		params?: ListRunsParams
-	): Promise<{ runs: Run[]; total: number }> {
-		const queryParams: Record<string, string> = {};
-		if (params?.request_id) queryParams.request_id = params.request_id;
-		if (params?.type) queryParams.type = params.type;
-		if (params?.status) queryParams.status = params.status;
-		if (params?.limit) queryParams.limit = params.limit.toString();
-		if (params?.offset) queryParams.offset = params.offset.toString();
-
-		return await httpClient.get<ListRunsResponse>(
-			API_ENDPOINTS.RUNS,
-			queryParams
-		);
+	async listRuns(): Promise<Run[]> {
+		// Backend returns flat array directly
+		return await httpClient.get<Run[]>(API_ENDPOINTS.RUNS);
 	},
 
 	async getRun(id: string): Promise<Run> {
-		const response = await httpClient.get<GetRunResponse>(
-			API_ENDPOINTS.RUN_BY_ID(id)
-		);
-		return response.run;
+		// Backend returns run object directly
+		return await httpClient.get<Run>(API_ENDPOINTS.RUN_BY_ID(id));
 	},
 
 	async getRunReport(id: string): Promise<RunReport> {
@@ -222,5 +219,12 @@ export const apiService = {
 
 	async deleteRun(id: string): Promise<void> {
 		await httpClient.delete(API_ENDPOINTS.RUN_BY_ID(id));
+	},
+
+	// Scripting
+	async getScriptCompletions(): Promise<ScriptCompletionsResponse> {
+		return await httpClient.get<ScriptCompletionsResponse>(
+			API_ENDPOINTS.SCRIPT_COMPLETIONS
+		);
 	},
 };

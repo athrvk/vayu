@@ -8,6 +8,7 @@
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/routes.hpp"
 
 namespace vayu::http {
 
@@ -33,6 +34,7 @@ private:
     httplib::Server server_;
     std::thread server_thread_;
     std::atomic<bool> is_running_{false};
+    std::unique_ptr<routes::RouteContext> route_ctx_;
 };
 
 }  // namespace vayu::http

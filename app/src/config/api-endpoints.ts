@@ -5,8 +5,12 @@
  * Change these if the backend API routes change.
  */
 
+// Remote URLs (for reference)
 // const BASE_URL = "https://71bb7ff8ef44.ngrok-free.app";
-const BASE_URL = "https://vayu-engine-latest.onrender.com";
+// const BASE_URL = "https://vayu-engine-latest.onrender.com";
+
+// Local development
+const BASE_URL = "http://127.0.0.1:9876";
 
 export const API_ENDPOINTS = {
 	// Base
@@ -27,6 +31,10 @@ export const API_ENDPOINTS = {
 	// Environments
 	ENVIRONMENTS: `/environments`,
 	ENVIRONMENT_BY_ID: (id: string) => `/environments/${id}`,
+
+	// Scripting
+	SCRIPT_COMPLETIONS: `/scripting/completions`,
+
 	// Execution
 	EXECUTE_REQUEST: `/request`,
 	START_LOAD_TEST: `/run`,
@@ -38,5 +46,6 @@ export const API_ENDPOINTS = {
 	RUN_STOP: (id: string) => `/run/${id}/stop`,
 
 	// Real-time stats (SSE)
-	STATS_STREAM: (runId: string) => `/stats/${runId}`,
+	STATS_STREAM: (runId: string) => `/stats/${runId}`,           // Old endpoint (DB-based)
+	METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`,  // New endpoint (memory-based, faster)
 } as const;

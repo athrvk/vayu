@@ -3,8 +3,8 @@
 import { create } from "zustand";
 import type { Run } from "@/types";
 
-type FilterType = "all" | "load" | "sanity";
-type FilterStatus = "all" | "running" | "completed" | "failed";
+type FilterType = "all" | "load" | "design";
+type FilterStatus = "all" | "pending" | "running" | "completed" | "stopped" | "failed";
 type SortBy = "newest" | "oldest";
 
 interface HistoryState {
@@ -16,6 +16,7 @@ interface HistoryState {
 	filterStatus: FilterStatus;
 	sortBy: SortBy;
 	totalCount: number;
+	isDeletingRun: boolean;
 
 	// Actions
 	setRuns: (runs: Run[]) => void;
@@ -29,6 +30,7 @@ interface HistoryState {
 	setFilterStatus: (status: FilterStatus) => void;
 	setSortBy: (sortBy: SortBy) => void;
 	setTotalCount: (count: number) => void;
+	setDeletingRun: (deleting: boolean) => void;
 
 	// Helpers
 	getFilteredRuns: () => Run[];
@@ -44,6 +46,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
 	filterStatus: "all",
 	sortBy: "newest",
 	totalCount: 0,
+	isDeletingRun: false,
 
 	setRuns: (runs) => set({ runs }),
 
@@ -71,6 +74,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
 	setFilterStatus: (status) => set({ filterStatus: status }),
 	setSortBy: (sortBy) => set({ sortBy }),
 	setTotalCount: (count) => set({ totalCount: count }),
+	setDeletingRun: (deleting) => set({ isDeletingRun: deleting }),
 
 	// Helpers
 	getFilteredRuns: () => {
@@ -84,7 +88,9 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
 			filtered = filtered.filter(
 				(run) =>
 					run.id.toLowerCase().includes(query) ||
-					run.request_id.toLowerCase().includes(query)
+					(run.requestId && run.requestId.toLowerCase().includes(query)) ||
+					(run.configSnapshot?.request?.url?.toLowerCase().includes(query)) ||
+					(run.configSnapshot?.url?.toLowerCase().includes(query))
 			);
 		}
 
@@ -98,10 +104,10 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
 			filtered = filtered.filter((run) => run.status === filterStatus);
 		}
 
-		// Apply sorting
+		// Apply sorting (using startTime which is a number timestamp)
 		filtered = [...filtered].sort((a, b) => {
-			const dateA = new Date(a.started_at).getTime();
-			const dateB = new Date(b.started_at).getTime();
+			const dateA = a.startTime || 0;
+			const dateB = b.startTime || 0;
 			return sortBy === "newest" ? dateB - dateA : dateA - dateB;
 		});
 

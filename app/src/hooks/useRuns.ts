@@ -3,11 +3,11 @@
 import { useState, useCallback } from "react";
 import { apiService } from "@/services";
 import { useHistoryStore } from "@/stores";
-import type { Run, RunReport, ListRunsParams } from "@/types";
+import type { Run, RunReport } from "@/types";
 
 interface UseRunsReturn {
 	runs: Run[];
-	loadRuns: (params?: ListRunsParams) => Promise<void>;
+	loadRuns: () => Promise<void>;
 	loadRunReport: (runId: string) => Promise<RunReport | null>;
 	deleteRun: (runId: string) => Promise<boolean>;
 	isLoading: boolean;
@@ -22,22 +22,24 @@ export function useRuns(): UseRunsReturn {
 		setLoading: setStoreLoading,
 		setError: setStoreError,
 		setTotalCount,
+		setDeletingRun,
 	} = useHistoryStore();
 
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	const loadRuns = useCallback(
-		async (params?: ListRunsParams) => {
+		async () => {
 			setIsLoading(true);
 			setStoreLoading(true);
 			setError(null);
 			setStoreError(null);
 
 			try {
-				const { runs: loadedRuns, total } = await apiService.listRuns(params);
+				// Backend returns flat array directly
+				const loadedRuns = await apiService.listRuns();
 				setRuns(loadedRuns);
-				setTotalCount(total);
+				setTotalCount(loadedRuns.length);
 			} catch (err) {
 				const errorMessage =
 					err instanceof Error ? err.message : "Failed to load runs";
@@ -70,6 +72,7 @@ export function useRuns(): UseRunsReturn {
 	const deleteRun = useCallback(
 		async (runId: string): Promise<boolean> => {
 			setError(null);
+			setDeletingRun(true);
 			try {
 				await apiService.deleteRun(runId);
 				removeRun(runId);
@@ -79,9 +82,11 @@ export function useRuns(): UseRunsReturn {
 					err instanceof Error ? err.message : "Failed to delete run";
 				setError(errorMessage);
 				return false;
+			} finally {
+				setDeletingRun(false);
 			}
 		},
-		[removeRun]
+		[removeRun, setDeletingRun]
 	);
 
 	return {

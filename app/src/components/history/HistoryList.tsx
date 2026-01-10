@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { Search, Trash2, Clock } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Search, Trash2, Clock, Loader2 } from "lucide-react";
 import { useAppStore, useHistoryStore } from "@/stores";
 import { useRuns } from "@/hooks";
 import { formatRelativeTime, formatNumber } from "@/utils";
@@ -17,8 +17,11 @@ export default function HistoryList() {
 		sortBy,
 		setSortBy,
 		getFilteredRuns,
+		isLoading,
+		isDeletingRun,
 	} = useHistoryStore();
 	const { loadRuns, deleteRun } = useRuns();
+	const [deletingId, setDeletingId] = useState<string | null>(null);
 
 	useEffect(() => {
 		loadRuns();
@@ -29,7 +32,9 @@ export default function HistoryList() {
 	const handleDelete = async (runId: string, event: React.MouseEvent) => {
 		event.stopPropagation();
 		if (confirm("Delete this run?")) {
+			setDeletingId(runId);
 			await deleteRun(runId);
+			setDeletingId(null);
 		}
 	};
 
@@ -56,7 +61,7 @@ export default function HistoryList() {
 					>
 						<option value="all">All Types</option>
 						<option value="load">Load Test</option>
-						<option value="sanity">Sanity Check</option>
+						<option value="design">Design Mode</option>
 					</select>
 
 					<select
@@ -65,8 +70,10 @@ export default function HistoryList() {
 						className="flex-1 px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
 					>
 						<option value="all">All Status</option>
+						<option value="pending">Pending</option>
 						<option value="running">Running</option>
 						<option value="completed">Completed</option>
+						<option value="stopped">Stopped</option>
 						<option value="failed">Failed</option>
 					</select>
 				</div>
@@ -97,19 +104,26 @@ export default function HistoryList() {
 
 			{/* Runs List */}
 			<div className="flex-1 overflow-auto p-4 space-y-2">
-				{runs.length === 0 && (
+				{isLoading && (
+					<div className="flex items-center justify-center py-12">
+						<Loader2 className="w-8 h-8 text-primary-600 animate-spin" />
+					</div>
+				)}
+
+				{!isLoading && runs.length === 0 && (
 					<div className="text-center py-12 text-sm text-gray-500">
 						<Clock className="w-12 h-12 mx-auto mb-3 text-gray-300" />
 						<p>No runs found</p>
 					</div>
 				)}
 
-				{runs.map((run) => (
+				{!isLoading && runs.map((run) => (
 					<RunItem
 						key={run.id}
 						run={run}
 						onSelect={navigateToRunDetail}
 						onDelete={handleDelete}
+						isDeleting={deletingId === run.id}
 					/>
 				))}
 			</div>
@@ -121,20 +135,42 @@ interface RunItemProps {
 	run: Run;
 	onSelect: (runId: string) => void;
 	onDelete: (runId: string, event: React.MouseEvent) => Promise<void>;
+	isDeleting: boolean;
 }
 
-function RunItem({ run, onSelect, onDelete }: RunItemProps) {
-	const statusColors = {
+function RunItem({ run, onSelect, onDelete, isDeleting }: RunItemProps) {
+	const statusColors: Record<string, string> = {
+		pending: "bg-gray-100 text-gray-700",
 		running: "bg-blue-100 text-blue-700",
 		completed: "bg-green-100 text-green-700",
 		stopped: "bg-yellow-100 text-yellow-700",
 		failed: "bg-red-100 text-red-700",
 	};
 
-	const typeColors = {
+	const typeColors: Record<string, string> = {
 		load: "bg-purple-100 text-purple-700",
-		sanity: "bg-gray-100 text-gray-700",
+		design: "bg-gray-100 text-gray-700",
 	};
+
+	// Format timestamp to relative time
+	const formatTime = (timestamp: number) => {
+		if (!timestamp) return "Unknown";
+		return formatRelativeTime(new Date(timestamp).toISOString());
+	};
+
+	// Get URL from configSnapshot if available
+	const getRequestInfo = () => {
+		if (!run.configSnapshot) return null;
+		if (run.configSnapshot.request?.url) {
+			return run.configSnapshot.request.url;
+		}
+		if (run.configSnapshot.url) {
+			return run.configSnapshot.url;
+		}
+		return null;
+	};
+
+	const requestUrl = getRequestInfo();
 
 	return (
 		<div
@@ -145,14 +181,14 @@ function RunItem({ run, onSelect, onDelete }: RunItemProps) {
 				<div className="flex items-center gap-2">
 					<span
 						className={`text-xs px-2 py-0.5 rounded font-medium ${
-							typeColors[run.type]
+							typeColors[run.type] || typeColors.design
 						}`}
 					>
-						{run.type.toUpperCase()}
+						{run.type === "design" ? "DESIGN" : "LOAD TEST"}
 					</span>
 					<span
 						className={`text-xs px-2 py-0.5 rounded font-medium ${
-							statusColors[run.status]
+							statusColors[run.status] || statusColors.pending
 						}`}
 					>
 						{run.status}
@@ -160,38 +196,25 @@ function RunItem({ run, onSelect, onDelete }: RunItemProps) {
 				</div>
 				<button
 					onClick={(e) => onDelete(run.id, e)}
-					className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 rounded transition-all"
+					disabled={isDeleting}
+					className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 rounded transition-all disabled:opacity-50"
 					title="Delete Run"
 				>
-					<Trash2 className="w-4 h-4 text-red-600" />
+					{isDeleting ? (
+						<Loader2 className="w-4 h-4 text-red-600 animate-spin" />
+					) : (
+							<Trash2 className="w-4 h-4 text-red-600" />
+					)}
 				</button>
 			</div>
 
 			<p className="text-sm font-medium text-gray-900 mb-1 truncate">
-				{run.request_id}
+				{requestUrl || run.id}
 			</p>
 
 			<div className="flex items-center gap-3 text-xs text-gray-600">
-				<span>{formatRelativeTime(run.started_at)}</span>
-				{run.total_requests !== undefined && (
-					<>
-						<span>•</span>
-						<span>{formatNumber(run.total_requests)} requests</span>
-					</>
-				)}
-				{run.total_errors !== undefined && run.total_errors > 0 && (
-					<>
-						<span>•</span>
-						<span className="text-red-600">{run.total_errors} errors</span>
-					</>
-				)}
+				<span>{formatTime(run.startTime)}</span>
 			</div>
-
-			{run.average_latency_ms !== undefined && (
-				<div className="mt-2 text-xs text-gray-600">
-					Avg Latency: {run.average_latency_ms.toFixed(2)}ms
-				</div>
-			)}
 		</div>
 	);
 }

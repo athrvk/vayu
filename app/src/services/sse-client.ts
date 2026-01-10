@@ -12,6 +12,29 @@ export class SSEClient {
 	private reconnectAttempts = 0;
 	private maxReconnectAttempts = 5;
 	private reconnectDelay = 1000; // Start with 1 second
+	private useLiveEndpoint = true; // Try new endpoint first
+	private hasTriedFallback = false; // Track if we've tried fallback
+
+	// Current metrics state
+	private currentMetrics: LoadTestMetrics = this.createEmptyMetrics();
+	private startTime: number = 0;
+
+	private createEmptyMetrics(): LoadTestMetrics {
+		return {
+			timestamp: Date.now(),
+			elapsed_seconds: 0,
+			requests_completed: 0,
+			requests_failed: 0,
+			current_rps: 0,
+			current_concurrency: 0,
+			latency_p50_ms: 0,
+			latency_p95_ms: 0,
+			latency_p99_ms: 0,
+			avg_latency_ms: 0,
+			bytes_sent: 0,
+			bytes_received: 0,
+		};
+	}
 
 	connect(
 		runId: string,
@@ -22,37 +45,90 @@ export class SSEClient {
 		// Close existing connection
 		this.disconnect();
 
-		const url = API_ENDPOINTS.STATS_STREAM(runId);
+		// Reset metrics state for new connection
+		this.currentMetrics = this.createEmptyMetrics();
+		this.startTime = 0;
+		this.lastErrorRate = 0;
+
+		// Try new live endpoint first, fallback to old stats endpoint
+		const endpoint = this.useLiveEndpoint && !this.hasTriedFallback
+			? API_ENDPOINTS.METRICS_LIVE(runId)
+			: API_ENDPOINTS.STATS_STREAM(runId);
+
+		const url = `${API_ENDPOINTS.BASE_URL}${endpoint}`;
+
+		const endpointType = this.useLiveEndpoint && !this.hasTriedFallback ? 'live' : 'stats';
+		console.log(`Connecting to ${endpointType} endpoint:`, url);
 
 		try {
 			this.eventSource = new EventSource(url);
 
-			this.eventSource.addEventListener("metric", (event) => {
+			// Handle metrics event - unified format from both endpoints
+			this.eventSource.addEventListener("metrics", (event) => {
 				try {
-					const metrics = JSON.parse(event.data) as LoadTestMetrics;
-					onMessage(metrics);
-					this.reconnectAttempts = 0; // Reset on successful message
+					// Both endpoints now send complete metrics object in same format
+					const metrics = JSON.parse(event.data);
+					console.log("Metrics received:", metrics);
+
+					// Initialize start time on first metrics
+					if (this.startTime === 0 && metrics.timestamp) {
+						this.startTime = metrics.timestamp;
+					}
+
+					// Map from backend format to frontend LoadTestMetrics
+					this.currentMetrics = {
+						timestamp: metrics.timestamp || Date.now(),
+						elapsed_seconds: metrics.elapsed_seconds || 0,
+						requests_completed: metrics.total_requests || 0,
+						requests_failed: metrics.total_errors || 0,
+						current_rps: metrics.current_rps || 0,
+						current_concurrency: metrics.active_connections || 0,
+						latency_p50_ms: 0, // Not included in real-time metrics
+						latency_p95_ms: 0,
+						latency_p99_ms: 0,
+						avg_latency_ms: metrics.avg_latency_ms || 0,
+						bytes_sent: 0,
+						bytes_received: 0,
+					};
+
+					onMessage({ ...this.currentMetrics });
+					this.reconnectAttempts = 0;
 				} catch (error) {
-					console.error("Failed to parse SSE metric:", error);
-					onError(new Error("Failed to parse metrics data"));
+					console.error("Failed to parse metrics:", error);
 				}
 			});
 
 			this.eventSource.addEventListener("complete", () => {
 				console.log("Load test completed");
+				// Send final metrics before closing
+				onMessage({ ...this.currentMetrics });
 				this.disconnect();
 				onClose();
 			});
 
 			this.eventSource.addEventListener("error", (event) => {
-				console.error("SSE connection error:", event);
-
-				// Check if connection is closed
-				if (this.eventSource?.readyState === EventSource.CLOSED) {
-					this.handleReconnect(runId, onMessage, onError, onClose);
-				} else {
-					onError(new Error("SSE connection error"));
+				// Check if this is a 404 (endpoint not found) and we haven't tried fallback
+				if (this.useLiveEndpoint && !this.hasTriedFallback &&
+					this.eventSource?.readyState === EventSource.CLOSED) {
+					console.log("Live endpoint not available, falling back to stats endpoint...");
+					this.hasTriedFallback = true;
+					this.useLiveEndpoint = false;
+					// Retry with old endpoint
+					this.disconnect();
+					setTimeout(() => {
+						this.connect(runId, onMessage, onError, onClose);
+					}, 100);
+					return;
 				}
+
+				// SSE connections can have transient errors - only log, don't spam user
+				// Check if connection is closed (real disconnect)
+				if (this.eventSource?.readyState === EventSource.CLOSED) {
+					console.log("SSE connection closed, attempting reconnect...");
+					this.handleReconnect(runId, onMessage, onError, onClose);
+				}
+				// For CONNECTING state errors, just wait - the connection may recover
+				// Don't call onError for transient issues
 			});
 
 			this.eventSource.addEventListener("open", () => {
@@ -99,6 +175,7 @@ export class SSEClient {
 			this.eventSource.close();
 			this.eventSource = null;
 			this.reconnectAttempts = 0;
+			this.hasTriedFallback = false; // Reset for next connection
 		}
 	}
 

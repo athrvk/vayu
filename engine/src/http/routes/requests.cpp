@@ -1,0 +1,141 @@
+/**
+ * @file http/routes/requests.cpp
+ * @brief Request management routes
+ */
+
+#include "vayu/http/routes.hpp"
+#include "vayu/utils/json.hpp"
+#include "vayu/utils/logger.hpp"
+
+namespace vayu::http::routes {
+
+void register_request_routes(RouteContext& ctx) {
+    /**
+     * GET /requests
+     * Retrieves all requests belonging to a specific collection.
+     * Query params: collectionId (required) - The collection ID to fetch requests from.
+     * Returns: Array of request objects with method, url, headers, body, scripts, etc.
+     */
+    ctx.server.Get("/requests", [&ctx](const httplib::Request& req, httplib::Response& res) {
+        try {
+            if (req.has_param("collectionId")) {
+                auto requests =
+                    ctx.db.get_requests_in_collection(req.get_param_value("collectionId"));
+                nlohmann::json response = nlohmann::json::array();
+                for (const auto& r : requests) {
+                    response.push_back(vayu::json::serialize(r));
+                }
+                res.set_content(response.dump(), "application/json");
+            } else {
+                send_error(res, 400, "collectionId required");
+            }
+        } catch (const std::exception& e) {
+            send_error(res, 500, e.what());
+        }
+    });
+
+    /**
+     * POST /requests
+     * Creates or updates a request in the database.
+     * If 'id' is provided and exists, performs a partial update.
+     * Otherwise, creates a new request (requires 'collectionId', 'name', 'method', 'url').
+     * Body params: id, collectionId, name, method, url, headers (object), body (any),
+     *              auth (object), preRequestScript (string), postRequestScript (string)
+     * Returns: The saved request object.
+     */
+    ctx.server.Post("/requests", [&ctx](const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto json = nlohmann::json::parse(req.body);
+
+            std::string id;
+            if (json.contains("id") && !json["id"].is_null()) {
+                id = json["id"].get<std::string>();
+            } else {
+                id = "req_" + std::to_string(now_ms());
+            }
+
+            vayu::db::Request r;
+            auto existing = ctx.db.get_request(id);
+
+            if (existing) {
+                r = *existing;
+            } else {
+                if (!json.contains("collectionId") || json["collectionId"].is_null()) {
+                    send_error(res, 400, "Missing required field: collectionId");
+                    return;
+                }
+                if (!json.contains("name") || json["name"].is_null()) {
+                    send_error(res, 400, "Missing required field: name");
+                    return;
+                }
+                if (!json.contains("method") || json["method"].is_null()) {
+                    send_error(res, 400, "Missing required field: method");
+                    return;
+                }
+                if (!json.contains("url") || json["url"].is_null()) {
+                    send_error(res, 400, "Missing required field: url");
+                    return;
+                }
+                r.id = id;
+            }
+
+            if (json.contains("collectionId") && !json["collectionId"].is_null()) {
+                r.collection_id = json["collectionId"].get<std::string>();
+            }
+            if (json.contains("name") && !json["name"].is_null()) {
+                r.name = json["name"].get<std::string>();
+            }
+            if (json.contains("method") && !json["method"].is_null()) {
+                auto method = vayu::parse_method(json["method"].get<std::string>());
+                if (!method) throw std::runtime_error("Invalid HTTP method");
+                r.method = *method;
+            }
+            if (json.contains("url") && !json["url"].is_null()) {
+                r.url = json["url"].get<std::string>();
+            }
+            if (json.contains("headers")) r.headers = json["headers"].dump();
+            if (json.contains("body")) r.body = json["body"].dump();
+            if (json.contains("auth")) r.auth = json["auth"].dump();
+            if (json.contains("preRequestScript"))
+                r.pre_request_script = json["preRequestScript"].get<std::string>();
+            if (json.contains("postRequestScript"))
+                r.post_request_script = json["postRequestScript"].get<std::string>();
+
+            r.updated_at = now_ms();
+
+            ctx.db.save_request(r);
+            res.set_content(vayu::json::serialize(r).dump(), "application/json");
+        } catch (const std::exception& e) {
+            send_error(res, 400, e.what());
+        }
+    });
+
+    /**
+     * DELETE /requests/:id
+     * Deletes a request from the database.
+     * Path params: id - The request ID to delete.
+     * Returns: Success message or 404 if not found.
+     */
+    ctx.server.Delete(R"(/requests/([^/]+))",
+                      [&ctx](const httplib::Request& req, httplib::Response& res) {
+                          std::string request_id = req.matches[1];
+                          try {
+                              auto request = ctx.db.get_request(request_id);
+                              if (!request) {
+                                  send_error(res, 404, "Request not found");
+                                  return;
+                              }
+
+                              ctx.db.delete_request(request_id);
+
+                              nlohmann::json response;
+                              response["message"] = "Request deleted successfully";
+                              response["id"] = request_id;
+                              res.set_content(response.dump(), "application/json");
+                          } catch (const std::exception& e) {
+                              send_error(res, 500, e.what());
+                          }
+                      });
+}
+
+}  // namespace vayu::http::routes

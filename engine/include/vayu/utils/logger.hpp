@@ -30,6 +30,9 @@ public:
         return verbosity_level_;
     }
 
+    // Force flush log file
+    void flush();
+
     // Legacy support
     void set_verbose(bool verbose) {
         verbosity_level_ = verbose ? 1 : 0;

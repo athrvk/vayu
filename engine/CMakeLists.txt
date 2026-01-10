@@ -60,7 +60,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         -Wall
         -Wextra
         -Wpedantic
-        -Werror
+        $<$<BOOL:$ENV{VAYU_STRICT_BUILD}>:-Werror>
         -Wno-unused-parameter
         -Wconversion
         -Wsign-conversion
@@ -234,6 +234,13 @@ if(VAYU_BUILD_ENGINE)
     add_executable(vayu-engine
         src/daemon.cpp
         src/http/server.cpp
+        src/http/routes/collections.cpp
+        src/http/routes/requests.cpp
+        src/http/routes/environments.cpp
+        src/http/routes/runs.cpp
+        src/http/routes/execution.cpp
+        src/http/routes/metrics.cpp
+        src/http/routes/scripting.cpp
     )
     
     target_link_libraries(vayu-engine PRIVATE

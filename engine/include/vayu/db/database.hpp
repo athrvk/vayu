@@ -20,10 +20,12 @@ public:
     void create_collection(const Collection& c);
     std::vector<Collection> get_collections();
     std::optional<Collection> get_collection(const std::string& id);
+    void delete_collection(const std::string& id);
 
     void save_request(const Request& r);
     std::optional<Request> get_request(const std::string& id);
     std::vector<Request> get_requests_in_collection(const std::string& collection_id);
+    void delete_request(const std::string& id);
 
     void save_environment(const Environment& e);
     std::vector<Environment> get_environments();
@@ -33,7 +35,9 @@ public:
     void create_run(const Run& run);
     std::optional<Run> get_run(const std::string& id);
     void update_run_status(const std::string& id, RunStatus status);
+    void update_run_status_with_retry(const std::string& id, RunStatus status, int max_retries = 3);
     std::vector<Run> get_all_runs();
+    void delete_run(const std::string& id);
 
     // Metrics
     void add_metric(const Metric& metric);

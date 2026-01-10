@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <thread>
 
 #include "vayu/utils/logger.hpp"
 
@@ -224,6 +225,7 @@ void Database::init() {
     // Enable WAL mode for better concurrency
     impl_->storage.pragma.journal_mode(journal_mode::WAL);
     impl_->storage.pragma.synchronous(1);  // NORMAL
+    impl_->storage.pragma.busy_timeout(5000);  // Wait up to 5 seconds on lock contention
     vayu::utils::log_debug("Database initialized with WAL mode");
 }
 
@@ -246,6 +248,14 @@ std::optional<Collection> Database::get_collection(const std::string& id) {
     return cols.front();
 }
 
+void Database::delete_collection(const std::string& id) {
+    vayu::utils::log_debug("Deleting collection: id=" + id);
+    // First delete all requests in this collection
+    impl_->storage.remove_all<Request>(where(c(&Request::collection_id) == id));
+    // Then delete the collection itself
+    impl_->storage.remove_all<Collection>(where(c(&Collection::id) == id));
+}
+
 void Database::save_request(const Request& r) {
     vayu::utils::log_debug("Saving request: id=" + r.id + ", name=" + r.name);
     impl_->storage.replace(r);
@@ -259,6 +269,11 @@ std::optional<Request> Database::get_request(const std::string& id) {
 
 std::vector<Request> Database::get_requests_in_collection(const std::string& collection_id) {
     return impl_->storage.get_all<Request>(where(c(&Request::collection_id) == collection_id));
+}
+
+void Database::delete_request(const std::string& id) {
+    vayu::utils::log_debug("Deleting request: id=" + id);
+    impl_->storage.remove_all<Request>(where(c(&Request::id) == id));
 }
 
 void Database::save_environment(const Environment& e) {
@@ -305,8 +320,51 @@ void Database::update_run_status(const std::string& id, RunStatus status) {
     }
 }
 
+void Database::update_run_status_with_retry(const std::string& id,
+                                            RunStatus status,
+                                            int max_retries) {
+    for (int attempt = 0; attempt < max_retries; attempt++) {
+        try {
+            update_run_status(id, status);
+            return;  // Success
+        } catch (const std::system_error& e) {
+            std::string error_msg = e.what();
+            // Check if it's a database lock error
+            if (error_msg.find("database is locked") != std::string::npos ||
+                error_msg.find("SQLITE_BUSY") != std::string::npos) {
+                if (attempt == max_retries - 1) {
+                    // Last attempt failed, rethrow
+                    vayu::utils::log_error("Failed to update run status after " +
+                                           std::to_string(max_retries) + " attempts: " + error_msg);
+                    throw;
+                }
+                // Wait before retry with exponential backoff
+                vayu::utils::log_debug("Database locked, retrying in " +
+                                       std::to_string(100 * (attempt + 1)) + "ms (attempt " +
+                                       std::to_string(attempt + 1) + "/" +
+                                       std::to_string(max_retries) + ")");
+                std::this_thread::sleep_for(std::chrono::milliseconds(100 * (attempt + 1)));
+            } else {
+                // Different error, rethrow immediately
+                throw;
+            }
+        } catch (...) {
+            // Non-system_error exceptions, rethrow immediately
+            throw;
+        }
+    }
+}
+
 std::vector<Run> Database::get_all_runs() {
     return impl_->storage.get_all<Run>(order_by(&Run::start_time).desc());
+}
+
+void Database::delete_run(const std::string& id) {
+    // Delete associated metrics and results first
+    impl_->storage.remove_all<Metric>(where(c(&Metric::run_id) == id));
+    impl_->storage.remove_all<Result>(where(c(&Result::run_id) == id));
+    // Delete the run itself
+    impl_->storage.remove<Run>(id);
 }
 
 // Metrics

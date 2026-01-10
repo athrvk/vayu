@@ -336,9 +336,11 @@ struct DetailedReport {
     double latency_max;
     double latency_avg;
     double latency_p50;
+    double latency_p75;  // Phase 1: Additional percentile
     double latency_p90;
     double latency_p95;
     double latency_p99;
+    double latency_p999;  // Phase 1: Additional percentile
 
     // Distribution
     std::map<int, size_t> status_codes;
@@ -346,6 +348,9 @@ struct DetailedReport {
     // Error Details
     size_t errors_with_details;                 // Count of errors with trace data
     std::map<std::string, size_t> error_types;  // e.g., {"timeout": 3, "connection_failed": 2}
+
+    // Phase 1: Error categorization by status code
+    std::map<int, size_t> errors_by_status_code;
 
     // Timing Breakdown (averages in ms) - only if timing data captured
     bool has_timing_data;
@@ -358,6 +363,11 @@ struct DetailedReport {
     // Slow Requests
     size_t slow_requests_count;
     size_t slow_threshold_ms;  // The threshold used (0 if not set)
+
+    // Phase 1: Rate Control Metrics
+    double target_rps;       // Configured target RPS (0 if unlimited)
+    double actual_rps;       // Actual RPS achieved
+    double rps_achievement;  // Percentage of target achieved
 };
 
 // ============================================================================

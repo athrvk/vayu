@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Activity, StopCircle, Eye, BarChart3 } from "lucide-react";
+import { Activity, StopCircle, Eye, BarChart3, Loader2 } from "lucide-react";
 import { useDashboardStore } from "@/stores";
 import { useSSE, useRuns } from "@/hooks";
 import { apiService } from "@/services";
@@ -23,9 +23,11 @@ export default function LoadTestDashboard() {
 		historicalMetrics,
 		finalReport,
 		activeView,
+		isStopping,
 		setActiveView,
 		stopRun,
 		setFinalReport,
+		setStopping,
 	} = useDashboardStore();
 	const { loadRunReport } = useRuns();
 
@@ -48,8 +50,15 @@ export default function LoadTestDashboard() {
 
 	const handleStop = async () => {
 		if (currentRunId) {
-			await apiService.stopRun(currentRunId);
-			stopRun();
+			setStopping(true);
+			try {
+				await apiService.stopRun(currentRunId);
+				stopRun();
+			} catch (error) {
+				console.error("Failed to stop run:", error);
+			} finally {
+				setStopping(false);
+			}
 		}
 	};
 
@@ -64,15 +73,16 @@ export default function LoadTestDashboard() {
 	const displayMetrics =
 		mode === "completed" && finalReport
 			? {
-					requests_completed: finalReport.total_requests,
-					requests_failed: finalReport.total_errors,
-					current_rps: finalReport.avg_rps,
-					latency_p50_ms: finalReport.latency_p50_ms,
-					latency_p95_ms: finalReport.latency_p95_ms,
-					latency_p99_ms: finalReport.latency_p99_ms,
-					avg_latency_ms: finalReport.avg_latency_ms,
-					bytes_sent: finalReport.total_bytes_sent,
-					bytes_received: finalReport.total_bytes_received,
+				// Map new report structure to metrics format
+				requests_completed: finalReport.summary.totalRequests,
+				requests_failed: finalReport.summary.failedRequests,
+				current_rps: finalReport.summary.avgRps,
+				latency_p50_ms: finalReport.latency.p50,
+				latency_p95_ms: finalReport.latency.p95,
+				latency_p99_ms: finalReport.latency.p99,
+				avg_latency_ms: finalReport.latency.avg,
+				bytes_sent: 0, // Not included in new format
+				bytes_received: 0,
 			  }
 			: currentMetrics;
 
@@ -103,10 +113,20 @@ export default function LoadTestDashboard() {
 						{mode === "running" && (
 							<button
 								onClick={handleStop}
-								className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+								disabled={isStopping}
+								className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 							>
-								<StopCircle className="w-4 h-4" />
-								Stop Test
+								{isStopping ? (
+									<>
+										<Loader2 className="w-4 h-4 animate-spin" />
+										Stopping...
+									</>
+								) : (
+									<>
+											<StopCircle className="w-4 h-4" />
+											Stop Test
+									</>
+								)}
 							</button>
 						)}
 					</div>
@@ -155,7 +175,7 @@ export default function LoadTestDashboard() {
 }
 
 function MetricsView({ metrics, historicalMetrics }: any) {
-	if (!metrics) {
+	if (!metrics || typeof metrics.requests_completed === 'undefined') {
 		return (
 			<div className="text-center py-12 text-gray-500">
 				<Activity className="w-16 h-16 mx-auto mb-4 text-gray-300" />
@@ -166,17 +186,26 @@ function MetricsView({ metrics, historicalMetrics }: any) {
 
 	const successRate =
 		metrics.requests_completed > 0
-			? ((metrics.requests_completed - metrics.requests_failed) /
+			? ((metrics.requests_completed - (metrics.requests_failed || 0)) /
 					metrics.requests_completed) *
 			  100
 			: 0;
 
-	// Prepare chart data
-	const chartData = historicalMetrics.slice(-60).map((m: any) => ({
-		time: m.elapsed_seconds,
-		rps: m.current_rps,
-		p95: m.latency_p95_ms,
-	}));
+	// Prepare chart data - show all data, deduplicated by second
+	// Group by rounded time to avoid multiple points at same second
+	const dataBySecond = new Map<number, any>();
+	historicalMetrics.forEach((m: any) => {
+		const second = Math.round(m.elapsed_seconds);
+		// Keep the latest metric for each second
+		dataBySecond.set(second, {
+			time: second,
+			rps: m.current_rps,
+			concurrency: m.current_concurrency,
+		});
+	});
+
+	// Convert to array and sort by time
+	const chartData = Array.from(dataBySecond.values()).sort((a, b) => a.time - b.time);
 
 	return (
 		<div className="space-y-6">
@@ -189,7 +218,7 @@ function MetricsView({ metrics, historicalMetrics }: any) {
 				/>
 				<MetricCard
 					label="Failed"
-					value={formatNumber(metrics.requests_failed)}
+					value={formatNumber(metrics.requests_failed ?? 0)}
 					color="red"
 				/>
 				<MetricCard
@@ -199,7 +228,7 @@ function MetricsView({ metrics, historicalMetrics }: any) {
 				/>
 				<MetricCard
 					label="Current RPS"
-					value={formatNumber(Math.round(metrics.current_rps))}
+					value={formatNumber(Math.round(metrics.current_rps ?? 0))}
 					color="purple"
 				/>
 			</div>
@@ -211,25 +240,25 @@ function MetricsView({ metrics, historicalMetrics }: any) {
 					<div>
 						<p className="text-sm text-gray-600">Average</p>
 						<p className="text-2xl font-bold text-gray-900">
-							{metrics.avg_latency_ms.toFixed(2)}ms
+							{(metrics.avg_latency_ms ?? 0).toFixed(2)}ms
 						</p>
 					</div>
 					<div>
 						<p className="text-sm text-gray-600">P50</p>
 						<p className="text-2xl font-bold text-gray-900">
-							{metrics.latency_p50_ms.toFixed(2)}ms
+							{(metrics.latency_p50_ms ?? 0).toFixed(2)}ms
 						</p>
 					</div>
 					<div>
 						<p className="text-sm text-gray-600">P95</p>
 						<p className="text-2xl font-bold text-gray-900">
-							{metrics.latency_p95_ms.toFixed(2)}ms
+							{(metrics.latency_p95_ms ?? 0).toFixed(2)}ms
 						</p>
 					</div>
 					<div>
 						<p className="text-sm text-gray-600">P99</p>
 						<p className="text-2xl font-bold text-gray-900">
-							{metrics.latency_p99_ms.toFixed(2)}ms
+							{(metrics.latency_p99_ms ?? 0).toFixed(2)}ms
 						</p>
 					</div>
 				</div>
@@ -270,7 +299,7 @@ function MetricsView({ metrics, historicalMetrics }: any) {
 
 					<div className="bg-white rounded-lg border border-gray-200 p-6">
 						<h3 className="text-lg font-semibold text-gray-900 mb-4">
-							P95 Latency
+							Active Connections
 						</h3>
 						<ResponsiveContainer width="100%" height={200}>
 							<LineChart data={chartData}>
@@ -284,12 +313,12 @@ function MetricsView({ metrics, historicalMetrics }: any) {
 									}}
 								/>
 								<YAxis
-									label={{ value: "ms", angle: -90, position: "insideLeft" }}
+									label={{ value: "Connections", angle: -90, position: "insideLeft" }}
 								/>
 								<Tooltip />
 								<Line
 									type="monotone"
-									dataKey="p95"
+									dataKey="concurrency"
 									stroke="#f59e0b"
 									strokeWidth={2}
 									dot={false}
@@ -350,7 +379,7 @@ function MetricCard({
 	);
 }
 
-function RequestResponseView({ report }: any) {
+function RequestResponseView({ report }: { report: any }) {
 	if (!report) {
 		return (
 			<div className="text-center py-12 text-gray-500">
@@ -360,39 +389,130 @@ function RequestResponseView({ report }: any) {
 	}
 
 	return (
-		<div className="bg-white rounded-lg border border-gray-200 p-6">
-			<h3 className="text-lg font-semibold text-gray-900 mb-4">
-				Request Details
-			</h3>
-			<div className="space-y-3 text-sm">
-				<div>
-					<span className="font-medium text-gray-700">Method:</span>{" "}
-					<span className="text-gray-900">{report.request.method}</span>
-				</div>
-				<div>
-					<span className="font-medium text-gray-700">URL:</span>{" "}
-					<span className="text-gray-900">{report.request.url}</span>
-				</div>
-				{report.request.headers &&
-					Object.keys(report.request.headers).length > 0 && (
-						<div>
-							<span className="font-medium text-gray-700 block mb-2">
-								Headers:
-							</span>
-							<pre className="p-3 bg-gray-50 rounded text-xs font-mono overflow-x-auto">
-								{JSON.stringify(report.request.headers, null, 2)}
-							</pre>
+		<div className="space-y-6">
+			{/* Status Code Distribution */}
+			<div className="bg-white rounded-lg border border-gray-200 p-6">
+				<h3 className="text-lg font-semibold text-gray-900 mb-4">
+					Status Code Distribution
+				</h3>
+				<div className="grid grid-cols-4 gap-4">
+					{Object.entries(report.statusCodes || {}).map(([code, count]) => (
+						<div key={code} className="p-3 bg-gray-50 rounded">
+							<span className={`font-mono font-bold ${code.startsWith('2') ? 'text-green-600' :
+								code.startsWith('3') ? 'text-blue-600' :
+									code.startsWith('4') ? 'text-yellow-600' :
+										'text-red-600'
+								}`}>{code}</span>
+							<p className="text-sm text-gray-600">{String(count)} requests</p>
 						</div>
-					)}
-				{report.request.body && (
-					<div>
-						<span className="font-medium text-gray-700 block mb-2">Body:</span>
-						<pre className="p-3 bg-gray-50 rounded text-xs font-mono overflow-x-auto">
-							{report.request.body}
-						</pre>
-					</div>
-				)}
+					))}
+				</div>
 			</div>
+
+			{/* Error Details */}
+			{report.errors && report.errors.total > 0 && (
+				<div className="bg-white rounded-lg border border-gray-200 p-6">
+					<h3 className="text-lg font-semibold text-gray-900 mb-4">
+						Error Summary
+					</h3>
+					<div className="space-y-3">
+						<div className="flex justify-between">
+							<span className="text-gray-600">Total Errors:</span>
+							<span className="font-semibold text-red-600">{report.errors.total}</span>
+						</div>
+						{Object.entries(report.errors.types || {}).map(([type, count]) => (
+							<div key={type} className="flex justify-between text-sm">
+								<span className="text-gray-600">{type}:</span>
+								<span className="font-medium">{String(count)}</span>
+							</div>
+						))}
+					</div>
+				</div>
+			)}
+
+			{/* Timing Breakdown */}
+			{report.timingBreakdown && (
+				<div className="bg-white rounded-lg border border-gray-200 p-6">
+					<h3 className="text-lg font-semibold text-gray-900 mb-4">
+						Timing Breakdown
+					</h3>
+					<div className="grid grid-cols-5 gap-4">
+						<div>
+							<p className="text-sm text-gray-600">DNS</p>
+							<p className="font-bold">{report.timingBreakdown.avgDnsMs.toFixed(2)}ms</p>
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">Connect</p>
+							<p className="font-bold">{report.timingBreakdown.avgConnectMs.toFixed(2)}ms</p>
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">TLS</p>
+							<p className="font-bold">{report.timingBreakdown.avgTlsMs.toFixed(2)}ms</p>
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">First Byte</p>
+							<p className="font-bold">{report.timingBreakdown.avgFirstByteMs.toFixed(2)}ms</p>
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">Download</p>
+							<p className="font-bold">{report.timingBreakdown.avgDownloadMs.toFixed(2)}ms</p>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Slow Requests */}
+			{report.slowRequests && report.slowRequests.count > 0 && (
+				<div className="bg-white rounded-lg border border-gray-200 p-6">
+					<h3 className="text-lg font-semibold text-gray-900 mb-4">
+						Slow Requests
+					</h3>
+					<div className="grid grid-cols-3 gap-4">
+						<div>
+							<p className="text-sm text-gray-600">Slow Requests</p>
+							<p className="font-bold text-orange-600">{report.slowRequests.count}</p>
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">Threshold</p>
+							<p className="font-bold">{report.slowRequests.thresholdMs}ms</p>
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">Percentage</p>
+							<p className="font-bold">{report.slowRequests.percentage.toFixed(2)}%</p>
+						</div>
+					</div>
+					<p className="text-xs text-gray-500 mt-3">
+						Requests that exceeded the configured threshold and were automatically captured
+					</p>
+				</div>
+			)}
+
+			{/* Test Validation Results */}
+			{report.testValidation && (
+				<div className="bg-white rounded-lg border border-gray-200 p-6">
+					<h3 className="text-lg font-semibold text-gray-900 mb-4">
+						Test Validation
+					</h3>
+					<div className="grid grid-cols-4 gap-4">
+						<div>
+							<p className="text-sm text-gray-600">Samples Tested</p>
+							<p className="font-bold">{report.testValidation.samplesTested}</p>
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">Passed</p>
+							<p className="font-bold text-green-600">{report.testValidation.testsPassed}</p>
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">Failed</p>
+							<p className="font-bold text-red-600">{report.testValidation.testsFailed}</p>
+						</div>
+						<div>
+							<p className="text-sm text-gray-600">Success Rate</p>
+							<p className="font-bold">{report.testValidation.successRate.toFixed(1)}%</p>
+						</div>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }

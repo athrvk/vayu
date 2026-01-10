@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
@@ -248,6 +249,16 @@ public:
      * @brief Get memory usage estimate in bytes
      */
     [[nodiscard]] size_t memory_usage_bytes() const;
+
+    /**
+     * @brief Get current statistics as JSON (for live streaming)
+     * Lock-free read from atomic counters, no database access
+     * @param current_active Active connection count from event loop
+     * @param elapsed_seconds Elapsed time since test start
+     * @return JSON object with current metrics
+     */
+    [[nodiscard]] nlohmann::json get_current_stats(size_t current_active,
+                                                   double elapsed_seconds) const;
 
 private:
     std::string run_id_;

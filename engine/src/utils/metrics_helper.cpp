@@ -130,10 +130,24 @@ MetricsHelper::DetailedReport MetricsHelper::calculate_detailed_report(
         };
 
         report.latency_p50 = get_percentile(0.50);
+        report.latency_p75 = get_percentile(0.75);  // Phase 1
         report.latency_p90 = get_percentile(0.90);
         report.latency_p95 = get_percentile(0.95);
         report.latency_p99 = get_percentile(0.99);
+        report.latency_p999 = get_percentile(0.999);  // Phase 1
     }
+
+    // Phase 1: Categorize errors by status code
+    for (const auto& [code, count] : report.status_codes) {
+        if (code == 0 || code >= 400) {
+            report.errors_by_status_code[code] = count;
+        }
+    }
+
+    // Phase 1: Set actual RPS (already calculated)
+    report.actual_rps = report.avg_rps;
+    report.target_rps = 0;       // Will be set by caller if available
+    report.rps_achievement = 0;  // Will be calculated by caller
 
     return report;
 }

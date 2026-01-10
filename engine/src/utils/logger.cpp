@@ -88,6 +88,15 @@ void Logger::error(const std::string& message) {
     log(Level::ERROR, message);
 }
 
+void Logger::flush() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (log_file_ && log_file_->is_open()) {
+        log_file_->flush();
+    }
+    std::cout.flush();
+    std::cerr.flush();
+}
+
 Logger::~Logger() {
     if (log_file_ && log_file_->is_open()) {
         log_file_->close();

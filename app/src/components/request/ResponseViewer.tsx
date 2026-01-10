@@ -10,6 +10,7 @@ import {
 	Terminal,
 } from "lucide-react";
 import { formatBytes, formatDuration, getStatusColor } from "@/utils";
+import { ErrorHints, ErrorStatusCodes } from "@/constants/error-codes";
 import type { SanityResult } from "@/types";
 
 interface ResponseViewerProps {
@@ -23,23 +24,49 @@ export default function ResponseViewer({ response }: ResponseViewerProps) {
 
 	if (!response.status) {
 		return (
-			<div className="p-4 text-gray-500">
+			<div className="p-6">
 				{response.error ? (
-					<div className="text-red-600">
-						<p className="font-semibold">Error:</p>
-						<p className="mt-2">{response.error}</p>
+					<div className="border border-red-200 rounded-lg p-4 bg-red-50">
+						<div className="flex items-start gap-3">
+							<XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+							<div className="flex-1">
+								<h3 className="text-sm font-semibold text-red-900 mb-1">
+									Request Failed
+								</h3>
+								<p className="text-sm text-red-800 mb-3">{response.error}</p>
+								{(response as any).errorCode && (
+									<div className="flex items-center gap-2">
+										<span className="text-xs font-mono bg-red-100 text-red-700 px-2 py-1 rounded">
+											{(response as any).errorCode}
+										</span>
+										{(response as any).statusCode && (
+											<span className="text-xs text-red-600">
+												HTTP {(response as any).statusCode}
+											</span>
+										)}
+									</div>
+								)}
+								{(response as any).errorCode && ErrorHints[(response as any).errorCode as keyof typeof ErrorHints] && (
+									<p className="text-xs text-red-700 mt-2">
+										{ErrorHints[(response as any).errorCode as keyof typeof ErrorHints]}
+									</p>
+								)}
+							</div>
+						</div>
 					</div>
 				) : (
-					<p>No response data</p>
+						<div className="text-center py-8 text-gray-500">
+							<p>No response data</p>
+						</div>
 				)}
 			</div>
 		);
 	}
 
-	const { test_results } = response;
-	const hasTests = test_results && test_results.length > 0;
+	const { testResults } = response;
+	const hasTests = testResults && testResults.length > 0;
 	const hasConsoleLogs =
-		response.console_logs && response.console_logs.length > 0;
+		response.consoleLogs && response.consoleLogs.length > 0;
 
 	const tabs = [
 		{ id: "body" as ResponseTab, label: "Body", icon: FileText },
@@ -56,7 +83,7 @@ export default function ResponseViewer({ response }: ResponseViewerProps) {
 						id: "tests" as ResponseTab,
 						label: "Tests",
 						icon: CheckCircle,
-						count: test_results.length,
+					count: testResults.length,
 					},
 			  ]
 			: []),
@@ -66,7 +93,7 @@ export default function ResponseViewer({ response }: ResponseViewerProps) {
 						id: "console" as ResponseTab,
 						label: "Console",
 						icon: Terminal,
-						count: response.console_logs!.length,
+					count: response.consoleLogs!.length,
 					},
 			  ]
 			: []),
@@ -110,13 +137,13 @@ export default function ResponseViewer({ response }: ResponseViewerProps) {
 						<div className="flex items-center gap-2 text-sm">
 							<span className="text-gray-600">Tests:</span>
 							<span className="text-green-600 font-medium">
-								{test_results.filter((t) => t.passed).length} passed
+								{testResults.filter((t) => t.passed).length} passed
 							</span>
-							{test_results.filter((t) => !t.passed).length > 0 && (
+							{testResults.filter((t) => !t.passed).length > 0 && (
 								<>
 									<span className="text-gray-400">/</span>
 									<span className="text-red-600 font-medium">
-										{test_results.filter((t) => !t.passed).length} failed
+										{testResults.filter((t) => !t.passed).length} failed
 									</span>
 								</>
 							)}
@@ -126,6 +153,30 @@ export default function ResponseViewer({ response }: ResponseViewerProps) {
 			</div>
 
 			{/* Tabs Navigation */}
+			{/* Script Errors Banner */}
+			{(response.preScriptError || response.postScriptError) && (
+				<div className="px-4 py-2 bg-amber-50 border-b border-amber-200">
+					<div className="flex items-start gap-2">
+						<XCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+						<div className="text-sm">
+							{response.preScriptError && (
+								<div className="text-amber-800">
+									<span className="font-medium">Pre-request script error:</span>{" "}
+									{response.preScriptError}
+								</div>
+							)}
+							{response.postScriptError && (
+								<div className="text-amber-800">
+									<span className="font-medium">Post-request script error:</span>{" "}
+									{response.postScriptError}
+								</div>
+							)}
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Tab Bar */}
 			<div className="border-b border-gray-200">
 				<div className="flex">
 					{tabs.map((tab) => (
@@ -281,7 +332,7 @@ ${
 				{activeTab === "tests" && hasTests && (
 					<div className="p-4">
 						<div className="space-y-2">
-							{test_results.map((test, index) => (
+							{testResults.map((test, index) => (
 								<div
 									key={index}
 									className={`
@@ -320,7 +371,7 @@ ${test.passed ? "bg-green-50 border-green-500" : "bg-red-50 border-red-500"}
 				{activeTab === "console" && hasConsoleLogs && (
 					<div className="p-4">
 						<div className="bg-gray-900 rounded-lg p-4 font-mono text-sm">
-							{response.console_logs!.map((log, index) => (
+							{response.consoleLogs!.map((log, index) => (
 								<div
 									key={index}
 									className="text-green-400 py-1 border-b border-gray-800 last:border-0"

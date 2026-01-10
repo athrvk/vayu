@@ -13,6 +13,7 @@ import { getMethodColor } from "@/utils";
 import type { HttpMethod } from "@/types";
 import ResponseViewer from "./ResponseViewer";
 import LoadTestConfigDialog from "./LoadTestConfigDialog";
+import ScriptEditor from "./ScriptEditor";
 
 export default function RequestBuilder() {
 	const { selectedRequestId, setActiveScreen } = useAppStore();
@@ -37,6 +38,7 @@ export default function RequestBuilder() {
 	const { startRun } = useDashboardStore();
 	const { executeRequest, startLoadTest } = useEngine();
 	const [showLoadTestDialog, setShowLoadTestDialog] = useState(false);
+	const [isStartingLoadTest, setIsStartingLoadTest] = useState(false);
 
 	// Enable auto-save
 	useAutoSave(true);
@@ -122,23 +124,31 @@ export default function RequestBuilder() {
 	const handleStartLoadTest = async (config: any) => {
 		if (!currentRequest.id) return;
 
-		// Save first if there are unsaved changes
-		if (hasUnsavedChanges) {
-			await handleSave();
+		setIsStartingLoadTest(true);
+		try {
+			// Save first if there are unsaved changes
+			if (hasUnsavedChanges) {
+				await handleSave();
+			}
+
+			// Pass the full request object to startLoadTest
+			const result = await startLoadTest(
+				currentRequest,
+				config,
+				activeEnvironmentId || undefined
+			);
+
+			if (result) {
+				startRun(result.runId);
+				setActiveScreen("dashboard");
+			}
+
+			setShowLoadTestDialog(false);
+		} catch (error) {
+			console.error("Failed to start load test:", error);
+		} finally {
+			setIsStartingLoadTest(false);
 		}
-
-		const result = await startLoadTest(
-			currentRequest.id,
-			config,
-			activeEnvironmentId || undefined
-		);
-
-		if (result) {
-			startRun(result.run_id);
-			setActiveScreen("dashboard");
-		}
-
-		setShowLoadTestDialog(false);
 	};
 
 	const handleSave = async () => {
@@ -299,6 +309,7 @@ export default function RequestBuilder() {
 				<LoadTestConfigDialog
 					onClose={() => setShowLoadTestDialog(false)}
 					onStart={handleStartLoadTest}
+					isStarting={isStartingLoadTest}
 				/>
 			)}
 		</div>
@@ -360,13 +371,10 @@ function TabContent() {
 						Execute JavaScript before sending the request. Use{" "}
 						<code className="bg-gray-100 px-1">pm</code> API.
 					</p>
-					<textarea
+					<ScriptEditor
 						value={currentRequest.pre_request_script || ""}
-						onChange={(e) =>
-							updateRequestField("pre_request_script", e.target.value)
-						}
+						onChange={(value) => updateRequestField("pre_request_script", value)}
 						placeholder="// Pre-request script (JavaScript)&#10;pm.environment.set('timestamp', Date.now());"
-						className="w-full h-96 px-3 py-2 border border-gray-300 rounded font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 code-editor"
 					/>
 				</div>
 			);
@@ -378,11 +386,10 @@ function TabContent() {
 						Execute JavaScript after receiving the response. Use{" "}
 						<code className="bg-gray-100 px-1">pm.test()</code> for assertions.
 					</p>
-					<textarea
+					<ScriptEditor
 						value={currentRequest.test_script || ""}
-						onChange={(e) => updateRequestField("test_script", e.target.value)}
+						onChange={(value) => updateRequestField("test_script", value)}
 						placeholder="// Test script (JavaScript)&#10;pm.test('Status code is 200', () => {&#10;  pm.response.to.have.status(200);&#10;});"
-						className="w-full h-96 px-3 py-2 border border-gray-300 rounded font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 code-editor"
 					/>
 				</div>
 			);

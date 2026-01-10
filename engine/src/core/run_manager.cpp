@@ -331,8 +331,11 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         // Wait for all requests to complete
         context->event_loop->stop(true);  // Wait for pending
 
-        // Stop background metrics collection to ensure COMPLETED is the last metric
+        // SOLUTION 2: Stop background metrics collection FIRST to prevent database lock conflicts
         context->is_running = false;
+
+        // Wait for metrics thread to complete its current cycle and exit
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
         // Calculate final metrics
         auto test_end = std::chrono::steady_clock::now();
@@ -406,10 +409,10 @@ void execute_load_test(std::shared_ptr<RunContext> context,
             vayu::utils::log_error("Script validation failed: " + std::string(e.what()));
         }
 
-        // Update run status
+        // Update run status with retry logic to handle any remaining contention
         vayu::RunStatus final_status =
             context->should_stop ? vayu::RunStatus::Stopped : vayu::RunStatus::Completed;
-        db.update_run_status(context->run_id, final_status);
+        db.update_run_status_with_retry(context->run_id, final_status);
 
         if (verbose) {
             vayu::utils::log_info("Load test " + context->run_id + " " +
@@ -428,10 +431,11 @@ void execute_load_test(std::shared_ptr<RunContext> context,
     } catch (const std::exception& e) {
         // Stop background metrics collection
         context->is_running = false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
         vayu::utils::log_error("Load test error: " + std::string(e.what()));
         try {
-            db.update_run_status(context->run_id, vayu::RunStatus::Failed);
+            db.update_run_status_with_retry(context->run_id, vayu::RunStatus::Failed);
         } catch (const std::exception& ex) {
             vayu::utils::log_error("Failed to update run status: " + std::string(ex.what()));
         }

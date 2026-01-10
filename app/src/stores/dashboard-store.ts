@@ -15,6 +15,7 @@ interface DashboardState {
 	finalReport: RunReport | null;
 	error: string | null;
 	activeView: DashboardView;
+	isStopping: boolean;
 
 	// Actions
 	startRun: (runId: string) => void;
@@ -24,6 +25,7 @@ interface DashboardState {
 	setFinalReport: (report: RunReport) => void;
 	setError: (error: string | null) => void;
 	setActiveView: (view: DashboardView) => void;
+	setStopping: (stopping: boolean) => void;
 	reset: () => void;
 
 	// Helpers
@@ -40,6 +42,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 	finalReport: null,
 	error: null,
 	activeView: "metrics",
+	isStopping: false,
 
 	startRun: (runId) =>
 		set({
@@ -51,6 +54,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			finalReport: null,
 			error: null,
 			activeView: "metrics",
+			isStopping: false,
 		}),
 
 	stopRun: () =>
@@ -62,10 +66,19 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 	setStreaming: (streaming) => set({ isStreaming: streaming }),
 
 	addMetrics: (metrics) =>
-		set((state) => ({
-			currentMetrics: metrics,
-			historicalMetrics: [...state.historicalMetrics, metrics],
-		})),
+		set((state) => {
+			// Keep all historical metrics with reasonable limit (10000 points max)
+			const newHistory = [...state.historicalMetrics, metrics];
+			// Trim to last 10000 points if needed (prevents memory issues on very long tests)
+			const trimmedHistory = newHistory.length > 10000
+				? newHistory.slice(-10000)
+				: newHistory;
+
+			return {
+				currentMetrics: metrics,
+				historicalMetrics: trimmedHistory,
+			};
+		}),
 
 	setFinalReport: (report) =>
 		set({
@@ -76,6 +89,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
 	setError: (error) => set({ error }),
 	setActiveView: (view) => set({ activeView: view }),
+	setStopping: (stopping) => set({ isStopping: stopping }),
 
 	reset: () =>
 		set({
@@ -87,6 +101,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			finalReport: null,
 			error: null,
 			activeView: "metrics",
+			isStopping: false,
 		}),
 
 	// Helpers

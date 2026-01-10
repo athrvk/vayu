@@ -1,15 +1,37 @@
 // HTTP Client - Fetch wrapper with error handling
 
 import { API_ENDPOINTS } from "@/config/api-endpoints";
+import { ErrorCode, ErrorMessages, ErrorStatusCodes } from "@/constants/error-codes";
 
 export class ApiError extends Error {
 	constructor(
 		public statusCode: number,
 		public errorCode: string,
-		message: string
+		message: string,
+		public response?: any
 	) {
 		super(message);
 		this.name = "ApiError";
+	}
+
+	get isTimeout(): boolean {
+		return this.errorCode === ErrorCode.TIMEOUT || this.statusCode === ErrorStatusCodes.TIMEOUT;
+	}
+
+	get isNetworkError(): boolean {
+		return [
+			ErrorCode.CONNECTION_FAILED,
+			ErrorCode.DNS_ERROR
+		].includes(this.errorCode) || [ErrorStatusCodes.BAD_GATEWAY, ErrorStatusCodes.CONNECTION_FAILED].includes(this.statusCode);
+	}
+
+	get isDatabaseError(): boolean {
+		return this.errorCode === ErrorCode.DATABASE_ERROR;
+	}
+
+	get userFriendlyMessage(): string {
+		// Try to get message from constants, fallback to original message
+		return ErrorMessages[this.errorCode as keyof typeof ErrorMessages] || this.message;
 	}
 }
 
@@ -67,11 +89,15 @@ class HttpClient {
 
 			if (!response.ok) {
 				const errorData = await response.json().catch(() => ({}));
+				const errorCode = errorData.error?.code || "UNKNOWN_ERROR";
+				const errorMessage = errorData.error?.message ||
+					`HTTP ${response.status}: ${response.statusText}`;
+
 				throw new ApiError(
 					response.status,
-					errorData.error?.code || "UNKNOWN_ERROR",
-					errorData.error?.message ||
-						`HTTP ${response.status}: ${response.statusText}`
+					errorCode,
+					errorMessage,
+					errorData
 				);
 			}
 

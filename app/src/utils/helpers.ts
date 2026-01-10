@@ -65,7 +65,8 @@ export function formatRelativeTime(timestamp: string | number): string {
 /**
  * Format number with thousand separators
  */
-export function formatNumber(num: number): string {
+export function formatNumber(num: number | undefined | null): string {
+	if (num === undefined || num === null || isNaN(num)) return "0";
 	return num.toLocaleString();
 }
 

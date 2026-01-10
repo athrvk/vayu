@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import Shell from "./components/layout/Shell";
 import { useHealthCheck, useCollections, useRuns } from "./hooks";
 import { useAppStore } from "./stores";
+import { useScriptCompletionsStore } from "./stores/script-completions-store";
 
 function App() {
 	// Initialize health check
@@ -10,6 +11,7 @@ function App() {
 	const { loadCollections } = useCollections();
 	const { loadRuns } = useRuns();
 	const { isEngineConnected } = useAppStore();
+	const { fetchCompletions } = useScriptCompletionsStore();
 
 	// Load initial data when engine connects
 	useEffect(() => {
@@ -18,8 +20,10 @@ function App() {
 			console.log("App: Loading collections and runs...");
 			loadCollections();
 			loadRuns();
+			// Fetch script completions for Monaco editor
+			fetchCompletions();
 		}
-	}, [isEngineConnected, loadCollections, loadRuns]);
+	}, [isEngineConnected, loadCollections, loadRuns, fetchCompletions]);
 
 	return <Shell />;
 }

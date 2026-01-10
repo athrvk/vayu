@@ -23,10 +23,10 @@ export function useSSE({ runId, enabled }: UseSSEParams): void {
 	const handleError = useCallback(
 		(error: Error) => {
 			console.error("SSE error:", error);
+			// Only set error state, don't stop streaming - let reconnect logic handle it
 			setError(error.message);
-			setStreaming(false);
 		},
-		[setError, setStreaming]
+		[setError]
 	);
 
 	const handleClose = useCallback(() => {
@@ -43,9 +43,14 @@ export function useSSE({ runId, enabled }: UseSSEParams): void {
 
 		setStreaming(true);
 		setError(null);
-		sseClient.connect(runId, handleMessage, handleError, handleClose);
+
+		// Add a small delay before connecting to give backend time to set up the run
+		const connectTimeout = setTimeout(() => {
+			sseClient.connect(runId, handleMessage, handleError, handleClose);
+		}, 500);
 
 		return () => {
+			clearTimeout(connectTimeout);
 			sseClient.disconnect();
 		};
 	}, [

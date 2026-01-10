@@ -1,15 +1,17 @@
 import { useState } from "react";
-import { X } from "lucide-react";
+import { X, Loader2 } from "lucide-react";
 import type { LoadTestConfig } from "@/types";
 
 interface LoadTestConfigDialogProps {
 	onClose: () => void;
 	onStart: (config: LoadTestConfig) => void;
+	isStarting?: boolean;
 }
 
 export default function LoadTestConfigDialog({
 	onClose,
 	onStart,
+	isStarting = false,
 }: LoadTestConfigDialogProps) {
 	const [mode, setMode] = useState<LoadTestConfig["mode"]>("constant_rps");
 	const [duration, setDuration] = useState(60);
@@ -17,11 +19,21 @@ export default function LoadTestConfigDialog({
 	const [concurrency, setConcurrency] = useState(10);
 	const [iterations, setIterations] = useState(1000);
 	const [rampDuration, setRampDuration] = useState(30);
+	// Data capture options
+	const [sampleRate, setSampleRate] = useState(10); // Default 10%
+	const [slowThreshold, setSlowThreshold] = useState(1000); // Default 1000ms
+	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(true);
+	const [comment, setComment] = useState("");
 
 	const handleStart = () => {
 		const config: LoadTestConfig = {
 			mode,
 			duration_seconds: duration,
+			// Data capture options
+			data_sample_rate: sampleRate,
+			slow_threshold_ms: slowThreshold,
+			save_timing_breakdown: saveTimingBreakdown,
+			comment: comment || undefined,
 		};
 
 		if (mode === "constant_rps") {
@@ -160,6 +172,76 @@ export default function LoadTestConfigDialog({
 						</div>
 					)}
 
+					{/* Data Capture Options */}
+					<div className="border-t pt-4 mt-4">
+						<h3 className="text-sm font-semibold text-gray-700 mb-3">Data Capture Options</h3>
+
+						<div className="space-y-3">
+							<div>
+								<label className="block text-sm font-medium text-gray-700 mb-2">
+									Success Sample Rate (%) - Save {sampleRate}% of successful responses
+								</label>
+								<input
+									type="range"
+									value={sampleRate}
+									onChange={(e) => setSampleRate(Number(e.target.value))}
+									min="0"
+									max="100"
+									className="w-full"
+								/>
+								<div className="flex justify-between text-xs text-gray-500">
+									<span>0% (errors only)</span>
+									<span>{sampleRate}%</span>
+									<span>100% (all requests)</span>
+								</div>
+							</div>
+
+							<div>
+								<label className="block text-sm font-medium text-gray-700 mb-2">
+									Slow Request Threshold (ms)
+								</label>
+								<input
+									type="number"
+									value={slowThreshold}
+									onChange={(e) => setSlowThreshold(Number(e.target.value))}
+									min="0"
+									max="60000"
+									className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+									placeholder="e.g., 1000 (1 second)"
+								/>
+								<p className="text-xs text-gray-500 mt-1">
+									Requests slower than this will be flagged and saved
+								</p>
+							</div>
+
+							<div className="flex items-center">
+								<input
+									type="checkbox"
+									id="save-timing"
+									checked={saveTimingBreakdown}
+									onChange={(e) => setSaveTimingBreakdown(e.target.checked)}
+									className="mr-2"
+								/>
+								<label htmlFor="save-timing" className="text-sm text-gray-700">
+									Save detailed timing breakdown (DNS, TLS, Connect, etc.)
+								</label>
+							</div>
+
+							<div>
+								<label className="block text-sm font-medium text-gray-700 mb-2">
+									Comment (optional)
+								</label>
+								<input
+									type="text"
+									value={comment}
+									onChange={(e) => setComment(e.target.value)}
+									className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+									placeholder="Description for this test run..."
+								/>
+							</div>
+						</div>
+					</div>
+
 					{/* Info Box */}
 					<div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
 						<p className="font-medium mb-1">What will happen:</p>
@@ -191,15 +273,24 @@ export default function LoadTestConfigDialog({
 				{/* Footer */}
 				<div className="flex justify-end gap-3 p-4 border-t border-gray-200">
 					<button
-						onClick={onClose}
-						className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors"
+						disabled={isStarting}
+						className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 					>
 						Cancel
 					</button>
 					<button
 						onClick={handleStart}
-						className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
+						disabled={isStarting}
+						className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 					>
+						{isStarting ? (
+							<>
+								<Loader2 className="w-4 h-4 animate-spin" />
+								Starting...
+							</>
+						) : (
+							"Start Load Test"
+						)}
 						Start Load Test
 					</button>
 				</div>

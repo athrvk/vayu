@@ -46,16 +46,13 @@ export interface Environment {
 
 export interface Run {
 	id: string;
-	request_id: string;
-	environment_id?: string;
-	type: "load" | "sanity";
-	status: "running" | "completed" | "stopped" | "failed";
-	config?: LoadTestConfig;
-	started_at: string;
-	completed_at?: string;
-	total_requests?: number;
-	total_errors?: number;
-	average_latency_ms?: number;
+	type: "load" | "design"; // Backend uses "design" not "sanity"
+	status: "pending" | "running" | "completed" | "stopped" | "failed";
+	startTime: number; // Unix timestamp in ms
+	endTime: number;
+	configSnapshot?: any; // The request config used for this run
+	requestId?: string | null;
+	environmentId?: string | null;
 }
 
 export interface LoadTestConfig {
@@ -65,7 +62,12 @@ export interface LoadTestConfig {
 	iterations?: number;
 	mode: "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
 	ramp_duration_seconds?: number;
+	// Data capture options
 	data_sample_rate?: number;
+	slow_threshold_ms?: number;
+	save_timing_breakdown?: boolean;
+	// Metadata
+	comment?: string;
 	latency_percentiles?: number[];
 }
 
@@ -95,9 +97,13 @@ export interface TestResult {
 // SanityResult is the response from /request endpoint
 // It directly contains the HTTP response fields
 export interface SanityResult extends HttpResponse {
-	request_id?: string;
-	test_results?: TestResult[];
-	console_logs?: string[];
+	requestId?: string;
+	// Script execution results (camelCase from backend)
+	testResults?: TestResult[];
+	consoleLogs?: string[];
+	// Script errors
+	preScriptError?: string;
+	postScriptError?: string;
 	error?: string;
 }
 
@@ -117,29 +123,102 @@ export interface LoadTestMetrics {
 }
 
 export interface RunReport {
-	run_id: string;
-	request: Request;
-	environment?: Environment;
-	config: LoadTestConfig;
-	started_at: string;
-	completed_at: string;
-	duration_seconds: number;
-	total_requests: number;
-	total_errors: number;
-	success_rate: number;
-	avg_latency_ms: number;
-	min_latency_ms: number;
-	max_latency_ms: number;
-	latency_p50_ms: number;
-	latency_p95_ms: number;
-	latency_p99_ms: number;
-	avg_rps: number;
-	max_rps: number;
-	total_bytes_sent: number;
-	total_bytes_received: number;
-	status_code_distribution: Record<string, number>;
-	error_distribution?: Record<string, number>;
-	timeline: LoadTestMetrics[];
+	// Phase 1: Metadata section
+	metadata?: {
+		runId: string;
+		runType: string;
+		status: string;
+		startTime: number;
+		endTime: number;
+		requestUrl?: string;
+		requestMethod?: string;
+		configuration?: {
+			mode?: string;
+			duration?: string;
+			targetRps?: number;
+			concurrency?: number;
+			timeout?: number;
+			comment?: string;
+		};
+	};
+	// Summary section
+	summary: {
+		totalRequests: number;
+		successfulRequests: number;
+		failedRequests: number;
+		errorRate: number;
+		totalDurationSeconds: number;
+		avgRps: number;
+	};
+	// Latency section
+	latency: {
+		min: number;
+		max: number;
+		avg: number;
+		median?: number;  // Phase 1: Renamed from p50
+		p50: number;
+		p75?: number;     // Phase 1
+		p90: number;
+		p95: number;
+		p99: number;
+		p999?: number;    // Phase 1
+	};
+	// Status code distribution
+	statusCodes: Record<string, number>;
+	// Error details
+	errors: {
+		total: number;
+		withDetails: number;
+		types: Record<string, number>;
+		byStatusCode?: Record<string, number>;  // Phase 1
+	};
+	// Phase 1: Rate control metrics
+	rateControl?: {
+		targetRps: number;
+		actualRps: number;
+		achievement: number;
+	};
+	// Optional timing breakdown
+	timingBreakdown?: {
+		avgDnsMs: number;
+		avgConnectMs: number;
+		avgTlsMs: number;
+		avgFirstByteMs: number;
+		avgDownloadMs: number;
+	};
+	// Optional slow requests info
+	slowRequests?: {
+		count: number;
+		thresholdMs: number;
+		percentage: number;
+	};
+	// Optional test validation results
+	testValidation?: {
+		samplesTested: number;
+		testsPassed: number;
+		testsFailed: number;
+		successRate: number;
+	};
+	// Request/Response results (errors + sampled successes)
+	// Backend returns this as a direct array
+	results?: Array<{
+		timestamp: number;
+		statusCode: number;
+		latencyMs: number;
+		error?: string;
+		trace?: {
+			headers?: Record<string, string>;
+			body?: string;
+			dns_ms?: number;
+			connect_ms?: number;
+			tls_ms?: number;
+			first_byte_ms?: number;
+			download_ms?: number;
+			error_type?: string;
+			is_slow?: boolean;
+			threshold_ms?: number;
+		};
+	}>;
 }
 
 export interface EngineHealth {
@@ -153,4 +232,22 @@ export interface EngineConfig {
 	default_timeout_ms: number;
 	follow_redirects: boolean;
 	verify_ssl: boolean;
+}
+
+// Script Editor Completions (from backend)
+export interface ScriptCompletion {
+	label: string;
+	kind: number;
+	insertText: string;
+	insertTextRules?: number;
+	detail: string;
+	documentation: string;
+	sortText?: string;
+	filterText?: string;
+}
+
+export interface ScriptCompletionsResponse {
+	version: string;
+	engine: string;
+	completions: ScriptCompletion[];
 }

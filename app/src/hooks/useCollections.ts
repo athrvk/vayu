@@ -39,6 +39,8 @@ export function useCollections(): UseCollectionsReturn {
 		removeRequest,
 		setLoading: setStoreLoading,
 		setError: setStoreError,
+		setSavingCollection,
+		setSavingRequest,
 	} = useCollectionsStore();
 
 	const [isLoading, setIsLoading] = useState(false);
@@ -86,6 +88,7 @@ export function useCollections(): UseCollectionsReturn {
 	const createCollection = useCallback(
 		async (data: CreateCollectionRequest): Promise<Collection | null> => {
 			setError(null);
+			setSavingCollection(true);
 			try {
 				console.log("Creating collection with data:", data);
 				const collection = await apiService.createCollection(data);
@@ -98,14 +101,17 @@ export function useCollections(): UseCollectionsReturn {
 				console.error("Failed to create collection:", err);
 				setError(errorMessage);
 				return null;
+			} finally {
+				setSavingCollection(false);
 			}
 		},
-		[addCollection]
+		[addCollection, setSavingCollection]
 	);
 
 	const createRequest = useCallback(
 		async (data: CreateRequestRequest): Promise<Request | null> => {
 			setError(null);
+			setSavingRequest(true);
 			try {
 				console.log("Creating request with data:", data);
 				const request = await apiService.createRequest(data);
@@ -129,9 +135,11 @@ export function useCollections(): UseCollectionsReturn {
 				console.error("Failed to create request:", err);
 				setError(errorMessage);
 				return null;
+			} finally {
+				setSavingRequest(false);
 			}
 		},
-		[addRequest, loadRequestsForCollection]
+		[addRequest, loadRequestsForCollection, setSavingRequest]
 	);
 
 	const updateCollection = useCallback(
@@ -140,6 +148,7 @@ export function useCollections(): UseCollectionsReturn {
 			data: { name?: string; parent_id?: string }
 		): Promise<boolean> => {
 			setError(null);
+			setSavingCollection(true);
 			try {
 				console.log("Updating collection", id, "with data:", data);
 				await apiService.updateCollection({ id, ...data });
@@ -152,14 +161,17 @@ export function useCollections(): UseCollectionsReturn {
 				console.error("Failed to update collection:", err);
 				setError(errorMessage);
 				return false;
+			} finally {
+				setSavingCollection(false);
 			}
 		},
-		[loadCollections]
+		[loadCollections, setSavingCollection]
 	);
 
 	const deleteCollection = useCallback(
 		async (collectionId: string): Promise<boolean> => {
 			setError(null);
+			setSavingCollection(true);
 			try {
 				await apiService.deleteCollection(collectionId);
 				removeCollection(collectionId);
@@ -169,14 +181,17 @@ export function useCollections(): UseCollectionsReturn {
 					err instanceof Error ? err.message : "Failed to delete collection";
 				setError(errorMessage);
 				return false;
+			} finally {
+				setSavingCollection(false);
 			}
 		},
-		[removeCollection]
+		[removeCollection, setSavingCollection]
 	);
 
 	const deleteRequest = useCallback(
 		async (requestId: string): Promise<boolean> => {
 			setError(null);
+			setSavingRequest(true);
 			try {
 				await apiService.deleteRequest(requestId);
 				removeRequest(requestId);
@@ -186,9 +201,11 @@ export function useCollections(): UseCollectionsReturn {
 					err instanceof Error ? err.message : "Failed to delete request";
 				setError(errorMessage);
 				return false;
+			} finally {
+				setSavingRequest(false);
 			}
 		},
-		[removeRequest]
+		[removeRequest, setSavingRequest]
 	);
 
 	return {

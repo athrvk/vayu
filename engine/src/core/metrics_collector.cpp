@@ -251,4 +251,35 @@ size_t MetricsCollector::memory_usage_bytes() const {
     return bytes;
 }
 
+nlohmann::json MetricsCollector::get_current_stats(size_t current_active,
+                                                   double elapsed_seconds) const {
+    // Lock-free reads from atomic counters
+    size_t total = total_requests();
+    size_t errors = total_errors();
+    size_t success = total > errors ? total - errors : 0;
+    double avg_lat = average_latency();
+    double err_rate = error_rate();
+
+    // Calculate current RPS
+    double current_rps = elapsed_seconds > 0 ? static_cast<double>(total) / elapsed_seconds : 0.0;
+
+    nlohmann::json stats;
+    stats["total_requests"] = total;
+    stats["total_errors"] = errors;
+    stats["total_success"] = success;
+    stats["error_rate"] = err_rate;
+    stats["avg_latency_ms"] = avg_lat;
+    stats["current_rps"] = current_rps;
+    stats["active_connections"] = current_active;
+    stats["elapsed_seconds"] = elapsed_seconds;
+
+    // Status code distribution (lock-free)
+    stats["status_2xx"] = status_2xx_.load(std::memory_order_relaxed);
+    stats["status_3xx"] = status_3xx_.load(std::memory_order_relaxed);
+    stats["status_4xx"] = status_4xx_.load(std::memory_order_relaxed);
+    stats["status_5xx"] = status_5xx_.load(std::memory_order_relaxed);
+
+    return stats;
+}
+
 }  // namespace vayu::core

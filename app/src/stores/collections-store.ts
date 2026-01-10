@@ -10,6 +10,8 @@ interface CollectionsState {
 	isLoading: boolean;
 	error: string | null;
 	expandedCollectionIds: Set<string>;
+	isSavingCollection: boolean;
+	isSavingRequest: boolean;
 
 	// Actions
 	setCollections: (collections: Collection[]) => void;
@@ -23,6 +25,8 @@ interface CollectionsState {
 	toggleCollectionExpanded: (collectionId: string) => void;
 	setLoading: (loading: boolean) => void;
 	setError: (error: string | null) => void;
+	setSavingCollection: (saving: boolean) => void;
+	setSavingRequest: (saving: boolean) => void;
 
 	// Helpers
 	getRequestsByCollection: (collectionId: string) => Request[];
@@ -38,6 +42,8 @@ export const useCollectionsStore = create<CollectionsState>()(
 			isLoading: false,
 			error: null,
 			expandedCollectionIds: new Set<string>(),
+			isSavingCollection: false,
+			isSavingRequest: false,
 
 	setCollections: (collections) => set({ collections }),
 
@@ -111,6 +117,8 @@ export const useCollectionsStore = create<CollectionsState>()(
 			return { expandedCollectionIds: newExpanded };
 		}),
 
+			setSavingCollection: (saving) => set({ isSavingCollection: saving }),
+			setSavingRequest: (saving) => set({ isSavingRequest: saving }),
 	setLoading: (loading) => set({ isLoading: loading }),
 	setError: (error) => set({ error }),
 
