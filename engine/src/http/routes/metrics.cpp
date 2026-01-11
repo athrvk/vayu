@@ -20,6 +20,7 @@ void register_health_routes(RouteContext& ctx) {
      * Returns server health status, version, and available worker threads.
      */
     ctx.server.Get("/health", [](const httplib::Request&, httplib::Response& res) {
+        vayu::utils::log_debug("GET /health - Health check requested");
         nlohmann::json response;
         response["status"] = "ok";
         response["version"] = vayu::Version::string;
@@ -32,6 +33,7 @@ void register_health_routes(RouteContext& ctx) {
      * Retrieves the global configuration settings.
      */
     ctx.server.Get("/config", [&ctx](const httplib::Request&, httplib::Response& res) {
+        vayu::utils::log_info("GET /config - Fetching global configuration");
         nlohmann::json config;
 
         auto stored_config = ctx.db.get_config("global_settings");
@@ -63,14 +65,17 @@ void register_metrics_routes(RouteContext& ctx) {
     ctx.server.Get(
         R"(/stats/([^/]+))", [&ctx](const httplib::Request& req, httplib::Response& res) {
             std::string run_id = req.matches[1];
+            vayu::utils::log_info("GET /stats/:id - Starting SSE stream for run: " + run_id);
 
             try {
                 auto run = ctx.db.get_run(run_id);
                 if (!run) {
+                    vayu::utils::log_warning("GET /stats/:id - Run not found: " + run_id);
                     send_error(res, 404, "Run not found");
                     return;
                 }
             } catch (const std::exception& e) {
+                vayu::utils::log_error("GET /stats/:id - Error: " + std::string(e.what()));
                 send_error(res, 500, e.what());
                 return;
             }
@@ -82,14 +87,14 @@ void register_metrics_routes(RouteContext& ctx) {
                     int64_t start_time = 0;
 
                     nlohmann::json aggregated_metrics;
-                    aggregated_metrics["total_requests"] = 0;
-                    aggregated_metrics["total_errors"] = 0;
-                    aggregated_metrics["total_success"] = 0;
-                    aggregated_metrics["error_rate"] = 0.0;
-                    aggregated_metrics["avg_latency_ms"] = 0.0;
-                    aggregated_metrics["current_rps"] = 0.0;
-                    aggregated_metrics["active_connections"] = 0;
-                    aggregated_metrics["elapsed_seconds"] = 0.0;
+                    aggregated_metrics["totalRequests"] = 0;
+                    aggregated_metrics["totalErrors"] = 0;
+                    aggregated_metrics["totalSuccess"] = 0;
+                    aggregated_metrics["errorRate"] = 0.0;
+                    aggregated_metrics["avgLatencyMs"] = 0.0;
+                    aggregated_metrics["currentRps"] = 0.0;
+                    aggregated_metrics["activeConnections"] = 0;
+                    aggregated_metrics["elapsedSeconds"] = 0.0;
 
                     while (!test_completed) {
                         if (!sink.is_writable()) {
@@ -109,35 +114,35 @@ void register_metrics_routes(RouteContext& ctx) {
                                     }
 
                                     if (metric.name == vayu::MetricName::Rps) {
-                                        aggregated_metrics["current_rps"] = metric.value;
+                                        aggregated_metrics["currentRps"] = metric.value;
                                         has_updates = true;
                                     } else if (metric.name == vayu::MetricName::ErrorRate) {
-                                        aggregated_metrics["error_rate"] = metric.value;
+                                        aggregated_metrics["errorRate"] = metric.value;
                                         has_updates = true;
                                     } else if (metric.name == vayu::MetricName::ConnectionsActive) {
-                                        aggregated_metrics["active_connections"] =
+                                        aggregated_metrics["activeConnections"] =
                                             static_cast<int>(metric.value);
                                         has_updates = true;
                                     } else if (metric.name == vayu::MetricName::RequestsSent ||
                                                metric.name == vayu::MetricName::TotalRequests) {
-                                        aggregated_metrics["total_requests"] =
+                                        aggregated_metrics["totalRequests"] =
                                             static_cast<int>(metric.value);
                                         has_updates = true;
                                     } else if (metric.name == vayu::MetricName::LatencyAvg) {
-                                        aggregated_metrics["avg_latency_ms"] = metric.value;
+                                        aggregated_metrics["avgLatencyMs"] = metric.value;
                                         has_updates = true;
                                     }
 
-                                    int total_req = aggregated_metrics["total_requests"];
-                                    double err_rate = aggregated_metrics["error_rate"];
-                                    aggregated_metrics["total_errors"] =
+                                    int total_req = aggregated_metrics["totalRequests"];
+                                    double err_rate = aggregated_metrics["errorRate"];
+                                    aggregated_metrics["totalErrors"] =
                                         static_cast<int>((err_rate / 100.0) * total_req);
-                                    aggregated_metrics["total_success"] =
-                                        total_req - aggregated_metrics["total_errors"].get<int>();
-                                    aggregated_metrics["elapsed_seconds"] =
+                                    aggregated_metrics["totalSuccess"] =
+                                        total_req - aggregated_metrics["totalErrors"].get<int>();
+                                    aggregated_metrics["elapsedSeconds"] =
                                         static_cast<double>(metric.timestamp - start_time) / 1000.0;
                                     aggregated_metrics["timestamp"] = metric.timestamp;
-                                    aggregated_metrics["run_id"] = run_id;
+                                    aggregated_metrics["runId"] = run_id;
 
                                     if (metric.name == vayu::MetricName::Completed) {
                                         test_completed = true;
@@ -156,7 +161,7 @@ void register_metrics_routes(RouteContext& ctx) {
                                 if (test_completed) {
                                     nlohmann::json completion_event;
                                     completion_event["event"] = "complete";
-                                    completion_event["run_id"] = run_id;
+                                    completion_event["runId"] = run_id;
                                     std::string completion_payload =
                                         "event: complete\ndata: " + completion_event.dump() +
                                         "\n\n";
@@ -173,7 +178,7 @@ void register_metrics_routes(RouteContext& ctx) {
 
                                     nlohmann::json completion_event;
                                     completion_event["event"] = "complete";
-                                    completion_event["run_id"] = run_id;
+                                    completion_event["runId"] = run_id;
                                     completion_event["status"] = to_string(run->status);
                                     std::string payload =
                                         "event: complete\ndata: " + completion_event.dump() +
@@ -240,13 +245,13 @@ void register_metrics_routes(RouteContext& ctx) {
                             auto stats = context->metrics_collector->get_current_stats(
                                 active_count, elapsed_seconds);
 
-                            stats["run_id"] = run_id;
+                            stats["runId"] = run_id;
                             stats["timestamp"] =
                                 std::chrono::duration_cast<std::chrono::milliseconds>(
                                     std::chrono::system_clock::now().time_since_epoch())
                                     .count();
-                            stats["requests_sent"] = context->requests_sent.load();
-                            stats["requests_expected"] = context->requests_expected.load();
+                            stats["requestsSent"] = context->requests_sent.load();
+                            stats["requestsExpected"] = context->requests_expected.load();
 
                             std::string payload = "event: metrics\ndata: " + stats.dump() + "\n\n";
                             if (!sink.write(payload.data(), payload.size())) {
@@ -267,7 +272,7 @@ void register_metrics_routes(RouteContext& ctx) {
 
                     nlohmann::json completion_event;
                     completion_event["event"] = "complete";
-                    completion_event["run_id"] = run_id;
+                    completion_event["runId"] = run_id;
                     completion_event["message"] =
                         "Test completed, use /stats/" + run_id + " for full report";
                     std::string payload =

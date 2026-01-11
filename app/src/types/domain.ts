@@ -9,11 +9,21 @@ export type HttpMethod =
 	| "HEAD"
 	| "OPTIONS";
 
+/**
+ * Variable value with enabled flag (Postman-style)
+ */
+export interface VariableValue {
+	value: string;
+	enabled: boolean;
+}
+
 export interface Collection {
 	id: string;
 	name: string;
 	description?: string;
 	parent_id?: string;
+	order?: number;  // Position in the collection list
+	variables?: Record<string, VariableValue>;  // Collection-scoped variables
 	created_at: string;
 	updated_at: string;
 }
@@ -25,6 +35,7 @@ export interface Request {
 	description?: string;
 	method: HttpMethod;
 	url: string;
+	params?: Record<string, string>;  // Query parameters
 	headers?: Record<string, string>;
 	body?: string;
 	body_type?: "json" | "text" | "form-data" | "x-www-form-urlencoded";
@@ -38,10 +49,35 @@ export interface Request {
 export interface Environment {
 	id: string;
 	name: string;
-	variables: Record<string, string>;
+	variables: Record<string, VariableValue>;
 	is_active: boolean;
 	created_at: string;
 	updated_at: string;
+}
+
+/**
+ * Global variables - singleton storage for app-wide variables
+ */
+export interface GlobalVariables {
+	id: string;  // Always "globals"
+	variables: Record<string, VariableValue>;
+	updated_at: string;
+}
+
+/**
+ * Variable scope for UI display
+ */
+export type VariableScope = 'global' | 'collection' | 'environment';
+
+/**
+ * Variable info for autocomplete and quick view
+ */
+export interface VariableInfo {
+	name: string;
+	value: string;
+	scope: VariableScope;
+	sourceId?: string;  // Collection ID or Environment ID
+	sourceName?: string;  // Collection name or Environment name
 }
 
 export interface Run {
@@ -75,6 +111,8 @@ export interface HttpResponse {
 	status: number;
 	statusText: string;
 	headers: Record<string, string>;
+	requestHeaders?: Record<string, string>;
+	rawRequest?: string;
 	body: any;
 	bodyRaw: string;
 	bodySize: number;

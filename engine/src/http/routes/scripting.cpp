@@ -4,6 +4,7 @@
  */
 
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/logger.hpp"
 
 namespace vayu::http::routes {
 
@@ -606,12 +607,16 @@ void register_scripting_routes(RouteContext& ctx) {
      */
     ctx.server.Get("/scripting/completions",
                    [&ctx](const httplib::Request&, httplib::Response& res) {
+                       vayu::utils::log_info(
+                           "GET /scripting/completions - Fetching script API completions");
                        try {
                            nlohmann::json response = {{"version", "1.0.0"},
                                                       {"engine", "quickjs"},
                                                       {"completions", get_script_completions()}};
                            send_json(res, response);
                        } catch (const std::exception& e) {
+                           vayu::utils::log_error("GET /scripting/completions - Error: " +
+                                                  std::string(e.what()));
                            send_error(res, 500, e.what());
                        }
                    });

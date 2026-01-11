@@ -237,6 +237,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/collections.cpp
         src/http/routes/requests.cpp
         src/http/routes/environments.cpp
+        src/http/routes/globals.cpp
         src/http/routes/runs.cpp
         src/http/routes/execution.cpp
         src/http/routes/metrics.cpp

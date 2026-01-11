@@ -1,8 +1,116 @@
 {
+    // =========================================================================
+    // CMake Configuration
+    // =========================================================================
+    "cmake.cmakePath": "/home/ubuntu/.local/bin/cmake",
     "cmake.sourceDirectory": "${workspaceFolder}/engine",
+    "cmake.buildDirectory": "${workspaceFolder}/engine/build",
+    "cmake.configureOnOpen": true,
+    "cmake.generator": "Ninja",
+    "cmake.parallelJobs": 0,
+    "cmake.buildBeforeRun": true,
+    // =========================================================================
+    // C/C++ IntelliSense Configuration
+    // =========================================================================
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/engine/build/compile_commands.json",
+    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.autocompleteAddParentheses": true,
+    "C_Cpp.formatting": "clangFormat",
     "C_Cpp.clang_format_style": "file",
-    "editor.formatOnSave": true,
+    "C_Cpp.clang_format_fallbackStyle": "Google",
+    // =========================================================================
+    // Editor Settings for C++
+    // =========================================================================
     "[cpp]": {
-        "editor.defaultFormatter": "ms-vscode.cpptools"
-    }
+        "editor.defaultFormatter": "ms-vscode.cpptools",
+        "editor.formatOnSave": true,
+        "editor.formatOnPaste": false,
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "editor.wordBasedSuggestions": "off",
+        "editor.suggest.insertMode": "replace"
+    },
+    "[c]": {
+        "editor.defaultFormatter": "ms-vscode.cpptools",
+        "editor.formatOnSave": true,
+        "editor.tabSize": 4
+    },
+    // =========================================================================
+    // File Associations
+    // =========================================================================
+    "files.associations": {
+        "*.hpp": "cpp",
+        "*.cpp": "cpp",
+        "*.h": "c",
+        "*.tpp": "cpp",
+        "*.ipp": "cpp",
+        "CMakeLists.txt": "cmake",
+        "*.cmake": "cmake"
+    },
+    // =========================================================================
+    // Search/Files Exclusions (faster indexing)
+    // =========================================================================
+    "files.exclude": {
+        "**/engine/build/**": true,
+        "**/node_modules": true,
+        "**/.git": true
+    },
+    "search.exclude": {
+        "**/engine/build": true,
+        "**/engine/vendor/quickjs": true,
+        "**/node_modules": true,
+        "**/*.log": true
+    },
+    // =========================================================================
+    // Testing
+    // =========================================================================
+    "testMate.cpp.test.executables": "${workspaceFolder}/engine/build/vayu_tests",
+    // =========================================================================
+    // General Editor Settings
+    // =========================================================================
+    "editor.formatOnSave": true,
+    "editor.rulers": [
+        100
+    ],
+    "editor.renderWhitespace": "boundary",
+    "editor.bracketPairColorization.enabled": true,
+    // =========================================================================
+    // Terminal
+    // =========================================================================
+    "terminal.integrated.cwd": "${workspaceFolder}/engine",
+    "cSpell.words": [
+        "ASAN",
+        "BIGNUM",
+        "buildsystems",
+        "ccache",
+        "cutils",
+        "DCMAKE",
+        "DVCPKG",
+        "fsanitize",
+        "httplib",
+        "libbf",
+        "libregexp",
+        "libunicode",
+        "memsize",
+        "MSVC",
+        "ncpu",
+        "nlohmann",
+        "partialize",
+        "physicalcpu",
+        "QUICKJS",
+        "SIGABRT",
+        "STREQUAL",
+        "TSAN",
+        "vayu",
+        "Wconversion",
+        "Wdouble",
+        "Werror",
+        "Wextra",
+        "Wformat",
+        "Wnull",
+        "Wpedantic",
+        "Wsign"
+    ]
 }

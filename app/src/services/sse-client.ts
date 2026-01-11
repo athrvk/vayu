@@ -48,7 +48,6 @@ export class SSEClient {
 		// Reset metrics state for new connection
 		this.currentMetrics = this.createEmptyMetrics();
 		this.startTime = 0;
-		this.lastErrorRate = 0;
 
 		// Try new live endpoint first, fallback to old stats endpoint
 		const endpoint = this.useLiveEndpoint && !this.hasTriedFallback
@@ -75,18 +74,18 @@ export class SSEClient {
 						this.startTime = metrics.timestamp;
 					}
 
-					// Map from backend format to frontend LoadTestMetrics
+					// Map from backend camelCase format to frontend LoadTestMetrics
 					this.currentMetrics = {
 						timestamp: metrics.timestamp || Date.now(),
-						elapsed_seconds: metrics.elapsed_seconds || 0,
-						requests_completed: metrics.total_requests || 0,
-						requests_failed: metrics.total_errors || 0,
-						current_rps: metrics.current_rps || 0,
-						current_concurrency: metrics.active_connections || 0,
+						elapsed_seconds: metrics.elapsedSeconds || 0,
+						requests_completed: metrics.totalRequests || 0,
+						requests_failed: metrics.totalErrors || 0,
+						current_rps: metrics.currentRps || 0,
+						current_concurrency: metrics.activeConnections || 0,
 						latency_p50_ms: 0, // Not included in real-time metrics
 						latency_p95_ms: 0,
 						latency_p99_ms: 0,
-						avg_latency_ms: metrics.avg_latency_ms || 0,
+						avg_latency_ms: metrics.avgLatencyMs || 0,
 						bytes_sent: 0,
 						bytes_received: 0,
 					};
@@ -106,7 +105,7 @@ export class SSEClient {
 				onClose();
 			});
 
-			this.eventSource.addEventListener("error", (event) => {
+				this.eventSource.addEventListener("error", (_event) => {
 				// Check if this is a 404 (endpoint not found) and we haven't tried fallback
 				if (this.useLiveEndpoint && !this.hasTriedFallback &&
 					this.eventSource?.readyState === EventSource.CLOSED) {

@@ -1,0 +1,28 @@
+{
+    "recommendations": [
+        // Essential C++ Development
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack",
+        "ms-vscode.cmake-tools",
+        
+        // Build System
+        
+        // Code Quality
+        "xaver.clang-format",
+        
+        // Testing
+        "matepek.vscode-catch2-test-adapter",
+        
+        // Debugging
+        "vadimcn.vscode-lldb",
+        
+        // Git
+        "eamodio.gitlens",
+        
+        // General Productivity
+        "usernamehw.errorlens",
+        "streetsidesoftware.code-spell-checker",
+        "gruntfuggly.todo-tree"
+    ],
+    "unwantedRecommendations": []
+}

@@ -118,6 +118,8 @@ struct Response {
     int status_code = 0;
     std::string status_text;
     Headers headers;
+    Headers request_headers;  // Headers that were sent in the request
+    std::string raw_request;  // Complete raw HTTP request
     std::string body;
     size_t body_size = 0;
     Timing timing;
@@ -564,6 +566,7 @@ struct Collection {
     std::string id;
     std::optional<std::string> parent_id;
     std::string name;
+    std::string variables;  // JSON - Collection-scoped variables
     int order;
     int64_t created_at;
 };
@@ -574,8 +577,10 @@ struct Request {
     std::string name;
     HttpMethod method;
     std::string url;
+    std::string params;               // JSON - Query parameters
     std::string headers;              // JSON
     std::string body;                 // JSON/Text
+    std::string body_type;  // "json", "text", "form-data", "x-www-form-urlencoded", "none"
     std::string auth;                 // JSON
     std::string pre_request_script;   // JS Code
     std::string post_request_script;  // JS Code (Tests)
@@ -622,6 +627,15 @@ struct Result {
 struct KVStore {
     std::string key;
     std::string value;
+};
+
+/**
+ * @brief Global variables - singleton storage for app-wide variables
+ */
+struct Globals {
+    std::string id;         // Always "globals" - singleton
+    std::string variables;  // JSON - Global variables
+    int64_t updated_at;
 };
 }  // namespace db
 

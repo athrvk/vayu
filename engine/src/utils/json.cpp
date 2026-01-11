@@ -125,6 +125,18 @@ Json serialize(const vayu::db::Collection& c) {
     json["name"] = c.name;
     json["order"] = c.order;
     json["createdAt"] = c.created_at;
+
+    // Parse collection variables JSON
+    if (c.variables.empty()) {
+        json["variables"] = Json::object();
+    } else {
+        try {
+            json["variables"] = Json::parse(c.variables);
+        } catch (const std::exception&) {
+            json["variables"] = Json::object();
+        }
+    }
+
     return json;
 }
 
@@ -135,9 +147,54 @@ Json serialize(const vayu::db::Request& r) {
     json["name"] = r.name;
     json["method"] = to_string(r.method);
     json["url"] = r.url;
-    json["headers"] = r.headers.empty() ? Json::object() : Json::parse(r.headers);
-    json["body"] = r.body.empty() ? Json() : Json::parse(r.body);
-    json["auth"] = r.auth.empty() ? Json::object() : Json::parse(r.auth);
+
+    // Query params
+    if (r.params.empty()) {
+        json["params"] = Json::object();
+    } else {
+        try {
+            json["params"] = Json::parse(r.params);
+        } catch (const std::exception&) {
+            json["params"] = Json::object();
+        }
+    }
+
+    // Safely parse JSON fields with exception handling to prevent "out of memory" errors
+    // from invalid JSON strings stored in the database
+    if (r.headers.empty()) {
+        json["headers"] = Json::object();
+    } else {
+        try {
+            json["headers"] = Json::parse(r.headers);
+        } catch (const std::exception&) {
+            json["headers"] = Json::object();
+        }
+    }
+
+    if (r.body.empty()) {
+        json["body"] = Json();
+    } else {
+        try {
+            json["body"] = Json::parse(r.body);
+        } catch (const std::exception&) {
+            // If body is not valid JSON, store it as a string
+            json["body"] = r.body;
+        }
+    }
+
+    // Body type
+    json["bodyType"] = r.body_type.empty() ? "none" : r.body_type;
+
+    if (r.auth.empty()) {
+        json["auth"] = Json::object();
+    } else {
+        try {
+            json["auth"] = Json::parse(r.auth);
+        } catch (const std::exception&) {
+            json["auth"] = Json::object();
+        }
+    }
+
     json["preRequestScript"] = r.pre_request_script;
     json["postRequestScript"] = r.post_request_script;
     json["updatedAt"] = r.updated_at;
@@ -148,7 +205,18 @@ Json serialize(const vayu::db::Environment& e) {
     Json json;
     json["id"] = e.id;
     json["name"] = e.name;
-    json["variables"] = e.variables.empty() ? Json::object() : Json::parse(e.variables);
+
+    // Safely parse variables JSON with exception handling
+    if (e.variables.empty()) {
+        json["variables"] = Json::object();
+    } else {
+        try {
+            json["variables"] = Json::parse(e.variables);
+        } catch (const std::exception&) {
+            json["variables"] = Json::object();
+        }
+    }
+
     json["updatedAt"] = e.updated_at;
     return json;
 }
@@ -267,6 +335,8 @@ Json serialize(const Response& response) {
     json["status"] = response.status_code;
     json["statusText"] = response.status_text;
     json["headers"] = response.headers;
+    json["requestHeaders"] = response.request_headers;
+    json["rawRequest"] = response.raw_request;
     json["bodySize"] = response.body_size;
 
     // Try to parse body as JSON

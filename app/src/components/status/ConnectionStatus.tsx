@@ -6,25 +6,25 @@ export default function ConnectionStatus() {
 
 	if (isEngineConnected) {
 		return (
-			<div className="bg-green-50 border-b border-green-200 px-4 py-2 flex items-center gap-2 text-sm">
-				<CheckCircle className="w-4 h-4 text-green-600" />
-				<span className="text-green-800">Connected to Vayu Engine</span>
+			<div className="bg-green-50 dark:bg-green-950/50 border-b border-green-200 dark:border-green-900 px-4 py-2 flex items-center gap-2 text-sm">
+				<CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+				<span className="text-green-800 dark:text-green-200">Connected to Vayu Engine</span>
 			</div>
 		);
 	}
 
 	return (
-		<div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center gap-2">
-			<AlertCircle className="w-5 h-5 text-red-600" />
+		<div className="bg-destructive/10 border-b border-destructive/20 px-4 py-3 flex items-center gap-2">
+			<AlertCircle className="w-5 h-5 text-destructive" />
 			<div className="flex-1">
-				<p className="text-sm font-medium text-red-800">
+				<p className="text-sm font-medium text-destructive">
 					Cannot connect to Vayu Engine
 				</p>
-				<p className="text-xs text-red-600 mt-0.5">
+				<p className="text-xs text-destructive/80 mt-0.5">
 					{engineError || "Make sure the engine is running on port 9876"}
 				</p>
 			</div>
-			<Zap className="w-5 h-5 text-red-400" />
+			<Zap className="w-5 h-5 text-destructive/50" />
 		</div>
 	);
 }

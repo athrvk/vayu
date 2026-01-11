@@ -1,8 +1,8 @@
 // useAutoSave Hook - Auto-save request changes after debounce
 
 import { useEffect, useRef, useCallback } from "react";
-import { apiService } from "@/services";
-import { useRequestBuilderStore, useCollectionsStore } from "@/stores";
+import { useRequestBuilderStore } from "@/stores";
+import { useUpdateRequestMutation } from "@/queries";
 import type { UpdateRequestRequest } from "@/types";
 
 const AUTO_SAVE_DELAY_MS = 5000;
@@ -10,7 +10,7 @@ const AUTO_SAVE_DELAY_MS = 5000;
 export function useAutoSave(enabled: boolean = true): void {
 	const { currentRequest, hasUnsavedChanges, setSaving, setUnsavedChanges } =
 		useRequestBuilderStore();
-	const { updateRequest: updateStoreRequest } = useCollectionsStore();
+	const updateRequestMutation = useUpdateRequestMutation();
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const lastSavedRef = useRef<string>("");
 
@@ -42,8 +42,7 @@ export function useAutoSave(enabled: boolean = true): void {
 				test_script: currentRequest.test_script,
 			};
 
-			const updated = await apiService.updateRequest(updateData);
-			updateStoreRequest(updated);
+			const updated = await updateRequestMutation.mutateAsync(updateData);
 			lastSavedRef.current = JSON.stringify(updated);
 			setUnsavedChanges(false);
 		} catch (error) {
@@ -52,7 +51,7 @@ export function useAutoSave(enabled: boolean = true): void {
 		} finally {
 			setSaving(false);
 		}
-	}, [currentRequest, setSaving, setUnsavedChanges, updateStoreRequest]);
+	}, [currentRequest, setSaving, setUnsavedChanges, updateRequestMutation]);
 
 	useEffect(() => {
 		if (!enabled || !hasUnsavedChanges || !currentRequest?.id) {

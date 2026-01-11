@@ -30,6 +30,11 @@ public:
     void save_environment(const Environment& e);
     std::vector<Environment> get_environments();
     std::optional<Environment> get_environment(const std::string& id);
+    void delete_environment(const std::string& id);
+
+    // Globals (singleton)
+    void save_globals(const Globals& g);
+    std::optional<Globals> get_globals();
 
     // Execution
     void create_run(const Run& run);

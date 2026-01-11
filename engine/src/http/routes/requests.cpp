@@ -19,17 +19,23 @@ void register_request_routes(RouteContext& ctx) {
     ctx.server.Get("/requests", [&ctx](const httplib::Request& req, httplib::Response& res) {
         try {
             if (req.has_param("collectionId")) {
-                auto requests =
-                    ctx.db.get_requests_in_collection(req.get_param_value("collectionId"));
+                std::string collection_id = req.get_param_value("collectionId");
+                vayu::utils::log_info("GET /requests - Fetching requests for collection: " +
+                                      collection_id);
+                auto requests = ctx.db.get_requests_in_collection(collection_id);
                 nlohmann::json response = nlohmann::json::array();
                 for (const auto& r : requests) {
                     response.push_back(vayu::json::serialize(r));
                 }
+                vayu::utils::log_debug("GET /requests - Returning " +
+                                       std::to_string(requests.size()) + " requests");
                 res.set_content(response.dump(), "application/json");
             } else {
+                vayu::utils::log_warning("GET /requests - Missing required param: collectionId");
                 send_error(res, 400, "collectionId required");
             }
         } catch (const std::exception& e) {
+            vayu::utils::log_error("GET /requests - Error: " + std::string(e.what()));
             send_error(res, 500, e.what());
         }
     });
@@ -56,23 +62,29 @@ void register_request_routes(RouteContext& ctx) {
 
             vayu::db::Request r;
             auto existing = ctx.db.get_request(id);
+            bool is_update = existing.has_value();
 
             if (existing) {
                 r = *existing;
             } else {
                 if (!json.contains("collectionId") || json["collectionId"].is_null()) {
+                    vayu::utils::log_warning(
+                        "POST /requests - Missing required field: collectionId");
                     send_error(res, 400, "Missing required field: collectionId");
                     return;
                 }
                 if (!json.contains("name") || json["name"].is_null()) {
+                    vayu::utils::log_warning("POST /requests - Missing required field: name");
                     send_error(res, 400, "Missing required field: name");
                     return;
                 }
                 if (!json.contains("method") || json["method"].is_null()) {
+                    vayu::utils::log_warning("POST /requests - Missing required field: method");
                     send_error(res, 400, "Missing required field: method");
                     return;
                 }
                 if (!json.contains("url") || json["url"].is_null()) {
+                    vayu::utils::log_warning("POST /requests - Missing required field: url");
                     send_error(res, 400, "Missing required field: url");
                     return;
                 }
@@ -93,8 +105,14 @@ void register_request_routes(RouteContext& ctx) {
             if (json.contains("url") && !json["url"].is_null()) {
                 r.url = json["url"].get<std::string>();
             }
+            if (json.contains("params")) r.params = json["params"].dump();
             if (json.contains("headers")) r.headers = json["headers"].dump();
             if (json.contains("body")) r.body = json["body"].dump();
+            if (json.contains("bodyType") && !json["bodyType"].is_null()) {
+                r.body_type = json["bodyType"].get<std::string>();
+            } else if (json.contains("body_type") && !json["body_type"].is_null()) {
+                r.body_type = json["body_type"].get<std::string>();
+            }
             if (json.contains("auth")) r.auth = json["auth"].dump();
             if (json.contains("preRequestScript"))
                 r.pre_request_script = json["preRequestScript"].get<std::string>();
@@ -103,9 +121,15 @@ void register_request_routes(RouteContext& ctx) {
 
             r.updated_at = now_ms();
 
+            vayu::utils::log_info(
+                "POST /requests - " + std::string(is_update ? "Updating" : "Creating") +
+                " request: id=" + r.id + ", name=" + r.name + ", method=" + to_string(r.method) +
+                ", url=" + r.url + ", collection_id=" + r.collection_id);
+
             ctx.db.save_request(r);
             res.set_content(vayu::json::serialize(r).dump(), "application/json");
         } catch (const std::exception& e) {
+            vayu::utils::log_error("POST /requests - Error: " + std::string(e.what()));
             send_error(res, 400, e.what());
         }
     });
@@ -119,20 +143,29 @@ void register_request_routes(RouteContext& ctx) {
     ctx.server.Delete(R"(/requests/([^/]+))",
                       [&ctx](const httplib::Request& req, httplib::Response& res) {
                           std::string request_id = req.matches[1];
+                          vayu::utils::log_info("DELETE /requests/:id - Deleting request: " +
+                                                request_id);
                           try {
                               auto request = ctx.db.get_request(request_id);
                               if (!request) {
+                                  vayu::utils::log_warning(
+                                      "DELETE /requests/:id - Request not found: " + request_id);
                                   send_error(res, 404, "Request not found");
                                   return;
                               }
 
                               ctx.db.delete_request(request_id);
+                              vayu::utils::log_info(
+                                  "DELETE /requests/:id - Successfully deleted request: " +
+                                  request_id + ", name=" + request->name);
 
                               nlohmann::json response;
                               response["message"] = "Request deleted successfully";
                               response["id"] = request_id;
                               res.set_content(response.dump(), "application/json");
                           } catch (const std::exception& e) {
+                              vayu::utils::log_error("DELETE /requests/:id - Error: " +
+                                                     std::string(e.what()));
                               send_error(res, 500, e.what());
                           }
                       });

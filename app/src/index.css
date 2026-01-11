@@ -2,97 +2,230 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-	font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-	line-height: 1.5;
-	font-weight: 400;
+/*
+ * Vayu Design System
+ * 
+ * Color Philosophy: Clean gray palette with orange accent
+ * - Primary: Warm orange for actions, variables, highlights
+ * - Neutral: Zinc-based grays for backgrounds, text, borders
+ * 
+ * Usage:
+ * - bg-background, text-foreground (main app)
+ * - bg-card, text-card-foreground (cards, panels)
+ * - bg-primary, text-primary-foreground (buttons, badges)
+ * - bg-muted, text-muted-foreground (subtle backgrounds, secondary text)
+ * - bg-accent, text-accent-foreground (hover states)
+ * - bg-destructive (errors, delete actions)
+ * - border-border, border-input (borders)
+ * - ring-ring (focus rings)
+ */
 
-	color-scheme: light;
-	color: rgba(0, 0, 0, 0.87);
-	background-color: #ffffff;
+@layer base {
+  :root {
+    /* Base colors - Light mode */
+    --background: 0 0% 100%;           /* white */
+    --foreground: 240 10% 3.9%;        /* near black */
 
-	font-synthesis: none;
-	text-rendering: optimizeLegibility;
-	-webkit-font-smoothing: antialiased;
-	-moz-osx-font-smoothing: grayscale;
+    /* Card/Panel surfaces */
+    --card: 0 0% 100%;                 /* white */
+    --card-foreground: 240 10% 3.9%;
+
+    /* Popover/Dropdown surfaces */
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+
+    /* Primary - Orange (Vayu brand) */
+    --primary: 24.6 95% 53.1%;         /* orange-500 */
+    --primary-foreground: 0 0% 100%;   /* white text on orange */
+
+    /* Secondary - Subtle gray */
+    --secondary: 240 4.8% 95.9%;       /* zinc-100 */
+    --secondary-foreground: 240 5.9% 10%;
+
+    /* Muted - For subtle backgrounds and disabled states */
+    --muted: 240 4.8% 95.9%;           /* zinc-100 */
+    --muted-foreground: 240 3.8% 46.1%; /* zinc-500 */
+
+    /* Accent - For hover states */
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+
+    /* Destructive - For errors and delete actions */
+    --destructive: 0 84.2% 60.2%;      /* red-500 */
+    --destructive-foreground: 0 0% 98%;
+
+    /* Borders */
+    --border: 240 5.9% 90%;            /* zinc-200 */
+    --input: 240 5.9% 90%;             /* zinc-200 */
+    --ring: 24.6 95% 53.1%;            /* orange for focus rings */
+
+    /* Chart colors */
+    --chart-1: 24.6 95% 53.1%;         /* orange */
+    --chart-2: 173 58% 39%;            /* teal */
+    --chart-3: 197 37% 24%;            /* dark cyan */
+    --chart-4: 43 74% 66%;             /* yellow */
+    --chart-5: 27 87% 67%;             /* light orange */
+
+    /* Semantic colors for HTTP methods */
+    --method-get: 142 76% 36%;         /* green */
+    --method-post: 217 91% 60%;        /* blue */
+    --method-put: 38 92% 50%;          /* amber */
+    --method-patch: 262 83% 58%;       /* purple */
+    --method-delete: 0 84% 60%;        /* red */
+    --method-head: 199 89% 48%;        /* cyan */
+    --method-options: 240 5% 64%;      /* gray */
+
+    /* Variables highlight */
+    --variable: 24.6 95% 53.1%;        /* orange for {{variables}} */
+
+    /* Success/Warning/Info */
+    --success: 142 76% 36%;            /* green-600 */
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;             /* amber-500 */
+    --warning-foreground: 0 0% 100%;
+    --info: 199 89% 48%;               /* sky-500 */
+    --info-foreground: 0 0% 100%;
+
+    /* Radius */
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Base colors - Dark mode */
+    --background: 240 10% 3.9%;        /* near black */
+    --foreground: 0 0% 98%;            /* near white */
+
+    /* Card/Panel surfaces */
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+
+    /* Popover/Dropdown surfaces */
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+
+    /* Primary - Orange (slightly adjusted for dark) */
+    --primary: 20.5 90.2% 48.2%;       /* orange-600 */
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary */
+    --secondary: 240 3.7% 15.9%;       /* zinc-800 */
+    --secondary-foreground: 0 0% 98%;
+
+    /* Muted */
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+
+    /* Accent */
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+
+    /* Destructive */
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    /* Borders */
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 20.5 90.2% 48.2%;
+
+    /* Chart colors (adjusted for dark mode) */
+    --chart-1: 20.5 90.2% 48.2%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+
+    /* Variables highlight (dark mode) */
+    --variable: 20.5 90.2% 48.2%;
+
+    /* Success/Warning/Info (dark mode) */
+    --success: 142 70% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+  }
 }
 
-* {
-	box-sizing: border-box;
-	margin: 0;
-	padding: 0;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  html {
+    @apply antialiased;
+  }
+  
+  body {
+    @apply bg-background text-foreground;
+    font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+  }
+
+  #root {
+    @apply w-full h-screen overflow-hidden;
+  }
 }
 
-body {
-	margin: 0;
-	display: flex;
-	min-width: 320px;
-	min-height: 100vh;
+/* Custom scrollbar using theme colors */
+@layer components {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/30 rounded-full;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+  }
 }
 
-#root {
-	width: 100%;
-	height: 100vh;
-	overflow: hidden;
+/* Code/Mono styling */
+@layer utilities {
+  .font-code {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  }
+
+  .truncate-2-lines {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Variable highlight in text */
+  .variable-highlight {
+    @apply text-[hsl(var(--variable))] font-medium;
+  }
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-	width: 8px;
-	height: 8px;
-}
+/* HTTP Method colors - utility classes */
+@layer utilities {
+  .method-get { @apply text-[hsl(var(--method-get))]; }
+  .method-post { @apply text-[hsl(var(--method-post))]; }
+  .method-put { @apply text-[hsl(var(--method-put))]; }
+  .method-patch { @apply text-[hsl(var(--method-patch))]; }
+  .method-delete { @apply text-[hsl(var(--method-delete))]; }
+  .method-head { @apply text-[hsl(var(--method-head))]; }
+  .method-options { @apply text-[hsl(var(--method-options))]; }
 
-::-webkit-scrollbar-track {
-	background: #f1f1f1;
-}
-
-::-webkit-scrollbar-thumb {
-	background: #888;
-	border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-	background: #555;
-}
-
-/* Code Editor Styles */
-.code-editor {
-	font-family: "Consolas", "Monaco", "Courier New", monospace;
-	font-size: 13px;
-	line-height: 1.6;
-}
-
-/* Button Base Styles */
-button {
-	cursor: pointer;
-	transition: all 0.2s ease;
-}
-
-button:disabled {
-	cursor: not-allowed;
-	opacity: 0.5;
-}
-
-/* Input Base Styles */
-input,
-textarea,
-select {
-	font-family: inherit;
-}
-
-/* Focus Styles */
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible {
-	outline: 2px solid #0ea5e9;
-	outline-offset: 2px;
-}
-
-/* Utility Classes */
-.truncate-2-lines {
-	display: -webkit-box;
-	-webkit-line-clamp: 2;
-	-webkit-box-orient: vertical;
-	overflow: hidden;
+  .bg-method-get { @apply bg-[hsl(var(--method-get))]; }
+  .bg-method-post { @apply bg-[hsl(var(--method-post))]; }
+  .bg-method-put { @apply bg-[hsl(var(--method-put))]; }
+  .bg-method-patch { @apply bg-[hsl(var(--method-patch))]; }
+  .bg-method-delete { @apply bg-[hsl(var(--method-delete))]; }
+  .bg-method-head { @apply bg-[hsl(var(--method-head))]; }
+  .bg-method-options { @apply bg-[hsl(var(--method-options))]; }
 }

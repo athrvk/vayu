@@ -15,14 +15,16 @@ import type {
 export type SidebarTab =
 	| "collections"
 	| "history"
-	| "environments"
+	| "variables"
 	| "settings";
 
 // Main Screen Views
 export type MainScreen =
 	| "request-builder"
 	| "dashboard"
+	| "history"
 	| "history-detail"
+	| "variables"
 	| "welcome";
 
 // Dashboard Mode

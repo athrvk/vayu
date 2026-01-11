@@ -22,7 +22,8 @@ export class ApiError extends Error {
 		return [
 			ErrorCode.CONNECTION_FAILED,
 			ErrorCode.DNS_ERROR
-		].includes(this.errorCode) || [ErrorStatusCodes.BAD_GATEWAY, ErrorStatusCodes.CONNECTION_FAILED].includes(this.statusCode);
+		].includes(this.errorCode as typeof ErrorCode.CONNECTION_FAILED) || 
+			[ErrorStatusCodes.BAD_GATEWAY, ErrorStatusCodes.CONNECTION_FAILED].includes(this.statusCode as typeof ErrorStatusCodes.BAD_GATEWAY);
 	}
 
 	get isDatabaseError(): boolean {

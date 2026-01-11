@@ -1,11 +1,12 @@
 import { useState, useRef } from "react";
 import { useAppStore } from "@/stores";
 import Sidebar from "./Sidebar";
-import RequestBuilder from "../request/RequestBuilder";
-import LoadTestDashboard from "../dashboard/LoadTestDashboard";
+import RequestBuilder from "../request-builder";
+import LoadTestDashboard from "../load-test-dashboard";
 import HistoryDetail from "../history/HistoryDetail";
 import WelcomeScreen from "../welcome/WelcomeScreen";
-import ConnectionStatus from "../status/ConnectionStatus";
+import { VariablesEditor } from "../variables";
+import { cn } from "@/lib/utils";
 
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 600;
@@ -41,6 +42,8 @@ export default function Shell() {
 				return <LoadTestDashboard />;
 			case "history-detail":
 				return <HistoryDetail />;
+			case "variables":
+				return <VariablesEditor />;
 			case "welcome":
 			default:
 				return <WelcomeScreen />;
@@ -49,7 +52,7 @@ export default function Shell() {
 
 	return (
 		<div
-			className="flex h-screen bg-gray-50"
+			className="flex h-screen bg-background"
 			onMouseMove={handleMouseMove}
 			onMouseUp={handleMouseUp}
 			onMouseLeave={handleMouseUp}
@@ -65,14 +68,14 @@ export default function Shell() {
 			{/* Resize Handle */}
 			<div
 				onMouseDown={handleMouseDown}
-				className={`w-1 bg-gray-300 hover:bg-primary-500 cursor-col-resize transition-colors ${
-					isResizing ? "bg-primary-500" : ""
-				}`}
+				className={cn(
+					"w-1 bg-border hover:bg-primary cursor-col-resize transition-colors",
+					isResizing && "bg-primary"
+				)}
 				title="Drag to resize sidebar"
 			/>
 
 			<main className="flex-1 flex flex-col overflow-hidden">
-				{/* <ConnectionStatus /> */}
 				{renderMainContent()}
 			</main>
 		</div>

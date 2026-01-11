@@ -27,6 +27,7 @@ void register_execution_routes(RouteContext& ctx) {
 
             auto request_result = vayu::json::deserialize_request(json);
             if (request_result.is_error()) {
+                vayu::utils::log_warning("POST /request - Invalid request format");
                 res.status = 400;
                 res.set_content(vayu::json::serialize(request_result.error()).dump(),
                                 "application/json");
@@ -58,6 +59,21 @@ void register_execution_routes(RouteContext& ctx) {
             if (json.contains("environmentId") && !json["environmentId"].is_null()) {
                 run.environment_id = json["environmentId"].get<std::string>();
             }
+
+            // Log Design Mode request details
+            std::string method_str =
+                json.contains("method") ? json["method"].get<std::string>() : "UNKNOWN";
+            std::string url_str = json.contains("url") ? json["url"].get<std::string>() : "UNKNOWN";
+            bool has_pre_script = !pre_request_script.empty();
+            bool has_post_script = !post_request_script.empty();
+            std::string env_id = run.environment_id.value_or("none");
+            std::string req_id = run.request_id.value_or("none");
+
+            vayu::utils::log_info("POST /request - Design Mode: run_id=" + run_id +
+                                  ", method=" + method_str + ", url=" + url_str +
+                                  ", request_id=" + req_id + ", environment_id=" + env_id +
+                                  ", has_pre_script=" + (has_pre_script ? "true" : "false") +
+                                  ", has_post_script=" + (has_post_script ? "true" : "false"));
 
             try {
                 ctx.db.create_run(run);
@@ -123,6 +139,19 @@ void register_execution_routes(RouteContext& ctx) {
                     db_result.status_code = 0;
                     db_result.latency_ms = 0.0;
                     db_result.error = error.message;
+
+                    // Store request information even on error
+                    nlohmann::json trace;
+                    nlohmann::json request_trace;
+                    request_trace["method"] = to_string(request.method);
+                    request_trace["url"] = request.url;
+                    request_trace["headers"] = request.headers;
+                    if (!request.body.content.empty()) {
+                        request_trace["body"] = request.body.content;
+                    }
+                    trace["request"] = request_trace;
+                    db_result.trace_data = trace.dump();
+
                     ctx.db.add_result(db_result);
                 } catch (const std::exception& db_error) {
                     vayu::utils::log_error("Failed to update run status: " +
@@ -152,16 +181,31 @@ void register_execution_routes(RouteContext& ctx) {
                 db_result.latency_ms = response_result.value().timing.total_ms;
                 db_result.error = "";
 
+                // Store both request and response data in trace
                 nlohmann::json trace;
-                trace["headers"] = response_result.value().headers;
-                trace["body"] = response_result.value().body;
+
+                // Request information (what was actually sent)
+                nlohmann::json request_trace;
+                request_trace["method"] = to_string(request.method);
+                request_trace["url"] = request.url;
+                request_trace["headers"] = request.headers;
+                if (!request.body.content.empty()) {
+                    request_trace["body"] = request.body.content;
+                }
+                trace["request"] = request_trace;
+
+                // Response information
+                nlohmann::json response_trace;
+                response_trace["headers"] = response_result.value().headers;
+                response_trace["body"] = response_result.value().body;
+                trace["response"] = response_trace;
 
                 const auto& timing = response_result.value().timing;
-                if (timing.dns_ms > 0) trace["dns_ms"] = timing.dns_ms;
-                if (timing.connect_ms > 0) trace["connect_ms"] = timing.connect_ms;
-                if (timing.tls_ms > 0) trace["tls_ms"] = timing.tls_ms;
-                if (timing.first_byte_ms > 0) trace["first_byte_ms"] = timing.first_byte_ms;
-                if (timing.download_ms > 0) trace["download_ms"] = timing.download_ms;
+                if (timing.dns_ms > 0) trace["dnsMs"] = timing.dns_ms;
+                if (timing.connect_ms > 0) trace["connectMs"] = timing.connect_ms;
+                if (timing.tls_ms > 0) trace["tlsMs"] = timing.tls_ms;
+                if (timing.first_byte_ms > 0) trace["firstByteMs"] = timing.first_byte_ms;
+                if (timing.download_ms > 0) trace["downloadMs"] = timing.download_ms;
 
                 db_result.trace_data = trace.dump();
 
@@ -275,22 +319,37 @@ void register_execution_routes(RouteContext& ctx) {
      */
     ctx.server.Post("/run", [&ctx](const httplib::Request& req, httplib::Response& res) {
         std::string run_id = "run_" + std::to_string(now_ms());
-        vayu::utils::log_debug("Received POST /run, run_id=" + run_id);
 
         try {
             auto json = nlohmann::json::parse(req.body);
 
-            vayu::utils::log_debug("Load test config: mode=" + json.value("mode", "unspecified"));
-
             if (!json.contains("request")) {
+                vayu::utils::log_warning("POST /run - Missing required field: request");
                 send_error(res, 400, "Missing required field: request");
                 return;
             }
 
             if (!json.contains("mode") && !json.contains("duration") &&
                 !json.contains("iterations")) {
+                vayu::utils::log_warning("POST /run - Missing mode/duration/iterations config");
                 send_error(res, 400, "Must specify either 'mode' with 'duration' or 'iterations'");
                 return;
+            }
+
+            // Extract config for logging
+            std::string mode = json.value("mode", "unspecified");
+            int duration = json.value("duration", 0);
+            int iterations = json.value("iterations", 0);
+            int rps = json.value("rps", json.value("targetRps", 0));
+            int concurrency = json.value("concurrency", 1);
+
+            // Extract request details for logging
+            std::string method_str = "UNKNOWN";
+            std::string url_str = "UNKNOWN";
+            if (json.contains("request")) {
+                auto& req_json = json["request"];
+                method_str = req_json.value("method", "UNKNOWN");
+                url_str = req_json.value("url", "UNKNOWN");
             }
 
             // Create DB run record
@@ -309,6 +368,17 @@ void register_execution_routes(RouteContext& ctx) {
                 run.environment_id = json["environmentId"].get<std::string>();
             }
 
+            std::string env_id = run.environment_id.value_or("none");
+            std::string req_id = run.request_id.value_or("none");
+
+            // Log comprehensive Load Test config
+            vayu::utils::log_info("POST /run - Load Test: run_id=" + run_id + ", mode=" + mode +
+                                  ", method=" + method_str + ", url=" + url_str +
+                                  ", duration=" + std::to_string(duration) + "s" + ", iterations=" +
+                                  std::to_string(iterations) + ", rps=" + std::to_string(rps) +
+                                  ", concurrency=" + std::to_string(concurrency) +
+                                  ", request_id=" + req_id + ", environment_id=" + env_id);
+
             ctx.db.create_run(run);
 
             // Start run via RunManager
@@ -323,6 +393,7 @@ void register_execution_routes(RouteContext& ctx) {
             res.set_content(response.dump(), "application/json");
 
         } catch (const std::exception& e) {
+            vayu::utils::log_error("POST /run - Failed to create run " + run_id + ": " + e.what());
             send_error(res, 500, "Failed to create run: " + std::string(e.what()));
         }
     });

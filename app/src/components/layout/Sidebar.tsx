@@ -1,19 +1,33 @@
-import { Folder, History, Settings, Database } from "lucide-react";
+import { Folder, History, Settings, Variable } from "lucide-react";
 import { useAppStore } from "@/stores";
 import type { SidebarTab } from "@/types";
+import { Button, Tooltip, TooltipContent, TooltipTrigger, TooltipProvider, ScrollArea } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import CollectionTree from "../collections/CollectionTree";
 import HistoryList from "../history/HistoryList";
-import EnvironmentManager from "../environment/EnvironmentManager";
+import { VariablesCategoryTree } from "../variables";
+import { useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
+import ConnectionStatus from "../status/ConnectionStatus";
 
 export default function Sidebar() {
-	const { activeSidebarTab, setActiveSidebarTab } = useAppStore();
+	const { activeSidebarTab, setActiveSidebarTab, navigateToVariables } = useAppStore();
+	const { data: collections = [] } = useCollectionsQuery();
+	const { data: environments = [] } = useEnvironmentsQuery();
 
 	const tabs: Array<{ id: SidebarTab; label: string; icon: typeof Folder }> = [
 		{ id: "collections", label: "Collections", icon: Folder },
 		{ id: "history", label: "History", icon: History },
-		{ id: "environments", label: "Environments", icon: Database },
+		{ id: "variables", label: "Variables", icon: Variable },
 		{ id: "settings", label: "Settings", icon: Settings },
 	];
+
+	const handleTabClick = (tabId: SidebarTab) => {
+		if (tabId === "variables") {
+			navigateToVariables();
+		} else {
+			setActiveSidebarTab(tabId);
+		}
+	};
 
 	const renderContent = () => {
 		switch (activeSidebarTab) {
@@ -21,11 +35,16 @@ export default function Sidebar() {
 				return <CollectionTree />;
 			case "history":
 				return <HistoryList />;
-			case "environments":
-				return <EnvironmentManager />;
+			case "variables":
+				return (
+					<VariablesCategoryTree
+						collections={collections}
+						environments={environments}
+					/>
+				);
 			case "settings":
 				return (
-					<div className="p-4 text-sm text-gray-500">
+					<div className="p-4 text-sm text-muted-foreground">
 						Settings coming soon...
 					</div>
 				);
@@ -35,32 +54,45 @@ export default function Sidebar() {
 	};
 
 	return (
-		<div className="w-full bg-white border-r border-gray-200 flex flex-col h-full">
-			{/* Tab Headers */}
-			<div className="flex border-b border-gray-200">
-				{tabs.map((tab) => {
-					const Icon = tab.icon;
-					const isActive = activeSidebarTab === tab.id;
-					return (
-						<button
-							key={tab.id}
-							onClick={() => setActiveSidebarTab(tab.id)}
-							className={`flex-1 flex flex-col items-center justify-center gap-1 px-2 py-3 text-xs font-medium transition-colors min-w-0 ${
-								isActive
-									? "text-primary-600 bg-primary-50 border-b-2 border-primary-600"
-									: "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-							}`}
-							title={tab.label}
-						>
-							<Icon className="w-5 h-5" />
-							<span className="truncate text-center">{tab.label}</span>
-						</button>
-					);
-				})}
-			</div>
+		<TooltipProvider>
+			<div className="w-full bg-card border-r border-border flex flex-col h-full">
+				{/* Tab Headers */}
+				<div className="flex border-b border-border">
+					{tabs.map((tab) => {
+						const Icon = tab.icon;
+						const isActive = activeSidebarTab === tab.id;
+						return (
+							<Tooltip key={tab.id}>
+								<TooltipTrigger asChild>
+									<Button
+										variant="ghost"
+										onClick={() => handleTabClick(tab.id)}
+										className={cn(
+											"flex-1 flex flex-col items-center justify-center gap-1 px-2 py-3 h-auto min-w-0 rounded-none",
+											isActive
+												? "text-primary bg-primary/10 border-b-2 border-primary"
+												: "text-muted-foreground hover:text-foreground hover:bg-accent"
+										)}
+									>
+										<Icon className="w-5 h-5" />
+										<span className="text-xs font-medium truncate text-center">{tab.label}</span>
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="bottom">
+									{tab.label}
+								</TooltipContent>
+							</Tooltip>
+						);
+					})}
+				</div>
 
-			{/* Tab Content */}
-			<div className="flex-1 overflow-auto">{renderContent()}</div>
-		</div>
+				{/* Tab Content */}
+				<ScrollArea className="flex-1">{renderContent()}</ScrollArea>
+
+				<div className="mt-auto border-t border-border">
+					<ConnectionStatus />
+				</div>
+			</div>
+		</TooltipProvider>
 	);
 }

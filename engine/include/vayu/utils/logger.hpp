@@ -5,7 +5,9 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
+#include <thread>
 
 #include "vayu/core/constants.hpp"
 
@@ -47,6 +49,7 @@ private:
 
     std::string level_to_string(Level level) const;
     std::string get_timestamp() const;
+    std::string get_thread_id() const;
     void ensure_log_directory();
 
     std::unique_ptr<std::ofstream> log_file_;

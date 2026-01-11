@@ -139,8 +139,8 @@ void validate_scripts(std::shared_ptr<RunContext> context, vayu::db::Database& d
     if (!failure_messages.empty()) {
         nlohmann::json failure_json;
         failure_json["failures"] = failure_messages;
-        failure_json["total_failed"] = failed;
-        failure_json["total_passed"] = passed;
+        failure_json["totalFailed"] = failed;
+        failure_json["totalPassed"] = passed;
 
         vayu::db::Result validation_result;
         validation_result.run_id = context->run_id;

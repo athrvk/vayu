@@ -264,20 +264,20 @@ nlohmann::json MetricsCollector::get_current_stats(size_t current_active,
     double current_rps = elapsed_seconds > 0 ? static_cast<double>(total) / elapsed_seconds : 0.0;
 
     nlohmann::json stats;
-    stats["total_requests"] = total;
-    stats["total_errors"] = errors;
-    stats["total_success"] = success;
-    stats["error_rate"] = err_rate;
-    stats["avg_latency_ms"] = avg_lat;
-    stats["current_rps"] = current_rps;
-    stats["active_connections"] = current_active;
-    stats["elapsed_seconds"] = elapsed_seconds;
+    stats["totalRequests"] = total;
+    stats["totalErrors"] = errors;
+    stats["totalSuccess"] = success;
+    stats["errorRate"] = err_rate;
+    stats["avgLatencyMs"] = avg_lat;
+    stats["currentRps"] = current_rps;
+    stats["activeConnections"] = current_active;
+    stats["elapsedSeconds"] = elapsed_seconds;
 
     // Status code distribution (lock-free)
-    stats["status_2xx"] = status_2xx_.load(std::memory_order_relaxed);
-    stats["status_3xx"] = status_3xx_.load(std::memory_order_relaxed);
-    stats["status_4xx"] = status_4xx_.load(std::memory_order_relaxed);
-    stats["status_5xx"] = status_5xx_.load(std::memory_order_relaxed);
+    stats["status2xx"] = status_2xx_.load(std::memory_order_relaxed);
+    stats["status3xx"] = status_3xx_.load(std::memory_order_relaxed);
+    stats["status4xx"] = status_4xx_.load(std::memory_order_relaxed);
+    stats["status5xx"] = status_5xx_.load(std::memory_order_relaxed);
 
     return stats;
 }

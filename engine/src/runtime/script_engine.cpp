@@ -692,6 +692,13 @@ JSValue create_response_to_object(JSContext* ctx) {
 
 void setup_pm_response(JSContext* ctx, JSValue pm) {
     auto* data = get_context_data(ctx);
+
+    // Free old response object if it exists to prevent memory leak
+    JSValue old_response = JS_GetPropertyStr(ctx, pm, "response");
+    if (!JS_IsUndefined(old_response)) {
+        JS_FreeValue(ctx, old_response);
+    }
+
     JSValue response = JS_NewObject(ctx);
 
     if (data && data->response) {
@@ -727,6 +734,13 @@ void setup_pm_response(JSContext* ctx, JSValue pm) {
 
 void setup_pm_request(JSContext* ctx, JSValue pm) {
     auto* data = get_context_data(ctx);
+
+    // Free old request object if it exists to prevent memory leak
+    JSValue old_request = JS_GetPropertyStr(ctx, pm, "request");
+    if (!JS_IsUndefined(old_request)) {
+        JS_FreeValue(ctx, old_request);
+    }
+
     JSValue request = JS_NewObject(ctx);
 
     if (data && data->request) {
@@ -886,6 +900,11 @@ public:
 
     void release_context(ContextPair pair) {
         if (!pair.first || !pair.second) return;
+
+        // Run garbage collection before returning to pool to free any unreferenced objects
+        // This prevents memory buildup from script execution
+        JS_RunGC(pair.first);
+
         std::lock_guard<std::mutex> lock(pool_mutex);
         context_pool.push_back(pair);
     }

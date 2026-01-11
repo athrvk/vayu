@@ -9,6 +9,7 @@ import type {
 	RunReport,
 	EngineHealth,
 	EngineConfig,
+	VariableValue,
 } from "./domain";
 
 // API Response wrapper
@@ -27,6 +28,7 @@ export interface CreateCollectionRequest {
 	name: string;
 	description?: string;
 	parent_id?: string;
+	variables?: Record<string, VariableValue>;
 }
 
 export interface UpdateCollectionRequest {
@@ -34,6 +36,7 @@ export interface UpdateCollectionRequest {
 	name?: string;
 	description?: string;
 	parent_id?: string;
+	variables?: Record<string, VariableValue>;
 }
 
 // Requests API
@@ -51,6 +54,7 @@ export interface CreateRequestRequest {
 	description?: string;
 	method: string;
 	url: string;
+	params?: Record<string, string>;
 	headers?: Record<string, string>;
 	body?: string;
 	body_type?: string;
@@ -65,6 +69,7 @@ export interface UpdateRequestRequest {
 	description?: string;
 	method?: string;
 	url?: string;
+	params?: Record<string, string>;
 	headers?: Record<string, string>;
 	body?: string;
 	body_type?: string;
@@ -80,15 +85,26 @@ export interface ListEnvironmentsResponse {
 
 export interface CreateEnvironmentRequest {
 	name: string;
-	variables: Record<string, string>;
+	variables: Record<string, VariableValue>;
 	is_active?: boolean;
 }
 
 export interface UpdateEnvironmentRequest {
 	id: string;
 	name?: string;
-	variables?: Record<string, string>;
+	variables?: Record<string, VariableValue>;
 	is_active?: boolean;
+}
+
+// Globals API
+export interface GlobalsResponse {
+	id: string;
+	variables: Record<string, VariableValue>;
+	updatedAt: number;
+}
+
+export interface UpdateGlobalsRequest {
+	variables: Record<string, VariableValue>;
 }
 
 // Execution API

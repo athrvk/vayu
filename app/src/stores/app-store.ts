@@ -28,6 +28,7 @@ interface AppState {
 	navigateToRequest: (collectionId: string, requestId: string) => void;
 	navigateToRunDetail: (runId: string) => void;
 	navigateToHistory: () => void;
+	navigateToVariables: () => void;
 	navigateToWelcome: () => void;
 }
 
@@ -71,6 +72,12 @@ export const useAppStore = create<AppState>((set) => ({
 			activeScreen: "history",
 			activeSidebarTab: "history",
 			selectedRunId: null,
+		}),
+
+	navigateToVariables: () =>
+		set({
+			activeScreen: "variables",
+			activeSidebarTab: "variables",
 		}),
 
 	navigateToWelcome: () =>

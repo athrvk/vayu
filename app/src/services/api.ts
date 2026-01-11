@@ -6,6 +6,8 @@ import type {
 	Collection,
 	Request,
 	Environment,
+	GlobalVariables,
+	VariableValue,
 	Run,
 	RunReport,
 	EngineHealth,
@@ -39,6 +41,18 @@ function transformRequest(backendRequest: any): Request {
 		body_type: backendRequest.bodyType || backendRequest.body_type,
 		pre_request_script: backendRequest.preRequestScript || backendRequest.pre_request_script,
 		test_script: backendRequest.postRequestScript || backendRequest.test_script,
+		// Params is already in snake_case from backend, but ensure it's set
+		params: backendRequest.params || {},
+	};
+}
+
+// Transform backend collection (camelCase) to frontend collection (snake_case)
+function transformCollection(backendCollection: any): Collection {
+	return {
+		...backendCollection,
+		parent_id: backendCollection.parentId || backendCollection.parent_id,
+		created_at: backendCollection.createdAt || backendCollection.created_at,
+		updated_at: backendCollection.updatedAt || backendCollection.updated_at,
 	};
 }
 
@@ -65,19 +79,41 @@ export const apiService = {
 	// Collections
 	async listCollections(): Promise<Collection[]> {
 		console.log("API: Fetching collections from", API_ENDPOINTS.COLLECTIONS);
-		const response = await httpClient.get<Collection[]>(
+		const response = await httpClient.get<any[]>(
 			API_ENDPOINTS.COLLECTIONS
 		);
 		console.log("API: Received collections:", response);
-		return response;
+		return response.map(transformCollection);
 	},
 
 	async createCollection(data: CreateCollectionRequest): Promise<Collection> {
-		return await httpClient.post<Collection>(API_ENDPOINTS.COLLECTIONS, data);
+		// Transform snake_case to camelCase for backend
+		const backendData: any = {
+			name: data.name,
+			description: data.description,
+		};
+		if (data.parent_id) {
+			backendData.parentId = data.parent_id;
+		}
+		const response = await httpClient.post<any>(API_ENDPOINTS.COLLECTIONS, backendData);
+		return transformCollection(response);
 	},
 
 	async updateCollection(data: UpdateCollectionRequest): Promise<Collection> {
-		return await httpClient.post<Collection>(API_ENDPOINTS.COLLECTIONS, data);
+		// Transform snake_case to camelCase for backend
+		const backendData: any = {
+			id: data.id,
+			name: data.name,
+			description: data.description,
+		};
+		if (data.parent_id) {
+			backendData.parentId = data.parent_id;
+		}
+		if (data.variables) {
+			backendData.variables = data.variables;
+		}
+		const response = await httpClient.post<any>(API_ENDPOINTS.COLLECTIONS, backendData);
+		return transformCollection(response);
 	},
 
 	async deleteCollection(id: string): Promise<void> {
@@ -112,7 +148,9 @@ export const apiService = {
 
 		// Only include optional fields if they exist
 		if (data.headers) backendData.headers = data.headers;
+		if (data.params) backendData.params = data.params;
 		if (data.body) backendData.body = data.body;
+		if (data.body_type) backendData.bodyType = data.body_type;
 		if (data.auth) backendData.auth = data.auth;
 		if (data.pre_request_script)
 			backendData.preRequestScript = data.pre_request_script;
@@ -134,13 +172,14 @@ export const apiService = {
 
 		// Optional fields - only include if they're present
 		if (data.headers !== undefined) backendData.headers = data.headers;
+		if (data.params !== undefined) backendData.params = data.params;
 		if (data.body !== undefined) backendData.body = data.body;
+		if (data.body_type !== undefined) backendData.bodyType = data.body_type;
 		if (data.auth !== undefined) backendData.auth = data.auth;
 		if (data.pre_request_script !== undefined)
 			backendData.preRequestScript = data.pre_request_script;
 		if (data.test_script !== undefined) backendData.postRequestScript = data.test_script;
 		if (data.description !== undefined) backendData.description = data.description;
-		if (data.body_type !== undefined) backendData.bodyType = data.body_type;
 
 		console.log("Updating request with data:", backendData);
 		const response = await httpClient.post<any>(API_ENDPOINTS.REQUESTS, backendData);
@@ -177,6 +216,33 @@ export const apiService = {
 
 	async deleteEnvironment(id: string): Promise<void> {
 		await httpClient.delete(API_ENDPOINTS.ENVIRONMENT_BY_ID(id));
+	},
+
+	// Global Variables
+	async getGlobals(): Promise<GlobalVariables> {
+		const response = await httpClient.get<{
+			id: string;
+			variables: Record<string, VariableValue>;
+			updatedAt: number;
+		}>(API_ENDPOINTS.GLOBALS);
+		return {
+			id: response.id,
+			variables: response.variables || {},
+			updated_at: new Date(response.updatedAt).toISOString(),
+		};
+	},
+
+	async updateGlobals(variables: Record<string, VariableValue>): Promise<GlobalVariables> {
+		const response = await httpClient.post<{
+			id: string;
+			variables: Record<string, VariableValue>;
+			updatedAt: number;
+		}>(API_ENDPOINTS.GLOBALS, { variables });
+		return {
+			id: response.id,
+			variables: response.variables || {},
+			updated_at: new Date(response.updatedAt).toISOString(),
+		};
 	},
 
 	// Execution

@@ -36,16 +36,16 @@ void handle_result(std::shared_ptr<RunContext> context,
         bool is_slow = latency >= static_cast<double>(slow_threshold_ms);
 
         if (save_timing_breakdown || is_slow) {
-            nlohmann::json timing_json = {{"total_ms", response.timing.total_ms},
-                                          {"dns_ms", response.timing.dns_ms},
-                                          {"connect_ms", response.timing.connect_ms},
-                                          {"tls_ms", response.timing.tls_ms},
-                                          {"first_byte_ms", response.timing.first_byte_ms},
-                                          {"download_ms", response.timing.download_ms}};
+            nlohmann::json timing_json = {{"totalMs", response.timing.total_ms},
+                                          {"dnsMs", response.timing.dns_ms},
+                                          {"connectMs", response.timing.connect_ms},
+                                          {"tlsMs", response.timing.tls_ms},
+                                          {"firstByteMs", response.timing.first_byte_ms},
+                                          {"downloadMs", response.timing.download_ms}};
 
             if (is_slow) {
-                timing_json["is_slow"] = true;
-                timing_json["threshold_ms"] = slow_threshold_ms;
+                timing_json["isSlow"] = true;
+                timing_json["thresholdMs"] = slow_threshold_ms;
             }
 
             trace_data = timing_json.dump();

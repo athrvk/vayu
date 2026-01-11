@@ -1,42 +1,65 @@
 import { useState, useRef, useEffect } from "react";
 import {
-	ChevronRight,
-	ChevronDown,
 	Folder,
-	File,
 	Plus,
 	Trash2,
-	MoreVertical,
 	Edit2,
 	Copy,
 	FolderPlus,
 	Loader2,
 } from "lucide-react";
 import { useAppStore, useCollectionsStore } from "@/stores";
-import { useCollections } from "@/hooks";
-import { getMethodColor } from "@/utils";
+import {
+	useCollectionsQuery,
+	useMultipleCollectionRequests,
+	useCreateCollectionMutation,
+	useUpdateCollectionMutation,
+	useDeleteCollectionMutation,
+	useCreateRequestMutation,
+	useDeleteRequestMutation,
+} from "@/queries";
+import {
+	Button,
+	Input,
+	Separator,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+	TooltipProvider,
+} from "@/components/ui";
+import CollectionItem from "./CollectionItem";
 import type { Collection, Request } from "@/types";
 
 export default function CollectionTree() {
-	const { navigateToRequest, selectedCollectionId, setSelectedCollectionId, selectedRequestId } = useAppStore();
+	const { navigateToRequest, navigateToWelcome, selectedCollectionId, setSelectedCollectionId, selectedRequestId } = useAppStore();
 	const {
-		collections,
 		expandedCollectionIds,
 		toggleCollectionExpanded,
-		getRequestsByCollection,
-		isSavingCollection,
-		isSavingRequest,
 	} = useCollectionsStore();
-	const {
-		loadRequestsForCollection,
-		deleteCollection,
-		deleteRequest,
-		createCollection,
-		createRequest,
-		updateCollection,
-	} = useCollections();
+
+	// TanStack Query hooks
+	const { data: collections = [] } = useCollectionsQuery();
+
+	// Fetch requests for ALL collections (prefetched data is already in cache)
+	// This ensures the UI reflects the data immediately on load
+	const allCollectionIds = collections.map((c) => c.id);
+	const { requestsByCollection } = useMultipleCollectionRequests(allCollectionIds);
+
+	// Mutation hooks
+	const createCollectionMutation = useCreateCollectionMutation();
+	const updateCollectionMutation = useUpdateCollectionMutation();
+	const deleteCollectionMutation = useDeleteCollectionMutation();
+	const createRequestMutation = useCreateRequestMutation();
+	const deleteRequestMutation = useDeleteRequestMutation();
+
+	// Helper to get requests for a collection
+	const getRequestsByCollection = (collectionId: string): Request[] => {
+		return requestsByCollection.get(collectionId) ?? [];
+	};
 	const [creatingCollection, setCreatingCollection] = useState(false);
+	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID
 	const [newCollectionName, setNewCollectionName] = useState("New Collection");
+	const [newSubfolderName, setNewSubfolderName] = useState("New Folder");
 	const [contextMenu, setContextMenu] = useState<{
 		collectionId: string;
 		x: number;
@@ -44,13 +67,11 @@ export default function CollectionTree() {
 	} | null>(null);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState("");
-	const [showCollectionPicker, setShowCollectionPicker] = useState(false);
 	const [deletingCollectionId, setDeletingCollectionId] = useState<string | null>(null);
 	const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
 	const contextMenuRef = useRef<HTMLDivElement>(null);
-	const collectionPickerRef = useRef<HTMLDivElement>(null);
 
-	// Close context menu and collection picker on outside click
+	// Close context menu on outside click
 	useEffect(() => {
 		const handleClickOutside = (e: MouseEvent) => {
 			if (
@@ -59,35 +80,24 @@ export default function CollectionTree() {
 			) {
 				setContextMenu(null);
 			}
-			if (
-				collectionPickerRef.current &&
-				!collectionPickerRef.current.contains(e.target as Node)
-			) {
-				setShowCollectionPicker(false);
-			}
 		};
 
-		if (contextMenu || showCollectionPicker) {
+		if (contextMenu) {
 			document.addEventListener("mousedown", handleClickOutside);
 		}
 
 		return () => {
 			document.removeEventListener("mousedown", handleClickOutside);
 		};
-	}, [contextMenu, showCollectionPicker]);
+	}, [contextMenu]);
 
 	const handleCollectionClick = async (collection: Collection) => {
-		// Set this collection as selected
+		// Set this collection as selected (this will trigger useRequestsQuery to load)
 		setSelectedCollectionId(collection.id);
 		toggleCollectionExpanded(collection.id);
-
-		// Load requests if expanding and not already loaded
-		if (!expandedCollectionIds.has(collection.id)) {
-			await loadRequestsForCollection(collection.id);
-		}
 	};
 
-	// Handle "New Request" button click with smart collection selection
+	// Handle "New Request" button click - use selected collection or first one
 	const handleNewRequestClick = () => {
 		if (collections.length === 0) {
 			// No collections - prompt to create one first
@@ -95,39 +105,43 @@ export default function CollectionTree() {
 			return;
 		}
 
-		if (selectedCollectionId) {
-			// A collection is already selected - add request there
-			handleCreateRequest(selectedCollectionId);
-		} else if (collections.length === 1) {
-			// Only one collection exists - use it directly
-			handleCreateRequest(collections[0].id);
-		} else {
-			// Multiple collections, none selected - show picker
-			setShowCollectionPicker(true);
-		}
+		// Use selected collection if available, otherwise use first collection
+		const targetCollection = selectedCollectionId || collections[0].id;
+		handleCreateRequest(targetCollection);
 	};
 
-	// Pick a collection and create request in it
-	const handlePickCollectionForRequest = (collectionId: string) => {
-		setShowCollectionPicker(false);
-		setSelectedCollectionId(collectionId);
-		handleCreateRequest(collectionId);
-	};
+
 
 	const handleRequestClick = (collectionId: string, requestId: string) => {
 		navigateToRequest(collectionId, requestId);
 	};
 
 	const handleCreateCollection = async () => {
-		if (!newCollectionName.trim() || isSavingCollection) return;
+		if (!newCollectionName.trim() || createCollectionMutation.isPending) return;
 
-		await createCollection({ name: newCollectionName.trim() });
+		await createCollectionMutation.mutateAsync({ name: newCollectionName.trim() });
 		setNewCollectionName("");
 		setCreatingCollection(false);
 	};
 
+	const handleCreateSubfolder = async (parentId: string) => {
+		if (!newSubfolderName.trim() || createCollectionMutation.isPending) return;
+
+		// Ensure parent collection is expanded
+		if (!expandedCollectionIds.has(parentId)) {
+			toggleCollectionExpanded(parentId);
+		}
+
+		await createCollectionMutation.mutateAsync({
+			name: newSubfolderName.trim(),
+			parent_id: parentId,
+		});
+		setNewSubfolderName("New Folder");
+		setCreatingSubfolder(null);
+	};
+
 	const handleCreateRequest = async (collectionId: string) => {
-		if (isSavingRequest) return;
+		if (createRequestMutation.isPending) return;
 
 		console.log("Creating request for collection:", collectionId);
 		console.log("Collection expanded before:", expandedCollectionIds.has(collectionId));
@@ -138,7 +152,7 @@ export default function CollectionTree() {
 			toggleCollectionExpanded(collectionId);
 		}
 
-		const request = await createRequest({
+		const request = await createRequestMutation.mutateAsync({
 			collection_id: collectionId,
 			name: "New Request",
 			method: "GET",
@@ -160,23 +174,22 @@ export default function CollectionTree() {
 	const handleRenameSubmit = async (collectionId: string) => {
 		if (!renameValue.trim()) return;
 
-		const success = await updateCollection(collectionId, {
+		await updateCollectionMutation.mutateAsync({
+			id: collectionId,
 			name: renameValue.trim(),
 		});
 
-		if (success) {
-			setRenamingId(null);
-			setRenameValue("");
-		}
+		setRenamingId(null);
+		setRenameValue("");
 	};
 
 	const handleDuplicateCollection = async (collectionId: string) => {
-		if (isSavingCollection) return;
+		if (createCollectionMutation.isPending) return;
 
 		const collection = collections.find((c) => c.id === collectionId);
 		if (!collection) return;
 
-		await createCollection({ name: `${collection.name} (Copy)` });
+		await createCollectionMutation.mutateAsync({ name: `${collection.name} (Copy)` });
 		setContextMenu(null);
 	};
 
@@ -194,7 +207,11 @@ export default function CollectionTree() {
 		setDeletingCollectionId(collectionId);
 		setContextMenu(null);
 		try {
-			await deleteCollection(collectionId);
+			await deleteCollectionMutation.mutateAsync(collectionId);
+			// If the deleted collection was selected, navigate to welcome
+			if (selectedCollectionId === collectionId) {
+				navigateToWelcome();
+			}
 		} finally {
 			setDeletingCollectionId(null);
 		}
@@ -203,7 +220,11 @@ export default function CollectionTree() {
 	const handleDeleteRequest = async (requestId: string) => {
 		setDeletingRequestId(requestId);
 		try {
-			await deleteRequest(requestId);
+			await deleteRequestMutation.mutateAsync(requestId);
+			// If the deleted request was selected, navigate to welcome
+			if (selectedRequestId === requestId) {
+				navigateToWelcome();
+			}
 		} finally {
 			setDeletingRequestId(null);
 		}
@@ -213,326 +234,217 @@ export default function CollectionTree() {
 		<div className="p-4 space-y-2">
 			{/* Header */}
 			<div className="flex items-center justify-between mb-4">
-				<h2 className="text-sm font-semibold text-gray-700">Collections</h2>
+				<h2 className="text-sm font-semibold text-foreground">Collections</h2>
 				<div className="flex items-center gap-1">
-					<button
-						onClick={() => setCreatingCollection(true)}
-						disabled={isSavingCollection}
-						className="p-1.5 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-						title="New Collection"
-					>
-						{isSavingCollection ? (
-							<Loader2 className="w-4 h-4 text-gray-600 animate-spin" />
-						) : (
-							<FolderPlus className="w-4 h-4 text-gray-600" />
-						)}
-					</button>
-					<div className="relative">
-						<button
-							onClick={handleNewRequestClick}
-							disabled={isSavingRequest}
-							className="p-1.5 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-							title={selectedCollectionId
-								? `New Request in ${collections.find(c => c.id === selectedCollectionId)?.name || 'selected collection'}`
-								: "New Request"}
-						>
-							{isSavingRequest ? (
-								<Loader2 className="w-4 h-4 text-gray-600 animate-spin" />
-							) : (
-									<Plus className="w-4 h-4 text-gray-600" />
-							)}
-						</button>
+					<TooltipProvider>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									variant="ghost"
+									size="icon"
+									onClick={() => setCreatingCollection(true)}
+									disabled={createCollectionMutation.isPending}
+									className="h-8 w-8"
+								>
+									{createCollectionMutation.isPending ? (
+										<Loader2 className="w-4 h-4 animate-spin" />
+									) : (
+										<FolderPlus className="w-4 h-4" />
+									)}
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>New Collection</TooltipContent>
+						</Tooltip>
+					</TooltipProvider>
 
-						{/* Collection Picker Dropdown */}
-						{showCollectionPicker && (
-							<div
-								ref={collectionPickerRef}
-								className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 min-w-[200px]"
-							>
-								<div className="px-3 py-2 text-xs font-medium text-gray-500 border-b border-gray-100">
-									Select a collection for the new request
-								</div>
-								{collections.map((collection) => (
-									<button
-										key={collection.id}
-										onClick={() => handlePickCollectionForRequest(collection.id)}
-										className="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
-									>
-										<Folder className="w-4 h-4 text-primary-500" />
-										<span>{collection.name}</span>
-									</button>
-								))}
-							</div>
-						)}
-					</div>
+					<TooltipProvider>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									variant="ghost"
+									size="icon"
+									onClick={handleNewRequestClick}
+									disabled={createRequestMutation.isPending}
+									className="h-8 w-8"
+								>
+									{createRequestMutation.isPending ? (
+										<Loader2 className="w-4 h-4 animate-spin" />
+									) : (
+										<Plus className="w-4 h-4" />
+									)}
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>
+								{selectedCollectionId
+									? `New Request in ${collections.find(c => c.id === selectedCollectionId)?.name || 'selected collection'}`
+									: "New Request"}
+							</TooltipContent>
+						</Tooltip>
+					</TooltipProvider>
 				</div>
 			</div>
 
 			{/* New Collection Form */}
 			{creatingCollection && (
 				<div className="flex gap-2 mb-2">
-					<input
+					<Input
 						type="text"
 						value={newCollectionName}
 						onChange={(e) => setNewCollectionName(e.target.value)}
 						onKeyDown={(e) => e.key === "Enter" && handleCreateCollection()}
 						placeholder="Collection name"
-						className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
-						disabled={isSavingCollection}
+						className="flex-1 h-8 text-sm"
+						disabled={createCollectionMutation.isPending}
 						autoFocus
 					/>
-					<button
+					<Button
+						size="sm"
 						onClick={handleCreateCollection}
-						disabled={isSavingCollection}
-						className="px-3 py-1 text-sm bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+						disabled={createCollectionMutation.isPending}
 					>
-						{isSavingCollection && <Loader2 className="w-3 h-3 animate-spin" />}
+						{createCollectionMutation.isPending && <Loader2 className="w-3 h-3 animate-spin mr-1" />}
 						Add
-					</button>
-					<button
+					</Button>
+					<Button
+						variant="secondary"
+						size="sm"
 						onClick={() => {
 							setCreatingCollection(false);
 							setNewCollectionName("");
 						}}
-						disabled={isSavingCollection}
-						className="px-3 py-1 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+						disabled={createCollectionMutation.isPending}
 					>
 						Cancel
-					</button>
+					</Button>
 				</div>
 			)}
 
 			{/* Collections List */}
 			{collections.length === 0 && !creatingCollection && (
-				<div className="text-center py-8 text-sm text-gray-500">
-					<Folder className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+				<div className="text-center py-8 text-sm text-muted-foreground">
+					<Folder className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
 					<p>No collections yet</p>
-					<button
+					<Button
+						variant="link"
 						onClick={() => setCreatingCollection(true)}
-						className="mt-3 text-primary-600 hover:text-primary-700 font-medium"
+						className="mt-3 text-primary"
 					>
 						Create your first collection
-					</button>
+					</Button>
 				</div>
 			)}
 
-			{collections.map((collection) => {
-				const isExpanded = expandedCollectionIds.has(collection.id);
-				const requests = getRequestsByCollection(collection.id);
-				const isRenaming = renamingId === collection.id;
-
-				return (
-					<div key={collection.id} className="select-none">
-						{/* Collection Header */}
-						<div className={`flex items-center gap-1 px-2 py-1.5 rounded group transition-colors ${selectedCollectionId === collection.id
-								? 'bg-primary-50 hover:bg-primary-100 ring-1 ring-primary-200'
-								: 'hover:bg-gray-100'
-							}`}>
-							<button
-								onClick={() => handleCollectionClick(collection)}
-								className="flex items-center gap-2 flex-1 text-left"
-							>
-								{isExpanded ? (
-									<ChevronDown className="w-4 h-4 text-gray-500" />
-								) : (
-									<ChevronRight className="w-4 h-4 text-gray-500" />
-								)}
-								<Folder className="w-4 h-4 text-primary-500" />
-								{isRenaming ? (
-									<input
-										type="text"
-										value={renameValue}
-										onChange={(e) => setRenameValue(e.target.value)}
-										onKeyDown={(e) => {
-											if (e.key === "Enter") {
-												handleRenameSubmit(collection.id);
-											} else if (e.key === "Escape") {
-												setRenamingId(null);
-												setRenameValue("");
-											}
-										}}
-										onBlur={() => handleRenameSubmit(collection.id)}
-										className="flex-1 px-2 py-0.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
-										autoFocus
-										onClick={(e) => e.stopPropagation()}
-									/>
-								) : (
-									<>
-										<span className="text-sm font-medium text-gray-700">
-											{collection.name}
-										</span>
-										<span className="text-xs text-gray-400">
-											({requests.length})
-										</span>
-									</>
-								)}
-							</button>
-
-							{!isRenaming && (
-								<div className="hidden group-hover:flex items-center gap-1">
-									<button
-										onClick={(e) => {
-											e.preventDefault();
-											e.stopPropagation();
-											handleShowContextMenu(e, collection.id);
-										}}
-										className="p-1 hover:bg-gray-200 rounded"
-										title="More actions"
-									>
-										<MoreVertical className="w-3 h-3 text-gray-600" />
-									</button>
-								</div>
-							)}
-						</div>
-
-						{/* Requests List */}
-						{isExpanded && (
-							<div className="ml-6 mt-1 space-y-0.5">
-								{requests.length === 0 && (
-									<div className="py-2 px-3 text-xs text-gray-400">
-										No requests yet
-									</div>
-								)}
-								{requests.map((request) => (
-									<RequestItem
-										key={request.id}
-										request={request}
-										collectionId={collection.id}
-										onSelect={handleRequestClick}
-										onDelete={handleDeleteRequest}
-										isDeleting={deletingRequestId === request.id}
-										isSelected={selectedCollectionId === collection.id && selectedRequestId === request.id}
-									/>
-								))}
-							</div>
-						)}
-					</div>
-				);
-			})}
+			{/* Root-level collections (no parent_id) - sorted by order */}
+			{collections
+				.filter((c) => !c.parent_id)
+				.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+				.map((collection) => (
+					<CollectionItem
+						key={collection.id}
+						collection={collection}
+						allCollections={collections}
+						depth={0}
+						expandedCollectionIds={expandedCollectionIds}
+						selectedCollectionId={selectedCollectionId}
+						selectedRequestId={selectedRequestId}
+						renamingId={renamingId}
+						renameValue={renameValue}
+						deletingCollectionId={deletingCollectionId}
+						deletingRequestId={deletingRequestId}
+						creatingSubfolder={creatingSubfolder}
+						newSubfolderName={newSubfolderName}
+						isCreatingSubfolder={createCollectionMutation.isPending}
+						getRequestsByCollection={getRequestsByCollection}
+						onCollectionClick={handleCollectionClick}
+						onRequestClick={handleRequestClick}
+						onShowContextMenu={handleShowContextMenu}
+						onRenameChange={setRenameValue}
+						onRenameSubmit={handleRenameSubmit}
+						onRenameCancel={() => {
+							setRenamingId(null);
+							setRenameValue("");
+					}}
+						onDeleteRequest={handleDeleteRequest}
+						onSubfolderNameChange={setNewSubfolderName}
+						onCreateSubfolder={handleCreateSubfolder}
+						onCancelSubfolder={() => {
+							setCreatingSubfolder(null);
+							setNewSubfolderName("New Folder");
+						}}
+					/>
+				))}
 
 			{/* Context Menu */}
 			{contextMenu && (
 				<div
 					ref={contextMenuRef}
-					className="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 min-w-[180px]"
+					className="fixed bg-popover border rounded-md shadow-md py-1 z-50 min-w-[180px]"
 					style={{
 						top: contextMenu.y,
 						left: contextMenu.x,
 					}}
 				>
 					<button
+						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
 						onClick={() => {
 							const collection = collections.find(
 								(c) => c.id === contextMenu.collectionId
 							);
 							if (collection) handleRenameCollection(collection);
 						}}
-						className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-3"
 					>
-						<Edit2 className="w-4 h-4 text-gray-600" />
+						<Edit2 className="w-4 h-4 mr-2" />
 						<span>Rename</span>
 					</button>
 					<button
+						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
 						onClick={() => handleDuplicateCollection(contextMenu.collectionId)}
-						className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-3"
 					>
-						<Copy className="w-4 h-4 text-gray-600" />
+						<Copy className="w-4 h-4 mr-2" />
 						<span>Duplicate</span>
 					</button>
 					<button
+						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
 						onClick={async (e) => {
 							e.stopPropagation();
 							const collectionId = contextMenu.collectionId;
 							setContextMenu(null);
 							await handleCreateRequest(collectionId);
 						}}
-						className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-3"
 					>
-						<Plus className="w-4 h-4 text-gray-600" />
+						<Plus className="w-4 h-4 mr-2" />
 						<span>Add Request</span>
 					</button>
 					<button
+						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
 						onClick={() => {
-							// TODO: Add subfolder creation
-							console.log("Add folder");
+							const parentId = contextMenu.collectionId;
 							setContextMenu(null);
+							// Expand parent collection if not already
+							if (!expandedCollectionIds.has(parentId)) {
+								toggleCollectionExpanded(parentId);
+							}
+							setCreatingSubfolder(parentId);
 						}}
-						className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-3"
 					>
-						<FolderPlus className="w-4 h-4 text-gray-600" />
+						<FolderPlus className="w-4 h-4 mr-2" />
 						<span>Add Folder</span>
 					</button>
-					<div className="border-t border-gray-200 my-1" />
+					<Separator className="my-1" />
 					<button
+						className="flex items-center w-full px-2 py-1.5 text-sm text-destructive hover:bg-accent cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
 						onClick={() => handleDeleteCollection(contextMenu.collectionId)}
 						disabled={deletingCollectionId === contextMenu.collectionId}
-						className="w-full px-4 py-2 text-left text-sm hover:bg-red-50 flex items-center gap-3 text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						{deletingCollectionId === contextMenu.collectionId ? (
-							<Loader2 className="w-4 h-4 animate-spin" />
+							<Loader2 className="w-4 h-4 mr-2 animate-spin" />
 						) : (
-								<Trash2 className="w-4 h-4" />
+								<Trash2 className="w-4 h-4 mr-2" />
 						)}
 						<span>{deletingCollectionId === contextMenu.collectionId ? 'Deleting...' : 'Delete'}</span>
 					</button>
 				</div>
 			)}
-		</div>
-	);
-}
-
-interface RequestItemProps {
-	request: Request;
-	collectionId: string;
-	onSelect: (collectionId: string, requestId: string) => void;
-	onDelete: (requestId: string) => Promise<void>;
-	isDeleting?: boolean;
-	isSelected?: boolean;
-}
-
-function RequestItem({
-	request,
-	collectionId,
-	onSelect,
-	onDelete,
-	isDeleting,
-	isSelected,
-}: RequestItemProps) {
-	return (
-		<div className={`flex items-center gap-2 px-3 py-1.5 rounded group cursor-pointer transition-colors ${isDeleting
-				? 'opacity-50'
-				: isSelected
-					? 'bg-primary-50 ring-1 ring-primary-200 hover:bg-primary-100'
-					: 'hover:bg-gray-100'
-			}`}>
-			<button
-				onClick={() => onSelect(collectionId, request.id)}
-				className="flex items-center gap-2 flex-1 text-left"
-				disabled={isDeleting}
-			>
-				{/* <File className="w-3.5 h-3.5 text-gray-400" /> */}
-				<span
-					className={`text-xs font-mono font-semibold px-1.5 py-0.5 rounded ${getMethodColor(
-						request.method
-					)}`}
-				>
-					{request.method}
-				</span>
-				<span className="text-sm text-gray-700 truncate">{request.name}</span>
-			</button>
-
-			<button
-				onClick={() => onDelete(request.id)}
-				disabled={isDeleting}
-				className={`p-1 hover:bg-red-100 rounded ${isDeleting ? 'block' : 'hidden group-hover:block'}`}
-				title="Delete Request"
-			>
-				{isDeleting ? (
-					<Loader2 className="w-3 h-3 text-red-600 animate-spin" />
-				) : (
-						<Trash2 className="w-3 h-3 text-red-600" />
-				)}
-			</button>
 		</div>
 	);
 }

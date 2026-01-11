@@ -65,28 +65,28 @@ MetricsHelper::DetailedReport MetricsHelper::calculate_detailed_report(
                 auto trace = nlohmann::json::parse(result.trace_data);
 
                 // Check for error details
-                if (trace.contains("error_type")) {
+                if (trace.contains("errorType")) {
                     report.errors_with_details++;
-                    std::string error_type = trace["error_type"].get<std::string>();
+                    std::string error_type = trace["errorType"].get<std::string>();
                     report.error_types[error_type]++;
                 }
 
                 // Check for timing breakdown
-                if (trace.contains("dns_ms")) {
+                if (trace.contains("dnsMs")) {
                     report.has_timing_data = true;
                     timing_samples++;
-                    total_dns += trace["dns_ms"].get<double>();
-                    total_connect += trace["connect_ms"].get<double>();
-                    total_tls += trace["tls_ms"].get<double>();
-                    total_first_byte += trace["first_byte_ms"].get<double>();
-                    total_download += trace["download_ms"].get<double>();
+                    total_dns += trace["dnsMs"].get<double>();
+                    total_connect += trace["connectMs"].get<double>();
+                    total_tls += trace["tlsMs"].get<double>();
+                    total_first_byte += trace["firstByteMs"].get<double>();
+                    total_download += trace["downloadMs"].get<double>();
                 }
 
                 // Check for slow requests
-                if (trace.contains("is_slow") && trace["is_slow"].get<bool>()) {
+                if (trace.contains("isSlow") && trace["isSlow"].get<bool>()) {
                     report.slow_requests_count++;
-                    if (trace.contains("threshold_ms") && report.slow_threshold_ms == 0) {
-                        report.slow_threshold_ms = trace["threshold_ms"].get<size_t>();
+                    if (trace.contains("thresholdMs") && report.slow_threshold_ms == 0) {
+                        report.slow_threshold_ms = trace["thresholdMs"].get<size_t>();
                     }
                 }
             } catch (const std::exception&) {

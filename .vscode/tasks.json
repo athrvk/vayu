@@ -1,0 +1,195 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Release",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/build-and-test.sh",
+            "args": [
+                "-s"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Build engine in Release mode (skip tests)"
+        },
+        {
+            "label": "Build Debug",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/build-and-test.sh",
+            "args": [
+                "-d",
+                "-s"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Build engine in Debug mode (skip tests)"
+        },
+        {
+            "label": "Build and Test",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/build-and-test.sh",
+            "args": [],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Build Release and run all tests"
+        },
+        {
+            "label": "Build Debug and Test",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/build-and-test.sh",
+            "args": [
+                "-d"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Build Debug and run all tests"
+        },
+        {
+            "label": "Run Tests Only",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/build-and-test.sh",
+            "args": [
+                "-t"
+            ],
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": [],
+            "detail": "Run tests without rebuilding"
+        },
+        {
+            "label": "Clean Build",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/build-and-test.sh",
+            "args": [
+                "-c",
+                "-s"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Clean build directory and rebuild from scratch"
+        },
+        {
+            "label": "CMake Configure",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S",
+                "${workspaceFolder}/engine",
+                "-B",
+                "${workspaceFolder}/engine/build",
+                "-GNinja",
+                "-DCMAKE_BUILD_TYPE=Debug",
+                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": [],
+            "detail": "Run CMake configure step"
+        },
+        {
+            "label": "Ninja Build",
+            "type": "shell",
+            "command": "ninja",
+            "args": [
+                "-C",
+                "${workspaceFolder}/engine/build"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Run Ninja build directly"
+        },
+        {
+            "label": "Start Engine Daemon",
+            "type": "shell",
+            "command": "${workspaceFolder}/engine/build/vayu-engine",
+            "args": [
+                "--verbose",
+                "2"
+            ],
+            "group": "none",
+            "isBackground": true,
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": [],
+            "detail": "Start the Vayu engine daemon"
+        },
+        {
+            "label": "Format All C++ Files",
+            "type": "shell",
+            "command": "find",
+            "args": [
+                "${workspaceFolder}/engine/src",
+                "${workspaceFolder}/engine/include",
+                "-name",
+                "*.cpp",
+                "-o",
+                "-name",
+                "*.hpp",
+                "-exec",
+                "clang-format",
+                "-i",
+                "{}",
+                ";"
+            ],
+            "group": "none",
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            },
+            "problemMatcher": [],
+            "detail": "Format all C++ source files with clang-format"
+        }
+    ]
+}

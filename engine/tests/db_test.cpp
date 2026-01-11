@@ -156,5 +156,79 @@ TEST_F(DatabaseTest, RetrievesAllRuns) {
     EXPECT_TRUE(found2);
 }
 
+// ==================== Globals Tests ====================
+
+TEST_F(DatabaseTest, SavesAndRetrievesGlobals) {
+    Database db(TEST_DB_PATH);
+    db.init();
+
+    Globals globals;
+    globals.id = "globals";
+    globals.variables =
+        R"({"api_key":{"value":"secret123","enabled":true},"base_url":{"value":"https://api.example.com","enabled":true}})";
+    globals.updated_at = 1000;
+
+    db.save_globals(globals);
+
+    auto retrieved = db.get_globals();
+    ASSERT_TRUE(retrieved.has_value());
+    EXPECT_EQ(retrieved->id, "globals");
+    EXPECT_EQ(retrieved->variables, globals.variables);
+}
+
+TEST_F(DatabaseTest, UpdatesExistingGlobals) {
+    Database db(TEST_DB_PATH);
+    db.init();
+
+    Globals globals1;
+    globals1.id = "globals";
+    globals1.variables = R"({"key1":{"value":"value1","enabled":true}})";
+    globals1.updated_at = 1000;
+    db.save_globals(globals1);
+
+    Globals globals2;
+    globals2.id = "globals";
+    globals2.variables =
+        R"({"key1":{"value":"updated","enabled":true},"key2":{"value":"value2","enabled":false}})";
+    globals2.updated_at = 2000;
+    db.save_globals(globals2);
+
+    auto retrieved = db.get_globals();
+    ASSERT_TRUE(retrieved.has_value());
+    EXPECT_EQ(retrieved->variables, globals2.variables);
+    EXPECT_EQ(retrieved->updated_at, 2000);
+}
+
+TEST_F(DatabaseTest, ReturnsEmptyGlobalsWhenNotSet) {
+    Database db(TEST_DB_PATH);
+    db.init();
+
+    auto retrieved = db.get_globals();
+    EXPECT_FALSE(retrieved.has_value());
+}
+
+// ==================== Environment Delete Tests ====================
+
+TEST_F(DatabaseTest, DeletesEnvironment) {
+    Database db(TEST_DB_PATH);
+    db.init();
+
+    Environment env;
+    env.id = "env_1";
+    env.name = "Development";
+    env.variables = R"({"host":{"value":"localhost","enabled":true}})";
+    env.updated_at = 1000;
+
+    db.save_environment(env);
+
+    auto retrieved = db.get_environment("env_1");
+    ASSERT_TRUE(retrieved.has_value());
+
+    db.delete_environment("env_1");
+
+    auto deleted = db.get_environment("env_1");
+    EXPECT_FALSE(deleted.has_value());
+}
+
 }  // namespace
 }  // namespace vayu::db

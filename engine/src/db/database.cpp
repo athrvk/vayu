@@ -1,3 +1,25 @@
+/**
+ * @file database.cpp
+ * @brief SQLite database layer using sqlite_orm
+ *
+ * Schema Overview:
+ * ────────────────────────────────────────────────────────────────────────
+ * PROJECT MANAGEMENT:
+ *   collections  - Folder structure for organizing requests
+ *   requests     - HTTP request definitions with scripts
+ *   environments - Named variable sets (e.g., dev, staging, prod)
+ *   globals      - App-wide variables (singleton)
+ *
+ * EXECUTION ENGINE:
+ *   runs         - Test execution records (load tests, design mode)
+ *   metrics      - Time-series performance data per run
+ *   results      - Individual request results with timing
+ *
+ * CONFIGURATION:
+ *   kv_store     - Generic key-value settings
+ * ────────────────────────────────────────────────────────────────────────
+ */
+
 #include "vayu/db/database.hpp"
 
 #include <sqlite_orm/sqlite_orm.h>
@@ -9,8 +31,14 @@
 
 #include "vayu/utils/logger.hpp"
 
+// ============================================================================
+// SQLite ORM Type Adapters
+// These templates tell sqlite_orm how to serialize/deserialize our enums
+// ============================================================================
+
 namespace sqlite_orm {
-// HttpMethod
+
+// HttpMethod enum adapter (GET, POST, PUT, DELETE, etc.)
 template <>
 struct type_printer<vayu::HttpMethod> {
     const std::string& print() {
@@ -42,7 +70,7 @@ struct row_extractor<vayu::HttpMethod> {
     }
 };
 
-// RunType
+// RunType enum adapter (Design, Load)
 template <>
 struct type_printer<vayu::RunType> {
     const std::string& print() {
@@ -74,7 +102,7 @@ struct row_extractor<vayu::RunType> {
     }
 };
 
-// RunStatus
+// RunStatus enum adapter (Pending, Running, Completed, Failed, Stopped)
 template <>
 struct type_printer<vayu::RunStatus> {
     const std::string& print() {
@@ -106,7 +134,7 @@ struct row_extractor<vayu::RunStatus> {
     }
 };
 
-// MetricName
+// MetricName enum adapter (Rps, Latency, ErrorRate, etc.)
 template <>
 struct type_printer<vayu::MetricName> {
     const std::string& print() {
@@ -143,71 +171,109 @@ using namespace sqlite_orm;
 
 namespace vayu::db {
 
-// Helper to create storage
+// ============================================================================
+// Database Schema Definition
+// All tables defined here - sqlite_orm auto-creates/migrates on sync_schema()
+// ============================================================================
+
 inline auto make_storage(const std::string& path) {
     return sqlite_orm::make_storage(
         path,
-        // Project Management
-        make_table("collections",
-                   make_column("id", &Collection::id, primary_key()),
-                   make_column("parent_id", &Collection::parent_id),
-                   make_column("name", &Collection::name),
-                   make_column("order", &Collection::order),
-                   make_column("created_at", &Collection::created_at)),
+
+        // ─────────────── PROJECT MANAGEMENT TABLES ───────────────
+
+        // Collections: Folder hierarchy for organizing requests
+        make_table(
+            "collections",
+            make_column("id", &Collection::id, primary_key()),
+            make_column("parent_id", &Collection::parent_id),
+            make_column("name", &Collection::name),
+            make_column("variables", &Collection::variables),  // JSON: collection-scoped vars
+            make_column("order", &Collection::order),
+            make_column("created_at", &Collection::created_at)),
+
+        // Requests: HTTP request definitions with pre/post scripts
         make_table("requests",
                    make_column("id", &Request::id, primary_key()),
                    make_column("collection_id", &Request::collection_id),
                    make_column("name", &Request::name),
                    make_column("method", &Request::method),
                    make_column("url", &Request::url),
-                   make_column("headers", &Request::headers),
+                   make_column("params", &Request::params),    // JSON
+                   make_column("headers", &Request::headers),  // JSON
                    make_column("body", &Request::body),
-                   make_column("auth", &Request::auth),
-                   make_column("pre_request_script", &Request::pre_request_script),
-                   make_column("post_request_script", &Request::post_request_script),
+                   make_column("body_type", &Request::body_type),                    // Content type
+                   make_column("auth", &Request::auth),                              // JSON
+                   make_column("pre_request_script", &Request::pre_request_script),  // JS
+                   make_column("post_request_script", &Request::post_request_script),  // JS
                    make_column("updated_at", &Request::updated_at)),
-        make_table("environments",
-                   make_column("id", &Environment::id, primary_key()),
-                   make_column("name", &Environment::name),
-                   make_column("variables", &Environment::variables),
-                   make_column("updated_at", &Environment::updated_at)),
-        // Execution Engine
-        make_table("runs",
-                   make_column("id", &Run::id, primary_key()),
-                   make_column("request_id", &Run::request_id),
-                   make_column("environment_id", &Run::environment_id),
-                   make_column("type", &Run::type),
-                   make_column("status", &Run::status),
-                   make_column("config_snapshot", &Run::config_snapshot),
-                   make_column("start_time", &Run::start_time),
-                   make_column("end_time", &Run::end_time)),
+
+        // Environments: Named variable sets (dev, staging, prod)
+        make_table(
+            "environments",
+            make_column("id", &Environment::id, primary_key()),
+            make_column("name", &Environment::name),
+            make_column("variables", &Environment::variables),  // JSON: {key: {value, enabled}}
+            make_column("updated_at", &Environment::updated_at)),
+
+        // ─────────────── EXECUTION ENGINE TABLES ───────────────
+
+        // Runs: Test execution sessions (load tests or design mode requests)
+        make_table(
+            "runs",
+            make_column("id", &Run::id, primary_key()),
+            make_column("request_id", &Run::request_id),
+            make_column("environment_id", &Run::environment_id),
+            make_column("type", &Run::type),      // "design" or "load"
+            make_column("status", &Run::status),  // pending/running/completed/failed
+            make_column("config_snapshot", &Run::config_snapshot),  // JSON: full request copy
+            make_column("start_time", &Run::start_time),
+            make_column("end_time", &Run::end_time)),
+
+        // Metrics: Time-series performance data (RPS, latency percentiles, etc.)
         make_table("metrics",
                    make_column("id", &Metric::id, primary_key().autoincrement()),
                    make_column("run_id", &Metric::run_id),
                    make_column("timestamp", &Metric::timestamp),
                    make_column("name", &Metric::name),
                    make_column("value", &Metric::value),
-                   make_column("labels", &Metric::labels)),
-        make_table("results",
-                   make_column("id", &Result::id, primary_key().autoincrement()),
-                   make_column("run_id", &Result::run_id),
-                   make_column("timestamp", &Result::timestamp),
-                   make_column("status_code", &Result::status_code),
-                   make_column("latency_ms", &Result::latency_ms),
-                   make_column("error", &Result::error),
-                   make_column("trace_data", &Result::trace_data)),
+                   make_column("labels", &Metric::labels)),  // JSON: additional dimensions
+
+        // Results: Individual request outcomes with timing breakdown
+        make_table(
+            "results",
+            make_column("id", &Result::id, primary_key().autoincrement()),
+            make_column("run_id", &Result::run_id),
+            make_column("timestamp", &Result::timestamp),
+            make_column("status_code", &Result::status_code),
+            make_column("latency_ms", &Result::latency_ms),
+            make_column("error", &Result::error),
+            make_column("trace_data", &Result::trace_data)),  // JSON: headers/body for errors
+
+        // ─────────────── CONFIGURATION TABLES ───────────────
+
+        // KV Store: Generic key-value settings
         make_table("kv_store",
                    make_column("key", &KVStore::key, primary_key()),
-                   make_column("value", &KVStore::value)));
+                   make_column("value", &KVStore::value)),
+
+        // Globals: App-wide variables (singleton row with id="globals")
+        make_table("globals",
+                   make_column("id", &Globals::id, primary_key()),
+                   make_column("variables", &Globals::variables),  // JSON: {key: {value, enabled}}
+                   make_column("updated_at", &Globals::updated_at)));
 }
 
 using Storage = decltype(make_storage(""));
+
+// ============================================================================
+// Database Implementation (PImpl pattern)
+// ============================================================================
 
 struct Database::Impl {
     Storage storage;
 
     Impl(const std::string& path) : storage(make_storage(path)) {
-        // Ensure parent directory exists
         std::filesystem::path db_path(path);
         if (db_path.has_parent_path()) {
             std::filesystem::create_directories(db_path.parent_path());
@@ -219,19 +285,22 @@ Database::Database(const std::string& db_path) : impl_(std::make_unique<Impl>(db
 
 Database::~Database() = default;
 
+// Initialize database with optimized SQLite settings
 void Database::init() {
     vayu::utils::log_debug("Initializing database, syncing schema...");
     impl_->storage.sync_schema();
-    // Enable WAL mode for better concurrency
+
+    // WAL mode for better concurrent read/write performance
     impl_->storage.pragma.journal_mode(journal_mode::WAL);
-    impl_->storage.pragma.synchronous(1);  // NORMAL
-    impl_->storage.pragma.busy_timeout(5000);  // Wait up to 5 seconds on lock contention
+    impl_->storage.pragma.synchronous(1);      // NORMAL - balance safety/speed
+    impl_->storage.pragma.busy_timeout(5000);  // Wait up to 5s on lock contention
+
     vayu::utils::log_debug("Database initialized with WAL mode");
 }
 
-// ==========================================
-// Project Management
-// ==========================================
+// ============================================================================
+// Collections - Folder structure for organizing requests
+// ============================================================================
 
 void Database::create_collection(const Collection& c) {
     vayu::utils::log_debug("Creating collection: id=" + c.id + ", name=" + c.name);
@@ -248,13 +317,16 @@ std::optional<Collection> Database::get_collection(const std::string& id) {
     return cols.front();
 }
 
+// Cascade delete: removes all requests in collection first
 void Database::delete_collection(const std::string& id) {
     vayu::utils::log_debug("Deleting collection: id=" + id);
-    // First delete all requests in this collection
     impl_->storage.remove_all<Request>(where(c(&Request::collection_id) == id));
-    // Then delete the collection itself
     impl_->storage.remove_all<Collection>(where(c(&Collection::id) == id));
 }
+
+// ============================================================================
+// Requests - HTTP request definitions with pre/post scripts
+// ============================================================================
 
 void Database::save_request(const Request& r) {
     vayu::utils::log_debug("Saving request: id=" + r.id + ", name=" + r.name);
@@ -276,6 +348,10 @@ void Database::delete_request(const std::string& id) {
     impl_->storage.remove_all<Request>(where(c(&Request::id) == id));
 }
 
+// ============================================================================
+// Environments - Named variable sets (dev, staging, prod)
+// ============================================================================
+
 void Database::save_environment(const Environment& e) {
     vayu::utils::log_debug("Saving environment: id=" + e.id + ", name=" + e.name);
     impl_->storage.replace(e);
@@ -291,9 +367,29 @@ std::optional<Environment> Database::get_environment(const std::string& id) {
     return envs.front();
 }
 
-// ==========================================
-// Execution
-// ==========================================
+void Database::delete_environment(const std::string& id) {
+    vayu::utils::log_debug("Deleting environment: id=" + id);
+    impl_->storage.remove_all<Environment>(where(c(&Environment::id) == id));
+}
+
+// ============================================================================
+// Globals - App-wide variables (singleton row with id="globals")
+// ============================================================================
+
+void Database::save_globals(const Globals& g) {
+    vayu::utils::log_debug("Saving globals");
+    impl_->storage.replace(g);
+}
+
+std::optional<Globals> Database::get_globals() {
+    auto globals = impl_->storage.get_all<Globals>(where(c(&Globals::id) == "globals"));
+    if (globals.empty()) return std::nullopt;
+    return globals.front();
+}
+
+// ============================================================================
+// Runs - Test execution sessions (load tests or design mode requests)
+// ============================================================================
 
 void Database::create_run(const Run& run) {
     vayu::utils::log_debug("Creating run: id=" + run.id +
@@ -359,15 +455,17 @@ std::vector<Run> Database::get_all_runs() {
     return impl_->storage.get_all<Run>(order_by(&Run::start_time).desc());
 }
 
+// Cascade delete: removes metrics and results first
 void Database::delete_run(const std::string& id) {
-    // Delete associated metrics and results first
     impl_->storage.remove_all<Metric>(where(c(&Metric::run_id) == id));
     impl_->storage.remove_all<Result>(where(c(&Result::run_id) == id));
-    // Delete the run itself
     impl_->storage.remove<Run>(id);
 }
 
-// Metrics
+// ============================================================================
+// Metrics - Time-series performance data (RPS, latency percentiles, etc.)
+// ============================================================================
+
 void Database::add_metric(const Metric& metric) {
     impl_->storage.insert(metric);
 }
@@ -376,20 +474,24 @@ std::vector<Metric> Database::get_metrics(const std::string& run_id) {
     return impl_->storage.get_all<Metric>(where(c(&Metric::run_id) == run_id));
 }
 
+// Get metrics added after a specific ID (for incremental updates)
 std::vector<Metric> Database::get_metrics_since(const std::string& run_id, int64_t last_id) {
     return impl_->storage.get_all<Metric>(
         where(c(&Metric::run_id) == run_id && c(&Metric::id) > last_id), order_by(&Metric::id));
 }
 
-// Results
+// ============================================================================
+// Results - Individual request outcomes with timing breakdown
+// ============================================================================
+
 void Database::add_result(const Result& result) {
     impl_->storage.insert(result);
 }
 
+// Batch insert with transaction for better performance
 void Database::add_results_batch(const std::vector<Result>& results) {
     if (results.empty()) return;
 
-    // Use transaction for batch insert - much faster and prevents WAL growth
     impl_->storage.transaction([&] {
         for (const auto& result : results) {
             impl_->storage.insert(result);
@@ -402,7 +504,10 @@ std::vector<Result> Database::get_results(const std::string& run_id) {
     return impl_->storage.get_all<Result>(where(c(&Result::run_id) == run_id));
 }
 
-// Transaction helpers
+// ============================================================================
+// Transaction Helpers
+// ============================================================================
+
 void Database::begin_transaction() {
     impl_->storage.begin_transaction();
 }
@@ -415,7 +520,10 @@ void Database::rollback_transaction() {
     impl_->storage.rollback();
 }
 
-// KV Store
+// ============================================================================
+// KV Store - Generic key-value settings
+// ============================================================================
+
 void Database::set_config(const std::string& key, const std::string& value) {
     impl_->storage.replace(KVStore{key, value});
 }

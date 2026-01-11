@@ -4,6 +4,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <thread>
 
 #include "vayu/core/constants.hpp"
 
@@ -38,10 +39,11 @@ void Logger::log(Level level, const std::string& message) {
 
     std::string timestamp = get_timestamp();
     std::string level_str = level_to_string(level);
+    std::string thread_id = get_thread_id();
 
-    std::string log_message = timestamp + " [" + level_str + "] " + message;
+    std::string log_message = timestamp + " [" + level_str + "] [" + thread_id + "] " + message;
 
-    // Always write to file
+    // Always write to file (irrespective of log level)
     if (log_file_ && log_file_->is_open()) {
         *log_file_ << log_message << "\n";
         log_file_->flush();
@@ -128,6 +130,12 @@ std::string Logger::get_timestamp() const {
     ss << '.' << std::setfill('0') << std::setw(3) << ms.count();
 
     return ss.str();
+}
+
+std::string Logger::get_thread_id() const {
+    std::stringstream ss;
+    ss << std::this_thread::get_id();
+    return "T:" + ss.str();
 }
 
 void Logger::ensure_log_directory() {

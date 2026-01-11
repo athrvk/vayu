@@ -222,6 +222,9 @@ Result<Response> Client::send(const Request& request) {
     Response response;
     std::string response_body;
 
+    // Store request headers for response
+    response.request_headers = request.headers;
+
     // Set error buffer
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, impl_->error_buffer);
 
@@ -273,11 +276,24 @@ Result<Response> Client::send(const Request& request) {
     if (!has_user_agent) {
         std::string ua = "User-Agent: " + impl_->config.user_agent;
         headers_list = curl_slist_append(headers_list, ua.c_str());
+        response.request_headers["User-Agent"] = impl_->config.user_agent;
     }
 
     if (headers_list) {
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers_list);
     }
+
+    // Build raw request string
+    std::stringstream raw_req;
+    raw_req << to_string(request.method) << " " << request.url << " HTTP/1.1\r\n";
+    for (const auto& [key, value] : response.request_headers) {
+        raw_req << key << ": " << value << "\r\n";
+    }
+    raw_req << "\r\n";
+    if (!request.body.content.empty()) {
+        raw_req << request.body.content;
+    }
+    response.raw_request = raw_req.str();
 
     // Set callbacks
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);

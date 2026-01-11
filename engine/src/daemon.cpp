@@ -132,10 +132,10 @@ int main(int argc, char* argv[]) {
     std::signal(SIGTERM, signal_handler);
 
     // Initialize database
-    vayu::db::Database db("db/vayu.db");
+    vayu::db::Database db("engine/db/vayu.db");
     try {
         db.init();
-        vayu::utils::log_info("Database initialized at db/vayu.db");
+        vayu::utils::log_info("Database initialized at engine/db/vayu.db");
     } catch (const std::exception& e) {
         vayu::utils::log_error("Failed to initialize database: " + std::string(e.what()));
         return 1;

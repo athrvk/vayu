@@ -32,6 +32,9 @@ export const API_ENDPOINTS = {
 	ENVIRONMENTS: `/environments`,
 	ENVIRONMENT_BY_ID: (id: string) => `/environments/${id}`,
 
+	// Global Variables
+	GLOBALS: `/globals`,
+
 	// Scripting
 	SCRIPT_COMPLETIONS: `/scripting/completions`,
 
