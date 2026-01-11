@@ -96,6 +96,7 @@
         "memsize",
         "MSVC",
         "ncpu",
+        "ngrok",
         "nlohmann",
         "partialize",
         "physicalcpu",
