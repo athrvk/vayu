@@ -1,7 +1,12 @@
 import { app, BrowserWindow } from "electron";
 import path from "path";
+import { fileURLToPath } from "url";
 
 const isDev = process.env.NODE_ENV === "development";
+
+// __dirname is not defined in ES modules. Derive it from import.meta.url
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 function createWindow() {
 	const mainWindow = new BrowserWindow({
