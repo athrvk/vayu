@@ -416,6 +416,17 @@ void Database::update_run_status(const std::string& id, RunStatus status) {
     }
 }
 
+void Database::update_run_end_time(const std::string& id) {
+    vayu::utils::log_debug("Updating run end_time: id=" + id);
+    auto run = get_run(id);
+    if (run) {
+        run->end_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+        impl_->storage.update(*run);
+    }
+}
+
 void Database::update_run_status_with_retry(const std::string& id,
                                             RunStatus status,
                                             int max_retries) {

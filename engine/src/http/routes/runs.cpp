@@ -196,6 +196,41 @@ void register_run_routes(RouteContext& ctx) {
                     } else if (m.name == vayu::MetricName::Rps) {
                         report.avg_rps = m.value;
                         report.actual_rps = m.value;
+                    } else if (m.name == vayu::MetricName::TestDuration) {
+                        // Use actual test duration (excludes setup/teardown overhead)
+                        report.total_duration_s = m.value;
+                    } else if (m.name == vayu::MetricName::SetupOverhead) {
+                        // Time from run creation to test start
+                        report.setup_overhead_s = m.value;
+                    } else if (m.name == vayu::MetricName::StatusCodes && !m.labels.empty()) {
+                        // Override status codes with accurate data from metrics
+                        try {
+                            auto status_json = nlohmann::json::parse(m.labels);
+                            report.status_codes.clear();
+                            for (auto& [code_str, count] : status_json.items()) {
+                                int code = std::stoi(code_str);
+                                report.status_codes[code] = count.get<size_t>();
+                            }
+                            // Recalculate successful/failed counts from accurate status codes
+                            report.successful_requests = 0;
+                            report.failed_requests = 0;
+                            for (const auto& [code, count] : report.status_codes) {
+                                if (code >= 200 && code < 400) {
+                                    report.successful_requests += count;
+                                } else {
+                                    report.failed_requests += count;
+                                }
+                            }
+                            // Recalculate errors by status code
+                            report.errors_by_status_code.clear();
+                            for (const auto& [code, count] : report.status_codes) {
+                                if (code == 0 || code >= 400) {
+                                    report.errors_by_status_code[code] = count;
+                                }
+                            }
+                        } catch (...) {
+                            // Keep calculated values if parsing fails
+                        }
                     }
                 }
 
@@ -217,6 +252,14 @@ void register_run_routes(RouteContext& ctx) {
                 }
                 report.rps_achievement =
                     target_rps > 0 ? (report.actual_rps / target_rps * 100.0) : 0.0;
+
+                // Fallback: calculate duration from RPS if TestDuration metric wasn't stored
+                // (for backward compatibility with older runs)
+                if (report.total_duration_s == duration_s && report.actual_rps > 0 &&
+                    report.total_requests > 0) {
+                    report.total_duration_s =
+                        static_cast<double>(report.total_requests) / report.actual_rps;
+                }
 
                 // Build response
                 nlohmann::json metadata;
@@ -259,7 +302,9 @@ void register_run_routes(RouteContext& ctx) {
                                           {"failedRequests", report.failed_requests},
                                           {"errorRate", report.error_rate},
                                           {"totalDurationSeconds", report.total_duration_s},
-                                          {"avgRps", report.avg_rps}};
+                                          {"avgRps", report.avg_rps},
+                                          {"testDuration", report.total_duration_s},
+                                          {"setupOverhead", report.setup_overhead_s}};
                 json_report["latency"] = {{"min", report.latency_min},
                                           {"max", report.latency_max},
                                           {"avg", report.latency_avg},

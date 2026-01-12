@@ -16,6 +16,7 @@ export default function RunMetadata({
     endTime,
     mode,
     elapsedDuration,
+    setupOverhead,
     configuration,
 }: RunMetadataProps) {
     if (!requestUrl && !requestMethod && !startTime) {
@@ -92,6 +93,12 @@ export default function RunMetadata({
                                 : formatDuration(startTime ? Date.now() - startTime : 0)
                             }
                         </span>
+                        {/* Show setup overhead if available */}
+                        {mode === "completed" && setupOverhead !== undefined && setupOverhead > 0 && (
+                            <span className="text-muted-foreground text-xs" title="Time spent in setup before test started">
+                                (+{(setupOverhead * 1000).toFixed(0)}ms setup)
+                            </span>
+                        )}
                     </div>
                 )}
 

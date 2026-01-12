@@ -6,6 +6,22 @@ import type { LoadTestMetrics, RunReport } from "@/types";
 type DashboardMode = "running" | "completed";
 type DashboardView = "metrics" | "request-response";
 
+// Config passed when starting a load test (for display during streaming)
+export interface LoadTestRunConfig {
+	mode?: string;
+	duration?: string;
+	targetRps?: number;
+	concurrency?: number;
+	iterations?: number;
+	comment?: string;
+}
+
+// Request info passed when starting a load test
+export interface LoadTestRequestInfo {
+	method: string;
+	url: string;
+}
+
 interface DashboardState {
 	currentRunId: string | null;
 	mode: DashboardMode;
@@ -16,9 +32,12 @@ interface DashboardState {
 	error: string | null;
 	activeView: DashboardView;
 	isStopping: boolean;
+	// Config and request info (available during live streaming)
+	loadTestConfig: LoadTestRunConfig | null;
+	requestInfo: LoadTestRequestInfo | null;
 
 	// Actions
-	startRun: (runId: string) => void;
+	startRun: (runId: string, config?: LoadTestRunConfig, requestInfo?: LoadTestRequestInfo) => void;
 	stopRun: () => void;
 	setStreaming: (streaming: boolean) => void;
 	addMetrics: (metrics: LoadTestMetrics) => void;
@@ -43,8 +62,10 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 	error: null,
 	activeView: "metrics",
 	isStopping: false,
+	loadTestConfig: null,
+	requestInfo: null,
 
-	startRun: (runId) =>
+	startRun: (runId, config, requestInfo) =>
 		set({
 			currentRunId: runId,
 			mode: "running",
@@ -55,6 +76,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			error: null,
 			activeView: "metrics",
 			isStopping: false,
+			loadTestConfig: config ?? null,
+			requestInfo: requestInfo ?? null,
 		}),
 
 	stopRun: () =>
@@ -102,6 +125,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			error: null,
 			activeView: "metrics",
 			isStopping: false,
+			loadTestConfig: null,
+			requestInfo: null,
 		}),
 
 	// Helpers

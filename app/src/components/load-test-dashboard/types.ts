@@ -43,6 +43,7 @@ export interface RunMetadataProps {
     endTime?: number;
     mode: DashboardMode;
     elapsedDuration: number;
+    setupOverhead?: number;  // in seconds
     configuration?: {
         mode?: string;
         targetRps?: number;

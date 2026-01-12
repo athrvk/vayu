@@ -64,10 +64,12 @@ MetricsHelper::DetailedReport MetricsHelper::calculate_detailed_report(
             try {
                 auto trace = nlohmann::json::parse(result.trace_data);
 
-                // Check for error details
-                if (trace.contains("errorType")) {
+                // Check for error details (supports both snake_case and camelCase)
+                if (trace.contains("error_type") || trace.contains("errorType")) {
                     report.errors_with_details++;
-                    std::string error_type = trace["errorType"].get<std::string>();
+                    std::string error_type = trace.contains("error_type")
+                                                 ? trace["error_type"].get<std::string>()
+                                                 : trace["errorType"].get<std::string>();
                     report.error_types[error_type]++;
                 }
 

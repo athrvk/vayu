@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Search, Trash2, Clock, Loader2 } from "lucide-react";
+import { Search, Trash2, Clock, Loader2, Activity, Zap, CheckCircle2, XCircle, AlertCircle, StopCircle } from "lucide-react";
 import { useAppStore, useHistoryStore } from "@/stores";
 import { filterRuns } from "@/stores/history-store";
 import { useRunsQuery, useDeleteRunMutation } from "@/queries";
 import { formatRelativeTime } from "@/utils";
 import type { Run } from "@/types";
-import { Button, Input, Badge, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui";
+import { Button, Input, Badge, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, ScrollArea } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 export default function HistoryList() {
@@ -40,9 +40,20 @@ export default function HistoryList() {
 	};
 
 	return (
-		<div className="flex flex-col h-full">
+		<div className="flex flex-col h-full bg-background">
+			{/* Header */}
+			<div className="px-4 py-3 border-b">
+				<h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+					<Clock className="w-5 h-5 text-primary" />
+					Test History
+				</h2>
+				<p className="text-xs text-muted-foreground mt-0.5">
+					{allRuns.length} {allRuns.length === 1 ? 'run' : 'runs'} total
+				</p>
+			</div>
+
 			{/* Search & Filters */}
-			<div className="p-4 border-b space-y-3">
+			<div className="px-4 py-3 border-b space-y-3 bg-muted/30">
 				<div className="relative">
 					<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
 					<Input
@@ -81,51 +92,64 @@ export default function HistoryList() {
 					</Select>
 				</div>
 
-				<div className="flex gap-2">
-					<Button
-						variant={sortBy === "newest" ? "default" : "secondary"}
-						onClick={() => setSortBy("newest")}
-						className="flex-1"
-						size="sm"
-					>
-						Newest First
-					</Button>
-					<Button
-						variant={sortBy === "oldest" ? "default" : "secondary"}
-						onClick={() => setSortBy("oldest")}
-						className="flex-1"
-						size="sm"
-					>
-						Oldest First
-					</Button>
+				<div className="flex items-center gap-2">
+					<span className="text-xs text-muted-foreground font-medium">Sort:</span>
+					<div className="flex gap-1">
+						<Button
+							variant={sortBy === "newest" ? "default" : "ghost"}
+							onClick={() => setSortBy("newest")}
+							size="sm"
+							className="h-8"
+						>
+							Newest
+						</Button>
+						<Button
+							variant={sortBy === "oldest" ? "default" : "ghost"}
+							onClick={() => setSortBy("oldest")}
+							size="sm"
+							className="h-8"
+						>
+							Oldest
+						</Button>
+					</div>
 				</div>
 			</div>
 
 			{/* Runs List */}
-			<div className="flex-1 overflow-auto p-4 space-y-2">
-				{isLoading && (
-					<div className="flex items-center justify-center py-12">
-						<Loader2 className="w-8 h-8 text-primary animate-spin" />
-					</div>
-				)}
+			<ScrollArea className="flex-1">
+				<div className="p-3 space-y-2">
+					{isLoading && (
+						<div className="flex flex-col items-center justify-center py-16">
+							<Loader2 className="w-8 h-8 text-primary animate-spin mb-3" />
+							<p className="text-sm text-muted-foreground">Loading runs...</p>
+						</div>
+					)}
 
-				{!isLoading && runs.length === 0 && (
-					<div className="text-center py-12 text-sm text-muted-foreground">
-						<Clock className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-						<p>No runs found</p>
-					</div>
-				)}
+					{!isLoading && runs.length === 0 && (
+						<div className="text-center py-16">
+							<div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted/50 flex items-center justify-center">
+								<Clock className="w-8 h-8 text-muted-foreground/40" />
+							</div>
+							<p className="text-sm font-medium text-foreground">No test runs found</p>
+							<p className="text-xs text-muted-foreground mt-1">
+								{searchQuery || filterType !== 'all' || filterStatus !== 'all'
+									? 'Try adjusting your filters'
+									: 'Run your first load test to see results here'}
+							</p>
+						</div>
+					)}
 
-				{!isLoading && runs.map((run) => (
-					<RunItem
-						key={run.id}
-						run={run}
-						onSelect={navigateToRunDetail}
-						onDelete={handleDelete}
-						isDeleting={deletingId === run.id}
-					/>
-				))}
-			</div>
+					{!isLoading && runs.map((run) => (
+						<RunItem
+							key={run.id}
+							run={run}
+							onSelect={navigateToRunDetail}
+							onDelete={handleDelete}
+							isDeleting={deletingId === run.id}
+						/>
+					))}
+				</div>
+			</ScrollArea>
 		</div>
 	);
 }
@@ -138,74 +162,135 @@ interface RunItemProps {
 }
 
 function RunItem({ run, onSelect, onDelete, isDeleting }: RunItemProps) {
-	const statusVariants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-		pending: "secondary",
-		running: "default",
-		completed: "default",
-		stopped: "outline",
-		failed: "destructive",
-	};
-
 	// Format timestamp to relative time
 	const formatTime = (timestamp: number) => {
 		if (!timestamp) return "Unknown";
 		return formatRelativeTime(new Date(timestamp).toISOString());
 	};
 
-	// Get URL from configSnapshot if available
+	// Get URL and method from configSnapshot
 	const getRequestInfo = () => {
-		if (!run.configSnapshot) return null;
-		if (run.configSnapshot.request?.url) {
-			return run.configSnapshot.request.url;
-		}
-		if (run.configSnapshot.url) {
-			return run.configSnapshot.url;
-		}
-		return null;
+		if (!run.configSnapshot) return { url: null, method: null };
+		const url = run.configSnapshot.request?.url || run.configSnapshot.url || null;
+		const method = run.configSnapshot.request?.method || run.configSnapshot.method || 'GET';
+		return { url, method };
 	};
 
-	const requestUrl = getRequestInfo();
+	const { url: requestUrl, method } = getRequestInfo();
+
+	// Get status icon and color
+	const getStatusIcon = () => {
+		switch (run.status) {
+			case 'completed':
+				return <CheckCircle2 className="w-4 h-4 text-green-500" />;
+			case 'failed':
+				return <XCircle className="w-4 h-4 text-red-500" />;
+			case 'running':
+				return <Activity className="w-4 h-4 text-blue-500 animate-pulse" />;
+			case 'stopped':
+				return <StopCircle className="w-4 h-4 text-orange-500" />;
+			default:
+				return <Clock className="w-4 h-4 text-muted-foreground" />;
+		}
+	};
 
 	return (
 		<div
 			onClick={() => onSelect(run.id)}
-			className="p-3 bg-card border rounded hover:border-primary cursor-pointer transition-colors group"
+			className="group relative bg-card border rounded-lg hover:border-primary hover:shadow-sm cursor-pointer transition-all overflow-hidden"
 		>
-			<div className="flex items-start justify-between mb-2">
-				<div className="flex items-center gap-2">
-					<Badge variant="outline" className={cn(
-						"text-xs",
-						run.type === "load"
-							? "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300"
-							: "bg-muted text-muted-foreground"
-					)}>
-						{run.type === "design" ? "DESIGN" : "LOAD TEST"}
-					</Badge>
-					<Badge variant={statusVariants[run.status] || "secondary"} className="text-xs">
-						{run.status}
-					</Badge>
+			{/* Status color indicator */}
+			<div className={cn(
+				"absolute left-0 top-0 bottom-0 w-1",
+				run.status === 'completed' && "bg-green-500",
+				run.status === 'failed' && "bg-red-500",
+				run.status === 'running' && "bg-blue-500",
+				run.status === 'stopped' && "bg-orange-500",
+				run.status === 'pending' && "bg-muted-foreground"
+			)} />
+
+			<div className="pl-4 pr-3 py-3">
+				{/* Header Row */}
+				<div className="flex items-start justify-between gap-2 mb-2">
+					<div className="flex items-center gap-2 min-w-0 flex-1">
+						{getStatusIcon()}
+						<span className={cn(
+							"text-xs font-medium capitalize",
+							run.status === 'completed' && "text-green-600 dark:text-green-400",
+							run.status === 'failed' && "text-red-600 dark:text-red-400",
+							run.status === 'running' && "text-blue-600 dark:text-blue-400",
+							run.status === 'stopped' && "text-orange-600 dark:text-orange-400",
+							run.status === 'pending' && "text-muted-foreground"
+						)}>
+							{run.status}
+						</span>
+						<span className="text-xs text-muted-foreground">•</span>
+						<span className="text-xs text-muted-foreground">{formatTime(run.startTime)}</span>
+					</div>
+					<div className="flex items-center gap-1 shrink-0">
+						{run.type === 'load' && (
+							<Zap className="w-3.5 h-3.5 text-purple-500" />
+						)}
+						<Button
+							variant="ghost"
+							size="icon"
+							onClick={(e) => onDelete(run.id, e)}
+							disabled={isDeleting}
+							className="opacity-0 group-hover:opacity-100 h-7 w-7 hover:bg-destructive/10 hover:text-destructive transition-opacity"
+						>
+							{isDeleting ? (
+								<Loader2 className="w-3.5 h-3.5 animate-spin" />
+							) : (
+								<Trash2 className="w-3.5 h-3.5" />
+							)}
+						</Button>
+					</div>
 				</div>
-				<Button
-					variant="ghost"
-					size="icon"
-					onClick={(e) => onDelete(run.id, e)}
-					disabled={isDeleting}
-					className="opacity-0 group-hover:opacity-100 h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-all"
-				>
-					{isDeleting ? (
-						<Loader2 className="w-4 h-4 animate-spin" />
-					) : (
-							<Trash2 className="w-4 h-4" />
-					)}
-				</Button>
-			</div>
 
-			<p className="text-sm font-medium text-foreground mb-1 truncate">
-				{requestUrl || run.id}
-			</p>
+				{/* Request Info */}
+				{requestUrl && (
+					<div className="flex items-start gap-2 mb-1">
+						{method && (
+							<Badge variant="outline" className={cn(
+								"text-[10px] h-5 px-1.5 font-mono shrink-0",
+								method === 'GET' && "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900",
+								method === 'POST' && "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-400 dark:border-green-900",
+								method === 'PUT' && "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-900",
+								method === 'DELETE' && "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900"
+							)}>
+								{method}
+							</Badge>
+						)}
+						<p className="text-xs text-foreground font-medium truncate flex-1 leading-5">
+							{requestUrl}
+						</p>
+					</div>
+				)}
 
-			<div className="flex items-center gap-3 text-xs text-muted-foreground">
-				<span>{formatTime(run.startTime)}</span>
+				{/* Config Info (if load test) */}
+				{run.type === 'load' && run.configSnapshot?.configuration && (
+					<div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1.5">
+						{run.configSnapshot.configuration.duration && (
+							<span className="flex items-center gap-1">
+								<Clock className="w-3 h-3" />
+								{run.configSnapshot.configuration.duration}
+							</span>
+						)}
+						{run.configSnapshot.configuration.concurrency && (
+							<span className="flex items-center gap-1">
+								<Activity className="w-3 h-3" />
+								{run.configSnapshot.configuration.concurrency} workers
+							</span>
+						)}
+					</div>
+				)}
+
+				{/* Comment if exists */}
+				{run.configSnapshot?.configuration?.comment && (
+					<p className="text-xs text-muted-foreground italic mt-1.5 truncate">
+						"{run.configSnapshot.configuration.comment}"
+					</p>
+				)}
 			</div>
 		</div>
 	);

@@ -39,15 +39,19 @@ export function useEngine(): UseEngineReturn {
 
 			try {
 				// Build the request body according to API documentation
+				// Backend expects body as { mode: string, content: string }
+				const bodyPayload = request.body
+					? {
+						mode: request.body_type || "text",
+						content: request.body,
+					}
+					: undefined;
+
 				const result = await apiService.executeRequest({
 					method: request.method,
 					url: request.url,
 					headers: request.headers,
-					body: request.body
-						? request.body_type === "json"
-							? JSON.parse(request.body)
-							: request.body
-						: undefined,
+					body: bodyPayload,
 					auth: request.auth,
 					preRequestScript: request.pre_request_script,
 					postRequestScript: request.test_script,
@@ -92,17 +96,21 @@ export function useEngine(): UseEngineReturn {
 
 			try {
 				// Build payload matching backend POST /run expectations
+				// Backend expects body as { mode: string, content: string }
+				const bodyPayload = request.body
+					? {
+						mode: request.body_type || "text",
+						content: request.body,
+					}
+					: undefined;
+
 				const payload: StartLoadTestRequest = {
 					// The HTTP request configuration
 					request: {
 						method: request.method,
 						url: request.url,
 						headers: request.headers,
-						body: request.body
-							? request.body_type === "json"
-								? JSON.parse(request.body)
-								: request.body
-							: undefined,
+						body: bodyPayload,
 					},
 					// Load test strategy
 					mode: config.mode === "constant_rps" || config.mode === "constant_concurrency"

@@ -370,6 +370,9 @@ struct DetailedReport {
     double target_rps;       // Configured target RPS (0 if unlimited)
     double actual_rps;       // Actual RPS achieved
     double rps_achievement;  // Percentage of target achieved
+
+    // Phase 2: Timing context
+    double setup_overhead_s;  // Time from run creation to test start (seconds)
 };
 
 // ============================================================================
@@ -499,7 +502,12 @@ enum class MetricName {
     TestsValidating,
     TestsPassed,
     TestsFailed,
-    TestsSampled
+    TestsSampled,
+    // Status code distribution
+    StatusCodes,
+    // Duration metrics
+    TestDuration,  // Actual test execution time in seconds
+    SetupOverhead  // Time spent on setup/teardown in seconds
 };
 
 inline const char* to_string(MetricName name) {
@@ -534,6 +542,12 @@ inline const char* to_string(MetricName name) {
             return "tests_failed";
         case MetricName::TestsSampled:
             return "tests_sampled";
+        case MetricName::StatusCodes:
+            return "status_codes";
+        case MetricName::TestDuration:
+            return "test_duration";
+        case MetricName::SetupOverhead:
+            return "setup_overhead";
     }
     return "unknown";
 }
@@ -554,6 +568,9 @@ inline std::optional<MetricName> parse_metric_name(const std::string& str) {
     if (str == "tests_passed") return MetricName::TestsPassed;
     if (str == "tests_failed") return MetricName::TestsFailed;
     if (str == "tests_sampled") return MetricName::TestsSampled;
+    if (str == "status_codes") return MetricName::StatusCodes;
+    if (str == "test_duration") return MetricName::TestDuration;
+    if (str == "setup_overhead") return MetricName::SetupOverhead;
     return std::nullopt;
 }
 

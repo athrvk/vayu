@@ -36,7 +36,7 @@ import type { Request, HttpMethod, LoadTestConfig, StartLoadTestRequest } from "
  * Gets request ID from store, fetches data, and provides context
  */
 export default function RequestBuilder() {
-    const { selectedRequestId, setActiveScreen } = useAppStore();
+    const { selectedRequestId, navigateToDashboard } = useAppStore();
     const { activeEnvironmentId } = useEnvironmentStore();
     const { startRun } = useDashboardStore();
     const { executeRequest: engineExecuteRequest } = useEngine();
@@ -225,13 +225,21 @@ export default function RequestBuilder() {
                 ? resolveString(pendingLoadTestRequest.body)
                 : pendingLoadTestRequest.body;
 
+            // Build body in the format backend expects: { mode, content }
+            const bodyPayload = resolvedBody
+                ? {
+                    mode: pendingLoadTestRequest.bodyMode || "text",
+                    content: resolvedBody,
+                }
+                : undefined;
+
             // Convert LoadTestConfig to StartLoadTestRequest
             const apiRequest: StartLoadTestRequest = {
                 request: {
                     method: pendingLoadTestRequest.method,
                     url: resolvedUrl,
                     headers: resolvedHeaders,
-                    body: resolvedBody,
+                    body: bodyPayload,
                 },
                 mode: config.mode === "constant_rps" ? "constant" :
                     config.mode === "constant_concurrency" ? "constant" :
@@ -252,8 +260,23 @@ export default function RequestBuilder() {
             const result = await apiService.startLoadTest(apiRequest);
 
             // Set the active run ID and switch to dashboard
-            startRun(result.runId);
-            setActiveScreen("dashboard");
+            // Pass config and request info so dashboard can show them during live streaming
+            startRun(
+                result.runId,
+                {
+                    mode: apiRequest.mode,
+                    duration: apiRequest.duration,
+                    targetRps: apiRequest.targetRps,
+                    concurrency: apiRequest.concurrency,
+                    iterations: apiRequest.iterations,
+                    comment: apiRequest.comment,
+                },
+                {
+                    method: apiRequest.request.method,
+                    url: apiRequest.request.url,
+                }
+            );
+            navigateToDashboard();
             setShowLoadTestDialog(false);
             setPendingLoadTestRequest(null);
         } catch (error) {
@@ -262,7 +285,7 @@ export default function RequestBuilder() {
         } finally {
             setIsStartingLoadTest(false);
         }
-    }, [pendingLoadTestRequest, fetchedRequest, activeEnvironmentId, startRun, setActiveScreen, resolveString]);
+    }, [pendingLoadTestRequest, fetchedRequest, activeEnvironmentId, startRun, navigateToDashboard, resolveString]);
 
     // Close load test dialog
     const handleCloseLoadTestDialog = useCallback(() => {

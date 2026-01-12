@@ -129,13 +129,26 @@ public:
                 static_cast<size_t>((static_cast<double>(duration_ms) / 1000.0) * target_rps);
             context->requests_expected = expected;
 
-            // For high RPS, submit in batches to reduce loop overhead
-            // Batch interval: 1ms = 1000us, batch_size = target_rps / 1000
-            constexpr int64_t BATCH_INTERVAL_US = 1000;  // 1ms batches
-            size_t batch_size = std::max(static_cast<size_t>(target_rps / 1000.0), size_t(1));
+            // Calculate correct interval between requests based on target RPS
+            // For 10 RPS: interval = 1,000,000 / 10 = 100,000 us = 100ms
+            // For 1000 RPS: interval = 1,000,000 / 1000 = 1,000 us = 1ms
+            // For high RPS (>1000), we batch multiple requests per interval
+            int64_t base_interval_us = static_cast<int64_t>(1000000.0 / target_rps);
+
+            // Minimum interval of 1ms (1000us) to avoid busy-spinning
+            // If target_rps > 1000, we need to submit multiple requests per interval
+            size_t batch_size = 1;
+            int64_t batch_interval_us = base_interval_us;
+
+            if (base_interval_us < 1000) {
+                // High RPS mode: batch requests every 1ms
+                batch_interval_us = 1000;
+                batch_size = std::max(static_cast<size_t>(target_rps / 1000.0), size_t(1));
+            }
 
             vayu::utils::log_debug("Submission config: batch_size=" + std::to_string(batch_size) +
-                                   ", batch_interval_us=" + std::to_string(BATCH_INTERVAL_US));
+                                   ", batch_interval_us=" + std::to_string(batch_interval_us) +
+                                   ", expected_requests=" + std::to_string(expected));
 
             auto test_start = std::chrono::steady_clock::now();
             auto next_batch_time = test_start;
@@ -152,7 +165,7 @@ public:
 
                 // Check if it's time to submit next batch
                 if (now >= next_batch_time) {
-                    // Backpressure check
+                    // Backpressure check - don't overwhelm the event loop
                     size_t max_pending =
                         std::max(static_cast<size_t>(target_rps * 10.0), size_t(1000));
 
@@ -168,11 +181,11 @@ public:
                             context->requests_sent++;
                         }
 
-                        // Schedule next batch
-                        next_batch_time += std::chrono::microseconds(BATCH_INTERVAL_US);
+                        // Schedule next batch using the correct interval
+                        next_batch_time += std::chrono::microseconds(batch_interval_us);
                     } else {
                         // If we're backed up, skip ahead to avoid flooding
-                        next_batch_time = now + std::chrono::microseconds(BATCH_INTERVAL_US);
+                        next_batch_time = now + std::chrono::microseconds(batch_interval_us);
                     }
                 }
 

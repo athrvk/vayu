@@ -41,10 +41,12 @@ export default function UrlInput() {
 
     // Sync params from URL when URL changes directly
     const handleUrlChange = useCallback((newUrl: string) => {
-        updateField("url", newUrl);
+        // Trim leading/trailing whitespace to prevent malformed URL errors
+        const trimmedUrl = newUrl.trim();
+        updateField("url", trimmedUrl);
 
         // Extract and sync params
-        const newParams = parseQueryParams(newUrl);
+        const newParams = parseQueryParams(trimmedUrl);
         if (newParams.length > 0) {
             updateField("params", newParams);
         }

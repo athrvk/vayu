@@ -34,6 +34,8 @@ export default function LoadTestDashboard() {
         finalReport,
         activeView,
         isStopping,
+        loadTestConfig,
+        requestInfo,
         setActiveView,
         stopRun,
         setFinalReport,
@@ -53,7 +55,9 @@ export default function LoadTestDashboard() {
     // Load final report when test completes (with delay and retry)
     useEffect(() => {
         if (mode === "completed" && currentRunId && !finalReport && !isLoadingReport) {
-            const delay = loadAttemptRef.current === 0 ? 1000 : 500;
+            // Longer initial delay to allow database writes to complete
+            // This helps avoid "database is locked" issues
+            const delay = loadAttemptRef.current === 0 ? 3000 : 1000;
 
             const timeoutId = setTimeout(async () => {
                 setIsLoadingReport(true);
@@ -66,7 +70,7 @@ export default function LoadTestDashboard() {
                         if (isValidReport) {
                             setFinalReport(report);
                             loadAttemptRef.current = 0;
-                        } else if (loadAttemptRef.current < 3) {
+                        } else if (loadAttemptRef.current < 5) {
                             console.log(`Report has zero data, retrying... (attempt ${loadAttemptRef.current + 1})`);
                             loadAttemptRef.current++;
                             setIsLoadingReport(false);
@@ -138,6 +142,28 @@ export default function LoadTestDashboard() {
 
     const runMetadata = hasValidReportData ? finalReport?.metadata : null;
 
+    // Build configuration from stored config or final report
+    // This ensures config is shown during live streaming, not just after report loads
+    const displayConfiguration = useMemo(() => {
+        if (runMetadata?.configuration) {
+            return runMetadata.configuration;
+        }
+        if (loadTestConfig) {
+            return {
+                mode: loadTestConfig.mode,
+                duration: loadTestConfig.duration,
+                targetRps: loadTestConfig.targetRps,
+                concurrency: loadTestConfig.concurrency,
+                comment: loadTestConfig.comment,
+            };
+        }
+        return undefined;
+    }, [runMetadata?.configuration, loadTestConfig]);
+
+    // Build request info from stored info or final report
+    const displayRequestUrl = runMetadata?.requestUrl ?? requestInfo?.url;
+    const displayRequestMethod = runMetadata?.requestMethod ?? requestInfo?.method;
+
     // Calculate times
     const historicalStartTime = historicalMetrics.length > 0 ? historicalMetrics[0].timestamp : null;
     const historicalEndTime = mode === "completed" && historicalMetrics.length > 0
@@ -153,12 +179,16 @@ export default function LoadTestDashboard() {
         : historicalEndTime;
 
     const elapsedDuration = useMemo(() => {
+        // Use accurate testDuration from report if available (in seconds, convert to ms)
+        if (mode === "completed" && finalReport?.summary?.testDuration) {
+            return finalReport.summary.testDuration * 1000;
+        }
         if (historicalMetrics.length > 0) {
             const lastMetric = historicalMetrics[historicalMetrics.length - 1];
             return lastMetric.elapsed_seconds * 1000;
         }
         return startTime && endTime ? endTime - startTime : 0;
-    }, [historicalMetrics, startTime, endTime]);
+    }, [mode, finalReport?.summary?.testDuration, historicalMetrics, startTime, endTime]);
 
     return (
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -174,13 +204,14 @@ export default function LoadTestDashboard() {
 
                 {/* Run Metadata */}
                 <RunMetadata
-                    requestUrl={runMetadata?.requestUrl}
-                    requestMethod={runMetadata?.requestMethod}
+                    requestUrl={displayRequestUrl}
+                    requestMethod={displayRequestMethod}
                     startTime={startTime ?? undefined}
                     endTime={endTime ?? undefined}
                     mode={mode}
                     elapsedDuration={elapsedDuration}
-                    configuration={runMetadata?.configuration}
+                    setupOverhead={finalReport?.summary?.setupOverhead}
+                    configuration={displayConfiguration}
                 />
 
                 {/* View Toggle */}

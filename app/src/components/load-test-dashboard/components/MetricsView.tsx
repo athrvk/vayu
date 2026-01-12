@@ -116,21 +116,33 @@ export default function MetricsView({ metrics, historicalMetrics, isCompleted }:
                         </div>
                         <div>
                             <p className="text-sm text-muted-foreground">P50</p>
-                            <p className="text-2xl font-bold text-foreground">
-                                {(metrics.latency_p50_ms ?? 0).toFixed(2)}ms
-                            </p>
+                            {isCompleted ? (
+                                <p className="text-2xl font-bold text-foreground">
+                                    {(metrics.latency_p50_ms ?? 0).toFixed(2)}ms
+                                </p>
+                            ) : (
+                                <p className="text-sm text-muted-foreground italic">Calculating...</p>
+                            )}
                         </div>
                         <div>
                             <p className="text-sm text-muted-foreground">P95</p>
-                            <p className="text-2xl font-bold text-foreground">
-                                {(metrics.latency_p95_ms ?? 0).toFixed(2)}ms
-                            </p>
+                            {isCompleted ? (
+                                <p className="text-2xl font-bold text-foreground">
+                                    {(metrics.latency_p95_ms ?? 0).toFixed(2)}ms
+                                </p>
+                            ) : (
+                                <p className="text-sm text-muted-foreground italic">Calculating...</p>
+                            )}
                         </div>
                         <div>
                             <p className="text-sm text-muted-foreground">P99</p>
-                            <p className="text-2xl font-bold text-foreground">
-                                {(metrics.latency_p99_ms ?? 0).toFixed(2)}ms
-                            </p>
+                            {isCompleted ? (
+                                <p className="text-2xl font-bold text-foreground">
+                                    {(metrics.latency_p99_ms ?? 0).toFixed(2)}ms
+                                </p>
+                            ) : (
+                                <p className="text-sm text-muted-foreground italic">Calculating...</p>
+                            )}
                         </div>
                     </div>
                 </CardContent>

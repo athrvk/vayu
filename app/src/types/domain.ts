@@ -187,6 +187,9 @@ export interface RunReport {
 		errorRate: number;
 		totalDurationSeconds: number;
 		avgRps: number;
+		// Phase 2: Accurate timing metrics
+		testDuration?: number;      // Actual test duration in seconds
+		setupOverhead?: number;     // Context overhead before test started (seconds)
 	};
 	// Latency section
 	latency: {
@@ -245,16 +248,23 @@ export interface RunReport {
 		latencyMs: number;
 		error?: string;
 		trace?: {
+			// Success trace fields (camelCase from backend)
+			totalMs?: number;
+			dnsMs?: number;
+			connectMs?: number;
+			tlsMs?: number;
+			firstByteMs?: number;
+			downloadMs?: number;
+			isSlow?: boolean;
+			thresholdMs?: number;
+			// Error trace fields
+			request_number?: number;
+			error_code?: number;
+			error_type?: string;
+			message?: string;
+			// Legacy/optional fields
 			headers?: Record<string, string>;
 			body?: string;
-			dns_ms?: number;
-			connect_ms?: number;
-			tls_ms?: number;
-			first_byte_ms?: number;
-			download_ms?: number;
-			error_type?: string;
-			is_slow?: boolean;
-			threshold_ms?: number;
 		};
 	}>;
 }

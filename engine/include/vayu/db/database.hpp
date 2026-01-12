@@ -41,6 +41,7 @@ public:
     std::optional<Run> get_run(const std::string& id);
     void update_run_status(const std::string& id, RunStatus status);
     void update_run_status_with_retry(const std::string& id, RunStatus status, int max_retries = 3);
+    void update_run_end_time(const std::string& id);  // Update end_time without changing status
     std::vector<Run> get_all_runs();
     void delete_run(const std::string& id);
 

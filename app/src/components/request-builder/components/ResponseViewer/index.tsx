@@ -11,7 +11,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { Clock, FileText, Copy, Check, Download, Terminal, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronRight, Image as ImageIcon, FileCode, File } from "lucide-react";
+import { Clock, FileText, Copy, Check, Download, Terminal, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronRight, Image as ImageIcon, FileCode, File, BarChart3 } from "lucide-react";
 import Editor from "@monaco-editor/react";
 import {
     Tabs,
@@ -28,6 +28,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context";
+import { useAppStore, useDashboardStore } from "@/stores";
 
 // Extended body type to support more response formats
 type BodyType = "json" | "html" | "xml" | "text" | "binary" | "image" | "pdf" | "javascript" | "css" | "markdown";
@@ -116,8 +117,17 @@ function detectBodyType(headers: Record<string, string>, body: string): BodyType
 
 export default function ResponseViewer() {
     const { response, isExecuting } = useRequestBuilderContext();
+    const { navigateToDashboard } = useAppStore();
+    const { currentRunId, mode: dashboardMode } = useDashboardStore();
     const [activeTab, setActiveTab] = useState<ResponseTab>("body");
     const [copied, setCopied] = useState(false);
+
+    // Check if there's a load test dashboard available
+    const hasLoadTestDashboard = !!currentRunId;
+
+    const handleViewLoadTest = () => {
+        navigateToDashboard();
+    };
 
     // Loading state
     if (isExecuting) {
@@ -135,10 +145,28 @@ export default function ResponseViewer() {
     if (!response) {
         return (
             <div className="flex-1 flex items-center justify-center bg-card">
-                <div className="text-center space-y-2">
+                <div className="text-center space-y-4">
                     <FileText className="w-12 h-12 mx-auto text-muted-foreground/50" />
-                    <p className="text-muted-foreground">Response will appear here</p>
-                    <p className="text-xs text-muted-foreground/70">Send a request to see the response</p>
+                    <div className="space-y-2">
+                        <p className="text-muted-foreground">Response will appear here</p>
+                        <p className="text-xs text-muted-foreground/70">Send a request to see the response</p>
+                    </div>
+
+                    {/* Show button to view load test dashboard if available */}
+                    {hasLoadTestDashboard && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleViewLoadTest}
+                            className="mt-4"
+                        >
+                            <BarChart3 className="w-4 h-4 mr-2" />
+                            View Load Test Dashboard
+                            {dashboardMode === "running" && (
+                                <Badge variant="default" className="ml-2 text-xs">Live</Badge>
+                            )}
+                        </Button>
+                    )}
                 </div>
             </div>
         );
@@ -225,13 +253,33 @@ export default function ResponseViewer() {
                                 value="raw-request"
                                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
                             >
-                                Raw Request
+                                Raw
                             </TabsTrigger>
                         )}
                     </TabsList>
 
                     {/* Actions */}
                     <div className="flex items-center gap-1">
+                        {/* View Load Test Dashboard button */}
+                        {hasLoadTestDashboard && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={handleViewLoadTest}
+                                        className="gap-1.5"
+                                    >
+                                        <BarChart3 className="w-4 h-4" />
+                                        <span className="hidden sm:inline">Load Test</span>
+                                        {dashboardMode === "running" && (
+                                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                                        )}
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>View Load Test Dashboard</TooltipContent>
+                            </Tooltip>
+                        )}
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Button size="icon" variant="ghost" onClick={handleCopy}>
@@ -258,7 +306,7 @@ export default function ResponseViewer() {
                     {activeTab === "cookies" && <ResponseCookies headers={response.headers} />}
                     {activeTab === "console" && <ConsoleOutput logs={response.consoleLogs || []} errors={{ pre: response.preScriptError, post: response.postScriptError }} />}
                     {activeTab === "tests" && <TestResults results={response.testResults || []} />}
-                    {activeTab === "raw-request" && <RawRequest rawRequest={response.rawRequest || ""} />}
+                    {activeTab === "raw-request" && <RawRequestResponse rawRequest={response.rawRequest || ""} response={response} />}
                 </div>
             </Tabs>
         </div>
@@ -719,16 +767,49 @@ function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
     );
 }
 
-// Raw Request Viewer
-interface RawRequestProps {
+// Raw Request & Response Viewer (similar to Postman)
+interface RawRequestResponseProps {
     rawRequest: string;
+    response: {
+        status: number;
+        statusText: string;
+        headers: Record<string, string>;
+        body: string;
+    };
 }
 
-function RawRequest({ rawRequest }: RawRequestProps) {
-    if (!rawRequest) {
+function RawRequestResponse({ rawRequest, response }: RawRequestResponseProps) {
+    // Build raw HTTP response string
+    const buildRawResponse = () => {
+        let raw = `HTTP/1.1 ${response.status} ${response.statusText}\r\n`;
+
+        // Add response headers
+        for (const [key, value] of Object.entries(response.headers)) {
+            raw += `${key}: ${value}\r\n`;
+        }
+
+        // Empty line between headers and body
+        raw += "\r\n";
+
+        // Add body
+        if (response.body) {
+            raw += response.body;
+        }
+
+        return raw;
+    };
+
+    const rawResponse = buildRawResponse();
+
+    // Combine request and response with a separator
+    const combinedRaw = rawRequest
+        ? `${rawRequest}\n\n${"─".repeat(60)}\n\n${rawResponse}`
+        : rawResponse;
+
+    if (!rawRequest && !response) {
         return (
             <div className="p-8 text-center text-muted-foreground">
-                No raw request data available
+                No raw data available
             </div>
         );
     }
@@ -737,7 +818,7 @@ function RawRequest({ rawRequest }: RawRequestProps) {
         <Editor
             height="100%"
             language="http"
-            value={rawRequest}
+            value={combinedRaw}
             theme="vs-dark"
             options={{
                 readOnly: true,

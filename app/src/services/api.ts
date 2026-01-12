@@ -56,6 +56,36 @@ function transformCollection(backendCollection: any): Collection {
 	};
 }
 
+// Transform backend RunReport - handles statusCodes array format to object
+function transformRunReport(backendReport: any): RunReport {
+	const report = { ...backendReport };
+	
+	// Backend returns statusCodes as array of tuples: [[200, 50], [404, 10]]
+	// Frontend expects: { "200": 50, "404": 10 }
+	if (Array.isArray(report.statusCodes)) {
+		const statusCodesObj: Record<string, number> = {};
+		for (const entry of report.statusCodes) {
+			if (Array.isArray(entry) && entry.length >= 2) {
+				statusCodesObj[String(entry[0])] = entry[1];
+			}
+		}
+		report.statusCodes = statusCodesObj;
+	}
+	
+	// Also transform errors.byStatusCode if present
+	if (report.errors && Array.isArray(report.errors.byStatusCode)) {
+		const byStatusCodeObj: Record<string, number> = {};
+		for (const entry of report.errors.byStatusCode) {
+			if (Array.isArray(entry) && entry.length >= 2) {
+				byStatusCodeObj[String(entry[0])] = entry[1];
+			}
+		}
+		report.errors.byStatusCode = byStatusCodeObj;
+	}
+	
+	return report as RunReport;
+}
+
 export const apiService = {
 	// Health & Configuration
 	async getHealth(): Promise<EngineHealth> {
@@ -274,9 +304,10 @@ export const apiService = {
 	},
 
 	async getRunReport(id: string): Promise<RunReport> {
-		return await httpClient.get<GetRunReportResponse>(
+		const response = await httpClient.get<GetRunReportResponse>(
 			API_ENDPOINTS.RUN_REPORT(id)
 		);
+		return transformRunReport(response);
 	},
 
 	async stopRun(id: string): Promise<StopRunResponse> {

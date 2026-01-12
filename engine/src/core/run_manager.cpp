@@ -253,14 +253,14 @@ void RunManager::start_run(const std::string& run_id,
     auto context = std::make_shared<RunContext>(run_id, config);
     register_run(run_id, context);
 
+    // Spawn metrics collection thread first (will be joined by worker thread)
+    context->metrics_thread = std::thread([context, &db]() { collect_metrics(context, &db); });
+    // Note: metrics_thread is NOT detached - it will be joined by the worker thread
+
     // Spawn background thread for execution
     context->worker_thread = std::thread(
         [context, &db, verbose, this]() { execute_load_test(context, &db, verbose, *this); });
     context->worker_thread.detach();
-
-    // Spawn metrics collection thread
-    context->metrics_thread = std::thread([context, &db]() { collect_metrics(context, &db); });
-    context->metrics_thread.detach();
 }
 
 void execute_load_test(std::shared_ptr<RunContext> context,
@@ -331,15 +331,25 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         // Wait for all requests to complete
         context->event_loop->stop(true);  // Wait for pending
 
-        // SOLUTION 2: Stop background metrics collection FIRST to prevent database lock conflicts
-        context->is_running = false;
-
-        // Wait for metrics thread to complete its current cycle and exit
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-        // Calculate final metrics
+        // Record test end time immediately (before cleanup overhead)
         auto test_end = std::chrono::steady_clock::now();
         double total_duration_s = std::chrono::duration<double>(test_end - test_start).count();
+
+        // Update end_time in DB immediately to reflect actual test end
+        // (not after cleanup/metrics thread join)
+        db.update_run_end_time(context->run_id);
+
+        // Stop background metrics collection and wait for thread to finish
+        context->is_running = false;
+
+        // Properly join the metrics thread to ensure it's done writing to DB
+        if (context->metrics_thread.joinable()) {
+            context->metrics_thread.join();
+        }
+
+        // Calculate cleanup overhead (time from test end to after cleanup)
+        auto cleanup_end = std::chrono::steady_clock::now();
+        double setup_overhead_s = std::chrono::duration<double>(cleanup_end - test_end).count();
 
         size_t completed = context->total_requests();
         size_t errors = context->total_errors();
@@ -387,6 +397,37 @@ void execute_load_test(std::shared_ptr<RunContext> context,
                            static_cast<double>(completed),
                            ""});
             db.add_metric({0, context->run_id, timestamp, vayu::MetricName::Completed, 1.0, ""});
+
+            // Store actual test duration (excludes setup/teardown overhead)
+            db.add_metric({0,
+                           context->run_id,
+                           timestamp,
+                           vayu::MetricName::TestDuration,
+                           total_duration_s,
+                           ""});
+
+            // Store setup/teardown overhead for diagnostic purposes
+            db.add_metric({0,
+                           context->run_id,
+                           timestamp,
+                           vayu::MetricName::SetupOverhead,
+                           setup_overhead_s,
+                           ""});
+
+            // Store status code distribution as JSON in metadata field
+            auto status_codes = context->metrics_collector->status_code_distribution();
+            if (!status_codes.empty()) {
+                nlohmann::json status_codes_json;
+                for (const auto& [code, count] : status_codes) {
+                    status_codes_json[std::to_string(code)] = count;
+                }
+                db.add_metric({0,
+                               context->run_id,
+                               timestamp,
+                               vayu::MetricName::StatusCodes,
+                               0.0,
+                               status_codes_json.dump()});
+            }
         } catch (const std::exception& e) {
             vayu::utils::log_error("Failed to store final metrics: " + std::string(e.what()));
         }
