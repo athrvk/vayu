@@ -338,7 +338,15 @@ void register_execution_routes(RouteContext& ctx) {
 
             // Extract config for logging
             std::string mode = json.value("mode", "unspecified");
-            int duration = json.value("duration", 0);
+            // Duration can be a string like "10s" or a number
+            std::string duration_str = "0s";
+            if (json.contains("duration")) {
+                if (json["duration"].is_string()) {
+                    duration_str = json["duration"].get<std::string>();
+                } else if (json["duration"].is_number()) {
+                    duration_str = std::to_string(json["duration"].get<int>()) + "s";
+                }
+            }
             int iterations = json.value("iterations", 0);
             int rps = json.value("rps", json.value("targetRps", 0));
             int concurrency = json.value("concurrency", 1);
@@ -372,12 +380,12 @@ void register_execution_routes(RouteContext& ctx) {
             std::string req_id = run.request_id.value_or("none");
 
             // Log comprehensive Load Test config
-            vayu::utils::log_info("POST /run - Load Test: run_id=" + run_id + ", mode=" + mode +
-                                  ", method=" + method_str + ", url=" + url_str +
-                                  ", duration=" + std::to_string(duration) + "s" + ", iterations=" +
-                                  std::to_string(iterations) + ", rps=" + std::to_string(rps) +
-                                  ", concurrency=" + std::to_string(concurrency) +
-                                  ", request_id=" + req_id + ", environment_id=" + env_id);
+            vayu::utils::log_info(
+                "POST /run - Load Test: run_id=" + run_id + ", mode=" + mode +
+                ", method=" + method_str + ", url=" + url_str + ", duration=" + duration_str +
+                ", iterations=" + std::to_string(iterations) + ", rps=" + std::to_string(rps) +
+                ", concurrency=" + std::to_string(concurrency) + ", request_id=" + req_id +
+                ", environment_id=" + env_id);
 
             ctx.db.create_run(run);
 

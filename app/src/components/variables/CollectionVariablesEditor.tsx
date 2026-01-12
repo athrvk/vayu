@@ -2,11 +2,13 @@
  * Collection Variables Editor
  * 
  * Editor for variables scoped to a specific collection.
+ * Uses centralized save store for auto-save with visual feedback.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Folder, Trash2, Check } from "lucide-react";
+import { Folder, Trash2 } from "lucide-react";
 import { useUpdateCollectionMutation } from "@/queries";
+import { useSaveStore } from "@/stores/save-store";
 import { Button, Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { Collection, VariableValue } from "@/types";
@@ -24,13 +26,34 @@ interface CollectionVariablesEditorProps {
 
 export default function CollectionVariablesEditor({ collection }: CollectionVariablesEditorProps) {
     const updateMutation = useUpdateCollectionMutation();
+    const {
+        registerContext,
+        unregisterContext,
+        updateContext,
+        setActiveContext,
+        markPendingSave,
+        startSaving,
+        completeSave,
+        failSave,
+        setStatus,
+    } = useSaveStore();
 
     const [variables, setVariables] = useState<VariableRow[]>([]);
-    const [showSaved, setShowSaved] = useState(false);
+    const [hasPendingChanges, setHasPendingChanges] = useState(false);
     const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const variablesRef = useRef<VariableRow[]>([]);
+    const performSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
+    const contextId = `collection-${collection.id}`;
+
+    // Keep variablesRef in sync
+    useEffect(() => {
+        variablesRef.current = variables;
+    }, [variables]);
 
     // Auto-save function
-    const performSave = useCallback((varsToSave: VariableRow[]) => {
+    const performSave = useCallback(async () => {
+        const varsToSave = variablesRef.current;
         const variablesObj: Record<string, VariableValue> = {};
 
         varsToSave.forEach((v) => {
@@ -42,35 +65,71 @@ export default function CollectionVariablesEditor({ collection }: CollectionVari
             }
         });
 
-        updateMutation.mutate({
-            id: collection.id,
-            name: collection.name,
-            variables: variablesObj,
-        }, {
-            onSuccess: () => {
-                setShowSaved(true);
-                setTimeout(() => setShowSaved(false), 2000);
-            }
-        });
-    }, [updateMutation, collection.id, collection.name]);
+        startSaving();
 
-    // Debounced save - triggers after user stops typing
-    const debouncedSave = useCallback((varsToSave: VariableRow[]) => {
-        if (saveTimeoutRef.current) {
-            clearTimeout(saveTimeoutRef.current);
-        }
-        saveTimeoutRef.current = setTimeout(() => {
-            performSave(varsToSave);
-        }, 800);
+        return new Promise<void>((resolve, reject) => {
+            updateMutation.mutate({
+                id: collection.id,
+                name: collection.name,
+                variables: variablesObj,
+            }, {
+                onSuccess: () => {
+                    setHasPendingChanges(false);
+                    completeSave();
+                    setTimeout(() => setStatus("idle"), 2000);
+                    resolve();
+                },
+                onError: (error) => {
+                    failSave(error instanceof Error ? error.message : "Save failed");
+                    reject(error);
+                }
+            });
+        });
+    }, [updateMutation, collection.id, collection.name, startSaving, completeSave, failSave, setStatus]);
+
+    // Keep performSaveRef updated
+    useEffect(() => {
+        performSaveRef.current = performSave;
     }, [performSave]);
 
-    // Cleanup timeout on unmount
+    // Register save context on mount
     useEffect(() => {
+        registerContext({
+            id: contextId,
+            name: `Collection: ${collection.name}`,
+            save: () => performSaveRef.current(),
+            hasPendingChanges: false,
+        });
+        setActiveContext(contextId);
+
         return () => {
+            unregisterContext(contextId);
             if (saveTimeoutRef.current) {
                 clearTimeout(saveTimeoutRef.current);
             }
         };
+    }, [contextId, collection.name, registerContext, unregisterContext, setActiveContext]);
+
+    // Update context when hasPendingChanges changes
+    useEffect(() => {
+        updateContext(contextId, { hasPendingChanges });
+    }, [contextId, hasPendingChanges, updateContext]);
+
+    // Handle blur - save when user leaves the field
+    const handleBlur = useCallback(() => {
+        if (hasPendingChanges) {
+            if (saveTimeoutRef.current) {
+                clearTimeout(saveTimeoutRef.current);
+            }
+            performSaveRef.current();
+        }
+    }, [hasPendingChanges]);
+
+    // Handle focus - cancel any pending save
+    const handleFocus = useCallback(() => {
+        if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current);
+        }
     }, []);
 
     // Initialize variables from collection data
@@ -98,7 +157,8 @@ export default function CollectionVariablesEditor({ collection }: CollectionVari
         }
 
         setVariables(newVariables);
-        debouncedSave(newVariables);
+        setHasPendingChanges(true);
+        markPendingSave(contextId);
     };
 
     const removeVariable = (index: number) => {
@@ -107,7 +167,8 @@ export default function CollectionVariablesEditor({ collection }: CollectionVari
             newVariables.push({ key: '', value: '', enabled: true, isNew: true });
         }
         setVariables(newVariables);
-        debouncedSave(newVariables);
+        setHasPendingChanges(true);
+        performSaveRef.current();
     };
 
     return (
@@ -120,20 +181,6 @@ export default function CollectionVariablesEditor({ collection }: CollectionVari
                         <h2 className="text-lg font-semibold text-foreground">{collection.name}</h2>
                         <p className="text-xs text-muted-foreground">Collection Variables</p>
                     </div>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    {updateMutation.isPending && (
-                        <span className="flex items-center gap-1">
-                            <span className="animate-spin w-3 h-3 border border-orange-500 border-t-transparent rounded-full" />
-                            Saving...
-                        </span>
-                    )}
-                    {showSaved && !updateMutation.isPending && (
-                        <span className="flex items-center gap-1 text-orange-600">
-                            <Check className="w-4 h-4" />
-                            Saved
-                        </span>
-                    )}
                 </div>
             </div>
 
@@ -159,7 +206,10 @@ export default function CollectionVariablesEditor({ collection }: CollectionVari
                                     <input
                                         type="checkbox"
                                         checked={variable.enabled}
-                                        onChange={(e) => updateVariable(index, 'enabled', e.target.checked)}
+                                        onChange={(e) => {
+                                            updateVariable(index, 'enabled', e.target.checked);
+                                            performSaveRef.current();
+                                        }}
                                         className="w-4 h-4 rounded border-input text-primary focus:ring-ring"
                                         disabled={variable.isNew && !variable.key}
                                     />
@@ -169,6 +219,8 @@ export default function CollectionVariablesEditor({ collection }: CollectionVari
                                         type="text"
                                         value={variable.key}
                                         onChange={(e) => updateVariable(index, 'key', e.target.value)}
+                                        onFocus={handleFocus}
+                                        onBlur={handleBlur}
                                         placeholder="variable_name"
                                         className={cn(
                                             "h-8",
@@ -181,6 +233,8 @@ export default function CollectionVariablesEditor({ collection }: CollectionVari
                                         type="text"
                                         value={variable.value}
                                         onChange={(e) => updateVariable(index, 'value', e.target.value)}
+                                        onFocus={handleFocus}
+                                        onBlur={handleBlur}
                                         placeholder="value"
                                         className={cn(
                                             "h-8",
@@ -209,7 +263,6 @@ export default function CollectionVariablesEditor({ collection }: CollectionVari
             {/* Footer */}
             <div className="px-4 py-2 border-t border-border bg-muted/50 text-xs text-muted-foreground">
                 {variables.filter(v => v.key && !v.isNew).length} variable(s)
-                <span className="ml-2">• Auto-saves as you type</span>
             </div>
         </div>
     );

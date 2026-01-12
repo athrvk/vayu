@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "@/stores";
+import { useSaveStore } from "@/stores/save-store";
 import Sidebar from "./Sidebar";
 import RequestBuilder from "../request-builder";
 import LoadTestDashboard from "../load-test-dashboard";
@@ -13,9 +14,23 @@ const MAX_SIDEBAR_WIDTH = 600;
 
 export default function Shell() {
 	const { activeScreen } = useAppStore();
+	const { triggerSave } = useSaveStore();
 	const [sidebarWidth, setSidebarWidth] = useState(320);
 	const [isResizing, setIsResizing] = useState(false);
 	const sidebarRef = useRef<HTMLDivElement>(null);
+
+	// App-wide Ctrl/Cmd+S keyboard handler
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+				e.preventDefault();
+				triggerSave();
+			}
+		};
+
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [triggerSave]);
 
 	const handleMouseDown = () => {
 		setIsResizing(true);

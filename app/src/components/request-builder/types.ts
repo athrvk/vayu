@@ -145,7 +145,7 @@ export interface RequestBuilderContextValue {
     isExecuting: boolean;
     isSaving: boolean;
     hasUnsavedChanges: boolean;
-    saveStatus: 'idle' | 'saving' | 'saved';
+    saveStatus: 'idle' | 'pending' | 'saving' | 'saved' | 'error';
     
     // Variable Resolution
     resolveString: (input: string) => string;

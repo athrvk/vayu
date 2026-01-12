@@ -2,11 +2,13 @@
  * Globals Editor
  * 
  * Editor for global variables that are available across all requests.
+ * Uses centralized save store for auto-save with visual feedback.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Globe, Trash2, AlertCircle, Check } from "lucide-react";
+import { Globe, Trash2, AlertCircle } from "lucide-react";
 import { useGlobalsQuery, useUpdateGlobalsMutation } from "@/queries";
+import { useSaveStore } from "@/stores/save-store";
 import type { VariableValue } from "@/types";
 import { Button, Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -18,16 +20,37 @@ interface VariableRow {
     isNew?: boolean;
 }
 
+const CONTEXT_ID = "globals-editor";
+
 export default function GlobalsEditor() {
     const { data: globalsData, isLoading, error } = useGlobalsQuery();
     const updateMutation = useUpdateGlobalsMutation();
+    const {
+        registerContext,
+        unregisterContext,
+        updateContext,
+        setActiveContext,
+        markPendingSave,
+        startSaving,
+        completeSave,
+        failSave,
+        setStatus,
+    } = useSaveStore();
 
     const [variables, setVariables] = useState<VariableRow[]>([]);
-    const [showSaved, setShowSaved] = useState(false);
+    const [hasPendingChanges, setHasPendingChanges] = useState(false);
     const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const variablesRef = useRef<VariableRow[]>([]);
+    const performSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
+    // Keep variablesRef in sync
+    useEffect(() => {
+        variablesRef.current = variables;
+    }, [variables]);
 
     // Auto-save function
-    const performSave = useCallback((varsToSave: VariableRow[]) => {
+    const performSave = useCallback(async () => {
+        const varsToSave = variablesRef.current;
         const variablesObj: Record<string, VariableValue> = {};
 
         varsToSave.forEach((v) => {
@@ -39,31 +62,69 @@ export default function GlobalsEditor() {
             }
         });
 
-        updateMutation.mutate({ variables: variablesObj }, {
-            onSuccess: () => {
-                setShowSaved(true);
-                setTimeout(() => setShowSaved(false), 2000);
-            }
-        });
-    }, [updateMutation]);
+        startSaving();
 
-    // Debounced save - triggers after user stops typing
-    const debouncedSave = useCallback((varsToSave: VariableRow[]) => {
-        if (saveTimeoutRef.current) {
-            clearTimeout(saveTimeoutRef.current);
-        }
-        saveTimeoutRef.current = setTimeout(() => {
-            performSave(varsToSave);
-        }, 800); // 800ms debounce
+        return new Promise<void>((resolve, reject) => {
+            updateMutation.mutate({ variables: variablesObj }, {
+                onSuccess: () => {
+                    setHasPendingChanges(false);
+                    completeSave();
+                    // Reset to idle after showing "saved"
+                    setTimeout(() => setStatus("idle"), 2000);
+                    resolve();
+                },
+                onError: (error) => {
+                    failSave(error instanceof Error ? error.message : "Save failed");
+                    reject(error);
+                }
+            });
+        });
+    }, [updateMutation, startSaving, completeSave, failSave, setStatus]);
+
+    // Keep performSaveRef updated
+    useEffect(() => {
+        performSaveRef.current = performSave;
     }, [performSave]);
 
-    // Cleanup timeout on unmount
+    // Register save context on mount
     useEffect(() => {
+        registerContext({
+            id: CONTEXT_ID,
+            name: "Global Variables",
+            save: () => performSaveRef.current(),
+            hasPendingChanges: false,
+        });
+        setActiveContext(CONTEXT_ID);
+
         return () => {
+            unregisterContext(CONTEXT_ID);
             if (saveTimeoutRef.current) {
                 clearTimeout(saveTimeoutRef.current);
             }
         };
+    }, [registerContext, unregisterContext, setActiveContext]);
+
+    // Update context when hasPendingChanges changes
+    useEffect(() => {
+        updateContext(CONTEXT_ID, { hasPendingChanges });
+    }, [hasPendingChanges, updateContext]);
+
+    // Handle blur - save when user leaves the field
+    const handleBlur = useCallback(() => {
+        if (hasPendingChanges) {
+    // Clear any pending timeout and save immediately
+            if (saveTimeoutRef.current) {
+                clearTimeout(saveTimeoutRef.current);
+            }
+            performSaveRef.current();
+        }
+    }, [hasPendingChanges]);
+
+    // Handle focus - cancel any pending save
+    const handleFocus = useCallback(() => {
+        if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current);
+        }
     }, []);
 
     // Initialize variables from server data
@@ -93,7 +154,8 @@ export default function GlobalsEditor() {
         }
 
         setVariables(newVariables);
-        debouncedSave(newVariables);
+        setHasPendingChanges(true);
+        markPendingSave(CONTEXT_ID);
     };
 
     const removeVariable = (index: number) => {
@@ -103,7 +165,9 @@ export default function GlobalsEditor() {
             newVariables.push({ key: '', value: '', enabled: true, isNew: true });
         }
         setVariables(newVariables);
-        debouncedSave(newVariables);
+        // Save immediately on delete (not editing text)
+        setHasPendingChanges(true);
+        performSaveRef.current();
     };
 
     if (isLoading) {
@@ -131,20 +195,6 @@ export default function GlobalsEditor() {
                     <Globe className="w-5 h-5 text-green-500" />
                     <h2 className="text-lg font-semibold text-foreground">Global Variables</h2>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    {updateMutation.isPending && (
-                        <span className="flex items-center gap-1">
-                            <span className="animate-spin w-3 h-3 border border-green-500 border-t-transparent rounded-full" />
-                            Saving...
-                        </span>
-                    )}
-                    {showSaved && !updateMutation.isPending && (
-                        <span className="flex items-center gap-1 text-green-600">
-                            <Check className="w-4 h-4" />
-                            Saved
-                        </span>
-                    )}
-                </div>
             </div>
 
             <div className="px-4 py-2 text-xs text-muted-foreground bg-green-50 dark:bg-green-950/30 border-b border-green-100 dark:border-green-900">
@@ -169,7 +219,11 @@ export default function GlobalsEditor() {
                                     <input
                                         type="checkbox"
                                         checked={variable.enabled}
-                                        onChange={(e) => updateVariable(index, 'enabled', e.target.checked)}
+                                        onChange={(e) => {
+                                            updateVariable(index, 'enabled', e.target.checked);
+                                            // Checkboxes save immediately
+                                            performSaveRef.current();
+                                        }}
                                         className="w-4 h-4 rounded border-input text-green-500 focus:ring-green-500 accent-green-500"
                                         disabled={variable.isNew && !variable.key}
                                     />
@@ -179,6 +233,8 @@ export default function GlobalsEditor() {
                                         type="text"
                                         value={variable.key}
                                         onChange={(e) => updateVariable(index, 'key', e.target.value)}
+                                        onFocus={handleFocus}
+                                        onBlur={handleBlur}
                                         placeholder="variable_name"
                                         className={cn(
                                             "h-8",
@@ -191,6 +247,8 @@ export default function GlobalsEditor() {
                                         type="text"
                                         value={variable.value}
                                         onChange={(e) => updateVariable(index, 'value', e.target.value)}
+                                        onFocus={handleFocus}
+                                        onBlur={handleBlur}
                                         placeholder="value"
                                         className={cn(
                                             "h-8",
@@ -219,7 +277,6 @@ export default function GlobalsEditor() {
             {/* Footer with count */}
             <div className="px-4 py-2 border-t bg-muted/50 text-xs text-muted-foreground">
                 {variables.filter(v => v.key && !v.isNew).length} variable(s)
-                <span className="ml-2">• Auto-saves as you type</span>
             </div>
         </div>
     );

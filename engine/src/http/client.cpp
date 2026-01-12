@@ -283,13 +283,57 @@ Result<Response> Client::send(const Request& request) {
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers_list);
     }
 
-    // Build raw request string
+    // Build raw request string (proper HTTP/1.1 format)
     std::stringstream raw_req;
-    raw_req << to_string(request.method) << " " << request.url << " HTTP/1.1\r\n";
+
+    // Parse URL to extract host and path
+    std::string host;
+    std::string path = "/";
+    std::string url = request.url;
+
+    // Remove protocol prefix
+    size_t proto_end = url.find("://");
+    if (proto_end != std::string::npos) {
+        url = url.substr(proto_end + 3);
+    }
+
+    // Split host and path
+    size_t path_start = url.find('/');
+    if (path_start != std::string::npos) {
+        host = url.substr(0, path_start);
+        path = url.substr(path_start);
+    } else {
+        host = url;
+        // Check for query string without path
+        size_t query_start = host.find('?');
+        if (query_start != std::string::npos) {
+            path = "/" + host.substr(query_start);
+            host = host.substr(0, query_start);
+        }
+    }
+
+    // Request line: METHOD /path HTTP/1.1
+    raw_req << to_string(request.method) << " " << path << " HTTP/1.1\r\n";
+
+    // Host header (required for HTTP/1.1)
+    raw_req << "Host: " << host << "\r\n";
+
+    // Add all request headers
     for (const auto& [key, value] : response.request_headers) {
+        // Skip if it's a Host header (we already added it)
+        if (key == "Host" || key == "host") continue;
         raw_req << key << ": " << value << "\r\n";
     }
+
+    // Add Content-Length for body
+    if (!request.body.content.empty()) {
+        raw_req << "Content-Length: " << request.body.content.size() << "\r\n";
+    }
+
+    // End of headers
     raw_req << "\r\n";
+
+    // Body
     if (!request.body.content.empty()) {
         raw_req << request.body.content;
     }

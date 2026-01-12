@@ -7,7 +7,7 @@
  * - Shows resolved value and scope
  */
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
     Popover,
     PopoverContent,
@@ -37,20 +37,29 @@ export default function VariableToken({
 }: VariableTokenProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [editValue, setEditValue] = useState(value);
-    const [hasUserEdited, setHasUserEdited] = useState(false);
+    // Track the value that was set when popover opened to detect actual changes
+    const openValueRef = useRef(value);
+
+    // Keep editValue in sync with value prop when popover is closed
+    // This ensures the edit field shows the correct value when opened
+    useEffect(() => {
+        if (!isOpen) {
+            setEditValue(value);
+        }
+    }, [value, isOpen]);
 
     // Auto-save when value changes and popover closes
     const handleOpenChange = (open: boolean) => {
         if (open) {
-            // Opening: initialize edit value with current value and reset edit flag
+            // Opening: initialize edit value from current prop value
             setEditValue(value);
-            setHasUserEdited(false);
+            openValueRef.current = value;
         } else {
-            // Closing: auto-save only if user actually edited the value
-            if (hasUserEdited && editValue !== value && onValueChange) {
+            // Closing: auto-save if value actually changed from when we opened
+            // Compare against openValueRef to avoid saving unchanged values
+            if (editValue !== openValueRef.current && onValueChange) {
                 onValueChange(name, editValue, scope);
             }
-            setHasUserEdited(false);
         }
         setIsOpen(open);
     };
@@ -123,10 +132,7 @@ export default function VariableToken({
                                     <label className="text-xs text-muted-foreground">Edit Value</label>
                                     <Input
                                         value={editValue}
-                                        onChange={(e) => {
-                                            setEditValue(e.target.value);
-                                            setHasUserEdited(true);
-                                        }}
+                                        onChange={(e) => setEditValue(e.target.value)}
                                         onKeyDown={(e) => {
                                             e.stopPropagation();
                                             if (e.key === "Enter" || e.key === "Escape") {

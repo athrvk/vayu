@@ -5,10 +5,9 @@
  * - HTTP method selector
  * - URL input with variable support
  * - Action buttons (Send, Load Test)
- * - Auto-save status indicator
  */
 
-import { Play, Zap, Loader2, Check } from "lucide-react";
+import { Play, Zap, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
 import MethodSelector from "./MethodSelector";
@@ -18,8 +17,6 @@ export default function UrlBar() {
     const {
         request,
         isExecuting,
-        hasUnsavedChanges,
-        saveStatus,
         executeRequest,
         startLoadTest,
     } = useRequestBuilderContext();
@@ -63,25 +60,6 @@ export default function UrlBar() {
                 <Zap className="w-4 h-4 mr-2" />
                 Load Test
             </Button>
-
-            {/* Auto-save Status */}
-            <div className="flex items-center gap-2 px-3 text-sm text-muted-foreground">
-                {saveStatus === 'saving' && (
-                    <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Saving...</span>
-                    </>
-                )}
-                {saveStatus === 'saved' && (
-                    <>
-                        <Check className="w-4 h-4 text-green-600" />
-                        <span className="text-green-600">Saved</span>
-                    </>
-                )}
-                {saveStatus === 'idle' && !hasUnsavedChanges && (
-                    <span className="text-xs">Auto-saves as you type</span>
-                )}
-            </div>
         </div>
     );
 }

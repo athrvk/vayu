@@ -1,14 +1,64 @@
-import { Zap, AlertCircle, CheckCircle } from "lucide-react";
+import { Zap, AlertCircle, CheckCircle, Loader2, Cloud, CloudOff } from "lucide-react";
 import { useAppStore } from "@/stores";
+import { useSaveStore } from "@/stores/save-store";
+
+function SaveStatusIndicator() {
+	const { status, errorMessage } = useSaveStore();
+
+	if (status === "idle") {
+		return null;
+	}
+
+	if (status === "pending") {
+		return (
+			<div className="flex items-center gap-1.5 text-muted-foreground">
+				<div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+				<span className="text-xs">Unsaved</span>
+			</div>
+		);
+	}
+
+	if (status === "saving") {
+		return (
+			<div className="flex items-center gap-1.5 text-muted-foreground">
+				<Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+				<span className="text-xs">Saving...</span>
+			</div>
+		);
+	}
+
+	if (status === "saved") {
+		return (
+			<div className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
+				<Cloud className="w-3.5 h-3.5" />
+				<span className="text-xs">Saved</span>
+			</div>
+		);
+	}
+
+	if (status === "error") {
+		return (
+			<div className="flex items-center gap-1.5 text-destructive" title={errorMessage || "Save failed"}>
+				<CloudOff className="w-3.5 h-3.5" />
+				<span className="text-xs">Save failed</span>
+			</div>
+		);
+	}
+
+	return null;
+}
 
 export default function ConnectionStatus() {
 	const { isEngineConnected, engineError } = useAppStore();
 
 	if (isEngineConnected) {
 		return (
-			<div className="bg-green-50 dark:bg-green-950/50 border-b border-green-200 dark:border-green-900 px-4 py-2 flex items-center gap-2 text-sm">
-				<CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
-				<span className="text-green-800 dark:text-green-200">Connected to Vayu Engine</span>
+			<div className="bg-green-50 dark:bg-green-950/50 border-b border-green-200 dark:border-green-900 px-4 py-2 flex items-center justify-between text-sm">
+				<div className="flex items-center gap-2">
+					<CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+					<span className="text-green-800 dark:text-green-200">Connected to Vayu Engine</span>
+				</div>
+				<SaveStatusIndicator />
 			</div>
 		);
 	}

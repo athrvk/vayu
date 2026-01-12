@@ -9,9 +9,9 @@
  * - Auto-save with debouncing
  */
 
-import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
+import { useState, useCallback, useMemo, useEffect, type ReactNode } from "react";
 import { RequestBuilderContext } from "./RequestBuilderContext";
-import { useVariableResolver } from "@/hooks";
+import { useVariableResolver, useSaveManager } from "@/hooks";
 import {
     useGlobalsQuery,
     useUpdateGlobalsMutation,
@@ -62,13 +62,7 @@ export default function RequestBuilderProvider({
     // UI state
     const [activeTab, setActiveTab] = useState<RequestTab>("params");
     const [isExecuting, setIsExecuting] = useState(false);
-    const [isSaving, setIsSaving] = useState(false);
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
-
-    // Auto-save debounce
-    const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const AUTO_SAVE_DELAY = 800; // ms
 
     // Variable resolution
     const { resolveString, getVariable: resolverGetVariable, getAllVariables: resolverGetAllVariables } =
@@ -86,77 +80,39 @@ export default function RequestBuilderProvider({
     // Reset when initial request changes
     useEffect(() => {
         if (initialRequest) {
-            // Clear any pending auto-save
-            if (autoSaveTimeoutRef.current) {
-                clearTimeout(autoSaveTimeoutRef.current);
-            }
-
             setRequestState({
                 ...createDefaultRequestState(),
                 ...initialRequest,
                 collectionId: collectionId || null,
             });
             setHasUnsavedChanges(false);
-            setSaveStatus('idle');
         }
     }, [initialRequest?.id, collectionId]);
 
-    // Cleanup auto-save timeout on unmount
-    useEffect(() => {
-        return () => {
-            if (autoSaveTimeoutRef.current) {
-                clearTimeout(autoSaveTimeoutRef.current);
-            }
-        };
-    }, []);
-
-    // Save request
-    const saveRequest = useCallback(async () => {
+    // Centralized save manager - handles auto-save, keyboard shortcut, and status
+    const handleSave = useCallback(async () => {
         if (!onSave) return;
-
-        setIsSaving(true);
-        setSaveStatus('saving');
-        try {
-            await onSave(request);
-            setHasUnsavedChanges(false);
-            setSaveStatus('saved');
-            // Reset saved status after 2 seconds
-            setTimeout(() => setSaveStatus('idle'), 2000);
-        } catch (error) {
-            console.error("Save failed:", error);
-            setSaveStatus('idle');
-        } finally {
-            setIsSaving(false);
-        }
+        await onSave(request);
+        setHasUnsavedChanges(false);
     }, [request, onSave]);
+
+    const { forceSave, status: saveStatus, isSaving } = useSaveManager({
+        entityId: request.id || null,
+        onSave: handleSave,
+        hasChanges: hasUnsavedChanges,
+        enabled: !!onSave,
+    });
 
     // Set request with change tracking
     const setRequest = useCallback((updates: Partial<RequestState>) => {
         setRequestState(prev => ({ ...prev, ...updates }));
         setHasUnsavedChanges(true);
+    }, []);
 
-        // Trigger auto-save after debounce
-        if (autoSaveTimeoutRef.current) {
-            clearTimeout(autoSaveTimeoutRef.current);
-        }
-        autoSaveTimeoutRef.current = setTimeout(() => {
-            // Call onSave directly to avoid circular dependency
-            if (onSave) {
-                setIsSaving(true);
-                setSaveStatus('saving');
-                onSave(request).then(() => {
-                    setHasUnsavedChanges(false);
-                    setSaveStatus('saved');
-                    setTimeout(() => setSaveStatus('idle'), 2000);
-                }).catch((error) => {
-                    console.error("Auto-save failed:", error);
-                    setSaveStatus('idle');
-                }).finally(() => {
-                    setIsSaving(false);
-                });
-            }
-        }, AUTO_SAVE_DELAY);
-    }, [onSave, request]);
+    // saveRequest now uses the centralized forceSave
+    const saveRequest = useCallback(async () => {
+        await forceSave();
+    }, [forceSave]);
 
     // Update single field
     const updateField = useCallback(<K extends keyof RequestState>(field: K, value: RequestState[K]) => {

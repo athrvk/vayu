@@ -3,11 +3,13 @@
  * 
  * Editor for environment-scoped variables.
  * Environments have medium priority in variable resolution (override globals, overridden by collections).
+ * Uses centralized save store for auto-save with visual feedback.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Cloud, Trash2, Check } from "lucide-react";
+import { Cloud, Trash2 } from "lucide-react";
 import { useUpdateEnvironmentMutation, useDeleteEnvironmentMutation } from "@/queries";
+import { useSaveStore } from "@/stores/save-store";
 import { Button, Input, Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { Environment, VariableValue } from "@/types";
@@ -28,14 +30,35 @@ export default function EnvironmentEditor({ environment }: EnvironmentEditorProp
     const updateMutation = useUpdateEnvironmentMutation();
     const deleteMutation = useDeleteEnvironmentMutation();
     const { setSelectedCategory, setActiveEnvironmentId } = useVariablesStore();
+    const {
+        registerContext,
+        unregisterContext,
+        updateContext,
+        setActiveContext,
+        markPendingSave,
+        startSaving,
+        completeSave,
+        failSave,
+        setStatus,
+    } = useSaveStore();
 
     const [variables, setVariables] = useState<VariableRow[]>([]);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-    const [showSaved, setShowSaved] = useState(false);
+    const [hasPendingChanges, setHasPendingChanges] = useState(false);
     const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const variablesRef = useRef<VariableRow[]>([]);
+    const performSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
+    const contextId = `environment-${environment.id}`;
+
+    // Keep variablesRef in sync
+    useEffect(() => {
+        variablesRef.current = variables;
+    }, [variables]);
 
     // Auto-save function
-    const performSave = useCallback((varsToSave: VariableRow[]) => {
+    const performSave = useCallback(async () => {
+        const varsToSave = variablesRef.current;
         const variablesObj: Record<string, VariableValue> = {};
 
         varsToSave.forEach((v) => {
@@ -47,35 +70,71 @@ export default function EnvironmentEditor({ environment }: EnvironmentEditorProp
             }
         });
 
-        updateMutation.mutate({
-            id: environment.id,
-            name: environment.name,
-            variables: variablesObj,
-        }, {
-            onSuccess: () => {
-                setShowSaved(true);
-                setTimeout(() => setShowSaved(false), 2000);
-            }
-        });
-    }, [updateMutation, environment.id, environment.name]);
+        startSaving();
 
-    // Debounced save - triggers after user stops typing
-    const debouncedSave = useCallback((varsToSave: VariableRow[]) => {
-        if (saveTimeoutRef.current) {
-            clearTimeout(saveTimeoutRef.current);
-        }
-        saveTimeoutRef.current = setTimeout(() => {
-            performSave(varsToSave);
-        }, 800);
+        return new Promise<void>((resolve, reject) => {
+            updateMutation.mutate({
+                id: environment.id,
+                name: environment.name,
+                variables: variablesObj,
+            }, {
+                onSuccess: () => {
+                    setHasPendingChanges(false);
+                    completeSave();
+                    setTimeout(() => setStatus("idle"), 2000);
+                    resolve();
+                },
+                onError: (error) => {
+                    failSave(error instanceof Error ? error.message : "Save failed");
+                    reject(error);
+                }
+            });
+        });
+    }, [updateMutation, environment.id, environment.name, startSaving, completeSave, failSave, setStatus]);
+
+    // Keep performSaveRef updated
+    useEffect(() => {
+        performSaveRef.current = performSave;
     }, [performSave]);
 
-    // Cleanup timeout on unmount
+    // Register save context on mount
     useEffect(() => {
+        registerContext({
+            id: contextId,
+            name: `Environment: ${environment.name}`,
+            save: () => performSaveRef.current(),
+            hasPendingChanges: false,
+        });
+        setActiveContext(contextId);
+
         return () => {
+            unregisterContext(contextId);
             if (saveTimeoutRef.current) {
                 clearTimeout(saveTimeoutRef.current);
             }
         };
+    }, [contextId, environment.name, registerContext, unregisterContext, setActiveContext]);
+
+    // Update context when hasPendingChanges changes
+    useEffect(() => {
+        updateContext(contextId, { hasPendingChanges });
+    }, [contextId, hasPendingChanges, updateContext]);
+
+    // Handle blur - save when user leaves the field
+    const handleBlur = useCallback(() => {
+        if (hasPendingChanges) {
+            if (saveTimeoutRef.current) {
+                clearTimeout(saveTimeoutRef.current);
+            }
+            performSaveRef.current();
+        }
+    }, [hasPendingChanges]);
+
+    // Handle focus - cancel any pending save
+    const handleFocus = useCallback(() => {
+        if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current);
+        }
     }, []);
 
     // Initialize variables from environment data
@@ -99,7 +158,8 @@ export default function EnvironmentEditor({ environment }: EnvironmentEditorProp
         }
 
         setVariables(newVariables);
-        debouncedSave(newVariables);
+        setHasPendingChanges(true);
+        markPendingSave(contextId);
     };
 
     const removeVariable = (index: number) => {
@@ -108,7 +168,8 @@ export default function EnvironmentEditor({ environment }: EnvironmentEditorProp
             newVariables.push({ key: '', value: '', enabled: true, isNew: true });
         }
         setVariables(newVariables);
-        debouncedSave(newVariables);
+        setHasPendingChanges(true);
+        performSaveRef.current();
     };
 
     const handleDelete = () => {
@@ -163,20 +224,6 @@ export default function EnvironmentEditor({ environment }: EnvironmentEditorProp
                     >
                         <Trash2 className="w-4 h-4" />
                     </Button>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        {updateMutation.isPending && (
-                            <span className="flex items-center gap-1">
-                                <span className="animate-spin w-3 h-3 border border-blue-500 border-t-transparent rounded-full" />
-                                Saving...
-                            </span>
-                        )}
-                        {showSaved && !updateMutation.isPending && (
-                            <span className="flex items-center gap-1 text-blue-600">
-                                <Check className="w-4 h-4" />
-                                Saved
-                            </span>
-                        )}
-                    </div>
                 </div>
             </div>
 
@@ -228,7 +275,10 @@ export default function EnvironmentEditor({ environment }: EnvironmentEditorProp
                                     <input
                                         type="checkbox"
                                         checked={variable.enabled}
-                                        onChange={(e) => updateVariable(index, 'enabled', e.target.checked)}
+                                        onChange={(e) => {
+                                            updateVariable(index, 'enabled', e.target.checked);
+                                            performSaveRef.current();
+                                        }}
                                         className="w-4 h-4 rounded border-input text-blue-500 focus:ring-blue-500"
                                         disabled={variable.isNew && !variable.key}
                                     />
@@ -238,6 +288,8 @@ export default function EnvironmentEditor({ environment }: EnvironmentEditorProp
                                         type="text"
                                         value={variable.key}
                                         onChange={(e) => updateVariable(index, 'key', e.target.value)}
+                                        onFocus={handleFocus}
+                                        onBlur={handleBlur}
                                         placeholder="variable_name"
                                         className={cn(
                                             "h-8",
@@ -250,6 +302,8 @@ export default function EnvironmentEditor({ environment }: EnvironmentEditorProp
                                         type="text"
                                         value={variable.value}
                                         onChange={(e) => updateVariable(index, 'value', e.target.value)}
+                                        onFocus={handleFocus}
+                                        onBlur={handleBlur}
                                         placeholder="value"
                                         className={cn(
                                             "h-8",
@@ -278,7 +332,6 @@ export default function EnvironmentEditor({ environment }: EnvironmentEditorProp
             {/* Footer */}
             <div className="px-4 py-2 border-t border-border bg-muted/50 text-xs text-muted-foreground">
                 {variables.filter(v => v.key && !v.isNew).length} variable(s)
-                <span className="ml-2">• Auto-saves as you type</span>
             </div>
         </div>
     );
