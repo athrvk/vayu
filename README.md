@@ -140,29 +140,37 @@ We welcome contributions! See [Contributing Guide](docs/contributing.md).
 git clone https://github.com/vayu/vayu.git
 cd vayu
 
-# Quick start (auto-detects platform: macOS, Windows, or Linux)
-./scripts/build-app-dev.sh
+# Build for your platform (dev mode)
+# macOS:
+./scripts/build-macos.sh dev
 
-# Run in development mode
+# Linux:
+./scripts/build-linux.sh dev
+
+# Windows (PowerShell):
+.\scripts\build-windows.ps1 dev
+
+# Then start the app
 cd app && pnpm run electron:dev
 ```
 
-### Production Build (All Platforms)
+### Production Build
 
 ```bash
-# Build complete app with bundled engine (auto-detects platform)
-./scripts/build-app-prod.sh
-
-# Outputs:
-# - macOS:   app/release/Vayu Desktop-*.dmg
-# - Windows: app/release/Vayu Desktop Setup *.exe
-# - Linux:   app/release/Vayu Desktop-*.AppImage or *.deb
-```
-
-See [Building Guide](docs/building.md) for platform-specific details.
-
+# macOS:
+./scripts/build-macos.sh prod
 # Output: app/release/Vayu Desktop-*.dmg
+
+# Linux:
+./scripts/build-linux.sh prod
+# Output: app/release/Vayu Desktop-*.AppImage or *.deb
+
+# Windows (PowerShell):
+.\scripts\build-windows.ps1 prod
+# Output: app/release/Vayu Desktop Setup *.exe
 ```
+
+See [Building Guide](docs/building.md) for detailed instructions.
 
 See [Building for macOS](docs/building-macos.md) for detailed instructions.
 
