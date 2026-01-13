@@ -75,10 +75,16 @@ npm install -g pnpm
 git clone https://github.com/athrvk/vayu.git
 cd vayu
 
-# Setup (auto-detects platform and builds engine)
-./scripts/build-app-dev.sh
+# macOS
+./scripts/build-macos.sh dev
 
-# Start development
+# Linux
+./scripts/build-linux.sh dev
+
+# Windows (PowerShell)
+.\scripts\build-windows.ps1 dev
+
+# Start development (after build completes)
 cd app
 pnpm run electron:dev
 ```
@@ -86,13 +92,17 @@ pnpm run electron:dev
 ### Production Build
 
 ```bash
-# Build complete app (auto-detects platform)
-./scripts/build-app-prod.sh
+# macOS
+./scripts/build-macos.sh prod
+# Output: app/release/Vayu Desktop-*.dmg
 
-# Output locations:
-# - macOS:   app/release/Vayu Desktop-*.dmg
-# - Windows: app/release/Vayu Desktop Setup *.exe
-# - Linux:   app/release/Vayu Desktop-*.AppImage or *.deb
+# Linux
+./scripts/build-linux.sh prod
+# Output: app/release/Vayu Desktop-*.AppImage or *.deb
+
+# Windows (PowerShell)
+.\scripts\build-windows.ps1 prod
+# Output: app/release/Vayu Desktop Setup *.exe
 ```
 
 ## Platform-Specific Guides
@@ -171,53 +181,105 @@ pnpm run electron:dev
 
 ## Build Scripts
 
-### `build-app-dev.sh`
+### Platform-Specific Scripts
 
-Platform-aware development setup script.
+Vayu provides a single build script for each platform that handles both development and production builds.
 
-**Features:**
-- Auto-detects platform (macOS, Windows, Linux)
-- Builds engine in Debug mode if not present
-- Installs app dependencies
-- Handles platform-specific binary paths
+#### `build-macos.sh`
 
 **Usage:**
 ```bash
-./scripts/build-app-dev.sh
+./scripts/build-macos.sh [dev|prod]
 ```
 
-### `build-app-prod.sh`
+**Features:**
+- Auto-detects macOS architecture (Apple Silicon or Intel)
+- Builds C++ engine with CMake and vcpkg
+- Compiles TypeScript and builds React app
+- In prod mode: Creates universal DMG installer
+- In dev mode: Sets up for `pnpm run electron:dev`
 
-Platform-aware production build script.
+**Example:**
+```bash
+# Development build
+./scripts/build-macos.sh dev
+cd app && pnpm run electron:dev
+
+# Production build
+./scripts/build-macos.sh prod
+# Output: app/release/Vayu Desktop-*.dmg
+```
+
+#### `build-linux.sh`
+
+**Usage:**
+```bash
+./scripts/build-linux.sh [dev|prod]
+```
 
 **Features:**
-- Auto-detects platform
-- Calls appropriate engine build script
-- Compiles TypeScript
-- Builds React app
+- Auto-detects Linux architecture (x64 or ARM64)
+- Builds C++ engine with CMake and vcpkg
+- Compiles TypeScript and builds React app
+- In prod mode: Creates AppImage and .deb packages
+- In dev mode: Sets up for `pnpm run electron:dev`
+
+**Example:**
+```bash
+# Development build
+./scripts/build-linux.sh dev
+cd app && pnpm run electron:dev
+
+# Production build
+./scripts/build-linux.sh prod
+# Output: app/release/Vayu Desktop-*.AppImage and *.deb
+```
+
+#### `build-windows.ps1`
+
+**Usage (PowerShell):**
+```powershell
+.\scripts\build-windows.ps1 [dev|prod]
+```
+
+**Features:**
+- Auto-detects Windows architecture (x64 or ARM64)
+- Builds C++ engine with Visual Studio 2022
+- Compiles TypeScript and builds React app
+- In prod mode: Creates NSIS installer
+- In dev mode: Sets up for `pnpm run electron:dev`
+
+**Example:**
+```powershell
+# Development build
+.\scripts\build-windows.ps1 dev
+cd app
+pnpm run electron:dev
+
+# Production build
+.\scripts\build-windows.ps1 prod
+# Output: app\release\Vayu Desktop Setup *.exe
+```
+
+### Build Modes
+
+#### Development (`dev`)
+
+- Builds engine in **Debug** mode with debug symbols
+- Engine built to `engine/build/`
+- Only compiles TypeScript (no packaging)
+- Faster build times
+- Includes debugging information
+- Instructions to run with `pnpm run electron:dev`
+
+#### Production (`prod`)
+
+- Builds engine in **Release** mode with optimizations
+- Engine built to `engine/build-release/`
+- Full TypeScript compilation and React build
 - Packages with electron-builder
-
-**Usage:**
-```bash
-./scripts/build-app-prod.sh
-```
-
-### Platform-Specific Engine Scripts
-
-#### `build-engine-macos.sh`
-- Builds universal binary for macOS
-- Optimized for Apple Silicon and Intel
-- Output: `app/resources/bin/vayu-engine`
-
-#### `build-engine-windows.sh`
-- Builds with Visual Studio 2022
-- Supports x64 and ARM64
-- Output: `app/resources/bin/vayu-engine.exe`
-
-#### `build-engine-linux.sh`
-- Builds with GCC/Clang
-- Supports x64 and ARM64
-- Output: `app/resources/bin/vayu-engine`
+- Creates platform-specific installers
+- Optimized for distribution
 
 ## File Paths
 
