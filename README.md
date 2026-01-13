@@ -133,16 +133,30 @@ See [PLAN.md](PLAN.md) for detailed roadmap.
 
 We welcome contributions! See [Contributing Guide](docs/contributing.md).
 
+### Development Setup
+
 ```bash
 # Clone
 git clone https://github.com/vayu/vayu.git
+cd vayu
 
-# Build engine
-cd engine && cmake -B build && cmake --build build
+# Quick start (builds engine + sets up app)
+./scripts/build-app-dev.sh
 
-# Build app
-cd ../app && pnpm install && pnpm dev
+# Run in development mode
+cd app && pnpm run electron:dev
 ```
+
+### Production Build (macOS)
+
+```bash
+# Build complete app with bundled engine
+./scripts/build-app-prod.sh
+
+# Output: app/release/Vayu Desktop-*.dmg
+```
+
+See [Building for macOS](docs/building-macos.md) for detailed instructions.
 
 ---
 
