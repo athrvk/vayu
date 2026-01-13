@@ -51,13 +51,21 @@ check_vcpkg() {
 install_deps() {
     info "Installing dependencies..."
     
-    # Parse dependencies from vcpkg.json
-    local deps=$(grep -A 20 '"dependencies"' "$ENGINE_DIR/vcpkg.json" | grep '"' | grep -v 'dependencies' | tr -d ' ",' | grep -v '^$')
+    # Check if jq is available for better JSON parsing
+    if command -v jq &>/dev/null; then
+        # Use jq for reliable JSON parsing
+        local deps=$(jq -r '.dependencies[]' "$ENGINE_DIR/vcpkg.json" 2>/dev/null)
+    else
+        # Fallback to grep-based parsing
+        warn "jq not found, using basic parsing. Install jq for better reliability: brew install jq"
+        local deps=$(grep -A 20 '"dependencies"' "$ENGINE_DIR/vcpkg.json" | grep '"' | grep -v 'dependencies' | tr -d ' ",' | grep -v '^$')
+    fi
     
     # Collect missing deps
     local missing_deps=()
     for dep in $deps; do
-        if [ -z "$(vcpkg list "${dep}:${TRIPLET}" 2>/dev/null)" ]; then
+        # Check if package is installed (case-insensitive grep for robustness)
+        if ! vcpkg list | grep -iq "^${dep}:${TRIPLET}"; then
             missing_deps+=("$dep:$TRIPLET")
         fi
     done

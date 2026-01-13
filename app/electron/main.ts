@@ -95,6 +95,7 @@ app.on("before-quit", async (event) => {
 	if (engineSidecar && engineSidecar.isRunning()) {
 		event.preventDefault();
 		await stopEngine();
-		app.quit();
+		// Continue with quit process
+		setImmediate(() => app.quit());
 	}
 });

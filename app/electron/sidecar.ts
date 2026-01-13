@@ -165,7 +165,15 @@ export class EngineSidecar {
 
 		for (let i = 0; i < maxAttempts; i++) {
 			try {
-				const response = await fetch(healthUrl);
+				const controller = new AbortController();
+				const timeout = setTimeout(() => controller.abort(), 2000);
+				
+				const response = await fetch(healthUrl, {
+					signal: controller.signal,
+				});
+				
+				clearTimeout(timeout);
+				
 				if (response.ok) {
 					console.log(`[Sidecar] Engine is ready`);
 					return;
