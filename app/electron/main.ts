@@ -1,12 +1,16 @@
 import { app, BrowserWindow } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
+import { EngineSidecar } from "./sidecar";
 
 const isDev = process.env.NODE_ENV === "development";
 
 // __dirname is not defined in ES modules. Derive it from import.meta.url
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Global sidecar instance
+let engineSidecar: EngineSidecar | null = null;
 
 function createWindow() {
 	const mainWindow = new BrowserWindow({
@@ -35,7 +39,42 @@ function createWindow() {
 	});
 }
 
-app.whenReady().then(() => {
+async function startEngine() {
+	try {
+		engineSidecar = new EngineSidecar(9876);
+		await engineSidecar.start();
+		console.log(
+			"[Main] Engine started successfully at",
+			engineSidecar.getApiUrl(),
+		);
+	} catch (error) {
+		console.error("[Main] Failed to start engine:", error);
+		// Show error dialog to user
+		const { dialog } = await import("electron");
+		await dialog.showErrorBox(
+			"Failed to Start Engine",
+			`The Vayu engine failed to start:\n\n${error}\n\nPlease check the logs for more details.`,
+		);
+		app.quit();
+	}
+}
+
+async function stopEngine() {
+	if (engineSidecar) {
+		try {
+			await engineSidecar.stop();
+			console.log("[Main] Engine stopped successfully");
+		} catch (error) {
+			console.error("[Main] Error stopping engine:", error);
+		}
+	}
+}
+
+app.whenReady().then(async () => {
+	// Start the engine first
+	await startEngine();
+
+	// Then create the window
 	createWindow();
 
 	app.on("activate", () => {
@@ -47,6 +86,15 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") {
+		app.quit();
+	}
+});
+
+// Ensure engine is stopped when the app quits
+app.on("before-quit", async (event) => {
+	if (engineSidecar && engineSidecar.isRunning()) {
+		event.preventDefault();
+		await stopEngine();
 		app.quit();
 	}
 });

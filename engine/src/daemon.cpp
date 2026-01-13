@@ -44,11 +44,10 @@ void signal_handler(int signal) {
     }
 }
 
-bool acquire_lock() {
-    const char* lock_path = "/tmp/vayu.lock";
-    g_lock_fd = open(lock_path, O_RDWR | O_CREAT, 0666);
+bool acquire_lock(const std::string& lock_path) {
+    g_lock_fd = open(lock_path.c_str(), O_RDWR | O_CREAT, 0666);
     if (g_lock_fd < 0) {
-        vayu::utils::log_error("Failed to open lock file: " + std::string(lock_path));
+        vayu::utils::log_error("Failed to open lock file: " + lock_path);
         return false;
     }
 
@@ -56,7 +55,7 @@ bool acquire_lock() {
         if (errno == EWOULDBLOCK) {
             vayu::utils::log_error("Error: Another instance of Vayu Engine is already running.");
         } else {
-            vayu::utils::log_error("Error: Failed to acquire lock on " + std::string(lock_path) +
+            vayu::utils::log_error("Error: Failed to acquire lock on " + lock_path +
                                    ": " + strerror(errno));
         }
         close(g_lock_fd);
@@ -80,20 +79,30 @@ bool acquire_lock() {
     // Do not close the fd, as that releases the lock
     return true;
 }
+
+std::string get_default_data_dir() {
+    // Default to current directory for backward compatibility
+    return ".";
+}
+
+void ensure_directory(const std::string& path) {
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) {
+        // Directory doesn't exist, create it
+        if (mkdir(path.c_str(), 0755) != 0 && errno != EEXIST) {
+            throw std::runtime_error("Failed to create directory: " + path + " - " + strerror(errno));
+        }
+    } else if (!S_ISDIR(st.st_mode)) {
+        throw std::runtime_error("Path exists but is not a directory: " + path);
+    }
+}
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    // Initialize logger first
-    vayu::utils::Logger::instance().init(vayu::core::constants::logging::DIR);
-
-    // Check for single instance
-    if (!acquire_lock()) {
-        return 1;
-    }
-
-    // Parse arguments
+    // Parse arguments first (need data_dir for logging)
     int port = vayu::core::constants::defaults::PORT;
     int verbosity = 0;  // 0=warn/error, 1=info+, 2=debug+
+    std::string data_dir = get_default_data_dir();
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -102,6 +111,10 @@ int main(int argc, char* argv[]) {
             arg == vayu::core::constants::cli::ARG_PORT_LONG) {
             if (i + 1 < argc) {
                 port = std::stoi(argv[++i]);
+            }
+        } else if (arg == "-d" || arg == "--data-dir") {
+            if (i + 1 < argc) {
+                data_dir = argv[++i];
             }
         } else if (arg == "-v" || arg == "--verbose") {
             // Check if next arg is a number (verbosity level)
@@ -117,12 +130,41 @@ int main(int argc, char* argv[]) {
             std::cout << "Vayu Engine " << vayu::Version::string << "\n\n";
             std::cout << "Usage: vayu-engine [OPTIONS]\n\n";
             std::cout << "Options:\n";
-            std::cout << "  -p, --port <PORT>     Port to listen on (default: 9876)\n";
-            std::cout << "  -v, --verbose [LEVEL] Enable verbose output (0=warn/error, 1=info, "
+            std::cout << "  -p, --port <PORT>        Port to listen on (default: 9876)\n";
+            std::cout << "  -d, --data-dir <DIR>     Data directory for DB, logs, and lock file (default: .)\n";
+            std::cout << "  -v, --verbose [LEVEL]    Enable verbose output (0=warn/error, 1=info, "
                          "2=debug, default: 1)\n";
-            std::cout << "  -h, --help            Show this help message\n";
+            std::cout << "  -h, --help               Show this help message\n";
             return 0;
         }
+    }
+
+    // Ensure data directory exists
+    try {
+        ensure_directory(data_dir);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
+    }
+
+    // Create subdirectories for logs and database
+    std::string log_dir = data_dir + "/logs";
+    std::string db_dir = data_dir + "/db";
+    try {
+        ensure_directory(log_dir);
+        ensure_directory(db_dir);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
+    }
+
+    // Initialize logger
+    vayu::utils::Logger::instance().init(log_dir);
+
+    // Check for single instance
+    std::string lock_path = data_dir + "/vayu.lock";
+    if (!acquire_lock(lock_path)) {
+        return 1;
     }
 
     vayu::utils::Logger::instance().set_verbosity(verbosity);
@@ -132,10 +174,11 @@ int main(int argc, char* argv[]) {
     std::signal(SIGTERM, signal_handler);
 
     // Initialize database
-    vayu::db::Database db("engine/db/vayu.db");
+    std::string db_path = db_dir + "/vayu.db";
+    vayu::db::Database db(db_path);
     try {
         db.init();
-        vayu::utils::log_info("Database initialized at engine/db/vayu.db");
+        vayu::utils::log_info("Database initialized at " + db_path);
     } catch (const std::exception& e) {
         vayu::utils::log_error("Failed to initialize database: " + std::string(e.what()));
         return 1;

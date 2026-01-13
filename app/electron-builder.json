@@ -1,0 +1,62 @@
+{
+	"appId": "com.vayu.desktop",
+	"productName": "Vayu Desktop",
+	"directories": {
+		"output": "release",
+		"buildResources": "build"
+	},
+	"files": [
+		"dist/**/*",
+		"dist-electron/**/*",
+		"package.json"
+	],
+	"extraResources": [
+		{
+			"from": "resources/bin/vayu-engine",
+			"to": "bin/vayu-engine"
+		}
+	],
+	"mac": {
+		"category": "public.app-category.developer-tools",
+		"target": [
+			{
+				"target": "dmg",
+				"arch": ["universal", "arm64", "x64"]
+			}
+		],
+		"icon": "build/icon.icns",
+		"artifactName": "${productName}-${version}-${arch}.${ext}",
+		"hardenedRuntime": true,
+		"gatekeeperAssess": false,
+		"entitlements": "build/entitlements.mac.plist",
+		"entitlementsInherit": "build/entitlements.mac.plist"
+	},
+	"dmg": {
+		"contents": [
+			{
+				"x": 130,
+				"y": 220
+			},
+			{
+				"x": 410,
+				"y": 220,
+				"type": "link",
+				"path": "/Applications"
+			}
+		],
+		"title": "${productName} ${version}",
+		"window": {
+			"width": 540,
+			"height": 380
+		}
+	},
+	"linux": {
+		"target": ["AppImage", "deb"],
+		"category": "Development",
+		"icon": "build/icon.png"
+	},
+	"win": {
+		"target": ["nsis"],
+		"icon": "build/icon.ico"
+	}
+}
