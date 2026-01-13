@@ -15,13 +15,32 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 APP_DIR="$PROJECT_ROOT/app"
-ENGINE_SCRIPT="$SCRIPT_DIR/build-engine-macos.sh"
 
 # Helper functions
 info() { echo -e "${BLUE}==>${NC} $1"; }
 warn() { echo -e "${YELLOW}Warning:${NC} $1"; }
 error() { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
 success() { echo -e "${GREEN}✓${NC} $1"; }
+
+# Detect platform and set engine script
+detect_platform() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        PLATFORM="macOS"
+        ENGINE_SCRIPT="$SCRIPT_DIR/build-engine-macos.sh"
+        OUTPUT_INFO="DMG installer: app/release/Vayu Desktop-*.dmg"
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        PLATFORM="Linux"
+        ENGINE_SCRIPT="$SCRIPT_DIR/build-engine-linux.sh"
+        OUTPUT_INFO="AppImage/deb: app/release/Vayu Desktop-*"
+    elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "cygwin" ]] || grep -q Microsoft /proc/version 2>/dev/null; then
+        PLATFORM="Windows"
+        ENGINE_SCRIPT="$SCRIPT_DIR/build-engine-windows.sh"
+        OUTPUT_INFO="NSIS installer: app/release/Vayu Desktop Setup *.exe"
+    else
+        error "Unsupported platform: $OSTYPE"
+    fi
+    info "Building for: $PLATFORM"
+}
 
 # Build engine
 build_engine() {
@@ -76,6 +95,7 @@ main() {
     echo "============================="
     echo ""
     
+    detect_platform
     build_engine
     install_deps
     build_app
@@ -87,12 +107,22 @@ main() {
     success "Production build completed in ${elapsed}s!"
     echo ""
     echo "Output:"
-    echo "  - DMG installer: app/release/Vayu Desktop-*.dmg"
+    echo "  - $OUTPUT_INFO"
     echo ""
-    echo "To test the app:"
-    echo "  1. Open the DMG file"
-    echo "  2. Drag Vayu Desktop to Applications"
-    echo "  3. Launch from Applications folder"
+    if [[ "$PLATFORM" == "macOS" ]]; then
+        echo "To test the app:"
+        echo "  1. Open the DMG file"
+        echo "  2. Drag Vayu Desktop to Applications"
+        echo "  3. Launch from Applications folder"
+    elif [[ "$PLATFORM" == "Linux" ]]; then
+        echo "To test the app:"
+        echo "  1. Install the .deb package or run the AppImage"
+        echo "  2. Launch Vayu Desktop from your applications menu"
+    elif [[ "$PLATFORM" == "Windows" ]]; then
+        echo "To test the app:"
+        echo "  1. Run the installer"
+        echo "  2. Launch Vayu Desktop from the Start menu"
+    fi
 }
 
 main

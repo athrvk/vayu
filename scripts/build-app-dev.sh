@@ -23,9 +23,32 @@ warn() { echo -e "${YELLOW}Warning:${NC} $1"; }
 error() { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
 success() { echo -e "${GREEN}✓${NC} $1"; }
 
+# Detect platform
+detect_platform() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        PLATFORM="macos"
+        CORES=$(sysctl -n hw.physicalcpu 2>/dev/null || echo 4)
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        PLATFORM="linux"
+        CORES=$(nproc 2>/dev/null || echo 4)
+    elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "cygwin" ]] || grep -q Microsoft /proc/version 2>/dev/null; then
+        PLATFORM="windows"
+        CORES=$(nproc 2>/dev/null || echo 4)
+    else
+        error "Unsupported platform: $OSTYPE"
+    fi
+    info "Platform detected: $PLATFORM"
+}
+
 # Check if engine is built
 check_engine() {
-    local engine_binary="$ENGINE_DIR/build/vayu-engine"
+    local engine_binary
+    
+    if [[ "$PLATFORM" == "windows" ]]; then
+        engine_binary="$ENGINE_DIR/build/Release/vayu-engine.exe"
+    else
+        engine_binary="$ENGINE_DIR/build/vayu-engine"
+    fi
     
     if [ ! -f "$engine_binary" ]; then
         warn "Engine binary not found at: $engine_binary"
@@ -40,8 +63,14 @@ check_engine() {
         fi
         
         cd build
-        cmake .. -DCMAKE_BUILD_TYPE=Debug
-        cmake --build . -j $(sysctl -n hw.physicalcpu 2>/dev/null || echo 4)
+        
+        if [[ "$PLATFORM" == "windows" ]]; then
+            cmake .. -G "Visual Studio 17 2022" -DCMAKE_BUILD_TYPE=Debug
+            cmake --build . --config Debug -j "$CORES"
+        else
+            cmake .. -DCMAKE_BUILD_TYPE=Debug
+            cmake --build . -j "$CORES"
+        fi
         
         success "Engine built successfully"
     else
@@ -68,6 +97,7 @@ main() {
     echo "=============================="
     echo ""
     
+    detect_platform
     check_engine
     install_deps
     

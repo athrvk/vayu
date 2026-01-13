@@ -24,7 +24,10 @@ export class EngineSidecar {
 
 	/**
 	 * Get the user data directory for the engine
-	 * Production: ~/Library/Application Support/vayu-desktop
+	 * Production:
+	 *   - macOS: ~/Library/Application Support/vayu-desktop
+	 *   - Windows: %APPDATA%/vayu-desktop
+	 *   - Linux: ~/.config/vayu-desktop
 	 * Development: <repo>/engine/data
 	 */
 	private getDataDirectory(): string {
@@ -39,34 +42,56 @@ export class EngineSidecar {
 			return devDataDir;
 		} else {
 			// In production, use the app's userData directory
-			// On macOS: ~/Library/Application Support/vayu-desktop
+			// app.getPath("userData") returns platform-specific paths
 			return app.getPath("userData");
 		}
 	}
 
 	/**
 	 * Get the path to the vayu-engine binary
-	 * Development: ../engine/build/vayu-engine
-	 * Production: app.asar.unpacked/resources/bin/vayu-engine (inside Resources)
+	 * Development:
+	 *   - Unix: ../engine/build/vayu-engine
+	 *   - Windows: ../engine/build/Release/vayu-engine.exe
+	 * Production:
+	 *   - macOS: Contents/Resources/bin/vayu-engine
+	 *   - Windows: resources/bin/vayu-engine.exe
+	 *   - Linux: resources/bin/vayu-engine
 	 */
 	private getEngineBinaryPath(): string {
+		const isWindows = process.platform === "win32";
+		const binaryName = isWindows ? "vayu-engine.exe" : "vayu-engine";
+
 		if (isDev) {
 			// In development, use the build directory
-			const devBinaryPath = path.join(
-				app.getAppPath(),
-				"..",
-				"engine",
-				"build",
-				"vayu-engine",
-			);
-			return devBinaryPath;
+			if (isWindows) {
+				// Windows build outputs to build/Release/
+				const devBinaryPath = path.join(
+					app.getAppPath(),
+					"..",
+					"engine",
+					"build",
+					"Release",
+					binaryName,
+				);
+				return devBinaryPath;
+			} else {
+				// Unix systems (macOS, Linux)
+				const devBinaryPath = path.join(
+					app.getAppPath(),
+					"..",
+					"engine",
+					"build",
+					binaryName,
+				);
+				return devBinaryPath;
+			}
 		} else {
 			// In production, the binary is in resources/bin
-			// process.resourcesPath points to the Resources directory in the .app bundle
+			// process.resourcesPath points to the Resources directory
 			const prodBinaryPath = path.join(
 				process.resourcesPath,
 				"bin",
-				"vayu-engine",
+				binaryName,
 			);
 			return prodBinaryPath;
 		}
@@ -96,11 +121,19 @@ export class EngineSidecar {
 
 		// Check if binary exists
 		if (!fs.existsSync(this.binaryPath)) {
+			const platform = process.platform;
+			let buildScript = "./scripts/build-engine-macos.sh";
+			if (platform === "win32") {
+				buildScript = "./scripts/build-engine-windows.sh";
+			} else if (platform === "linux") {
+				buildScript = "./scripts/build-engine-linux.sh";
+			}
+
 			throw new Error(
 				`Engine binary not found at: ${this.binaryPath}\n` +
 					`Please build the engine first:\n` +
 					`  Development: cd engine && cmake -B build && cmake --build build\n` +
-					`  Production: ./scripts/build-engine-macos.sh`,
+					`  Production: ${buildScript}`,
 			);
 		}
 

@@ -12,8 +12,9 @@
 	],
 	"extraResources": [
 		{
-			"from": "resources/bin/vayu-engine",
-			"to": "bin/vayu-engine"
+			"from": "resources/bin/vayu-engine${/*}",
+			"to": "bin",
+			"filter": ["**/*"]
 		}
 	],
 	"mac": {
