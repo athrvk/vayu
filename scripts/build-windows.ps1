@@ -12,9 +12,15 @@ param(
     
     [switch]$SkipEngine,
     [switch]$SkipApp,
-    [switch]$Clean
-)
+    [switch]$Clean,
 
+    # CI/override parameters
+    [string]$CMakePathParam,
+    [string]$VcpkgRootParam,
+    [string]$EngineDirParam,
+    [string]$AppDirParam,
+    [string]$ArtifactsDirParam
+)
 # Stop on first error
 $ErrorActionPreference = "Stop"
 
@@ -50,6 +56,16 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $EngineDir = Join-Path $ProjectRoot "engine"
 $AppDir = Join-Path $ProjectRoot "app"
+
+# Override paths if provided (useful for CI)
+if ($EngineDirParam) {
+    $EngineDir = $EngineDirParam
+    Write-Host "Using overridden EngineDir: $EngineDir" -ForegroundColor Gray
+}
+if ($AppDirParam) {
+    $AppDir = $AppDirParam
+    Write-Host "Using overridden AppDir: $AppDir" -ForegroundColor Gray
+}
 
 # Find Visual Studio installation
 function Find-VisualStudio {
@@ -137,8 +153,13 @@ function Test-Prerequisites {
     
     $missing = @()
     
-    # Check CMake
-    $script:CMakePath = Find-CMake
+    # Check CMake - allow override from parameter
+    if ($CMakePathParam) {
+        $script:CMakePath = $CMakePathParam
+        Write-Host "  CMake (overridden): $script:CMakePath" -ForegroundColor Gray
+    } else {
+        $script:CMakePath = Find-CMake
+    }
     if (-not $CMakePath) {
         $missing += "cmake (https://cmake.org/download/)"
     } else {
@@ -154,8 +175,13 @@ function Test-Prerequisites {
         Write-Host "  Visual Studio: $vsPath" -ForegroundColor Gray
     }
     
-    # Check vcpkg
-    $script:VcpkgRoot = Find-VcpkgRoot
+    # Check vcpkg - allow override from parameter
+    if ($VcpkgRootParam) {
+        $script:VcpkgRoot = $VcpkgRootParam
+        Write-Host "  vcpkg (overridden): $script:VcpkgRoot" -ForegroundColor Gray
+    } else {
+        $script:VcpkgRoot = Find-VcpkgRoot
+    }
     if (-not $VcpkgRoot) {
         $missing += "vcpkg (https://vcpkg.io/en/getting-started.html)"
     } else {
@@ -464,6 +490,22 @@ function Build-Electron {
             & pnpm run electron:pack
             if ($LASTEXITCODE -ne 0) {
                 throw "Electron packaging failed"
+            }
+
+            # If artifacts dir provided, copy installers there for CI
+            if ($ArtifactsDirParam) {
+                $releaseDir = Join-Path $AppDir "release"
+                if (Test-Path $releaseDir) {
+                    if (-not (Test-Path $ArtifactsDirParam)) {
+                        New-Item -ItemType Directory -Path $ArtifactsDirParam -Force | Out-Null
+                    }
+                    Write-Info "Copying installer artifacts to: $ArtifactsDirParam"
+                    Get-ChildItem -Path $releaseDir -Filter "*.*" | ForEach-Object {
+                        Copy-Item $_.FullName -Destination $ArtifactsDirParam -Force
+                    }
+                } else {
+                    Write-Warn "Release directory not found: $releaseDir"
+                }
             }
             
             Write-Success "Production build complete"
