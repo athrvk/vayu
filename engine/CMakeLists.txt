@@ -73,6 +73,12 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         /W4
         /WX
         /permissive-
+        /FS
+        /wd4324
+        /wd4101
+        /wd4100
+        /wd4456
+        /wd4244
     )
 endif()
 
@@ -118,42 +124,75 @@ if(VAYU_BUILD_TESTS)
 endif()
 
 # ============================================================================
-# QuickJS (Vendored)
+# QuickJS (Vendored) - Platform Dependent
 # ============================================================================
 
-# QuickJS source files (will be populated when vendored)
-set(QUICKJS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/quickjs)
+if(WIN32)
+    # Windows: Use QuickJS-NG (MSVC compatible)
+    set(QUICKJS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/quickjs-ng)
+    
+    if(EXISTS ${QUICKJS_DIR}/CMakeLists.txt)
+        # Configure QuickJS-NG
+        set(QJS_BUILD_EXAMPLES OFF CACHE BOOL "Disable QuickJS examples" FORCE)
+        set(QJS_BUILD_LIBC OFF CACHE BOOL "Disable QuickJS libc build in library" FORCE)
 
-if(EXISTS ${QUICKJS_DIR}/quickjs.c)
-    add_library(quickjs STATIC
-        ${QUICKJS_DIR}/quickjs.c
-        ${QUICKJS_DIR}/libregexp.c
-        ${QUICKJS_DIR}/libunicode.c
-        ${QUICKJS_DIR}/cutils.c
-        ${QUICKJS_DIR}/libbf.c
-    )
-    target_include_directories(quickjs PUBLIC ${QUICKJS_DIR})
-    target_compile_definitions(quickjs PRIVATE
-        CONFIG_VERSION="2024-01-13"
-        CONFIG_BIGNUM
-    )
-    # Disable warnings for vendored code
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        target_compile_options(quickjs PRIVATE -w)
+        # Add QuickJS-NG as a subdirectory
+        add_subdirectory(${QUICKJS_DIR} ${CMAKE_BINARY_DIR}/quickjs-ng EXCLUDE_FROM_ALL)
+        
+        if(TARGET qjs)
+            add_library(quickjs ALIAS qjs)
+            set(QUICKJS_FOUND TRUE)
+            message(STATUS "Found and configured QuickJS-NG (Windows) at ${QUICKJS_DIR}")
+        else()
+            message(WARNING "QuickJS-NG target 'qjs' not found after add_subdirectory")
+            set(QUICKJS_FOUND FALSE)
+        endif()
+    else()
+        message(WARNING "QuickJS-NG not found in vendor/quickjs-ng. Scripting will be disabled on Windows.")
+        set(QUICKJS_FOUND FALSE)
     endif()
-
-    # Disable clang-tidy for vendored code
-    set_target_properties(quickjs PROPERTIES C_CLANG_TIDY "" CXX_CLANG_TIDY "")
-
-    set(QUICKJS_FOUND TRUE)
 else()
-    message(WARNING "QuickJS not found in vendor/quickjs. Scripting will be disabled.")
-    set(QUICKJS_FOUND FALSE)
+    # Linux/macOS: Use original QuickJS
+    set(QUICKJS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/quickjs)
+    
+    if(EXISTS ${QUICKJS_DIR}/quickjs.c)
+        add_library(quickjs STATIC
+            ${QUICKJS_DIR}/quickjs.c
+            ${QUICKJS_DIR}/libregexp.c
+            ${QUICKJS_DIR}/libunicode.c
+            ${QUICKJS_DIR}/cutils.c
+            ${QUICKJS_DIR}/libbf.c
+        )
+        target_include_directories(quickjs PUBLIC ${QUICKJS_DIR})
+        target_compile_definitions(quickjs PRIVATE
+            CONFIG_VERSION="2024-01-13"
+            CONFIG_BIGNUM
+        )
+        
+        # GCC/Clang: Disable warnings for vendored code
+        target_compile_options(quickjs PRIVATE -w)
+        
+        # Disable clang-tidy for vendored code
+        set_target_properties(quickjs PROPERTIES C_CLANG_TIDY "" CXX_CLANG_TIDY "")
+        
+        set(QUICKJS_FOUND TRUE)
+        message(STATUS "Found and configured QuickJS (Unix) at ${QUICKJS_DIR}")
+    else()
+        message(WARNING "QuickJS not found in vendor/quickjs. Scripting will be disabled.")
+        set(QUICKJS_FOUND FALSE)
+    endif()
 endif()
 
 # ============================================================================
 # Core Library
 # ============================================================================
+
+# Platform-specific source files
+if(WIN32)
+    set(PLATFORM_SOURCES src/platform/platform_windows.cpp)
+else()
+    set(PLATFORM_SOURCES src/platform/platform_unix.cpp)
+endif()
 
 add_library(vayu_core STATIC
     src/http/client.cpp
@@ -173,6 +212,7 @@ add_library(vayu_core STATIC
     src/core/load_strategy.cpp
     src/core/run_manager.cpp
     src/core/metrics_collector.cpp
+    ${PLATFORM_SOURCES}
 )
 
 target_include_directories(vayu_core PUBLIC
@@ -188,6 +228,20 @@ target_link_libraries(vayu_core PUBLIC
     vayu_sanitizers
 )
 
+# Windows-specific libraries
+if(WIN32)
+    target_link_libraries(vayu_core PUBLIC ws2_32)
+    # MSVC-specific options for vayu_core
+    if(MSVC)
+        target_compile_definitions(vayu_core PRIVATE
+            _CRT_SECURE_NO_WARNINGS
+            _CRT_NONSTDC_NO_DEPRECATE
+            NOMINMAX
+            WIN32_LEAN_AND_MEAN
+        )
+    endif()
+endif()
+
 # Add QuickJS if available
 if(QUICKJS_FOUND)
     target_sources(vayu_core PRIVATE
@@ -197,9 +251,11 @@ if(QUICKJS_FOUND)
     target_compile_definitions(vayu_core PUBLIC VAYU_HAS_QUICKJS)
     
     # Disable C99 extension warnings for script_engine.cpp (QuickJS macros use compound literals)
-    set_source_files_properties(src/runtime/script_engine.cpp PROPERTIES
-        COMPILE_FLAGS "-Wno-c99-extensions"
-    )
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        set_source_files_properties(src/runtime/script_engine.cpp PROPERTIES
+            COMPILE_FLAGS "-Wno-c99-extensions"
+        )
+    endif()
 endif()
 
 # ============================================================================

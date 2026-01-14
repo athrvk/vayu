@@ -3,6 +3,15 @@
  * @brief HTTP client implementation using libcurl
  */
 
+#ifdef _WIN32
+#include <windows.h>
+#include <winsock2.h>
+// Windows headers define DELETE macro which conflicts with HttpMethod::DELETE
+#ifdef DELETE
+#undef DELETE
+#endif
+#endif
+
 #include "vayu/http/client.hpp"
 
 #include <curl/curl.h>

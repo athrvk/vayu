@@ -1,16 +1,16 @@
 {
-    "name": "vayu-engine",
-    "version": "0.1.1",
-    "description": "High-performance API execution engine",
-    "homepage": "https://github.com/vayu/vayu",
-    "license": "MIT",
-    "dependencies": [
-        "curl",
-        "nlohmann-json",
-        "cpp-httplib",
-        "gtest",
-        "sqlite3",
-        "sqlite-orm"
+  "name": "vayu-engine",
+  "version": "0.1.1",
+  "description": "High-performance API execution engine",
+  "homepage": "https://github.com/vayu/vayu",
+  "license": "MIT",
+  "dependencies": [
+    "curl",
+    "nlohmann-json",
+    "cpp-httplib",
+    "gtest",
+    "sqlite3",
+    "sqlite-orm"
   ],
   "builtin-baseline": "bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428"
 }

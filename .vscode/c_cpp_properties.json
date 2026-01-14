@@ -13,7 +13,9 @@
             "cStandard": "c17",
             "cppStandard": "c++20",
             "intelliSenseMode": "linux-clang-x64",
-            "compileCommands": "${workspaceFolder}/engine/build/compile_commands.json",
+            "compileCommands": [
+                "${workspaceFolder}/engine/build/compile_commands.json"
+            ],
             "configurationProvider": "ms-vscode.cmake-tools"
         },
         {
@@ -29,7 +31,9 @@
             "cStandard": "c17",
             "cppStandard": "c++20",
             "intelliSenseMode": "macos-clang-arm64",
-            "compileCommands": "${workspaceFolder}/engine/build/compile_commands.json",
+            "compileCommands": [
+                "${workspaceFolder}/engine/build/compile_commands.json"
+            ],
             "configurationProvider": "ms-vscode.cmake-tools"
         },
         {
@@ -45,7 +49,33 @@
             "cStandard": "c17",
             "cppStandard": "c++20",
             "intelliSenseMode": "macos-clang-x64",
-            "compileCommands": "${workspaceFolder}/engine/build/compile_commands.json",
+            "compileCommands": [
+                "${workspaceFolder}/engine/build/compile_commands.json"
+            ],
+            "configurationProvider": "ms-vscode.cmake-tools"
+        },
+        {
+            "name": "Windows",
+            "includePath": [
+                "${workspaceFolder}/engine/include",
+                "${workspaceFolder}/engine/src",
+                "${workspaceFolder}/engine/vendor/**",
+                "${workspaceFolder}/engine/vcpkg_installed/x64-windows/include",
+                "D:/Software Installations/Microsoft Visual Studio/18/Community/VC/vcpkg/installed/x64-windows/include"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE",
+                "WIN32",
+                "_WIN32",
+                "NOMINMAX",
+                "WIN32_LEAN_AND_MEAN"
+            ],
+            "compilerPath": "",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "windows-msvc-x64",
             "configurationProvider": "ms-vscode.cmake-tools"
         }
     ],

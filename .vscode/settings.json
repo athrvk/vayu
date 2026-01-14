@@ -1,12 +1,10 @@
 {
     // =========================================================================
-    // CMake Configuration
+    // CMake Configuration (auto-detects cmake and generator per platform)
     // =========================================================================
-    "cmake.cmakePath": "/home/ubuntu/.local/bin/cmake",
     "cmake.sourceDirectory": "${workspaceFolder}/engine",
     "cmake.buildDirectory": "${workspaceFolder}/engine/build",
     "cmake.configureOnOpen": true,
-    "cmake.generator": "Ninja",
     "cmake.parallelJobs": 0,
     "cmake.buildBeforeRun": true,
     // =========================================================================
@@ -91,6 +89,7 @@
         "fsanitize",
         "httplib",
         "libbf",
+        "LIBC",
         "libregexp",
         "libunicode",
         "memsize",
@@ -98,6 +97,8 @@
         "ncpu",
         "ngrok",
         "nlohmann",
+        "NOMINMAX",
+        "NONSTDC",
         "partialize",
         "physicalcpu",
         "QUICKJS",

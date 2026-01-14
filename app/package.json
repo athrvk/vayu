@@ -12,6 +12,7 @@
 		"electron:watch": "tsc -p tsconfig.node.json --watch",
 		"electron:dev": "concurrently \"vite\" \"npm:electron:watch\" \"wait-on http://127.0.0.1:5173 && electron .\"",
 		"electron:build": "npm run electron:compile && npm run build && electron-builder --config electron-builder.json",
+		"electron:pack": "electron-builder --config electron-builder.json",
 		"lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
 		"type-check": "tsc --noEmit"
 	},

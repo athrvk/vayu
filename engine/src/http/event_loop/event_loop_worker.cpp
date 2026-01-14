@@ -1,8 +1,13 @@
 #include "vayu/http/event_loop/event_loop_worker.hpp"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#endif
 
 #include <chrono>
 #include <regex>

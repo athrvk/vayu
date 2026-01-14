@@ -1,7 +1,7 @@
 import { app, BrowserWindow } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
-import { EngineSidecar } from "./sidecar";
+import { EngineSidecar } from "./sidecar.js";
 
 const isDev = process.env.NODE_ENV === "development";
 
