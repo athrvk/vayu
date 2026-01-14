@@ -2,6 +2,11 @@
 	"name": "vayu-desktop",
 	"version": "0.1.0",
 	"description": "Vayu Desktop - High-Performance API Testing Platform",
+	"author": {
+		"name": "Atharva Kusumbia",
+		"email": "atharvakusumbia@gmail.com"
+	},
+	"homepage": "https://github.com/athrvk/vayu",
 	"main": "dist-electron/main.js",
 	"type": "module",
 	"scripts": {
@@ -64,6 +69,5 @@
 		"vite": "^5.0.8",
 		"wait-on": "^7.2.0"
 	},
-	"author": "Vayu Team",
 	"license": "MIT"
 }
