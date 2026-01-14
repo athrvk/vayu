@@ -1,7 +1,12 @@
 {
-	"name": "vayu-desktop",
+	"name": "vayu-client",
 	"version": "0.1.0",
-	"description": "Vayu Desktop - High-Performance API Testing Platform",
+	"description": "Vayu - High-Performance API Testing Platform",
+	"author": {
+		"name": "Atharva Kusumbia",
+		"email": "atharvakusumbia@gmail.com"
+	},
+	"homepage": "https://github.com/athrvk/vayu",
 	"main": "dist-electron/main.js",
 	"type": "module",
 	"scripts": {
@@ -10,8 +15,9 @@
 		"preview": "vite preview",
 		"electron:compile": "tsc -p tsconfig.node.json",
 		"electron:watch": "tsc -p tsconfig.node.json --watch",
-		"electron:dev": "concurrently \"vite\" \"npm:electron:watch\" \"wait-on http://127.0.0.1:5173 && /home/ubuntu/.nvm/versions/node/v22.21.1/bin/electron .\"",
-		"electron:build": "npm run electron:compile && npm run build && electron-builder",
+		"electron:dev": "concurrently \"vite\" \"npm:electron:watch\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+		"electron:build": "npm run electron:compile && npm run build && electron-builder --config electron-builder.json",
+		"electron:pack": "electron-builder --config electron-builder.json",
 		"lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
 		"type-check": "tsc --noEmit"
 	},
@@ -63,6 +69,5 @@
 		"vite": "^5.0.8",
 		"wait-on": "^7.2.0"
 	},
-	"author": "Vayu Team",
 	"license": "MIT"
 }

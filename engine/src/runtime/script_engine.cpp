@@ -29,6 +29,18 @@ extern "C" {
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+
+// Compatibility macros for QuickJS vs QuickJS-NG API differences
+#ifdef _WIN32
+// QuickJS-NG (Windows): JS_IsArray takes 1 arg, JS_NewClassID takes 2 args
+#define QJS_IsArray(ctx, val) JS_IsArray(val)
+#define QJS_NewClassID(rt, pclass_id) JS_NewClassID(rt, pclass_id)
+#else
+// Original QuickJS (Unix): JS_IsArray takes 2 args, JS_NewClassID takes 1 arg
+#define QJS_IsArray(ctx, val) JS_IsArray(ctx, val)
+#define QJS_NewClassID(rt, pclass_id) JS_NewClassID(pclass_id)
+#endif
+
 #endif
 
 namespace vayu::runtime {
@@ -339,7 +351,7 @@ JSValue expect_include(JSContext* ctx, JSValueConst this_val, int argc, JSValueC
         std::string str = js_to_string(ctx, state->actual);
         std::string substr = js_to_string(ctx, argv[0]);
         includes = str.find(substr) != std::string::npos;
-    } else if (JS_IsArray(ctx, state->actual)) {
+    } else if (QJS_IsArray(ctx, state->actual)) {
         JSValue length = JS_GetPropertyStr(ctx, state->actual, "length");
         uint32_t len;
         JS_ToUint32(ctx, &len, length);
@@ -880,7 +892,7 @@ public:
 
         // Register Expectation class
         if (expect_class_id == 0) {
-            JS_NewClassID(&expect_class_id);
+            QJS_NewClassID(rt, &expect_class_id);
         }
         JS_NewClass(rt, expect_class_id, &expect_class);
 

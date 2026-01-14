@@ -1,0 +1,77 @@
+{
+	"appId": "com.vayu.client",
+	"productName": "Vayu",
+	"directories": {
+		"output": "release",
+		"buildResources": "build"
+	},
+	"files": [
+		"dist/**/*",
+		"dist-electron/**/*",
+		"package.json"
+	],
+	"extraResources": [
+		{
+			"from": "build/resources/bin/",
+			"to": "bin",
+			"filter": ["**/*"]
+		}
+	],
+	"nsis": {
+		"oneClick": false,
+		"perMachine": false,
+		"allowToChangeInstallationDirectory": true,
+		"deleteAppDataOnUninstall": false,
+		"allowElevation": true,
+		"runAfterFinish": true,
+		"include": "build/installer.nsh",
+		"uninstallDisplayName": "Vayu",
+		"createDesktopShortcut": "always",
+		"createStartMenuShortcut": true,
+		"shortcutName": "Vayu",
+		"license": "build/license.txt"
+	},
+	"mac": {
+		"category": "public.app-category.developer-tools",
+		"target": [
+			{
+				"target": "dmg",
+				"arch": ["universal"]
+			}
+		],
+		"icon": "build/icon.icns",
+		"artifactName": "${productName}-${version}-${arch}.${ext}",
+		"hardenedRuntime": true,
+		"gatekeeperAssess": false,
+		"entitlements": "build/entitlements.mac.plist",
+		"entitlementsInherit": "build/entitlements.mac.plist"
+	},
+	"dmg": {
+		"contents": [
+			{
+				"x": 130,
+				"y": 220
+			},
+			{
+				"x": 410,
+				"y": 220,
+				"type": "link",
+				"path": "/Applications"
+			}
+		],
+		"title": "${productName} ${version}",
+		"window": {
+			"width": 540,
+			"height": 380
+		}
+	},
+	"linux": {
+		"target": ["AppImage", "deb"],
+		"category": "Development",
+		"icon": "build/icons"
+	},
+	"win": {
+		"target": ["nsis"],
+		"icon": "build/icon.ico"
+	}
+}

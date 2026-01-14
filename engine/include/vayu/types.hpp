@@ -26,6 +26,16 @@ using Duration = std::chrono::milliseconds;
 // HTTP Types
 // ============================================================================
 
+#ifdef WIN32
+// Un-define Windows macros that conflict with Vayu types
+#ifdef DELETE
+#undef DELETE
+#endif
+#ifdef ERROR
+#undef ERROR
+#endif
+#endif
+
 enum class HttpMethod { GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS };
 
 /**

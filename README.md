@@ -43,7 +43,7 @@ In the current API development landscape, engineers maintain **two separate work
 - 📝 **Postman Compatible** - Import collections, use familiar `pm.test()` syntax
 - 🔒 **Privacy First** - 100% local, no cloud sync, your data stays yours
 - 🆓 **Open Source** - MIT licensed, free forever
-- 💻 **Cross Platform** - macOS today, Windows & Linux coming soon
+- 💻 **Cross Platform** - macOS, Windows & Linux support
 
 ---
 
@@ -133,16 +133,46 @@ See [PLAN.md](PLAN.md) for detailed roadmap.
 
 We welcome contributions! See [Contributing Guide](docs/contributing.md).
 
+### Development Setup
+
 ```bash
 # Clone
 git clone https://github.com/vayu/vayu.git
+cd vayu
 
-# Build engine
-cd engine && cmake -B build && cmake --build build
+# Build for your platform (dev mode)
+# macOS:
+./scripts/build-macos.sh dev
 
-# Build app
-cd ../app && pnpm install && pnpm dev
+# Linux:
+./scripts/build-linux.sh dev
+
+# Windows (PowerShell):
+.\scripts\build-windows.ps1 dev
+
+# Then start the app
+cd app && pnpm run electron:dev
 ```
+
+### Production Build
+
+```bash
+# macOS:
+./scripts/build-macos.sh prod
+# Output: app/release/Vayu-*.dmg
+
+# Linux:
+./scripts/build-linux.sh prod
+# Output: app/release/Vayu-*.AppImage or *.deb
+
+# Windows (PowerShell):
+.\scripts\build-windows.ps1 prod
+# Output: app/release/Vayu Setup *.exe
+```
+
+See [Building Guide](docs/building.md) for detailed instructions.
+
+See [Building for macOS](docs/building-macos.md) for detailed instructions.
 
 ---
 

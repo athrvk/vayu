@@ -10,7 +10,7 @@ export default function WelcomeScreen() {
 			<div className="text-center max-w-2xl">
 				<div className="flex items-center justify-center gap-3 mb-6">
 					<Zap className="w-12 h-12 text-primary" />
-					<h1 className="text-4xl font-bold text-foreground">Vayu Desktop</h1>
+					<h1 className="text-4xl font-bold text-foreground">Vayu</h1>
 				</div>
 
 				<p className="text-xl text-muted-foreground mb-8">

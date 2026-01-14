@@ -1,0 +1,91 @@
+﻿{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "windows-base",
+      "description": "Target Windows with the Visual Studio development environment.",
+      "hidden": true,
+      "generator": "Visual Studio 18 2026",
+      "binaryDir": "${sourceDir}/engine/build/out/build/${presetName}",
+      "installDir": "${sourceDir}/engine/build/out/install/${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_TOOLCHAIN_FILE": "D:\\Software Installations\\Microsoft Visual Studio\\18\\Community\\VC\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-ninja-msvc",
+      "description": "Target Windows using Ninja generator with the MSVC toolchain (Ninja + vcpkg).",
+      "hidden": false,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/engine/build/out/build/${presetName}",
+      "installDir": "${sourceDir}/engine/build/out/install/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "D:\\Software Installations\\Microsoft Visual Studio\\18\\Community\\VC\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "ninja-x64-debug",
+      "displayName": "Ninja x64 Debug",
+      "description": "Ninja generator (MSVC toolchain) x64 Debug",
+      "inherits": "windows-ninja-msvc",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "ninja-x64-release",
+      "displayName": "Ninja x64 Release",
+      "description": "Ninja generator (MSVC toolchain) x64 Release",
+      "inherits": "windows-ninja-msvc",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "x64-debug",
+      "displayName": "x64 Debug",
+      "description": "Target Windows (64-bit) with the Visual Studio development environment. (Debug)",
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "x64-release",
+      "displayName": "x64 Release",
+      "description": "Target Windows (64-bit) with the Visual Studio development environment. (RelWithDebInfo)",
+      "inherits": "x64-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "x86-debug",
+      "displayName": "x86 Debug",
+      "description": "Target Windows (32-bit) with the Visual Studio development environment. (Debug)",
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "x86",
+        "strategy": "external"
+      },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "x86-release",
+      "displayName": "x86 Release",
+      "description": "Target Windows (32-bit) with the Visual Studio development environment. (RelWithDebInfo)",
+      "inherits": "x86-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, Trash2, Clock, Loader2, Activity, Zap, CheckCircle2, XCircle, AlertCircle, StopCircle } from "lucide-react";
+import { Search, Trash2, Clock, Loader2, Activity, Zap, CheckCircle2, XCircle, StopCircle } from "lucide-react";
 import { useAppStore, useHistoryStore } from "@/stores";
 import { filterRuns } from "@/stores/history-store";
 import { useRunsQuery, useDeleteRunMutation } from "@/queries";

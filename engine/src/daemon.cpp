@@ -6,15 +6,8 @@
  * It exposes a Control API for the Electron app to communicate with.
  */
 
-#include <fcntl.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
 #include <atomic>
 #include <chrono>
-#include <csignal>
-#include <cstring>
 #include <iostream>
 #include <thread>
 
@@ -23,77 +16,42 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/server.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
 
 namespace {
 std::atomic<bool> g_running{true};
-std::atomic<bool> g_shutdown_requested{false};
-int g_lock_fd = -1;
+vayu::platform::LockHandle g_lock_handle = vayu::platform::INVALID_LOCK_HANDLE;
 
-void signal_handler(int signal) {
-    if (signal == SIGINT || signal == SIGTERM) {
-        if (g_shutdown_requested.load()) {
-            // Second signal - force immediate exit
-            vayu::utils::log_warning("Force shutdown requested, exiting immediately");
-            std::exit(1);
-        }
-        vayu::utils::log_info("Shutting down...");
-        g_shutdown_requested.store(true);
-        g_running.store(false);
-    }
+std::string get_default_data_dir() {
+    // Default to current directory for backward compatibility
+    return ".";
 }
 
-bool acquire_lock() {
-    const char* lock_path = "/tmp/vayu.lock";
-    g_lock_fd = open(lock_path, O_RDWR | O_CREAT, 0666);
-    if (g_lock_fd < 0) {
-        vayu::utils::log_error("Failed to open lock file: " + std::string(lock_path));
+bool acquire_lock(const std::string& lock_path) {
+    if (!vayu::platform::acquire_file_lock(lock_path, g_lock_handle)) {
+        vayu::utils::log_error(
+            "Error: Another instance of Vayu Engine is already running, or failed to create lock "
+            "file: " +
+            lock_path);
         return false;
     }
 
-    if (flock(g_lock_fd, LOCK_EX | LOCK_NB) < 0) {
-        if (errno == EWOULDBLOCK) {
-            vayu::utils::log_error("Error: Another instance of Vayu Engine is already running.");
-        } else {
-            vayu::utils::log_error("Error: Failed to acquire lock on " + std::string(lock_path) +
-                                   ": " + strerror(errno));
-        }
-        close(g_lock_fd);
-        return false;
+    if (!vayu::platform::write_pid_to_lock(g_lock_handle)) {
+        vayu::utils::log_warning("Failed to write PID to lock file");
+        // Not fatal, continue anyway
     }
 
-    // Write PID
-    if (ftruncate(g_lock_fd, 0) == -1) {
-        perror("ftruncate failed");
-        close(g_lock_fd);
-        return false;
-    }
-    std::string pid = std::to_string(getpid()) + "\n";
-    ssize_t written = write(g_lock_fd, pid.c_str(), pid.length());
-    if (written != (ssize_t) pid.length()) {
-        perror("write failed");
-        close(g_lock_fd);
-        return false;
-    }
-
-    // Do not close the fd, as that releases the lock
     return true;
 }
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    // Initialize logger first
-    vayu::utils::Logger::instance().init(vayu::core::constants::logging::DIR);
-
-    // Check for single instance
-    if (!acquire_lock()) {
-        return 1;
-    }
-
-    // Parse arguments
+    // Parse arguments first (need data_dir for logging)
     int port = vayu::core::constants::defaults::PORT;
     int verbosity = 0;  // 0=warn/error, 1=info+, 2=debug+
+    std::string data_dir = get_default_data_dir();
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -102,6 +60,10 @@ int main(int argc, char* argv[]) {
             arg == vayu::core::constants::cli::ARG_PORT_LONG) {
             if (i + 1 < argc) {
                 port = std::stoi(argv[++i]);
+            }
+        } else if (arg == "-d" || arg == "--data-dir") {
+            if (i + 1 < argc) {
+                data_dir = argv[++i];
             }
         } else if (arg == "-v" || arg == "--verbose") {
             // Check if next arg is a number (verbosity level)
@@ -117,25 +79,61 @@ int main(int argc, char* argv[]) {
             std::cout << "Vayu Engine " << vayu::Version::string << "\n\n";
             std::cout << "Usage: vayu-engine [OPTIONS]\n\n";
             std::cout << "Options:\n";
-            std::cout << "  -p, --port <PORT>     Port to listen on (default: 9876)\n";
-            std::cout << "  -v, --verbose [LEVEL] Enable verbose output (0=warn/error, 1=info, "
+            std::cout << "  -p, --port <PORT>        Port to listen on (default: 9876)\n";
+            std::cout << "  -d, --data-dir <DIR>     Data directory for DB, logs, and lock file (default: .)\n";
+            std::cout << "  -v, --verbose [LEVEL]    Enable verbose output (0=warn/error, 1=info, "
                          "2=debug, default: 1)\n";
-            std::cout << "  -h, --help            Show this help message\n";
+            std::cout << "  -h, --help               Show this help message\n";
             return 0;
         }
     }
 
+    // Ensure data directory exists
+    try {
+        vayu::platform::ensure_directory(data_dir);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
+    }
+
+    // Create subdirectories for logs and database
+    std::string log_dir = vayu::platform::path_join(data_dir, "logs");
+    std::string db_dir = vayu::platform::path_join(data_dir, "db");
+    try {
+        vayu::platform::ensure_directory(log_dir);
+        vayu::platform::ensure_directory(db_dir);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
+    }
+
+    // Initialize logger
+    vayu::utils::Logger::instance().init(log_dir);
+
+    // Check for single instance
+    std::string lock_path = vayu::platform::path_join(data_dir, "vayu.lock");
+    if (!acquire_lock(lock_path)) {
+        return 1;
+    }
+
     vayu::utils::Logger::instance().set_verbosity(verbosity);
 
-    // Setup signal handlers
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
+    // Setup signal handlers using platform abstraction
+    vayu::platform::setup_signal_handlers([](bool force) {
+        if (force) {
+            vayu::utils::log_warning("Force shutdown requested, exiting immediately");
+            std::exit(1);
+        }
+        vayu::utils::log_info("Shutting down...");
+        g_running.store(false);
+    });
 
     // Initialize database
-    vayu::db::Database db("engine/db/vayu.db");
+    std::string db_path = vayu::platform::path_join(db_dir, "vayu.db");
+    vayu::db::Database db(db_path);
     try {
         db.init();
-        vayu::utils::log_info("Database initialized at engine/db/vayu.db");
+        vayu::utils::log_info("Database initialized at " + db_path);
     } catch (const std::exception& e) {
         vayu::utils::log_error("Failed to initialize database: " + std::string(e.what()));
         return 1;
@@ -201,10 +199,7 @@ int main(int argc, char* argv[]) {
     vayu::http::global_cleanup();
 
     // Release lock file
-    if (g_lock_fd >= 0) {
-        flock(g_lock_fd, LOCK_UN);
-        close(g_lock_fd);
-    }
+    vayu::platform::release_file_lock(g_lock_handle);
 
     vayu::utils::log_info("Goodbye!");
 

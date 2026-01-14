@@ -11,6 +11,13 @@
 
 #include "vayu/core/constants.hpp"
 
+// Windows headers define ERROR as a macro, undef it
+#ifdef _WIN32
+#ifdef ERROR
+#undef ERROR
+#endif
+#endif
+
 namespace vayu::utils {
 class Logger {
 public:
