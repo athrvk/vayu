@@ -1,6 +1,6 @@
 ﻿# Building Vayu on Windows
 
-This document covers building Vayu Desktop on Windows (development and production).
+This document covers building Vayu on Windows (development and production).
 
 ## Prerequisites
 
@@ -25,7 +25,7 @@ Production:
 ```powershell
 .\scripts\build-windows.ps1 prod
 # Output:
-#   app\release\Vayu Desktop Setup *.exe
+#   app\release\Vayu Setup *.exe
 ```
 
 ## Manual Engine Build

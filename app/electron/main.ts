@@ -23,7 +23,7 @@ function createWindow() {
 			contextIsolation: true,
 			preload: path.join(__dirname, "preload.js"),
 		},
-		title: "Vayu Desktop",
+		title: "Vayu",
 		backgroundColor: "#ffffff",
 	});
 

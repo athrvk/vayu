@@ -1,6 +1,6 @@
 {
-	"appId": "com.vayu.desktop",
-	"productName": "Vayu Desktop",
+	"appId": "com.vayu.client",
+	"productName": "Vayu",
 	"directories": {
 		"output": "release",
 		"buildResources": "build"
@@ -25,10 +25,10 @@
 		"allowElevation": true,
 		"runAfterFinish": true,
 		"include": "build/installer.nsh",
-		"uninstallDisplayName": "Vayu Desktop",
+		"uninstallDisplayName": "Vayu",
 		"createDesktopShortcut": "always",
 		"createStartMenuShortcut": true,
-		"shortcutName": "Vayu Desktop",
+		"shortcutName": "Vayu",
 		"license": "build/license.txt"
 	},
 	"mac": {

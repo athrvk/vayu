@@ -178,11 +178,11 @@ main() {
     else
         echo "✅ Production build created:"
         echo ""
-        echo "   app/release/Vayu Desktop-*.dmg"
+        echo "   app/release/Vayu-*.dmg"
         echo ""
         echo "📦 To install:"
         echo "  1. Open the DMG file"
-        echo "  2. Drag Vayu Desktop to Applications"
+        echo "  2. Drag Vayu to Applications"
         echo "  3. Launch from Applications folder"
         echo ""
     fi

@@ -1,6 +1,6 @@
-# Troubleshooting Vayu Desktop
+# Troubleshooting Vayu
 
-This guide covers common issues when building and running Vayu Desktop.
+This guide covers common issues when building and running Vayu.
 
 ## Table of Contents
 
@@ -184,14 +184,14 @@ chmod 755 ~/Library/Application\ Support/
 **Solution:**
 ```bash
 # Check logs
-cat ~/Library/Application\ Support/vayu-desktop/logs/vayu_*.log
+cat ~/Library/Application\ Support/vayu/logs/vayu_*.log
 
 # Common causes:
 # 1. Database corruption
-rm ~/Library/Application\ Support/vayu-desktop/db/vayu.db
+rm ~/Library/Application\ Support/vayu/db/vayu.db
 
 # 2. Lock file left from crashed instance
-rm ~/Library/Application\ Support/vayu-desktop/vayu.lock
+rm ~/Library/Application\ Support/vayu/vayu.lock
 ```
 
 ## Engine Issues
@@ -206,14 +206,14 @@ Failed to initialize database: unable to open database file
 **Solution:**
 ```bash
 # Ensure data directory exists
-mkdir -p ~/Library/Application\ Support/vayu-desktop/db
+mkdir -p ~/Library/Application\ Support/vayu/db
 
 # Check permissions
-chmod 755 ~/Library/Application\ Support/vayu-desktop
-chmod 755 ~/Library/Application\ Support/vayu-desktop/db
+chmod 755 ~/Library/Application\ Support/vayu
+chmod 755 ~/Library/Application\ Support/vayu/db
 
 # Delete corrupted database
-rm ~/Library/Application\ Support/vayu-desktop/db/vayu.db
+rm ~/Library/Application\ Support/vayu/db/vayu.db
 ```
 
 ### Lock file error
@@ -229,7 +229,7 @@ Error: Another instance of Vayu Engine is already running
 ps aux | grep vayu-engine
 
 # If not running, remove stale lock file
-rm ~/Library/Application\ Support/vayu-desktop/vayu.lock
+rm ~/Library/Application\ Support/vayu/vayu.lock
 
 # If running, kill it first
 pkill vayu-engine
@@ -251,7 +251,7 @@ lsof -i :9876
 curl http://127.0.0.1:9876/health
 
 # Check engine logs
-cat ~/Library/Application\ Support/vayu-desktop/logs/vayu_*.log
+cat ~/Library/Application\ Support/vayu/logs/vayu_*.log
 ```
 
 ### SSL/TLS errors
@@ -287,7 +287,7 @@ brew upgrade openssl
 ```bash
 # Enable debug logging
 # In app, set verbose mode or check logs:
-cat ~/Library/Application\ Support/vayu-desktop/logs/vayu_*.log
+cat ~/Library/Application\ Support/vayu/logs/vayu_*.log
 
 # Test with curl to compare
 curl -w "@curl-format.txt" -o /dev/null -s https://example.com
@@ -388,7 +388,7 @@ xattr -d com.apple.quarantine /Applications/Vayu\ Desktop.app
 # System Settings > Privacy & Security > Allow apps from: App Store and identified developers
 ```
 
-### "Vayu Desktop" wants to access files
+### "Vayu" wants to access files
 
 **Symptoms:** Permission dialogs on every launch
 
@@ -396,14 +396,14 @@ xattr -d com.apple.quarantine /Applications/Vayu\ Desktop.app
 ```bash
 # Grant Full Disk Access:
 # System Settings > Privacy & Security > Full Disk Access
-# Add Vayu Desktop
+# Add Vayu
 
 # Or grant specific folder access as prompted
 ```
 
 ### Rosetta required (Intel Mac)
 
-**Error:** "Vayu Desktop requires Rosetta"
+**Error:** "Vayu requires Rosetta"
 
 **Solution:**
 ```bash
@@ -416,7 +416,7 @@ softwareupdate --install-rosetta
 If you're still stuck:
 
 1. **Check logs:**
-   - App logs: `~/Library/Application Support/vayu-desktop/logs/`
+   - App logs: `~/Library/Application Support/vayu/logs/`
    - Console.app: Filter by "Vayu"
 
 2. **Search issues:** [GitHub Issues](https://github.com/vayu/vayu/issues)
@@ -459,10 +459,10 @@ cd app && pnpm run electron:dev
 
 ```bash
 # Backup first (optional)
-cp -r ~/Library/Application\ Support/vayu-desktop ~/vayu-backup
+cp -r ~/Library/Application\ Support/vayu ~/vayu-backup
 
 # Remove all app data
-rm -rf ~/Library/Application\ Support/vayu-desktop
+rm -rf ~/Library/Application\ Support/vayu
 
 # App will recreate on next launch
 ```

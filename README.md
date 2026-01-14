@@ -159,15 +159,15 @@ cd app && pnpm run electron:dev
 ```bash
 # macOS:
 ./scripts/build-macos.sh prod
-# Output: app/release/Vayu Desktop-*.dmg
+# Output: app/release/Vayu-*.dmg
 
 # Linux:
 ./scripts/build-linux.sh prod
-# Output: app/release/Vayu Desktop-*.AppImage or *.deb
+# Output: app/release/Vayu-*.AppImage or *.deb
 
 # Windows (PowerShell):
 .\scripts\build-windows.ps1 prod
-# Output: app/release/Vayu Desktop Setup *.exe
+# Output: app/release/Vayu Setup *.exe
 ```
 
 See [Building Guide](docs/building.md) for detailed instructions.

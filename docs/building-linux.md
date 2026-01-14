@@ -1,6 +1,6 @@
 # Building Vayu on Linux
 
-This document covers building Vayu Desktop on Linux (Ubuntu/Debian).
+This document covers building Vayu on Linux (Ubuntu/Debian).
 
 ## Prerequisites
 
@@ -83,7 +83,7 @@ Production:
 
 ```bash
 ./scripts/build-linux.sh prod
-# Output: app/release/Vayu Desktop-*.AppImage and/or *.deb
+# Output: app/release/Vayu-*.AppImage and/or *.deb
 ```
 
 ## Manual Engine Build
@@ -109,14 +109,14 @@ cmake --build build-release
 
 ### Production Build
 - Engine binary: `engine/build-release/vayu-engine`
-- AppImage: `app/release/Vayu Desktop-*.AppImage`
-- Debian package: `app/release/Vayu Desktop-*.deb`
-- RPM package: `app/release/Vayu Desktop-*.rpm` (if fpm is available)
+- AppImage: `app/release/Vayu-*.AppImage`
+- Debian package: `app/release/Vayu-*.deb`
+- RPM package: `app/release/Vayu-*.rpm` (if fpm is available)
 
 ## Notes
 
-- Data directory: `~/.config/vayu-desktop`
-- Logs directory: `~/.config/vayu-desktop/logs`
+- Data directory: `~/.config/vayu`
+- Logs directory: `~/.config/vayu/logs`
 - CI: Use `--artifacts` flag to collect build outputs
 
 ## Installation & Uninstallation
@@ -125,15 +125,15 @@ cmake --build build-release
 
 **AppImage:**
 ```bash
-chmod +x 'Vayu Desktop-0.1.0.AppImage'
-./'Vayu Desktop-0.1.0.AppImage'
+chmod +x 'Vayu-0.1.0.AppImage'
+./'Vayu-0.1.0.AppImage'
 ```
 
 **Debian/Ubuntu (.deb):**
 ```bash
-sudo dpkg -i vayu-desktop_0.1.0_amd64.deb
+sudo dpkg -i vayu-client_0.1.0_amd64.deb
 # Or with apt (handles dependencies automatically):
-sudo apt install ./vayu-desktop_0.1.0_amd64.deb
+sudo apt install ./vayu-client_0.1.0_amd64.deb
 ```
 
 ### Uninstalling
@@ -141,24 +141,24 @@ sudo apt install ./vayu-desktop_0.1.0_amd64.deb
 **AppImage:**
 ```bash
 # Simply delete the AppImage file
-rm 'Vayu Desktop-0.1.0.AppImage'
+rm 'Vayu-0.1.0.AppImage'
 
 # Optionally remove user data:
-rm -rf ~/.config/vayu-desktop
+rm -rf ~/.config/vayu
 ```
 
 **Debian/Ubuntu (.deb):**
 ```bash
 # Uninstall the package
-sudo apt remove vayu-desktop
+sudo apt remove vayu-client
 # Or:
-sudo dpkg -r vayu-desktop
+sudo dpkg -r vayu-client
 
 # To also remove configuration files:
-sudo apt purge vayu-desktop
+sudo apt purge vayu-client
 
 # Optionally remove user data:
-rm -rf ~/.config/vayu-desktop
+rm -rf ~/.config/vayu
 ```
 
 ## Troubleshooting
@@ -178,6 +178,6 @@ sudo apt install build-essential cmake ninja-build pkg-config libssl-dev
 ### AppImage not running
 Make sure it's executable:
 ```bash
-chmod +x Vayu-Desktop-*.AppImage
-./Vayu-Desktop-*.AppImage
+chmod +x Vayu-*.AppImage
+./Vayu-*.AppImage
 ```

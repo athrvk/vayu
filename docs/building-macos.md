@@ -1,16 +1,16 @@
-# Building Vayu Desktop for macOS
+# Building Vayu for macOS
 
-This guide explains how to build and package Vayu Desktop for macOS with the bundled C++ engine.
+This guide explains how to build and package Vayu for macOS with the bundled C++ engine.
 
 ## Architecture
 
-Vayu Desktop uses the **sidecar pattern** to bundle the C++ engine with the Electron app:
+Vayu uses the **sidecar pattern** to bundle the C++ engine with the Electron app:
 
 ```
-Vayu Desktop.app/
+Vayu.app/
 ├── Contents/
 │   ├── MacOS/
-│   │   └── Vayu Desktop          # Electron executable
+│   │   └── Vayu          # Electron executable
 │   └── Resources/
 │       ├── app.asar              # Electron app (UI)
 │       └── bin/
@@ -126,15 +126,15 @@ This script will:
 
 The final installer is created at:
 ```
-app/release/Vayu Desktop-<version>-<arch>.dmg
+app/release/Vayu-<version>-<arch>.dmg
 ```
 
 **Production Paths (inside .app):**
-- Engine binary: `Vayu Desktop.app/Contents/Resources/bin/vayu-engine`
-- Data directory: `~/Library/Application Support/vayu-desktop/`
-  - Database: `~/Library/Application Support/vayu-desktop/db/vayu.db`
-  - Logs: `~/Library/Application Support/vayu-desktop/logs/`
-  - Lock file: `~/Library/Application Support/vayu-desktop/vayu.lock`
+- Engine binary: `Vayu.app/Contents/Resources/bin/vayu-engine`
+- Data directory: `~/Library/Application Support/vayu/`
+  - Database: `~/Library/Application Support/vayu/db/vayu.db`
+  - Logs: `~/Library/Application Support/vayu/logs/`
+  - Lock file: `~/Library/Application Support/vayu/vayu.lock`
 
 ### 3. Testing the Production Build
 
@@ -243,7 +243,7 @@ Manages the engine process:
 
 **Solution:**
 1. Check Console.app for crash logs
-2. Look in `~/Library/Application Support/vayu-desktop/logs/`
+2. Look in `~/Library/Application Support/vayu/logs/`
 3. Verify engine binary has correct permissions:
    ```bash
    ls -la Vayu\ Desktop.app/Contents/Resources/bin/vayu-engine

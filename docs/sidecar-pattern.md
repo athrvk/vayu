@@ -1,10 +1,10 @@
 # Sidecar Pattern Implementation
 
-This document explains how Vayu Desktop bundles and manages the C++ engine using the sidecar pattern.
+This document explains how Vayu bundles and manages the C++ engine using the sidecar pattern.
 
 ## Overview
 
-The **sidecar pattern** is a design pattern where a helper process (the "sidecar") runs alongside the main application. In Vayu Desktop:
+The **sidecar pattern** is a design pattern where a helper process (the "sidecar") runs alongside the main application. In Vayu:
 
 - **Main Process:** Electron app (UI)
 - **Sidecar Process:** vayu-engine (C++ backend)
@@ -13,7 +13,7 @@ The **sidecar pattern** is a design pattern where a helper process (the "sidecar
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Vayu Desktop.app                        │
+│                         Vayu.app                            │
 │                                                             │
 │  ┌──────────────────┐              ┌──────────────────┐   │
 │  │  Electron Main   │   spawns     │   vayu-engine    │   │
@@ -27,7 +27,7 @@ The **sidecar pattern** is a design pattern where a helper process (the "sidecar
 │  ┌──────────────────┐                       ↓              │
 │  │  Renderer Process│                  User Data           │
 │  │  (React UI)      │              ~/Library/App Support   │
-│  │                  │                 /vayu-desktop/       │
+│  │                  │                    /vayu/            │
 │  │  - Request UI    │                    ├── db/           │
 │  │  - Response UI   │                    ├── logs/         │
 │  │  - Dashboard     │                    └── vayu.lock     │
@@ -81,7 +81,7 @@ Why?
 // Detected via: process.env.NODE_ENV !== "development"
 
 Binary Path:    process.resourcesPath/bin/vayu-engine
-Data Directory: app.getPath("userData")  // ~/Library/Application Support/vayu-desktop
+Data Directory: app.getPath("userData")  // ~/Library/Application Support/vayu
 ```
 
 Why?
@@ -94,12 +94,12 @@ Why?
 The engine accepts a `--data-dir` parameter to configure all file paths:
 
 ```bash
-vayu-engine --port 9876 --data-dir ~/Library/Application\ Support/vayu-desktop
+vayu-engine --port 9876 --data-dir ~/Library/Application\ Support/vayu
 ```
 
 This creates:
 ```
-~/Library/Application Support/vayu-desktop/
+~/Library/Application Support/vayu/
 ├── db/
 │   └── vayu.db           # SQLite database
 ├── logs/
@@ -200,7 +200,7 @@ The build process packages the engine binary:
      ]
    }
    ```
-   - Bundles binary into `Vayu Desktop.app/Contents/Resources/bin/`
+   - Bundles binary into `Vayu.app/Contents/Resources/bin/`
    - Makes it executable
    - Signs it (if certificate provided)
 
@@ -279,7 +279,7 @@ Check the engine's own logs:
 cat engine/data/logs/vayu_*.log
 
 # Production
-cat ~/Library/Application\ Support/vayu-desktop/logs/vayu_*.log
+cat ~/Library/Application\ Support/vayu/logs/vayu_*.log
 ```
 
 ### Manual Engine Testing

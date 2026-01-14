@@ -379,9 +379,9 @@ main() {
         fi
         echo ""
         echo "📦 To install:"
-        echo "  AppImage: chmod +x *.AppImage && ./Vayu-Desktop-*.AppImage"
-        echo "  deb: sudo dpkg -i Vayu-Desktop-*.deb"
-        echo "  rpm: sudo rpm -i Vayu-Desktop-*.rpm"
+        echo "  AppImage: chmod +x *.AppImage && ./Vayu-*.AppImage"
+        echo "  deb: sudo dpkg -i vayu-client_*.deb"
+        echo "  rpm: sudo rpm -i vayu-client-*.rpm"
         echo ""
     fi
 }

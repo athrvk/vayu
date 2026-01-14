@@ -582,7 +582,7 @@ function Main {
         Write-Host ""
         Write-Host "To install:"
         Write-Host "  1. Run the installer"
-        Write-Host "  2. Launch Vayu Desktop from the Start menu"
+        Write-Host "  2. Launch Vayu from the Start menu"
         Write-Host ""
     }
 }

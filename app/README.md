@@ -1,4 +1,4 @@
-# Vayu Desktop App
+# Vayu Client App
 
 API testing and load testing platform built with Electron + React + TypeScript.
 
