@@ -53,3 +53,6 @@ db/vayu.*
 # Logs
 logs/
 *.log
+
+# Ignore vendor CI/meta folders we don't want in the repo
+vendor/*/.github/
