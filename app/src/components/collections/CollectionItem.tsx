@@ -24,6 +24,8 @@ export interface CollectionItemProps {
     creatingSubfolder: string | null;
     newSubfolderName: string;
     isCreatingSubfolder: boolean;
+    renamingRequestId: string | null;
+    renameRequestValue: string;
     getRequestsByCollection: (collectionId: string) => Request[];
     onCollectionClick: (collection: Collection) => void;
     onRequestClick: (collectionId: string, requestId: string) => void;
@@ -31,10 +33,15 @@ export interface CollectionItemProps {
     onRenameChange: (value: string) => void;
     onRenameSubmit: (collectionId: string) => void;
     onRenameCancel: () => void;
+    onStartRename: (collection: Collection) => void;
     onDeleteRequest: (requestId: string) => Promise<void>;
     onSubfolderNameChange: (value: string) => void;
     onCreateSubfolder: (parentId: string) => void;
     onCancelSubfolder: () => void;
+    onRequestRenameChange: (value: string) => void;
+    onRequestRenameSubmit: (requestId: string) => void;
+    onRequestRenameCancel: () => void;
+    onStartRequestRename: (request: Request) => void;
 }
 
 export default function CollectionItem({
@@ -51,6 +58,8 @@ export default function CollectionItem({
     creatingSubfolder,
     newSubfolderName,
     isCreatingSubfolder,
+    renamingRequestId,
+    renameRequestValue,
     getRequestsByCollection,
     onCollectionClick,
     onRequestClick,
@@ -58,10 +67,15 @@ export default function CollectionItem({
     onRenameChange,
     onRenameSubmit,
     onRenameCancel,
+    onStartRename,
     onDeleteRequest,
     onSubfolderNameChange,
     onCreateSubfolder,
     onCancelSubfolder,
+    onRequestRenameChange,
+    onRequestRenameSubmit,
+    onRequestRenameCancel,
+    onStartRequestRename,
 }: CollectionItemProps) {
     const isExpanded = expandedCollectionIds.has(collection.id);
     const requests = getRequestsByCollection(collection.id);
@@ -112,7 +126,13 @@ export default function CollectionItem({
                         />
                     ) : (
                         <>
-                            <span className={cn("text-sm text-foreground", depth === 0 && "font-medium")}>
+                                <span
+                                    className={cn("text-sm text-foreground", depth === 0 && "font-medium")}
+                                    onDoubleClick={(e) => {
+                                        e.stopPropagation();
+                                        onStartRename(collection);
+                                    }}
+                                >
                                 {collection.name}
                             </span>
                             <span className="text-xs text-muted-foreground">
@@ -204,10 +224,17 @@ export default function CollectionItem({
                             onRenameChange={onRenameChange}
                             onRenameSubmit={onRenameSubmit}
                             onRenameCancel={onRenameCancel}
+                            onStartRename={onStartRename}
                             onDeleteRequest={onDeleteRequest}
                             onSubfolderNameChange={onSubfolderNameChange}
                             onCreateSubfolder={onCreateSubfolder}
                             onCancelSubfolder={onCancelSubfolder}
+                            onRequestRenameChange={onRequestRenameChange}
+                            onRequestRenameSubmit={onRequestRenameSubmit}
+                            onRequestRenameCancel={onRequestRenameCancel}
+                            onStartRequestRename={onStartRequestRename}
+                            renamingRequestId={renamingRequestId}
+                            renameRequestValue={renameRequestValue}
                         />
                     ))}
 
@@ -226,6 +253,12 @@ export default function CollectionItem({
                             onDelete={onDeleteRequest}
                             isDeleting={deletingRequestId === request.id}
                             isSelected={selectedCollectionId === collection.id && selectedRequestId === request.id}
+                            isRenaming={renamingRequestId === request.id}
+                            renameValue={renameRequestValue}
+                            onRenameChange={onRequestRenameChange}
+                            onRenameSubmit={onRequestRenameSubmit}
+                            onRenameCancel={onRequestRenameCancel}
+                            onStartRename={onStartRequestRename}
                         />
                     ))}
                 </div>

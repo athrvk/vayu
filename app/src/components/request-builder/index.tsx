@@ -22,7 +22,7 @@ import {
     ResizablePanel,
     ResizablePanelGroup,
 } from "@/components/ui";
-import { useAppStore, useEnvironmentStore, useDashboardStore } from "@/stores";
+import { useAppStore, useVariablesStore, useDashboardStore } from "@/stores";
 import { useRequestQuery, useUpdateRequestMutation } from "@/queries";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService } from "@/services/api";
@@ -37,7 +37,7 @@ import type { Request, HttpMethod, LoadTestConfig, StartLoadTestRequest } from "
  */
 export default function RequestBuilder() {
     const { selectedRequestId, navigateToDashboard } = useAppStore();
-    const { activeEnvironmentId } = useEnvironmentStore();
+    const { activeEnvironmentId } = useVariablesStore();
     const { startRun } = useDashboardStore();
     const { executeRequest: engineExecuteRequest } = useEngine();
     const updateRequestMutation = useUpdateRequestMutation();

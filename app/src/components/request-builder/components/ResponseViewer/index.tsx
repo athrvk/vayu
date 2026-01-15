@@ -8,10 +8,12 @@
  * - Body formatting (JSON, HTML, XML, Text, Image, PDF, etc.)
  * - Collapsible headers sections
  * - Console logs separated by pre-scripts and tests
+ * 
+ * Uses shared ResponseBody component for body display with Pretty/Raw/Preview modes.
  */
 
 import { useState, useMemo } from "react";
-import { Clock, FileText, Copy, Check, Download, Terminal, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronRight, Image as ImageIcon, FileCode, File, BarChart3 } from "lucide-react";
+import { Clock, FileText, Copy, Check, Download, Terminal, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronRight, BarChart3 } from "lucide-react";
 import Editor from "@monaco-editor/react";
 import {
     Tabs,
@@ -29,91 +31,9 @@ import {
 import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context";
 import { useAppStore, useDashboardStore } from "@/stores";
-
-// Extended body type to support more response formats
-type BodyType = "json" | "html" | "xml" | "text" | "binary" | "image" | "pdf" | "javascript" | "css" | "markdown";
+import { ResponseBody as SharedResponseBody, HeadersViewer, formatSize, buildRawResponse } from "@/components/shared/response-viewer";
 
 type ResponseTab = "body" | "headers" | "cookies" | "console" | "tests" | "raw-request";
-
-// Detect content type from headers and body content
-function detectBodyType(headers: Record<string, string>, body: string): BodyType {
-    const contentType = headers["content-type"] || headers["Content-Type"] || "";
-    const lowerContentType = contentType.toLowerCase();
-
-    // Image types
-    if (lowerContentType.includes("image/")) {
-        return "image";
-    }
-
-    // PDF
-    if (lowerContentType.includes("application/pdf")) {
-        return "pdf";
-    }
-
-    // JSON
-    if (lowerContentType.includes("application/json") || lowerContentType.includes("+json")) {
-        return "json";
-    }
-
-    // JavaScript
-    if (lowerContentType.includes("javascript") || lowerContentType.includes("application/js")) {
-        return "javascript";
-    }
-
-    // CSS
-    if (lowerContentType.includes("text/css")) {
-        return "css";
-    }
-
-    // HTML
-    if (lowerContentType.includes("text/html") || lowerContentType.includes("application/xhtml")) {
-        return "html";
-    }
-
-    // XML
-    if (lowerContentType.includes("xml") || lowerContentType.includes("application/xml") || lowerContentType.includes("+xml")) {
-        return "xml";
-    }
-
-    // Markdown
-    if (lowerContentType.includes("text/markdown")) {
-        return "markdown";
-    }
-
-    // Binary types
-    if (lowerContentType.includes("application/octet-stream") ||
-        lowerContentType.includes("application/zip") ||
-        lowerContentType.includes("application/gzip")) {
-        return "binary";
-    }
-
-    // Try to detect from body content if content-type is generic or missing
-    if (!contentType || lowerContentType.includes("text/plain")) {
-        // Try JSON detection
-        const trimmed = body.trim();
-        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-            (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
-            try {
-                JSON.parse(trimmed);
-                return "json";
-            } catch {
-                // Not valid JSON
-            }
-        }
-
-        // Try XML detection
-        if (trimmed.startsWith("<?xml") || (trimmed.startsWith("<") && trimmed.includes("</"))) {
-            return "xml";
-        }
-
-        // Try HTML detection
-        if (trimmed.toLowerCase().includes("<!doctype html") || trimmed.toLowerCase().includes("<html")) {
-            return "html";
-        }
-    }
-
-    return "text";
-}
 
 export default function ResponseViewer() {
     const { response, isExecuting } = useRequestBuilderContext();
@@ -301,8 +221,14 @@ export default function ResponseViewer() {
 
                 {/* Tab Content */}
                 <div className="flex-1 overflow-hidden">
-                    {activeTab === "body" && <ResponseBody response={response} />}
-                    {activeTab === "headers" && <ResponseHeaders response={response} />}
+                    {activeTab === "body" && (
+                        <SharedResponseBody
+                            body={response.body}
+                            headers={response.headers}
+                            showModeToggle
+                        />
+                    )}
+                    {activeTab === "headers" && <ResponseHeadersTab response={response} />}
                     {activeTab === "cookies" && <ResponseCookies headers={response.headers} />}
                     {activeTab === "console" && <ConsoleOutput logs={response.consoleLogs || []} errors={{ pre: response.preScriptError, post: response.postScriptError }} />}
                     {activeTab === "tests" && <TestResults results={response.testResults || []} />}
@@ -358,229 +284,38 @@ function ResponseHeader({ response }: ResponseHeaderProps) {
     );
 }
 
-// Response Body with Monaco editor and multiple format support
-interface ResponseBodyProps {
-    response: {
-        body: string;
-        bodyType: "json" | "html" | "xml" | "text" | "binary";
-        headers: Record<string, string>;
-    };
-}
-
-function ResponseBody({ response }: ResponseBodyProps) {
-    // Detect actual body type from content-type header
-    const detectedType = detectBodyType(response.headers, response.body);
-
-    // Handle image types
-    if (detectedType === "image") {
-        const contentType = response.headers["content-type"] || response.headers["Content-Type"] || "image/png";
-        return (
-            <div className="flex-1 flex items-center justify-center p-4 bg-zinc-900">
-                <div className="text-center space-y-4">
-                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted text-sm text-muted-foreground">
-                        <ImageIcon className="w-4 h-4" />
-                        <span>Image Response ({contentType.split("/")[1]?.toUpperCase() || "IMAGE"})</span>
-                    </div>
-                    <div className="max-w-full max-h-[400px] overflow-auto">
-                        <img
-                            src={`data:${contentType};base64,${response.body}`}
-                            alt="Response"
-                            className="max-w-full h-auto rounded-md border border-border"
-                        />
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    // Handle PDF
-    if (detectedType === "pdf") {
-        return (
-            <div className="flex-1 flex items-center justify-center p-4 bg-zinc-900">
-                <div className="text-center space-y-4">
-                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted text-sm text-muted-foreground">
-                        <File className="w-4 h-4" />
-                        <span>PDF Document</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                        PDF preview is not available. Download to view.
-                    </p>
-                </div>
-            </div>
-        );
-    }
-
-    // Handle binary
-    if (detectedType === "binary") {
-        return (
-            <div className="flex-1 flex items-center justify-center p-4 bg-zinc-900">
-                <div className="text-center space-y-4">
-                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted text-sm text-muted-foreground">
-                        <FileCode className="w-4 h-4" />
-                        <span>Binary Data</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                        Binary content cannot be displayed. Download to view.
-                    </p>
-                </div>
-            </div>
-        );
-    }
-
-    // Determine language for Monaco based on detected type
-    const languageMap: Record<BodyType, string> = {
-        json: "json",
-        html: "html",
-        xml: "xml",
-        javascript: "javascript",
-        css: "css",
-        markdown: "markdown",
-        text: "plaintext",
-        binary: "plaintext",
-        image: "plaintext",
-        pdf: "plaintext",
-    };
-    const language = languageMap[detectedType] || "plaintext";
-
-    // Try to format JSON
-    let formattedBody = response.body;
-    if (detectedType === "json") {
-        try {
-            formattedBody = JSON.stringify(JSON.parse(response.body), null, 2);
-        } catch {
-            // Keep original if not valid JSON
-        }
-    }
-
-    return (
-        <div className="flex-1 flex flex-col h-full">
-            {/* Format indicator */}
-            <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-muted/20">
-                <FileCode className="w-4 h-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground uppercase tracking-wide">
-                    {detectedType}
-                </span>
-            </div>
-            <div className="flex-1">
-                <Editor
-                    height="100%"
-                    language={language}
-                    value={formattedBody}
-                    theme="vs-dark"
-                    options={{
-                        readOnly: true,
-                        minimap: { enabled: false },
-                        fontSize: 13,
-                        lineNumbers: "on",
-                        scrollBeyondLastLine: false,
-                        wordWrap: "on",
-                        automaticLayout: true,
-                    }}
-                />
-            </div>
-        </div>
-    );
-}
-
-// Response Headers table - shows both request and response headers with collapsible sections
-interface ResponseHeadersProps {
+// Response Headers table - shows both request and response headers using shared HeadersViewer
+interface ResponseHeadersTabProps {
     response: {
         headers: Record<string, string>;
         requestHeaders?: Record<string, string>;
     };
 }
 
-function ResponseHeaders({ response }: ResponseHeadersProps) {
-    const responseEntries = Object.entries(response.headers);
-    const requestEntries = Object.entries(response.requestHeaders || {});
-
-    // Request headers collapsed by default, response headers expanded
-    const [requestHeadersOpen, setRequestHeadersOpen] = useState(false);
-    const [responseHeadersOpen, setResponseHeadersOpen] = useState(true);
-
+function ResponseHeadersTab({ response }: ResponseHeadersTabProps) {
     return (
         <div className="p-4 overflow-auto h-full space-y-4">
             {/* Request Headers */}
-            {requestEntries.length > 0 && (
-                <Collapsible open={requestHeadersOpen} onOpenChange={setRequestHeadersOpen}>
-                    <CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
-                        <div className="flex items-center justify-center w-5 h-5 rounded bg-muted group-hover:bg-muted/80 transition-colors">
-                            {requestHeadersOpen ? (
-                                <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                            ) : (
-                                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                            )}
-                        </div>
-                        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                            Request Headers
-                        </h3>
-                        <Badge variant="outline" className="ml-auto text-xs">
-                            {requestEntries.length}
-                        </Badge>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-2">
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="border-b border-border">
-                                    <th className="text-left py-2 px-3 font-medium text-muted-foreground">Name</th>
-                                    <th className="text-left py-2 px-3 font-medium text-muted-foreground">Value</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {requestEntries.map(([name, value]) => (
-                                    <tr key={name} className="border-b border-border/50 hover:bg-muted/50">
-                                        <td className="py-2 px-3 font-mono text-blue-500">{name}</td>
-                                        <td className="py-2 px-3 font-mono break-all">{value}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </CollapsibleContent>
-                </Collapsible>
+            {response.requestHeaders && Object.keys(response.requestHeaders).length > 0 && (
+                <HeadersViewer
+                    headers={response.requestHeaders}
+                    variant="request"
+                    defaultOpen={false}
+                />
             )}
 
             {/* Response Headers */}
-            <Collapsible open={responseHeadersOpen} onOpenChange={setResponseHeadersOpen}>
-                <CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
-                    <div className="flex items-center justify-center w-5 h-5 rounded bg-muted group-hover:bg-muted/80 transition-colors">
-                        {responseHeadersOpen ? (
-                            <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                        ) : (
-                            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                        )}
-                    </div>
-                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                        Response Headers
-                    </h3>
-                    <Badge variant="outline" className="ml-auto text-xs">
-                        {responseEntries.length}
-                    </Badge>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2">
-                    {responseEntries.length === 0 ? (
-                        <div className="p-8 text-center text-muted-foreground">
-                            No headers in response
-                        </div>
-                    ) : (
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="border-b border-border">
-                                    <th className="text-left py-2 px-3 font-medium text-muted-foreground">Name</th>
-                                    <th className="text-left py-2 px-3 font-medium text-muted-foreground">Value</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {responseEntries.map(([name, value]) => (
-                                    <tr key={name} className="border-b border-border/50 hover:bg-muted/50">
-                                        <td className="py-2 px-3 font-mono text-green-500">{name}</td>
-                                        <td className="py-2 px-3 font-mono break-all">{value}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    )}
-                </CollapsibleContent>
-            </Collapsible>
+            <HeadersViewer
+                headers={response.headers}
+                variant="response"
+                defaultOpen={true}
+            />
+
+            {Object.keys(response.headers).length === 0 && (
+                <div className="p-8 text-center text-muted-foreground">
+                    No headers in response
+                </div>
+            )}
         </div>
     );
 }
@@ -779,27 +514,8 @@ interface RawRequestResponseProps {
 }
 
 function RawRequestResponse({ rawRequest, response }: RawRequestResponseProps) {
-    // Build raw HTTP response string
-    const buildRawResponse = () => {
-        let raw = `HTTP/1.1 ${response.status} ${response.statusText}\r\n`;
-
-        // Add response headers
-        for (const [key, value] of Object.entries(response.headers)) {
-            raw += `${key}: ${value}\r\n`;
-        }
-
-        // Empty line between headers and body
-        raw += "\r\n";
-
-        // Add body
-        if (response.body) {
-            raw += response.body;
-        }
-
-        return raw;
-    };
-
-    const rawResponse = buildRawResponse();
+    // Use shared utility to build raw response
+    const rawResponse = buildRawResponse(response.status, response.statusText, response.headers, response.body);
 
     // Combine request and response with a separator
     const combinedRaw = rawRequest

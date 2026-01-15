@@ -19,7 +19,7 @@ import {
     useEnvironmentsQuery,
     useUpdateEnvironmentMutation
 } from "@/queries";
-import { useEnvironmentStore } from "@/stores";
+import { useVariablesStore } from "@/stores";
 import type { VariableValue } from "@/types";
 
 interface VariableInputProps {
@@ -43,7 +43,7 @@ export default function VariableInput({
     enableInlineEdit = true,
 }: VariableInputProps) {
     const { getAllVariables, getVariable } = useVariableResolver({ collectionId });
-    const { activeEnvironmentId } = useEnvironmentStore();
+    const { activeEnvironmentId } = useVariablesStore();
 
     // Data queries
     const { data: globalsData } = useGlobalsQuery();

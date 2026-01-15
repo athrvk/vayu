@@ -5,11 +5,11 @@
  * - Request state management
  * - Variable resolution layer
  * - Execute/save actions
- * - Response state
+ * - Response state (persisted via store)
  * - Auto-save with debouncing
  */
 
-import { useState, useCallback, useMemo, useEffect, type ReactNode } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { RequestBuilderContext } from "./RequestBuilderContext";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import {
@@ -18,9 +18,10 @@ import {
     useCollectionsQuery,
     useUpdateCollectionMutation,
     useEnvironmentsQuery,
-    useUpdateEnvironmentMutation
+    useUpdateEnvironmentMutation,
+    useLastDesignRunQuery
 } from "@/queries";
-import { useEnvironmentStore } from "@/stores";
+import { useVariablesStore, useResponseStore } from "@/stores";
 import type { VariableValue } from "@/types";
 import type {
     RequestState,
@@ -56,8 +57,89 @@ export default function RequestBuilderProvider({
         collectionId: collectionId || null,
     }));
 
-    // Response state
-    const [response, setResponse] = useState<ResponseState | null>(null);
+    // Response state - use store for persistence across view switches
+    const { getResponse, setResponse: storeSetResponse } = useResponseStore();
+    const [response, setLocalResponse] = useState<ResponseState | null>(() => {
+        // Initialize from store if available
+        const requestId = initialRequest?.id;
+        if (requestId) {
+            const stored = getResponse(requestId);
+            if (stored) {
+                return stored as ResponseState;
+            }
+        }
+        return null;
+    });
+
+    // Wrapper to update both local state and store
+    const setResponse = useCallback((newResponse: ResponseState | null) => {
+        setLocalResponse(newResponse);
+        const requestId = request.id;
+        if (requestId && newResponse) {
+            storeSetResponse(requestId, newResponse);
+        }
+    }, [request.id, storeSetResponse]);
+
+    // Fetch last design run from backend (for app reload scenarios)
+    const { report: lastDesignRunReport, isLoading: isLoadingLastRun } = useLastDesignRunQuery(request.id);
+    const hasLoadedFromBackend = useRef<string | null>(null);
+
+    // Load response from backend if we don't have one cached and backend has a previous run
+    useEffect(() => {
+        // Skip if no request ID or already have a response
+        if (!request.id || response) return;
+
+        // Skip if already loaded for this request ID
+        if (hasLoadedFromBackend.current === request.id) return;
+
+        // Skip if still loading
+        if (isLoadingLastRun) return;
+
+        // Try to reconstruct response from last design run
+        if (lastDesignRunReport?.results && lastDesignRunReport.results.length > 0) {
+            const lastResult = lastDesignRunReport.results[0];
+            const trace = lastResult.trace as any;
+
+            if (trace?.response) {
+                // Determine body type
+                let bodyType: "json" | "html" | "xml" | "text" | "binary" = "text";
+                const body = typeof trace.response.body === "string"
+                    ? trace.response.body
+                    : JSON.stringify(trace.response.body, null, 2);
+
+                try {
+                    JSON.parse(body);
+                    bodyType = "json";
+                } catch {
+                    if (body.includes("<html") || body.includes("<!DOCTYPE")) {
+                        bodyType = "html";
+                    } else if (body.includes("<?xml") || body.includes("<xml")) {
+                        bodyType = "xml";
+                    }
+                }
+
+                const restoredResponse: ResponseState = {
+                    status: lastResult.statusCode || 0,
+                    statusText: `${lastResult.statusCode || 0}`,
+                    headers: trace.response.headers || {},
+                    requestHeaders: trace.request?.headers || {},
+                    rawRequest: trace.request ? `${trace.request.method} ${trace.request.url}` : undefined,
+                    body,
+                    bodyType,
+                    size: body.length,
+                    time: lastResult.latencyMs || 0,
+                    timestamp: new Date(lastResult.timestamp).toISOString(),
+                };
+
+                setLocalResponse(restoredResponse);
+                storeSetResponse(request.id, restoredResponse);
+                hasLoadedFromBackend.current = request.id;
+            }
+        }
+
+        // Mark as loaded even if no response found
+        hasLoadedFromBackend.current = request.id;
+    }, [request.id, response, lastDesignRunReport, isLoadingLastRun, storeSetResponse]);
 
     // UI state
     const [activeTab, setActiveTab] = useState<RequestTab>("params");
@@ -69,7 +151,7 @@ export default function RequestBuilderProvider({
         useVariableResolver({ collectionId: collectionId || undefined });
 
     // Variable update mutations
-    const { activeEnvironmentId } = useEnvironmentStore();
+    const { activeEnvironmentId } = useVariablesStore();
     const { data: globalsData } = useGlobalsQuery();
     const { data: collections = [] } = useCollectionsQuery();
     const { data: environments = [] } = useEnvironmentsQuery();
@@ -86,8 +168,23 @@ export default function RequestBuilderProvider({
                 collectionId: collectionId || null,
             });
             setHasUnsavedChanges(false);
+
+            // Restore response from store for this request
+            const requestId = initialRequest.id;
+            if (requestId) {
+                const stored = getResponse(requestId);
+                if (stored) {
+                    setLocalResponse(stored as ResponseState);
+                } else {
+                    setLocalResponse(null);
+                }
+                // Reset backend loading flag to allow reloading from backend if needed
+                hasLoadedFromBackend.current = null;
+            } else {
+                setLocalResponse(null);
+            }
         }
-    }, [initialRequest?.id, collectionId]);
+    }, [initialRequest?.id, collectionId, getResponse]);
 
     // Centralized save manager - handles auto-save, keyboard shortcut, and status
     const handleSave = useCallback(async () => {

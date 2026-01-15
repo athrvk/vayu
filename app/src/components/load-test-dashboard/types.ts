@@ -13,17 +13,6 @@ import type { LoadTestMetrics, RunReport } from "@/types";
 export type DashboardMode = "idle" | "running" | "completed";
 export type DashboardView = "metrics" | "request-response";
 
-export interface DashboardState {
-    runId: string | null;
-    mode: DashboardMode;
-    isStreaming: boolean;
-    currentMetrics: LoadTestMetrics | null;
-    historicalMetrics: LoadTestMetrics[];
-    finalReport: RunReport | null;
-    activeView: DashboardView;
-    isStopping: boolean;
-}
-
 // ============================================================================
 // Component Props Types
 // ============================================================================

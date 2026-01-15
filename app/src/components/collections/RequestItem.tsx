@@ -1,7 +1,7 @@
 import { Loader2, Trash2 } from "lucide-react";
 import { getMethodColor } from "@/utils";
 import type { Request } from "@/types";
-import { Button, Badge } from "@/components/ui";
+import { Button, Badge, Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 export interface RequestItemProps {
@@ -11,6 +11,12 @@ export interface RequestItemProps {
     onDelete: (requestId: string) => Promise<void>;
     isDeleting?: boolean;
     isSelected?: boolean;
+    isRenaming?: boolean;
+    renameValue?: string;
+    onRenameChange?: (value: string) => void;
+    onRenameSubmit?: (requestId: string) => void;
+    onRenameCancel?: () => void;
+    onStartRename?: (request: Request) => void;
 }
 
 export default function RequestItem({
@@ -20,6 +26,12 @@ export default function RequestItem({
     onDelete,
     isDeleting,
     isSelected,
+    isRenaming,
+    renameValue,
+    onRenameChange,
+    onRenameSubmit,
+    onRenameCancel,
+    onStartRename,
 }: RequestItemProps) {
     return (
         <div className={cn(
@@ -32,7 +44,7 @@ export default function RequestItem({
             <button
                 onClick={() => onSelect(collectionId, request.id)}
                 className="flex items-center gap-2 flex-1 text-left"
-                disabled={isDeleting}
+                disabled={isDeleting || isRenaming}
             >
                 <Badge
                     variant="outline"
@@ -40,25 +52,54 @@ export default function RequestItem({
                 >
                     {request.method}
                 </Badge>
-                <span className="text-sm text-foreground truncate">{request.name}</span>
+                {isRenaming ? (
+                    <Input
+                        type="text"
+                        value={renameValue ?? ""}
+                        onChange={(e) => onRenameChange?.(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                onRenameSubmit?.(request.id);
+                            } else if (e.key === "Escape") {
+                                onRenameCancel?.();
+                            }
+                        }}
+                        onBlur={() => onRenameSubmit?.(request.id)}
+                        className="flex-1 h-6 text-sm"
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                    />
+                ) : (
+                    <span
+                        className="text-sm text-foreground truncate"
+                        onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            onStartRename?.(request);
+                        }}
+                    >
+                        {request.name}
+                    </span>
+                )}
             </button>
 
-            <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onDelete(request.id)}
-                disabled={isDeleting}
-                className={cn(
-                    "h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-opacity",
-                    isDeleting ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                )}
-            >
-                {isDeleting ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                    <Trash2 className="w-3 h-3" />
-                )}
-            </Button>
+            {!isRenaming && (
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onDelete(request.id)}
+                    disabled={isDeleting}
+                    className={cn(
+                        "h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-opacity",
+                        isDeleting ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                    )}
+                >
+                    {isDeleting ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                        <Trash2 className="w-3 h-3" />
+                    )}
+                </Button>
+            )}
         </div>
     );
 }

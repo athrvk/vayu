@@ -8,7 +8,7 @@ import {
 	FolderPlus,
 	Loader2,
 } from "lucide-react";
-import { useAppStore, useCollectionsStore } from "@/stores";
+import { useAppStore, useCollectionsStore, useSaveStore } from "@/stores";
 import {
 	useCollectionsQuery,
 	useMultipleCollectionRequests,
@@ -17,6 +17,7 @@ import {
 	useDeleteCollectionMutation,
 	useCreateRequestMutation,
 	useDeleteRequestMutation,
+	useUpdateRequestMutation,
 } from "@/queries";
 import {
 	Button,
@@ -36,6 +37,7 @@ export default function CollectionTree() {
 		expandedCollectionIds,
 		toggleCollectionExpanded,
 	} = useCollectionsStore();
+	const { startSaving, completeSave, failSave, setStatus } = useSaveStore();
 
 	// TanStack Query hooks
 	const { data: collections = [] } = useCollectionsQuery();
@@ -51,6 +53,7 @@ export default function CollectionTree() {
 	const deleteCollectionMutation = useDeleteCollectionMutation();
 	const createRequestMutation = useCreateRequestMutation();
 	const deleteRequestMutation = useDeleteRequestMutation();
+	const updateRequestMutation = useUpdateRequestMutation();
 
 	// Helper to get requests for a collection
 	const getRequestsByCollection = (collectionId: string): Request[] => {
@@ -67,6 +70,8 @@ export default function CollectionTree() {
 	} | null>(null);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState("");
+	const [renamingRequestId, setRenamingRequestId] = useState<string | null>(null);
+	const [renameRequestValue, setRenameRequestValue] = useState("");
 	const [deletingCollectionId, setDeletingCollectionId] = useState<string | null>(null);
 	const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
 	const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -172,12 +177,24 @@ export default function CollectionTree() {
 	};
 
 	const handleRenameSubmit = async (collectionId: string) => {
-		if (!renameValue.trim()) return;
+		if (!renameValue.trim()) {
+			setRenamingId(null);
+			setRenameValue("");
+			return;
+		}
 
-		await updateCollectionMutation.mutateAsync({
-			id: collectionId,
-			name: renameValue.trim(),
-		});
+		startSaving();
+		try {
+			await updateCollectionMutation.mutateAsync({
+				id: collectionId,
+				name: renameValue.trim(),
+			});
+			completeSave();
+			// Reset to idle after showing "saved" status
+			setTimeout(() => setStatus("idle"), 2000);
+		} catch (error) {
+			failSave(error instanceof Error ? error.message : "Failed to rename collection");
+		}
 
 		setRenamingId(null);
 		setRenameValue("");
@@ -228,6 +245,40 @@ export default function CollectionTree() {
 		} finally {
 			setDeletingRequestId(null);
 		}
+	};
+
+	const handleStartRequestRename = (request: Request) => {
+		setRenamingRequestId(request.id);
+		setRenameRequestValue(request.name);
+	};
+
+	const handleRequestRenameSubmit = async (requestId: string) => {
+		if (!renameRequestValue.trim()) {
+			setRenamingRequestId(null);
+			setRenameRequestValue("");
+			return;
+		}
+
+		startSaving();
+		try {
+			await updateRequestMutation.mutateAsync({
+				id: requestId,
+				name: renameRequestValue.trim(),
+			});
+			completeSave();
+			// Reset to idle after showing "saved" status
+			setTimeout(() => setStatus("idle"), 2000);
+		} catch (error) {
+			failSave(error instanceof Error ? error.message : "Failed to rename request");
+		}
+
+		setRenamingRequestId(null);
+		setRenameRequestValue("");
+	};
+
+	const handleRequestRenameCancel = () => {
+		setRenamingRequestId(null);
+		setRenameRequestValue("");
 	};
 
 	return (
@@ -364,6 +415,7 @@ export default function CollectionTree() {
 							setRenamingId(null);
 							setRenameValue("");
 					}}
+						onStartRename={handleRenameCollection}
 						onDeleteRequest={handleDeleteRequest}
 						onSubfolderNameChange={setNewSubfolderName}
 						onCreateSubfolder={handleCreateSubfolder}
@@ -371,6 +423,12 @@ export default function CollectionTree() {
 							setCreatingSubfolder(null);
 							setNewSubfolderName("New Folder");
 						}}
+						renamingRequestId={renamingRequestId}
+						renameRequestValue={renameRequestValue}
+						onRequestRenameChange={setRenameRequestValue}
+						onRequestRenameSubmit={handleRequestRenameSubmit}
+						onRequestRenameCancel={handleRequestRenameCancel}
+						onStartRequestRename={handleStartRequestRename}
 					/>
 				))}
 

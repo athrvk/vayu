@@ -25,8 +25,10 @@ std::atomic<bool> g_running{true};
 vayu::platform::LockHandle g_lock_handle = vayu::platform::INVALID_LOCK_HANDLE;
 
 std::string get_default_data_dir() {
-    // Default to current directory for backward compatibility
-    return ".";
+    // Default to the repository data folder adjacent to the engine build ("../data").
+    // This makes the daemon, logger and lock file default to the project's data
+    // directory when no --data-dir argument is provided.
+    return vayu::platform::path_join(".", "data");
 }
 
 bool acquire_lock(const std::string& lock_path) {
@@ -80,7 +82,8 @@ int main(int argc, char* argv[]) {
             std::cout << "Usage: vayu-engine [OPTIONS]\n\n";
             std::cout << "Options:\n";
             std::cout << "  -p, --port <PORT>        Port to listen on (default: 9876)\n";
-            std::cout << "  -d, --data-dir <DIR>     Data directory for DB, logs, and lock file (default: .)\n";
+            std::cout << "  -d, --data-dir <DIR>     Data directory for DB, logs, and lock file "
+                         "(default: ../data)\n";
             std::cout << "  -v, --verbose [LEVEL]    Enable verbose output (0=warn/error, 1=info, "
                          "2=debug, default: 1)\n";
             std::cout << "  -h, --help               Show this help message\n";

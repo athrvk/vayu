@@ -87,11 +87,18 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 		})),
 	});
 	
-	// Build a map of collectionId -> requests
+	// Build a map of collectionId -> requests (sorted by created_at for stable order)
 	const requestsByCollection = new Map<string, Request[]>();
 	queries.forEach((query, index) => {
 		const collectionId = collectionIds[index];
-		requestsByCollection.set(collectionId, query.data ?? []);
+		const requests = query.data ?? [];
+		// Sort by created_at to maintain stable order after renames
+		const sortedRequests = [...requests].sort((a, b) => {
+			const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+			const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+			return aTime - bTime;
+		});
+		requestsByCollection.set(collectionId, sortedRequests);
 	});
 	
 	return {

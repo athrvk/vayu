@@ -9,7 +9,7 @@
 
 import { useMemo, useCallback } from "react";
 import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
-import { useVariablesStore, useEnvironmentStore } from "@/stores";
+import { useVariablesStore } from "@/stores";
 import type { VariableValue } from "@/types";
 
 interface VariableSource {
@@ -47,10 +47,8 @@ export function useVariableResolver(options?: UseVariableResolverOptions): UseVa
     const { data: collections = [] } = useCollectionsQuery();
     const { data: environments = [] } = useEnvironmentsQuery();
     
-    // Get active environment from environment store (used throughout the app)
-    const { activeEnvironmentId } = useEnvironmentStore();
-    // Get collection ID from options or variables store
-    const { activeCollectionId: storeCollectionId } = useVariablesStore();
+    // Get active environment from variables store (set by EnvironmentEditor)
+    const { activeEnvironmentId, activeCollectionId: storeCollectionId } = useVariablesStore();
     
     // Use option collectionId if provided, otherwise fall back to store
     const activeCollectionId = options?.collectionId || storeCollectionId;

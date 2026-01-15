@@ -7,7 +7,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
-import type { Run } from "@/types";
+import type { Run, RunReport } from "@/types";
 
 // ============ Run Queries ============
 
@@ -32,6 +32,35 @@ export function useRunReportQuery(runId: string | null) {
 		// Reports don't change, cache longer
 		staleTime: 5 * 60 * 1000,
 	});
+}
+
+/**
+ * Find the last design run for a specific request
+ * Returns the most recent completed design run and its report
+ */
+export function useLastDesignRunQuery(requestId: string | null | undefined) {
+	const { data: runs = [] } = useRunsQuery();
+	
+	// Find the most recent completed design run for this request
+	const lastDesignRun = requestId
+		? runs
+			.filter(
+				(r) =>
+					r.type === "design" &&
+					r.requestId === requestId &&
+					r.status === "completed"
+			)
+			.sort((a, b) => b.startTime - a.startTime)[0] || null
+		: null;
+	
+	// Fetch the report for that run
+	const { data: report, isLoading } = useRunReportQuery(lastDesignRun?.id || null);
+	
+	return {
+		run: lastDesignRun,
+		report,
+		isLoading,
+	};
 }
 
 // ============ Run Mutations ============

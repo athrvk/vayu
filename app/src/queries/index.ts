@@ -26,6 +26,7 @@ export {
 export {
 	useRunsQuery,
 	useRunReportQuery,
+	useLastDesignRunQuery,
 	useDeleteRunMutation,
 	useAddRunToCache,
 	useInvalidateRuns,

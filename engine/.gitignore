@@ -4,6 +4,7 @@ build-test/
 build-release/
 cmake-build-*/
 out/
+data/
 
 # IDE
 .vscode/
