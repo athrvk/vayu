@@ -7,8 +7,39 @@ import { spawn, ChildProcess } from "child_process";
 import { app } from "electron";
 import path from "path";
 import fs from "fs";
+import net from "net";
 
 const isDev = process.env.NODE_ENV === "development";
+
+/**
+ * Check if a port is available
+ */
+function isPortAvailable(port: number): Promise<boolean> {
+	return new Promise((resolve) => {
+		const server = net.createServer();
+		server.once("error", () => resolve(false));
+		server.once("listening", () => {
+			server.close();
+			resolve(true);
+		});
+		server.listen(port, "127.0.0.1");
+	});
+}
+
+/**
+ * Check if our engine is already running on a port
+ */
+async function isEngineRunning(port: number): Promise<boolean> {
+	try {
+		const response = await fetch(`http://127.0.0.1:${port}/health`, {
+			signal: AbortSignal.timeout(1000),
+		});
+		const data = await response.json();
+		return data?.status === "ok";
+	} catch {
+		return false;
+	}
+}
 
 export class EngineSidecar {
 	private process: ChildProcess | null = null;
@@ -64,13 +95,13 @@ export class EngineSidecar {
 		if (isDev) {
 			// In development, use the build directory
 			if (isWindows) {
-				// Windows build outputs to build/Release/
+				// Windows build outputs to build/Debug/
 				const devBinaryPath = path.join(
 					app.getAppPath(),
 					"..",
 					"engine",
 					"build",
-					"Release",
+					"Debug",
 					binaryName,
 				);
 				return devBinaryPath;
@@ -112,8 +143,22 @@ export class EngineSidecar {
 	 */
 	async start(): Promise<void> {
 		if (this.process) {
-			console.log("[Sidecar] Engine already running");
+			console.log("[Sidecar] Engine already running (managed by this instance)");
 			return;
+		}
+
+		// Check if engine is already running on this port (from previous session or crash)
+		if (await isEngineRunning(this.port)) {
+			console.log(`[Sidecar] Engine already running on port ${this.port}, reusing existing instance`);
+			return;
+		}
+
+		// Check if port is in use by something else
+		if (!(await isPortAvailable(this.port))) {
+			throw new Error(
+				`Port ${this.port} is already in use by another application.\n` +
+					`Please free the port or configure a different port.`,
+			);
 		}
 
 		// Ensure data directory exists
@@ -124,7 +169,7 @@ export class EngineSidecar {
 			const platform = process.platform;
 			let buildScript = "./scripts/build-engine-macos.sh";
 			if (platform === "win32") {
-				buildScript = "./scripts/build-engine-windows.sh";
+				buildScript = "./scripts/build-engine-windows.ps1";
 			} else if (platform === "linux") {
 				buildScript = "./scripts/build-engine-linux.sh";
 			}

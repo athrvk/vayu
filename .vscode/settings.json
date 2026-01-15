@@ -77,7 +77,7 @@
     // =========================================================================
     // Terminal
     // =========================================================================
-    "terminal.integrated.cwd": "${workspaceFolder}/engine",
+    "terminal.integrated.cwd": "${workspaceFolder}",
     "cSpell.words": [
         "ASAN",
         "BIGNUM",

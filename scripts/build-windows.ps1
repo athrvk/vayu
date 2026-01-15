@@ -14,15 +14,45 @@ param(
     [switch]$SkipApp,
     [switch]$Clean,
 
+    [Alias('h')]
+    [switch]$Help,
+
     # CI/override parameters
     [string]$CMakePathParam,
     [string]$VcpkgRootParam,
     [string]$EngineDirParam,
     [string]$AppDirParam,
-    [string]$ArtifactsDirParam
+    [string]$ArtifactsDirParam,
+    [string]$GeneratorParam = "Visual Studio 17 2022"
 )
+
 # Stop on first error
 $ErrorActionPreference = "Stop"
+
+# Print help/usage if requested
+if ($Help) {
+    Write-Host "" -ForegroundColor Cyan
+    Write-Host "Vayu Build Script for Windows" -ForegroundColor Cyan
+    Write-Host "Usage: .\build-windows.ps1 [dev|prod] [-SkipEngine] [-SkipApp] [-Clean] [-h|--help]" -ForegroundColor Cyan
+    Write-Host "" -ForegroundColor Cyan
+    Write-Host "Options:" -ForegroundColor Cyan
+    Write-Host "  dev           Development build (Debug mode)" -ForegroundColor Cyan
+    Write-Host "  prod          Production build (Release mode, default)" -ForegroundColor Cyan
+    Write-Host "  -SkipEngine   Skip building the C++ engine" -ForegroundColor Cyan
+    Write-Host "  -SkipApp      Skip building the Electron app" -ForegroundColor Cyan
+    Write-Host "  -Clean        Clean build directories before building" -ForegroundColor Cyan
+    Write-Host "  -h, --help    Show this help message and exit" -ForegroundColor Cyan
+    Write-Host "" -ForegroundColor Cyan
+    Write-Host "Advanced/CI options:" -ForegroundColor Cyan
+    Write-Host "  -CMakePathParam <path>     Override CMake executable path" -ForegroundColor Cyan
+    Write-Host "  -VcpkgRootParam <path>     Override vcpkg root directory" -ForegroundColor Cyan
+    Write-Host "  -EngineDirParam <path>     Override engine directory" -ForegroundColor Cyan
+    Write-Host "  -AppDirParam <path>        Override app directory" -ForegroundColor Cyan
+    Write-Host "  -ArtifactsDirParam <path>  Output installer artifacts to this directory" -ForegroundColor Cyan
+    Write-Host "  -GeneratorParam <name>     Override CMake generator (default: 'Visual Studio 17 2022')" -ForegroundColor Cyan
+    Write-Host "" -ForegroundColor Cyan
+    exit 0
+}
 
 # Colors for output
 $ErrorColor = 'Red'
@@ -75,6 +105,7 @@ function Find-VisualStudio {
         return $null
     }
     
+    # Check specifically for VC++ tools
     $vsPath = & $vsWhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     return $vsPath
 }
@@ -186,7 +217,7 @@ function Test-Prerequisites {
         $missing += "vcpkg (https://vcpkg.io/en/getting-started.html)"
     } else {
         Write-Host "  vcpkg: $VcpkgRoot" -ForegroundColor Gray
-        # Fix mismatch warning
+        # Fix mismatch warning by ensuring environment var is set for the session
         $env:VCPKG_ROOT = $VcpkgRoot
     }
     
@@ -212,38 +243,6 @@ function Test-Prerequisites {
     }
     
     Write-Success "All prerequisites found"
-}
-
-# Install vcpkg dependencies
-function Install-VcpkgDeps {
-    Write-Info "Checking vcpkg dependencies..."
-    
-    $Triplet = "x64-windows"
-    $deps = @(
-        "curl[ssl]",
-        "nlohmann-json",
-        "cpp-httplib",
-        "sqlite3",
-        "sqlite-orm"
-    )
-    
-    Push-Location $VcpkgRoot
-    try {
-        foreach ($dep in $deps) {
-            $installed = & .\vcpkg.exe list "${dep}:${Triplet}" 2>$null
-            if (-not $installed) {
-                Write-Info "Installing $dep..."
-                & .\vcpkg.exe install "${dep}:${Triplet}"
-                if ($LASTEXITCODE -ne 0) {
-                    throw "Failed to install $dep"
-                }
-            }
-        }
-        Write-Success "vcpkg dependencies ready"
-    }
-    finally {
-        Pop-Location
-    }
 }
 
 # Build engine
@@ -286,10 +285,10 @@ function Build-Engine {
     
     try {
         # Configure CMake
-        Write-Info "Configuring CMake..."
+        Write-Info "Configuring CMake (Generator: $GeneratorParam)..."
         
         $cmakeArgs = @(
-            "-G", "Visual Studio 17 2022",
+            "-G", $GeneratorParam,
             "-A", $CMakeArch,
             "-DCMAKE_BUILD_TYPE=$BuildType",
             "-DCMAKE_TOOLCHAIN_FILE=$VcpkgRoot\scripts\buildsystems\vcpkg.cmake",
@@ -484,7 +483,6 @@ function Build-Electron {
             
             Write-Info "Packaging with electron-builder..."
             Write-Host "  NOTE: If you see symlink errors, enable Developer Mode in Windows Settings" -ForegroundColor Yellow
-            Write-Host "        (Settings -> For Developers -> Developer Mode ON)" -ForegroundColor Yellow
             
             # Use electron:pack which only runs electron-builder (doesn't rebuild)
             & pnpm run electron:pack
@@ -522,8 +520,8 @@ function Main {
     
     Write-Host ""
     Write-Host "========================================================" -ForegroundColor Cyan
-    Write-Host "         Vayu Build Script for Windows                  " -ForegroundColor Cyan
-    Write-Host "         Mode: $($BuildMode.ToUpper())                  " -ForegroundColor Cyan
+    Write-Host "        Vayu Build Script for Windows                   " -ForegroundColor Cyan
+    Write-Host "        Mode: $($BuildMode.ToUpper())                   " -ForegroundColor Cyan
     Write-Host "========================================================" -ForegroundColor Cyan
     Write-Host ""
     
@@ -532,7 +530,7 @@ function Main {
     $EngineBinary = $null
     
     if (-not $SkipEngine) {
-        # Install-VcpkgDeps # Rely on manifest mode in CMake
+        # Note: Dependencies handled by CMake manifest mode (vcpkg.json)
         $EngineBinary = Build-Engine
     } else {
         Write-Warn "Skipping engine build"
@@ -560,30 +558,37 @@ function Main {
     Write-Host ""
     
     if ($BuildMode -eq 'dev') {
-        Write-Host "To start the app in development mode:" -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "   cd app"
-        Write-Host "   pnpm run electron:dev"
-        Write-Host ""
-        Write-Host "This will:"
-        Write-Host "  - Start Vite dev server (React app on http://localhost:5173)"
-        Write-Host "  - Launch Electron with the app"
-        Write-Host "  - Auto-start the C++ engine sidecar"
-        Write-Host ""
+        # Calculate relative path to app dir from current location for easy copy-paste
+        $RelativeAppPath = Resolve-Path -Path $AppDir -Relative
+        
+        Write-Host "To start the Electron app in development mode:" -ForegroundColor Yellow
+        Write-Host "" -ForegroundColor Yellow
+        Write-Host "    cd $RelativeAppPath; pnpm run electron:dev" -ForegroundColor White
+        Write-Host "" -ForegroundColor Yellow
     } else {
         Write-Host "Production build created:" -ForegroundColor Green
-        Write-Host ""
+        Write-Host "" -ForegroundColor Green
         $releaseDir = Join-Path $AppDir "release"
+        $installerPaths = @()
         if (Test-Path $releaseDir) {
-            Get-ChildItem $releaseDir -Filter "*.exe" | ForEach-Object {
-                Write-Host "   $($_.FullName)" -ForegroundColor White
+            $installers = Get-ChildItem $releaseDir -Filter "*.exe"
+            foreach ($installer in $installers) {
+                Write-Host "   $($installer.FullName)" -ForegroundColor White
+                $installerPaths += $installer.FullName
             }
         }
-        Write-Host ""
-        Write-Host "To install:"
-        Write-Host "  1. Run the installer"
-        Write-Host "  2. Launch Vayu from the Start menu"
-        Write-Host ""
+        Write-Host "" -ForegroundColor Green
+        Write-Host "To install and launch Vayu:" -ForegroundColor Yellow
+        if ($installerPaths.Count -gt 0) {
+            Write-Host "  1. Run the installer:" -ForegroundColor White
+            foreach ($path in $installerPaths) {
+                Write-Host "     `"$path`"" -ForegroundColor White
+            }
+        } else {
+            Write-Host "  1. Run the generated installer in the release directory." -ForegroundColor White
+        }
+        Write-Host "  2. After installation, launch 'Vayu' from the Windows Start menu." -ForegroundColor White
+        Write-Host "" -ForegroundColor Green
     }
 }
 
