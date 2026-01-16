@@ -1,17 +1,13 @@
 /**
  * Environments Queries
- * 
+ *
  * TanStack Query hooks for environment CRUD operations.
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
-import type {
-	Environment,
-	CreateEnvironmentRequest,
-	UpdateEnvironmentRequest,
-} from "@/types";
+import type { Environment, CreateEnvironmentRequest, UpdateEnvironmentRequest } from "@/types";
 
 // ============ Environment Queries ============
 
@@ -45,13 +41,11 @@ export function useCreateEnvironmentMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (data: CreateEnvironmentRequest) =>
-			apiService.createEnvironment(data),
+		mutationFn: (data: CreateEnvironmentRequest) => apiService.createEnvironment(data),
 		onSuccess: (newEnvironment) => {
 			// Add to cache
-			queryClient.setQueryData<Environment[]>(
-				queryKeys.environments.list(),
-				(old) => (old ? [...old, newEnvironment] : [newEnvironment])
+			queryClient.setQueryData<Environment[]>(queryKeys.environments.list(), (old) =>
+				old ? [...old, newEnvironment] : [newEnvironment]
 			);
 		},
 	});
@@ -64,16 +58,13 @@ export function useUpdateEnvironmentMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (data: UpdateEnvironmentRequest) =>
-			apiService.updateEnvironment(data),
+		mutationFn: (data: UpdateEnvironmentRequest) => apiService.updateEnvironment(data),
 		onSuccess: (updatedEnvironment) => {
 			// Update in list cache
 			queryClient.setQueryData<Environment[]>(
 				queryKeys.environments.list(),
 				(old) =>
-					old?.map((e) =>
-						e.id === updatedEnvironment.id ? updatedEnvironment : e
-					) ?? []
+					old?.map((e) => (e.id === updatedEnvironment.id ? updatedEnvironment : e)) ?? []
 			);
 			// Update detail cache
 			queryClient.setQueryData(

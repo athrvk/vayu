@@ -50,13 +50,14 @@ export class SSEClient {
 		this.startTime = 0;
 
 		// Try new live endpoint first, fallback to old stats endpoint
-		const endpoint = this.useLiveEndpoint && !this.hasTriedFallback
-			? API_ENDPOINTS.METRICS_LIVE(runId)
-			: API_ENDPOINTS.STATS_STREAM(runId);
+		const endpoint =
+			this.useLiveEndpoint && !this.hasTriedFallback
+				? API_ENDPOINTS.METRICS_LIVE(runId)
+				: API_ENDPOINTS.STATS_STREAM(runId);
 
 		const url = `${API_ENDPOINTS.BASE_URL}${endpoint}`;
 
-		const endpointType = this.useLiveEndpoint && !this.hasTriedFallback ? 'live' : 'stats';
+		const endpointType = this.useLiveEndpoint && !this.hasTriedFallback ? "live" : "stats";
 		console.log(`Connecting to ${endpointType} endpoint:`, url);
 
 		try {
@@ -105,10 +106,13 @@ export class SSEClient {
 				onClose();
 			});
 
-				this.eventSource.addEventListener("error", (_event) => {
+			this.eventSource.addEventListener("error", (_event) => {
 				// Check if this is a 404 (endpoint not found) and we haven't tried fallback
-				if (this.useLiveEndpoint && !this.hasTriedFallback &&
-					this.eventSource?.readyState === EventSource.CLOSED) {
+				if (
+					this.useLiveEndpoint &&
+					!this.hasTriedFallback &&
+					this.eventSource?.readyState === EventSource.CLOSED
+				) {
 					console.log("Live endpoint not available, falling back to stats endpoint...");
 					this.hasTriedFallback = true;
 					this.useLiveEndpoint = false;
@@ -135,9 +139,7 @@ export class SSEClient {
 				this.reconnectAttempts = 0;
 			});
 		} catch (error) {
-			onError(
-				error instanceof Error ? error : new Error("Failed to connect to SSE")
-			);
+			onError(error instanceof Error ? error : new Error("Failed to connect to SSE"));
 		}
 	}
 
@@ -148,11 +150,7 @@ export class SSEClient {
 		onClose: SSECloseHandler
 	): void {
 		if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-			onError(
-				new Error(
-					`Failed to reconnect after ${this.maxReconnectAttempts} attempts`
-				)
-			);
+			onError(new Error(`Failed to reconnect after ${this.maxReconnectAttempts} attempts`));
 			onClose();
 			return;
 		}

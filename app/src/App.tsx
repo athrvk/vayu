@@ -1,5 +1,5 @@
 import Shell from "./components/layout/Shell";
-import { useAppStore } from "./stores";
+import { useEngineConnectionStore } from "./stores";
 import {
 	useHealthQuery,
 	usePrefetchCollectionsAndRequests,
@@ -8,7 +8,7 @@ import {
 } from "./queries";
 
 function App() {
-	const { isEngineConnected } = useAppStore();
+	const { isEngineConnected } = useEngineConnectionStore();
 
 	// Initialize health check with automatic polling
 	useHealthQuery();

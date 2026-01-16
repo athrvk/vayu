@@ -1,6 +1,6 @@
 /**
  * Collections Queries
- * 
+ *
  * TanStack Query hooks for collections and requests CRUD operations.
  */
 
@@ -30,7 +30,7 @@ export function useCollectionsQuery() {
 
 /**
  * Prefetch all collections and their requests
- * 
+ *
  * This hook fetches all collections and then prefetches requests for each.
  * Useful for app initialization to populate the cache.
  */
@@ -68,8 +68,7 @@ export function usePrefetchCollectionsAndRequests() {
 export function useRequestsQuery(collectionId: string | null) {
 	return useQuery({
 		queryKey: queryKeys.requests.listByCollection(collectionId ?? ""),
-		queryFn: () =>
-			apiService.listRequests({ collection_id: collectionId! }),
+		queryFn: () => apiService.listRequests({ collection_id: collectionId! }),
 		enabled: !!collectionId,
 	});
 }
@@ -86,7 +85,7 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 			queryFn: () => apiService.listRequests({ collection_id: collectionId }),
 		})),
 	});
-	
+
 	// Build a map of collectionId -> requests (sorted by created_at for stable order)
 	const requestsByCollection = new Map<string, Request[]>();
 	queries.forEach((query, index) => {
@@ -100,7 +99,7 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 		});
 		requestsByCollection.set(collectionId, sortedRequests);
 	});
-	
+
 	return {
 		requestsByCollection,
 		isLoading: queries.some((q) => q.isLoading),
@@ -109,42 +108,37 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 
 /**
  * Fetch a single request by ID
- * 
- * This looks up the request from the cache since there's no dedicated 
+ *
+ * This looks up the request from the cache since there's no dedicated
  * GET /requests/:id endpoint. First checks the detail cache (set by mutations),
  * then falls back to searching through collection request lists.
  */
 export function useRequestQuery(requestId: string | null) {
 	const queryClient = useQueryClient();
-	
+
 	return useQuery({
 		queryKey: queryKeys.requests.detail(requestId ?? ""),
 		queryFn: () => {
 			// First check if we already have this request in detail cache
-			const cached = queryClient.getQueryData<Request>(
-				queryKeys.requests.detail(requestId!)
-			);
+			const cached = queryClient.getQueryData<Request>(queryKeys.requests.detail(requestId!));
 			if (cached) return cached;
-			
+
 			// Search through all cached request lists to find this one
 			const queriesData = queryClient.getQueriesData<Request[]>({
 				queryKey: queryKeys.requests.lists(),
 			});
-			
+
 			for (const [, requests] of queriesData) {
 				if (requests) {
 					const found = requests.find((r) => r.id === requestId);
 					if (found) {
 						// Also populate the detail cache for next time
-						queryClient.setQueryData(
-							queryKeys.requests.detail(requestId!),
-							found
-						);
+						queryClient.setQueryData(queryKeys.requests.detail(requestId!), found);
 						return found;
 					}
 				}
 			}
-			
+
 			throw new Error(`Request ${requestId} not found in cache`);
 		},
 		enabled: !!requestId,
@@ -165,13 +159,11 @@ export function useCreateCollectionMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (data: CreateCollectionRequest) =>
-			apiService.createCollection(data),
+		mutationFn: (data: CreateCollectionRequest) => apiService.createCollection(data),
 		onSuccess: (newCollection) => {
 			// Add to cache optimistically
-			queryClient.setQueryData<Collection[]>(
-				queryKeys.collections.list(),
-				(old) => (old ? [...old, newCollection] : [newCollection])
+			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) =>
+				old ? [...old, newCollection] : [newCollection]
 			);
 		},
 	});
@@ -184,16 +176,13 @@ export function useUpdateCollectionMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (data: UpdateCollectionRequest) =>
-			apiService.updateCollection(data),
+		mutationFn: (data: UpdateCollectionRequest) => apiService.updateCollection(data),
 		onSuccess: (updatedCollection) => {
 			// Update in cache
 			queryClient.setQueryData<Collection[]>(
 				queryKeys.collections.list(),
 				(old) =>
-					old?.map((c) =>
-						c.id === updatedCollection.id ? updatedCollection : c
-					) ?? []
+					old?.map((c) => (c.id === updatedCollection.id ? updatedCollection : c)) ?? []
 			);
 		},
 	});
@@ -230,8 +219,7 @@ export function useCreateRequestMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (data: CreateRequestRequest) =>
-			apiService.createRequest(data),
+		mutationFn: (data: CreateRequestRequest) => apiService.createRequest(data),
 		onSuccess: (newRequest) => {
 			// Add to collection's requests cache
 			queryClient.setQueryData<Request[]>(
@@ -239,10 +227,7 @@ export function useCreateRequestMutation() {
 				(old) => (old ? [...old, newRequest] : [newRequest])
 			);
 			// Also set the detail cache so useRequestQuery can find it immediately
-			queryClient.setQueryData(
-				queryKeys.requests.detail(newRequest.id),
-				newRequest
-			);
+			queryClient.setQueryData(queryKeys.requests.detail(newRequest.id), newRequest);
 		},
 	});
 }
@@ -254,8 +239,7 @@ export function useUpdateRequestMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (data: UpdateRequestRequest) =>
-			apiService.updateRequest(data),
+		mutationFn: (data: UpdateRequestRequest) => apiService.updateRequest(data),
 		onSuccess: (updatedRequest) => {
 			// Update in cache - need to find which collection it belongs to
 			// Invalidate all request lists to be safe
@@ -263,10 +247,7 @@ export function useUpdateRequestMutation() {
 				queryKey: queryKeys.requests.lists(),
 			});
 			// Update detail cache
-			queryClient.setQueryData(
-				queryKeys.requests.detail(updatedRequest.id),
-				updatedRequest
-			);
+			queryClient.setQueryData(queryKeys.requests.detail(updatedRequest.id), updatedRequest);
 		},
 	});
 }

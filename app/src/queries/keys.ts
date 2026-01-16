@@ -1,6 +1,6 @@
 /**
  * Query Keys
- * 
+ *
  * Centralized query key factory for type-safe, consistent cache keys.
  * Following TanStack Query best practices for query key management.
  */

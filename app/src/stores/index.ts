@@ -1,4 +1,8 @@
-export { useAppStore } from "./app-store";
+// Navigation and Engine stores
+export { useNavigationStore, type NavigationContext } from "./navigation";
+export { useEngineConnectionStore } from "./engine";
+
+// Domain stores
 export { useCollectionsStore } from "./collections-store";
 export { useDashboardStore } from "./dashboard-store";
 export { useHistoryStore } from "./history-store";

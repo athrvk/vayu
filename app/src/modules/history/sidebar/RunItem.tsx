@@ -1,0 +1,176 @@
+import { formatRelativeTime } from "@/utils";
+import type { Run } from "@/types";
+import { Button, Badge } from "@/components/ui";
+import { cn } from "@/lib/utils";
+import {
+	CheckCircle2,
+	XCircle,
+	Activity,
+	StopCircle,
+	Clock,
+	Loader2,
+	Trash2,
+	Zap,
+} from "lucide-react";
+
+interface RunItemProps {
+	run: Run;
+	onSelect: (runId: string) => void;
+	onDelete: (runId: string, event: React.MouseEvent) => Promise<void>;
+	isDeleting: boolean;
+}
+
+export default function RunItem({ run, onSelect, onDelete, isDeleting }: RunItemProps) {
+	// Format timestamp to relative time
+	const formatTime = (timestamp: number) => {
+		if (!timestamp) return "Unknown";
+		return formatRelativeTime(new Date(timestamp).toISOString());
+	};
+
+	// Get URL and method from configSnapshot
+	const getRequestInfo = () => {
+		if (!run.configSnapshot) return { url: null, method: null };
+		const url = run.configSnapshot.request?.url || run.configSnapshot.url || null;
+		const method = run.configSnapshot.request?.method || run.configSnapshot.method || "GET";
+		return { url, method };
+	};
+
+	const { url: requestUrl, method } = getRequestInfo();
+
+	// Get status icon and color
+	const getStatusIcon = () => {
+		switch (run.status) {
+			case "completed":
+				return <CheckCircle2 className="w-4 h-4 text-green-500" />;
+			case "failed":
+				return <XCircle className="w-4 h-4 text-red-500" />;
+			case "running":
+				return <Activity className="w-4 h-4 text-blue-500 animate-pulse" />;
+			case "stopped":
+				return <StopCircle className="w-4 h-4 text-orange-500" />;
+			default:
+				return <Clock className="w-4 h-4 text-muted-foreground" />;
+		}
+	};
+
+	return (
+		<div
+			onClick={() => onSelect(run.id)}
+			className={cn(
+				"group relative bg-card border rounded-lg hover:border-primary/50 hover:shadow-sm cursor-pointer transition-all overflow-hidden w-full"
+			)}
+		>
+			{/* Status color indicator */}
+			<div
+				className={cn(
+					"absolute left-0 top-0 bottom-0 w-1",
+					run.status === "completed" && "bg-green-500",
+					run.status === "failed" && "bg-red-500",
+					run.status === "running" && "bg-blue-500",
+					run.status === "stopped" && "bg-orange-500",
+					run.status === "pending" && "bg-muted-foreground"
+				)}
+			/>
+
+			<div className="pl-4 pr-3 py-3 min-w-0">
+				{/* Header Row */}
+				<div className="flex items-start justify-between gap-2 mb-2 min-w-0 flex-wrap">
+					<div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+						<div className="shrink-0">{getStatusIcon()}</div>
+						<span
+							className={cn(
+								"text-xs font-medium capitalize shrink-0",
+								run.status === "completed" && "text-green-600 dark:text-green-400",
+								run.status === "failed" && "text-red-600 dark:text-red-400",
+								run.status === "running" && "text-blue-600 dark:text-blue-400",
+								run.status === "stopped" && "text-orange-600 dark:text-orange-400",
+								run.status === "pending" && "text-muted-foreground"
+							)}
+						>
+							{run.status}
+						</span>
+						<span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
+							•
+						</span>
+						<span className="text-xs text-muted-foreground min-w-0 break-words">
+							{formatTime(run.startTime)}
+						</span>
+					</div>
+					<div className="flex items-center gap-1 shrink-0">
+						{run.type === "load" && (
+							<Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+						)}
+						<Button
+							variant="ghost"
+							size="icon"
+							onClick={(e) => onDelete(run.id, e)}
+							disabled={isDeleting}
+							className="opacity-0 group-hover:opacity-100 h-7 w-7 hover:bg-destructive/10 hover:text-destructive transition-opacity shrink-0"
+						>
+							{isDeleting ? (
+								<Loader2 className="w-3.5 h-3.5 animate-spin" />
+							) : (
+								<Trash2 className="w-3.5 h-3.5" />
+							)}
+						</Button>
+					</div>
+				</div>
+
+				{/* Request Info */}
+				{requestUrl && (
+					<div className="flex items-start gap-2 mb-1.5 min-w-0 flex-wrap">
+						{method && (
+							<Badge
+								variant="outline"
+								className={cn(
+									"text-[10px] h-5 px-1.5 font-mono shrink-0",
+									method === "GET" &&
+										"bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900",
+									method === "POST" &&
+										"bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-400 dark:border-green-900",
+									method === "PUT" &&
+										"bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-900",
+									method === "DELETE" &&
+										"bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900"
+								)}
+							>
+								{method}
+							</Badge>
+						)}
+						<p
+							className="text-xs text-foreground font-medium break-words flex-1 min-w-0 leading-5"
+							title={requestUrl}
+						>
+							{requestUrl}
+						</p>
+					</div>
+				)}
+
+				{/* Config Info (if load test) */}
+				{run.type === "load" && run.configSnapshot?.configuration && (
+					<div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1.5 flex-wrap">
+						{run.configSnapshot.configuration.duration && (
+							<span className="flex items-center gap-1 shrink-0">
+								<Clock className="w-3 h-3" />
+								{run.configSnapshot.configuration.duration}
+							</span>
+						)}
+						{run.configSnapshot.configuration.concurrency && (
+							<span className="flex items-center gap-1 shrink-0">
+								<Activity className="w-3 h-3" />
+								{run.configSnapshot.configuration.concurrency} workers
+							</span>
+						)}
+					</div>
+				)}
+
+				{/* Comment if exists */}
+				{run.configSnapshot?.configuration?.comment && (
+					<p className="text-xs text-muted-foreground italic mt-1.5 break-words">
+						"{run.configSnapshot.configuration.comment}"
+					</p>
+				)}
+			</div>
+		</div>
+	);
+}

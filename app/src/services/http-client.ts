@@ -19,11 +19,14 @@ export class ApiError extends Error {
 	}
 
 	get isNetworkError(): boolean {
-		return [
-			ErrorCode.CONNECTION_FAILED,
-			ErrorCode.DNS_ERROR
-		].includes(this.errorCode as typeof ErrorCode.CONNECTION_FAILED) || 
-			[ErrorStatusCodes.BAD_GATEWAY, ErrorStatusCodes.CONNECTION_FAILED].includes(this.statusCode as typeof ErrorStatusCodes.BAD_GATEWAY);
+		return (
+			[ErrorCode.CONNECTION_FAILED, ErrorCode.DNS_ERROR].includes(
+				this.errorCode as typeof ErrorCode.CONNECTION_FAILED
+			) ||
+			[ErrorStatusCodes.BAD_GATEWAY, ErrorStatusCodes.CONNECTION_FAILED].includes(
+				this.statusCode as typeof ErrorStatusCodes.BAD_GATEWAY
+			)
+		);
 	}
 
 	get isDatabaseError(): boolean {
@@ -91,15 +94,10 @@ class HttpClient {
 			if (!response.ok) {
 				const errorData = await response.json().catch(() => ({}));
 				const errorCode = errorData.error?.code || "UNKNOWN_ERROR";
-				const errorMessage = errorData.error?.message ||
-					`HTTP ${response.status}: ${response.statusText}`;
+				const errorMessage =
+					errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
 
-				throw new ApiError(
-					response.status,
-					errorCode,
-					errorMessage,
-					errorData
-				);
+				throw new ApiError(response.status, errorCode, errorMessage, errorData);
 			}
 
 			return await response.json();

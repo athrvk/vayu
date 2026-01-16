@@ -1,13 +1,13 @@
 /**
  * Runs Queries
- * 
+ *
  * TanStack Query hooks for run history operations.
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
-import type { Run, RunReport } from "@/types";
+import type { Run } from "@/types";
 
 // ============ Run Queries ============
 
@@ -40,22 +40,20 @@ export function useRunReportQuery(runId: string | null) {
  */
 export function useLastDesignRunQuery(requestId: string | null | undefined) {
 	const { data: runs = [] } = useRunsQuery();
-	
+
 	// Find the most recent completed design run for this request
 	const lastDesignRun = requestId
 		? runs
-			.filter(
-				(r) =>
-					r.type === "design" &&
-					r.requestId === requestId &&
-					r.status === "completed"
-			)
-			.sort((a, b) => b.startTime - a.startTime)[0] || null
+				.filter(
+					(r) =>
+						r.type === "design" && r.requestId === requestId && r.status === "completed"
+				)
+				.sort((a, b) => b.startTime - a.startTime)[0] || null
 		: null;
-	
+
 	// Fetch the report for that run
 	const { data: report, isLoading } = useRunReportQuery(lastDesignRun?.id || null);
-	
+
 	return {
 		run: lastDesignRun,
 		report,
@@ -75,8 +73,9 @@ export function useDeleteRunMutation() {
 		mutationFn: (runId: string) => apiService.deleteRun(runId),
 		onSuccess: (_, deletedId) => {
 			// Remove from cache
-			queryClient.setQueryData<Run[]>(queryKeys.runs.list(), (old) =>
-				old?.filter((r) => r.id !== deletedId) ?? []
+			queryClient.setQueryData<Run[]>(
+				queryKeys.runs.list(),
+				(old) => old?.filter((r) => r.id !== deletedId) ?? []
 			);
 			// Remove report from cache
 			queryClient.removeQueries({

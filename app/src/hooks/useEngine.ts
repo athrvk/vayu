@@ -11,10 +11,7 @@ import type {
 } from "@/types";
 
 interface UseEngineReturn {
-	executeRequest: (
-		request: Request,
-		environmentId?: string
-	) => Promise<SanityResult | null>;
+	executeRequest: (request: Request, environmentId?: string) => Promise<SanityResult | null>;
 	startLoadTest: (
 		request: Request,
 		config: LoadTestConfig,
@@ -30,10 +27,7 @@ export function useEngine(): UseEngineReturn {
 	const [error, setError] = useState<string | null>(null);
 
 	const executeRequest = useCallback(
-		async (
-			request: Request,
-			environmentId?: string
-		): Promise<SanityResult | null> => {
+		async (request: Request, environmentId?: string): Promise<SanityResult | null> => {
 			setIsExecuting(true);
 			setError(null);
 
@@ -42,9 +36,9 @@ export function useEngine(): UseEngineReturn {
 				// Backend expects body as { mode: string, content: string }
 				const bodyPayload = request.body
 					? {
-						mode: request.body_type || "text",
-						content: request.body,
-					}
+							mode: request.body_type || "text",
+							content: request.body,
+						}
 					: undefined;
 
 				const result = await apiService.executeRequest({
@@ -61,7 +55,7 @@ export function useEngine(): UseEngineReturn {
 				return result;
 			} catch (err) {
 				// Import ApiError for type checking
-				if (err && typeof err === 'object' && 'userFriendlyMessage' in err) {
+				if (err && typeof err === "object" && "userFriendlyMessage" in err) {
 					const apiError = err as any;
 					setError(apiError.userFriendlyMessage);
 
@@ -99,9 +93,9 @@ export function useEngine(): UseEngineReturn {
 				// Backend expects body as { mode: string, content: string }
 				const bodyPayload = request.body
 					? {
-						mode: request.body_type || "text",
-						content: request.body,
-					}
+							mode: request.body_type || "text",
+							content: request.body,
+						}
 					: undefined;
 
 				const payload: StartLoadTestRequest = {
@@ -113,11 +107,12 @@ export function useEngine(): UseEngineReturn {
 						body: bodyPayload,
 					},
 					// Load test strategy
-					mode: config.mode === "constant_rps" || config.mode === "constant_concurrency"
-						? "constant"
-						: config.mode === "iterations"
-							? "iterations"
-							: "ramp_up",
+					mode:
+						config.mode === "constant_rps" || config.mode === "constant_concurrency"
+							? "constant"
+							: config.mode === "iterations"
+								? "iterations"
+								: "ramp_up",
 					// Duration (convert seconds to string format)
 					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,
 					targetRps: config.rps,
@@ -159,8 +154,7 @@ export function useEngine(): UseEngineReturn {
 			await apiService.stopRun(runId);
 			return true;
 		} catch (err) {
-			const errorMessage =
-				err instanceof Error ? err.message : "Failed to stop load test";
+			const errorMessage = err instanceof Error ? err.message : "Failed to stop load test";
 			setError(errorMessage);
 			return false;
 		}

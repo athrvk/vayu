@@ -1,6 +1,6 @@
 /**
  * TanStack Query Client Configuration
- * 
+ *
  * Centralized QueryClient setup with sensible defaults for Vayu.
  */
 

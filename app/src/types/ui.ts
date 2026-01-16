@@ -3,11 +3,7 @@
 // Stores define their own state interfaces inline.
 
 // Sidebar Navigation
-export type SidebarTab =
-	| "collections"
-	| "history"
-	| "variables"
-	| "settings";
+export type SidebarTab = "collections" | "history" | "variables" | "settings";
 
 // Main Screen Views
 export type MainScreen =

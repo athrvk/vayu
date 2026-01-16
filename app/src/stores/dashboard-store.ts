@@ -37,7 +37,11 @@ interface DashboardState {
 	requestInfo: LoadTestRequestInfo | null;
 
 	// Actions
-	startRun: (runId: string, config?: LoadTestRunConfig, requestInfo?: LoadTestRequestInfo) => void;
+	startRun: (
+		runId: string,
+		config?: LoadTestRunConfig,
+		requestInfo?: LoadTestRequestInfo
+	) => void;
 	stopRun: () => void;
 	setStreaming: (streaming: boolean) => void;
 	addMetrics: (metrics: LoadTestMetrics) => void;
@@ -93,9 +97,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			// Keep all historical metrics with reasonable limit (10000 points max)
 			const newHistory = [...state.historicalMetrics, metrics];
 			// Trim to last 10000 points if needed (prevents memory issues on very long tests)
-			const trimmedHistory = newHistory.length > 10000
-				? newHistory.slice(-10000)
-				: newHistory;
+			const trimmedHistory =
+				newHistory.length > 10000 ? newHistory.slice(-10000) : newHistory;
 
 			return {
 				currentMetrics: metrics,

@@ -5,17 +5,12 @@ export { Button, buttonVariants } from "./button";
 export type { ButtonProps } from "./button";
 
 export { Input } from "./input";
+export { Textarea } from "./textarea";
+export type { TextareaProps } from "./textarea";
 
 export { Badge, badgeVariants } from "./badge";
 
-export {
-	Card,
-	CardHeader,
-	CardFooter,
-	CardTitle,
-	CardDescription,
-	CardContent,
-} from "./card";
+export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from "./card";
 
 export {
 	Dialog,
@@ -50,12 +45,7 @@ export {
 
 export { Tabs, TabsList, TabsTrigger, TabsContent } from "./tabs";
 
-export {
-	Tooltip,
-	TooltipTrigger,
-	TooltipContent,
-	TooltipProvider,
-} from "./tooltip";
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./tooltip";
 
 export {
 	Select,
@@ -93,14 +83,6 @@ export { Label } from "./label";
 export { TemplatedInput } from "./templated-input";
 export type { TemplatedInputProps, VariableInfo, VariableScope } from "./templated-input";
 
-export {
-	ResizablePanelGroup,
-	ResizablePanel,
-	ResizableHandle,
-} from "./resizable";
+export { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "./resizable";
 
-export {
-	Collapsible,
-	CollapsibleTrigger,
-	CollapsibleContent,
-} from "./collapsible";
+export { Collapsible, CollapsibleTrigger, CollapsibleContent } from "./collapsible";

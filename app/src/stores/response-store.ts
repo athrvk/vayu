@@ -1,10 +1,10 @@
 /**
  * Response Store
- * 
+ *
  * Persists response state per request ID so it survives:
  * - View switches (e.g., request builder <-> load test dashboard)
  * - Tab changes within the app
- * 
+ *
  * Response data is stored in memory (not persisted to localStorage)
  * since responses can be large and we can reload from backend.
  */
@@ -35,7 +35,7 @@ export interface StoredResponse {
 interface ResponseStoreState {
 	// Map of requestId -> response
 	responses: Map<string, StoredResponse>;
-	
+
 	// Actions
 	setResponse: (requestId: string, response: StoredResponse) => void;
 	getResponse: (requestId: string) => StoredResponse | null;
@@ -45,7 +45,7 @@ interface ResponseStoreState {
 
 export const useResponseStore = create<ResponseStoreState>((set, get) => ({
 	responses: new Map(),
-	
+
 	setResponse: (requestId, response) => {
 		const newResponses = new Map(get().responses);
 		newResponses.set(requestId, {
@@ -54,17 +54,17 @@ export const useResponseStore = create<ResponseStoreState>((set, get) => ({
 		});
 		set({ responses: newResponses });
 	},
-	
+
 	getResponse: (requestId) => {
 		return get().responses.get(requestId) || null;
 	},
-	
+
 	clearResponse: (requestId) => {
 		const newResponses = new Map(get().responses);
 		newResponses.delete(requestId);
 		set({ responses: newResponses });
 	},
-	
+
 	clearAll: () => {
 		set({ responses: new Map() });
 	},

@@ -43,17 +43,14 @@ async function startEngine() {
 	try {
 		engineSidecar = new EngineSidecar(9876);
 		await engineSidecar.start();
-		console.log(
-			"[Main] Engine started successfully at",
-			engineSidecar.getApiUrl(),
-		);
+		console.log("[Main] Engine started successfully at", engineSidecar.getApiUrl());
 	} catch (error) {
 		console.error("[Main] Failed to start engine:", error);
 		// Show error dialog to user
 		const { dialog } = await import("electron");
 		await dialog.showErrorBox(
 			"Failed to Start Engine",
-			`The Vayu engine failed to start:\n\n${error}\n\nPlease check the logs for more details.`,
+			`The Vayu engine failed to start:\n\n${error}\n\nPlease check the logs for more details.`
 		);
 		app.quit();
 	}

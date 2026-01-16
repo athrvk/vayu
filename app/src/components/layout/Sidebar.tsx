@@ -1,16 +1,24 @@
 import { Folder, History, Settings, Variable } from "lucide-react";
-import { useAppStore } from "@/stores";
+import { useNavigationStore } from "@/stores";
 import type { SidebarTab } from "@/types";
-import { Button, Tooltip, TooltipContent, TooltipTrigger, TooltipProvider, ScrollArea } from "@/components/ui";
+import {
+	Button,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+	TooltipProvider,
+	ScrollArea,
+} from "@/components/ui";
 import { cn } from "@/lib/utils";
-import CollectionTree from "../collections/CollectionTree";
-import HistoryList from "../history/HistoryList";
-import { VariablesCategoryTree } from "../variables";
+// Sidebar modules (displayed in left sidebar)
+import CollectionTree from "@/modules/collections/CollectionTree";
+import { HistoryList } from "@/modules/history/sidebar";
+import { VariablesCategoryTree } from "@/modules/variables/sidebar";
 import { useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import ConnectionStatus from "../status/ConnectionStatus";
 
 export default function Sidebar() {
-	const { activeSidebarTab, setActiveSidebarTab, navigateToVariables } = useAppStore();
+	const { activeSidebarTab, setActiveSidebarTab, navigateToVariables } = useNavigationStore();
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
 
@@ -37,16 +45,11 @@ export default function Sidebar() {
 				return <HistoryList />;
 			case "variables":
 				return (
-					<VariablesCategoryTree
-						collections={collections}
-						environments={environments}
-					/>
+					<VariablesCategoryTree collections={collections} environments={environments} />
 				);
 			case "settings":
 				return (
-					<div className="p-4 text-sm text-muted-foreground">
-						Settings coming soon...
-					</div>
+					<div className="p-4 text-sm text-muted-foreground">Settings coming soon...</div>
 				);
 			default:
 				return null;
@@ -55,9 +58,10 @@ export default function Sidebar() {
 
 	return (
 		<TooltipProvider>
-			<div className="w-full bg-card border-r border-border flex flex-col h-full">
-				{/* Tab Headers */}
-				<div className="flex border-b border-border">
+			{/* Sidebar Container - Handles all width and overflow constraints */}
+			<div className="w-full h-full bg-card border-r border-border flex flex-col overflow-hidden">
+				{/* Tab Headers - Fixed height, handles text truncation */}
+				<div className="flex border-b border-border shrink-0 min-w-0">
 					{tabs.map((tab) => {
 						const Icon = tab.icon;
 						const isActive = activeSidebarTab === tab.id;
@@ -74,22 +78,27 @@ export default function Sidebar() {
 												: "text-muted-foreground hover:text-foreground hover:bg-accent"
 										)}
 									>
-										<Icon className="w-5 h-5" />
-										<span className="text-xs font-medium truncate text-center">{tab.label}</span>
+										<Icon className="w-5 h-5 shrink-0" />
+										<span className="text-xs font-medium truncate text-center w-full">
+											{tab.label}
+										</span>
 									</Button>
 								</TooltipTrigger>
-								<TooltipContent side="bottom">
-									{tab.label}
-								</TooltipContent>
+								<TooltipContent side="bottom">{tab.label}</TooltipContent>
 							</Tooltip>
 						);
 					})}
 				</div>
 
-				{/* Tab Content */}
-				<ScrollArea className="flex-1">{renderContent()}</ScrollArea>
+				{/* Tab Content - Handles overflow, children just fill space */}
+				<div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+					<ScrollArea className="h-full w-full">
+						<div className="w-full min-w-0">{renderContent()}</div>
+					</ScrollArea>
+				</div>
 
-				<div className="mt-auto border-t border-border">
+				{/* Footer - Fixed height */}
+				<div className="mt-auto border-t border-border shrink-0">
 					<ConnectionStatus />
 				</div>
 			</div>

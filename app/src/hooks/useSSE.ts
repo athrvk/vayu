@@ -53,13 +53,5 @@ export function useSSE({ runId, enabled }: UseSSEParams): void {
 			clearTimeout(connectTimeout);
 			sseClient.disconnect();
 		};
-	}, [
-		runId,
-		enabled,
-		handleMessage,
-		handleError,
-		handleClose,
-		setStreaming,
-		setError,
-	]);
+	}, [runId, enabled, handleMessage, handleError, handleClose, setStreaming, setError]);
 }

@@ -1,13 +1,6 @@
 // Core Domain Types
 
-export type HttpMethod =
-	| "GET"
-	| "POST"
-	| "PUT"
-	| "PATCH"
-	| "DELETE"
-	| "HEAD"
-	| "OPTIONS";
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 /**
  * Variable value with enabled flag (Postman-style)
@@ -22,8 +15,8 @@ export interface Collection {
 	name: string;
 	description?: string;
 	parent_id?: string;
-	order?: number;  // Position in the collection list
-	variables?: Record<string, VariableValue>;  // Collection-scoped variables
+	order?: number; // Position in the collection list
+	variables?: Record<string, VariableValue>; // Collection-scoped variables
 	created_at: string;
 	updated_at: string;
 }
@@ -35,7 +28,7 @@ export interface Request {
 	description?: string;
 	method: HttpMethod;
 	url: string;
-	params?: Record<string, string>;  // Query parameters
+	params?: Record<string, string>; // Query parameters
 	headers?: Record<string, string>;
 	body?: string;
 	body_type?: "json" | "text" | "form-data" | "x-www-form-urlencoded";
@@ -59,7 +52,7 @@ export interface Environment {
  * Global variables - singleton storage for app-wide variables
  */
 export interface GlobalVariables {
-	id: string;  // Always "globals"
+	id: string; // Always "globals"
 	variables: Record<string, VariableValue>;
 	updated_at: string;
 }
@@ -67,7 +60,7 @@ export interface GlobalVariables {
 /**
  * Variable scope for UI display
  */
-export type VariableScope = 'global' | 'collection' | 'environment';
+export type VariableScope = "global" | "collection" | "environment";
 
 /**
  * Variable info for autocomplete and quick view
@@ -76,8 +69,8 @@ export interface VariableInfo {
 	name: string;
 	value: string;
 	scope: VariableScope;
-	sourceId?: string;  // Collection ID or Environment ID
-	sourceName?: string;  // Collection name or Environment name
+	sourceId?: string; // Collection ID or Environment ID
+	sourceName?: string; // Collection name or Environment name
 }
 
 export interface Run {
@@ -188,21 +181,21 @@ export interface RunReport {
 		totalDurationSeconds: number;
 		avgRps: number;
 		// Phase 2: Accurate timing metrics
-		testDuration?: number;      // Actual test duration in seconds
-		setupOverhead?: number;     // Context overhead before test started (seconds)
+		testDuration?: number; // Actual test duration in seconds
+		setupOverhead?: number; // Context overhead before test started (seconds)
 	};
 	// Latency section
 	latency: {
 		min: number;
 		max: number;
 		avg: number;
-		median?: number;  // Phase 1: Renamed from p50
+		median?: number; // Phase 1: Renamed from p50
 		p50: number;
-		p75?: number;     // Phase 1
+		p75?: number; // Phase 1
 		p90: number;
 		p95: number;
 		p99: number;
-		p999?: number;    // Phase 1
+		p999?: number; // Phase 1
 	};
 	// Status code distribution
 	statusCodes: Record<string, number>;
@@ -211,7 +204,7 @@ export interface RunReport {
 		total: number;
 		withDetails: number;
 		types: Record<string, number>;
-		byStatusCode?: Record<string, number>;  // Phase 1
+		byStatusCode?: Record<string, number>; // Phase 1
 	};
 	// Phase 1: Rate control metrics
 	rateControl?: {

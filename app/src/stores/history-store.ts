@@ -65,8 +65,8 @@ export function filterRuns(
 			(run) =>
 				run.id.toLowerCase().includes(query) ||
 				(run.requestId && run.requestId.toLowerCase().includes(query)) ||
-				(run.configSnapshot?.request?.url?.toLowerCase().includes(query)) ||
-				(run.configSnapshot?.url?.toLowerCase().includes(query))
+				run.configSnapshot?.request?.url?.toLowerCase().includes(query) ||
+				run.configSnapshot?.url?.toLowerCase().includes(query)
 		);
 	}
 

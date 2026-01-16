@@ -1,5 +1,5 @@
 import { Zap, AlertCircle, CheckCircle, Loader2, Cloud, CloudOff } from "lucide-react";
-import { useAppStore } from "@/stores";
+import { useEngineConnectionStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
 
 function SaveStatusIndicator() {
@@ -38,7 +38,10 @@ function SaveStatusIndicator() {
 
 	if (status === "error") {
 		return (
-			<div className="flex items-center gap-1.5 text-destructive" title={errorMessage || "Save failed"}>
+			<div
+				className="flex items-center gap-1.5 text-destructive"
+				title={errorMessage || "Save failed"}
+			>
 				<CloudOff className="w-3.5 h-3.5" />
 				<span className="text-xs">Save failed</span>
 			</div>
@@ -49,14 +52,16 @@ function SaveStatusIndicator() {
 }
 
 export default function ConnectionStatus() {
-	const { isEngineConnected, engineError } = useAppStore();
+	const { isEngineConnected, engineError } = useEngineConnectionStore();
 
 	if (isEngineConnected) {
 		return (
 			<div className="bg-green-50 dark:bg-green-950/50 border-b border-green-200 dark:border-green-900 px-4 py-2 flex items-center justify-between text-sm">
 				<div className="flex items-center gap-2">
 					<CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
-					<span className="text-green-800 dark:text-green-200">Connected to Vayu Engine</span>
+					<span className="text-green-800 dark:text-green-200">
+						Connected to Vayu Engine
+					</span>
 				</div>
 				<SaveStatusIndicator />
 			</div>

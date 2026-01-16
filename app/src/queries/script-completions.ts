@@ -1,6 +1,6 @@
 /**
  * Script Completions Query
- * 
+ *
  * TanStack Query hook for fetching Monaco editor autocomplete data.
  */
 

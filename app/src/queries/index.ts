@@ -1,6 +1,6 @@
 /**
  * Queries Index
- * 
+ *
  * Central export for all TanStack Query hooks.
  */
 
@@ -42,10 +42,7 @@ export {
 } from "./environments";
 
 // Global Variables
-export {
-	useGlobalsQuery,
-	useUpdateGlobalsMutation,
-} from "./globals";
+export { useGlobalsQuery, useUpdateGlobalsMutation } from "./globals";
 
 // Health & Config
 export { useHealthQuery, useConfigQuery } from "./health";

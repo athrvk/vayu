@@ -83,7 +83,7 @@ function Write-Error-Custom {
 
 # Paths
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $EngineDir = Join-Path $ProjectRoot "engine"
 $AppDir = Join-Path $ProjectRoot "app"
 
@@ -297,7 +297,7 @@ function Build-Engine {
             "-DVAYU_BUILD_TESTS=OFF",
             "-DVAYU_BUILD_CLI=OFF",
             "-DVAYU_BUILD_ENGINE=ON",
-            ".."
+            $EngineDir
         )
         
         & $CMakePath @cmakeArgs

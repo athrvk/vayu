@@ -18,14 +18,14 @@ pnpm electron:dev     # Full Electron app
 
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `pnpm dev` | Start Vite dev server |
-| `pnpm electron:dev` | Start Electron with hot reload |
-| `pnpm build` | Build for production |
-| `pnpm electron:build` | Build Electron installer |
-| `pnpm type-check` | TypeScript type checking |
-| `pnpm lint` | Run ESLint |
+| Command               | Description                    |
+| --------------------- | ------------------------------ |
+| `pnpm dev`            | Start Vite dev server          |
+| `pnpm electron:dev`   | Start Electron with hot reload |
+| `pnpm build`          | Build for production           |
+| `pnpm electron:build` | Build Electron installer       |
+| `pnpm type-check`     | TypeScript type checking       |
+| `pnpm lint`           | Run ESLint                     |
 
 ## Project Structure
 
@@ -64,24 +64,24 @@ electron/
 
 ## Key Stores
 
-| Store | Purpose |
-|-------|---------|
-| `useAppStore` | Navigation, screen state |
-| `useDashboardStore` | Load test metrics |
-| `useEnvironmentStore` | Active environment |
-| `useVariablesStore` | Variable scope context |
-| `useHistoryStore` | History filtering |
-| `useCollectionsStore` | Collections state |
-| `useSaveStore` | Auto-save state |
+| Store                 | Purpose                  |
+| --------------------- | ------------------------ |
+| `useAppStore`         | Navigation, screen state |
+| `useDashboardStore`   | Load test metrics        |
+| `useEnvironmentStore` | Active environment       |
+| `useVariablesStore`   | Variable scope context   |
+| `useHistoryStore`     | History filtering        |
+| `useCollectionsStore` | Collections state        |
+| `useSaveStore`        | Auto-save state          |
 
 ## Key Hooks
 
-| Hook | Purpose |
-|------|---------|
-| `useEngine()` | Execute requests, start load tests |
-| `useSSE()` | Stream real-time metrics |
-| `useVariableResolver()` | Resolve `{{variables}}` |
-| `useSaveManager()` | Auto-save orchestration |
+| Hook                    | Purpose                            |
+| ----------------------- | ---------------------------------- |
+| `useEngine()`           | Execute requests, start load tests |
+| `useSSE()`              | Stream real-time metrics           |
+| `useVariableResolver()` | Resolve `{{variables}}`            |
+| `useSaveManager()`      | Auto-save orchestration            |
 
 ## Troubleshooting
 

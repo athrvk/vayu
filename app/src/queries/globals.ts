@@ -1,6 +1,6 @@
 /**
  * Globals Queries
- * 
+ *
  * TanStack Query hooks for global variables operations.
  */
 
@@ -30,10 +30,7 @@ export function useUpdateGlobalsMutation() {
 			apiService.updateGlobals(data.variables),
 		onSuccess: (updatedGlobals) => {
 			// Update cache
-			queryClient.setQueryData<GlobalVariables>(
-				queryKeys.globals.all,
-				updatedGlobals
-			);
+			queryClient.setQueryData<GlobalVariables>(queryKeys.globals.all, updatedGlobals);
 		},
 	});
 }

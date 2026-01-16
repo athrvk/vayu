@@ -64,12 +64,7 @@ export class EngineSidecar {
 	private getDataDirectory(): string {
 		if (isDev) {
 			// In development, use a local directory in the engine folder
-			const devDataDir = path.join(
-				app.getAppPath(),
-				"..",
-				"engine",
-				"data",
-			);
+			const devDataDir = path.join(app.getAppPath(), "..", "engine", "data");
 			return devDataDir;
 		} else {
 			// In production, use the app's userData directory
@@ -102,7 +97,7 @@ export class EngineSidecar {
 					"engine",
 					"build",
 					"Debug",
-					binaryName,
+					binaryName
 				);
 				return devBinaryPath;
 			} else {
@@ -112,18 +107,14 @@ export class EngineSidecar {
 					"..",
 					"engine",
 					"build",
-					binaryName,
+					binaryName
 				);
 				return devBinaryPath;
 			}
 		} else {
 			// In production, the binary is in resources/bin
 			// process.resourcesPath points to the Resources directory
-			const prodBinaryPath = path.join(
-				process.resourcesPath,
-				"bin",
-				binaryName,
-			);
+			const prodBinaryPath = path.join(process.resourcesPath, "bin", binaryName);
 			return prodBinaryPath;
 		}
 	}
@@ -149,7 +140,9 @@ export class EngineSidecar {
 
 		// Check if engine is already running on this port (from previous session or crash)
 		if (await isEngineRunning(this.port)) {
-			console.log(`[Sidecar] Engine already running on port ${this.port}, reusing existing instance`);
+			console.log(
+				`[Sidecar] Engine already running on port ${this.port}, reusing existing instance`
+			);
 			return;
 		}
 
@@ -157,7 +150,7 @@ export class EngineSidecar {
 		if (!(await isPortAvailable(this.port))) {
 			throw new Error(
 				`Port ${this.port} is already in use by another application.\n` +
-					`Please free the port or configure a different port.`,
+					`Please free the port or configure a different port.`
 			);
 		}
 
@@ -166,19 +159,19 @@ export class EngineSidecar {
 
 		// Check if binary exists
 		if (!fs.existsSync(this.binaryPath)) {
-		const platform = process.platform;
-		let buildScript = "./scripts/build/build-macos.sh";
-		if (platform === "win32") {
-			buildScript = "./scripts/build/build-windows.ps1";
-		} else if (platform === "linux") {
-			buildScript = "./scripts/build/build-linux.sh";
-		}
+			const platform = process.platform;
+			let buildScript = "./scripts/build/build-macos.sh";
+			if (platform === "win32") {
+				buildScript = "./scripts/build/build-windows.ps1";
+			} else if (platform === "linux") {
+				buildScript = "./scripts/build/build-linux.sh";
+			}
 
 			throw new Error(
 				`Engine binary not found at: ${this.binaryPath}\n` +
 					`Please build the engine first:\n` +
 					`  Development: cd engine && cmake -B build && cmake --build build\n` +
-					`  Production: ${buildScript}`,
+					`  Production: ${buildScript}`
 			);
 		}
 
@@ -190,18 +183,11 @@ export class EngineSidecar {
 		// Spawn the engine process
 		this.process = spawn(
 			this.binaryPath,
-			[
-				"--port",
-				this.port.toString(),
-				"--data-dir",
-				this.dataDir,
-				"--verbose",
-				"1",
-			],
+			["--port", this.port.toString(), "--data-dir", this.dataDir, "--verbose", "1"],
 			{
 				stdio: ["ignore", "pipe", "pipe"],
 				detached: false,
-			},
+			}
 		);
 
 		// Handle stdout
@@ -216,9 +202,7 @@ export class EngineSidecar {
 
 		// Handle process exit
 		this.process.on("exit", (code, signal) => {
-			console.log(
-				`[Sidecar] Engine exited with code ${code} signal ${signal}`,
-			);
+			console.log(`[Sidecar] Engine exited with code ${code} signal ${signal}`);
 			this.process = null;
 		});
 
@@ -235,23 +219,20 @@ export class EngineSidecar {
 	/**
 	 * Wait for the engine to be ready by polling the health endpoint
 	 */
-	private async waitForEngine(
-		maxAttempts: number = 30,
-		delay: number = 500,
-	): Promise<void> {
+	private async waitForEngine(maxAttempts: number = 30, delay: number = 500): Promise<void> {
 		const healthUrl = `http://127.0.0.1:${this.port}/health`;
 
 		for (let i = 0; i < maxAttempts; i++) {
 			try {
 				const controller = new AbortController();
 				const timeout = setTimeout(() => controller.abort(), 2000);
-				
+
 				const response = await fetch(healthUrl, {
 					signal: controller.signal,
 				});
-				
+
 				clearTimeout(timeout);
-				
+
 				if (response.ok) {
 					console.log(`[Sidecar] Engine is ready`);
 					return;
@@ -263,9 +244,7 @@ export class EngineSidecar {
 			await new Promise((resolve) => setTimeout(resolve, delay));
 		}
 
-		throw new Error(
-			`Engine failed to start within ${(maxAttempts * delay) / 1000} seconds`,
-		);
+		throw new Error(`Engine failed to start within ${(maxAttempts * delay) / 1000} seconds`);
 	}
 
 	/**
@@ -288,9 +267,7 @@ export class EngineSidecar {
 			// Give the process 5 seconds to exit gracefully
 			const timeout = setTimeout(() => {
 				if (this.process) {
-					console.log(
-						"[Sidecar] Engine did not exit gracefully, killing...",
-					);
+					console.log("[Sidecar] Engine did not exit gracefully, killing...");
 					this.process.kill("SIGKILL");
 				}
 			}, 5000);

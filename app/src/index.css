@@ -5,40 +5,40 @@
 /* Define custom semantic colors that reference CSS variables */
 /* Using 'inline' preserves default Tailwind colors (green, red, etc.) */
 @theme inline {
-  --color-background: hsl(var(--background));
-  --color-foreground: hsl(var(--foreground));
-  --color-card: hsl(var(--card));
-  --color-card-foreground: hsl(var(--card-foreground));
-  --color-popover: hsl(var(--popover));
-  --color-popover-foreground: hsl(var(--popover-foreground));
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  --color-secondary: hsl(var(--secondary));
-  --color-secondary-foreground: hsl(var(--secondary-foreground));
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
-  --color-destructive: hsl(var(--destructive));
-  --color-destructive-foreground: hsl(var(--destructive-foreground));
-  --color-border: hsl(var(--border));
-  --color-input: hsl(var(--input));
-  --color-ring: hsl(var(--ring));
-  --color-success: hsl(var(--success));
-  --color-success-foreground: hsl(var(--success-foreground));
-  --color-warning: hsl(var(--warning));
-  --color-warning-foreground: hsl(var(--warning-foreground));
-  --color-info: hsl(var(--info));
-  --color-info-foreground: hsl(var(--info-foreground));
-  --color-variable: hsl(var(--variable));
-  --color-chart-1: hsl(var(--chart-1));
-  --color-chart-2: hsl(var(--chart-2));
-  --color-chart-3: hsl(var(--chart-3));
-  --color-chart-4: hsl(var(--chart-4));
-  --color-chart-5: hsl(var(--chart-5));
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+	--color-background: hsl(var(--background));
+	--color-foreground: hsl(var(--foreground));
+	--color-card: hsl(var(--card));
+	--color-card-foreground: hsl(var(--card-foreground));
+	--color-popover: hsl(var(--popover));
+	--color-popover-foreground: hsl(var(--popover-foreground));
+	--color-primary: hsl(var(--primary));
+	--color-primary-foreground: hsl(var(--primary-foreground));
+	--color-secondary: hsl(var(--secondary));
+	--color-secondary-foreground: hsl(var(--secondary-foreground));
+	--color-muted: hsl(var(--muted));
+	--color-muted-foreground: hsl(var(--muted-foreground));
+	--color-accent: hsl(var(--accent));
+	--color-accent-foreground: hsl(var(--accent-foreground));
+	--color-destructive: hsl(var(--destructive));
+	--color-destructive-foreground: hsl(var(--destructive-foreground));
+	--color-border: hsl(var(--border));
+	--color-input: hsl(var(--input));
+	--color-ring: hsl(var(--ring));
+	--color-success: hsl(var(--success));
+	--color-success-foreground: hsl(var(--success-foreground));
+	--color-warning: hsl(var(--warning));
+	--color-warning-foreground: hsl(var(--warning-foreground));
+	--color-info: hsl(var(--info));
+	--color-info-foreground: hsl(var(--info-foreground));
+	--color-variable: hsl(var(--variable));
+	--color-chart-1: hsl(var(--chart-1));
+	--color-chart-2: hsl(var(--chart-2));
+	--color-chart-3: hsl(var(--chart-3));
+	--color-chart-4: hsl(var(--chart-4));
+	--color-chart-5: hsl(var(--chart-5));
+	--radius-lg: var(--radius);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-sm: calc(var(--radius) - 4px);
 }
 
 /*
@@ -60,211 +60,239 @@
  */
 
 @layer base {
-  :root {
-    /* Base colors - Light mode */
-    --background: 0 0% 100%;           /* white */
-    --foreground: 240 10% 3.9%;        /* near black */
+	:root {
+		/* Base colors - Light mode */
+		--background: 0 0% 100%; /* white */
+		--foreground: 240 10% 3.9%; /* near black */
 
-    /* Card/Panel surfaces */
-    --card: 0 0% 100%;                 /* white */
-    --card-foreground: 240 10% 3.9%;
+		/* Card/Panel surfaces */
+		--card: 0 0% 100%; /* white */
+		--card-foreground: 240 10% 3.9%;
 
-    /* Popover/Dropdown surfaces */
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
+		/* Popover/Dropdown surfaces */
+		--popover: 0 0% 100%;
+		--popover-foreground: 240 10% 3.9%;
 
-    /* Primary - Orange (Vayu brand) */
-    --primary: 24.6 95% 53.1%;         /* orange-500 */
-    --primary-foreground: 0 0% 100%;   /* white text on orange */
+		/* Primary - Orange (Vayu brand) */
+		--primary: 24.6 95% 53.1%; /* orange-500 */
+		--primary-foreground: 0 0% 100%; /* white text on orange */
 
-    /* Secondary - Subtle gray */
-    --secondary: 240 4.8% 95.9%;       /* zinc-100 */
-    --secondary-foreground: 240 5.9% 10%;
+		/* Secondary - Subtle gray */
+		--secondary: 240 4.8% 95.9%; /* zinc-100 */
+		--secondary-foreground: 240 5.9% 10%;
 
-    /* Muted - For subtle backgrounds and disabled states */
-    --muted: 240 4.8% 95.9%;           /* zinc-100 */
-    --muted-foreground: 240 3.8% 46.1%; /* zinc-500 */
+		/* Muted - For subtle backgrounds and disabled states */
+		--muted: 240 4.8% 95.9%; /* zinc-100 */
+		--muted-foreground: 240 3.8% 46.1%; /* zinc-500 */
 
-    /* Accent - For hover states */
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
+		/* Accent - For hover states */
+		--accent: 240 4.8% 95.9%;
+		--accent-foreground: 240 5.9% 10%;
 
-    /* Destructive - For errors and delete actions */
-    --destructive: 0 84.2% 60.2%;      /* red-500 */
-    --destructive-foreground: 0 0% 98%;
+		/* Destructive - For errors and delete actions */
+		--destructive: 0 84.2% 60.2%; /* red-500 */
+		--destructive-foreground: 0 0% 98%;
 
-    /* Borders */
-    --border: 240 5.9% 90%;            /* zinc-200 */
-    --input: 240 5.9% 90%;             /* zinc-200 */
-    --ring: 24.6 95% 53.1%;            /* orange for focus rings */
+		/* Borders */
+		--border: 240 5.9% 90%; /* zinc-200 */
+		--input: 240 5.9% 90%; /* zinc-200 */
+		--ring: 24.6 95% 53.1%; /* orange for focus rings */
 
-    /* Chart colors */
-    --chart-1: 24.6 95% 53.1%;         /* orange */
-    --chart-2: 173 58% 39%;            /* teal */
-    --chart-3: 197 37% 24%;            /* dark cyan */
-    --chart-4: 43 74% 66%;             /* yellow */
-    --chart-5: 27 87% 67%;             /* light orange */
+		/* Chart colors */
+		--chart-1: 24.6 95% 53.1%; /* orange */
+		--chart-2: 173 58% 39%; /* teal */
+		--chart-3: 197 37% 24%; /* dark cyan */
+		--chart-4: 43 74% 66%; /* yellow */
+		--chart-5: 27 87% 67%; /* light orange */
 
-    /* Semantic colors for HTTP methods */
-    --method-get: 142 76% 36%;         /* green */
-    --method-post: 217 91% 60%;        /* blue */
-    --method-put: 38 92% 50%;          /* amber */
-    --method-patch: 262 83% 58%;       /* purple */
-    --method-delete: 0 84% 60%;        /* red */
-    --method-head: 199 89% 48%;        /* cyan */
-    --method-options: 240 5% 64%;      /* gray */
+		/* Semantic colors for HTTP methods */
+		--method-get: 142 76% 36%; /* green */
+		--method-post: 217 91% 60%; /* blue */
+		--method-put: 38 92% 50%; /* amber */
+		--method-patch: 262 83% 58%; /* purple */
+		--method-delete: 0 84% 60%; /* red */
+		--method-head: 199 89% 48%; /* cyan */
+		--method-options: 240 5% 64%; /* gray */
 
-    /* Variables highlight */
-    --variable: 24.6 95% 53.1%;        /* orange for {{variables}} */
+		/* Variables highlight */
+		--variable: 24.6 95% 53.1%; /* orange for {{variables}} */
 
-    /* Success/Warning/Info */
-    --success: 142 76% 36%;            /* green-600 */
-    --success-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;             /* amber-500 */
-    --warning-foreground: 0 0% 100%;
-    --info: 199 89% 48%;               /* sky-500 */
-    --info-foreground: 0 0% 100%;
+		/* Success/Warning/Info */
+		--success: 142 76% 36%; /* green-600 */
+		--success-foreground: 0 0% 100%;
+		--warning: 38 92% 50%; /* amber-500 */
+		--warning-foreground: 0 0% 100%;
+		--info: 199 89% 48%; /* sky-500 */
+		--info-foreground: 0 0% 100%;
 
-    /* Radius */
-    --radius: 0.5rem;
-  }
+		/* Radius */
+		--radius: 0.5rem;
+	}
 
-  .dark {
-    /* Base colors - Dark mode */
-    --background: 240 10% 3.9%;        /* near black */
-    --foreground: 0 0% 98%;            /* near white */
+	.dark {
+		/* Base colors - Dark mode */
+		--background: 240 10% 3.9%; /* near black */
+		--foreground: 0 0% 98%; /* near white */
 
-    /* Card/Panel surfaces */
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
+		/* Card/Panel surfaces */
+		--card: 240 10% 3.9%;
+		--card-foreground: 0 0% 98%;
 
-    /* Popover/Dropdown surfaces */
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
+		/* Popover/Dropdown surfaces */
+		--popover: 240 10% 3.9%;
+		--popover-foreground: 0 0% 98%;
 
-    /* Primary - Orange (slightly adjusted for dark) */
-    --primary: 20.5 90.2% 48.2%;       /* orange-600 */
-    --primary-foreground: 0 0% 100%;
+		/* Primary - Orange (slightly adjusted for dark) */
+		--primary: 20.5 90.2% 48.2%; /* orange-600 */
+		--primary-foreground: 0 0% 100%;
 
-    /* Secondary */
-    --secondary: 240 3.7% 15.9%;       /* zinc-800 */
-    --secondary-foreground: 0 0% 98%;
+		/* Secondary */
+		--secondary: 240 3.7% 15.9%; /* zinc-800 */
+		--secondary-foreground: 0 0% 98%;
 
-    /* Muted */
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
+		/* Muted */
+		--muted: 240 3.7% 15.9%;
+		--muted-foreground: 240 5% 64.9%;
 
-    /* Accent */
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
+		/* Accent */
+		--accent: 240 3.7% 15.9%;
+		--accent-foreground: 0 0% 98%;
 
-    /* Destructive */
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
+		/* Destructive */
+		--destructive: 0 62.8% 30.6%;
+		--destructive-foreground: 0 0% 98%;
 
-    /* Borders */
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 20.5 90.2% 48.2%;
+		/* Borders */
+		--border: 240 3.7% 15.9%;
+		--input: 240 3.7% 15.9%;
+		--ring: 20.5 90.2% 48.2%;
 
-    /* Chart colors (adjusted for dark mode) */
-    --chart-1: 20.5 90.2% 48.2%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+		/* Chart colors (adjusted for dark mode) */
+		--chart-1: 20.5 90.2% 48.2%;
+		--chart-2: 160 60% 45%;
+		--chart-3: 30 80% 55%;
+		--chart-4: 280 65% 60%;
+		--chart-5: 340 75% 55%;
 
-    /* Variables highlight (dark mode) */
-    --variable: 20.5 90.2% 48.2%;
+		/* Variables highlight (dark mode) */
+		--variable: 20.5 90.2% 48.2%;
 
-    /* Success/Warning/Info (dark mode) */
-    --success: 142 70% 45%;
-    --success-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
-    --info: 199 89% 48%;
-    --info-foreground: 0 0% 100%;
-  }
+		/* Success/Warning/Info (dark mode) */
+		--success: 142 70% 45%;
+		--success-foreground: 0 0% 100%;
+		--warning: 38 92% 50%;
+		--warning-foreground: 0 0% 100%;
+		--info: 199 89% 48%;
+		--info-foreground: 0 0% 100%;
+	}
 }
 
 @layer base {
-  * {
-    border-color: hsl(var(--border));
-  }
-  
-  html {
-    @apply antialiased;
-  }
-  
-  body {
-    @apply bg-background text-foreground;
-    font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-    min-height: 100vh;
-  }
+	* {
+		border-color: hsl(var(--border));
+	}
 
-  #root {
-    @apply w-full h-screen overflow-hidden;
-  }
+	html {
+		@apply antialiased;
+	}
+
+	body {
+		@apply bg-background text-foreground;
+		font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+		min-height: 100vh;
+	}
+
+	#root {
+		@apply w-full h-screen overflow-hidden;
+	}
 }
 
 /* Custom scrollbar using theme colors */
 @layer components {
-  .scrollbar-thin {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
-  }
+	.scrollbar-thin {
+		scrollbar-width: thin;
+		scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+	}
 
-  .scrollbar-thin::-webkit-scrollbar {
-    @apply w-2 h-2;
-  }
+	.scrollbar-thin::-webkit-scrollbar {
+		@apply w-2 h-2;
+	}
 
-  .scrollbar-thin::-webkit-scrollbar-track {
-    @apply bg-transparent;
-  }
+	.scrollbar-thin::-webkit-scrollbar-track {
+		@apply bg-transparent;
+	}
 
-  .scrollbar-thin::-webkit-scrollbar-thumb {
-    @apply bg-muted-foreground/30 rounded-full;
-  }
+	.scrollbar-thin::-webkit-scrollbar-thumb {
+		@apply bg-muted-foreground/30 rounded-full;
+	}
 
-  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/50;
-  }
+	.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+		@apply bg-muted-foreground/50;
+	}
 }
 
 /* Code/Mono styling */
 @layer utilities {
-  .font-code {
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  }
+	.font-code {
+		font-family: "Consolas", "Monaco", "Courier New", monospace;
+	}
 
-  .truncate-2-lines {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
+	.truncate-2-lines {
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
 
-  /* Variable highlight in text */
-  .variable-highlight {
-    @apply text-[hsl(var(--variable))] font-medium;
-  }
+	/* Variable highlight in text */
+	.variable-highlight {
+		@apply text-[hsl(var(--variable))] font-medium;
+	}
 }
 
 /* HTTP Method colors - utility classes */
 @layer utilities {
-  .method-get { @apply text-[hsl(var(--method-get))]; }
-  .method-post { @apply text-[hsl(var(--method-post))]; }
-  .method-put { @apply text-[hsl(var(--method-put))]; }
-  .method-patch { @apply text-[hsl(var(--method-patch))]; }
-  .method-delete { @apply text-[hsl(var(--method-delete))]; }
-  .method-head { @apply text-[hsl(var(--method-head))]; }
-  .method-options { @apply text-[hsl(var(--method-options))]; }
+	.method-get {
+		@apply text-[hsl(var(--method-get))];
+	}
+	.method-post {
+		@apply text-[hsl(var(--method-post))];
+	}
+	.method-put {
+		@apply text-[hsl(var(--method-put))];
+	}
+	.method-patch {
+		@apply text-[hsl(var(--method-patch))];
+	}
+	.method-delete {
+		@apply text-[hsl(var(--method-delete))];
+	}
+	.method-head {
+		@apply text-[hsl(var(--method-head))];
+	}
+	.method-options {
+		@apply text-[hsl(var(--method-options))];
+	}
 
-  .bg-method-get { @apply bg-[hsl(var(--method-get))]; }
-  .bg-method-post { @apply bg-[hsl(var(--method-post))]; }
-  .bg-method-put { @apply bg-[hsl(var(--method-put))]; }
-  .bg-method-patch { @apply bg-[hsl(var(--method-patch))]; }
-  .bg-method-delete { @apply bg-[hsl(var(--method-delete))]; }
-  .bg-method-head { @apply bg-[hsl(var(--method-head))]; }
-  .bg-method-options { @apply bg-[hsl(var(--method-options))]; }
+	.bg-method-get {
+		@apply bg-[hsl(var(--method-get))];
+	}
+	.bg-method-post {
+		@apply bg-[hsl(var(--method-post))];
+	}
+	.bg-method-put {
+		@apply bg-[hsl(var(--method-put))];
+	}
+	.bg-method-patch {
+		@apply bg-[hsl(var(--method-patch))];
+	}
+	.bg-method-delete {
+		@apply bg-[hsl(var(--method-delete))];
+	}
+	.bg-method-head {
+		@apply bg-[hsl(var(--method-head))];
+	}
+	.bg-method-options {
+		@apply bg-[hsl(var(--method-options))];
+	}
 }

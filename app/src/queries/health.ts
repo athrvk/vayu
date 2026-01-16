@@ -1,23 +1,23 @@
 /**
  * Health Query
- * 
+ *
  * TanStack Query hook for engine health check with automatic polling.
  */
 
 import { useQuery } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
-import { useAppStore } from "@/stores";
+import { useEngineConnectionStore } from "@/stores";
 import { useEffect } from "react";
 
 const HEALTH_CHECK_INTERVAL_MS = 10000; // 10 seconds
 
 /**
  * Engine health check with automatic polling
- * Updates app store with connection status
+ * Updates engine connection store with connection status
  */
 export function useHealthQuery() {
-	const { setEngineConnected, setEngineError } = useAppStore();
+	const { setEngineConnected, setEngineError } = useEngineConnectionStore();
 
 	const query = useQuery({
 		queryKey: queryKeys.health.status(),
@@ -36,9 +36,7 @@ export function useHealthQuery() {
 		} else if (query.isError) {
 			setEngineConnected(false);
 			const errorMessage =
-				query.error instanceof Error
-					? query.error.message
-					: "Cannot connect to engine";
+				query.error instanceof Error ? query.error.message : "Cannot connect to engine";
 			setEngineError(errorMessage);
 		}
 	}, [

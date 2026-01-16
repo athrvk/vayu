@@ -49,6 +49,6 @@ export const API_ENDPOINTS = {
 	RUN_STOP: (id: string) => `/run/${id}/stop`,
 
 	// Real-time stats (SSE)
-	STATS_STREAM: (runId: string) => `/stats/${runId}`,           // Old endpoint (DB-based)
-	METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`,  // New endpoint (memory-based, faster)
+	STATS_STREAM: (runId: string) => `/stats/${runId}`, // Old endpoint (DB-based)
+	METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`, // New endpoint (memory-based, faster)
 } as const;
