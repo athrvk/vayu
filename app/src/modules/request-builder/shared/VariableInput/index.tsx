@@ -19,12 +19,11 @@ import {
 } from "react";
 import {
 	Command,
-	CommandInput,
 	CommandList,
 	CommandEmpty,
 	CommandGroup,
 	CommandItem,
-	Badge,
+	VariableScopeBadge,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
@@ -88,11 +87,11 @@ export default function VariableInput({
 	const [showSuggestions, setShowSuggestions] = useState(false);
 	const [showPlainSuggestions, setShowPlainSuggestions] = useState(false);
 	const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
-	const [selectedVariableIndex, setSelectedVariableIndex] = useState(0);
 	const [cursorPosition, setCursorPosition] = useState(0);
 	const [searchQuery, setSearchQuery] = useState("");
 	const inputRef = useRef<HTMLInputElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const isNavigatingRef = useRef(false);
 
 	const allVariables = getAllVariables();
 	const segments = useMemo(() => parseSegments(value), [value]);
@@ -118,7 +117,6 @@ export default function VariableInput({
 		setSearchQuery(partialName);
 		setShowSuggestions(true);
 		setShowPlainSuggestions(false);
-		setSelectedVariableIndex(0);
 	}, []);
 
 	const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -198,22 +196,6 @@ export default function VariableInput({
 		return () => document.removeEventListener("keydown", handleEscapeKey);
 	}, []);
 
-	const getScopeBadge = (scope: VariableScope) => {
-		const config = {
-			global: { label: "G", className: "bg-muted" },
-			collection: { label: "C", className: "bg-blue-50 text-blue-700 border-blue-200" },
-			environment: { label: "E", className: "bg-green-50 text-green-700 border-green-200" },
-		};
-		const { label, className } = config[scope];
-		return (
-			<Badge
-				variant="outline"
-				className={cn("h-5 px-1.5 text-[10px] font-medium", className)}
-			>
-				{label}
-			</Badge>
-		);
-	};
 
 	// Handle keyboard navigation
 	const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -249,30 +231,53 @@ export default function VariableInput({
 			}
 		}
 
-		// Arrow key navigation for variable suggestions
+		// For variable suggestions, let Command component handle navigation
+		// Just prevent input from handling arrow keys and forward them to Command
 		if (showSuggestions && filteredVariables.length > 0) {
-			const maxIndex = Math.min(filteredVariables.length, 10) - 1;
-
-			if (e.key === "ArrowDown") {
+			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
 				e.preventDefault();
-				setSelectedVariableIndex((prev) => (prev < maxIndex ? prev + 1 : prev));
-				return;
-			}
-			if (e.key === "ArrowUp") {
-				e.preventDefault();
-				setSelectedVariableIndex((prev) => (prev > 0 ? prev - 1 : 0));
+				e.stopPropagation();
+				// Mark that we're navigating to prevent blur from closing popover
+				isNavigatingRef.current = true;
+				// Keep input focused to prevent blur
+				inputRef.current?.focus();
+				// Forward the key event to the Command component
+				const commandRoot = document.querySelector('[cmdk-root]') as HTMLElement;
+				if (commandRoot) {
+					// Create and dispatch the key event to the Command root
+					const keyEvent = new KeyboardEvent("keydown", {
+						key: e.key,
+						bubbles: true,
+						cancelable: true,
+					});
+					commandRoot.dispatchEvent(keyEvent);
+				}
+				// Reset navigation flag after a short delay
+				setTimeout(() => {
+					isNavigatingRef.current = false;
+				}, 100);
 				return;
 			}
 			if (e.key === "Enter") {
 				e.preventDefault();
-				const idx = Math.min(selectedVariableIndex, maxIndex);
-				handleSelectVariable(filteredVariables[idx][0]);
+				// Command component will handle selection via onSelect
+				// Trigger click on highlighted item
+				const highlightedItem = document.querySelector(
+					'[cmdk-item][data-selected="true"]'
+				) as HTMLElement;
+				if (highlightedItem) {
+					highlightedItem.click();
+				}
 				return;
 			}
 			if (e.key === "Tab") {
 				e.preventDefault();
-				const idx = Math.min(selectedVariableIndex, maxIndex);
-				handleSelectVariable(filteredVariables[idx][0]);
+				const highlightedItem = document.querySelector(
+					'[cmdk-item][data-selected="true"]'
+				) as HTMLElement;
+				if (highlightedItem) {
+					highlightedItem.click();
+				}
 				return;
 			}
 			if (e.key === "Escape") {
@@ -291,10 +296,21 @@ export default function VariableInput({
 	};
 
 	// Handle blur - hide suggestions
-	const handleBlur = () => {
+	const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+		// Don't close if we're navigating with arrow keys
+		if (isNavigatingRef.current) {
+			return;
+		}
+		// Check if focus is moving to the popover
+		const relatedTarget = e.relatedTarget as HTMLElement;
+		if (relatedTarget?.closest('[cmdk-item]') || relatedTarget?.closest('[cmdk-list]')) {
+			return;
+		}
 		setTimeout(() => {
-			setShowSuggestions(false);
-			setShowPlainSuggestions(false);
+			if (!isNavigatingRef.current) {
+				setShowSuggestions(false);
+				setShowPlainSuggestions(false);
+			}
 		}, 200);
 	};
 
@@ -410,12 +426,6 @@ export default function VariableInput({
 			{showSuggestions && filteredVariables.length > 0 && (
 				<div className="absolute left-0 top-full mt-1 z-50 w-64 rounded-md border bg-popover shadow-md">
 					<Command shouldFilter={false}>
-						<CommandInput
-							placeholder="Search variables..."
-							value={searchQuery}
-							onValueChange={setSearchQuery}
-							className="h-9"
-						/>
 						<CommandList>
 							<CommandEmpty>No variables found.</CommandEmpty>
 							<CommandGroup heading="Variables">
@@ -427,7 +437,7 @@ export default function VariableInput({
 										className="flex items-center justify-between cursor-pointer"
 									>
 										<span className="font-mono text-sm">{name}</span>
-										{getScopeBadge(source.scope)}
+										<VariableScopeBadge scope={source.scope} variant="compact" />
 									</CommandItem>
 								))}
 							</CommandGroup>

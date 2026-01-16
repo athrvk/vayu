@@ -105,11 +105,11 @@ export default function VariablesCategoryTree({
 					className={cn(
 						"w-full flex items-center gap-2 px-7.5 py-2 text-left text-sm hover:bg-accent transition-colors",
 						isSelected({ type: "globals" }) &&
-							"bg-primary/10 text-primary hover:bg-primary/15"
+						"bg-green-50 text-green-700 dark:bg-green-950/50 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-950/70"
 					)}
 				>
-					<Globe className="w-4 h-4 text-green-500" />
-					<span className="font-medium">Globals</span>
+					<Globe className="w-3 h-3" />
+					<span>Globals</span>
 				</button>
 			</div>
 

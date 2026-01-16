@@ -20,9 +20,5 @@ export * as main from "./main";
 
 // Re-export commonly used components for convenience
 export { default as VariablesCategoryTree } from "./sidebar/VariablesCategoryTree";
-export { default as VariablesEditor } from "./main/VariablesEditor";
-export { default as VariablesPanel } from "./main/VariablesPanel";
-export { default as GlobalsEditor } from "./main/GlobalsEditor";
-export { default as CollectionVariablesEditor } from "./main/CollectionVariablesEditor";
-export { default as EnvironmentEditor } from "./main/EnvironmentEditor";
-export { default as VariableInput } from "./main/VariableInput";
+export { default as VariablesEditor } from "./main/VariablesMain";
+export { default as VariableTableEditor } from "./main/VariableTableEditor";

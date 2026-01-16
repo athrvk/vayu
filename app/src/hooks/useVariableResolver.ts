@@ -49,7 +49,7 @@ export function useVariableResolver(
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
 
-	// Get active environment from variables store (set by EnvironmentEditor)
+	// Get active environment from variables store (set by VariableEditor when editing environments)
 	const { activeEnvironmentId, activeCollectionId: storeCollectionId } = useVariablesStore();
 
 	// Use option collectionId if provided, otherwise fall back to store

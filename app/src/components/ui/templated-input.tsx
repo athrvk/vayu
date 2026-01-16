@@ -16,16 +16,15 @@ import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import {
 	Command,
-	CommandInput,
 	CommandList,
 	CommandEmpty,
 	CommandGroup,
 	CommandItem,
 } from "./command";
-import { Badge } from "./badge";
-import { Button } from "./button";
-import { Input } from "./input";
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "./tooltip";
+import { TooltipProvider } from "./tooltip";
+import { VariablePopover } from "./variable-popover";
+import { VariableTooltip } from "./variable-tooltip";
+import { VariableScopeBadge } from "./variable-scope-badge";
 import { cn } from "@/lib/utils";
 
 export type VariableScope = "global" | "collection" | "environment";
@@ -60,17 +59,13 @@ const VARIABLE_PATTERN = /\{\{([^{}]+)\}\}/g;
 
 /**
  * VariableSegment - Renders a single {{variable}} with tooltip and optional edit popover
+ * Uses centralized VariablePopover and VariableTooltip components
  */
 interface VariableSegmentProps {
 	varName: string;
 	content: string;
 	resolveVariable: (name: string) => VariableInfo | null;
 	onUpdateVariable?: (name: string, value: string, scope: VariableScope) => void;
-	editingVariable: { name: string; value: string; scope: VariableScope } | null;
-	setEditingVariable: (v: { name: string; value: string; scope: VariableScope } | null) => void;
-	editValue: string;
-	setEditValue: (v: string) => void;
-	getScopeBadge: (scope: VariableScope) => React.ReactNode;
 }
 
 function VariableSegment({
@@ -78,113 +73,31 @@ function VariableSegment({
 	content,
 	resolveVariable,
 	onUpdateVariable,
-	editingVariable,
-	setEditingVariable,
-	editValue,
-	setEditValue,
-	getScopeBadge,
 }: VariableSegmentProps) {
 	const varInfo = resolveVariable(varName);
-	const isEditing = editingVariable?.name === varName;
 	const canEdit = !!onUpdateVariable && !!varInfo;
 
-	const handleOpenEditPopover = (e: React.MouseEvent) => {
-		if (!canEdit || !varInfo) return;
-		e.stopPropagation();
-		e.preventDefault();
-		setEditingVariable({ name: varName, value: varInfo.value, scope: varInfo.scope });
-		setEditValue(varInfo.value);
-	};
-
-	const handleSaveEdit = () => {
-		if (editingVariable && onUpdateVariable) {
-			onUpdateVariable(editingVariable.name, editValue, editingVariable.scope);
-		}
-		setEditingVariable(null);
-	};
-
-	const handleCancelEdit = () => {
-		setEditingVariable(null);
-	};
-
-	const handleKeyDown = (e: React.KeyboardEvent) => {
-		if (e.key === "Enter") {
-			handleSaveEdit();
-		} else if (e.key === "Escape") {
-			handleCancelEdit();
-		}
-	};
-
-	// If we can edit and have the popover, show it
-	if (canEdit) {
+	// If we can edit, use popover with manual save mode
+	if (canEdit && varInfo) {
 		return (
-			<Popover open={isEditing} onOpenChange={(open) => !open && setEditingVariable(null)}>
-				<PopoverTrigger asChild>
-					<span
-						className="text-primary font-medium cursor-pointer hover:underline hover:bg-primary/10 rounded px-0.5 -mx-0.5"
-						onClick={handleOpenEditPopover}
-					>
-						{content}
-					</span>
-				</PopoverTrigger>
-				<PopoverContent
-					className="w-72 p-3"
-					align="start"
-					onClick={(e) => e.stopPropagation()}
-					onPointerDownOutside={(e) => e.preventDefault()}
-				>
-					<div className="space-y-3">
-						<div className="flex items-center justify-between">
-							<div className="flex items-center gap-2">
-								<span className="font-mono text-sm font-medium">{varName}</span>
-								{getScopeBadge(editingVariable?.scope || varInfo.scope)}
-							</div>
-						</div>
-						<div className="space-y-2">
-							<label className="text-xs text-muted-foreground">Value</label>
-							<Input
-								value={editValue}
-								onChange={(e) => setEditValue(e.target.value)}
-								onKeyDown={handleKeyDown}
-								className="h-8 font-mono text-sm"
-								autoFocus
-							/>
-						</div>
-						<div className="flex justify-end gap-2">
-							<Button size="sm" variant="ghost" onClick={handleCancelEdit}>
-								Cancel
-							</Button>
-							<Button size="sm" onClick={handleSaveEdit}>
-								Save
-							</Button>
-						</div>
-						<p className="text-xs text-muted-foreground">
-							Press Enter to save, Esc to cancel
-						</p>
-					</div>
-				</PopoverContent>
-			</Popover>
+			<VariablePopover
+				name={varName}
+				varInfo={varInfo}
+				resolved={true}
+				onValueChange={onUpdateVariable}
+				saveMode="manual"
+				showCurrentValue={false}
+				trigger={content}
+				triggerClassName="text-primary font-medium cursor-pointer hover:underline hover:bg-primary/10 rounded px-0.5 -mx-0.5"
+			/>
 		);
 	}
 
-	// Non-editable: just show tooltip
+	// Non-editable: use tooltip
 	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<span className="text-primary font-medium cursor-help">{content}</span>
-			</TooltipTrigger>
-			<TooltipContent>
-				{varInfo ? (
-					<div className="text-xs">
-						<div className="font-medium">{varName}</div>
-						<div className="text-muted-foreground">= {varInfo.value}</div>
-						<div className="text-muted-foreground mt-1">Scope: {varInfo.scope}</div>
-					</div>
-				) : (
-					<div className="text-xs text-destructive">Unresolved variable</div>
-				)}
-			</TooltipContent>
-		</Tooltip>
+		<VariableTooltip varName={varName} varInfo={varInfo} className="text-primary font-medium cursor-help">
+			{content}
+		</VariableTooltip>
 	);
 }
 
@@ -201,13 +114,8 @@ export function TemplatedInput({
 	const [showSuggestions, setShowSuggestions] = useState(false);
 	const [cursorPosition, setCursorPosition] = useState(0);
 	const [searchQuery, setSearchQuery] = useState("");
-	const [editingVariable, setEditingVariable] = useState<{
-		name: string;
-		value: string;
-		scope: VariableScope;
-	} | null>(null);
-	const [editValue, setEditValue] = useState("");
 	const inputRef = useRef<HTMLInputElement>(null);
+	const isNavigatingRef = useRef(false);
 
 	const allVariables = getVariables();
 
@@ -310,38 +218,6 @@ export function TemplatedInput({
 		return () => document.removeEventListener("keydown", handleKeyDown);
 	}, []);
 
-	// Get scope badge color
-	const getScopeBadge = (scope: VariableScope) => {
-		switch (scope) {
-			case "global":
-				return (
-					<Badge
-						variant="outline"
-						className="h-5 px-1.5 text-[10px] font-medium bg-muted"
-					>
-						G
-					</Badge>
-				);
-			case "collection":
-				return (
-					<Badge
-						variant="outline"
-						className="h-5 px-1.5 text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-200"
-					>
-						C
-					</Badge>
-				);
-			case "environment":
-				return (
-					<Badge
-						variant="outline"
-						className="h-5 px-1.5 text-[10px] font-medium bg-green-50 text-green-700 border-green-200"
-					>
-						E
-					</Badge>
-				);
-		}
-	};
 
 	return (
 		<TooltipProvider>
@@ -355,13 +231,67 @@ export function TemplatedInput({
 							value={value}
 							onChange={handleChange}
 							onKeyDown={(e) => {
-								if (e.key === "Escape") {
-									setShowSuggestions(false);
+								// When suggestions are open, handle navigation keys
+								if (showSuggestions) {
+									if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+										// Prevent input from handling these, let Command component handle navigation
+										e.preventDefault();
+										e.stopPropagation();
+										// Mark that we're navigating to prevent blur from closing popover
+										isNavigatingRef.current = true;
+										// Keep input focused to prevent blur
+										inputRef.current?.focus();
+										// Dispatch the key event to the Command component
+										const commandRoot = document.querySelector('[cmdk-root]') as HTMLElement;
+										if (commandRoot) {
+											// Create and dispatch the key event to the Command root
+											const keyEvent = new KeyboardEvent("keydown", {
+												key: e.key,
+												bubbles: true,
+												cancelable: true,
+											});
+											commandRoot.dispatchEvent(keyEvent);
+										}
+										// Reset navigation flag after a short delay
+										setTimeout(() => {
+											isNavigatingRef.current = false;
+										}, 100);
+										return;
+									}
+									if (e.key === "Enter") {
+										// Enter should select the highlighted item in Command
+										e.preventDefault();
+										const highlightedItem = document.querySelector(
+											'[cmdk-item][data-selected="true"]'
+										) as HTMLElement;
+										if (highlightedItem) {
+											highlightedItem.click();
+										}
+										return;
+									}
+									if (e.key === "Escape") {
+										e.preventDefault();
+										setShowSuggestions(false);
+										return;
+									}
 								}
 							}}
-							onBlur={() => {
+							onBlur={(e) => {
+								// Don't close if we're navigating with arrow keys
+								if (isNavigatingRef.current) {
+									return;
+								}
+								// Check if focus is moving to the popover
+								const relatedTarget = e.relatedTarget as HTMLElement;
+								if (relatedTarget?.closest('[cmdk-item]') || relatedTarget?.closest('[cmdk-list]')) {
+									return;
+								}
 								// Delay to allow clicking on suggestions
-								setTimeout(() => setShowSuggestions(false), 150);
+								setTimeout(() => {
+									if (!isNavigatingRef.current) {
+										setShowSuggestions(false);
+									}
+								}, 150);
 							}}
 							placeholder={placeholder}
 							disabled={disabled}
@@ -387,11 +317,6 @@ export function TemplatedInput({
 												content={seg.content}
 												resolveVariable={resolveVariable}
 												onUpdateVariable={onUpdateVariable}
-												editingVariable={editingVariable}
-												setEditingVariable={setEditingVariable}
-												editValue={editValue}
-												setEditValue={setEditValue}
-												getScopeBadge={getScopeBadge}
 											/>
 										) : (
 											<span key={i}>{seg.content}</span>
@@ -411,12 +336,6 @@ export function TemplatedInput({
 					onOpenAutoFocus={(e) => e.preventDefault()}
 				>
 					<Command shouldFilter={false}>
-						<CommandInput
-							placeholder="Search variables..."
-							value={searchQuery}
-							onValueChange={setSearchQuery}
-							className="h-9"
-						/>
 						<CommandList>
 							<CommandEmpty>No variables found.</CommandEmpty>
 							<CommandGroup heading="Variables">
@@ -428,7 +347,7 @@ export function TemplatedInput({
 										className="flex items-center justify-between cursor-pointer"
 									>
 										<span className="font-mono text-sm">{name}</span>
-										{getScopeBadge(source.scope)}
+										<VariableScopeBadge scope={source.scope} variant="compact" />
 									</CommandItem>
 								))}
 							</CommandGroup>
