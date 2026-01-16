@@ -97,6 +97,7 @@ public:
 
     // Metrics
     void add_metric(const Metric& metric);
+    void add_metrics_batch(const std::vector<Metric>& metrics);  // Transactional batch insert
     std::vector<Metric> get_metrics(const std::string& run_id);
     std::vector<Metric> get_metrics_since(const std::string& run_id, int64_t last_id);
 
@@ -110,11 +111,7 @@ public:
     void commit_transaction();
     void rollback_transaction();
 
-    // KV Store (legacy)
-    void set_config(const std::string& key, const std::string& value);
-    std::optional<std::string> get_config(const std::string& key);
-
-    // Config Entries (new structured config with metadata)
+    // Config Entries - Structured configuration with metadata
     void save_config_entry(const ConfigEntry& entry);
     std::optional<ConfigEntry> get_config_entry(const std::string& key);
     std::vector<ConfigEntry> get_all_config_entries();

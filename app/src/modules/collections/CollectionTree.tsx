@@ -243,7 +243,28 @@ export default function CollectionTree() {
 	};
 
 	const handleRequestRenameSubmit = async (requestId: string) => {
-		if (!renameRequestValue.trim()) {
+		const trimmedValue = renameRequestValue.trim();
+
+		// Validate: name cannot be empty
+		if (!trimmedValue) {
+			setRenamingRequestId(null);
+			setRenameRequestValue("");
+			return;
+		}
+
+		// Find the original request to check if name actually changed
+		// Search through all collections to find the request
+		let originalRequest: Request | undefined;
+		for (const requests of requestsByCollection.values()) {
+			const found = requests.find((r) => r.id === requestId);
+			if (found) {
+				originalRequest = found;
+				break;
+			}
+		}
+
+		// Skip save if name hasn't actually changed
+		if (originalRequest && originalRequest.name === trimmedValue) {
 			setRenamingRequestId(null);
 			setRenameRequestValue("");
 			return;
@@ -253,7 +274,7 @@ export default function CollectionTree() {
 		try {
 			await updateRequestMutation.mutateAsync({
 				id: requestId,
-				name: renameRequestValue.trim(),
+				name: trimmedValue,
 			});
 			completeSave();
 			// Reset to idle after showing "saved" status

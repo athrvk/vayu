@@ -5,7 +5,7 @@
  * Shows a form with all configurable entries for that category.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSettingsStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
@@ -73,7 +73,17 @@ export default function SettingsMain() {
         addRestartRequiredKey,
         clearRestartRequired
     } = useSettingsStore();
-    const { startSaving, completeSave, failSave, setStatus, markPendingSave } = useSaveStore();
+    const { 
+        startSaving, 
+        completeSave, 
+        failSave, 
+        setStatus, 
+        markPendingSave,
+        registerContext,
+        unregisterContext,
+        setActiveContext,
+        updateContext
+    } = useSaveStore();
     const queryClient = useQueryClient();
     const { data: configResponse, isLoading, error } = useConfigQuery();
     const updateConfigMutation = useUpdateConfigMutation();
@@ -81,11 +91,128 @@ export default function SettingsMain() {
     // Track edited values locally
     const [editedValues, setEditedValues] = useState<Record<string, EditedValue>>({});
     const [isRestarting, setIsRestarting] = useState(false);
+    
+    // Ref for save function to avoid stale closures
+    const handleSaveRef = useRef<() => Promise<void>>();
+
+    // Filter entries by selected category (calculate before early returns)
+    const categoryEntries =
+        selectedCategory && configResponse?.entries
+            ? configResponse.entries.filter((entry) => entry.category === selectedCategory)
+            : [];
+    const categoryConfig = selectedCategory ? CATEGORY_TITLES[selectedCategory] : null;
+
+    // Check if there are unsaved changes (calculate before early returns)
+    const hasChanges = Object.keys(editedValues).length > 0;
+    const hasInvalidValues = Object.values(editedValues).some((v) => !v.isValid);
 
     // Reset edited values when category changes
     useEffect(() => {
         setEditedValues({});
     }, [selectedCategory]);
+
+    // Mark as pending when there are unsaved changes
+    // This hook must be called before any early returns to follow Rules of Hooks
+    useEffect(() => {
+        if (hasChanges && !hasInvalidValues) {
+            markPendingSave("settings");
+        } else {
+            setStatus("idle");
+        }
+    }, [hasChanges, hasInvalidValues, markPendingSave, setStatus]);
+
+    // Save changes - MUST be defined before early returns (Rules of Hooks)
+    const handleSave = useCallback(async () => {
+        if (hasInvalidValues || !hasChanges) return;
+
+        const updates: Record<string, string> = {};
+        const restartKeys: string[] = [];
+
+        for (const [key, edited] of Object.entries(editedValues)) {
+            updates[key] = edited.value;
+
+            // Check if this config requires restart
+            const entry = configResponse?.entries.find((e) => e.key === key);
+            if (entry && isRestartRequired(entry)) {
+                restartKeys.push(key);
+            }
+        }
+
+        startSaving();
+        try {
+            await updateConfigMutation.mutateAsync({ entries: updates });
+            setEditedValues({});
+            completeSave();
+
+            // Track restart-required configs
+            for (const key of restartKeys) {
+                addRestartRequiredKey(key);
+            }
+
+            // Reset to idle after showing "saved" status
+            setTimeout(() => setStatus("idle"), 2000);
+        } catch (err) {
+            console.error("Failed to save settings:", err);
+            failSave(err instanceof Error ? err.message : "Failed to save settings");
+        }
+    }, [
+        hasInvalidValues,
+        hasChanges,
+        editedValues,
+        configResponse,
+        updateConfigMutation,
+        startSaving,
+        completeSave,
+        failSave,
+        setStatus,
+        addRestartRequiredKey,
+    ]);
+
+    // Keep handleSave ref updated
+    useEffect(() => {
+        handleSaveRef.current = handleSave;
+    }, [handleSave]);
+
+    // Register save context when settings are ready (not loading, no error, category selected)
+    const contextId = "settings";
+    useEffect(() => {
+        // Only register when we have a valid settings view (not loading, no error, category selected, not UI category)
+        if (isLoading || error || !selectedCategory || selectedCategory === "ui") {
+            return;
+        }
+
+        registerContext({
+            id: contextId,
+            name: "Settings",
+            save: () => handleSaveRef.current?.(),
+            hasPendingChanges: hasChanges && !hasInvalidValues,
+        });
+        setActiveContext(contextId);
+
+        return () => {
+            unregisterContext(contextId);
+        };
+    }, [
+        isLoading,
+        error,
+        selectedCategory,
+        registerContext,
+        unregisterContext,
+        setActiveContext,
+        hasChanges,
+        hasInvalidValues,
+    ]);
+
+    // Update context when hasChanges changes
+    useEffect(() => {
+        if (isLoading || error || !selectedCategory || selectedCategory === "ui") {
+            return;
+        }
+        updateContext(contextId, {
+            hasPendingChanges: hasChanges && !hasInvalidValues,
+            save: () => handleSaveRef.current?.(),
+        });
+    }, [isLoading, error, selectedCategory, hasChanges, hasInvalidValues, updateContext]);
 
     if (!selectedCategory) {
         return (
@@ -133,12 +260,6 @@ export default function SettingsMain() {
             </div>
         );
     }
-
-    // Filter entries by selected category
-    const categoryEntries =
-        configResponse?.entries.filter((entry) => entry.category === selectedCategory) || [];
-
-    const categoryConfig = CATEGORY_TITLES[selectedCategory];
 
     // Validate a value based on entry constraints
     const validateValue = (entry: ConfigEntry, value: string): { isValid: boolean; error?: string } => {
@@ -225,54 +346,6 @@ export default function SettingsMain() {
         setEditedValues(defaultValues);
     };
 
-    // Check if there are unsaved changes
-    const hasChanges = Object.keys(editedValues).length > 0;
-    const hasInvalidValues = Object.values(editedValues).some((v) => !v.isValid);
-
-    // Mark as pending when there are unsaved changes
-    useEffect(() => {
-        if (hasChanges && !hasInvalidValues) {
-            markPendingSave("settings");
-        } else {
-            setStatus("idle");
-        }
-    }, [hasChanges, hasInvalidValues, markPendingSave, setStatus]);
-
-    // Save changes
-    const handleSave = async () => {
-        if (hasInvalidValues || !hasChanges) return;
-
-        const updates: Record<string, string> = {};
-        const restartKeys: string[] = [];
-
-        for (const [key, edited] of Object.entries(editedValues)) {
-            updates[key] = edited.value;
-
-            // Check if this config requires restart
-            const entry = configResponse?.entries.find((e) => e.key === key);
-            if (entry && isRestartRequired(entry)) {
-                restartKeys.push(key);
-            }
-        }
-
-        startSaving();
-        try {
-            await updateConfigMutation.mutateAsync({ entries: updates });
-            setEditedValues({});
-            completeSave();
-
-            // Track restart-required configs
-            for (const key of restartKeys) {
-                addRestartRequiredKey(key);
-            }
-
-            // Reset to idle after showing "saved" status
-            setTimeout(() => setStatus("idle"), 2000);
-        } catch (err) {
-            console.error("Failed to save settings:", err);
-            failSave(err instanceof Error ? err.message : "Failed to save settings");
-        }
-    };
 
     // Get labels for restart-required keys
     const getRestartRequiredLabels = (): string[] => {

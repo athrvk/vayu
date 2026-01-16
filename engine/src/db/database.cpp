@@ -16,20 +16,24 @@
  *   results      - Individual request results with timing
  *
  * CONFIGURATION:
- *   kv_store     - Generic key-value settings
+ *   config_entries - Structured configuration with metadata for UI
  * ────────────────────────────────────────────────────────────────────────
  */
 
 #include "vayu/db/database.hpp"
 
 #include <sqlite_orm/sqlite_orm.h>
+#include <sqlite3.h>
 
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <sstream>
 #include <thread>
 #include <unordered_map>
 
+#include "vayu/core/config_manager.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/utils/logger.hpp"
 
 // ============================================================================
@@ -253,11 +257,6 @@ inline auto make_storage(const std::string& path) {
 
         // ─────────────── CONFIGURATION TABLES ───────────────
 
-        // KV Store: Generic key-value settings (legacy, kept for backward compatibility)
-        make_table("kv_store",
-                   make_column("key", &KVStore::key, primary_key()),
-                   make_column("value", &KVStore::value)),
-
         // Config Entries: Structured configuration with metadata for UI
         make_table("config_entries",
                    make_column("key", &ConfigEntry::key, primary_key()),
@@ -292,6 +291,66 @@ struct Database::Impl {
         if (db_path.has_parent_path()) {
             std::filesystem::create_directories(db_path.parent_path());
         }
+        
+        // Set on_open callback to apply database optimizations when connection is established
+        // Note: These use default constants. To use custom values from UI settings,
+        // users must restart the engine after changing settings.
+        storage.on_open = [](sqlite3* db) {
+            char* err_msg = nullptr;
+            std::stringstream sql;
+            
+            // Try to read from ConfigManager if available, otherwise use defaults
+            int cache_size = vayu::core::constants::database::CACHE_SIZE_KB;
+            int temp_store = vayu::core::constants::database::TEMP_STORE;
+            size_t mmap_size = vayu::core::constants::database::MMAP_SIZE_BYTES;
+            int wal_checkpoint = vayu::core::constants::database::WAL_AUTOCHECKPOINT;
+            
+            // Attempt to read from ConfigManager (may not be initialized yet)
+            try {
+                auto& cfg_mgr = vayu::core::ConfigManager::instance();
+                cache_size = cfg_mgr.get_int("dbCacheSize", cache_size);
+                temp_store = cfg_mgr.get_int("dbTempStore", temp_store);
+                mmap_size = static_cast<size_t>(cfg_mgr.get_int("dbMmapSize", static_cast<int>(mmap_size)));
+                wal_checkpoint = cfg_mgr.get_int("dbWalAutocheckpoint", wal_checkpoint);
+            } catch (...) {
+                // ConfigManager not initialized yet, use defaults
+            }
+            
+            // Apply optimizations
+            sql << "PRAGMA cache_size = " << cache_size << ";";
+            int rc = sqlite3_exec(db, sql.str().c_str(), nullptr, nullptr, &err_msg);
+            if (rc != SQLITE_OK && err_msg) {
+                vayu::utils::log_warning("Failed to set cache_size: " + std::string(err_msg));
+                sqlite3_free(err_msg);
+                err_msg = nullptr;
+            }
+            sql.str("");
+            
+            sql << "PRAGMA temp_store = " << temp_store << ";";
+            rc = sqlite3_exec(db, sql.str().c_str(), nullptr, nullptr, &err_msg);
+            if (rc != SQLITE_OK && err_msg) {
+                vayu::utils::log_warning("Failed to set temp_store: " + std::string(err_msg));
+                sqlite3_free(err_msg);
+                err_msg = nullptr;
+            }
+            sql.str("");
+            
+            sql << "PRAGMA mmap_size = " << mmap_size << ";";
+            rc = sqlite3_exec(db, sql.str().c_str(), nullptr, nullptr, &err_msg);
+            if (rc != SQLITE_OK && err_msg) {
+                vayu::utils::log_warning("Failed to set mmap_size: " + std::string(err_msg));
+                sqlite3_free(err_msg);
+                err_msg = nullptr;
+            }
+            sql.str("");
+            
+            sql << "PRAGMA wal_autocheckpoint = " << wal_checkpoint << ";";
+            rc = sqlite3_exec(db, sql.str().c_str(), nullptr, nullptr, &err_msg);
+            if (rc != SQLITE_OK && err_msg) {
+                vayu::utils::log_warning("Failed to set wal_autocheckpoint: " + std::string(err_msg));
+                sqlite3_free(err_msg);
+            }
+        };
     }
 };
 
@@ -306,13 +365,36 @@ void Database::init() {
 
     // WAL mode for better concurrent read/write performance
     impl_->storage.pragma.journal_mode(journal_mode::WAL);
-    impl_->storage.pragma.synchronous(1);      // NORMAL - balance safety/speed
-    impl_->storage.pragma.busy_timeout(5000);  // Wait up to 5s on lock contention
 
-    vayu::utils::log_debug("Database initialized with WAL mode");
-
-    // Seed default configuration values if empty
+    // Seed default configuration values if empty (must be before reading config)
     seed_default_config();
+    
+    // Apply database optimizations from ConfigManager (or use defaults)
+    // Note: These settings require engine restart to take effect
+    // The on_open callback applies defaults; config values are read here for logging
+    auto& cfg_mgr = vayu::core::ConfigManager::instance();
+    
+    // Get synchronous mode (0=OFF, 1=NORMAL, 2=FULL)
+    int synchronous = cfg_mgr.get_int("dbSynchronous", vayu::core::constants::database::SYNCHRONOUS);
+    impl_->storage.pragma.synchronous(synchronous);
+    
+    // Get busy timeout in milliseconds
+    int busy_timeout = cfg_mgr.get_int("dbBusyTimeout", vayu::core::constants::database::BUSY_TIMEOUT_MS);
+    impl_->storage.pragma.busy_timeout(busy_timeout);
+    
+    // Log current configuration (other PRAGMAs are set in on_open callback)
+    int cache_size = cfg_mgr.get_int("dbCacheSize", vayu::core::constants::database::CACHE_SIZE_KB);
+    int temp_store = cfg_mgr.get_int("dbTempStore", vayu::core::constants::database::TEMP_STORE);
+    int mmap_size = cfg_mgr.get_int("dbMmapSize", static_cast<int>(vayu::core::constants::database::MMAP_SIZE_BYTES));
+    int wal_checkpoint = cfg_mgr.get_int("dbWalAutocheckpoint", vayu::core::constants::database::WAL_AUTOCHECKPOINT);
+    
+    vayu::utils::log_debug("Database initialized with WAL mode (cache=" + 
+                          std::to_string(-cache_size) + "KB, mmap=" + 
+                          std::to_string(mmap_size / 1024 / 1024) + "MB, " +
+                          "temp_store=" + std::to_string(temp_store) + ", " +
+                          "wal_checkpoint=" + std::to_string(wal_checkpoint) + " pages, " +
+                          "busy_timeout=" + std::to_string(busy_timeout) + "ms, " +
+                          "synchronous=" + std::to_string(synchronous) + ")");
 }
 
 // ============================================================================
@@ -500,7 +582,76 @@ void Database::delete_run(const std::string& id) {
 // ============================================================================
 
 void Database::add_metric(const Metric& metric) {
+    const int max_retries = 3;
+    for (int attempt = 0; attempt < max_retries; attempt++) {
+        try {
     impl_->storage.insert(metric);
+            return;  // Success
+        } catch (const std::system_error& e) {
+            std::string error_msg = e.what();
+            // Check if it's a database lock error
+            if (error_msg.find("database is locked") != std::string::npos ||
+                error_msg.find("SQLITE_BUSY") != std::string::npos) {
+                if (attempt == max_retries - 1) {
+                    // Last attempt failed, rethrow
+                    vayu::utils::log_error("Failed to add metric after " +
+                                           std::to_string(max_retries) + " attempts: " + error_msg);
+                    throw;
+                }
+                // Wait before retry with exponential backoff
+                std::this_thread::sleep_for(std::chrono::milliseconds(50 * (attempt + 1)));
+            } else {
+                // Different error, rethrow immediately
+                throw;
+            }
+        } catch (...) {
+            // Non-system_error exceptions, rethrow immediately
+            throw;
+        }
+    }
+}
+
+// Batch insert with transaction for better performance and reduced lock contention
+// Includes retry logic to handle database lock contention
+void Database::add_metrics_batch(const std::vector<Metric>& metrics) {
+    if (metrics.empty()) return;
+
+    const int max_retries = 5;
+    for (int attempt = 0; attempt < max_retries; attempt++) {
+        try {
+            impl_->storage.transaction([&] {
+                for (const auto& metric : metrics) {
+                    impl_->storage.insert(metric);
+                }
+                return true;  // Commit
+            });
+            return;  // Success
+        } catch (const std::system_error& e) {
+            std::string error_msg = e.what();
+            // Check if it's a database lock error
+            if (error_msg.find("database is locked") != std::string::npos ||
+                error_msg.find("SQLITE_BUSY") != std::string::npos) {
+                if (attempt == max_retries - 1) {
+                    // Last attempt failed, rethrow
+                    vayu::utils::log_error("Failed to store metrics batch after " +
+                                           std::to_string(max_retries) + " attempts: " + error_msg);
+                    throw;
+                }
+                // Wait before retry with exponential backoff
+                vayu::utils::log_debug("Database locked during metrics batch, retrying in " +
+                                       std::to_string(100 * (attempt + 1)) + "ms (attempt " +
+                                       std::to_string(attempt + 1) + "/" +
+                                       std::to_string(max_retries) + ")");
+                std::this_thread::sleep_for(std::chrono::milliseconds(100 * (attempt + 1)));
+            } else {
+                // Different error, rethrow immediately
+                throw;
+            }
+        } catch (...) {
+            // Non-system_error exceptions, rethrow immediately
+            throw;
+        }
+    }
 }
 
 std::vector<Metric> Database::get_metrics(const std::string& run_id) {
@@ -522,15 +673,46 @@ void Database::add_result(const Result& result) {
 }
 
 // Batch insert with transaction for better performance
+// Includes retry logic to handle database lock contention
 void Database::add_results_batch(const std::vector<Result>& results) {
     if (results.empty()) return;
 
+    const int max_retries = 5;
+    for (int attempt = 0; attempt < max_retries; attempt++) {
+        try {
     impl_->storage.transaction([&] {
         for (const auto& result : results) {
             impl_->storage.insert(result);
         }
         return true;  // Commit
     });
+            return;  // Success
+        } catch (const std::system_error& e) {
+            std::string error_msg = e.what();
+            // Check if it's a database lock error
+            if (error_msg.find("database is locked") != std::string::npos ||
+                error_msg.find("SQLITE_BUSY") != std::string::npos) {
+                if (attempt == max_retries - 1) {
+                    // Last attempt failed, rethrow
+                    vayu::utils::log_error("Failed to flush results batch after " +
+                                           std::to_string(max_retries) + " attempts: " + error_msg);
+                    throw;
+                }
+                // Wait before retry with exponential backoff
+                vayu::utils::log_debug("Database locked during results batch, retrying in " +
+                                       std::to_string(100 * (attempt + 1)) + "ms (attempt " +
+                                       std::to_string(attempt + 1) + "/" +
+                                       std::to_string(max_retries) + ")");
+                std::this_thread::sleep_for(std::chrono::milliseconds(100 * (attempt + 1)));
+            } else {
+                // Different error, rethrow immediately
+                throw;
+            }
+        } catch (...) {
+            // Non-system_error exceptions, rethrow immediately
+            throw;
+        }
+    }
 }
 
 std::vector<Result> Database::get_results(const std::string& run_id) {
@@ -551,20 +733,6 @@ void Database::commit_transaction() {
 
 void Database::rollback_transaction() {
     impl_->storage.rollback();
-}
-
-// ============================================================================
-// KV Store - Generic key-value settings
-// ============================================================================
-
-void Database::set_config(const std::string& key, const std::string& value) {
-    impl_->storage.replace(KVStore{key, value});
-}
-
-std::optional<std::string> Database::get_config(const std::string& key) {
-    auto configs = impl_->storage.get_all<KVStore>(where(c(&KVStore::key) == key));
-    if (configs.empty()) return std::nullopt;
-    return configs.front().value;
 }
 
 // ============================================================================
@@ -669,6 +837,100 @@ void Database::seed_default_config() {
         std::to_string(vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE),
         "1",
         "1000",
+        now});
+
+    // =========================================================================
+    // DATABASE PERFORMANCE CONFIGURATION
+    // SQLite optimization settings for high-throughput load testing
+    // =========================================================================
+
+    upsert_config(ConfigEntry{
+        "dbCacheSize",
+        std::to_string(vayu::core::constants::database::CACHE_SIZE_KB),
+        "integer",
+        "Database Cache Size",
+        "Memory used to cache test results and metrics during high-RPS load tests. "
+        "Enter a negative number in KB (e.g., -64000 = 64MB). Larger values reduce disk writes when storing thousands of results per second, improving test throughput. "
+        "Recommended: 64-128MB for tests generating 10K+ results/second. Default: 64MB. Requires engine restart.",
+        "database_performance",
+        std::to_string(vayu::core::constants::database::CACHE_SIZE_KB),
+        "-1048576",  // min: -1GB
+        "-1000",     // max: -1MB
+        now});
+
+    upsert_config(ConfigEntry{
+        "dbTempStore",
+        std::to_string(vayu::core::constants::database::TEMP_STORE),
+        "integer",
+        "Temporary Tables Storage",
+        "Where temporary data is stored when generating test reports and aggregating metrics. "
+        "Options: 0 = Default (file), 1 = Always use file, 2 = Always use memory. "
+        "Memory (2) significantly speeds up report generation and metric calculations during active tests. "
+        "Recommended for high-frequency reporting. Default: Memory. Requires engine restart.",
+        "database_performance",
+        std::to_string(vayu::core::constants::database::TEMP_STORE),
+        "0",
+        "2",
+        now});
+
+    upsert_config(ConfigEntry{
+        "dbMmapSize",
+        std::to_string(vayu::core::constants::database::MMAP_SIZE_BYTES),
+        "integer",
+        "Memory-Mapped I/O Size",
+        "Amount of database file accessed directly from memory when reading test results and metrics. "
+        "Example: 268435456 = 256MB. Speeds up dashboard updates and report generation by avoiding disk reads. "
+        "Larger values improve real-time metric streaming performance. Recommended: 256-512MB for large test runs. "
+        "Default: 256MB. Requires engine restart.",
+        "database_performance",
+        std::to_string(vayu::core::constants::database::MMAP_SIZE_BYTES),
+        "0",           // min: disabled
+        "1073741824",  // max: 1GB
+        now});
+
+    upsert_config(ConfigEntry{
+        "dbWalAutocheckpoint",
+        std::to_string(vayu::core::constants::database::WAL_AUTOCHECKPOINT),
+        "integer",
+        "WAL Checkpoint Frequency",
+        "How often SQLite saves accumulated test results to the main database file (in pages). "
+        "During high-RPS tests, results accumulate in the WAL file. Lower values save more frequently (reduces WAL size, but may slow writes). "
+        "Higher values batch saves less often (faster result storage, but WAL file grows larger). "
+        "Recommended: 1000-2000 for tests with 50K+ requests. Default: 1000 pages. Requires engine restart.",
+        "database_performance",
+        std::to_string(vayu::core::constants::database::WAL_AUTOCHECKPOINT),
+        "100",
+        "10000",
+        now});
+
+    upsert_config(ConfigEntry{
+        "dbBusyTimeout",
+        std::to_string(vayu::core::constants::database::BUSY_TIMEOUT_MS),
+        "integer",
+        "Database Lock Wait Time",
+        "How long SQLite waits (in milliseconds) when multiple threads try to write test results simultaneously. "
+        "During high-concurrency load tests, result storage threads compete for database access. "
+        "Higher values prevent 'database is locked' errors but may delay error reporting. "
+        "Recommended: 10-30 seconds for tests with 100+ concurrent requests. Default: 10 seconds. Requires engine restart.",
+        "database_performance",
+        std::to_string(vayu::core::constants::database::BUSY_TIMEOUT_MS),
+        "1000",   // min: 1 second
+        "60000",  // max: 60 seconds
+        now});
+
+    upsert_config(ConfigEntry{
+        "dbSynchronous",
+        std::to_string(vayu::core::constants::database::SYNCHRONOUS),
+        "integer",
+        "Data Safety Mode",
+        "How aggressively SQLite ensures test results are written to disk. "
+        "Options: 0 = Off (fastest, safe with WAL mode), 1 = Normal (balanced), 2 = Full (safest, slowest). "
+        "For load testing, Off (0) is recommended - WAL mode provides durability while maximizing write throughput for storing results. "
+        "This setting directly impacts how fast results can be saved during high-RPS tests. Default: Off. Requires engine restart.",
+        "database_performance",
+        std::to_string(vayu::core::constants::database::SYNCHRONOUS),
+        "0",
+        "2",
         now});
 
     // =========================================================================

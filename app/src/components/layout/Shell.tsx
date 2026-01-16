@@ -87,7 +87,7 @@ export default function Shell() {
 	};
 
 	return (
-		<div className="flex h-screen bg-background overflow-hidden">
+		<div className="flex h-full bg-background overflow-hidden">
 			{/* Sidebar Container - Handles width constraints */}
 			<div
 				ref={sidebarRef}

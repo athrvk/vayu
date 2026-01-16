@@ -651,11 +651,6 @@ struct Result {
     std::string trace_data;  // JSON (Headers/Body - only for Design Mode or Errors)
 };
 
-struct KVStore {
-    std::string key;
-    std::string value;
-};
-
 /**
  * @brief Configuration entry with metadata for UI display
  */

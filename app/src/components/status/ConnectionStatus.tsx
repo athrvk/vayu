@@ -56,7 +56,7 @@ export default function ConnectionStatus() {
 
 	if (isEngineConnected) {
 		return (
-			<div className="bg-primary/10 dark:bg-primary/20 border-t border-primary/30 dark:border-primary/40 px-4 py-2.5 flex items-center justify-between text-sm w-full">
+			<div className="bg-primary/10 dark:bg-primary/20 border-primary/30 dark:border-primary/40 px-4 py-2.5 flex items-center justify-between text-sm w-full">
 				<div className="flex items-center gap-2">
 					<CheckCircle className="w-4 h-4 text-primary shrink-0" />
 					<span className="text-primary dark:text-primary-foreground font-medium">
@@ -69,7 +69,7 @@ export default function ConnectionStatus() {
 	}
 
 	return (
-		<div className="bg-destructive/10 dark:bg-destructive/20 border-t border-destructive/30 dark:border-destructive/40 px-4 py-3 flex items-center gap-2 w-full">
+		<div className="bg-destructive/10 dark:bg-destructive/20 border-destructive/30 dark:border-destructive/40 px-4 py-3 flex items-center gap-2 w-full">
 			<AlertCircle className="w-5 h-5 text-destructive shrink-0" />
 			<div className="flex-1 min-w-0">
 				<p className="text-sm font-medium text-destructive">

@@ -306,16 +306,21 @@
 
 	html {
 		@apply antialiased;
+		height: 100%;
+		overflow: hidden;
 	}
 
 	body {
 		@apply bg-background text-foreground;
 		font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-		min-height: 100vh;
+		height: 100%;
+		margin: 0;
+		padding: 0;
+		overflow: hidden;
 	}
 
 	#root {
-		@apply w-full h-screen overflow-hidden;
+		@apply w-full h-full overflow-hidden;
 	}
 }
 

@@ -103,7 +103,7 @@ export default function VariablesCategoryTree({
 				<button
 					onClick={() => setSelectedCategory({ type: "globals" })}
 					className={cn(
-						"w-full flex items-center gap-2 px-7.5 py-2 text-left text-sm hover:bg-accent transition-colors",
+						"w-full flex items-center gap-2 px-8 py-2 text-left text-sm hover:bg-accent transition-colors",
 						isSelected({ type: "globals" }) &&
 						"bg-green-50 text-green-700 dark:bg-green-950/50 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-950/70"
 					)}

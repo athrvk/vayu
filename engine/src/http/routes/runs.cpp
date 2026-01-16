@@ -181,6 +181,7 @@ void register_run_routes(RouteContext& ctx) {
                     vayu::utils::MetricsHelper::calculate_detailed_report(results, duration_s);
 
                 // Override calculated percentiles with correct values from Metrics table
+                // Note: P75 and P90 are calculated from results, not stored as metrics
                 auto metrics = ctx.db.get_metrics(run_id);
                 for (const auto& m : metrics) {
                     if (m.name == vayu::MetricName::LatencyP50) {
@@ -276,6 +277,12 @@ void register_run_routes(RouteContext& ctx) {
                         if (req_config.contains("url")) metadata["requestUrl"] = req_config["url"];
                         if (req_config.contains("method"))
                             metadata["requestMethod"] = req_config["method"];
+                    }
+                    if (config.contains("url")) {
+                        metadata["requestUrl"] = config["url"];
+                    }  
+                    if (config.contains("method")) {
+                        metadata["requestMethod"] = config["method"];
                     }
 
                     nlohmann::json config_obj;

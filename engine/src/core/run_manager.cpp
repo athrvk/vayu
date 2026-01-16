@@ -384,55 +384,60 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         double p95 = percentiles.p95;
         double p99 = percentiles.p99;
 
-        // Store final summary metrics
+        // Store final summary metrics (batched in single transaction to reduce lock contention)
         try {
             auto timestamp = now_ms();
-            db.add_metric({0, context->run_id, timestamp, vayu::MetricName::Rps, actual_rps, ""});
-            db.add_metric(
+            std::vector<vayu::db::Metric> final_metrics;
+            final_metrics.reserve(12);  // Pre-allocate for expected metrics
+
+            final_metrics.push_back(
+                {0, context->run_id, timestamp, vayu::MetricName::Rps, actual_rps, ""});
+            final_metrics.push_back(
                 {0, context->run_id, timestamp, vayu::MetricName::LatencyAvg, avg_latency, ""});
-            db.add_metric({0,
-                           context->run_id,
-                           timestamp,
-                           vayu::MetricName::LatencyP50,
-                           p50,
-                           R"({"percentile":"p50"})"});
-            db.add_metric({0,
-                           context->run_id,
-                           timestamp,
-                           vayu::MetricName::LatencyP95,
-                           p95,
-                           R"({"percentile":"p95"})"});
-            db.add_metric({0,
-                           context->run_id,
-                           timestamp,
-                           vayu::MetricName::LatencyP99,
-                           p99,
-                           R"({"percentile":"p99"})"});
-            db.add_metric(
+            final_metrics.push_back({0,
+                                     context->run_id,
+                                     timestamp,
+                                     vayu::MetricName::LatencyP50,
+                                     p50,
+                                     R"({"percentile":"p50"})"});
+            final_metrics.push_back({0,
+                                     context->run_id,
+                                     timestamp,
+                                     vayu::MetricName::LatencyP95,
+                                     p95,
+                                     R"({"percentile":"p95"})"});
+            final_metrics.push_back({0,
+                                     context->run_id,
+                                     timestamp,
+                                     vayu::MetricName::LatencyP99,
+                                     p99,
+                                     R"({"percentile":"p99"})"});
+            final_metrics.push_back(
                 {0, context->run_id, timestamp, vayu::MetricName::ErrorRate, error_rate, ""});
-            db.add_metric({0,
-                           context->run_id,
-                           timestamp,
-                           vayu::MetricName::TotalRequests,
-                           static_cast<double>(completed),
-                           ""});
-            db.add_metric({0, context->run_id, timestamp, vayu::MetricName::Completed, 1.0, ""});
+            final_metrics.push_back({0,
+                                     context->run_id,
+                                     timestamp,
+                                     vayu::MetricName::TotalRequests,
+                                     static_cast<double>(completed),
+                                     ""});
+            final_metrics.push_back(
+                {0, context->run_id, timestamp, vayu::MetricName::Completed, 1.0, ""});
 
             // Store actual test duration (excludes setup/teardown overhead)
-            db.add_metric({0,
-                           context->run_id,
-                           timestamp,
-                           vayu::MetricName::TestDuration,
-                           total_duration_s,
-                           ""});
+            final_metrics.push_back({0,
+                                     context->run_id,
+                                     timestamp,
+                                     vayu::MetricName::TestDuration,
+                                     total_duration_s,
+                                     ""});
 
             // Store setup/teardown overhead for diagnostic purposes
-            db.add_metric({0,
-                           context->run_id,
-                           timestamp,
-                           vayu::MetricName::SetupOverhead,
-                           setup_overhead_s,
-                           ""});
+            final_metrics.push_back({0,
+                                     context->run_id,
+                                     timestamp,
+                                     vayu::MetricName::SetupOverhead,
+                                     setup_overhead_s,
+                                     ""});
 
             // Store status code distribution as JSON in metadata field
             auto status_codes = context->metrics_collector->status_code_distribution();
@@ -441,13 +446,16 @@ void execute_load_test(std::shared_ptr<RunContext> context,
                 for (const auto& [code, count] : status_codes) {
                     status_codes_json[std::to_string(code)] = count;
                 }
-                db.add_metric({0,
-                               context->run_id,
-                               timestamp,
-                               vayu::MetricName::StatusCodes,
-                               0.0,
-                               status_codes_json.dump()});
+                final_metrics.push_back({0,
+                                         context->run_id,
+                                         timestamp,
+                                         vayu::MetricName::StatusCodes,
+                                         0.0,
+                                         status_codes_json.dump()});
             }
+
+            // Batch insert all metrics in a single transaction
+            db.add_metrics_batch(final_metrics);
         } catch (const std::exception& e) {
             vayu::utils::log_error("Failed to store final metrics: " + std::string(e.what()));
         }

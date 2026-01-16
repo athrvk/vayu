@@ -166,6 +166,24 @@ namespace db_streaming {
 /// Batch size for streaming requests to prevent OOM
 constexpr size_t REQUEST_BATCH_SIZE = 5;
 }  // namespace db_streaming
+
+/**
+ * @brief Database optimization configuration
+ */
+namespace database {
+/// SQLite cache size in KB (negative value means KB, -64000 = 64MB)
+constexpr int CACHE_SIZE_KB = -64000;
+/// SQLite temp store mode (0=default, 1=file, 2=memory)
+constexpr int TEMP_STORE = 2;
+/// SQLite memory-mapped I/O size in bytes (256MB)
+constexpr size_t MMAP_SIZE_BYTES = 268435456;
+/// WAL autocheckpoint frequency in pages
+constexpr int WAL_AUTOCHECKPOINT = 1000;
+/// SQLite busy timeout in milliseconds (10 seconds)
+constexpr int BUSY_TIMEOUT_MS = 10000;
+/// SQLite synchronous mode (0=OFF, 1=NORMAL, 2=FULL) - 0 is safe with WAL
+constexpr int SYNCHRONOUS = 0;
+}  // namespace database
 }  // namespace vayu::core::constants
 
 /**

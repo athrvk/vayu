@@ -169,11 +169,14 @@ export default function ResponseBody({
 					<div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
 						<Button
 							size="sm"
-							variant={viewMode === "pretty" ? "secondary" : "ghost"}
+							variant="ghost"
 							onClick={() => setViewMode("pretty")}
 							className={cn(
 								"h-7 px-2 text-xs gap-1",
-								compact && "h-6 px-1.5 text-[11px]"
+								compact && "h-6 px-1.5 text-[11px]",
+								viewMode === "pretty"
+									? "bg-background text-foreground shadow-sm font-medium"
+									: "text-muted-foreground hover:text-foreground hover:bg-background/50"
 							)}
 						>
 							<Code className={cn("w-3 h-3", compact && "w-2.5 h-2.5")} />
@@ -181,11 +184,14 @@ export default function ResponseBody({
 						</Button>
 						<Button
 							size="sm"
-							variant={viewMode === "raw" ? "secondary" : "ghost"}
+							variant="ghost"
 							onClick={() => setViewMode("raw")}
 							className={cn(
 								"h-7 px-2 text-xs gap-1",
-								compact && "h-6 px-1.5 text-[11px]"
+								compact && "h-6 px-1.5 text-[11px]",
+								viewMode === "raw"
+									? "bg-background text-foreground shadow-sm font-medium"
+									: "text-muted-foreground hover:text-foreground hover:bg-background/50"
 							)}
 						>
 							<FileText className={cn("w-3 h-3", compact && "w-2.5 h-2.5")} />
@@ -194,11 +200,14 @@ export default function ResponseBody({
 						{canPreview && (
 							<Button
 								size="sm"
-								variant={viewMode === "preview" ? "secondary" : "ghost"}
+								variant="ghost"
 								onClick={() => setViewMode("preview")}
 								className={cn(
 									"h-7 px-2 text-xs gap-1",
-									compact && "h-6 px-1.5 text-[11px]"
+									compact && "h-6 px-1.5 text-[11px]",
+									viewMode === "preview"
+										? "bg-background text-foreground shadow-sm font-medium"
+										: "text-muted-foreground hover:text-foreground hover:bg-background/50"
 								)}
 							>
 								<Eye className={cn("w-3 h-3", compact && "w-2.5 h-2.5")} />
