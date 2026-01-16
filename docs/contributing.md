@@ -167,6 +167,20 @@ private:
 
 #### Naming Conventions
 
+**File Naming:**
+- Components: `PascalCase.tsx` (e.g., `RequestBuilder.tsx`)
+- Hooks: `camelCase.ts` with 'use' prefix (e.g., `useEngine.ts`)
+- Stores: `kebab-case-store.ts` (e.g., `navigation-store.ts`)
+- Services: `kebab-case.ts` (e.g., `http-client.ts`)
+- Transformers: `kebab-case-transformer.ts` (e.g., `request-transformer.ts`)
+- Queries: `kebab-case.ts` (e.g., `collections.ts`)
+- Types: `kebab-case.ts` (e.g., `api.ts`)
+- Utils: `kebab-case.ts` (e.g., `helpers.ts`)
+- Constants: `kebab-case.ts` (e.g., `error-codes.ts`)
+- Error Components: `PascalCase.tsx` (e.g., `ErrorBoundary.tsx`)
+- Error Utilities: `kebab-case.ts` (e.g., `error-handler.ts`)
+
+**Code Naming:**
 ```typescript
 // Components: PascalCase
 function RequestBuilder() {}
@@ -183,6 +197,8 @@ const MAX_HISTORY_SIZE = 100;
 // Types/Interfaces: PascalCase
 interface RequestConfig {}
 ```
+
+For detailed file naming conventions, see [`app/src/FILE_NAMING_CONVENTIONS.md`](../app/src/FILE_NAMING_CONVENTIONS.md).
 
 #### Formatting and Linting
 

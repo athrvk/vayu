@@ -11,5 +11,5 @@ export {
 	getErrorSeverity,
 	type UserFriendlyError,
 	type ErrorSeverity,
-} from "./errorHandler";
-export { logError, logApiError, type ErrorContext } from "./errorLogger";
+} from "./error-handler";
+export { logError, logApiError, type ErrorContext } from "./error-logger";

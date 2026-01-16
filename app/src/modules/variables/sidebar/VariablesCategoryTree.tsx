@@ -13,7 +13,6 @@ import { useCreateEnvironmentMutation, useDeleteEnvironmentMutation } from "@/qu
 import type { Collection, Environment } from "@/types";
 import {
 	Globe,
-	Folder,
 	Layers,
 	ChevronDown,
 	ChevronRight,

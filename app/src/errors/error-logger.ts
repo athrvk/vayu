@@ -4,7 +4,7 @@
  * Centralized error logging utility.
  */
 
-import type { ErrorSeverity } from "./errorHandler";
+import type { ErrorSeverity } from "./error-handler";
 
 /**
  * Error context for logging
