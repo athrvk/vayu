@@ -28,7 +28,7 @@ When the app launches:
 ### For Development
 
 - **macOS** (10.15 Catalina or later)
-- **Node.js** v18+ with pnpm
+- **Node.js** v20+ with pnpm
 - **CMake** v3.25+
 - **vcpkg** package manager
 - **Xcode Command Line Tools**
@@ -53,11 +53,11 @@ All of the above, plus:
 
 ```bash
 # Clone the repository
-git clone https://github.com/vayu/vayu.git
+git clone https://github.com/athrvk/vayu.git
 cd vayu
 
-# Run the development setup script
-./scripts/build-app-dev.sh
+# Run the development build script
+./scripts/build/build-macos.sh dev
 ```
 
 This script will:
@@ -100,8 +100,8 @@ This starts:
 - Edit files in `engine/src/`
 - Rebuild the engine:
   ```bash
-  cd engine/build
-  cmake --build . -j 8
+  cd engine
+  ./scripts/build/build-and-test.sh -d
   ```
 - Restart the Electron app
 
@@ -111,12 +111,12 @@ This starts:
 
 ```bash
 # From project root
-./scripts/build-app-prod.sh
+./scripts/build/build-macos.sh prod
 ```
 
 This script will:
 1. **Build C++ engine** for production (Release mode)
-2. **Copy engine binary** to `app/resources/bin/`
+2. **Copy engine binary** to `app/build/resources/bin/`
 3. **Install app dependencies**
 4. **Compile TypeScript** for Electron
 5. **Build React app** with Vite
@@ -126,7 +126,7 @@ This script will:
 
 The final installer is created at:
 ```
-app/release/Vayu-<version>-<arch>.dmg
+app/release/Vayu-<version>-universal.dmg
 ```
 
 **Production Paths (inside .app):**
@@ -140,54 +140,28 @@ app/release/Vayu-<version>-<arch>.dmg
 
 ```bash
 # Open the DMG
-open app/release/Vayu\ Desktop-*.dmg
+open app/release/Vayu-*.dmg
 
 # Drag to Applications and launch
 # Or test directly
-./app/release/mac/Vayu\ Desktop.app/Contents/MacOS/Vayu\ Desktop
+open app/release/mac/Vayu.app
 ```
 
 ## Build Scripts Reference
 
-### `scripts/build-engine-macos.sh`
+### `scripts/build/build-macos.sh`
 
-Builds the C++ engine for production:
-- Compiles in **Release** mode with optimizations
-- Links all dependencies statically
-- Copies binary to `app/resources/bin/vayu-engine`
-- **Flags:**
-  - `VAYU_BUILD_ENGINE=ON` - Build daemon
-  - `VAYU_BUILD_CLI=OFF` - Skip CLI
-  - `VAYU_BUILD_TESTS=OFF` - Skip tests
+Builds the C++ engine and Electron app for macOS:
+- **dev mode:** Development build with debug symbols
+- **prod mode:** Production build optimized and packaged as DMG
 
 Usage:
 ```bash
-./scripts/build-engine-macos.sh
-```
+# Development build
+./scripts/build/build-macos.sh dev
 
-### `scripts/build-app-dev.sh`
-
-Sets up the development environment:
-- Checks for engine binary (builds if missing)
-- Installs pnpm dependencies
-- Prepares for `pnpm run electron:dev`
-
-Usage:
-```bash
-./scripts/build-app-dev.sh
-```
-
-### `scripts/build-app-prod.sh`
-
-Builds the complete production app:
-- Calls `build-engine-macos.sh`
-- Builds React app with Vite
-- Packages with electron-builder
-- Creates .dmg installer
-
-Usage:
-```bash
-./scripts/build-app-prod.sh
+# Production build
+./scripts/build/build-macos.sh prod
 ```
 
 ## Electron Configuration
@@ -195,7 +169,7 @@ Usage:
 ### `app/electron-builder.json`
 
 Key settings:
-- **appId:** `com.vayu.desktop`
+- **appId:** `com.vayu.client`
 - **extraResources:** Bundles `vayu-engine` binary
 - **mac.target:** Universal binary (arm64 + x64)
 - **mac.category:** Developer Tools
@@ -221,8 +195,8 @@ Manages the engine process:
    ```
 2. If missing, rebuild:
    ```bash
-   cd engine/build
-   cmake --build . -j 8
+   cd engine
+   ./scripts/build/build-and-test.sh -d
    ```
 
 ### Port 9876 already in use
@@ -235,7 +209,11 @@ Manages the engine process:
    lsof -i :9876
    kill <PID>
    ```
-2. Or use a different port (edit `app/electron/main.ts`)
+2. Or use the kill-ports script:
+   ```bash
+   cd app
+   pnpm kill-ports
+   ```
 
 ### Production app crashes on launch
 
@@ -246,7 +224,7 @@ Manages the engine process:
 2. Look in `~/Library/Application Support/vayu/logs/`
 3. Verify engine binary has correct permissions:
    ```bash
-   ls -la Vayu\ Desktop.app/Contents/Resources/bin/vayu-engine
+   ls -la Vayu.app/Contents/Resources/bin/vayu-engine
    ```
 
 ### DMG creation fails
@@ -254,14 +232,14 @@ Manages the engine process:
 **Symptoms:** `electron-builder` errors during packaging
 
 **Common causes:**
-- Missing engine binary in `app/resources/bin/`
+- Missing engine binary in `app/build/resources/bin/`
 - Missing icon files in `app/build/`
 - Unsigned binary (requires Developer ID certificate)
 
 **Solution:**
 1. Ensure engine is built:
    ```bash
-   ./scripts/build-engine-macos.sh
+   ./scripts/build/build-macos.sh prod
    ```
 2. For unsigned builds, electron-builder will skip signing
 
@@ -286,17 +264,10 @@ export APPLE_TEAM_ID="XXXXXXXXXX"
 
 ```bash
 # electron-builder will use the above env vars
-./scripts/build-app-prod.sh
+./scripts/build/build-macos.sh prod
 ```
 
 For now, the scripts build **unsigned** apps for development testing.
-
-## Next Steps
-
-- Add Windows build support (`build-engine-windows.sh`)
-- Add Linux build support (`build-engine-linux.sh`)
-- Set up GitHub Actions for automated builds
-- Add automatic updates with electron-updater
 
 ## Resources
 
@@ -304,3 +275,4 @@ For now, the scripts build **unsigned** apps for development testing.
 - [electron-builder](https://www.electron.build/)
 - [vcpkg Package Manager](https://vcpkg.io/)
 - [CMake Documentation](https://cmake.org/documentation/)
+- [App Building Guide](app/building.md)

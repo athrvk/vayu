@@ -1,193 +1,118 @@
-<div align="center">
+# Vayu
 
-# ⚡ Vayu
-
-**The High-Performance, Open-Source API Development Platform**
-
-*Write once. Debug visually. Scale instantly.*
+**High-Performance API Testing Platform**
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![macOS](https://img.shields.io/badge/macOS-Universal-000000?logo=apple)](https://github.com/vayu/vayu/releases)
-[![Build](https://img.shields.io/github/actions/workflow/status/vayu/vayu/ci.yml?branch=main)](https://github.com/vayu/vayu/actions)
 
-</div>
+Vayu combines the ease of use of API design tools like Postman with the raw performance of high-throughput load testing tools. Build and debug requests visually, then run the same tests at scale—all in one tool.
 
----
+## Overview
 
-## The Problem
+Vayu uses a **sidecar architecture** that separates the user interface from the execution engine:
 
-In the current API development landscape, engineers maintain **two separate workflows**:
+- **The Manager** (Electron + React): Provides a modern UI for building requests, managing collections, and viewing results
+- **The Engine** (C++): A high-performance daemon capable of executing thousands of requests per second
 
-| Tool Type | Examples | Strengths | Weaknesses |
-|-----------|----------|-----------|------------|
-| **Design & Debug** | Postman, Insomnia, Bruno | Great UI, easy scripting | Single-threaded, ~100 RPS max |
-| **Load & Stress Test** | k6, JMeter, Gatling | 50k+ RPS | Requires rewriting tests, poor UX |
-
-**The pain:** Build tests in Postman to verify logic. Rewrite those same tests in k6 to verify scale.
-
----
-
-## The Solution
-
-**Vayu** is a hybrid API tool that combines:
-- 🎨 **Design Mode:** Postman-like UI for building and debugging requests
-- ⚡ **Vayu Mode:** Lock-free C++ engine capable of **60,000+ requests per second**
-
-**One tool. One test suite. Debug at 1 RPS. Load test at 60,000 RPS.**
-
----
+The Manager communicates with the Engine via a local HTTP API on port 9876 (dynamically assigned, if not available), allowing each component to be optimized for its specific purpose.
 
 ## Features
 
-- 🚀 **High Performance** - Lock-free C++ engine with 60k+ RPS (P99 < 50ms)
-- 📝 **Postman Compatible** - Import collections, use familiar `pm.test()` syntax
-- 🔒 **Privacy First** - 100% local, no cloud sync, your data stays yours
-- 🆓 **Open Source** - MIT licensed, free forever
-- 💻 **Cross Platform** - macOS, Windows & Linux support
-
----
+- **High Performance** - Lock-free C++ engine optimized for maximum throughput
+- **Request Management** - Organize requests into collections with folder hierarchy
+- **Load Testing** - Run load tests with real-time metrics streaming
+- **Environment Variables** - Manage variables across collections and environments
+- **Test Scripting** - QuickJS-based scripting engine compatible with Postman's `pm.test()` syntax
+- **Privacy First** - 100% local execution, no cloud sync required
+- **Cross Platform** - macOS, Windows, and Linux support
 
 ## Quick Start
 
-### Download
+### Prerequisites
 
-**macOS (Universal)**
+- **C++ Engine**: CMake 3.25+, C++20 compiler, vcpkg
+- **Electron App**: Node.js ≥ 20 LTS, pnpm ≥ 8
+
+### Building from Source
+
+Clone the repository:
+
 ```bash
-# Homebrew (coming soon)
-brew install --cask vayu
-
-# Or download from releases
-open https://github.com/vayu/vayu/releases
+git clone https://github.com/athrvk/vayu.git
+cd vayu
 ```
 
-### Your First Request
+Build for your platform:
 
-1. Launch Vayu
-2. Enter `https://httpbin.org/get`
-3. Click **Send**
+**macOS:**
+```bash
+./scripts/build/build-macos.sh dev
+```
 
-### Your First Load Test
+**Linux:**
+```bash
+./scripts/build/build-linux.sh dev
+```
 
-1. Configure your request
-2. Click the **⚡ Vayu** button
-3. Set: `100 connections`, `60 seconds`
-4. Click **Start Test**
-5. Watch real-time stats: RPS, latency percentiles, error rates
+**Windows (PowerShell):**
+```powershell
+.\scripts\build\build-windows.ps1 dev
+```
 
----
+Then start the app:
+
+```bash
+cd app && pnpm run electron:dev
+```
+
+For production builds and detailed platform-specific instructions, see the [Building Documentation](docs/building-macos.md).
 
 ## Architecture
+
+Vayu uses a sidecar pattern where the Electron UI (Manager) communicates with a separate C++ daemon (Engine) via HTTP:
 
 ```
 ┌────────────────────┐        ┌────────────────────┐
 │   THE MANAGER      │  HTTP  │    THE ENGINE      │
 │  (Electron/React)  │◄──────►│      (C++)         │
-│                    │        │                    │
+│                    │ :9876  │                    │
 │  • Request Builder │        │  • Lock-free SPSC  │
-│  • Response Viewer │        │  • QuickJS         │
-│  • Dashboard       │        │  • Multi-Worker    │
-│  • Collections     │        │  • 60k+ RPS        │
+│  • Collections     │        │  • QuickJS Runtime │
+│  • Load Dashboard   │        │  • Multi-Worker    │
 └────────────────────┘        └────────────────────┘
 ```
 
-See [Architecture Documentation](docs/architecture.md) for details.
-
----
+See [Architecture Documentation](docs/architecture.md) for detailed information.
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [Getting Started](docs/getting-started.md) | Installation and basics |
-| [Architecture](docs/architecture.md) | How Vayu works |
-| [API Reference](docs/api-reference.md) | Engine Control API |
-| [Postman Migration](docs/postman-migration.md) | Import from Postman |
-| [Building](docs/building.md) | Build from source |
-| [Contributing](docs/contributing.md) | How to contribute |
-
----
-
-## Roadmap
-
-- [x] Project design & planning
-- [x] **Phase 1:** Engine prototype (CLI with libcurl + QuickJS)
-- [x] **Phase 2:** Core engine (50k RPS, Control API, SSE streaming, Load testing)
-- [ ] **Phase 3:** Electron app (UI integration)
-- [ ] **Phase 4:** Polish (Postman import, packaging, releases)
-
-**Current Status:** Phase 2 Complete - Fully functional load testing engine with:
-- ✅ Lock-free architecture (SPSC queues, atomic counters)
-- ✅ HTTP Control API on port 9876
-- ✅ Real-time metrics streaming via SSE
-- ✅ Three load strategies (constant/rate-limited, iterations, ramp-up)
-- ✅ 11 metric types including progress tracking
-- ✅ SQLite persistence for runs and metrics
-- ✅ Precise RPS rate limiting with batched submission
-- ✅ **60k+ RPS with P99 < 50ms latency**
-
-See [PLAN.md](PLAN.md) for detailed roadmap.
-
----
-
-## Contributing
-
-We welcome contributions! See [Contributing Guide](docs/contributing.md).
-
-### Development Setup
-
-```bash
-# Clone
-git clone https://github.com/vayu/vayu.git
-cd vayu
-
-# Build for your platform (dev mode)
-# macOS:
-./scripts/build-macos.sh dev
-
-# Linux:
-./scripts/build-linux.sh dev
-
-# Windows (PowerShell):
-.\scripts\build-windows.ps1 dev
-
-# Then start the app
-cd app && pnpm run electron:dev
-```
-
-### Production Build
-
-```bash
-# macOS:
-./scripts/build-macos.sh prod
-# Output: app/release/Vayu-*.dmg
-
-# Linux:
-./scripts/build-linux.sh prod
-# Output: app/release/Vayu-*.AppImage or *.deb
-
-# Windows (PowerShell):
-.\scripts\build-windows.ps1 prod
-# Output: app/release/Vayu Setup *.exe
-```
-
-See [Building Guide](docs/building.md) for detailed instructions.
-
-See [Building for macOS](docs/building-macos.md) for detailed instructions.
-
----
+| [Architecture](docs/architecture.md) | System architecture and design decisions |
+| [Engine API Reference](docs/engine/api-reference.md) | HTTP API for controlling the engine |
+| [Building (macOS)](docs/building-macos.md) | Build instructions for macOS |
+| [Building (Linux)](docs/building-linux.md) | Build instructions for Linux |
+| [Building (Windows)](docs/building-windows.md) | Build instructions for Windows |
+| [Engine Building](docs/engine/building.md) | Building just the C++ engine |
+| [Contributing](docs/contributing.md) | Guidelines for contributing |
 
 ## Tech Stack
 
-| Component | Technology | Why |
-|-----------|------------|-----|
-| Engine | C++20 | Lock-free atomics, cache-line alignment, maximum performance |
-| Networking | libcurl | Battle-tested, HTTP/1.1, H/2, H/3 support |
-| Scripting | QuickJS | 500KB, microsecond startup, Postman-compatible |
-| Queuing | SPSC | Lock-free single-producer single-consumer ring buffer |
-| UI | Electron + React | Fast development, familiar ecosystem |
-| Build | CMake + vcpkg | Industry standard C++ tooling |
+- **Engine**: C++20 with lock-free data structures
+- **Networking**: libcurl for HTTP client operations
+- **Scripting**: QuickJS for test script execution
+- **UI**: Electron + React + TypeScript
+- **State Management**: Zustand (UI state) + TanStack Query (server state)
+- **Build System**: CMake + vcpkg for C++, pnpm + Vite for Electron app
 
----
+## Contributing
+
+Contributions are welcome! Please read the [Contributing Guide](docs/contributing.md) for details on:
+
+- Development setup
+- Code style guidelines
+- Testing requirements
+- Commit message conventions
+- Pull request process
 
 ## License
 
@@ -195,10 +120,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-<div align="center">
+**Built for developers who care about performance**
 
-**Built with ❤️ for developers who care about performance**
-
-[Documentation](docs/) · [Report Bug](https://github.com/vayu/vayu/issues) · [Request Feature](https://github.com/vayu/vayu/issues)
-
-</div>
+[Documentation](docs/) · [Report Bug](https://github.com/athrvk/vayu/issues) · [Request Feature](https://github.com/athrvk/vayu/issues)

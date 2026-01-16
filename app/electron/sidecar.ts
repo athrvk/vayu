@@ -166,13 +166,13 @@ export class EngineSidecar {
 
 		// Check if binary exists
 		if (!fs.existsSync(this.binaryPath)) {
-			const platform = process.platform;
-			let buildScript = "./scripts/build-engine-macos.sh";
-			if (platform === "win32") {
-				buildScript = "./scripts/build-engine-windows.ps1";
-			} else if (platform === "linux") {
-				buildScript = "./scripts/build-engine-linux.sh";
-			}
+		const platform = process.platform;
+		let buildScript = "./scripts/build/build-macos.sh";
+		if (platform === "win32") {
+			buildScript = "./scripts/build/build-windows.ps1";
+		} else if (platform === "linux") {
+			buildScript = "./scripts/build/build-linux.sh";
+		}
 
 			throw new Error(
 				`Engine binary not found at: ${this.binaryPath}\n` +

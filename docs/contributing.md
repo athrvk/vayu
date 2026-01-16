@@ -2,48 +2,47 @@
 
 Thank you for your interest in contributing to Vayu! This document provides guidelines and information for contributors.
 
----
-
 ## Code of Conduct
 
 We are committed to providing a friendly, safe, and welcoming environment. Please be respectful and constructive in all interactions.
-
----
 
 ## How to Contribute
 
 ### Reporting Bugs
 
 1. **Search existing issues** to avoid duplicates
-2. **Use the bug report template**
+2. **Use the bug report template** (if available)
 3. Include:
-   - Vayu version
-   - Operating system
+   - Vayu version (from `app/package.json` or engine version)
+   - Operating system and version
    - Steps to reproduce
    - Expected vs actual behavior
    - Screenshots/logs if applicable
+   - Engine logs (if relevant): `engine/data/logs/` or `~/.config/vayu/logs/`
 
 ### Suggesting Features
 
 1. **Search existing issues** for similar suggestions
-2. **Use the feature request template**
+2. **Use the feature request template** (if available)
 3. Describe the use case and benefits
 4. Consider implementation complexity
+5. Discuss in GitHub Discussions if unsure
 
 ### Pull Requests
 
 1. **Fork the repository**
 2. **Create a feature branch** from `main`
 3. **Make your changes** with clear commits
-4. **Add tests** for new functionality
+4. **Add tests** for new functionality (if applicable)
 5. **Update documentation** if needed
 6. **Submit PR** with a clear description
 
----
-
 ## Development Setup
 
-See [Building from Source](building.md) for detailed instructions.
+### Prerequisites
+
+- **C++ Engine**: CMake 3.25+, C++20 compiler, vcpkg
+- **Electron App**: Node.js ≥ 20 LTS, pnpm ≥ 8
 
 ### Quick Start
 
@@ -53,39 +52,51 @@ git clone https://github.com/YOUR_USERNAME/vayu.git
 cd vayu
 
 # Add upstream remote
-git remote add upstream https://github.com/vayu/vayu.git
+git remote add upstream https://github.com/athrvk/vayu.git
 
 # Create feature branch
 git checkout -b feature/my-feature
 
-# Build engine
-cd engine && cmake -B build -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
-cmake --build build
+# Build for your platform
+# macOS:
+./scripts/build/build-macos.sh dev
 
-# Build app
-cd ../app && pnpm install && pnpm dev
+# Linux:
+./scripts/build/build-linux.sh dev
+
+# Windows:
+.\scripts\build\build-windows.ps1 dev
+
+# Start the app
+cd app && pnpm run electron:dev
 ```
 
----
+For detailed platform-specific build instructions, see:
+- [Building on macOS](building-macos.md)
+- [Building on Linux](building-linux.md)
+- [Building on Windows](building-windows.md)
 
 ## Project Structure
 
 ```
 vayu/
-├── engine/          # C++ core (most contributions here)
+├── engine/          # C++ core
 │   ├── src/         # Source files
 │   ├── include/     # Public headers
-│   └── tests/       # Google Test suite
+│   ├── tests/       # Google Test suite
+│   └── vcpkg.json   # Dependencies
 ├── app/             # Electron + React UI
 │   ├── electron/    # Main process
-│   └── src/         # Renderer (React)
-├── shared/          # Shared schemas
-├── docs/            # Documentation
-└── scripts/         # Build scripts
+│   ├── src/         # Renderer (React)
+│   └── package.json # Dependencies
+├── scripts/         # Build scripts
+│   ├── build/       # Platform-specific build scripts
+│   └── test/        # Test scripts
+└── docs/            # Documentation
+    ├── engine/      # Engine documentation
+    ├── app/         # App documentation
+    └── ...          # Other docs
 ```
-
----
 
 ## Coding Standards
 
@@ -93,16 +104,8 @@ vayu/
 
 - **Standard:** C++20
 - **Style:** Google C++ Style Guide (with modifications)
-- **Formatting:** clang-format (config in `.clang-format`)
+- **Formatting:** clang-format (config in `.clang-format` if present)
 - **Linting:** clang-tidy
-
-```bash
-# Format code
-clang-format -i src/**/*.cpp include/**/*.hpp
-
-# Run linter
-clang-tidy src/**/*.cpp -- -I include
-```
 
 #### Naming Conventions
 
@@ -157,17 +160,10 @@ private:
 
 ### TypeScript/React (App)
 
-- **Style:** ESLint + Prettier
-- **Framework:** React 18 with hooks
-- **State:** Zustand
+- **Style:** ESLint + Prettier (if configured)
+- **Framework:** React 19 with hooks
+- **State:** Zustand (UI state) + TanStack Query (server state)
 - **Styling:** Tailwind CSS
-
-```bash
-# Format and lint
-cd app
-pnpm lint
-pnpm format
-```
 
 #### Naming Conventions
 
@@ -188,7 +184,13 @@ const MAX_HISTORY_SIZE = 100;
 interface RequestConfig {}
 ```
 
----
+#### Formatting and Linting
+
+```bash
+cd app
+pnpm lint
+pnpm type-check
+```
 
 ## Testing
 
@@ -199,11 +201,11 @@ We use Google Test for C++ unit tests.
 ```bash
 cd engine
 
-# Run all tests
-ctest --test-dir build --output-on-failure
+# Build and run all tests
+./scripts/build/build-and-test.sh
 
 # Run specific test
-./build/tests/http_client_test
+./build/vayu_tests --gtest_filter=HttpClientTest.*
 
 # Run with verbose output
 ctest --test-dir build -V
@@ -231,39 +233,16 @@ TEST(HttpClientTest, SendsGetRequest) {
     EXPECT_FALSE(response.body.empty());
 }
 
-TEST(HttpClientTest, HandlesTimeout) {
-    Client client;
-    Request request{
-        .method = "GET",
-        .url = "https://httpbin.org/delay/10",
-        .timeout_ms = 1000
-    };
-
-    EXPECT_THROW(client.send(request), TimeoutError);
-}
-
 }  // namespace
 }  // namespace vayu::http
 ```
 
 ### App (TypeScript)
 
-We use Vitest for unit tests and Playwright for E2E.
+Currently, the app does not have automated tests. If you add tests:
 
-```bash
-cd app
-
-# Run unit tests
-pnpm test
-
-# Run E2E tests
-pnpm test:e2e
-
-# Run with coverage
-pnpm test:coverage
-```
-
----
+- Use Vitest for unit tests
+- Use Playwright for E2E tests (if needed)
 
 ## Commit Messages
 
@@ -311,15 +290,13 @@ The JSON tree component was not properly unmounting,
 causing retained references to large response bodies.
 ```
 
----
-
 ## Pull Request Process
 
 ### Before Submitting
 
 - [ ] Code follows style guidelines
-- [ ] All tests pass locally
-- [ ] New tests added for new features
+- [ ] All tests pass locally (if applicable)
+- [ ] New tests added for new features (if applicable)
 - [ ] Documentation updated
 - [ ] Commit messages follow conventions
 - [ ] PR description explains changes
@@ -342,7 +319,7 @@ How was this tested?
 ## Checklist
 - [ ] My code follows the style guidelines
 - [ ] I have performed a self-review
-- [ ] I have added tests
+- [ ] I have added tests (if applicable)
 - [ ] I have updated documentation
 
 ## Related Issues
@@ -351,21 +328,19 @@ Closes #123
 
 ### Review Process
 
-1. **Automated checks** run (CI, linting, tests)
-2. **Maintainer review** within 48 hours
+1. **Automated checks** run (if configured: CI, linting, tests)
+2. **Maintainer review** (typically within 48 hours)
 3. **Address feedback** with new commits
-4. **Squash and merge** once approved
-
----
+4. **Squash and merge** once approved (or merge commit, depending on project preference)
 
 ## Architecture Decisions
 
 Major changes should be discussed before implementation:
 
 1. **Open an issue** describing the proposal
-2. **Tag it** with `discussion` or `rfc`
+2. **Tag it** with `discussion` or `rfc` (if labels exist)
 3. **Get feedback** from maintainers
-4. **Document** the decision in `docs/decisions/`
+4. **Document** the decision if significant
 
 ### Decision Record Template
 
@@ -387,20 +362,16 @@ Use QuickJS instead of V8.
 - Limited ES2020 support (no ES2021+)
 ```
 
----
-
 ## Getting Help
 
-- **Discord:** [discord.gg/vayu](https://discord.gg/vayu)
-- **GitHub Discussions:** Ask questions, share ideas
-- **Issues:** Bug reports, feature requests
-
----
+- **GitHub Issues**: Bug reports, feature requests
+- **GitHub Discussions**: Ask questions, share ideas (if enabled)
+- **Documentation**: Check `docs/` folder for detailed guides
 
 ## Recognition
 
 Contributors are recognized in:
-- `CONTRIBUTORS.md` file
+- `CONTRIBUTORS.md` file (if present)
 - Release notes
 - GitHub contributors page
 

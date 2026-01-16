@@ -8,10 +8,11 @@ TEST_FILE="${1:-load-test-example.json}"
 
 # Resolve file path
 if [ ! -f "$TEST_FILE" ]; then
-    if [ -f "scripts/$TEST_FILE" ]; then
-        TEST_FILE="scripts/$TEST_FILE"
-    elif [ -f "../$TEST_FILE" ]; then
-        TEST_FILE="../$TEST_FILE"
+    if [ -f "scripts/test/$TEST_FILE" ]; then
+        TEST_FILE="scripts/test/$TEST_FILE"
+    elif [ -f "$TEST_FILE" ]; then
+        # Already absolute or relative path
+        :
     else
         echo "Error: Test file '$TEST_FILE' not found."
         exit 1
