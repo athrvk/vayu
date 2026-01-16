@@ -615,35 +615,18 @@ void Database::seed_default_config() {
     };
 
     // =========================================================================
-    // SERVER CONFIGURATION
-    // Settings that control core server behavior and timeouts
+    // GENERAL & ENGINE CONFIGURATION
+    // Core settings defining the application's base capacity and threading model
     // =========================================================================
-
-    upsert_config(ConfigEntry{
-        "defaultTimeout",
-        std::to_string(vayu::core::constants::server::DEFAULT_TIMEOUT_MS),
-        "integer",
-        "Default Request Timeout",
-        "Default timeout for HTTP requests when not explicitly set in the request. "
-        "This applies to individual API calls and design mode executions. "
-        "Increase for slow endpoints; decrease for faster failure detection. "
-        "Value is in milliseconds (1000ms = 1 second).",
-        "server",
-        std::to_string(vayu::core::constants::server::DEFAULT_TIMEOUT_MS),
-        "1000",    // min: 1 second
-        "300000",  // max: 5 minutes
-        now});
 
     upsert_config(ConfigEntry{
         "workers",
         std::to_string(std::thread::hardware_concurrency()),
         "integer",
         "Worker Threads (Requires Restart)",
-        "Number of background worker threads for processing requests. "
-        "More threads can improve throughput on multi-core systems but increase memory usage. "
-        "Default is your CPU core count. Changes require engine restart to take effect. "
-        "⚠️ Advanced: Only modify if you understand threading implications.",
-        "server",
+        "Number of background worker threads. Higher values improve throughput on multi-core systems but increase RAM usage. "
+        "Default equals CPU core count. Changes require engine restart to take effect.",
+        "general_engine",
         std::to_string(std::thread::hardware_concurrency()),
         "1",
         "128",
@@ -654,169 +637,53 @@ void Database::seed_default_config() {
         std::to_string(vayu::core::constants::server::MAX_CONNECTIONS),
         "integer",
         "Maximum Connections (Requires Restart)",
-        "Maximum number of simultaneous connections the engine can handle internally. "
-        "Affects how many parallel operations (requests, scripts) can run. "
-        "Default is suitable for most use cases. Changes require engine restart. "
-        "⚠️ Advanced: Increasing beyond system limits may cause instability.",
-        "server",
+        "Global limit for simultaneous internal connections. Increasing beyond system limits (ulimit) may cause instability. "
+        "Changes require engine restart to take effect.",
+        "general_engine",
         std::to_string(vayu::core::constants::server::MAX_CONNECTIONS),
         "100",
         "100000",
         now});
 
     upsert_config(ConfigEntry{
-        "statsInterval",
-        std::to_string(vayu::core::constants::server::STATS_INTERVAL_MS),
+        "defaultTimeout",
+        std::to_string(vayu::core::constants::server::DEFAULT_TIMEOUT_MS),
         "integer",
-        "Statistics Collection Interval",
-        "How often (in milliseconds) the engine collects and aggregates performance metrics. "
-        "Lower values provide more real-time data but increase CPU overhead. "
-        "Higher values reduce overhead but make dashboards less responsive. "
-        "Recommended: 100-500ms for most use cases.",
-        "server",
-        std::to_string(vayu::core::constants::server::STATS_INTERVAL_MS),
-        "10",
-        "10000",
-        now});
-
-    upsert_config(ConfigEntry{
-        "sseConnectTimeout",
-        std::to_string(vayu::core::constants::sse::CONNECT_TIMEOUT_MS),
-        "integer",
-        "SSE Connection Timeout",
-        "Timeout for establishing Server-Sent Events (SSE) connections used for live metrics streaming. "
-        "SSE keeps the dashboard updated in real-time during load tests. "
-        "Increase if the UI shows connection errors during heavy load tests. "
+        "Default Request Timeout",
+        "Timeout for HTTP requests when not explicitly set. Increase for slow endpoints; decrease for faster failure detection. "
         "Value is in milliseconds (30000 = 30 seconds).",
-        "server",
-        std::to_string(vayu::core::constants::sse::CONNECT_TIMEOUT_MS),
-        "1000",
-        "300000",
+        "general_engine",
+        std::to_string(vayu::core::constants::server::DEFAULT_TIMEOUT_MS),
+        "1000",    // min: 1 second
+        "300000",  // max: 5 minutes
         now});
 
     upsert_config(ConfigEntry{
-        "sseMaxRetry",
-        std::to_string(vayu::core::constants::sse::MAX_RETRY_MS),
+        "requestBatchSize",
+        std::to_string(vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE),
         "integer",
-        "SSE Max Retry Interval",
-        "Maximum wait time between reconnection attempts when the live metrics stream disconnects. "
-        "The retry interval starts small and increases up to this maximum (exponential backoff). "
-        "Lower values reconnect faster but may cause rapid retries if the engine is busy.",
-        "server",
-        std::to_string(vayu::core::constants::sse::MAX_RETRY_MS),
-        "1000",
-        "300000",
-        now});
-
-    upsert_config(ConfigEntry{
-        "sseSendLastEventId",
-        vayu::core::constants::sse::SEND_LAST_EVENT_ID ? "true" : "false",
-        "boolean",
-        "SSE Send Last Event ID",
-        "When enabled, the client sends Last-Event-ID header on SSE reconnect, "
-        "allowing the server to resume from where it left off. "
-        "Disable only if experiencing compatibility issues with proxies.",
-        "server",
-        vayu::core::constants::sse::SEND_LAST_EVENT_ID ? "true" : "false",
-        std::nullopt,
-        std::nullopt,
-        now});
-
-    // =========================================================================
-    // SCRIPTING CONFIGURATION
-    // Settings that control JavaScript pre/post-request script execution
-    // =========================================================================
-
-    upsert_config(ConfigEntry{
-        "contextPoolSize",
-        std::to_string(vayu::core::constants::server::CONTEXT_POOL_SIZE),
-        "integer",
-        "Script Context Pool Size",
-        "Number of pre-initialized JavaScript execution contexts kept in memory. "
-        "More contexts allow higher concurrency for script execution in load tests. "
-        "Each context uses ~2-5MB of memory. Increase for script-heavy workloads. "
-        "Changes take effect on next script execution.",
-        "scripting",
-        std::to_string(vayu::core::constants::server::CONTEXT_POOL_SIZE),
+        "Request Batch Size",
+        "Batch size when fetching large collections from DB. Smaller batches save RAM; larger batches load faster. "
+        "Default is optimized for most cases.",
+        "general_engine",
+        std::to_string(vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE),
         "1",
-        "256",
-        now});
-
-    upsert_config(ConfigEntry{
-        "scriptTimeout",
-        std::to_string(vayu::core::constants::script_engine::TIMEOUT_MS),
-        "integer",
-        "Script Execution Timeout",
-        "Maximum time a pre-request or post-request script can run before being terminated. "
-        "Prevents infinite loops and runaway scripts from hanging the engine. "
-        "Increase for complex scripts with async operations; decrease for tighter control. "
-        "Value is in milliseconds.",
-        "scripting",
-        std::to_string(vayu::core::constants::script_engine::TIMEOUT_MS),
-        "100",
-        "60000",
-        now});
-
-    upsert_config(ConfigEntry{
-        "scriptMemoryLimit",
-        std::to_string(vayu::core::constants::script_engine::MEMORY_LIMIT),
-        "integer",
-        "Script Memory Limit",
-        "Maximum memory (in bytes) a single script execution can allocate. "
-        "Prevents memory leaks and excessive allocations from crashing the engine. "
-        "64MB (67108864) is usually sufficient. Increase only for scripts processing large data. "
-        "⚠️ Advanced: Setting too high may cause system instability.",
-        "scripting",
-        std::to_string(vayu::core::constants::script_engine::MEMORY_LIMIT),
-        "1048576",   // 1MB
-        "268435456",  // 256MB
-        now});
-
-    upsert_config(ConfigEntry{
-        "scriptStackSize",
-        std::to_string(vayu::core::constants::script_engine::STACK_SIZE),
-        "integer",
-        "Script Stack Size",
-        "Maximum call stack size (in bytes) for script execution. "
-        "Limits recursion depth to prevent stack overflow crashes. "
-        "Default is 256KB. Only increase if your scripts have deep recursion. "
-        "⚠️ Advanced: Modify only if you see 'stack overflow' errors.",
-        "scripting",
-        std::to_string(vayu::core::constants::script_engine::STACK_SIZE),
-        "65536",   // 64KB
-        "1048576",  // 1MB
-        now});
-
-    upsert_config(ConfigEntry{
-        "scriptEnableConsole",
-        vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
-        "boolean",
-        "Enable Script Console",
-        "Allow scripts to use console.log(), console.error(), etc. "
-        "When enabled, console output appears in the response's consoleLogs array. "
-        "Useful for debugging pre-request and post-request scripts. "
-        "Disable for slightly better performance during heavy load tests.",
-        "scripting",
-        vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
-        std::nullopt,
-        std::nullopt,
+        "1000",
         now});
 
     // =========================================================================
-    // PERFORMANCE CONFIGURATION
-    // Settings that control load testing performance and resource usage
+    // NETWORK & CONNECTIVITY CONFIGURATION
+    // Low-level networking tuning for throughput, DNS, and connection persistence
     // =========================================================================
 
     upsert_config(ConfigEntry{
         "eventLoopMaxConcurrent",
         std::to_string(vayu::core::constants::event_loop::MAX_CONCURRENT),
         "integer",
-        "Max Concurrent Requests",
-        "Maximum number of in-flight HTTP requests per worker during load tests. "
-        "Higher values increase throughput but use more memory and file descriptors. "
-        "Start with 100-500 and increase based on your system's capacity. "
+        "Max Concurrent Requests (Per Worker)",
+        "Throughput cap per worker. Higher values use more file descriptors. "
         "Applied when starting a new load test run.",
-        "performance",
+        "network_performance",
         std::to_string(vayu::core::constants::event_loop::MAX_CONCURRENT),
         "1",
         "10000",
@@ -827,11 +694,9 @@ void Database::seed_default_config() {
         std::to_string(vayu::core::constants::event_loop::MAX_PER_HOST),
         "integer",
         "Max Connections Per Host",
-        "Maximum simultaneous connections to a single target API host during load tests. "
-        "Prevents overwhelming the API you're testing. "
-        "Lower values are gentler on the target; higher values maximize throughput. "
-        "Check your target API's rate limits before increasing.",
-        "performance",
+        "Concurrency limit for a specific target API host. Critical for respecting target rate limits. "
+        "Lower values are gentler on the target; higher values maximize throughput.",
+        "network_performance",
         std::to_string(vayu::core::constants::event_loop::MAX_PER_HOST),
         "1",
         "1000",
@@ -842,11 +707,9 @@ void Database::seed_default_config() {
         std::to_string(vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS),
         "integer",
         "DNS Cache Timeout",
-        "How long (in seconds) to cache DNS lookups for target API hostnames. "
-        "Caching avoids repeated DNS queries during high-RPS load tests. "
-        "Set to 0 to disable (resolve every request). "
+        "Duration to cache DNS lookups. Set to 0 to force resolution on every request. "
         "Use higher values (60-300s) when testing stable endpoints.",
-        "performance",
+        "network_performance",
         std::to_string(vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS),
         "0",     // Disable cache
         "3600",  // 1 hour
@@ -857,11 +720,9 @@ void Database::seed_default_config() {
         std::to_string(vayu::core::constants::event_loop::TCP_KEEPALIVE_IDLE_SECONDS),
         "integer",
         "TCP Keep-Alive Idle Time",
-        "Seconds before sending keep-alive probes on idle connections to target APIs. "
-        "Prevents connections from being dropped by firewalls or load balancers. "
-        "Lower values detect dead connections faster. "
-        "Set to 0 to disable (not recommended for long-running tests).",
-        "performance",
+        "Time before sending keep-alive probes on idle connections. Prevents firewall drops. "
+        "Lower values detect dead connections faster.",
+        "network_performance",
         std::to_string(vayu::core::constants::event_loop::TCP_KEEPALIVE_IDLE_SECONDS),
         "1",
         "300",
@@ -872,14 +733,100 @@ void Database::seed_default_config() {
         std::to_string(vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS),
         "integer",
         "TCP Keep-Alive Interval",
-        "Seconds between keep-alive probes after the idle timeout is reached. "
-        "Applies to connections to target APIs during load tests. "
-        "Lower values detect unresponsive servers faster. "
+        "Frequency of probes after idle timeout is reached. "
         "Usually set to the same value as Keep-Alive Idle Time.",
-        "performance",
+        "network_performance",
         std::to_string(vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS),
         "1",
         "300",
+        now});
+
+    // =========================================================================
+    // SCRIPTING ENVIRONMENT CONFIGURATION
+    // Configuration for the QuickJS sandbox execution, limits, and debugging
+    // =========================================================================
+
+    upsert_config(ConfigEntry{
+        "scriptTimeout",
+        std::to_string(vayu::core::constants::script_engine::TIMEOUT_MS),
+        "integer",
+        "Script Execution Timeout",
+        "Max runtime for pre/post-request scripts. Prevents infinite loops. "
+        "Value is in milliseconds (5000 = 5 seconds).",
+        "scripting_sandbox",
+        std::to_string(vayu::core::constants::script_engine::TIMEOUT_MS),
+        "100",
+        "60000",
+        now});
+
+    upsert_config(ConfigEntry{
+        "scriptEnableConsole",
+        vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
+        "boolean",
+        "Enable Script Console",
+        "Enables console.log() in scripts. Disable for max performance during load tests. "
+        "When enabled, script console output is visible in the response viewer for debugging.",
+        "scripting_sandbox",
+        vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
+        std::nullopt,
+        std::nullopt,
+        now});
+
+    upsert_config(ConfigEntry{
+        "contextPoolSize",
+        std::to_string(vayu::core::constants::server::CONTEXT_POOL_SIZE),
+        "integer",
+        "Script Context Pool Size",
+        "Number of pre-initialized JS contexts. Increase for high-concurrency script workloads. "
+        "Each context uses ~2-5MB of memory.",
+        "scripting_sandbox",
+        std::to_string(vayu::core::constants::server::CONTEXT_POOL_SIZE),
+        "1",
+        "256",
+        now});
+
+    upsert_config(ConfigEntry{
+        "scriptMemoryLimit",
+        std::to_string(vayu::core::constants::script_engine::MEMORY_LIMIT),
+        "integer",
+        "Script Memory Limit",
+        "Max heap size per script execution. Default is 64MB. "
+        "Increase only for scripts processing very large data structures.",
+        "scripting_sandbox",
+        std::to_string(vayu::core::constants::script_engine::MEMORY_LIMIT),
+        "1048576",   // 1MB
+        "268435456",  // 256MB
+        now});
+
+    upsert_config(ConfigEntry{
+        "scriptStackSize",
+        std::to_string(vayu::core::constants::script_engine::STACK_SIZE),
+        "integer",
+        "Script Stack Size",
+        "Max call stack size. Increase only if scripts encounter stack overflows (recursion). "
+        "Default is 256KB.",
+        "scripting_sandbox",
+        std::to_string(vayu::core::constants::script_engine::STACK_SIZE),
+        "65536",   // 64KB
+        "1048576",  // 1MB
+        now});
+
+    // =========================================================================
+    // OBSERVABILITY & DATA CONFIGURATION
+    // Settings for real-time dashboards (SSE), metrics aggregation, and data parsing limits
+    // =========================================================================
+
+    upsert_config(ConfigEntry{
+        "statsInterval",
+        std::to_string(vayu::core::constants::server::STATS_INTERVAL_MS),
+        "integer",
+        "Statistics Collection Interval",
+        "Frequency of metric aggregation. Lower values = smoother UI but higher CPU overhead. "
+        "Recommended: 100-500ms for most use cases.",
+        "observability",
+        std::to_string(vayu::core::constants::server::STATS_INTERVAL_MS),
+        "10",
+        "10000",
         now});
 
     upsert_config(ConfigEntry{
@@ -887,29 +834,52 @@ void Database::seed_default_config() {
         std::to_string(vayu::core::constants::json::MAX_FIELD_SIZE),
         "integer",
         "Maximum JSON Field Size",
-        "Maximum size (in bytes) for individual JSON fields when parsing request/response data. "
-        "Prevents out-of-memory errors from extremely large JSON payloads. "
-        "10MB (10485760) handles most APIs. Increase only for APIs with very large responses. "
-        "⚠️ Setting too high may cause memory issues with large collections.",
-        "performance",
+        "Maximum size for JSON strings stored in saved requests (params, headers, body, auth) when loading from database. "
+        "Fields exceeding this limit are returned as empty objects or strings to prevent out-of-memory errors. "
+        "Default 10MB. Increase only if saved requests with very large JSON fields fail to load properly.",
+        "observability",
         std::to_string(vayu::core::constants::json::MAX_FIELD_SIZE),
         "1024",      // 1KB
         "104857600",  // 100MB
         now});
 
     upsert_config(ConfigEntry{
-        "requestBatchSize",
-        std::to_string(vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE),
+        "sseConnectTimeout",
+        std::to_string(vayu::core::constants::sse::CONNECT_TIMEOUT_MS),
         "integer",
-        "Request Batch Size",
-        "Number of requests fetched at a time when loading large collections. "
-        "Smaller batches use less memory but require more database queries. "
-        "Larger batches are faster but use more memory. "
-        "Adjust based on your typical collection sizes. Default is optimized for most cases.",
-        "performance",
-        std::to_string(vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE),
-        "1",
+        "SSE Connection Timeout",
+        "Timeout for establishing dashboard live streams. "
+        "Increase if the UI shows connection errors during heavy load tests. "
+        "Value is in milliseconds (30000 = 30 seconds).",
+        "observability",
+        std::to_string(vayu::core::constants::sse::CONNECT_TIMEOUT_MS),
         "1000",
+        "300000",
+        now});
+
+    upsert_config(ConfigEntry{
+        "sseMaxRetry",
+        std::to_string(vayu::core::constants::sse::MAX_RETRY_MS),
+        "integer",
+        "SSE Max Retry Interval",
+        "Max exponential backoff wait time for dashboard reconnection. "
+        "Lower values reconnect faster but may cause rapid retries if the engine is busy.",
+        "observability",
+        std::to_string(vayu::core::constants::sse::MAX_RETRY_MS),
+        "1000",
+        "300000",
+        now});
+
+    upsert_config(ConfigEntry{
+        "sseSendLastEventId",
+        vayu::core::constants::sse::SEND_LAST_EVENT_ID ? "true" : "false",
+        "boolean",
+        "SSE Send Last Event ID",
+        "Resumes data streams from the last received event. Disable if using incompatible proxies.",
+        "observability",
+        vayu::core::constants::sse::SEND_LAST_EVENT_ID ? "true" : "false",
+        std::nullopt,
+        std::nullopt,
         now});
 
     if (existing.empty()) {

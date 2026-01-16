@@ -8,9 +8,10 @@
 import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSettingsStore } from "@/stores";
+import { useSaveStore } from "@/stores/save-store";
 import { useConfigQuery, useUpdateConfigMutation } from "@/queries";
 import type { ConfigEntry, SettingsCategory } from "@/types";
-import { Settings, Save, RotateCcw, Loader2, CheckCircle2, AlertCircle, AlertTriangle, RefreshCw, X } from "lucide-react";
+import { Settings, Save, RotateCcw, Loader2, AlertCircle, AlertTriangle, RefreshCw, X } from "lucide-react";
 import {
     Button,
     Input,
@@ -25,7 +26,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import UISettingsPanel from "./UISettingsPanel";
-import { isSizeConfig, formatBytes, parseSizeToBytes, formatSizeRange } from "../utils/format-size";
+import { isSizeConfig, formatBytes, formatSizeRange } from "../utils/format-size";
 
 /**
  * Check if a config entry requires a restart when changed
@@ -40,17 +41,21 @@ const CATEGORY_TITLES: Record<SettingsCategory, { title: string; description: st
         title: "Appearance",
         description: "Customize the look and feel of the application",
     },
-    server: {
-        title: "Server Settings",
-        description: "Configure server behavior, timeouts, and connection settings",
+    general_engine: {
+        title: "General & Engine",
+        description: "Core settings defining the application's base capacity and threading model",
     },
-    scripting: {
-        title: "Scripting Settings",
-        description: "Configure JavaScript script execution limits and behavior",
+    network_performance: {
+        title: "Network & Connectivity",
+        description: "Low-level networking tuning for throughput, DNS, and connection persistence",
     },
-    performance: {
-        title: "Performance Settings",
-        description: "Tune performance parameters for load testing and data processing",
+    scripting_sandbox: {
+        title: "Scripting Environment",
+        description: "Configuration for the QuickJS sandbox execution, limits, and debugging",
+    },
+    observability: {
+        title: "Observability & Data",
+        description: "Settings for real-time dashboards (SSE), metrics aggregation, and data parsing limits",
     },
 };
 
@@ -68,28 +73,19 @@ export default function SettingsMain() {
         addRestartRequiredKey,
         clearRestartRequired
     } = useSettingsStore();
+    const { startSaving, completeSave, failSave, setStatus, markPendingSave } = useSaveStore();
     const queryClient = useQueryClient();
     const { data: configResponse, isLoading, error } = useConfigQuery();
     const updateConfigMutation = useUpdateConfigMutation();
 
     // Track edited values locally
     const [editedValues, setEditedValues] = useState<Record<string, EditedValue>>({});
-    const [saveSuccess, setSaveSuccess] = useState(false);
     const [isRestarting, setIsRestarting] = useState(false);
 
     // Reset edited values when category changes
     useEffect(() => {
         setEditedValues({});
-        setSaveSuccess(false);
     }, [selectedCategory]);
-
-    // Clear success message after 3 seconds
-    useEffect(() => {
-        if (saveSuccess) {
-            const timer = setTimeout(() => setSaveSuccess(false), 3000);
-            return () => clearTimeout(timer);
-        }
-    }, [saveSuccess]);
 
     if (!selectedCategory) {
         return (
@@ -167,71 +163,28 @@ export default function SettingsMain() {
         return { isValid: true };
     };
 
-    // Get current value (edited or original) - formatted for size configs
+    // Get current value (edited or original)
     const getCurrentValue = (entry: ConfigEntry): string => {
         const edited = editedValues[entry.key];
-        const rawValue = edited ? edited.value : entry.value;
+        return edited ? edited.value : entry.value;
+    };
 
-        // For size configs, format for display
-        if (isSizeConfig(entry.key)) {
-            const bytes = parseInt(rawValue, 10);
-            if (!isNaN(bytes)) {
-                return formatBytes(bytes);
-            }
-        }
-
-        return rawValue;
+    // Get formatted size for display (suffix/helper text)
+    const getFormattedSize = (entry: ConfigEntry): string | null => {
+        if (!isSizeConfig(entry.key)) return null;
+        const value = getCurrentValue(entry);
+        const bytes = parseInt(value, 10);
+        if (isNaN(bytes)) return null;
+        return formatBytes(bytes);
     };
 
     // Handle value change
     const handleValueChange = (entry: ConfigEntry, newValue: string) => {
-        let processedValue = newValue;
-        let validation: { isValid: boolean; error?: string } = { isValid: true };
-
-        // For size configs, parse human-readable format
-        if (isSizeConfig(entry.key)) {
-            const parsed = parseSizeToBytes(newValue);
-            if (parsed === null) {
-                // Try parsing as raw bytes as fallback
-                const bytes = parseInt(newValue, 10);
-                if (isNaN(bytes)) {
-                    validation = {
-                        isValid: false,
-                        error: "Invalid format. Use bytes (e.g., 67108864) or human-readable (e.g., 64 MB)",
-                    };
-                } else {
-                    processedValue = bytes.toString();
-                }
-            } else {
-                processedValue = parsed.toString();
-            }
-        }
-
-        // Validate the processed value
-        if (validation.isValid) {
-            const valResult = validateValue(entry, processedValue);
-            validation = valResult;
-            // Format error messages for size configs
-            if (!validation.isValid && isSizeConfig(entry.key) && validation.error) {
-                if (entry.min && validation.error.includes("at least")) {
-                    const minBytes = parseInt(entry.min, 10);
-                    if (!isNaN(minBytes)) {
-                        validation.error = `Must be at least ${formatBytes(minBytes)}`;
-                    }
-                }
-                if (entry.max && validation.error.includes("at most")) {
-                    const maxBytes = parseInt(entry.max, 10);
-                    if (!isNaN(maxBytes)) {
-                        validation.error = `Must be at most ${formatBytes(maxBytes)}`;
-                    }
-                }
-            }
-        }
-
+        const validation = validateValue(entry, newValue);
         setEditedValues((prev) => ({
             ...prev,
             [entry.key]: {
-                value: processedValue,
+                value: newValue,
                 isValid: validation.isValid,
                 error: validation.error,
             },
@@ -276,6 +229,15 @@ export default function SettingsMain() {
     const hasChanges = Object.keys(editedValues).length > 0;
     const hasInvalidValues = Object.values(editedValues).some((v) => !v.isValid);
 
+    // Mark as pending when there are unsaved changes
+    useEffect(() => {
+        if (hasChanges && !hasInvalidValues) {
+            markPendingSave("settings");
+        } else {
+            setStatus("idle");
+        }
+    }, [hasChanges, hasInvalidValues, markPendingSave, setStatus]);
+
     // Save changes
     const handleSave = async () => {
         if (hasInvalidValues || !hasChanges) return;
@@ -293,17 +255,22 @@ export default function SettingsMain() {
             }
         }
 
+        startSaving();
         try {
             await updateConfigMutation.mutateAsync({ entries: updates });
             setEditedValues({});
-            setSaveSuccess(true);
+            completeSave();
 
             // Track restart-required configs
             for (const key of restartKeys) {
                 addRestartRequiredKey(key);
             }
+
+            // Reset to idle after showing "saved" status
+            setTimeout(() => setStatus("idle"), 2000);
         } catch (err) {
             console.error("Failed to save settings:", err);
+            failSave(err instanceof Error ? err.message : "Failed to save settings");
         }
     };
 
@@ -396,18 +363,6 @@ export default function SettingsMain() {
                         <p className="text-sm text-muted-foreground mt-1">{categoryConfig.description}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                        {saveSuccess && (
-                            <div className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
-                                <CheckCircle2 className="w-4 h-4" />
-                                <span>Saved</span>
-                            </div>
-                        )}
-                        {updateConfigMutation.isError && (
-                            <div className="flex items-center gap-1.5 text-sm text-destructive">
-                                <AlertCircle className="w-4 h-4" />
-                                <span>Failed to save</span>
-                            </div>
-                        )}
                         <Button
                             variant="outline"
                             size="sm"
@@ -501,26 +456,33 @@ export default function SettingsMain() {
                                     ) : (
                                         <div className="space-y-2">
                                             <div className="flex items-center gap-2">
-                                                <Input
-                                                        type={isSizeConfig(entry.key) ? "text" : (entry.type === "integer" || entry.type === "number" ? "number" : "text")}
-                                                    value={currentValue}
-                                                    onChange={(e) => handleValueChange(entry, e.target.value)}
-                                                    className={cn("max-w-xs", hasError && "border-destructive")}
-                                                        placeholder={isSizeConfig(entry.key) ? "e.g., 64 MB or 67108864" : undefined}
-                                                        min={entry.min && !isSizeConfig(entry.key) ? entry.min : undefined}
-                                                        max={entry.max && !isSizeConfig(entry.key) ? entry.max : undefined}
-                                                />
-                                                    {isSizeConfig(entry.key) ? (
-                                                        <span className="text-xs text-muted-foreground">
-                                                            {formatSizeRange(entry.min, entry.max) || ""}
-                                                        </span>
-                                                    ) : (entry.min || entry.max) && (
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {entry.min && entry.max
-                                                            ? `${entry.min} - ${entry.max}`
-                                                            : entry.min
-                                                                ? `Min: ${entry.min}`
-                                                                : `Max: ${entry.max}`}
+                                                    <div className="relative">
+                                                        <Input
+                                                            type={entry.type === "integer" || entry.type === "number" ? "number" : "text"}
+                                                            value={currentValue}
+                                                            onChange={(e) => handleValueChange(entry, e.target.value)}
+                                                            className={cn("max-w-xs", hasError && "border-destructive", isSizeConfig(entry.key) && "pr-16")}
+                                                            placeholder={isSizeConfig(entry.key) ? "Enter bytes" : undefined}
+                                                            min={entry.min}
+                                                            max={entry.max}
+                                                        />
+                                                        {isSizeConfig(entry.key) && getFormattedSize(entry) && (
+                                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
+                                                                {getFormattedSize(entry)}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {(entry.min || entry.max) && (
+                                                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                                            {isSizeConfig(entry.key) ? (
+                                                                formatSizeRange(entry.min, entry.max) || ""
+                                                            ) : (
+                                                                entry.min && entry.max
+                                                                    ? `${entry.min} - ${entry.max}`
+                                                                    : entry.min
+                                                                        ? `Min: ${entry.min}`
+                                                                        : `Max: ${entry.max}`
+                                                            )}
                                                     </span>
                                                 )}
                                             </div>

@@ -17,17 +17,25 @@ export function formatBytes(bytes: number): string {
 
 /**
  * Parse human-readable size string to bytes
- * Supports formats like: "64 MB", "1.5GB", "1024KB", "500 B"
+ * Supports formats like: "64 MB", "1.5GB", "1024KB", "500 B", "256" (bytes)
  */
 export function parseSizeToBytes(sizeStr: string): number | null {
+	if (!sizeStr || sizeStr.trim() === "") return null;
+	
 	const trimmed = sizeStr.trim().toUpperCase();
 	
-	// Extract number and unit
+	// If it's just a number, treat as bytes
+	if (/^\d+$/.test(trimmed)) {
+		return parseInt(trimmed, 10);
+	}
+	
+	// Extract number and unit - more flexible regex
+	// Matches: "64 MB", "1.5GB", "1024KB", "500 B", "256K", "2M"
 	const match = trimmed.match(/^([\d.]+)\s*([KMGT]?B?)$/);
 	if (!match) return null;
 	
 	const value = parseFloat(match[1]);
-	if (isNaN(value)) return null;
+	if (isNaN(value) || value < 0) return null;
 	
 	const unit = match[2] || "B";
 	
@@ -35,12 +43,18 @@ export function parseSizeToBytes(sizeStr: string): number | null {
 		case "B":
 		case "":
 			return Math.round(value);
+		case "K":
 		case "KB":
 			return Math.round(value * 1024);
+		case "M":
 		case "MB":
 			return Math.round(value * 1024 * 1024);
+		case "G":
 		case "GB":
 			return Math.round(value * 1024 * 1024 * 1024);
+		case "T":
+		case "TB":
+			return Math.round(value * 1024 * 1024 * 1024 * 1024);
 		default:
 			return null;
 	}

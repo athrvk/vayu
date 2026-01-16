@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, MoreVertical, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import type { Collection, Request } from "@/types";
@@ -79,21 +80,55 @@ export default function CollectionItem({
 		.filter((c) => c.parent_id === collection.id)
 		.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
+	const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+	const handleClick = () => {
+		if (isDeleting || isRenaming) return;
+		
+		// Clear any existing timeout
+		if (clickTimeoutRef.current) {
+			clearTimeout(clickTimeoutRef.current);
+			clickTimeoutRef.current = null;
+			// This was a double-click, don't trigger single click
+			return;
+		}
+
+		// Set timeout for single click
+		clickTimeoutRef.current = setTimeout(() => {
+			onCollectionClick(collection);
+			clickTimeoutRef.current = null;
+		}, 200); // 200ms delay to detect double-click
+	};
+
+	const handleDoubleClick = (e: React.MouseEvent) => {
+		e.stopPropagation();
+		if (isDeleting || isRenaming) return;
+		
+		// Clear single click timeout
+		if (clickTimeoutRef.current) {
+			clearTimeout(clickTimeoutRef.current);
+			clickTimeoutRef.current = null;
+		}
+		
+		onStartRename(collection);
+	};
+
 	return (
 		<div className={cn("select-none", isDeleting && "opacity-50")}>
 			{/* Collection Header */}
 			<div
 				className={cn(
-					"flex items-center gap-1 px-2 py-1.5 rounded group transition-colors",
+					"flex items-center gap-1 px-2 py-1.5 rounded group transition-colors cursor-pointer",
 					selectedCollectionId === collection.id
 						? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
 						: "hover:bg-accent"
 				)}
 			>
 				<button
-					onClick={() => onCollectionClick(collection)}
-					className="flex items-center gap-2 flex-1 text-left"
-					disabled={isDeleting}
+					onClick={handleClick}
+					onDoubleClick={handleDoubleClick}
+					className="flex items-center gap-2 flex-1 text-left cursor-pointer"
+					disabled={isDeleting || isRenaming}
 				>
 					{isDeleting ? (
 						<Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
@@ -126,13 +161,9 @@ export default function CollectionItem({
 						<>
 							<span
 								className={cn(
-									"text-sm text-foreground",
+									"text-sm text-foreground cursor-pointer",
 									depth === 0 && "font-medium"
 								)}
-								onDoubleClick={(e) => {
-									e.stopPropagation();
-									onStartRename(collection);
-								}}
 							>
 								{collection.name}
 							</span>

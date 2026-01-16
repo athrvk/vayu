@@ -98,8 +98,8 @@ export default function Sidebar() {
 					</ScrollArea>
 				</div>
 
-				{/* Footer - Fixed height, always visible */}
-				<div className="mt-auto border-t border-border shrink-0 overflow-visible">
+				{/* Footer - Fixed height, always visible at bottom */}
+				<div className="shrink-0 border-t border-border z-10">
 					<ConnectionStatus />
 				</div>
 			</div>

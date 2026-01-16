@@ -11,7 +11,7 @@
 import { useSettingsStore } from "@/stores";
 import { useConfigQuery } from "@/queries";
 import type { SettingsCategory } from "@/types";
-import { Server, Code, Gauge, Settings, Palette } from "lucide-react";
+import { Server, Code, Settings, Palette, Network, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, Skeleton } from "@/components/ui";
 
@@ -24,19 +24,24 @@ const CATEGORY_CONFIG: Record<
 		icon: Palette,
 		color: "pink",
 	},
-	server: {
-		label: "Server",
+	general_engine: {
+		label: "General & Engine",
 		icon: Server,
 		color: "blue",
 	},
-	scripting: {
-		label: "Scripting",
+	network_performance: {
+		label: "Network & Connectivity",
+		icon: Network,
+		color: "cyan",
+	},
+	scripting_sandbox: {
+		label: "Scripting Environment",
 		icon: Code,
 		color: "purple",
 	},
-	performance: {
-		label: "Performance",
-		icon: Gauge,
+	observability: {
+		label: "Observability & Data",
+		icon: Activity,
 		color: "green",
 	},
 };
@@ -54,7 +59,7 @@ export default function SettingsCategoryTree() {
 	}
 
 	const appCategories: SettingsCategory[] = ["ui"];
-	const engineCategories: SettingsCategory[] = ["server", "scripting", "performance"];
+	const engineCategories: SettingsCategory[] = ["general_engine", "network_performance", "scripting_sandbox", "observability"];
 
 	if (isLoading) {
 		return (
@@ -90,6 +95,9 @@ export default function SettingsCategoryTree() {
 			blue: isSelected
 				? "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/70"
 				: "",
+			cyan: isSelected
+				? "bg-cyan-50 text-cyan-700 dark:bg-cyan-950/50 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-950/70"
+				: "",
 			purple: isSelected
 				? "bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-950/70"
 				: "",
@@ -101,6 +109,7 @@ export default function SettingsCategoryTree() {
 		const badgeClasses: Record<string, string> = {
 			pink: "bg-pink-100 text-pink-600 dark:bg-pink-950 dark:text-pink-300",
 			blue: "bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-300",
+			cyan: "bg-cyan-100 text-cyan-600 dark:bg-cyan-950 dark:text-cyan-300",
 			purple: "bg-purple-100 text-purple-600 dark:bg-purple-950 dark:text-purple-300",
 			green: "bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-300",
 		};

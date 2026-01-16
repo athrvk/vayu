@@ -11,7 +11,7 @@ function SaveStatusIndicator() {
 
 	if (status === "pending") {
 		return (
-			<div className="flex items-center gap-1.5 text-muted-foreground">
+			<div className="flex items-center gap-1.5 text-warning">
 				<div className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
 				<span className="text-xs">Unsaved</span>
 			</div>
@@ -20,8 +20,8 @@ function SaveStatusIndicator() {
 
 	if (status === "saving") {
 		return (
-			<div className="flex items-center gap-1.5 text-muted-foreground">
-				<Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+			<div className="flex items-center gap-1.5 text-primary">
+				<Loader2 className="w-3.5 h-3.5 animate-spin" />
 				<span className="text-xs">Saving...</span>
 			</div>
 		);
@@ -56,10 +56,10 @@ export default function ConnectionStatus() {
 
 	if (isEngineConnected) {
 		return (
-			<div className="bg-green-50 dark:bg-green-950/50 border-green-200 dark:border-green-900 px-4 py-2 flex items-center justify-between text-sm">
+			<div className="bg-primary/10 dark:bg-primary/20 border-t border-primary/30 dark:border-primary/40 px-4 py-2.5 flex items-center justify-between text-sm w-full">
 				<div className="flex items-center gap-2">
-					<CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
-					<span className="text-green-800 dark:text-green-200">
+					<CheckCircle className="w-4 h-4 text-primary shrink-0" />
+					<span className="text-primary dark:text-primary-foreground font-medium">
 						Connected to Vayu Engine
 					</span>
 				</div>
@@ -69,17 +69,17 @@ export default function ConnectionStatus() {
 	}
 
 	return (
-		<div className="bg-destructive/10 border-destructive/20 px-4 py-3 flex items-center gap-2">
-			<AlertCircle className="w-5 h-5 text-destructive" />
-			<div className="flex-1">
+		<div className="bg-destructive/10 dark:bg-destructive/20 border-t border-destructive/30 dark:border-destructive/40 px-4 py-3 flex items-center gap-2 w-full">
+			<AlertCircle className="w-5 h-5 text-destructive shrink-0" />
+			<div className="flex-1 min-w-0">
 				<p className="text-sm font-medium text-destructive">
 					Cannot connect to Vayu Engine
 				</p>
-				<p className="text-xs text-destructive/80 mt-0.5">
+				<p className="text-xs text-destructive/70 dark:text-destructive/80 mt-0.5">
 					{engineError || "Make sure the engine is running on port 9876"}
 				</p>
 			</div>
-			<Zap className="w-5 h-5 text-destructive/50" />
+			<Zap className="w-5 h-5 text-destructive/50 shrink-0" />
 		</div>
 	);
 }

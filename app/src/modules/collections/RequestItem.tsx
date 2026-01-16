@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Loader2, Trash2 } from "lucide-react";
 import { getMethodColor } from "@/utils";
 import type { Request } from "@/types";
@@ -33,6 +34,39 @@ export default function RequestItem({
 	onRenameCancel,
 	onStartRename,
 }: RequestItemProps) {
+	const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+	const handleClick = () => {
+		if (isDeleting || isRenaming) return;
+		
+		// Clear any existing timeout
+		if (clickTimeoutRef.current) {
+			clearTimeout(clickTimeoutRef.current);
+			clickTimeoutRef.current = null;
+			// This was a double-click, don't trigger single click
+			return;
+		}
+
+		// Set timeout for single click
+		clickTimeoutRef.current = setTimeout(() => {
+			onSelect(collectionId, request.id);
+			clickTimeoutRef.current = null;
+		}, 200); // 200ms delay to detect double-click
+	};
+
+	const handleDoubleClick = (e: React.MouseEvent) => {
+		e.stopPropagation();
+		if (isDeleting || isRenaming) return;
+		
+		// Clear single click timeout
+		if (clickTimeoutRef.current) {
+			clearTimeout(clickTimeoutRef.current);
+			clickTimeoutRef.current = null;
+		}
+		
+		onStartRename?.(request);
+	};
+
 	return (
 		<div
 			className={cn(
@@ -44,8 +78,9 @@ export default function RequestItem({
 			)}
 		>
 			<button
-				onClick={() => onSelect(collectionId, request.id)}
-				className="flex items-center gap-2 flex-1 text-left"
+				onClick={handleClick}
+				onDoubleClick={handleDoubleClick}
+				className="flex items-center gap-2 flex-1 text-left cursor-pointer"
 				disabled={isDeleting || isRenaming}
 			>
 				<Badge
@@ -75,13 +110,7 @@ export default function RequestItem({
 						onClick={(e) => e.stopPropagation()}
 					/>
 				) : (
-					<span
-						className="text-sm text-foreground truncate"
-						onDoubleClick={(e) => {
-							e.stopPropagation();
-							onStartRename?.(request);
-						}}
-					>
+					<span className="text-sm text-foreground truncate cursor-pointer">
 						{request.name}
 					</span>
 				)}

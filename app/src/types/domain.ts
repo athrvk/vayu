@@ -304,7 +304,7 @@ export interface ConfigResponse {
 /**
  * Settings category for UI grouping
  */
-export type SettingsCategory = "server" | "scripting" | "performance" | "ui";
+export type SettingsCategory = "general_engine" | "network_performance" | "scripting_sandbox" | "observability" | "ui";
 
 // Script Editor Completions (from backend)
 export interface ScriptCompletion {
