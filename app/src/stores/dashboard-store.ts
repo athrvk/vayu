@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import type { LoadTestMetrics, RunReport } from "@/types";
 
-type DashboardMode = "running" | "completed";
+type DashboardMode = "running" | "completed" | "stopped";
 type DashboardView = "metrics" | "request-response";
 
 // Config passed when starting a load test (for display during streaming)
@@ -86,7 +86,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
 	stopRun: () =>
 		set({
-			mode: "completed",
+			mode: "stopped",
 			isStreaming: false,
 		}),
 
@@ -107,11 +107,17 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 		}),
 
 	setFinalReport: (report) =>
-		set({
+		set((state) => ({
 			finalReport: report,
-			mode: "completed",
+			// Set mode based on report status - keep "stopped" if already stopped
+			mode:
+				state.mode === "stopped"
+					? "stopped"
+					: report.metadata?.status === "stopped"
+						? "stopped"
+						: "completed",
 			isStreaming: false,
-		}),
+		})),
 
 	setError: (error) => set({ error }),
 	setActiveView: (view) => set({ activeView: view }),

@@ -15,8 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, Eye } from "lucide-react";
 import { useDashboardStore } from "@/stores";
-import { useSSE } from "@/hooks";
-import { apiService } from "@/services";
+import { apiService, loadTestService } from "@/services";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui";
 import { DashboardHeader, RunMetadata, MetricsView, RequestResponseView } from "./components";
 import type { DashboardView, DisplayMetrics } from "./types";
@@ -39,19 +38,69 @@ export default function LoadTestDashboard() {
 		setStopping,
 	} = useDashboardStore();
 
-	// Connect to SSE stream for running tests
-	useSSE({
-		runId: currentRunId,
-		enabled: mode === "running" && !!currentRunId,
-	});
-
 	// Track whether we're loading the report
 	const [isLoadingReport, setIsLoadingReport] = useState(false);
 	const loadAttemptRef = useRef(0);
+	const hasCheckedStatus = useRef(false);
+
+	// Check run status on mount - handles case where user navigated away and returned
+	// Also ensures SSE reconnection if service lost connection
+	useEffect(() => {
+		if (currentRunId && mode === "running" && !hasCheckedStatus.current) {
+			hasCheckedStatus.current = true;
+
+			// Check if the run is still actually running on the backend
+			apiService.getRunReport(currentRunId).then((report) => {
+				if (report?.metadata?.status) {
+					const status = report.metadata.status;
+					if (status === "completed" || status === "stopped" || status === "failed") {
+						// Run finished while we were away - update state
+						console.log(`Run ${currentRunId} finished while away (status: ${status})`);
+						setFinalReport(report);
+						loadTestService.stopMonitoring();
+					} else if (!loadTestService.isMonitoring(currentRunId)) {
+						// Run is still running but service is not connected - reconnect
+						console.log(`Reconnecting to run ${currentRunId}`);
+						loadTestService.startMonitoring(currentRunId);
+					}
+				}
+			}).catch((err) => {
+				console.error("Failed to check run status:", err);
+				// Try to reconnect anyway if not monitoring
+				if (!loadTestService.isMonitoring(currentRunId)) {
+					loadTestService.startMonitoring(currentRunId);
+				}
+			});
+		}
+
+		// Reset the check flag when currentRunId changes
+		if (!currentRunId) {
+			hasCheckedStatus.current = false;
+		}
+	}, [currentRunId, mode, setFinalReport]);
+
+	// Detect when streaming stops (test completed naturally) and trigger report fetch
+	useEffect(() => {
+		if (mode === "running" && !isStreaming && currentRunId && !finalReport) {
+			// Streaming stopped but mode is still "running" - the test completed naturally
+			// Fetch the final report to get the actual completion status
+			console.log("Streaming stopped, fetching final report...");
+			setIsLoadingReport(true);
+			apiService.getRunReport(currentRunId).then((report) => {
+				if (report) {
+					setFinalReport(report);
+				}
+			}).catch((err) => {
+				console.error("Failed to fetch final report:", err);
+			}).finally(() => {
+				setIsLoadingReport(false);
+			});
+		}
+	}, [mode, isStreaming, currentRunId, finalReport, setFinalReport]);
 
 	// Load final report when test completes (with delay and retry)
 	useEffect(() => {
-		if (mode === "completed" && currentRunId && !finalReport && !isLoadingReport) {
+		if ((mode === "completed" || mode === "stopped") && currentRunId && !finalReport && !isLoadingReport) {
 			// Longer initial delay to allow database writes to complete
 			// This helps avoid "database is locked" issues
 			const delay = loadAttemptRef.current === 0 ? 3000 : 1000;
@@ -102,6 +151,7 @@ export default function LoadTestDashboard() {
 			setStopping(true);
 			try {
 				await apiService.stopRun(currentRunId);
+				loadTestService.stopMonitoring();
 				stopRun();
 			} catch (error) {
 				console.error("Failed to stop run:", error);

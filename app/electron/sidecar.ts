@@ -183,7 +183,7 @@ export class EngineSidecar {
 		// Spawn the engine process
 		this.process = spawn(
 			this.binaryPath,
-			["--port", this.port.toString(), "--data-dir", this.dataDir, "--verbose", "1"],
+			["--port", this.port.toString(), "--data-dir", this.dataDir, "--verbose", `${isDev ? "2" : "1"}`],
 			{
 				stdio: ["ignore", "pipe", "pipe"],
 				detached: false,
@@ -258,6 +258,20 @@ export class EngineSidecar {
 
 		console.log("[Sidecar] Stopping engine...");
 
+		// Try graceful HTTP shutdown first (works reliably on all platforms)
+		try {
+			console.log("[Sidecar] Requesting graceful shutdown via HTTP...");
+			const response = await fetch(`http://127.0.0.1:${this.port}/shutdown`, {
+				method: "POST",
+				signal: AbortSignal.timeout(2000),
+			});
+			if (response.ok) {
+				console.log("[Sidecar] Shutdown request accepted");
+			}
+		} catch (err) {
+			console.log("[Sidecar] HTTP shutdown request failed, will use signal");
+		}
+
 		return new Promise((resolve) => {
 			if (!this.process) {
 				resolve();
@@ -279,8 +293,11 @@ export class EngineSidecar {
 				resolve();
 			});
 
-			// Send SIGTERM to gracefully shut down
+			// Send SIGTERM as fallback (works on Unix, immediate termination on Windows)
+			// On Windows, the HTTP shutdown should have already initiated graceful shutdown
+			if (process.platform !== "win32") {
 			this.process.kill("SIGTERM");
+			}
 		});
 	}
 
@@ -296,5 +313,17 @@ export class EngineSidecar {
 	 */
 	isRunning(): boolean {
 		return this.process !== null;
+	}
+
+	/**
+	 * Restart the engine process
+	 */
+	async restart(): Promise<void> {
+		console.log("[Sidecar] Restarting engine...");
+		await this.stop();
+		// Small delay to ensure port is released
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		await this.start();
+		console.log("[Sidecar] Engine restarted successfully");
 	}
 }

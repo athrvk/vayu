@@ -657,6 +657,22 @@ struct KVStore {
 };
 
 /**
+ * @brief Configuration entry with metadata for UI display
+ */
+struct ConfigEntry {
+    std::string key;         // Unique identifier (e.g., "defaultTimeout")
+    std::string value;       // Current value as string (will be parsed based on type)
+    std::string type;        // "integer", "string", "boolean", "number"
+    std::string label;       // Display label (e.g., "Default Request Timeout")
+    std::string description; // Help text for UI
+    std::string category;    // Grouping (e.g., "server", "scripting", "performance")
+    std::string default_value; // Default value as string
+    std::optional<std::string> min_value;  // Optional minimum (for numbers)
+    std::optional<std::string> max_value;  // Optional maximum (for numbers)
+    int64_t updated_at;      // Last update timestamp
+};
+
+/**
  * @brief Global variables - singleton storage for app-wide variables
  */
 struct Globals {

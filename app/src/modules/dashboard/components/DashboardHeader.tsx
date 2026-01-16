@@ -32,18 +32,26 @@ export default function DashboardHeader({
 						<ArrowLeft className="w-4 h-4" />
 					</Button>
 				)}
-				<Activity className="w-6 h-6 text-purple-600" />
+				<Activity className="w-6 h-6 text-primary" />
 				<h2 className="text-xl font-semibold text-foreground">Load Test Dashboard</h2>
 				{isStreaming && (
 					<Badge
 						variant="outline"
-						className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300 border-green-200"
+						className="bg-success/10 text-success border-success/20"
 					>
-						<span className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
+						<span className="w-2 h-2 bg-success rounded-full animate-pulse mr-2" />
 						Live
 					</Badge>
 				)}
 				{mode === "completed" && <Badge variant="secondary">Completed</Badge>}
+				{mode === "stopped" && (
+					<Badge
+						variant="outline"
+						className="border-warning text-warning"
+					>
+						Stopped
+					</Badge>
+				)}
 			</div>
 
 			<div className="flex items-center gap-2">

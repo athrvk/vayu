@@ -24,6 +24,13 @@ public:
     void stop();
     bool is_running() const;
 
+    /**
+     * @brief Set a callback to be invoked when /shutdown endpoint is called
+     * This allows the daemon to perform platform-specific cleanup (lock file release, etc.)
+     * @param callback Function to call during graceful shutdown
+     */
+    void set_shutdown_callback(routes::ShutdownCallback callback);
+
 private:
     void setup_routes();
 
@@ -35,6 +42,7 @@ private:
     std::thread server_thread_;
     std::atomic<bool> is_running_{false};
     std::unique_ptr<routes::RouteContext> route_ctx_;
+    routes::ShutdownCallback shutdown_callback_;
 };
 
 }  // namespace vayu::http

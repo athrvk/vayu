@@ -10,7 +10,7 @@ import type { LoadTestMetrics, RunReport } from "@/types";
 // Dashboard State Types
 // ============================================================================
 
-export type DashboardMode = "idle" | "running" | "completed";
+export type DashboardMode = "idle" | "running" | "completed" | "stopped";
 export type DashboardView = "metrics" | "request-response";
 
 // ============================================================================

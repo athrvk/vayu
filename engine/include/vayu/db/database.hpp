@@ -1,10 +1,15 @@
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include <sqlite_orm/sqlite_orm.h>
+
+#include "vayu/core/config_manager.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::db {
@@ -25,6 +30,51 @@ public:
     void save_request(const Request& r);
     std::optional<Request> get_request(const std::string& id);
     std::vector<Request> get_requests_in_collection(const std::string& collection_id);
+    
+    /**
+     * @brief Iterate over requests in a collection using a callback.
+     * This allows streaming without loading all requests into memory.
+     * Fetches requests in batches to minimize memory usage.
+     * @param collection_id The collection ID to fetch requests from
+     * @param callback Function called for each request. Return false to stop iteration.
+     */
+    template <typename Callback>
+    void iterate_requests_in_collection(const std::string& collection_id, Callback&& callback) {
+        // Get batch size from ConfigManager (cached for performance)
+        const size_t batch_size = static_cast<size_t>(
+            vayu::core::ConfigManager::instance().get_int(
+                "requestBatchSize",
+                vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE));
+
+        // Fetch in batches to avoid loading everything into memory at once
+        size_t offset = 0;
+        
+        while (true) {
+            // Get all requests using helper that can access impl_
+            auto all_requests = _get_all_requests_for_collection(collection_id);
+            
+            // Process only the current batch
+            size_t start_idx = offset;
+            size_t end_idx = std::min(start_idx + batch_size, all_requests.size());
+            
+            if (start_idx >= all_requests.size()) {
+                break;
+            }
+            
+            // Process batch
+            for (size_t i = start_idx; i < end_idx; ++i) {
+                if (!callback(all_requests[i])) {
+                    return;  // Callback requested to stop
+                }
+            }
+            
+            offset = end_idx;
+            if (end_idx >= all_requests.size()) {
+                break;
+            }
+        }
+    }
+    
     void delete_request(const std::string& id);
 
     void save_environment(const Environment& e);
@@ -60,13 +110,22 @@ public:
     void commit_transaction();
     void rollback_transaction();
 
-    // KV Store
+    // KV Store (legacy)
     void set_config(const std::string& key, const std::string& value);
     std::optional<std::string> get_config(const std::string& key);
+
+    // Config Entries (new structured config with metadata)
+    void save_config_entry(const ConfigEntry& entry);
+    std::optional<ConfigEntry> get_config_entry(const std::string& key);
+    std::vector<ConfigEntry> get_all_config_entries();
+    void seed_default_config();  // Initialize default config values if empty
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    
+    // Helper function to get all requests (non-template, can access impl_)
+    std::vector<Request> _get_all_requests_for_collection(const std::string& collection_id);
 };
 
 }  // namespace vayu::db

@@ -47,8 +47,8 @@ export function VariableScopeBadge({
     const config = SCOPE_CONFIG[scope];
     const label = variant === "compact" ? config.compact : config.full;
 
-    // For compact variant, use outline style (like in templated-input)
-    // For full variant, use secondary style (like in VariableToken)
+    // For compact variant, use outline style (for autocomplete lists)
+    // For full variant, use secondary style (for popover details)
     if (variant === "compact") {
         return (
             <Badge

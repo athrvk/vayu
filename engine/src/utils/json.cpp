@@ -6,6 +6,10 @@
 #include "vayu/utils/json.hpp"
 
 #include <sstream>
+#include <ostream>
+
+#include "vayu/core/config_manager.hpp"
+#include "vayu/core/constants.hpp"
 
 namespace vayu::json {
 
@@ -300,6 +304,11 @@ Result<Request> deserialize_request(const Json& json) {
         // Options
         if (json.contains("timeout")) {
             request.timeout_ms = json["timeout"].get<int>();
+        } else {
+            // Use default timeout from config if not specified
+            auto& config_mgr = vayu::core::ConfigManager::instance();
+            request.timeout_ms = config_mgr.get_int("defaultTimeout",
+                                                     vayu::core::constants::server::DEFAULT_TIMEOUT_MS);
         }
         if (json.contains("followRedirects")) {
             request.follow_redirects = json["followRedirects"].get<bool>();
@@ -476,6 +485,109 @@ std::string pretty_print(const Json& json, bool color) {
     std::ostringstream ss;
     pretty_print_impl(ss, json, 2, 0, color);
     return ss.str();
+}
+
+// ============================================================================
+// Streaming Serialization
+// ============================================================================
+
+void serialize_to_stream(const vayu::db::Request& r, std::ostream& out) {
+    // Get max field size from ConfigManager (cached, so fast to access)
+    const size_t max_field_size = static_cast<size_t>(
+        vayu::core::ConfigManager::instance().get_int(
+            "maxJsonFieldSize",
+            vayu::core::constants::json::MAX_FIELD_SIZE));
+
+    // Manually write JSON to stream to avoid building full object in memory
+    out << "{";
+    out << "\"id\":" << Json(r.id).dump() << ",";
+    out << "\"collectionId\":" << Json(r.collection_id).dump() << ",";
+    out << "\"name\":" << Json(r.name).dump() << ",";
+    out << "\"method\":" << Json(to_string(r.method)).dump() << ",";
+    out << "\"url\":" << Json(r.url).dump() << ",";
+    
+    // Query params
+    out << "\"params\":";
+    if (r.params.empty()) {
+        out << "{}";
+    } else {
+        try {
+            // Validate size before parsing to prevent OOM
+            if (r.params.size() > max_field_size) {
+                out << "{}";
+            } else {
+                auto parsed = Json::parse(r.params);
+                out << parsed.dump();
+            }
+        } catch (const std::exception&) {
+            out << "{}";
+        }
+    }
+    out << ",";
+    
+    // Headers
+    out << "\"headers\":";
+    if (r.headers.empty()) {
+        out << "{}";
+    } else {
+        try {
+            if (r.headers.size() > max_field_size) {
+                out << "{}";
+            } else {
+                auto parsed = Json::parse(r.headers);
+                out << parsed.dump();
+            }
+        } catch (const std::exception&) {
+            out << "{}";
+        }
+    }
+    out << ",";
+    
+    // Body
+    out << "\"body\":";
+    if (r.body.empty()) {
+        out << "null";
+    } else {
+        try {
+            if (r.body.size() > max_field_size) {
+                // For very large bodies, just return as string
+                out << Json(r.body).dump();
+            } else {
+                auto parsed = Json::parse(r.body);
+                out << parsed.dump();
+            }
+        } catch (const std::exception&) {
+            // If body is not valid JSON, store it as a string
+            out << Json(r.body).dump();
+        }
+    }
+    out << ",";
+    
+    // Body type
+    out << "\"bodyType\":" << Json(r.body_type.empty() ? "none" : r.body_type).dump() << ",";
+    
+    // Auth
+    out << "\"auth\":";
+    if (r.auth.empty()) {
+        out << "{}";
+    } else {
+        try {
+            if (r.auth.size() > max_field_size) {
+                out << "{}";
+            } else {
+                auto parsed = Json::parse(r.auth);
+                out << parsed.dump();
+            }
+        } catch (const std::exception&) {
+            out << "{}";
+        }
+    }
+    out << ",";
+    
+    out << "\"preRequestScript\":" << Json(r.pre_request_script).dump() << ",";
+    out << "\"postRequestScript\":" << Json(r.post_request_script).dump() << ",";
+    out << "\"updatedAt\":" << r.updated_at;
+    out << "}";
 }
 
 }  // namespace vayu::json

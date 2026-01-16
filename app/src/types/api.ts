@@ -8,7 +8,6 @@ import type {
 	SanityResult,
 	RunReport,
 	EngineHealth,
-	EngineConfig,
 	VariableValue,
 } from "./domain";
 
@@ -213,11 +212,15 @@ export interface StopRunResponse {
 // Health & Config API
 export interface GetHealthResponse extends EngineHealth {}
 
-export interface GetConfigResponse extends EngineConfig {}
+export interface GetConfigResponse {
+	entries: import("./domain").ConfigEntry[];
+	success?: boolean;
+}
 
 export interface UpdateConfigRequest {
-	max_concurrency?: number;
-	default_timeout_ms?: number;
-	follow_redirects?: boolean;
-	verify_ssl?: boolean;
+	// Single entry update
+	key?: string;
+	value?: string;
+	// Bulk update
+	entries?: Record<string, string>;
 }

@@ -80,19 +80,20 @@ export { ScrollArea, ScrollBar } from "./scroll-area";
 
 export { Label } from "./label";
 
-export { TemplatedInput } from "./templated-input";
-export type { TemplatedInputProps, VariableInfo } from "./templated-input";
-
 // Variable components (system-wide)
 export { VariableScopeBadge } from "./variable-scope-badge";
 export type { VariableScopeBadgeProps, VariableScope } from "./variable-scope-badge";
 
-export { VariableTooltip } from "./variable-tooltip";
-export type { VariableTooltipProps, VariableInfo as VariableTooltipInfo } from "./variable-tooltip";
-
 export { VariablePopover } from "./variable-popover";
 export type { VariablePopoverProps, VariableInfo as VariablePopoverInfo } from "./variable-popover";
+
+export { VariableAutocomplete } from "./variable-autocomplete";
+export type { VariableAutocompleteProps, VariableInfo as VariableAutocompleteInfo } from "./variable-autocomplete";
 
 export { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "./resizable";
 
 export { Collapsible, CollapsibleTrigger, CollapsibleContent } from "./collapsible";
+
+export { Skeleton } from "./skeleton";
+
+export { Switch } from "./switch";

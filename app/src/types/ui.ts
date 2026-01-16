@@ -12,4 +12,5 @@ export type MainScreen =
 	| "history"
 	| "history-detail"
 	| "variables"
+	| "settings"
 	| "welcome";

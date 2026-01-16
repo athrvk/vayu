@@ -100,4 +100,12 @@ using Json = nlohmann::json;
  */
 [[nodiscard]] std::optional<Json> try_parse_body(const std::string& body);
 
+/**
+ * @brief Stream a Request to a string output stream as JSON.
+ * This is used for streaming responses to avoid loading all data into memory.
+ * @param request The request to serialize
+ * @param out Output stream to write JSON to
+ */
+void serialize_to_stream(const vayu::db::Request& request, std::ostream& out);
+
 }  // namespace vayu::json

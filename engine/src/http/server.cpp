@@ -9,6 +9,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
+#include "vayu/core/config_manager.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
@@ -32,21 +33,15 @@ void Server::start() {
     server_thread_ = std::thread([this]() {
         vayu::utils::log_info("Vayu Engine " + std::string(vayu::Version::string));
 
+        // Initialize ConfigManager
+        vayu::core::ConfigManager::instance().init(db_);
+
         // Load and display config
+        auto& config_mgr = vayu::core::ConfigManager::instance();
+        auto entries = config_mgr.get_all_entries();
         nlohmann::json config;
-        auto stored_config = db_.get_config("global_settings");
-        if (stored_config) {
-            try {
-                config = nlohmann::json::parse(*stored_config);
-            } catch (...) {
-            }
-        }
-        if (config.empty()) {
-            config["workers"] = std::thread::hardware_concurrency();
-            config["maxConnections"] = vayu::core::constants::server::MAX_CONNECTIONS;
-            config["defaultTimeout"] = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
-            config["statsInterval"] = vayu::core::constants::server::STATS_INTERVAL_MS;
-            config["contextPoolSize"] = vayu::core::constants::server::CONTEXT_POOL_SIZE;
+        for (const auto& entry : entries) {
+            config[entry.key] = entry.value;
         }
         config["verbose"] = verbose_;
         vayu::utils::log_info("Configuration: " + config.dump());
@@ -92,6 +87,14 @@ bool Server::is_running() const {
     return is_running_;
 }
 
+void Server::set_shutdown_callback(routes::ShutdownCallback callback) {
+    shutdown_callback_ = std::move(callback);
+    // Update the route context if it exists
+    if (route_ctx_) {
+        route_ctx_->on_shutdown = shutdown_callback_;
+    }
+}
+
 void Server::setup_routes() {
     // ==========================================
     // CORS Configuration
@@ -111,9 +114,10 @@ void Server::setup_routes() {
     // ==========================================
     // Note: route_ctx_ is a class member, ensuring it outlives the lambdas
     route_ctx_ = std::make_unique<routes::RouteContext>(
-        routes::RouteContext{server_, db_, run_manager_, verbose_});
+        routes::RouteContext{server_, db_, run_manager_, verbose_, shutdown_callback_});
 
     routes::register_health_routes(*route_ctx_);
+    routes::register_config_routes(*route_ctx_);
     routes::register_collection_routes(*route_ctx_);
     routes::register_request_routes(*route_ctx_);
     routes::register_environment_routes(*route_ctx_);

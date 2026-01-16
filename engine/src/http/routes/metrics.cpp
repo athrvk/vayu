@@ -1,60 +1,14 @@
 /**
  * @file http/routes/metrics.cpp
- * @brief Metrics streaming and health check routes
+ * @brief Metrics streaming routes (SSE endpoints for real-time stats)
  */
 
 #include <thread>
 
-#include "vayu/core/constants.hpp"
 #include "vayu/http/routes.hpp"
-#include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
-#include "vayu/utils/metrics_helper.hpp"
-#include "vayu/version.hpp"
 
 namespace vayu::http::routes {
-
-void register_health_routes(RouteContext& ctx) {
-    /**
-     * GET /health
-     * Returns server health status, version, and available worker threads.
-     */
-    ctx.server.Get("/health", [](const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_debug("GET /health - Health check requested");
-        nlohmann::json response;
-        response["status"] = "ok";
-        response["version"] = vayu::Version::string;
-        response["workers"] = std::thread::hardware_concurrency();
-        res.set_content(response.dump(), "application/json");
-    });
-
-    /**
-     * GET /config
-     * Retrieves the global configuration settings.
-     */
-    ctx.server.Get("/config", [&ctx](const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_info("GET /config - Fetching global configuration");
-        nlohmann::json config;
-
-        auto stored_config = ctx.db.get_config("global_settings");
-        if (stored_config) {
-            try {
-                config = nlohmann::json::parse(*stored_config);
-            } catch (...) {
-            }
-        }
-
-        if (config.empty()) {
-            config["workers"] = std::thread::hardware_concurrency();
-            config["maxConnections"] = vayu::core::constants::server::MAX_CONNECTIONS;
-            config["defaultTimeout"] = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
-            config["statsInterval"] = vayu::core::constants::server::STATS_INTERVAL_MS;
-            config["contextPoolSize"] = vayu::core::constants::server::CONTEXT_POOL_SIZE;
-        }
-
-        res.set_content(config.dump(2), "application/json");
-    });
-}
 
 void register_metrics_routes(RouteContext& ctx) {
     /**

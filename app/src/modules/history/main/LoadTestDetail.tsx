@@ -38,9 +38,14 @@ export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetail
 						<ArrowLeft className="w-5 h-5" />
 					</Button>
 					<div className="flex-1 min-w-0">
-						<h1 className="text-lg font-semibold text-foreground truncate">
-							{report.metadata?.requestUrl || "Test Run Report"}
-						</h1>
+						<div className="flex items-center gap-2">
+							<h1 className="text-lg font-semibold text-foreground truncate">
+								{report.metadata?.requestUrl || "Load Test Report"}
+							</h1>
+							<Badge variant="outline" className="text-xs shrink-0">
+								Load Test
+							</Badge>
+						</div>
 						<div className="flex items-center gap-2 mt-1">
 							<span className="text-xs text-muted-foreground font-mono">{runId}</span>
 							{report.metadata?.status && (
@@ -52,9 +57,12 @@ export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetail
 												? "default"
 												: report.metadata.status === "failed"
 													? "destructive"
-													: "secondary"
+													: "outline"
 										}
-										className="text-xs capitalize"
+										className={`text-xs capitalize ${report.metadata.status === "stopped"
+											? "border-orange-500 text-orange-600 dark:text-orange-400"
+											: ""
+											}`}
 									>
 										{report.metadata.status}
 									</Badge>
@@ -62,6 +70,16 @@ export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetail
 							)}
 						</div>
 					</div>
+				</div>
+
+				{/* Request Info Bar */}
+				<div className="flex items-center gap-3 bg-muted/50 rounded-lg p-3 mb-3">
+					<Badge variant="outline" className="font-mono font-bold shrink-0">
+						{report.metadata?.requestMethod || "GET"}
+					</Badge>
+					<span className="text-sm font-mono text-foreground truncate flex-1">
+						{report.metadata?.requestUrl || "Unknown URL"}
+					</span>
 				</div>
 
 				{/* Key Metrics Summary Row */}

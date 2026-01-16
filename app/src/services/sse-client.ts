@@ -172,7 +172,9 @@ export class SSEClient {
 			this.eventSource.close();
 			this.eventSource = null;
 			this.reconnectAttempts = 0;
-			this.hasTriedFallback = false; // Reset for next connection
+			// Reset both flags so next connection tries live endpoint first
+			this.hasTriedFallback = false;
+			this.useLiveEndpoint = true;
 		}
 	}
 

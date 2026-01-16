@@ -17,6 +17,40 @@ import {
 	DialogFooter,
 } from "@/components/ui";
 
+const LOAD_TEST_CONFIG_KEY = "vayu:lastLoadTestConfig";
+
+interface SavedLoadTestConfig {
+	mode: LoadTestConfig["mode"];
+	duration: number;
+	rps: number;
+	concurrency: number;
+	iterations: number;
+	rampDuration: number;
+	sampleRate: number;
+	slowThreshold: number;
+	saveTimingBreakdown: boolean;
+}
+
+function loadSavedConfig(): Partial<SavedLoadTestConfig> {
+	try {
+		const saved = localStorage.getItem(LOAD_TEST_CONFIG_KEY);
+		if (saved) {
+			return JSON.parse(saved);
+		}
+	} catch (e) {
+		console.warn("Failed to load saved load test config:", e);
+	}
+	return {};
+}
+
+function saveConfig(config: SavedLoadTestConfig): void {
+	try {
+		localStorage.setItem(LOAD_TEST_CONFIG_KEY, JSON.stringify(config));
+	} catch (e) {
+		console.warn("Failed to save load test config:", e);
+	}
+}
+
 interface LoadTestConfigDialogProps {
 	onClose: () => void;
 	onStart: (config: LoadTestConfig) => void;
@@ -28,19 +62,35 @@ export default function LoadTestConfigDialog({
 	onStart,
 	isStarting = false,
 }: LoadTestConfigDialogProps) {
-	const [mode, setMode] = useState<LoadTestConfig["mode"]>("constant_rps");
-	const [duration, setDuration] = useState(60);
-	const [rps, setRps] = useState(100);
-	const [concurrency, setConcurrency] = useState(10);
-	const [iterations, setIterations] = useState(1000);
-	const [rampDuration, setRampDuration] = useState(30);
+	// Load saved config or use defaults
+	const saved = loadSavedConfig();
+
+	const [mode, setMode] = useState<LoadTestConfig["mode"]>(saved.mode ?? "constant_rps");
+	const [duration, setDuration] = useState(saved.duration ?? 60);
+	const [rps, setRps] = useState(saved.rps ?? 100);
+	const [concurrency, setConcurrency] = useState(saved.concurrency ?? 10);
+	const [iterations, setIterations] = useState(saved.iterations ?? 1000);
+	const [rampDuration, setRampDuration] = useState(saved.rampDuration ?? 30);
 	// Data capture options
-	const [sampleRate, setSampleRate] = useState(10); // Default 10%
-	const [slowThreshold, setSlowThreshold] = useState(1000); // Default 1000ms
-	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(true);
-	const [comment, setComment] = useState("");
+	const [sampleRate, setSampleRate] = useState(saved.sampleRate ?? 10);
+	const [slowThreshold, setSlowThreshold] = useState(saved.slowThreshold ?? 1000);
+	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(saved.saveTimingBreakdown ?? true);
+	const [comment, setComment] = useState(""); // Don't persist comment
 
 	const handleStart = () => {
+		// Save current config for next time (excluding comment which is per-run)
+		saveConfig({
+			mode,
+			duration,
+			rps,
+			concurrency,
+			iterations,
+			rampDuration,
+			sampleRate,
+			slowThreshold,
+			saveTimingBreakdown,
+		});
+
 		const config: LoadTestConfig = {
 			mode,
 			duration_seconds: duration,

@@ -17,7 +17,6 @@ import type {
 	Run,
 	RunReport,
 	EngineHealth,
-	EngineConfig,
 	SanityResult,
 	ScriptCompletionsResponse,
 	CreateCollectionRequest,
@@ -44,13 +43,13 @@ export const apiService = {
 		return response;
 	},
 
-	async getConfig(): Promise<EngineConfig> {
+	async getConfig(): Promise<GetConfigResponse> {
 		const response = await httpClient.get<GetConfigResponse>(API_ENDPOINTS.CONFIG);
 		return response;
 	},
 
-	async updateConfig(config: UpdateConfigRequest): Promise<EngineConfig> {
-		return await httpClient.post<EngineConfig>(API_ENDPOINTS.CONFIG, config);
+	async updateConfig(config: UpdateConfigRequest): Promise<GetConfigResponse> {
+		return await httpClient.post<GetConfigResponse>(API_ENDPOINTS.CONFIG, config);
 	},
 
 	// Collections

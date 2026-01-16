@@ -43,7 +43,7 @@ export default function RunItem({ run, onSelect, onDelete, isDeleting }: RunItem
 			case "completed":
 				return <CheckCircle2 className="w-4 h-4 text-green-500" />;
 			case "failed":
-				return <XCircle className="w-4 h-4 text-red-500" />;
+				return <XCircle className="w-4 h-4 text-destructive" />;
 			case "running":
 				return <Activity className="w-4 h-4 text-blue-500 animate-pulse" />;
 			case "stopped":

@@ -35,6 +35,12 @@ inline void send_json(httplib::Response& res, const nlohmann::json& data) {
 }
 
 /**
+ * @brief Callback type for graceful shutdown
+ * Called when /shutdown endpoint is hit to perform platform-specific cleanup
+ */
+using ShutdownCallback = std::function<void()>;
+
+/**
  * @brief Context passed to route setup functions
  */
 struct RouteContext {
@@ -42,10 +48,12 @@ struct RouteContext {
     vayu::db::Database& db;
     vayu::core::RunManager& run_manager;
     bool verbose;
+    ShutdownCallback on_shutdown;  // Optional callback for graceful shutdown
 };
 
 // Route registration functions (implemented in separate files)
 void register_health_routes(RouteContext& ctx);
+void register_config_routes(RouteContext& ctx);
 void register_collection_routes(RouteContext& ctx);
 void register_request_routes(RouteContext& ctx);
 void register_environment_routes(RouteContext& ctx);

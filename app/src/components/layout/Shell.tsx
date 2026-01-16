@@ -7,14 +7,15 @@ import RequestBuilder from "@/modules/request-builder";
 import LoadTestDashboard from "@/modules/dashboard";
 import { HistoryDetail } from "@/modules/history/main";
 import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
-import { VariablesEditor } from "@/modules/variables/main";
+import { SettingsMain } from "@/modules/settings";
 import { cn } from "@/lib/utils";
 
 const MIN_SIDEBAR_WIDTH = 280;
 const MAX_SIDEBAR_WIDTH = 600;
 
 export default function Shell() {
-	const { activeScreen } = useNavigationStore();
+	const { resolveActiveScreen } = useNavigationStore();
+	const activeScreen = resolveActiveScreen();
 	const { triggerSave } = useSaveStore();
 	const [sidebarWidth, setSidebarWidth] = useState(320);
 	const [isResizing, setIsResizing] = useState(false);
@@ -75,9 +76,11 @@ export default function Shell() {
 				return <LoadTestDashboard />;
 			case "history-detail":
 				return <HistoryDetail />;
-			case "variables":
-				return <VariablesEditor />;
+			case "settings":
+				return <SettingsMain />;
 			case "welcome":
+			case "history": // History tab shows welcome screen
+			case "variables": // Variables tab shows welcome screen (unless category selected)
 			default:
 				return <WelcomeScreen />;
 		}

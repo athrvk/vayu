@@ -17,18 +17,11 @@ import {
 	type KeyboardEvent,
 	type ChangeEvent,
 } from "react";
-import {
-	Command,
-	CommandList,
-	CommandEmpty,
-	CommandGroup,
-	CommandItem,
-	VariableScopeBadge,
-} from "@/components/ui";
+import { VariableAutocomplete } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
 import type { VariableScope } from "../../types";
-import VariableToken from "./VariableToken";
+import EditableVariable from "./EditableVariable";
 
 interface VariableInputProps {
 	value: string;
@@ -163,12 +156,18 @@ export default function VariableInput({
 		}, 0);
 	};
 
-	const filteredVariables = useMemo(() => {
-		const entries = Object.entries(allVariables);
-		if (!searchQuery) return entries;
-		const lowerQuery = searchQuery.toLowerCase();
-		return entries.filter(([name]) => name.toLowerCase().includes(lowerQuery));
-	}, [allVariables, searchQuery]);
+	// Convert variables to the format expected by VariableAutocomplete
+	const variablesForAutocomplete = useMemo(() => {
+		return Object.fromEntries(
+			Object.entries(allVariables).map(([name, info]) => [
+				name,
+				{
+					value: info.value,
+					scope: info.scope as "global" | "collection" | "environment",
+				},
+			])
+		);
+	}, [allVariables]);
 
 	// Filter plain text suggestions based on current value
 	const filteredSuggestions = useMemo(() => {
@@ -231,9 +230,8 @@ export default function VariableInput({
 			}
 		}
 
-		// For variable suggestions, let Command component handle navigation
-		// Just prevent input from handling arrow keys and forward them to Command
-		if (showSuggestions && filteredVariables.length > 0) {
+		// For variable suggestions, let VariableAutocomplete (Command) handle navigation
+		if (showSuggestions) {
 			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
 				e.preventDefault();
 				e.stopPropagation();
@@ -244,7 +242,6 @@ export default function VariableInput({
 				// Forward the key event to the Command component
 				const commandRoot = document.querySelector('[cmdk-root]') as HTMLElement;
 				if (commandRoot) {
-					// Create and dispatch the key event to the Command root
 					const keyEvent = new KeyboardEvent("keydown", {
 						key: e.key,
 						bubbles: true,
@@ -252,26 +249,14 @@ export default function VariableInput({
 					});
 					commandRoot.dispatchEvent(keyEvent);
 				}
-				// Reset navigation flag after a short delay
 				setTimeout(() => {
 					isNavigatingRef.current = false;
 				}, 100);
 				return;
 			}
-			if (e.key === "Enter") {
+			if (e.key === "Enter" || e.key === "Tab") {
 				e.preventDefault();
 				// Command component will handle selection via onSelect
-				// Trigger click on highlighted item
-				const highlightedItem = document.querySelector(
-					'[cmdk-item][data-selected="true"]'
-				) as HTMLElement;
-				if (highlightedItem) {
-					highlightedItem.click();
-				}
-				return;
-			}
-			if (e.key === "Tab") {
-				e.preventDefault();
 				const highlightedItem = document.querySelector(
 					'[cmdk-item][data-selected="true"]'
 				) as HTMLElement;
@@ -342,7 +327,7 @@ export default function VariableInput({
 						data-variable-token
 						style={{ pointerEvents: "auto" }} // Make variable tokens clickable
 					>
-						<VariableToken
+						<EditableVariable
 							name={seg.varName}
 							value={varInfo?.value || ""}
 							scope={varInfo?.scope || "global"}
@@ -422,27 +407,14 @@ export default function VariableInput({
 				</div>
 			)}
 
-			{/* Variable Autocomplete Popover */}
-			{showSuggestions && filteredVariables.length > 0 && (
-				<div className="absolute left-0 top-full mt-1 z-50 w-64 rounded-md border bg-popover shadow-md">
-					<Command shouldFilter={false}>
-						<CommandList>
-							<CommandEmpty>No variables found.</CommandEmpty>
-							<CommandGroup heading="Variables">
-								{filteredVariables.map(([name, source]) => (
-									<CommandItem
-										key={name}
-										value={name}
-										onSelect={() => handleSelectVariable(name)}
-										className="flex items-center justify-between cursor-pointer"
-									>
-										<span className="font-mono text-sm">{name}</span>
-										<VariableScopeBadge scope={source.scope} variant="compact" />
-									</CommandItem>
-								))}
-							</CommandGroup>
-						</CommandList>
-					</Command>
+			{/* Variable Autocomplete - Use Case 1: Select from list */}
+			{showSuggestions && (
+				<div className="absolute left-0 top-full mt-1 z-50">
+					<VariableAutocomplete
+						variables={variablesForAutocomplete}
+						searchQuery={searchQuery}
+						onSelect={handleSelectVariable}
+					/>
 				</div>
 			)}
 

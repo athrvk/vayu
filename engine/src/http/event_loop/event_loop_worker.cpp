@@ -36,8 +36,10 @@ std::string DnsCache::resolve(const std::string& hostname) {
     }
 
     // Not cached - resolve (no lock during DNS lookup)
+    // Use AF_UNSPEC to allow both IPv4 and IPv6 - this matches curl's default behavior
+    // and is critical for localhost which often resolves to ::1 (IPv6) on modern systems
     struct addrinfo hints = {};
-    hints.ai_family = AF_INET;  // IPv4
+    hints.ai_family = AF_UNSPEC;  // Allow both IPv4 and IPv6
     hints.ai_socktype = SOCK_STREAM;
 
     struct addrinfo* result = nullptr;
@@ -45,10 +47,31 @@ std::string DnsCache::resolve(const std::string& hostname) {
 
     std::string ip;
     if (status == 0 && result) {
-        char ip_str[INET_ADDRSTRLEN];
-        struct sockaddr_in* addr = reinterpret_cast<struct sockaddr_in*>(result->ai_addr);
-        inet_ntop(AF_INET, &(addr->sin_addr), ip_str, INET_ADDRSTRLEN);
-        ip = ip_str;
+        // Iterate through results, preferring IPv6 for localhost (matches curl behavior)
+        // For other hosts, take the first result
+        struct addrinfo* best = result;
+        
+        // For localhost, prefer IPv6 if available (curl tries IPv6 first)
+        if (hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1") {
+            for (struct addrinfo* rp = result; rp != nullptr; rp = rp->ai_next) {
+                if (rp->ai_family == AF_INET6) {
+                    best = rp;
+                    break;
+                }
+            }
+        }
+        
+        if (best->ai_family == AF_INET6) {
+            char ip_str[INET6_ADDRSTRLEN];
+            struct sockaddr_in6* addr6 = reinterpret_cast<struct sockaddr_in6*>(best->ai_addr);
+            inet_ntop(AF_INET6, &(addr6->sin6_addr), ip_str, INET6_ADDRSTRLEN);
+            ip = ip_str;
+        } else if (best->ai_family == AF_INET) {
+            char ip_str[INET_ADDRSTRLEN];
+            struct sockaddr_in* addr = reinterpret_cast<struct sockaddr_in*>(best->ai_addr);
+            inet_ntop(AF_INET, &(addr->sin_addr), ip_str, INET_ADDRSTRLEN);
+            ip = ip_str;
+        }
         freeaddrinfo(result);
     }
 

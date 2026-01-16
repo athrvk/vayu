@@ -12,7 +12,7 @@ function SaveStatusIndicator() {
 	if (status === "pending") {
 		return (
 			<div className="flex items-center gap-1.5 text-muted-foreground">
-				<div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+				<div className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
 				<span className="text-xs">Unsaved</span>
 			</div>
 		);
@@ -29,7 +29,7 @@ function SaveStatusIndicator() {
 
 	if (status === "saved") {
 		return (
-			<div className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
+			<div className="flex items-center gap-1.5 text-success">
 				<Cloud className="w-3.5 h-3.5" />
 				<span className="text-xs">Saved</span>
 			</div>
@@ -56,7 +56,7 @@ export default function ConnectionStatus() {
 
 	if (isEngineConnected) {
 		return (
-			<div className="bg-green-50 dark:bg-green-950/50 border-b border-green-200 dark:border-green-900 px-4 py-2 flex items-center justify-between text-sm">
+			<div className="bg-green-50 dark:bg-green-950/50 border-green-200 dark:border-green-900 px-4 py-2 flex items-center justify-between text-sm">
 				<div className="flex items-center gap-2">
 					<CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
 					<span className="text-green-800 dark:text-green-200">
@@ -69,7 +69,7 @@ export default function ConnectionStatus() {
 	}
 
 	return (
-		<div className="bg-destructive/10 border-b border-destructive/20 px-4 py-3 flex items-center gap-2">
+		<div className="bg-destructive/10 border-destructive/20 px-4 py-3 flex items-center gap-2">
 			<AlertCircle className="w-5 h-5 text-destructive" />
 			<div className="flex-1">
 				<p className="text-sm font-medium text-destructive">

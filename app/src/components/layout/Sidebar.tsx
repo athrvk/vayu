@@ -14,11 +14,12 @@ import { cn } from "@/lib/utils";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import { HistoryList } from "@/modules/history/sidebar";
 import { VariablesCategoryTree } from "@/modules/variables/sidebar";
+import { SettingsCategoryTree } from "@/modules/settings";
 import { useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import ConnectionStatus from "../status/ConnectionStatus";
 
 export default function Sidebar() {
-	const { activeSidebarTab, setActiveSidebarTab, navigateToVariables } = useNavigationStore();
+	const { activeSidebarTab, setActiveSidebarTab, navigateToVariables, navigateToSettings } = useNavigationStore();
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
 
@@ -32,6 +33,8 @@ export default function Sidebar() {
 	const handleTabClick = (tabId: SidebarTab) => {
 		if (tabId === "variables") {
 			navigateToVariables();
+		} else if (tabId === "settings") {
+			navigateToSettings();
 		} else {
 			setActiveSidebarTab(tabId);
 		}
@@ -48,9 +51,7 @@ export default function Sidebar() {
 					<VariablesCategoryTree collections={collections} environments={environments} />
 				);
 			case "settings":
-				return (
-					<div className="p-4 text-sm text-muted-foreground">Settings coming soon...</div>
-				);
+				return <SettingsCategoryTree />;
 			default:
 				return null;
 		}
@@ -97,8 +98,8 @@ export default function Sidebar() {
 					</ScrollArea>
 				</div>
 
-				{/* Footer - Fixed height */}
-				<div className="mt-auto border-t border-border shrink-0">
+				{/* Footer - Fixed height, always visible */}
+				<div className="mt-auto border-t border-border shrink-0 overflow-visible">
 					<ConnectionStatus />
 				</div>
 			</div>

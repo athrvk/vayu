@@ -37,18 +37,22 @@ interface NavigationState {
 	navigateToRunDetail: (runId: string) => void;
 	navigateToHistory: () => void;
 	navigateToVariables: () => void;
+	navigateToSettings: () => void;
 	navigateToWelcome: () => void;
 	navigateToDashboard: () => void;
 	navigateBack: () => void;
 	canNavigateBack: () => boolean;
+
+	// Centralized screen resolution
+	resolveActiveScreen: () => MainScreen;
 }
 
 // Default tab memory
 const defaultTabMemory: Record<SidebarTab, NavigationContext> = {
 	collections: { screen: "welcome", collectionId: null, requestId: null, runId: null },
-	history: { screen: "history", collectionId: null, requestId: null, runId: null },
-	variables: { screen: "variables", collectionId: null, requestId: null, runId: null },
-	settings: { screen: "welcome", collectionId: null, requestId: null, runId: null },
+	history: { screen: "welcome", collectionId: null, requestId: null, runId: null },
+	variables: { screen: "welcome", collectionId: null, requestId: null, runId: null },
+	settings: { screen: "settings", collectionId: null, requestId: null, runId: null },
 };
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -140,13 +144,13 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 		const state = get();
 
 		set({
-			activeScreen: "history",
+			activeScreen: "welcome",
 			activeSidebarTab: "history",
 			selectedRunId: null,
 			tabMemory: {
 				...state.tabMemory,
 				history: {
-					screen: "history",
+					screen: "welcome",
 					collectionId: null,
 					requestId: null,
 					runId: null,
@@ -167,13 +171,40 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 		};
 
 		set({
-			activeScreen: "variables",
+			activeScreen: "welcome",
 			activeSidebarTab: "variables",
 			tabMemory: {
 				...state.tabMemory,
 				[state.activeSidebarTab]: currentContext,
 				variables: {
-					screen: "variables",
+					screen: "welcome",
+					collectionId: null,
+					requestId: null,
+					runId: null,
+				},
+			},
+		});
+	},
+
+	navigateToSettings: () => {
+		const state = get();
+
+		// Save current context before navigating
+		const currentContext: NavigationContext = {
+			screen: state.activeScreen,
+			collectionId: state.selectedCollectionId,
+			requestId: state.selectedRequestId,
+			runId: state.selectedRunId,
+		};
+
+		set({
+			activeScreen: "settings",
+			activeSidebarTab: "settings",
+			tabMemory: {
+				...state.tabMemory,
+				[state.activeSidebarTab]: currentContext,
+				settings: {
+					screen: "settings",
 					collectionId: null,
 					requestId: null,
 					runId: null,
@@ -224,5 +255,33 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
 	canNavigateBack: () => {
 		return get().previousContext !== null;
+	},
+
+	// Centralized screen resolution
+	// Determines which screen should be displayed based on current state
+	resolveActiveScreen: () => {
+		const state = get();
+
+		// If there's a specific screen set, use it (unless it's a tab-only screen)
+		if (state.activeScreen === "request-builder" && state.selectedRequestId) {
+			return "request-builder";
+		}
+		if (state.activeScreen === "dashboard") {
+			return "dashboard";
+		}
+		if (state.activeScreen === "history-detail" && state.selectedRunId) {
+			return "history-detail";
+		}
+		if (state.activeScreen === "settings") {
+			return "settings";
+		}
+
+		// For history and variables tabs, always show welcome screen
+		if (state.activeSidebarTab === "history" || state.activeSidebarTab === "variables") {
+			return "welcome";
+		}
+
+		// Default to welcome screen
+		return "welcome";
 	},
 }));

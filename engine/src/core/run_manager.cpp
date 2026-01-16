@@ -4,6 +4,7 @@
 #include <chrono>
 #include <iostream>
 
+#include "vayu/core/config_manager.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -253,6 +254,11 @@ void RunManager::start_run(const std::string& run_id,
     auto context = std::make_shared<RunContext>(run_id, config);
     register_run(run_id, context);
 
+    // IMPORTANT: Set is_running BEFORE spawning threads to avoid race condition
+    // where metrics_thread exits immediately because is_running is still false
+    context->is_running = true;
+    context->start_time_ms = now_ms();
+
     // Spawn metrics collection thread first (will be joined by worker thread)
     context->metrics_thread = std::thread([context, &db]() { collect_metrics(context, &db); });
     // Note: metrics_thread is NOT detached - it will be joined by the worker thread
@@ -267,8 +273,8 @@ void execute_load_test(std::shared_ptr<RunContext> context,
                        vayu::db::Database* db_ptr,
                        bool verbose,
                        RunManager& manager) {
-    context->is_running = true;
-    context->start_time_ms = now_ms();
+    // Note: is_running and start_time_ms are set in start_run() before threads spawn
+    // to avoid race condition with metrics_thread
 
     auto& db = *db_ptr;
     const auto& config = context->config;
@@ -277,7 +283,18 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         // Update status to running
         db.update_run_status(context->run_id, vayu::RunStatus::Running);
 
-        size_t concurrency = static_cast<size_t>(config.value("concurrency", 100));
+        // Get defaults from ConfigManager (set via Settings UI)
+        auto& cfg_mgr = ConfigManager::instance();
+        int default_max_concurrent = cfg_mgr.get_int(
+            "eventLoopMaxConcurrent",
+            vayu::core::constants::event_loop::MAX_CONCURRENT);
+        int default_max_per_host = cfg_mgr.get_int(
+            "eventLoopMaxPerHost",
+            vayu::core::constants::event_loop::MAX_PER_HOST);
+        int configured_workers = cfg_mgr.get_int("workers", 0);  // 0 = auto-detect
+
+        // Per-test config can override defaults
+        size_t concurrency = static_cast<size_t>(config.value("concurrency", default_max_concurrent));
         double target_rps = config.value("rps", 0.0);  // 0 = unlimited
         if (target_rps == 0.0) {
             target_rps = config.value("targetRps", 0.0);
@@ -286,16 +303,19 @@ void execute_load_test(std::shared_ptr<RunContext> context,
 
         // Configure EventLoop
         vayu::http::EventLoopConfig loop_config;
-        loop_config.num_workers = 0;  // Auto-detect
+        loop_config.num_workers = static_cast<size_t>(configured_workers);  // Use configured workers (0 = auto-detect)
         loop_config.max_concurrent = std::max(concurrency, size_t(100));
+        loop_config.max_per_host = static_cast<size_t>(default_max_per_host);
         loop_config.target_rps = target_rps;
         loop_config.burst_size = target_rps > 0 ? target_rps * 2.0 : 0.0;
         // Only enable curl verbose if explicitly requested in config, independent of server verbose
         // mode
         loop_config.verbose = config.value("verbose", false);
 
-        vayu::utils::log_debug("EventLoop config: workers=auto, max_concurrent=" +
-                               std::to_string(loop_config.max_concurrent) +
+        std::string workers_str = configured_workers == 0 ? "auto" : std::to_string(configured_workers);
+        vayu::utils::log_debug("EventLoop config: workers=" + workers_str +
+                               ", max_concurrent=" + std::to_string(loop_config.max_concurrent) +
+                               ", max_per_host=" + std::to_string(loop_config.max_per_host) +
                                ", target_rps=" + std::to_string(target_rps) +
                                ", timeout=" + std::to_string(timeout_ms) + "ms");
 
@@ -496,8 +516,14 @@ void collect_metrics(std::shared_ptr<RunContext> context, vayu::db::Database* db
     auto last_update = std::chrono::steady_clock::now();
     size_t last_total = 0;
 
+    // Get stats collection interval from config
+    auto& cfg_mgr = ConfigManager::instance();
+    int stats_interval_ms = cfg_mgr.get_int(
+        "statsInterval",
+        vayu::core::constants::server::STATS_INTERVAL_MS);
+
     while (context->is_running && !context->should_stop) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(stats_interval_ms));
 
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration<double>(now - last_update).count();

@@ -41,7 +41,7 @@ interface VariablesUIState {
 export const useVariablesStore = create<VariablesUIState>()(
 	persist(
 		(set) => ({
-			selectedCategory: { type: "globals" },
+			selectedCategory: null,
 			activeEnvironmentId: null,
 			activeCollectionId: null,
 			isEditing: false,
@@ -60,7 +60,7 @@ export const useVariablesStore = create<VariablesUIState>()(
 
 			reset: () =>
 				set({
-					selectedCategory: { type: "globals" },
+					selectedCategory: null,
 					activeEnvironmentId: null,
 					activeCollectionId: null,
 					isEditing: false,

@@ -275,6 +275,37 @@ export interface EngineConfig {
 	verify_ssl: boolean;
 }
 
+/**
+ * Configuration entry with metadata for UI display
+ */
+export interface ConfigEntry {
+	key: string;
+	value: string;
+	type: "integer" | "string" | "boolean" | "number";
+	label: string;
+	description: string;
+	category: string;
+	default: string;
+	min?: string;
+	max?: string;
+	updatedAt: number;
+	/** Whether changing this config requires an engine restart */
+	requiresRestart?: boolean;
+}
+
+/**
+ * Configuration response from backend
+ */
+export interface ConfigResponse {
+	entries: ConfigEntry[];
+	success?: boolean;
+}
+
+/**
+ * Settings category for UI grouping
+ */
+export type SettingsCategory = "server" | "scripting" | "performance" | "ui";
+
 // Script Editor Completions (from backend)
 export interface ScriptCompletion {
 	label: string;

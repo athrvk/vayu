@@ -67,9 +67,9 @@ export default function DesignRunDetail({ report, onBack, runId }: DesignRunDeta
 					<div className="flex-1 min-w-0">
 						<div className="flex items-center gap-2">
 							<h1 className="text-lg font-semibold text-foreground truncate">
-								Design Mode Request
+								{report.metadata?.requestUrl || "Design Request"}
 							</h1>
-							<Badge variant="outline" className="text-xs">
+							<Badge variant="outline" className="text-xs shrink-0">
 								Design
 							</Badge>
 						</div>
@@ -84,9 +84,12 @@ export default function DesignRunDetail({ report, onBack, runId }: DesignRunDeta
 												? "default"
 												: report.metadata.status === "failed"
 													? "destructive"
-													: "secondary"
+													: "outline"
 										}
-										className="text-xs capitalize"
+										className={`text-xs capitalize ${report.metadata.status === "stopped"
+											? "border-orange-500 text-orange-600 dark:text-orange-400"
+											: ""
+											}`}
 									>
 										{report.metadata.status}
 									</Badge>
@@ -98,7 +101,7 @@ export default function DesignRunDetail({ report, onBack, runId }: DesignRunDeta
 
 				{/* Request Summary */}
 				<div className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
-					<Badge variant="outline" className="font-mono font-bold">
+					<Badge variant="outline" className="font-mono font-bold shrink-0">
 						{trace?.request?.method || report.metadata?.requestMethod || "GET"}
 					</Badge>
 					<span className="text-sm font-mono text-foreground truncate flex-1">

@@ -159,8 +159,8 @@ export function VariablePopover({
             >
                 <div className="space-y-3">
                     {/* Header: Variable name and scope badge */}
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                    <div>
+                        <div className="flex flex-row items-baseline justify-between gap-2">
                             <span className="font-mono text-sm font-medium">{name}</span>
                             {varInfo && <VariableScopeBadge scope={varInfo.scope} variant="full" />}
                         </div>

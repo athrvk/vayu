@@ -1,18 +1,36 @@
 # Vayu Build Script for Windows
-# Usage: .\build-windows.ps1 [dev|prod] [-SkipEngine] [-SkipApp] [-Clean]
+# Usage: .\build-windows.ps1 [dev|prod] [-Engine|-App] [-Clean]
 # 
 # This script builds the C++ engine and Electron app for Windows
 # - dev:  Development build with debug symbols
 # - prod: Production build optimized and packaged as NSIS installer
+#
+# Quick aliases:
+#   .\build-windows.ps1 -e         # Build only engine (prod)
+#   .\build-windows.ps1 -a         # Build only app (prod)
+#   .\build-windows.ps1 dev -e     # Build only engine (dev)
+#   .\build-windows.ps1 dev -a     # Build only app (dev)
 
 param(
     [Parameter(Position=0)]
     [ValidateSet('dev', 'prod')]
     [string]$BuildMode = 'prod',
     
+    # Component selection aliases
+    [Alias('e', 'EngineOnly')]
+    [switch]$Engine,
+    
+    [Alias('a', 'AppOnly')]
+    [switch]$App,
+    
+    # Skip flags (for backwards compatibility)
     [switch]$SkipEngine,
     [switch]$SkipApp,
+    
+    [Alias('c')]
     [switch]$Clean,
+    [Alias('v')]
+    [switch]$VerboseOutput,
 
     [Alias('h')]
     [switch]$Help,
@@ -33,17 +51,35 @@ $ErrorActionPreference = "Stop"
 if ($Help) {
     Write-Host "" -ForegroundColor Cyan
     Write-Host "Vayu Build Script for Windows" -ForegroundColor Cyan
-    Write-Host "Usage: .\build-windows.ps1 [dev|prod] [-SkipEngine] [-SkipApp] [-Clean] [-h|--help]" -ForegroundColor Cyan
+    Write-Host "Usage: .\build-windows.ps1 [dev|prod] [-Engine|-App] [-Clean] [-h]" -ForegroundColor Cyan
     Write-Host "" -ForegroundColor Cyan
-    Write-Host "Options:" -ForegroundColor Cyan
+    Write-Host "Build Mode:" -ForegroundColor Cyan
     Write-Host "  dev           Development build (Debug mode)" -ForegroundColor Cyan
     Write-Host "  prod          Production build (Release mode, default)" -ForegroundColor Cyan
-    Write-Host "  -SkipEngine   Skip building the C++ engine" -ForegroundColor Cyan
-    Write-Host "  -SkipApp      Skip building the Electron app" -ForegroundColor Cyan
-    Write-Host "  -Clean        Clean build directories before building" -ForegroundColor Cyan
-    Write-Host "  -h, --help    Show this help message and exit" -ForegroundColor Cyan
     Write-Host "" -ForegroundColor Cyan
-    Write-Host "Advanced/CI options:" -ForegroundColor Cyan
+    Write-Host "Component Selection (shortcuts):" -ForegroundColor Cyan
+    Write-Host "  -Engine, -e   Build only the C++ engine" -ForegroundColor Cyan
+    Write-Host "  -App, -a      Build only the Electron app" -ForegroundColor Cyan
+    Write-Host "  (no flag)     Build both engine and app" -ForegroundColor Cyan
+    Write-Host "" -ForegroundColor Cyan
+    Write-Host "Other Options:" -ForegroundColor Cyan
+    Write-Host "  -Clean, -c    Clean build directories before building" -ForegroundColor Cyan
+    Write-Host "  -Verbose, -v  Show detailed output when build fails" -ForegroundColor Cyan
+    Write-Host "  -Help, -h     Show this help message" -ForegroundColor Cyan
+    Write-Host "" -ForegroundColor Cyan
+    Write-Host "Examples:" -ForegroundColor Yellow
+    Write-Host "  .\build-windows.ps1              # Build all (prod)" -ForegroundColor White
+    Write-Host "  .\build-windows.ps1 dev          # Build all (dev)" -ForegroundColor White
+    Write-Host "  .\build-windows.ps1 -e           # Build engine only (prod)" -ForegroundColor White
+    Write-Host "  .\build-windows.ps1 dev -e       # Build engine only (dev)" -ForegroundColor White
+    Write-Host "  .\build-windows.ps1 -a           # Build app only (prod)" -ForegroundColor White
+    Write-Host "  .\build-windows.ps1 -a -c        # Build app only, clean first" -ForegroundColor White
+    Write-Host "" -ForegroundColor Cyan
+    Write-Host "Legacy flags (still supported):" -ForegroundColor Gray
+    Write-Host "  -SkipEngine   Same as -App (build app only)" -ForegroundColor Gray
+    Write-Host "  -SkipApp      Same as -Engine (build engine only)" -ForegroundColor Gray
+    Write-Host "" -ForegroundColor Cyan
+    Write-Host "CI/Advanced options:" -ForegroundColor Cyan
     Write-Host "  -CMakePathParam <path>     Override CMake executable path" -ForegroundColor Cyan
     Write-Host "  -VcpkgRootParam <path>     Override vcpkg root directory" -ForegroundColor Cyan
     Write-Host "  -EngineDirParam <path>     Override engine directory" -ForegroundColor Cyan
@@ -52,6 +88,16 @@ if ($Help) {
     Write-Host "  -GeneratorParam <name>     Override CMake generator (default: 'Visual Studio 17 2022')" -ForegroundColor Cyan
     Write-Host "" -ForegroundColor Cyan
     exit 0
+}
+
+# Handle component selection aliases
+# -Engine/-e means build engine only (skip app)
+# -App/-a means build app only (skip engine)
+if ($Engine) {
+    $SkipApp = $true
+}
+if ($App) {
+    $SkipEngine = $true
 }
 
 # Colors for output
@@ -300,9 +346,25 @@ function Build-Engine {
             $EngineDir
         )
         
-        & $CMakePath @cmakeArgs
+        if ($VerboseOutput) {
+            # In verbose mode, show all output
+            $cmakeOutput = & $CMakePath @cmakeArgs 2>&1 | Tee-Object -Variable cmakeOutputVar
+        } else {
+            # In normal mode, capture output silently
+            $cmakeOutputVar = & $CMakePath @cmakeArgs 2>&1
+        }
         
         if ($LASTEXITCODE -ne 0) {
+            if ($VerboseOutput) {
+                Write-Host ""
+                Write-Host "========================================================" -ForegroundColor Red
+                Write-Host "   CMake Configuration Failed!                         " -ForegroundColor Red
+                Write-Host "========================================================" -ForegroundColor Red
+                Write-Host ""
+                Write-Host "CMake output:" -ForegroundColor Yellow
+                Write-Host $cmakeOutputVar -ForegroundColor Red
+                Write-Host ""
+            }
             throw "CMake configuration failed with exit code $LASTEXITCODE"
         }
         
@@ -310,9 +372,56 @@ function Build-Engine {
         Write-Info "Building..."
         $Cores = [Environment]::ProcessorCount
         
-        & $CMakePath --build . --config $BuildType --parallel $Cores
+        # Capture build output
+        $buildOutputVar = @()
+        if ($VerboseOutput) {
+            # In verbose mode, show output in real-time and capture it
+            & $CMakePath --build . --config $BuildType --parallel $Cores 2>&1 | ForEach-Object {
+                # Display output in real-time
+                Write-Host $_
+                # Capture for error analysis
+                $buildOutputVar += $_
+            }
+        } else {
+            # In normal mode, capture silently
+            $buildOutputVar = & $CMakePath --build . --config $BuildType --parallel $Cores 2>&1
+        }
         
         if ($LASTEXITCODE -ne 0) {
+            if ($VerboseOutput) {
+                Write-Host ""
+                Write-Host "========================================================" -ForegroundColor Red
+                Write-Host "   Build Failed!                                      " -ForegroundColor Red
+                Write-Host "========================================================" -ForegroundColor Red
+                Write-Host ""
+                
+                # Extract and highlight error lines
+                $errorLines = $buildOutputVar | Where-Object { 
+                    $_ -match "error|Error|ERROR|failed|Failed|FAILED" 
+                }
+                
+                if ($errorLines.Count -gt 0) {
+                    Write-Host "Error summary (lines containing 'error' or 'failed'):" -ForegroundColor Yellow
+                    Write-Host ""
+                    foreach ($line in $errorLines) {
+                        Write-Host $line -ForegroundColor Red
+                    }
+                    Write-Host ""
+                }
+                
+                # Show last 50 lines for context
+                Write-Host "Last 50 lines of build output:" -ForegroundColor Yellow
+                Write-Host ""
+                $lastLines = $buildOutputVar | Select-Object -Last 50
+                foreach ($line in $lastLines) {
+                    if ($line -match "error|Error|ERROR|failed|Failed|FAILED") {
+                        Write-Host $line -ForegroundColor Red
+                    } else {
+                        Write-Host $line -ForegroundColor Gray
+                    }
+                }
+                Write-Host ""
+            }
             throw "Build failed with exit code $LASTEXITCODE"
         }
         
@@ -518,10 +627,20 @@ function Build-Electron {
 function Main {
     $StartTime = Get-Date
     
+    # Determine what we're building
+    $BuildComponents = @()
+    if (-not $SkipEngine) { $BuildComponents += "Engine" }
+    if (-not $SkipApp) { $BuildComponents += "App" }
+    $ComponentsStr = $BuildComponents -join " + "
+    if ($BuildComponents.Count -eq 0) {
+        Write-Host "Nothing to build! Use -h for help." -ForegroundColor Red
+        exit 1
+    }
+    
     Write-Host ""
     Write-Host "========================================================" -ForegroundColor Cyan
     Write-Host "        Vayu Build Script for Windows                   " -ForegroundColor Cyan
-    Write-Host "        Mode: $($BuildMode.ToUpper())                   " -ForegroundColor Cyan
+    Write-Host "        Mode: $($BuildMode.ToUpper()) | $ComponentsStr  " -ForegroundColor Cyan
     Write-Host "========================================================" -ForegroundColor Cyan
     Write-Host ""
     
@@ -587,7 +706,7 @@ function Main {
         } else {
             Write-Host "  1. Run the generated installer in the release directory." -ForegroundColor White
         }
-        Write-Host "  2. After installation, launch 'Vayu' from the Windows Start menu." -ForegroundColor White
+        Write-Host "  2. After installation, launch 'Vayu' from the Desktop or Windows Start menu." -ForegroundColor White
         Write-Host "" -ForegroundColor Green
     }
 }

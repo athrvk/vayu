@@ -45,7 +45,8 @@ export {
 export { useGlobalsQuery, useUpdateGlobalsMutation } from "./globals";
 
 // Health & Config
-export { useHealthQuery, useConfigQuery } from "./health";
+export { useHealthQuery } from "./health";
+export { useConfigQuery, useUpdateConfigMutation } from "./config";
 
 // Script Completions
 export { useScriptCompletionsQuery } from "./script-completions";

@@ -13,7 +13,6 @@
  */
 
 import { useCallback } from "react";
-import { Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { KeyValueItem, KeyValueEditorProps } from "../../types";
 import { createEmptyKeyValue } from "../../utils/key-value";
@@ -95,13 +94,10 @@ export default function KeyValueEditor({
 		[items, onChange, canEdit, canDisable]
 	);
 
-	// Count enabled items with values
-	const enabledCount = items.filter((item) => item.enabled && item.key.trim()).length;
-
 	return (
 		<div className="space-y-2">
 			{/* Header */}
-			<div className="flex items-center justify-between">
+			{/* <div className="flex items-center justify-between">
 				<div className="flex items-center gap-2">
 					{enabledCount > 0 && (
 						<Badge variant="secondary" className="text-xs">
@@ -109,7 +105,7 @@ export default function KeyValueEditor({
 						</Badge>
 					)}
 				</div>
-			</div>
+			</div> */}
 
 			{/* Column Headers */}
 			<div

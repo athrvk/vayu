@@ -73,9 +73,9 @@
 		--popover: 0 0% 100%;
 		--popover-foreground: 240 10% 3.9%;
 
-		/* Primary - Orange (Vayu brand) */
-		--primary: 24.6 95% 53.1%; /* orange-500 */
-		--primary-foreground: 0 0% 100%; /* white text on orange */
+	/* Primary - Sunset (default, warm and energetic) */
+	--primary: 24.6 95% 53.1%; /* orange-500 */
+	--primary-foreground: 0 0% 100%; /* white text on orange */
 
 		/* Secondary - Subtle gray */
 		--secondary: 240 4.8% 95.9%; /* zinc-100 */
@@ -115,9 +115,66 @@
 		--method-options: 240 5% 64%; /* gray */
 
 		/* Variables highlight */
-		--variable: 24.6 95% 53.1%; /* orange for {{variables}} */
+		--variable: 24.6 95% 53.1%; /* sunset orange for {{variables}} */
+	}
 
-		/* Success/Warning/Info */
+	/* Color Schemes - Modern Themes */
+	[data-color-scheme="sky"] {
+		/* Sky - Light sky blue, calm and airy like clouds */
+		--primary: 199 89% 48%; /* sky-500 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 199 89% 48%;
+		--variable: 199 89% 48%;
+		--chart-1: 199 89% 48%;
+	}
+
+	[data-color-scheme="ocean"] {
+		/* Ocean - Deep blue, calm and professional */
+		--primary: 217 91% 60%; /* blue-500 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 217 91% 60%;
+		--variable: 217 91% 60%;
+		--chart-1: 217 91% 60%;
+	}
+
+	[data-color-scheme="forest"] {
+		/* Forest - Fresh green, nature-inspired and calm */
+		--primary: 142 76% 36%; /* green-600 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 142 76% 36%;
+		--variable: 142 76% 36%;
+		--chart-1: 142 76% 36%;
+	}
+
+	[data-color-scheme="sunset"] {
+		/* Sunset - Warm orange, energetic and vibrant */
+		--primary: 24.6 95% 53.1%; /* orange-500 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 24.6 95% 53.1%;
+		--variable: 24.6 95% 53.1%;
+		--chart-1: 24.6 95% 53.1%;
+	}
+
+	[data-color-scheme="aurora"] {
+		/* Aurora - Purple/blue, magical and modern */
+		--primary: 262 83% 58%; /* purple-500 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 262 83% 58%;
+		--variable: 262 83% 58%;
+		--chart-1: 262 83% 58%;
+	}
+
+	[data-color-scheme="coral"] {
+		/* Coral - Warm pink/coral, vibrant and energetic */
+		--primary: 0 72% 65%; /* rose-400 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 0 72% 65%;
+		--variable: 0 72% 65%;
+		--chart-1: 0 72% 65%;
+	}
+
+	/* Success/Warning/Info */
+	:root {
 		--success: 142 76% 36%; /* green-600 */
 		--success-foreground: 0 0% 100%;
 		--warning: 38 92% 50%; /* amber-500 */
@@ -142,7 +199,7 @@
 		--popover: 240 10% 3.9%;
 		--popover-foreground: 0 0% 98%;
 
-		/* Primary - Orange (slightly adjusted for dark) */
+		/* Primary - Sunset (slightly adjusted for dark, default) */
 		--primary: 20.5 90.2% 48.2%; /* orange-600 */
 		--primary-foreground: 0 0% 100%;
 
@@ -175,7 +232,7 @@
 		--chart-5: 340 75% 55%;
 
 		/* Variables highlight (dark mode) */
-		--variable: 20.5 90.2% 48.2%;
+		--variable: 20.5 90.2% 48.2%; /* sunset orange */
 
 		/* Success/Warning/Info (dark mode) */
 		--success: 142 70% 45%;
@@ -184,6 +241,61 @@
 		--warning-foreground: 0 0% 100%;
 		--info: 199 89% 48%;
 		--info-foreground: 0 0% 100%;
+	}
+
+	/* Color Schemes - Dark Mode */
+	.dark[data-color-scheme="sky"] {
+		/* Sky - Adjusted for dark mode */
+		--primary: 199 89% 48%; /* sky-500 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 199 89% 48%;
+		--variable: 199 89% 48%;
+		--chart-1: 199 89% 48%;
+	}
+
+	.dark[data-color-scheme="ocean"] {
+		/* Ocean - Deep blue for dark mode */
+		--primary: 217 78% 51%; /* blue-600 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 217 78% 51%;
+		--variable: 217 78% 51%;
+		--chart-1: 217 78% 51%;
+	}
+
+	.dark[data-color-scheme="forest"] {
+		/* Forest - Fresh green for dark mode */
+		--primary: 142 70% 45%; /* green-600 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 142 70% 45%;
+		--variable: 142 70% 45%;
+		--chart-1: 142 70% 45%;
+	}
+
+	.dark[data-color-scheme="sunset"] {
+		/* Sunset - Warm orange for dark mode */
+		--primary: 20.5 90.2% 48.2%; /* orange-600 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 20.5 90.2% 48.2%;
+		--variable: 20.5 90.2% 48.2%;
+		--chart-1: 20.5 90.2% 48.2%;
+	}
+
+	.dark[data-color-scheme="aurora"] {
+		/* Aurora - Purple/blue for dark mode */
+		--primary: 262 80% 50%; /* purple-600 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 262 80% 50%;
+		--variable: 262 80% 50%;
+		--chart-1: 262 80% 50%;
+	}
+
+	.dark[data-color-scheme="coral"] {
+		/* Coral - Warm pink for dark mode */
+		--primary: 0 72% 55%; /* rose-500 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 0 72% 55%;
+		--variable: 0 72% 55%;
+		--chart-1: 0 72% 55%;
 	}
 }
 

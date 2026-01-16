@@ -218,11 +218,6 @@ export default function ResponseBody({
 						sandbox="allow-scripts allow-same-origin"
 						title="HTML Preview"
 					/>
-				) : compact ? (
-					// Compact mode: use pre tag instead of Monaco
-					<pre className="p-4 text-xs font-mono overflow-auto h-full whitespace-pre-wrap break-words bg-zinc-900 text-zinc-300">
-						{formattedBody}
-					</pre>
 				) : (
 					<Editor
 						height={height}
@@ -232,7 +227,7 @@ export default function ResponseBody({
 						options={{
 							readOnly: true,
 							minimap: { enabled: false },
-							fontSize: 13,
+							fontSize: compact ? 12 : 13,
 							lineNumbers: "on",
 							scrollBeyondLastLine: false,
 							wordWrap: "on",

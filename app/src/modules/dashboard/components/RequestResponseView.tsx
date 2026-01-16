@@ -277,7 +277,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 													{/* Status Icon */}
 													{isError ? (
-														<AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+														<AlertCircle className="w-4 h-4 text-destructive shrink-0" />
 													) : isSlow ? (
 														<Clock className="w-4 h-4 text-orange-500 shrink-0" />
 													) : (
@@ -319,7 +319,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 													{/* Error preview */}
 													{isError && result.error && (
-														<span className="text-xs text-red-500 truncate max-w-[200px]">
+														<span className="text-xs text-destructive truncate max-w-[200px]">
 															{result.error.split(":")[0]}
 														</span>
 													)}

@@ -117,6 +117,8 @@ constexpr bool ENABLE_CONSOLE = true;
 namespace json {
 /// Default indentation level for JSON serialization
 constexpr int DEFAULT_INDENT = 2;
+/// Maximum size for JSON field parsing to prevent OOM (10MB)
+constexpr size_t MAX_FIELD_SIZE = 10 * 1024 * 1024;
 }  // namespace json
 
 /**
@@ -156,6 +158,14 @@ constexpr size_t CAPACITY = 65536;
 /// Number of spins before sleeping in the worker loop
 constexpr int SPIN_COUNT = 2000;
 }  // namespace queue
+
+/**
+ * @brief Database streaming configuration
+ */
+namespace db_streaming {
+/// Batch size for streaming requests to prevent OOM
+constexpr size_t REQUEST_BATCH_SIZE = 5;
+}  // namespace db_streaming
 }  // namespace vayu::core::constants
 
 /**

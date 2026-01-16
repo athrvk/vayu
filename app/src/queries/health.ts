@@ -51,13 +51,3 @@ export function useHealthQuery() {
 	return query;
 }
 
-/**
- * Engine configuration query
- */
-export function useConfigQuery() {
-	return useQuery({
-		queryKey: queryKeys.config.all,
-		queryFn: () => apiService.getConfig(),
-		staleTime: 60 * 1000, // Config rarely changes
-	});
-}

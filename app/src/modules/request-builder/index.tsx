@@ -15,15 +15,12 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { RequestBuilderProvider } from "./context";
-import UrlBar from "./components/UrlBar";
-import RequestTabs from "./components/RequestTabs";
-import ResponseViewer from "./components/ResponseViewer";
+import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui";
 import { useNavigationStore, useVariablesStore, useDashboardStore } from "@/stores";
 import { useRequestQuery, useUpdateRequestMutation } from "@/queries";
 import { useEngine, useVariableResolver } from "@/hooks";
-import { apiService } from "@/services/api";
+import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
 import { recordToKeyValue, keyValueToRecord } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
@@ -341,6 +338,10 @@ export default function RequestBuilder() {
 						url: apiRequest.request.url,
 					}
 				);
+				
+				// Start global metrics monitoring (stays active even if user navigates away)
+				loadTestService.startMonitoring(result.runId);
+				
 				navigateToDashboard();
 				setShowLoadTestDialog(false);
 				setPendingLoadTestRequest(null);
@@ -416,35 +417,6 @@ export default function RequestBuilder() {
 	);
 }
 
-/**
- * RequestBuilderLayout - Internal layout component
- *
- * Uses ResizablePanelGroup for the vertical split between
- * request editor (left) and response viewer (right)
- */
-function RequestBuilderLayout() {
-	return (
-		<div className="h-full flex flex-col">
-			{/* URL Bar - Always visible at top */}
-			<UrlBar />
-
-			{/* Main content area with resizable panels */}
-			<ResizablePanelGroup orientation="horizontal" className="flex-1">
-				{/* Request Editor Panel */}
-				<ResizablePanel defaultSize={50} minSize={30} className="flex flex-col">
-					<RequestTabs />
-				</ResizablePanel>
-
-				<ResizableHandle withHandle />
-
-				{/* Response Viewer Panel */}
-				<ResizablePanel defaultSize={50} minSize={30} className="flex flex-col">
-					<ResponseViewer />
-				</ResizablePanel>
-			</ResizablePanelGroup>
-		</div>
-	);
-}
 
 // Re-export types and context for external use
 export { useRequestBuilderContext } from "./context";

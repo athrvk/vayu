@@ -4,6 +4,7 @@
  * Displays key metrics, latency breakdown, and charts
  */
 
+import { useMemo } from "react";
 import { Activity } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -61,19 +62,20 @@ export default function MetricsView({ metrics, historicalMetrics, isCompleted }:
 				100
 			: 0;
 
-	// Prepare chart data - deduplicated by second
-	const dataBySecond = new Map<number, { time: number; rps: number; concurrency: number }>();
-	historicalMetrics.forEach((m) => {
-		const second = Math.round(m.elapsed_seconds);
-		dataBySecond.set(second, {
-			time: second,
-			rps: m.current_rps,
-			concurrency: m.current_concurrency,
+	// Prepare chart data - deduplicated by second, memoized to prevent excessive re-renders
+	const chartData = useMemo(() => {
+		const dataBySecond = new Map<number, { time: number; rps: number; concurrency: number }>();
+		historicalMetrics.forEach((m) => {
+			const second = Math.round(m.elapsed_seconds);
+			dataBySecond.set(second, {
+				time: second,
+				rps: m.current_rps,
+				concurrency: m.current_concurrency,
+			});
 		});
-	});
-
-	// Convert to array and sort by time
-	const chartData = Array.from(dataBySecond.values()).sort((a, b) => a.time - b.time);
+		// Convert to array and sort by time
+		return Array.from(dataBySecond.values()).sort((a, b) => a.time - b.time);
+	}, [historicalMetrics]);
 
 	return (
 		<div className="space-y-6">
@@ -162,7 +164,7 @@ export default function MetricsView({ metrics, historicalMetrics, isCompleted }:
 							<CardTitle className="text-lg">Requests per Second</CardTitle>
 						</CardHeader>
 						<CardContent>
-							<ResponsiveContainer width="100%" height={300}>
+							<ResponsiveContainer width="100%" height={300} debounce={100}>
 								<LineChart data={chartData}>
 									<CartesianGrid
 										strokeDasharray="3 3"
@@ -186,6 +188,7 @@ export default function MetricsView({ metrics, historicalMetrics, isCompleted }:
 										stroke="hsl(var(--primary))"
 										strokeWidth={2}
 										dot={false}
+										isAnimationActive={false}
 									/>
 								</LineChart>
 							</ResponsiveContainer>
@@ -197,7 +200,7 @@ export default function MetricsView({ metrics, historicalMetrics, isCompleted }:
 							<CardTitle className="text-lg">Active Connections</CardTitle>
 						</CardHeader>
 						<CardContent>
-							<ResponsiveContainer width="100%" height={300}>
+							<ResponsiveContainer width="100%" height={300} debounce={100}>
 								<LineChart data={chartData}>
 									<CartesianGrid
 										strokeDasharray="3 3"
@@ -226,6 +229,7 @@ export default function MetricsView({ metrics, historicalMetrics, isCompleted }:
 										stroke="hsl(var(--chart-2))"
 										strokeWidth={2}
 										dot={false}
+										isAnimationActive={false}
 									/>
 								</LineChart>
 							</ResponsiveContainer>

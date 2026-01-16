@@ -209,6 +209,7 @@ add_library(vayu_core STATIC
     src/utils/logger.cpp
     src/utils/metrics_helper.cpp
     src/db/database.cpp
+    src/core/config_manager.cpp
     src/core/load_strategy.cpp
     src/core/run_manager.cpp
     src/core/metrics_collector.cpp
@@ -290,6 +291,8 @@ if(VAYU_BUILD_ENGINE)
     add_executable(vayu-engine
         src/daemon.cpp
         src/http/server.cpp
+        src/http/routes/health.cpp
+        src/http/routes/config.cpp
         src/http/routes/collections.cpp
         src/http/routes/requests.cpp
         src/http/routes/environments.cpp

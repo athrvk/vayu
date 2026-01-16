@@ -152,9 +152,18 @@ int main(int argc, char* argv[]) {
     // verbose parameter is kept for backward compatibility with server internals
     bool verbose_legacy = (verbosity >= 1);
     vayu::http::Server server(db, run_manager, port, verbose_legacy);
+
+    // Set shutdown callback for /shutdown endpoint
+    // This callback is invoked before the server stops, allowing us to
+    // trigger the graceful shutdown sequence in the main loop
+    server.set_shutdown_callback([&]() {
+        vayu::utils::log_info("Shutdown callback invoked - signaling main loop to exit");
+        g_running.store(false);
+    });
+
     server.start();
 
-    // Wait for shutdown signal
+    // Wait for shutdown signal (either from OS signal or /shutdown endpoint)
     while (g_running && server.is_running()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
