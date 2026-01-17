@@ -23,7 +23,7 @@ jobs:
       - name: Setup Node (for pnpm)
         uses: pnpm/action-setup@v2
         with:
-          version: 8
+          version: 9
 
       - name: Ensure artifacts dir
         run: |
