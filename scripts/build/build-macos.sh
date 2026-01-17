@@ -403,17 +403,17 @@ main() {
     local build_components=()
     if [[ "$SKIP_ENGINE" == false ]]; then build_components+=("Engine"); fi
     if [[ "$SKIP_APP" == false ]]; then build_components+=("App"); fi
-    local components_str=$(IFS=" + "; echo "${build_components[*]}")
+    local components_str=$(echo ${build_components[*]} | tr ' ' '+')
     
     if [[ ${#build_components[@]} -eq 0 ]]; then
         error "Nothing to build! Use -h for help."
     fi
     
     echo ""
-    echo -e "${CYAN}╔════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║   Vayu Build Script for macOS          ║${NC}"
-    echo -e "${CYAN}║   Mode: $(printf '%-20s' "${BUILD_MODE^^}") | $components_str  ║${NC}"
-    echo -e "${CYAN}╚════════════════════════════════════════╝${NC}"
+    echo -e "${CYAN}╔═════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║   Vayu Build Script for macOS   ║${NC}"
+    echo -e "${CYAN}║   Mode: $(printf "${BUILD_MODE^^}") | $components_str       ║${NC}"
+    echo -e "${CYAN}╚═════════════════════════════════╝${NC}"
     echo ""
     
     check_prerequisites

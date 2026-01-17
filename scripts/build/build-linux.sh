@@ -38,8 +38,34 @@ ARTIFACTS_DIR=""
 
 # Parse arguments
 show_help() {
-    echo "Vayu Build Script for Linux"
+    echo -e "${CYAN}Vayu Build Script for Linux${NC}"
+    echo ""
     echo "Usage: ./build-linux.sh [dev|prod] [-e|-a] [OPTIONS]"
+    echo ""
+    echo "Build Mode:"
+    echo "  dev     Development build (Debug mode)"
+    echo "  prod    Production build (Release mode, default)"
+    echo ""
+    echo "Component Selection (shortcuts):"
+    echo "  -e, --skip-app      Build only the C++ engine"
+    echo "  -a, --skip-engine   Build only the Electron app"
+    echo "  (no flag)           Build both engine and app"
+    echo ""
+    echo "Other Options:"
+    echo "  --clean             Clean build directories before building"
+    echo "  -v, --verbose       Show detailed output when build fails"
+    echo "  --vcpkg-root PATH   Override vcpkg root directory"
+    echo "  --artifacts PATH    Copy build artifacts to this directory (for CI)"
+    echo "  -h, --help          Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  ./build-linux.sh              # Build all (prod)"
+    echo "  ./build-linux.sh dev          # Build all (dev)"
+    echo "  ./build-linux.sh -e           # Build engine only (prod)"
+    echo "  ./build-linux.sh dev -e       # Build engine only (dev)"
+    echo "  ./build-linux.sh -a           # Build app only (prod)"
+    echo "  ./build-linux.sh -a --clean   # Build app only, clean first"
+    echo ""
     exit 0
 }
 
@@ -221,12 +247,21 @@ build_electron() {
 # Main execution
 main() {
     local start_time=$(date +%s)
+
+    # Determine what we're building
+    build_components=()
+    if [[ "$SKIP_ENGINE" == false ]]; then build_components+=("Engine"); fi
+    if [[ "$SKIP_APP" == false ]]; then build_components+=("App"); fi
+    local components_str=$(echo ${build_components[*]} | tr ' ' '+')
+    if [[ ${#build_components[@]} -eq 0 ]]; then
+        error "Nothing to build! Use -h for help."
+    fi
     
     echo ""
-    echo -e "${CYAN}╔════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║   Vayu Build Script for Linux          ║${NC}"
-    echo -e "${CYAN}║   Mode: $(printf '%-30s' "${BUILD_MODE^^}") ║${NC}"
-    echo -e "${CYAN}╚════════════════════════════════════════╝${NC}"
+    echo -e "${CYAN}╔═════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║   Vayu Build Script for Linux   ║${NC}"
+    echo -e "${CYAN}║   Mode: $(printf "${BUILD_MODE^^}") | $components_str       ║${NC}"
+    echo -e "${CYAN}╚═════════════════════════════════╝${NC}"
     echo ""
     
     check_prerequisites
