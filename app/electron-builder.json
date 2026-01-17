@@ -67,6 +67,9 @@
 		"icon": "build/icons",
 		"maintainer": "Atharva Kusumbia <atharvakusumbia@gmail.com>"
 	},
+	"appImage": {
+		"type": "portable"
+	},
 	"deb": {
 		"afterInstall": "installer/linux-postinst.sh",
 		"afterRemove": "installer/linux-postrm.sh",
