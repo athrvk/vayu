@@ -59,10 +59,11 @@ export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetail
 													? "destructive"
 													: "outline"
 										}
-										className={`text-xs capitalize ${report.metadata.status === "stopped"
-											? "border-orange-500 text-orange-600 dark:text-orange-400"
-											: ""
-											}`}
+										className={`text-xs capitalize ${
+											report.metadata.status === "stopped"
+												? "border-orange-500 text-orange-600 dark:text-orange-400"
+												: ""
+										}`}
 									>
 										{report.metadata.status}
 									</Badge>

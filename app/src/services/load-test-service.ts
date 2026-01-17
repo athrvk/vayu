@@ -1,6 +1,6 @@
 /**
  * LoadTestService - Global singleton for managing active load test connections
- * 
+ *
  * This service runs independently of React components, ensuring the SSE connection
  * stays alive regardless of navigation. Metrics are pushed to the Zustand store
  * where any component can read them.
@@ -99,10 +99,10 @@ class LoadTestService {
 
 	private handleClose(): void {
 		console.log("[LoadTestService] SSE connection closed (test completed)");
-		
+
 		const store = useDashboardStore.getState();
 		store.setStreaming(false);
-		
+
 		// Clean up internal state
 		// Don't call stopRun() here - that's for manual stops only
 		// The dashboard will fetch the final report which sets the correct mode

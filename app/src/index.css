@@ -73,9 +73,9 @@
 		--popover: 0 0% 100%;
 		--popover-foreground: 240 10% 3.9%;
 
-	/* Primary - Sunset (default, warm and energetic) */
-	--primary: 24.6 95% 53.1%; /* orange-500 */
-	--primary-foreground: 0 0% 100%; /* white text on orange */
+		/* Primary - Sunset (default, warm and energetic) */
+		--primary: 24.6 95% 53.1%; /* orange-500 */
+		--primary-foreground: 0 0% 100%; /* white text on orange */
 
 		/* Secondary - Subtle gray */
 		--secondary: 240 4.8% 95.9%; /* zinc-100 */

@@ -84,7 +84,7 @@ export default function CollectionItem({
 
 	const handleClick = () => {
 		if (isDeleting || isRenaming) return;
-		
+
 		// Clear any existing timeout
 		if (clickTimeoutRef.current) {
 			clearTimeout(clickTimeoutRef.current);
@@ -103,13 +103,13 @@ export default function CollectionItem({
 	const handleDoubleClick = (e: React.MouseEvent) => {
 		e.stopPropagation();
 		if (isDeleting || isRenaming) return;
-		
+
 		// Clear single click timeout
 		if (clickTimeoutRef.current) {
 			clearTimeout(clickTimeoutRef.current);
 			clickTimeoutRef.current = null;
 		}
-		
+
 		onStartRename(collection);
 	};
 

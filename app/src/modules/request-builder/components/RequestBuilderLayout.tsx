@@ -31,8 +31,7 @@ export default function RequestBuilderLayout() {
 				// But prevent it in textareas, Monaco editors, and contenteditable elements
 				const isTextarea = target.tagName === "TEXTAREA";
 				const isContentEditable =
-					target.isContentEditable ||
-					target.closest('[contenteditable="true"]') !== null;
+					target.isContentEditable || target.closest('[contenteditable="true"]') !== null;
 				// Monaco editor creates elements with class 'monaco-editor'
 				const isMonacoEditor = target.closest(".monaco-editor") !== null;
 

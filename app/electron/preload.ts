@@ -8,9 +8,9 @@ const { contextBridge, ipcRenderer } = require("electron");
 // ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld("electronAPI", {
 	// Engine management
-	restartEngine: (): Promise<{ success: boolean; error?: string }> => 
+	restartEngine: (): Promise<{ success: boolean; error?: string }> =>
 		ipcRenderer.invoke("engine:restart"),
-	getEngineStatus: (): Promise<{ running: boolean; url: string | null }> => 
+	getEngineStatus: (): Promise<{ running: boolean; url: string | null }> =>
 		ipcRenderer.invoke("engine:status"),
 
 	// Theme management
@@ -23,7 +23,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	onThemeChanged: (
 		callback: (theme: { shouldUseDarkColors: boolean; themeSource: string }) => void
 	) => {
-		const handler = (_event: unknown, theme: { shouldUseDarkColors: boolean; themeSource: string }) => callback(theme);
+		const handler = (
+			_event: unknown,
+			theme: { shouldUseDarkColors: boolean; themeSource: string }
+		) => callback(theme);
 		ipcRenderer.on("theme:changed", handler);
 		return () => ipcRenderer.removeListener("theme:changed", handler);
 	},

@@ -88,7 +88,10 @@ export { VariablePopover } from "./variable-popover";
 export type { VariablePopoverProps, VariableInfo as VariablePopoverInfo } from "./variable-popover";
 
 export { VariableAutocomplete } from "./variable-autocomplete";
-export type { VariableAutocompleteProps, VariableInfo as VariableAutocompleteInfo } from "./variable-autocomplete";
+export type {
+	VariableAutocompleteProps,
+	VariableInfo as VariableAutocompleteInfo,
+} from "./variable-autocomplete";
 
 export { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "./resizable";
 

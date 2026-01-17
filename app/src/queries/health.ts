@@ -50,4 +50,3 @@ export function useHealthQuery() {
 
 	return query;
 }
-

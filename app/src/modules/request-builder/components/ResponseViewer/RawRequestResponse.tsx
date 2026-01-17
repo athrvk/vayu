@@ -17,10 +17,7 @@ export interface RawRequestResponseProps {
 	};
 }
 
-export default function RawRequestResponse({
-	rawRequest,
-	response,
-}: RawRequestResponseProps) {
+export default function RawRequestResponse({ rawRequest, response }: RawRequestResponseProps) {
 	// Use shared utility to build raw response
 	const rawResponse = buildRawResponse(
 		response.status,

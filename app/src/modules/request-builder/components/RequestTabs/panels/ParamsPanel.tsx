@@ -131,29 +131,29 @@ export default function ParamsPanel() {
 				</div>
 			) : (
 				<>
-						{/* Query Parameters Editor */}
-						<div className="space-y-2">
-							<KeyValueEditor
-								items={displayParams}
-								onChange={handleParamsChange}
-								keyPlaceholder="Parameter"
-								valuePlaceholder="Value"
-								showResolved={true}
-								allowDisable={true}
-							/>
-						</div>
+					{/* Query Parameters Editor */}
+					<div className="space-y-2">
+						<KeyValueEditor
+							items={displayParams}
+							onChange={handleParamsChange}
+							keyPlaceholder="Parameter"
+							valuePlaceholder="Value"
+							showResolved={true}
+							allowDisable={true}
+						/>
+					</div>
 
-						{/* Full Resolved URL */}
-						<div className="space-y-2">
-							<label className="text-sm font-medium text-muted-foreground">
-								Full Resolved URL
-							</label>
-							<div className="p-3 bg-muted rounded-md font-mono text-sm break-all">
-								{resolvedUrl || (
-									<span className="text-muted-foreground italic">No URL</span>
-								)}
-							</div>
+					{/* Full Resolved URL */}
+					<div className="space-y-2">
+						<label className="text-sm font-medium text-muted-foreground">
+							Full Resolved URL
+						</label>
+						<div className="p-3 bg-muted rounded-md font-mono text-sm break-all">
+							{resolvedUrl || (
+								<span className="text-muted-foreground italic">No URL</span>
+							)}
 						</div>
+					</div>
 				</>
 			)}
 		</div>

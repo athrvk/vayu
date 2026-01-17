@@ -59,7 +59,12 @@ export default function SettingsCategoryTree() {
 	}
 
 	const appCategories: SettingsCategory[] = ["ui"];
-	const engineCategories: SettingsCategory[] = ["general_engine", "network_performance", "scripting_sandbox", "observability"];
+	const engineCategories: SettingsCategory[] = [
+		"general_engine",
+		"network_performance",
+		"scripting_sandbox",
+		"observability",
+	];
 
 	if (isLoading) {
 		return (

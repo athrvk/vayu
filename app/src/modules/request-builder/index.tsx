@@ -338,10 +338,10 @@ export default function RequestBuilder() {
 						url: apiRequest.request.url,
 					}
 				);
-				
+
 				// Start global metrics monitoring (stays active even if user navigates away)
 				loadTestService.startMonitoring(result.runId);
-				
+
 				navigateToDashboard();
 				setShowLoadTestDialog(false);
 				setPendingLoadTestRequest(null);
@@ -416,7 +416,6 @@ export default function RequestBuilder() {
 		</>
 	);
 }
-
 
 // Re-export types and context for external use
 export { useRequestBuilderContext } from "./context";

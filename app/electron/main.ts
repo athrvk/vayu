@@ -31,11 +31,14 @@ function createWindow() {
 		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
-		titleBarOverlay: process.platform === "darwin" ? {
-			color: nativeTheme.shouldUseDarkColors ? "#1a1a1a" : "#ffffff",
-			symbolColor: nativeTheme.shouldUseDarkColors ? "#ffffff" : "#1a1a1a",
-			height: 40,
-		} : false,
+		titleBarOverlay:
+			process.platform === "darwin"
+				? {
+						color: nativeTheme.shouldUseDarkColors ? "#1a1a1a" : "#ffffff",
+						symbolColor: nativeTheme.shouldUseDarkColors ? "#ffffff" : "#1a1a1a",
+						height: 40,
+					}
+				: false,
 		webPreferences: {
 			nodeIntegration: false,
 			contextIsolation: true,
@@ -76,7 +79,7 @@ function createWindow() {
 			shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
 			themeSource: nativeTheme.themeSource,
 		});
-		
+
 		// Update titlebar overlay color on macOS
 		if (process.platform === "darwin" && mainWindow) {
 			mainWindow.setTitleBarOverlay({
@@ -117,9 +120,7 @@ function createMenu() {
 		// File menu
 		{
 			label: "File",
-			submenu: [
-				isMac ? { role: "close" as const } : { role: "quit" as const },
-			],
+			submenu: [isMac ? { role: "close" as const } : { role: "quit" as const }],
 		},
 		// Edit menu
 		{
@@ -213,7 +214,7 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 	if (!engineSidecar) {
 		return { success: false, error: "Engine sidecar not initialized" };
 	}
-	
+
 	try {
 		await engineSidecar.restart();
 		console.log("[Main] Engine restarted successfully");
@@ -231,7 +232,7 @@ function setupIpcHandlers() {
 	ipcMain.handle("engine:restart", async () => {
 		return await restartEngine();
 	});
-	
+
 	// Handle engine status check
 	ipcMain.handle("engine:status", () => {
 		return {
@@ -294,7 +295,7 @@ app.whenReady().then(async () => {
 
 	// Create application menu
 	createMenu();
-	
+
 	// Start the engine
 	await startEngine();
 

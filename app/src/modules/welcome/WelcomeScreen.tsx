@@ -62,9 +62,7 @@ export default function WelcomeScreen() {
 
 	// Get recent runs (last 3)
 	const recentRuns = useMemo(() => {
-		return runs
-			.sort((a, b) => (b.startTime || 0) - (a.startTime || 0))
-			.slice(0, 3);
+		return runs.sort((a, b) => (b.startTime || 0) - (a.startTime || 0)).slice(0, 3);
 	}, [runs]);
 
 	// Calculate stats
@@ -223,7 +221,9 @@ export default function WelcomeScreen() {
 								<CardContent className="p-4">
 									<div className="flex items-center gap-2 mb-2">
 										<Folder className="w-4 h-4 text-muted-foreground" />
-										<span className="text-xs text-muted-foreground">Collections</span>
+										<span className="text-xs text-muted-foreground">
+											Collections
+										</span>
 									</div>
 									<div className="text-2xl font-bold text-foreground">
 										{stats.collections}
@@ -235,7 +235,9 @@ export default function WelcomeScreen() {
 								<CardContent className="p-4">
 									<div className="flex items-center gap-2 mb-2">
 										<FileText className="w-4 h-4 text-muted-foreground" />
-										<span className="text-xs text-muted-foreground">Requests</span>
+										<span className="text-xs text-muted-foreground">
+											Requests
+										</span>
 									</div>
 									<div className="text-2xl font-bold text-foreground">
 										{stats.requests}
@@ -247,7 +249,9 @@ export default function WelcomeScreen() {
 								<CardContent className="p-4">
 									<div className="flex items-center gap-2 mb-2">
 										<Activity className="w-4 h-4 text-muted-foreground" />
-										<span className="text-xs text-muted-foreground">Total Runs</span>
+										<span className="text-xs text-muted-foreground">
+											Total Runs
+										</span>
 									</div>
 									<div className="text-2xl font-bold text-foreground">
 										{stats.totalRuns}
@@ -259,7 +263,9 @@ export default function WelcomeScreen() {
 								<CardContent className="p-4">
 									<div className="flex items-center gap-2 mb-2">
 										<Rocket className="w-4 h-4 text-muted-foreground" />
-										<span className="text-xs text-muted-foreground">Completed</span>
+										<span className="text-xs text-muted-foreground">
+											Completed
+										</span>
 									</div>
 									<div className="text-2xl font-bold text-foreground">
 										{stats.completedRuns}
@@ -277,9 +283,13 @@ export default function WelcomeScreen() {
 								<CardContent className="p-4">
 									<div className="flex items-center justify-between mb-1">
 										<Gauge className="w-4 h-4 text-primary" />
-										<span className="text-2xl font-bold text-primary">50k+</span>
+										<span className="text-2xl font-bold text-primary">
+											50k+
+										</span>
 									</div>
-									<p className="text-xs text-muted-foreground">Requests per second</p>
+									<p className="text-xs text-muted-foreground">
+										Requests per second
+									</p>
 								</CardContent>
 							</Card>
 
@@ -287,9 +297,13 @@ export default function WelcomeScreen() {
 								<CardContent className="p-4">
 									<div className="flex items-center justify-between mb-1">
 										<Zap className="w-4 h-4 text-primary" />
-										<span className="text-2xl font-bold text-primary">&lt; 1ms</span>
+										<span className="text-2xl font-bold text-primary">
+											&lt; 1ms
+										</span>
 									</div>
-									<p className="text-xs text-muted-foreground">Overhead latency</p>
+									<p className="text-xs text-muted-foreground">
+										Overhead latency
+									</p>
 								</CardContent>
 							</Card>
 						</div>
@@ -323,7 +337,10 @@ export default function WelcomeScreen() {
 														{collection.name}
 													</p>
 													<p className="text-xs text-muted-foreground">
-														{collection.requestCount} {collection.requestCount === 1 ? "request" : "requests"}
+														{collection.requestCount}{" "}
+														{collection.requestCount === 1
+															? "request"
+															: "requests"}
 													</p>
 												</div>
 												<ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0 ml-2" />
@@ -356,19 +373,27 @@ export default function WelcomeScreen() {
 												<div className="flex-1 min-w-0">
 													<div className="flex items-center gap-2 mb-1">
 														<span className="text-xs font-medium px-2 py-0.5 rounded bg-muted">
-															{run.type === "load" ? "Load Test" : "Design"}
+															{run.type === "load"
+																? "Load Test"
+																: "Design"}
 														</span>
 														{run.status === "completed" && (
-															<span className="text-xs text-success">Completed</span>
+															<span className="text-xs text-success">
+																Completed
+															</span>
 														)}
 														{run.status === "stopped" && (
-															<span className="text-xs text-warning">Stopped</span>
+															<span className="text-xs text-warning">
+																Stopped
+															</span>
 														)}
 													</div>
 													{run.startTime && (
 														<p className="text-xs text-muted-foreground flex items-center gap-1">
 															<Clock className="w-3 h-3" />
-															{formatDistanceToNow(run.startTime, { addSuffix: true })}
+															{formatDistanceToNow(run.startTime, {
+																addSuffix: true,
+															})}
 														</p>
 													)}
 												</div>
@@ -444,7 +469,8 @@ export default function WelcomeScreen() {
 								<Rocket className="w-12 h-12 text-primary mx-auto mb-4" />
 								<h3 className="text-xl font-semibold mb-2">Get Started</h3>
 								<p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
-									Create your first collection and start testing APIs with powerful load testing capabilities
+									Create your first collection and start testing APIs with
+									powerful load testing capabilities
 								</p>
 								<div className="flex flex-col sm:flex-row gap-3 justify-center">
 									<Button

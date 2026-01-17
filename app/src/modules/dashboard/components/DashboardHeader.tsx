@@ -45,10 +45,7 @@ export default function DashboardHeader({
 				)}
 				{mode === "completed" && <Badge variant="secondary">Completed</Badge>}
 				{mode === "stopped" && (
-					<Badge
-						variant="outline"
-						className="border-warning text-warning"
-					>
+					<Badge variant="outline" className="border-warning text-warning">
 						Stopped
 					</Badge>
 				)}

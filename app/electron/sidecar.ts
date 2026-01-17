@@ -97,7 +97,11 @@ function readPidFromLock(lockPath: string): number | null {
  * Check lock file and verify if the process is still running
  * Returns true if lock file exists and process is running, false otherwise
  */
-function checkLockFile(lockPath: string): { locked: boolean; pid: number | null; running: boolean } {
+function checkLockFile(lockPath: string): {
+	locked: boolean;
+	pid: number | null;
+	running: boolean;
+} {
 	const pid = readPidFromLock(lockPath);
 	if (pid === null) {
 		return { locked: false, pid: null, running: false };
@@ -264,8 +268,7 @@ export class EngineSidecar {
 		// Check if port is in use by something else
 		if (!(await isPortAvailable(this.port))) {
 			throw new Error(
-				`Port ${this.port} is already in use by another application.\n` +
-					`Please free the port or configure a different port.`
+				`[Sidecar] Port ${this.port} is already in use by another application.`
 			);
 		}
 
@@ -295,7 +298,14 @@ export class EngineSidecar {
 		// Spawn the engine process
 		this.process = spawn(
 			this.binaryPath,
-			["--port", this.port.toString(), "--data-dir", this.dataDir, "--verbose", `${isDev ? "2" : "1"}`],
+			[
+				"--port",
+				this.port.toString(),
+				"--data-dir",
+				this.dataDir,
+				"--verbose",
+				`${isDev ? "2" : "1"}`,
+			],
 			{
 				stdio: ["ignore", "pipe", "pipe"],
 				detached: false,
@@ -307,7 +317,10 @@ export class EngineSidecar {
 		if (this.process.stdout) {
 			this.process.stdout.setEncoding("utf8");
 			this.process.stdout.on("data", (data) => {
-				const lines = data.toString().split("\n").filter((line: string) => line.trim());
+				const lines = data
+					.toString()
+					.split("\n")
+					.filter((line: string) => line.trim());
 				for (const line of lines) {
 					console.log(`[Engine] ${line}`);
 				}
@@ -320,7 +333,10 @@ export class EngineSidecar {
 		if (this.process.stderr) {
 			this.process.stderr.setEncoding("utf8");
 			this.process.stderr.on("data", (data) => {
-				const lines = data.toString().split("\n").filter((line: string) => line.trim());
+				const lines = data
+					.toString()
+					.split("\n")
+					.filter((line: string) => line.trim());
 				for (const line of lines) {
 					console.error(`[Engine] ${line}`);
 				}
@@ -434,7 +450,7 @@ export class EngineSidecar {
 			// Send SIGTERM as fallback (works on Unix, immediate termination on Windows)
 			// On Windows, the HTTP shutdown should have already initiated graceful shutdown
 			if (process.platform !== "win32") {
-			this.process.kill("SIGTERM");
+				this.process.kill("SIGTERM");
 			}
 		});
 	}
@@ -454,14 +470,43 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * Restart the engine process
+	 * Restart the engine process with retry logic and exponential backoff
 	 */
-	async restart(): Promise<void> {
+	async restart(maxRetries: number = 3): Promise<void> {
 		console.log("[Sidecar] Restarting engine...");
-		await this.stop();
-		// Small delay to ensure port is released
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		await this.start();
-		console.log("[Sidecar] Engine restarted successfully");
+
+		let lastError: Error | null = null;
+		const baseDelay = 1000; // Initial delay in milliseconds
+
+		for (let attempt = 0; attempt <= maxRetries; attempt++) {
+			try {
+				if (attempt > 0) {
+					// Calculate exponential delay: baseDelay * 2^(attempt-1)
+					const delay = baseDelay * Math.pow(2, attempt - 1);
+					console.log(
+						`[Sidecar] Retry attempt ${attempt}/${maxRetries} after ${delay}ms delay...`
+					);
+					await new Promise((resolve) => setTimeout(resolve, delay));
+				}
+
+				await this.stop();
+				// Small delay to ensure port is released
+				await new Promise((resolve) => setTimeout(resolve, 500));
+				await this.start();
+				console.log("[Sidecar] Engine restarted successfully");
+				return;
+			} catch (error) {
+				lastError = error instanceof Error ? error : new Error(String(error));
+				console.error(
+					`[Sidecar] Restart attempt ${attempt + 1}/${maxRetries + 1} failed:`,
+					lastError.message
+				);
+
+				// If this was the last attempt, throw the error
+				if (attempt === maxRetries) {
+					throw new Error(`Please close the Application and reopen it.`);
+				}
+			}
+		}
 	}
 }

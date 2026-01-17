@@ -38,7 +38,7 @@ export default function RequestItem({
 
 	const handleClick = () => {
 		if (isDeleting || isRenaming) return;
-		
+
 		// Clear any existing timeout
 		if (clickTimeoutRef.current) {
 			clearTimeout(clickTimeoutRef.current);
@@ -57,13 +57,13 @@ export default function RequestItem({
 	const handleDoubleClick = (e: React.MouseEvent) => {
 		e.stopPropagation();
 		if (isDeleting || isRenaming) return;
-		
+
 		// Clear single click timeout
 		if (clickTimeoutRef.current) {
 			clearTimeout(clickTimeoutRef.current);
 			clickTimeoutRef.current = null;
 		}
-		
+
 		onStartRename?.(request);
 	};
 

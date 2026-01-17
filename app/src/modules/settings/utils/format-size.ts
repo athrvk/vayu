@@ -1,6 +1,6 @@
 /**
  * Size Formatting Utilities
- * 
+ *
  * Converts between bytes and human-readable formats (KB, MB, GB)
  * for display and input in settings.
  */
@@ -21,24 +21,24 @@ export function formatBytes(bytes: number): string {
  */
 export function parseSizeToBytes(sizeStr: string): number | null {
 	if (!sizeStr || sizeStr.trim() === "") return null;
-	
+
 	const trimmed = sizeStr.trim().toUpperCase();
-	
+
 	// If it's just a number, treat as bytes
 	if (/^\d+$/.test(trimmed)) {
 		return parseInt(trimmed, 10);
 	}
-	
+
 	// Extract number and unit - more flexible regex
 	// Matches: "64 MB", "1.5GB", "1024KB", "500 B", "256K", "2M"
 	const match = trimmed.match(/^([\d.]+)\s*([KMGT]?B?)$/);
 	if (!match) return null;
-	
+
 	const value = parseFloat(match[1]);
 	if (isNaN(value) || value < 0) return null;
-	
+
 	const unit = match[2] || "B";
-	
+
 	switch (unit) {
 		case "B":
 		case "":
@@ -64,11 +64,7 @@ export function parseSizeToBytes(sizeStr: string): number | null {
  * Check if a config key is size-related
  */
 export function isSizeConfig(key: string): boolean {
-	const sizeKeys = [
-		"scriptMemoryLimit",
-		"scriptStackSize",
-		"maxJsonFieldSize",
-	];
+	const sizeKeys = ["scriptMemoryLimit", "scriptStackSize", "maxJsonFieldSize"];
 	return sizeKeys.includes(key);
 }
 
@@ -77,7 +73,7 @@ export function isSizeConfig(key: string): boolean {
  */
 export function formatSizeRange(min?: string, max?: string): string | null {
 	if (!min && !max) return null;
-	
+
 	const parts: string[] = [];
 	if (min) {
 		const minBytes = parseInt(min, 10);
@@ -91,6 +87,6 @@ export function formatSizeRange(min?: string, max?: string): string | null {
 			parts.push(`Max: ${formatBytes(maxBytes)}`);
 		}
 	}
-	
+
 	return parts.length > 0 ? parts.join(", ") : null;
 }

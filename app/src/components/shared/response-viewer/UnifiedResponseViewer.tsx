@@ -148,11 +148,11 @@ export default function UnifiedResponseViewer({
 								Object.keys(effectiveRequest.headers).length === 0) &&
 								(!effectiveResponse?.headers ||
 									Object.keys(effectiveResponse.headers).length === 0) && (
-								<div className="py-8 text-center text-muted-foreground">
-									<FileText className="w-6 h-6 mx-auto mb-2 opacity-30" />
-									<p className="text-sm">No headers available</p>
-								</div>
-							)}
+									<div className="py-8 text-center text-muted-foreground">
+										<FileText className="w-6 h-6 mx-auto mb-2 opacity-30" />
+										<p className="text-sm">No headers available</p>
+									</div>
+								)}
 						</div>
 					)}
 				</div>

@@ -50,27 +50,32 @@ export default function LoadTestDashboard() {
 			hasCheckedStatus.current = true;
 
 			// Check if the run is still actually running on the backend
-			apiService.getRunReport(currentRunId).then((report) => {
-				if (report?.metadata?.status) {
-					const status = report.metadata.status;
-					if (status === "completed" || status === "stopped" || status === "failed") {
-						// Run finished while we were away - update state
-						console.log(`Run ${currentRunId} finished while away (status: ${status})`);
-						setFinalReport(report);
-						loadTestService.stopMonitoring();
-					} else if (!loadTestService.isMonitoring(currentRunId)) {
-						// Run is still running but service is not connected - reconnect
-						console.log(`Reconnecting to run ${currentRunId}`);
+			apiService
+				.getRunReport(currentRunId)
+				.then((report) => {
+					if (report?.metadata?.status) {
+						const status = report.metadata.status;
+						if (status === "completed" || status === "stopped" || status === "failed") {
+							// Run finished while we were away - update state
+							console.log(
+								`Run ${currentRunId} finished while away (status: ${status})`
+							);
+							setFinalReport(report);
+							loadTestService.stopMonitoring();
+						} else if (!loadTestService.isMonitoring(currentRunId)) {
+							// Run is still running but service is not connected - reconnect
+							console.log(`Reconnecting to run ${currentRunId}`);
+							loadTestService.startMonitoring(currentRunId);
+						}
+					}
+				})
+				.catch((err) => {
+					console.error("Failed to check run status:", err);
+					// Try to reconnect anyway if not monitoring
+					if (!loadTestService.isMonitoring(currentRunId)) {
 						loadTestService.startMonitoring(currentRunId);
 					}
-				}
-			}).catch((err) => {
-				console.error("Failed to check run status:", err);
-				// Try to reconnect anyway if not monitoring
-				if (!loadTestService.isMonitoring(currentRunId)) {
-					loadTestService.startMonitoring(currentRunId);
-				}
-			});
+				});
 		}
 
 		// Reset the check flag when currentRunId changes
@@ -86,21 +91,30 @@ export default function LoadTestDashboard() {
 			// Fetch the final report to get the actual completion status
 			console.log("Streaming stopped, fetching final report...");
 			setIsLoadingReport(true);
-			apiService.getRunReport(currentRunId).then((report) => {
-				if (report) {
-					setFinalReport(report);
-				}
-			}).catch((err) => {
-				console.error("Failed to fetch final report:", err);
-			}).finally(() => {
-				setIsLoadingReport(false);
-			});
+			apiService
+				.getRunReport(currentRunId)
+				.then((report) => {
+					if (report) {
+						setFinalReport(report);
+					}
+				})
+				.catch((err) => {
+					console.error("Failed to fetch final report:", err);
+				})
+				.finally(() => {
+					setIsLoadingReport(false);
+				});
 		}
 	}, [mode, isStreaming, currentRunId, finalReport, setFinalReport]);
 
 	// Load final report when test completes (with delay and retry)
 	useEffect(() => {
-		if ((mode === "completed" || mode === "stopped") && currentRunId && !finalReport && !isLoadingReport) {
+		if (
+			(mode === "completed" || mode === "stopped") &&
+			currentRunId &&
+			!finalReport &&
+			!isLoadingReport
+		) {
 			// Longer initial delay to allow database writes to complete
 			// This helps avoid "database is locked" issues
 			const delay = loadAttemptRef.current === 0 ? 3000 : 1000;

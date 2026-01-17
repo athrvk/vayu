@@ -195,7 +195,6 @@ export default function VariableInput({
 		return () => document.removeEventListener("keydown", handleEscapeKey);
 	}, []);
 
-
 	// Handle keyboard navigation
 	const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
 		// Arrow key navigation for plain suggestions
@@ -240,7 +239,7 @@ export default function VariableInput({
 				// Keep input focused to prevent blur
 				inputRef.current?.focus();
 				// Forward the key event to the Command component
-				const commandRoot = document.querySelector('[cmdk-root]') as HTMLElement;
+				const commandRoot = document.querySelector("[cmdk-root]") as HTMLElement;
 				if (commandRoot) {
 					const keyEvent = new KeyboardEvent("keydown", {
 						key: e.key,
@@ -288,7 +287,7 @@ export default function VariableInput({
 		}
 		// Check if focus is moving to the popover
 		const relatedTarget = e.relatedTarget as HTMLElement;
-		if (relatedTarget?.closest('[cmdk-item]') || relatedTarget?.closest('[cmdk-list]')) {
+		if (relatedTarget?.closest("[cmdk-item]") || relatedTarget?.closest("[cmdk-list]")) {
 			return;
 		}
 		setTimeout(() => {

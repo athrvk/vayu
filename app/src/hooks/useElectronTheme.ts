@@ -1,6 +1,6 @@
 /**
  * useElectronTheme Hook
- * 
+ *
  * Syncs the app theme with the OS/Electron theme settings.
  * Supports both light/dark mode and color schemes.
  * Falls back gracefully when not running in Electron.
@@ -23,30 +23,33 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 	const [isLoading, setIsLoading] = useState(true);
 
 	// Apply theme to document
-	const applyTheme = useCallback((isDark: boolean, scheme: ColorScheme = colorScheme) => {
-		// Apply dark mode class
-		if (isDark) {
-			document.documentElement.classList.add("dark");
-		} else {
-			document.documentElement.classList.remove("dark");
-		}
-		
-		// Apply color scheme data attribute
-		document.documentElement.setAttribute("data-color-scheme", scheme);
-		
-		onThemeChange?.(isDark);
-	}, [colorScheme, onThemeChange]);
+	const applyTheme = useCallback(
+		(isDark: boolean, scheme: ColorScheme = colorScheme) => {
+			// Apply dark mode class
+			if (isDark) {
+				document.documentElement.classList.add("dark");
+			} else {
+				document.documentElement.classList.remove("dark");
+			}
+
+			// Apply color scheme data attribute
+			document.documentElement.setAttribute("data-color-scheme", scheme);
+
+			onThemeChange?.(isDark);
+		},
+		[colorScheme, onThemeChange]
+	);
 
 	// Initialize theme
 	useEffect(() => {
 		const initTheme = async () => {
 			let source: ThemeSource = "system";
 			let scheme: ColorScheme = "sunset";
-			
+
 			// Load from localStorage
 			const savedSource = localStorage.getItem("vayu-theme-source") as ThemeSource | null;
 			const savedScheme = localStorage.getItem("vayu-color-scheme") as ColorScheme | null;
-			
+
 			if (window.electronAPI) {
 				// Get theme from Electron
 				const theme = await window.electronAPI.getTheme();
@@ -57,7 +60,9 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 				if (savedSource) {
 					source = savedSource;
 					if (source === "system") {
-						const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+						const prefersDark = window.matchMedia(
+							"(prefers-color-scheme: dark)"
+						).matches;
 						applyTheme(prefersDark, savedScheme || scheme);
 					} else {
 						applyTheme(source === "dark", savedScheme || scheme);
@@ -67,11 +72,11 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 					applyTheme(prefersDark, savedScheme || scheme);
 				}
 			}
-			
+
 			if (savedScheme) {
 				scheme = savedScheme;
 			}
-			
+
 			setThemeSource(source);
 			setColorScheme(scheme);
 			setIsLoading(false);
@@ -101,32 +106,38 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 	}, [applyTheme, themeSource, colorScheme]);
 
 	// Function to change theme source (light/dark)
-	const setTheme = useCallback(async (source: ThemeSource) => {
-		setThemeSource(source);
-		
-		if (window.electronAPI) {
-			const theme = await window.electronAPI.setTheme(source);
-			applyTheme(theme.shouldUseDarkColors, colorScheme);
-		} else {
-			// Fallback: manually set theme
-			if (source === "system") {
-				const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-				applyTheme(prefersDark, colorScheme);
+	const setTheme = useCallback(
+		async (source: ThemeSource) => {
+			setThemeSource(source);
+
+			if (window.electronAPI) {
+				const theme = await window.electronAPI.setTheme(source);
+				applyTheme(theme.shouldUseDarkColors, colorScheme);
 			} else {
-				applyTheme(source === "dark", colorScheme);
+				// Fallback: manually set theme
+				if (source === "system") {
+					const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+					applyTheme(prefersDark, colorScheme);
+				} else {
+					applyTheme(source === "dark", colorScheme);
+				}
 			}
-		}
-		// Persist preference
-		localStorage.setItem("vayu-theme-source", source);
-	}, [applyTheme, colorScheme]);
+			// Persist preference
+			localStorage.setItem("vayu-theme-source", source);
+		},
+		[applyTheme, colorScheme]
+	);
 
 	// Function to change color scheme
-	const changeColorScheme = useCallback((scheme: ColorScheme) => {
-		setColorScheme(scheme);
-		const isDark = document.documentElement.classList.contains("dark");
-		applyTheme(isDark, scheme);
-		localStorage.setItem("vayu-color-scheme", scheme);
-	}, [applyTheme]);
+	const changeColorScheme = useCallback(
+		(scheme: ColorScheme) => {
+			setColorScheme(scheme);
+			const isDark = document.documentElement.classList.contains("dark");
+			applyTheme(isDark, scheme);
+			localStorage.setItem("vayu-color-scheme", scheme);
+		},
+		[applyTheme]
+	);
 
 	return { themeSource, setTheme, colorScheme, setColorScheme: changeColorScheme, isLoading };
 }

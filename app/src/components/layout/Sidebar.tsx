@@ -19,7 +19,8 @@ import { useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import ConnectionStatus from "../status/ConnectionStatus";
 
 export default function Sidebar() {
-	const { activeSidebarTab, setActiveSidebarTab, navigateToVariables, navigateToSettings } = useNavigationStore();
+	const { activeSidebarTab, setActiveSidebarTab, navigateToVariables, navigateToSettings } =
+		useNavigationStore();
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
 

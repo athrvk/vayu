@@ -182,7 +182,9 @@ export class ErrorBoundary extends Component<Props, State> {
 									<AlertCircle className="w-6 h-6 text-destructive" />
 									<CardTitle>Something went wrong</CardTitle>
 								</div>
-								<span className="text-xs text-muted-foreground">v{APP_VERSION}</span>
+								<span className="text-xs text-muted-foreground">
+									v{APP_VERSION}
+								</span>
 							</div>
 						</CardHeader>
 						<CardContent className="space-y-4">
@@ -193,7 +195,8 @@ export class ErrorBoundary extends Component<Props, State> {
 							{this.state.error?.stack && (
 								<details className="text-xs">
 									<summary className="cursor-pointer text-muted-foreground mb-2">
-										Error details {process.env.NODE_ENV === "development" && "(dev only)"}
+										Error details{" "}
+										{process.env.NODE_ENV === "development" && "(dev only)"}
 									</summary>
 									<pre className="p-3 bg-muted rounded-md overflow-auto max-h-48 text-muted-foreground whitespace-pre-wrap break-words">
 										{this.state.error.stack}

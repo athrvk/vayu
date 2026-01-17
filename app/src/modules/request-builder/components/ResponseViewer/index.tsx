@@ -13,14 +13,7 @@
  */
 
 import { useState } from "react";
-import {
-	FileText,
-	Copy,
-	Check,
-	Download,
-	Terminal,
-	BarChart3,
-} from "lucide-react";
+import { FileText, Copy, Check, Download, Terminal, BarChart3 } from "lucide-react";
 import {
 	Tabs,
 	TabsList,

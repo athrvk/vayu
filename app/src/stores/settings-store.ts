@@ -31,18 +31,17 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 	restartRequiredKeys: [],
 
 	setSelectedCategory: (category) => set({ selectedCategory: category }),
-	
-	setPendingRestart: (pending, keys = []) => 
+
+	setPendingRestart: (pending, keys = []) =>
 		set({ pendingRestart: pending, restartRequiredKeys: keys }),
-	
-	addRestartRequiredKey: (key) => 
+
+	addRestartRequiredKey: (key) =>
 		set((state) => ({
 			pendingRestart: true,
 			restartRequiredKeys: state.restartRequiredKeys.includes(key)
 				? state.restartRequiredKeys
 				: [...state.restartRequiredKeys, key],
 		})),
-	
-	clearRestartRequired: () => 
-		set({ pendingRestart: false, restartRequiredKeys: [] }),
+
+	clearRestartRequired: () => set({ pendingRestart: false, restartRequiredKeys: [] }),
 }));

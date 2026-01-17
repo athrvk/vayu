@@ -74,7 +74,9 @@ export default function LoadTestConfigDialog({
 	// Data capture options
 	const [sampleRate, setSampleRate] = useState(saved.sampleRate ?? 10);
 	const [slowThreshold, setSlowThreshold] = useState(saved.slowThreshold ?? 1000);
-	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(saved.saveTimingBreakdown ?? true);
+	const [saveTimingBreakdown, setSaveTimingBreakdown] = useState(
+		saved.saveTimingBreakdown ?? true
+	);
 	const [comment, setComment] = useState(""); // Don't persist comment
 
 	const handleStart = () => {

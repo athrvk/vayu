@@ -5,18 +5,8 @@
  */
 
 import { useState, useMemo } from "react";
-import {
-	Terminal,
-	AlertCircle,
-	ChevronDown,
-	ChevronRight,
-} from "lucide-react";
-import {
-	Badge,
-	Collapsible,
-	CollapsibleContent,
-	CollapsibleTrigger,
-} from "@/components/ui";
+import { Terminal, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
+import { Badge, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
 
 export interface ConsoleOutputProps {
 	logs: string[];

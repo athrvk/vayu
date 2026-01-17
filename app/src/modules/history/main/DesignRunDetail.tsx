@@ -86,10 +86,11 @@ export default function DesignRunDetail({ report, onBack, runId }: DesignRunDeta
 													? "destructive"
 													: "outline"
 										}
-										className={`text-xs capitalize ${report.metadata.status === "stopped"
-											? "border-orange-500 text-orange-600 dark:text-orange-400"
-											: ""
-											}`}
+										className={`text-xs capitalize ${
+											report.metadata.status === "stopped"
+												? "border-orange-500 text-orange-600 dark:text-orange-400"
+												: ""
+										}`}
 									>
 										{report.metadata.status}
 									</Badge>
