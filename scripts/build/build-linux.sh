@@ -444,18 +444,18 @@ main() {
     echo ""
     
     if [[ "$BUILD_MODE" == "dev" ]]; then
-        # Calculate relative path to app dir from current location for easy copy-paste
-        local current_dir=$(pwd)
+        # Calculate relative path from project root (so it works from project root)
         local relative_app_path
         if command -v realpath &>/dev/null; then
-            relative_app_path=$(realpath --relative-to="$current_dir" "$APP_DIR" 2>/dev/null || echo "$APP_DIR")
+            relative_app_path=$(realpath --relative-to="$PROJECT_ROOT" "$APP_DIR" 2>/dev/null || echo "app")
         else
             # Fallback: use Python to calculate relative path
-            relative_app_path=$(python3 -c "import os; print(os.path.relpath('$APP_DIR', '$current_dir'))" 2>/dev/null || echo "$APP_DIR")
+            relative_app_path=$(python3 -c "import os; print(os.path.relpath('$APP_DIR', '$PROJECT_ROOT'))" 2>/dev/null || echo "app")
         fi
         
         echo "To start the Electron app in development mode:"
         echo ""
+        # Show path relative to project root for clarity
         echo "    cd $relative_app_path; pnpm run electron:dev"
         echo ""
     else
@@ -498,23 +498,25 @@ main() {
             echo ""
             
             if [[ "$has_appimage" == true ]] && [[ ${#appimage_files[@]} -gt 0 ]]; then
-                local appimage_name=$(basename "${appimage_files[0]}")
+                local appimage_file="${appimage_files[0]}"
+                local appimage_name=$(basename "$appimage_file")
                 echo "     AppImage (portable, no installation needed):"
+                echo "       cd $(dirname "$appimage_file")"
                 echo "       chmod +x \"$appimage_name\" && ./\"$appimage_name\""
                 echo ""
             fi
             
             if [[ "$has_deb" == true ]] && [[ ${#deb_files[@]} -gt 0 ]]; then
-                local deb_name=$(basename "${deb_files[0]}")
+                local deb_file="${deb_files[0]}"
                 echo "     Debian/Ubuntu (.deb package):"
-                echo "       sudo dpkg -i \"$deb_name\""
+                echo "       sudo dpkg -i \"$deb_file\""
                 echo ""
             fi
             
             if [[ "$has_rpm" == true ]] && [[ ${#rpm_files[@]} -gt 0 ]]; then
-                local rpm_name=$(basename "${rpm_files[0]}")
+                local rpm_file="${rpm_files[0]}"
                 echo "     Red Hat/Fedora (.rpm package):"
-                echo "       sudo rpm -i \"$rpm_name\""
+                echo "       sudo rpm -i \"$rpm_file\""
                 echo ""
             fi
         else

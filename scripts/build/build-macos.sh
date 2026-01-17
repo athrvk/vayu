@@ -450,18 +450,18 @@ main() {
     echo ""
     
     if [[ "$BUILD_MODE" == "dev" ]]; then
-        # Calculate relative path to app dir from current location for easy copy-paste
-        local current_dir=$(pwd)
+        # Calculate relative path from project root (so it works from project root)
         local relative_app_path
         if command -v realpath &>/dev/null; then
-            relative_app_path=$(realpath --relative-to="$current_dir" "$APP_DIR" 2>/dev/null || echo "$APP_DIR")
+            relative_app_path=$(realpath --relative-to="$PROJECT_ROOT" "$APP_DIR" 2>/dev/null || echo "app")
         else
             # Fallback: use Python to calculate relative path
-            relative_app_path=$(python3 -c "import os; print(os.path.relpath('$APP_DIR', '$current_dir'))" 2>/dev/null || echo "$APP_DIR")
+            relative_app_path=$(python3 -c "import os; print(os.path.relpath('$APP_DIR', '$PROJECT_ROOT'))" 2>/dev/null || echo "app")
         fi
         
         echo "To start the Electron app in development mode:"
         echo ""
+        # Show path relative to project root for clarity
         echo "    cd $relative_app_path; pnpm run electron:dev"
         echo ""
     else
