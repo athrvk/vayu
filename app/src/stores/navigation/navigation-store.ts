@@ -11,7 +11,6 @@
 
 import { create } from "zustand";
 import type { SidebarTab, MainScreen } from "@/types";
-import { useVariablesStore } from "../variables-store";
 
 export interface NavigationContext {
 	screen: MainScreen;
