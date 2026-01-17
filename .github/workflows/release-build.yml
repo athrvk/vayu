@@ -51,10 +51,19 @@ jobs:
           path: |
             ${{ env.VCPKG_DIR }}/installed
             ${{ env.VCPKG_DIR }}/packages
-            ~/.cache/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-v2
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-v3
           restore-keys: |
             vcpkg-${{ runner.os }}-
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/vcpkg/archives
+            ~/AppData/Local/vcpkg/archives
+          key: vcpkg-archives-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-v1
+          restore-keys: |
+            vcpkg-archives-${{ runner.os }}-
 
       - name: Bootstrap vcpkg
         run: |
