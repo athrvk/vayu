@@ -33,9 +33,8 @@ jobs:
           version: 9
 
       - name: Ensure artifacts dir
-        run: |
-          mkdir -p "${{ env.ARTIFACTS_DIR }}"
-
+        run: mkdir -p "${{ env.ARTIFACTS_DIR }}"
+        shell: bash
 
       - name: Cache vcpkg
         uses: actions/cache@v4
@@ -44,19 +43,23 @@ jobs:
             ${{ env.VCPKG_DIR }}/installed
             ${{ env.VCPKG_DIR }}/packages
             ${{ env.VCPKG_DIR }}/buildtrees
-          key: vcpkg-${{ runner.os }}-v1
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-v1
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
 
       - name: Bootstrap vcpkg
         run: |
           if [ ! -d "${{ env.VCPKG_DIR }}" ]; then
-            # Clone full history to ensure baseline commits are available
             git clone https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_DIR }}"
           else
-            # Update to latest vcpkg
             git -C "${{ env.VCPKG_DIR }}" fetch --all || true
             git -C "${{ env.VCPKG_DIR }}" reset --hard origin/master || true
           fi
-          if [ "${{ runner.os }}" = "Linux" ]; then "${{ env.VCPKG_DIR }}"/bootstrap-vcpkg.sh; else pwsh -NoProfile -Command "${{ env.VCPKG_DIR }}\bootstrap-vcpkg.bat"; fi
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            "${{ env.VCPKG_DIR }}"/bootstrap-vcpkg.sh
+          else
+            pwsh -NoProfile -Command "${{ env.VCPKG_DIR }}\bootstrap-vcpkg.bat"
+          fi
         shell: bash
 
       - name: Cache pnpm store
@@ -66,71 +69,72 @@ jobs:
             ~/.pnpm-store
             ~/.cache/pnpm
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
 
       - name: Install dependencies (app)
-        run: |
-          cd app
-          pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
+        working-directory: app
         shell: bash
 
       - name: Run frontend unit tests
-        run: |
-          cd app
-          pnpm test --if-present
+        run: pnpm test --if-present
+        working-directory: app
         shell: bash
 
       - name: Build and run engine unit tests (Linux)
         if: runner.os == 'Linux'
         run: |
-          # Ensure build tools are available
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ninja-build build-essential pkg-config ca-certificates
 
-          cmake -S engine -B engine/build-test -GNinja \
+          # Build engine with tests into build-release (reused by build script)
+          cmake -S engine -B engine/build-release -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_DIR }}/scripts/buildsystems/vcpkg.cmake \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DVCPKG_MANIFEST_MODE=ON \
             -DVAYU_BUILD_TESTS=ON \
             -DVAYU_BUILD_ENGINE=ON
-          cmake --build engine/build-test -j $(nproc)
-          ctest --test-dir engine/build-test --output-on-failure -j $(nproc)
+          cmake --build engine/build-release -j $(nproc)
+          ctest --test-dir engine/build-release --output-on-failure -j $(nproc)
         shell: bash
 
       - name: Build and run engine unit tests (Windows)
         if: runner.os == 'Windows'
         run: |
-          pwsh -NoProfile -Command {
-            $vcpkg = "${{ env.VCPKG_DIR }}"
-            cmake -S engine -B engine/build-test -G "Visual Studio 17 2022" -A x64 `
-              -DCMAKE_BUILD_TYPE=Release `
-              -DCMAKE_TOOLCHAIN_FILE="$vcpkg\scripts\buildsystems\vcpkg.cmake" `
-              -DVCPKG_TARGET_TRIPLET=x64-windows `
-              -DVCPKG_MANIFEST_MODE=ON `
-              -DVAYU_BUILD_TESTS=ON `
-              -DVAYU_BUILD_ENGINE=ON
-            cmake --build engine/build-test --config Release --parallel
-            ctest --test-dir engine/build-test --output-on-failure
-          }
+          # Build engine with tests into build-release (reused by build script)
+          cmake -S engine -B engine/build-release -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_DIR }}\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DVCPKG_MANIFEST_MODE=ON `
+            -DVAYU_BUILD_TESTS=ON `
+            -DVAYU_BUILD_ENGINE=ON
+          cmake --build engine/build-release --config Release --parallel
+          ctest --test-dir engine/build-release --output-on-failure
         shell: pwsh
 
-      - name: Run build script (Linux)
+      - name: Build and package app (Linux)
         if: runner.os == 'Linux'
         run: |
           chmod +x scripts/build/build-linux.sh
-          scripts/build/build-linux.sh prod --vcpkg-root "${{ env.VCPKG_DIR }}" --artifacts "${{ env.ARTIFACTS_DIR }}"
+          # Skip engine build (-a flag) - reuse binary from test step
+          scripts/build/build-linux.sh prod -a --vcpkg-root "${{ env.VCPKG_DIR }}" --artifacts "${{ env.ARTIFACTS_DIR }}"
         shell: bash
 
-      - name: Run build script (Windows)
+      - name: Build and package app (Windows)
         if: runner.os == 'Windows'
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -Command "& { .\scripts\build\build-windows.ps1 -BuildMode prod -VcpkgRootParam '${{ env.VCPKG_DIR }}' -ArtifactsDirParam '${{ env.ARTIFACTS_DIR }}' }"
+          # Skip engine build (-App flag) - reuse binary from test step
+          .\scripts\build\build-windows.ps1 -BuildMode prod -App -VcpkgRootParam "${{ env.VCPKG_DIR }}" -ArtifactsDirParam "${{ env.ARTIFACTS_DIR }}"
         shell: pwsh
 
       - name: List artifacts
         run: |
           echo "Artifacts for ${{ matrix.os }}:"
           ls -la "${{ env.ARTIFACTS_DIR }}" || true
+        shell: bash
 
       - name: Upload artifacts to Release
         uses: softprops/action-gh-release@v1
