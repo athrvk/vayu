@@ -30,7 +30,7 @@ jobs:
       - name: Setup pnpm (latest)
         uses: pnpm/action-setup@v2
         with:
-          version: 9
+          version: 10
 
       - name: Ensure artifacts dir
         run: mkdir -p "${{ env.ARTIFACTS_DIR }}"
