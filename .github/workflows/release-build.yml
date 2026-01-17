@@ -15,12 +15,21 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/${{ matrix.os }}
       VCPKG_DIR: ${{ github.workspace }}/.github/vcpkg
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set artifacts directory
+        id: set-artifacts
+        run: |
+          ARTIFACTS_DIR="${{ github.workspace }}/artifacts/${{ matrix.os }}"
+          # Normalize path for Windows (convert backslashes to forward slashes)
+          ARTIFACTS_DIR="${ARTIFACTS_DIR//\\//}"
+          echo "ARTIFACTS_DIR=$ARTIFACTS_DIR" >> $GITHUB_ENV
+          echo "dir=$ARTIFACTS_DIR" >> $GITHUB_OUTPUT
+        shell: bash
 
       - name: Setup Node.js (20)
         uses: actions/setup-node@v4
@@ -135,12 +144,16 @@ jobs:
       - name: List artifacts
         run: |
           echo "Artifacts for ${{ matrix.os }}:"
-          ls -la "${{ env.ARTIFACTS_DIR }}" || true
+          ls -la "${{ steps.set-artifacts.outputs.dir }}" || true
         shell: bash
 
       - name: Upload artifacts to Release
         uses: softprops/action-gh-release@v1
         with:
-          files: ${{ env.ARTIFACTS_DIR }}/*
+          files: |
+            ${{ steps.set-artifacts.outputs.dir }}/*.exe
+            ${{ steps.set-artifacts.outputs.dir }}/*.AppImage
+            ${{ steps.set-artifacts.outputs.dir }}/*.deb
+            ${{ steps.set-artifacts.outputs.dir }}/*.rpm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
