@@ -8,6 +8,7 @@
  */
 
 #include <string>
+#include <cstdint>
 
 #include "vayu/version.hpp"
 
