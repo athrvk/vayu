@@ -35,6 +35,8 @@ struct ScriptContext {
     const Request* request = nullptr;
     const Response* response = nullptr;
     Environment* environment = nullptr;
+    Environment* globals = nullptr;
+    Environment* collectionVariables = nullptr;
 };
 
 /**

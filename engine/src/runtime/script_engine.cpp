@@ -59,6 +59,8 @@ struct ContextData {
     const Request* request = nullptr;
     const Response* response = nullptr;
     Environment* environment = nullptr;
+    Environment* globals = nullptr;
+    Environment* collectionVariables = nullptr;
     bool has_error = false;
     std::string error_message;
 };
@@ -826,6 +828,98 @@ void setup_pm_environment(JSContext* ctx, JSValue pm) {
     JS_SetPropertyStr(ctx, pm, "environment", env);
 }
 
+JSValue js_pm_globals_get(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_UNDEFINED;
+    }
+
+    auto* data = get_context_data(ctx);
+    if (!data->globals) {
+        return JS_UNDEFINED;
+    }
+
+    std::string key = js_to_string(ctx, argv[0]);
+    auto it = data->globals->find(key);
+    if (it != data->globals->end() && it->second.enabled) {
+        return JS_NewString(ctx, it->second.value.c_str());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue js_pm_globals_set(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 2) {
+        return JS_UNDEFINED;
+    }
+
+    auto* data = get_context_data(ctx);
+    if (!data->globals) {
+        return JS_UNDEFINED;
+    }
+
+    std::string key = js_to_string(ctx, argv[0]);
+    std::string value = js_to_string(ctx, argv[1]);
+
+    (*data->globals)[key] = Variable{value, false, true};
+
+    return JS_UNDEFINED;
+}
+
+void setup_pm_globals(JSContext* ctx, JSValue pm) {
+    JSValue globals = JS_NewObject(ctx);
+
+    JS_SetPropertyStr(ctx, globals, "get", JS_NewCFunction(ctx, js_pm_globals_get, "get", 1));
+    JS_SetPropertyStr(ctx, globals, "set", JS_NewCFunction(ctx, js_pm_globals_set, "set", 2));
+
+    JS_SetPropertyStr(ctx, pm, "globals", globals);
+}
+
+JSValue js_pm_collectionVariables_get(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_UNDEFINED;
+    }
+
+    auto* data = get_context_data(ctx);
+    if (!data->collectionVariables) {
+        return JS_UNDEFINED;
+    }
+
+    std::string key = js_to_string(ctx, argv[0]);
+    auto it = data->collectionVariables->find(key);
+    if (it != data->collectionVariables->end() && it->second.enabled) {
+        return JS_NewString(ctx, it->second.value.c_str());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue js_pm_collectionVariables_set(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 2) {
+        return JS_UNDEFINED;
+    }
+
+    auto* data = get_context_data(ctx);
+    if (!data->collectionVariables) {
+        return JS_UNDEFINED;
+    }
+
+    std::string key = js_to_string(ctx, argv[0]);
+    std::string value = js_to_string(ctx, argv[1]);
+
+    (*data->collectionVariables)[key] = Variable{value, false, true};
+
+    return JS_UNDEFINED;
+}
+
+void setup_pm_collectionVariables(JSContext* ctx, JSValue pm) {
+    JSValue collectionVariables = JS_NewObject(ctx);
+
+    JS_SetPropertyStr(ctx, collectionVariables, "get", JS_NewCFunction(ctx, js_pm_collectionVariables_get, "get", 1));
+    JS_SetPropertyStr(ctx, collectionVariables, "set", JS_NewCFunction(ctx, js_pm_collectionVariables_set, "set", 2));
+
+    JS_SetPropertyStr(ctx, pm, "collectionVariables", collectionVariables);
+}
+
 void setup_pm_object(JSContext* ctx) {
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue pm = JS_NewObject(ctx);
@@ -844,6 +938,12 @@ void setup_pm_object(JSContext* ctx) {
 
     // pm.environment
     setup_pm_environment(ctx, pm);
+
+    // pm.globals
+    setup_pm_globals(ctx, pm);
+
+    // pm.collectionVariables
+    setup_pm_collectionVariables(ctx, pm);
 
     JS_SetPropertyStr(ctx, global, "pm", pm);
     JS_FreeValue(ctx, global);
@@ -940,6 +1040,8 @@ public:
         ctx_data.request = ctx.request;
         ctx_data.response = ctx.response;
         ctx_data.environment = ctx.environment;
+        ctx_data.globals = ctx.globals;
+        ctx_data.collectionVariables = ctx.collectionVariables;
         JS_SetContextOpaque(js_ctx, &ctx_data);
 
         // Refresh pm.request and pm.response with new data

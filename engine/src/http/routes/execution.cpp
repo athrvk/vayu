@@ -13,6 +13,33 @@
 
 namespace vayu::http::routes {
 
+// Helper function to parse variables JSON string to Environment
+vayu::Environment parse_variables_json(const std::string& json_str) {
+    vayu::Environment env;
+    if (json_str.empty()) {
+        return env;
+    }
+
+    try {
+        auto json = nlohmann::json::parse(json_str);
+        if (json.is_object()) {
+            for (auto& [key, value] : json.items()) {
+                if (value.is_object()) {
+                    std::string var_value = value.value("value", "");
+                    bool enabled = value.value("enabled", true);
+                    bool secret = value.value("secret", false);
+                    if (enabled) {
+                        env[key] = vayu::Variable{var_value, secret, enabled};
+                    }
+                }
+            }
+        }
+    } catch (const std::exception&) {
+        // Return empty environment on parse error
+    }
+    return env;
+}
+
 void register_execution_routes(RouteContext& ctx) {
     /**
      * POST /request
@@ -102,7 +129,36 @@ void register_execution_routes(RouteContext& ctx) {
                 vayu::core::constants::script_engine::ENABLE_CONSOLE);
 
             vayu::runtime::ScriptEngine script_engine(script_config);
+            
+            // Load variables from database
             vayu::Environment env;
+            vayu::Environment globals;
+            vayu::Environment collectionVariables;
+
+            // Load environment variables if environmentId is provided
+            if (run.environment_id.has_value()) {
+                auto db_env = ctx.db.get_environment(*run.environment_id);
+                if (db_env) {
+                    env = parse_variables_json(db_env->variables);
+                }
+            }
+
+            // Load global variables
+            auto db_globals = ctx.db.get_globals();
+            if (db_globals) {
+                globals = parse_variables_json(db_globals->variables);
+            }
+
+            // Load collection variables if requestId is provided
+            if (run.request_id.has_value()) {
+                auto db_request = ctx.db.get_request(*run.request_id);
+                if (db_request && !db_request->collection_id.empty()) {
+                    auto db_collection = ctx.db.get_collection(db_request->collection_id);
+                    if (db_collection) {
+                        collectionVariables = parse_variables_json(db_collection->variables);
+                    }
+                }
+            }
 
             // Track script results for response
             vayu::ScriptResult pre_script_result;
@@ -115,8 +171,12 @@ void register_execution_routes(RouteContext& ctx) {
             // Execute pre-request script if provided
             if (!pre_request_script.empty()) {
                 try {
-                    pre_script_result =
-                        script_engine.execute_prerequest(pre_request_script, request, env);
+                    vayu::runtime::ScriptContext script_ctx;
+                    script_ctx.request = &request;
+                    script_ctx.environment = &env;
+                    script_ctx.globals = &globals;
+                    script_ctx.collectionVariables = &collectionVariables;
+                    pre_script_result = script_engine.execute(pre_request_script, script_ctx);
 
                     if (!pre_script_result.success) {
                         pre_script_failed = true;
@@ -248,8 +308,13 @@ void register_execution_routes(RouteContext& ctx) {
             // Execute post-request (test) script if provided
             if (!post_request_script.empty()) {
                 try {
-                    post_script_result = script_engine.execute_test(
-                        post_request_script, request, response_result.value(), env);
+                    vayu::runtime::ScriptContext script_ctx;
+                    script_ctx.request = &request;
+                    script_ctx.response = &response_result.value();
+                    script_ctx.environment = &env;
+                    script_ctx.globals = &globals;
+                    script_ctx.collectionVariables = &collectionVariables;
+                    post_script_result = script_engine.execute(post_request_script, script_ctx);
 
                     if (!post_script_result.success) {
                         vayu::utils::log_warning("Post-request script failed: " +

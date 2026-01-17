@@ -261,6 +261,71 @@ nlohmann::json get_script_completions() {
                            {"sortText", "1_pm_variables_set"}});
 
     // ========================================
+    // pm.globals - Global variables
+    // ========================================
+    completions.push_back(
+        {{"label", "pm.globals"},
+         {"kind", KIND_VARIABLE},
+         {"insertText", "pm.globals"},
+         {"detail", "Globals object"},
+         {"documentation",
+          "Access and modify global variables. Changes persist to global variables."},
+         {"sortText", "0_pm_globals"}});
+
+    completions.push_back({{"label", "pm.globals.get"},
+                           {"kind", KIND_FUNCTION},
+                           {"insertText", "pm.globals.get(\"${1:variable}\")"},
+                           {"insertTextRules", INSERT_AS_SNIPPET},
+                           {"detail", "pm.globals.get(name: string): string | undefined"},
+                           {"documentation",
+                            "Get a global variable value by name.\n\nExample:\nconst apiKey = "
+                            "pm.globals.get('api_key');"},
+                           {"sortText", "1_pm_globals_get"}});
+
+    completions.push_back(
+        {{"label", "pm.globals.set"},
+         {"kind", KIND_FUNCTION},
+         {"insertText", "pm.globals.set(\"${1:variable}\", ${2:value})"},
+         {"insertTextRules", INSERT_AS_SNIPPET},
+         {"detail", "pm.globals.set(name: string, value: any): void"},
+         {"documentation",
+          "Set a global variable. The value will be persisted.\n\nExample:\npm.globals.set('api_key', 'new_key');"},
+         {"sortText", "1_pm_globals_set"}});
+
+    // ========================================
+    // pm.collectionVariables - Collection variables
+    // ========================================
+    completions.push_back(
+        {{"label", "pm.collectionVariables"},
+         {"kind", KIND_VARIABLE},
+         {"insertText", "pm.collectionVariables"},
+         {"detail", "CollectionVariables object"},
+         {"documentation",
+          "Access and modify collection variables. Changes persist to the collection."},
+         {"sortText", "0_pm_collectionVariables"}});
+
+    completions.push_back(
+        {{"label", "pm.collectionVariables.get"},
+         {"kind", KIND_FUNCTION},
+         {"insertText", "pm.collectionVariables.get(\"${1:variable}\")"},
+         {"insertTextRules", INSERT_AS_SNIPPET},
+         {"detail", "pm.collectionVariables.get(name: string): string | undefined"},
+         {"documentation",
+          "Get a collection variable value by name.\n\nExample:\nconst baseUrl = "
+          "pm.collectionVariables.get('base_url');"},
+         {"sortText", "1_pm_collectionVariables_get"}});
+
+    completions.push_back(
+        {{"label", "pm.collectionVariables.set"},
+         {"kind", KIND_FUNCTION},
+         {"insertText", "pm.collectionVariables.set(\"${1:variable}\", ${2:value})"},
+         {"insertTextRules", INSERT_AS_SNIPPET},
+         {"detail", "pm.collectionVariables.set(name: string, value: any): void"},
+         {"documentation",
+          "Set a collection variable. The value will be persisted.\n\nExample:\npm.collectionVariables.set('base_url', 'https://api.example.com');"},
+         {"sortText", "1_pm_collectionVariables_set"}});
+
+    // ========================================
     // console - Console output
     // ========================================
     completions.push_back({{"label", "console.log"},
