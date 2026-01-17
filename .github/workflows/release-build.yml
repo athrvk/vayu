@@ -51,8 +51,8 @@ jobs:
           path: |
             ${{ env.VCPKG_DIR }}/installed
             ${{ env.VCPKG_DIR }}/packages
-            ${{ env.VCPKG_DIR }}/buildtrees
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-v1
+            ~/.cache/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-v2
           restore-keys: |
             vcpkg-${{ runner.os }}-
 
