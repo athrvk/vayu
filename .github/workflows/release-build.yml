@@ -49,7 +49,9 @@ jobs:
 
       - name: Bootstrap vcpkg
         run: |
-          if [ ! -d "${{ env.VCPKG_DIR }}" ]; then
+          # Check for bootstrap script, not just directory (cache may restore partial dir)
+          if [ ! -f "${{ env.VCPKG_DIR }}/bootstrap-vcpkg.sh" ]; then
+            rm -rf "${{ env.VCPKG_DIR }}"
             git clone https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_DIR }}"
           else
             git -C "${{ env.VCPKG_DIR }}" fetch --all || true
