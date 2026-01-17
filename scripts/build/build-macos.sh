@@ -33,6 +33,7 @@ BUILD_MODE="prod"
 SKIP_ENGINE=false
 SKIP_APP=false
 CLEAN_BUILD=false
+VERBOSE_OUTPUT=false
 VCPKG_ROOT_OVERRIDE=""
 ARTIFACTS_DIR=""
 
@@ -53,6 +54,7 @@ show_help() {
     echo ""
     echo "Other Options:"
     echo "  --clean             Clean build directories before building"
+    echo "  -v, --verbose       Show detailed output when build fails"
     echo "  --vcpkg-root PATH   Override vcpkg root directory"
     echo "  --artifacts PATH    Copy build artifacts to this directory (for CI)"
     echo "  -h, --help          Show this help message"
@@ -90,6 +92,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --clean)
             CLEAN_BUILD=true
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE_OUTPUT=true
             shift
             ;;
         --vcpkg-root)
@@ -210,20 +216,87 @@ build_engine() {
     
     # Configure CMake
     info "Configuring CMake..."
-    cmake -GNinja \
-          -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-          -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
-          -DVCPKG_MANIFEST_MODE=ON \
-          -DVAYU_BUILD_TESTS=OFF \
-          -DVAYU_BUILD_CLI=OFF \
-          -DVAYU_BUILD_ENGINE=ON \
-          ..
+    if [[ "$VERBOSE_OUTPUT" == true ]]; then
+        # In verbose mode, show all output
+        cmake -GNinja \
+              -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
+              -DVCPKG_MANIFEST_MODE=ON \
+              -DVAYU_BUILD_TESTS=OFF \
+              -DVAYU_BUILD_CLI=OFF \
+              -DVAYU_BUILD_ENGINE=ON \
+              .. 2>&1 | tee /tmp/cmake_config_output.log
+        CMAKE_CONFIG_EXIT=${PIPESTATUS[0]}
+    else
+        # In normal mode, capture output silently
+        cmake -GNinja \
+              -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
+              -DVCPKG_MANIFEST_MODE=ON \
+              -DVAYU_BUILD_TESTS=OFF \
+              -DVAYU_BUILD_CLI=OFF \
+              -DVAYU_BUILD_ENGINE=ON \
+              .. > /tmp/cmake_config_output.log 2>&1
+        CMAKE_CONFIG_EXIT=$?
+    fi
+    
+    if [[ $CMAKE_CONFIG_EXIT -ne 0 ]]; then
+        if [[ "$VERBOSE_OUTPUT" == true ]]; then
+            echo ""
+            echo "╔════════════════════════════════════════╗"
+            echo "║   CMake Configuration Failed!         ║"
+            echo "╚════════════════════════════════════════╝"
+            echo ""
+            echo "CMake output:"
+            cat /tmp/cmake_config_output.log
+            echo ""
+        fi
+        error "CMake configuration failed with exit code $CMAKE_CONFIG_EXIT"
+    fi
     
     # Build
     info "Building..."
     local cores=$(sysctl -n hw.physicalcpu 2>/dev/null || echo 4)
-    cmake --build . -j "$cores"
+    if [[ "$VERBOSE_OUTPUT" == true ]]; then
+        # In verbose mode, show output in real-time
+        cmake --build . -j "$cores" 2>&1 | tee /tmp/cmake_build_output.log
+        CMAKE_BUILD_EXIT=${PIPESTATUS[0]}
+    else
+        # In normal mode, capture silently
+        cmake --build . -j "$cores" > /tmp/cmake_build_output.log 2>&1
+        CMAKE_BUILD_EXIT=$?
+    fi
+    
+    if [[ $CMAKE_BUILD_EXIT -ne 0 ]]; then
+        if [[ "$VERBOSE_OUTPUT" == true ]]; then
+            echo ""
+            echo "╔════════════════════════════════════════╗"
+            echo "║   Build Failed!                        ║"
+            echo "╚════════════════════════════════════════╝"
+            echo ""
+            
+            # Extract and highlight error lines
+            echo "Error summary (lines containing 'error' or 'failed'):"
+            echo ""
+            grep -i "error\|failed" /tmp/cmake_build_output.log | head -20 || true
+            echo ""
+            
+            # Show last 50 lines for context
+            echo "Last 50 lines of build output:"
+            echo ""
+            tail -50 /tmp/cmake_build_output.log | while IFS= read -r line; do
+                if echo "$line" | grep -qi "error\|failed"; then
+                    echo -e "${RED}$line${NC}"
+                else
+                    echo "$line"
+                fi
+            done
+            echo ""
+        fi
+        error "Build failed with exit code $CMAKE_BUILD_EXIT"
+    fi
     
     # Verify binary
     if [[ ! -f "$BUILD_DIR/vayu-engine" ]]; then
