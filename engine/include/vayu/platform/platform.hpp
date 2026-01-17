@@ -49,6 +49,13 @@ namespace vayu::platform {
  */
 int get_process_id();
 
+/**
+ * @brief Check if a process with the given PID is still running
+ * @param pid Process ID to check
+ * @return true if process is running, false otherwise
+ */
+bool is_process_running(int pid);
+
 // ============================================================================
 // File Locking (Single Instance)
 // ============================================================================
@@ -82,6 +89,14 @@ bool acquire_file_lock(const std::string& path, LockHandle& handle);
  * @return true on success
  */
 bool write_pid_to_lock(LockHandle handle);
+
+/**
+ * @brief Read PID from a lock file
+ * @param path Path to the lock file
+ * @param pid Output parameter for the PID
+ * @return true if PID was successfully read, false otherwise
+ */
+bool read_pid_from_lock(const std::string& path, int& pid);
 
 /**
  * @brief Release a previously acquired file lock

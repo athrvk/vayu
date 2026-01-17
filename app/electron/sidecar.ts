@@ -3,7 +3,7 @@
  * @brief Manages the C++ engine sidecar process lifecycle
  */
 
-import { spawn, ChildProcess } from "child_process";
+import { spawn, ChildProcess, execSync } from "child_process";
 import { app } from "electron";
 import path from "path";
 import fs from "fs";
@@ -41,6 +41,72 @@ async function isEngineRunning(port: number): Promise<boolean> {
 	}
 }
 
+/**
+ * Check if a process is still running by PID
+ * Cross-platform implementation
+ */
+function isProcessRunning(pid: number): boolean {
+	try {
+		if (process.platform === "win32") {
+			// On Windows, use tasklist to check if process exists
+			try {
+				// Try to get process info - if it fails, process doesn't exist
+				execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { stdio: "ignore" });
+				return true;
+			} catch {
+				return false;
+			}
+		} else {
+			// On Unix (macOS, Linux), send signal 0 to check if process exists
+			// This doesn't actually send a signal, just checks existence
+			process.kill(pid, 0);
+			return true;
+		}
+	} catch (err: any) {
+		// If errno is ESRCH, process doesn't exist
+		// If errno is EPERM, process exists but we don't have permission (still running)
+		if (err.code === "ESRCH") {
+			return false;
+		}
+		// EPERM or other errors mean process might exist
+		return err.code === "EPERM";
+	}
+}
+
+/**
+ * Read PID from lock file
+ */
+function readPidFromLock(lockPath: string): number | null {
+	try {
+		if (!fs.existsSync(lockPath)) {
+			return null;
+		}
+
+		const content = fs.readFileSync(lockPath, "utf-8").trim();
+		const pid = parseInt(content, 10);
+		if (isNaN(pid)) {
+			return null;
+		}
+		return pid;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Check lock file and verify if the process is still running
+ * Returns true if lock file exists and process is running, false otherwise
+ */
+function checkLockFile(lockPath: string): { locked: boolean; pid: number | null; running: boolean } {
+	const pid = readPidFromLock(lockPath);
+	if (pid === null) {
+		return { locked: false, pid: null, running: false };
+	}
+
+	const running = isProcessRunning(pid);
+	return { locked: true, pid, running };
+}
+
 export class EngineSidecar {
 	private process: ChildProcess | null = null;
 	private port: number;
@@ -71,6 +137,14 @@ export class EngineSidecar {
 			// app.getPath("userData") returns platform-specific paths
 			return app.getPath("userData");
 		}
+	}
+
+	/**
+	 * Get the lock file path
+	 * This should match the path used by the engine: {dataDir}/vayu.lock
+	 */
+	private getLockFilePath(): string {
+		return path.join(this.dataDir, "vayu.lock");
 	}
 
 	/**
@@ -138,6 +212,47 @@ export class EngineSidecar {
 			return;
 		}
 
+		// Ensure data directory exists first
+		this.ensureDataDirectory();
+
+		// Check lock file to see if engine is already running
+		const lockPath = this.getLockFilePath();
+		const lockStatus = checkLockFile(lockPath);
+
+		if (lockStatus.locked) {
+			if (lockStatus.running && lockStatus.pid !== null) {
+				console.log(
+					`[Sidecar] Lock file found with PID ${lockStatus.pid}, process is running`
+				);
+				// Verify engine is actually responding on the port
+				if (await isEngineRunning(this.port)) {
+					console.log(
+						`[Sidecar] Engine already running on port ${this.port}, reusing existing instance`
+					);
+					return;
+				} else {
+					console.warn(
+						`[Sidecar] Lock file indicates process ${lockStatus.pid} is running, but engine is not responding on port ${this.port}`
+					);
+					// Process might be stuck, but we'll let the engine's lock mechanism handle it
+					// The engine will fail to start if it can't acquire the lock
+				}
+			} else if (lockStatus.pid !== null) {
+				// Lock file exists but process is not running - stale lock file
+				console.warn(
+					`[Sidecar] Stale lock file found (PID ${lockStatus.pid} not running), cleaning up...`
+				);
+				// Clean up stale lock file to prevent issues during install/reinstall
+				try {
+					fs.unlinkSync(lockPath);
+					console.log(`[Sidecar] Removed stale lock file: ${lockPath}`);
+				} catch (err) {
+					console.warn(`[Sidecar] Failed to remove stale lock file: ${err}`);
+					// Continue anyway - the engine's lock mechanism will handle it
+				}
+			}
+		}
+
 		// Check if engine is already running on this port (from previous session or crash)
 		if (await isEngineRunning(this.port)) {
 			console.log(
@@ -153,9 +268,6 @@ export class EngineSidecar {
 					`Please free the port or configure a different port.`
 			);
 		}
-
-		// Ensure data directory exists
-		this.ensureDataDirectory();
 
 		// Check if binary exists
 		if (!fs.existsSync(this.binaryPath)) {

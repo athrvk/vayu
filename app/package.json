@@ -20,7 +20,7 @@
 		"electron:start": "cross-env NODE_ENV=development electron .",
 		"electron:build": "pnpm electron:compile && pnpm build && electron-builder --config electron-builder.json",
 		"electron:pack": "electron-builder --config electron-builder.json",
-		"clean": "rimraf dist dist-electron release build/resources/bin tsconfig.node.tsbuildinfo && rimraf ../engine/build ../engine/build-release",
+		"clean": "rimraf dist dist-electron release build/resources/bin build/icon.png build/icon.ico build/icon.icns.png build/icons tsconfig.node.tsbuildinfo && rimraf ../engine/build ../engine/build-release",
 		"clean:all": "pnpm clean && rimraf node_modules",
 		"lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
 		"format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,scss,md,html,yml,yaml,cjs,mjs}\"",

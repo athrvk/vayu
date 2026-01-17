@@ -22,6 +22,8 @@
 #include <windows.h>
 
 #include <atomic>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -35,12 +37,33 @@ int get_process_id() {
     return static_cast<int>(GetCurrentProcessId());
 }
 
+bool is_process_running(int pid) {
+    HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION | SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
+    if (process == nullptr) {
+        return false;
+    }
+    
+    DWORD exit_code = 0;
+    bool is_running = true;
+    if (GetExitCodeProcess(process, &exit_code)) {
+        // If exit code is STILL_ACTIVE (259), process is still running
+        is_running = (exit_code == STILL_ACTIVE);
+    } else {
+        is_running = false;
+    }
+    
+    CloseHandle(process);
+    return is_running;
+}
+
 // ============================================================================
 // File Locking
 // ============================================================================
 
 bool acquire_file_lock(const std::string& path, LockHandle& handle) {
     // Create or open the lock file
+    // Note: On Windows, file locks are automatically released when the process terminates
+    // (even if it crashes or is killed), so stale locks are not a concern.
     handle = CreateFileA(path.c_str(),
                          GENERIC_READ | GENERIC_WRITE,
                          0,  // No sharing - exclusive access
@@ -55,6 +78,7 @@ bool acquire_file_lock(const std::string& path, LockHandle& handle) {
     }
 
     // Try to lock the file (non-blocking)
+    // Lock the first byte of the file to prevent other processes from acquiring it
     OVERLAPPED overlapped = {0};
     if (!LockFileEx(
             handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlapped)) {
@@ -82,7 +106,29 @@ bool write_pid_to_lock(LockHandle handle) {
         return false;
     }
 
+    // Flush to ensure data is written
+    FlushFileBuffers(handle);
+
     return written == static_cast<DWORD>(pid.length());
+}
+
+bool read_pid_from_lock(const std::string& path, int& pid) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    std::string line;
+    if (!std::getline(file, line)) {
+        return false;
+    }
+
+    try {
+        pid = std::stoi(line);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 void release_file_lock(LockHandle& handle) {

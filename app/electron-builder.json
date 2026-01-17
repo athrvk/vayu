@@ -64,7 +64,15 @@
 	"linux": {
 		"target": ["AppImage", "deb"],
 		"category": "Development",
-		"icon": "build/icons"
+		"icon": "build/icons",
+		"maintainer": "Atharva Kusumbia <atharvakusumbia@gmail.com>"
+	},
+	"deb": {
+		"afterInstall": "build/linux-postinst.sh",
+		"afterRemove": "build/linux-postrm.sh",
+		"fpm": [
+			"--before-remove=build/linux-prerm.sh"
+		]
 	},
 	"win": {
 		"target": ["nsis"],

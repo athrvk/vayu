@@ -42,25 +42,35 @@ ARTIFACTS_DIR=""
 show_help() {
     echo "Vayu Build Script for Linux"
     echo ""
-    echo "Usage: ./build-linux.sh [dev|prod] [OPTIONS]"
+    echo "Usage: ./build-linux.sh [dev|prod] [-e|-a] [OPTIONS]"
     echo ""
-    echo "Build Modes:"
-    echo "  dev     Development build with debug symbols"
-    echo "  prod    Production build optimized and packaged (default)"
+    echo "Build Mode:"
+    echo "  dev     Development build (Debug mode)"
+    echo "  prod    Production build (Release mode, default)"
     echo ""
-    echo "Options:"
-    echo "  --skip-engine       Skip building the C++ engine"
-    echo "  --skip-app          Skip building the Electron app"
-    echo "  --clean             Clean build directory before building"
+    echo "Component Selection (shortcuts):"
+    echo "  -e, --skip-app      Build only the C++ engine"
+    echo "  -a, --skip-engine   Build only the Electron app"
+    echo "  (no flag)           Build both engine and app"
+    echo ""
+    echo "Other Options:"
+    echo "  --clean             Clean build directories before building"
     echo "  --vcpkg-root PATH   Override vcpkg root directory"
     echo "  --artifacts PATH    Copy build artifacts to this directory (for CI)"
     echo "  -h, --help          Show this help message"
     echo ""
     echo "Examples:"
-    echo "  ./build-linux.sh dev                    # Dev build (engine + app)"
-    echo "  ./build-linux.sh prod --skip-engine     # Prod build, skip engine"
-    echo "  ./build-linux.sh prod --clean           # Clean prod build"
-    echo "  ./build-linux.sh prod --artifacts ./out # Prod build with artifacts"
+    echo "  ./build-linux.sh              # Build all (prod)"
+    echo "  ./build-linux.sh dev          # Build all (dev)"
+    echo "  ./build-linux.sh -e           # Build engine only (prod)"
+    echo "  ./build-linux.sh dev -e       # Build engine only (dev)"
+    echo "  ./build-linux.sh -a           # Build app only (prod)"
+    echo "  ./build-linux.sh -a --clean   # Build app only, clean first"
+    echo ""
+    echo "CI/Advanced options:"
+    echo "  --vcpkg-root PATH   Override vcpkg root directory"
+    echo "  --artifacts PATH    Output installer artifacts to this directory"
+    echo ""
     exit 0
 }
 
@@ -70,12 +80,14 @@ while [[ $# -gt 0 ]]; do
             BUILD_MODE="$1"
             shift
             ;;
-        --skip-engine)
-            SKIP_ENGINE=true
+        -e|--skip-app)
+            SKIP_APP=true
+            SKIP_ENGINE=false
             shift
             ;;
-        --skip-app)
-            SKIP_APP=true
+        -a|--skip-engine)
+            SKIP_ENGINE=true
+            SKIP_APP=false
             shift
             ;;
         --clean)

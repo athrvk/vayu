@@ -16,6 +16,8 @@
 #include <cerrno>
 #include <csignal>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 
 namespace vayu::platform {
@@ -28,16 +30,31 @@ int get_process_id() {
     return static_cast<int>(getpid());
 }
 
+bool is_process_running(int pid) {
+    // Send signal 0 to check if process exists
+    // This doesn't actually send a signal, just checks if the process exists
+    if (kill(pid, 0) == 0) {
+        return true;
+    }
+    // If errno is ESRCH, process doesn't exist
+    // If errno is EPERM, process exists but we don't have permission (still running)
+    return errno == EPERM;
+}
+
 // ============================================================================
 // File Locking
 // ============================================================================
 
 bool acquire_file_lock(const std::string& path, LockHandle& handle) {
+    // Open or create the lock file
+    // Note: On Unix, file locks (flock) are automatically released when the process terminates
+    // (even if it crashes or is killed), so stale locks are not a concern.
     handle = open(path.c_str(), O_RDWR | O_CREAT, 0666);
     if (handle < 0) {
         return false;
     }
 
+    // Try to acquire exclusive lock (non-blocking)
     if (flock(handle, LOCK_EX | LOCK_NB) < 0) {
         close(handle);
         handle = INVALID_LOCK_HANDLE;
@@ -60,7 +77,32 @@ bool write_pid_to_lock(LockHandle handle) {
     // Write PID
     std::string pid = std::to_string(get_process_id()) + "\n";
     ssize_t written = write(handle, pid.c_str(), pid.length());
+    
+    // Sync to ensure data is written to disk
+    if (written == static_cast<ssize_t>(pid.length())) {
+        fsync(handle);
+    }
+    
     return written == static_cast<ssize_t>(pid.length());
+}
+
+bool read_pid_from_lock(const std::string& path, int& pid) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    std::string line;
+    if (!std::getline(file, line)) {
+        return false;
+    }
+
+    try {
+        pid = std::stoi(line);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 void release_file_lock(LockHandle& handle) {
