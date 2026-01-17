@@ -13,6 +13,8 @@
 			"filter": ["**/*"]
 		}
 	],
+	"asar": true,
+	"artifactName": "${productName}-${version}-${arch}.${ext}",
 	"nsis": {
 		"oneClick": false,
 		"perMachine": false,
@@ -68,7 +70,10 @@
 		"maintainer": "Atharva Kusumbia <atharvakusumbia@gmail.com>"
 	},
 	"appImage": {
-		"type": "portable"
+		"artifactName": "${productName}-${version}-${arch}.${ext}",
+		"category": "Development",
+		"description": "Vayu - High-Performance API Testing Platform",
+		"license": "../LICENSE"
 	},
 	"deb": {
 		"afterInstall": "installer/linux-postinst.sh",

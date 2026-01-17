@@ -305,24 +305,37 @@ main() {
         echo -e "${CYAN}  cd ./$rel_app_path && pnpm run electron:dev${NC}"
         
     else
-        # PROD MODE: Find the AppImage and give relative path from LAUNCH directory
+        # PROD MODE: Find artifacts and give clear install/run instructions
         local release_dir="$APP_DIR/release"
-        
-        # Try to find an AppImage first (easiest to run)
+
+        # Try to find AppImage and deb packages
         local app_image=$(find "$release_dir" -name "*.AppImage" 2>/dev/null | head -n 1)
-        
+        local deb_pkg=$(find "$release_dir" -name "*.deb" 2>/dev/null | head -n 1)
+
         if [[ -n "$app_image" ]]; then
             local rel_img_path=$(get_relative_path "$app_image")
-            echo -e "${CYAN}  ./$rel_img_path${NC}"
-        else
-            # Fallback if no AppImage, try deb
-            local deb_pkg=$(find "$release_dir" -name "*.deb" 2>/dev/null | head -n 1)
-            if [[ -n "$deb_pkg" ]]; then
-                local rel_deb_path=$(get_relative_path "$deb_pkg")
-                echo -e "  (Install .deb): ${CYAN}sudo dpkg -i ./$rel_deb_path${NC}"
-            else
-                 echo -e "${YELLOW}  No build artifacts found in $release_dir${NC}"
-            fi
+            echo -e "${CYAN}Run AppImage:${NC} ./$rel_img_path"
+            echo ""
+            echo -e "Notes for AppImage:" 
+            echo " - AppImages require FUSE at runtime on many systems (libfuse.so.2)."
+            echo -e "   If you see 'dlopen(): error loading libfuse.so.2', install it: ${CYAN}sudo apt update && sudo apt install libfuse2${NC}"
+            echo -e " - On systems without FUSE (some WSL installations), the AppImage may not run. Consider installing the .deb package instead."
+            echo -e " - You can extract the AppImage contents without FUSE: ${CYAN}./$(basename "$app_image") --appimage-extract && ./squashfs-root/AppRun${NC}"
+            echo ""
+        fi
+
+        if [[ -n "$deb_pkg" ]]; then
+            local rel_deb_path=$(get_relative_path "$deb_pkg")
+            echo -e "${CYAN}Install .deb package (recommended if AppImage fails):${NC}"
+            echo -e "  sudo dpkg -i ./$rel_deb_path"
+            echo -e "  # then fix dependencies if needed: sudo apt-get install -f"
+            echo ""
+            echo -e "Alternative (modern apt): ${CYAN}sudo apt install ././$rel_deb_path${NC}"
+            echo ""
+        fi
+
+        if [[ -z "$app_image" && -z "$deb_pkg" ]]; then
+            echo -e "${YELLOW}  No build artifacts found in $release_dir${NC}"
         fi
     fi
     echo ""
