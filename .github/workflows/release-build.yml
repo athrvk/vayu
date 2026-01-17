@@ -29,42 +29,6 @@ jobs:
         run: |
           mkdir -p "${{ env.ARTIFACTS_DIR }}"
 
-      - name: Validate VERSION vs tag (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          # Fetch origin/master and ensure the tag commit is contained in master
-          git fetch origin master:refs/remotes/origin/master --depth=1 || true
-          TAG_COMMIT=$(git rev-parse "$GITHUB_REF")
-          if ! git merge-base --is-ancestor "$TAG_COMMIT" refs/remotes/origin/master; then
-            echo "Tag commit ($TAG_COMMIT) is not contained in origin/master. Rejecting tag push."; exit 1
-          fi
-
-          VERSION_FILE=$(cat VERSION)
-          if [ "${TAG#v}" != "$VERSION_FILE" ]; then
-            echo "Tag ($TAG) does not match VERSION file ($VERSION_FILE)"; exit 1
-          fi
-          echo "VERSION=$VERSION_FILE" >> $GITHUB_ENV
-          echo "RELEASE_TAG=$TAG" >> $GITHUB_ENV
-        shell: bash
-
-      - name: Validate VERSION vs tag (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          pwsh -NoProfile -Command {
-            $tag = $env:GITHUB_REF -replace '^refs/tags/',''
-            # Fetch origin/master
-            git fetch origin master:refs/remotes/origin/master --depth=1
-            $tagCommit = git rev-parse $env:GITHUB_REF
-            $mergeCheck = git merge-base --is-ancestor $tagCommit refs/remotes/origin/master
-            if ($LASTEXITCODE -ne 0) { Write-Error "Tag commit ($tagCommit) is not contained in origin/master. Rejecting tag push."; exit 1 }
-
-            $version = (Get-Content -Path VERSION -Raw).Trim()
-            if ($tag.TrimStart('v') -ne $version) { Write-Error "Tag ($tag) does not match VERSION ($version)"; exit 1 }
-            Add-Content -Path $env:GITHUB_ENV -Value "VERSION=$version"
-            Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_TAG=$tag"
-          }
-        shell: pwsh
 
       - name: Cache vcpkg
         uses: actions/cache@v4

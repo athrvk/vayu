@@ -116,12 +116,11 @@ Contributions are welcome! Please read the [Contributing Guide](docs/contributin
 
 ## Versioning & Releases
 
-The canonical version for releases is stored in the top-level `VERSION` file. The CI pipeline validates that file against the pushed Git tag and uses the tag to publish artifacts.
+The canonical version for releases is stored in the top-level `VERSION` file. The CI workflow uses a pushed Git tag to publish artifacts.
 
 Key points:
 
 - The workflow triggers on tag pushes that follow the `v*` pattern (for example `v0.1.1`).
-- The workflow verifies that the pushed tag (stripped of the leading `v`) equals the contents of `VERSION` and will fail otherwise.
 - Electron produces installer filenames that already contain the version (for example `Vayu Setup 0.1.1.exe` and `Vayu-0.1.1-x86_64.AppImage`), and the workflow uploads those files to the Release as-is.
 
 How to create a release (recommended)
@@ -152,7 +151,7 @@ git push origin --tags
 
 Notes
 
-- The `VERSION` file is the single source of truth; maintain it before pushing tags. The CI enforces consistency.
+- The `VERSION` file is the single source of truth; maintain it before pushing tags.
 - If you want the bump script to create tags and push automatically, you may update it to do so, but the project intentionally requires an explicit tag push to keep releases deliberate.
 
 
