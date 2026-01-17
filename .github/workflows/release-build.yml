@@ -20,7 +20,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node (for pnpm)
+      - name: Setup Node.js (20)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm (latest)
         uses: pnpm/action-setup@v2
         with:
           version: 9
@@ -41,7 +46,14 @@ jobs:
 
       - name: Bootstrap vcpkg
         run: |
-          if [ ! -d "${{ env.VCPKG_DIR }}" ]; then git clone --depth 1 https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_DIR }}"; fi
+          if [ ! -d "${{ env.VCPKG_DIR }}" ]; then
+            # Clone full history to ensure baseline commits are available
+            git clone https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_DIR }}"
+          else
+            # Update to latest vcpkg
+            git -C "${{ env.VCPKG_DIR }}" fetch --all || true
+            git -C "${{ env.VCPKG_DIR }}" reset --hard origin/master || true
+          fi
           if [ "${{ runner.os }}" = "Linux" ]; then "${{ env.VCPKG_DIR }}"/bootstrap-vcpkg.sh; else pwsh -NoProfile -Command "${{ env.VCPKG_DIR }}\bootstrap-vcpkg.bat"; fi
         shell: bash
 
@@ -68,6 +80,10 @@ jobs:
       - name: Build and run engine unit tests (Linux)
         if: runner.os == 'Linux'
         run: |
+          # Ensure build tools are available
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build build-essential pkg-config ca-certificates
+
           cmake -S engine -B engine/build-test -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_DIR }}/scripts/buildsystems/vcpkg.cmake \

@@ -21,7 +21,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node (pnpm)
+      - name: Setup Node.js (20)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm (latest)
         uses: pnpm/action-setup@v2
         with:
           version: 9
@@ -37,7 +42,12 @@ jobs:
 
       - name: Bootstrap vcpkg
         run: |
-          if [ ! -d "${{ env.VCPKG_DIR }}" ]; then git clone --depth 1 https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_DIR }}"; fi
+          if [ ! -d "${{ env.VCPKG_DIR }}" ]; then
+            git clone https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_DIR }}"
+          else
+            git -C "${{ env.VCPKG_DIR }}" fetch --all || true
+            git -C "${{ env.VCPKG_DIR }}" reset --hard origin/master || true
+          fi
           if [ "${{ runner.os }}" = "Linux" ]; then "${{ env.VCPKG_DIR }}"/bootstrap-vcpkg.sh; else pwsh -NoProfile -Command "${{ env.VCPKG_DIR }}\bootstrap-vcpkg.bat"; fi
         shell: bash
 
