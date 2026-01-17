@@ -93,7 +93,7 @@ export default function SettingsMain() {
     const [isRestarting, setIsRestarting] = useState(false);
     
     // Ref for save function to avoid stale closures
-    const handleSaveRef = useRef<() => Promise<void>>();
+    const handleSaveRef = useRef<(() => Promise<void>) | undefined>(undefined);
 
     // Filter entries by selected category (calculate before early returns)
     const categoryEntries =
@@ -184,7 +184,7 @@ export default function SettingsMain() {
         registerContext({
             id: contextId,
             name: "Settings",
-            save: () => handleSaveRef.current?.(),
+            save: () => handleSaveRef.current?.() ?? Promise.resolve(),
             hasPendingChanges: hasChanges && !hasInvalidValues,
         });
         setActiveContext(contextId);
@@ -210,7 +210,7 @@ export default function SettingsMain() {
         }
         updateContext(contextId, {
             hasPendingChanges: hasChanges && !hasInvalidValues,
-            save: () => handleSaveRef.current?.(),
+            save: () => handleSaveRef.current?.() ?? Promise.resolve(),
         });
     }, [isLoading, error, selectedCategory, hasChanges, hasInvalidValues, updateContext]);
 
@@ -432,8 +432,8 @@ export default function SettingsMain() {
             <div className="border-b border-border px-6 py-4 shrink-0">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-xl font-semibold">{categoryConfig.title}</h1>
-                        <p className="text-sm text-muted-foreground mt-1">{categoryConfig.description}</p>
+                        <h1 className="text-xl font-semibold">{categoryConfig?.title}</h1>
+                        <p className="text-sm text-muted-foreground mt-1">{categoryConfig?.description}</p>
                     </div>
                     <div className="flex items-center gap-2">
                         <Button
