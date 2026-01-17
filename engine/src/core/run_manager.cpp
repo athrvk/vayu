@@ -291,15 +291,14 @@ void execute_load_test(std::shared_ptr<RunContext> context,
 
         // Get defaults from config (set via Settings UI)
         int default_max_concurrent = db.get_config_int(
-            "eventLoopMaxConcurrent",
-            vayu::core::constants::event_loop::MAX_CONCURRENT);
+            "eventLoopMaxConcurrent", vayu::core::constants::event_loop::MAX_CONCURRENT);
         int default_max_per_host = db.get_config_int(
-            "eventLoopMaxPerHost",
-            vayu::core::constants::event_loop::MAX_PER_HOST);
+            "eventLoopMaxPerHost", vayu::core::constants::event_loop::MAX_PER_HOST);
         int configured_workers = db.get_config_int("workers", 0);  // 0 = auto-detect
 
         // Per-test config can override defaults
-        size_t concurrency = static_cast<size_t>(config.value("concurrency", default_max_concurrent));
+        size_t concurrency =
+            static_cast<size_t>(config.value("concurrency", default_max_concurrent));
         double target_rps = config.value("rps", 0.0);  // 0 = unlimited
         if (target_rps == 0.0) {
             target_rps = config.value("targetRps", 0.0);
@@ -308,17 +307,20 @@ void execute_load_test(std::shared_ptr<RunContext> context,
 
         // Configure EventLoop
         vayu::http::EventLoopConfig loop_config;
-        loop_config.num_workers = static_cast<size_t>(configured_workers);  // Use configured workers (0 = auto-detect)
+        loop_config.num_workers =
+            static_cast<size_t>(configured_workers);  // Use configured workers (0 = auto-detect)
         loop_config.max_concurrent = std::max(concurrency, size_t(100));
         loop_config.max_per_host = static_cast<size_t>(default_max_per_host);
         loop_config.target_rps = target_rps;
         loop_config.burst_size = target_rps > 0 ? target_rps * 2.0 : 0.0;
-        loop_config.dns_cache_timeout = db.get_config_int("dnsCacheTimeout", vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
+        loop_config.dns_cache_timeout = db.get_config_int(
+            "dnsCacheTimeout", vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
         // Only enable curl verbose if explicitly requested in config, independent of server verbose
         // mode
         loop_config.verbose = config.value("verbose", false);
 
-        std::string workers_str = configured_workers == 0 ? "auto" : std::to_string(configured_workers);
+        std::string workers_str =
+            configured_workers == 0 ? "auto" : std::to_string(configured_workers);
         vayu::utils::log_debug("EventLoop config: workers=" + workers_str +
                                ", max_concurrent=" + std::to_string(loop_config.max_concurrent) +
                                ", max_per_host=" + std::to_string(loop_config.max_per_host) +
@@ -340,7 +342,7 @@ void execute_load_test(std::shared_ptr<RunContext> context,
 
         auto request = request_result.value();
         request.timeout_ms = timeout_ms;
-
+        
         // Execute Load Strategy
         auto test_start = std::chrono::steady_clock::now();
 
@@ -531,9 +533,8 @@ void collect_metrics(std::shared_ptr<RunContext> context, vayu::db::Database* db
     size_t last_total = 0;
 
     // Get stats collection interval from config
-    int stats_interval_ms = db_ptr->get_config_int(
-        "statsInterval",
-        vayu::core::constants::server::STATS_INTERVAL_MS);
+    int stats_interval_ms =
+        db_ptr->get_config_int("statsInterval", vayu::core::constants::server::STATS_INTERVAL_MS);
 
     while (context->is_running && !context->should_stop) {
         std::this_thread::sleep_for(std::chrono::milliseconds(stats_interval_ms));
@@ -557,31 +558,37 @@ void collect_metrics(std::shared_ptr<RunContext> context, vayu::db::Database* db
                                    std::to_string(context->event_loop->active_count()) +
                                    ", sent=" + std::to_string(context->requests_sent.load()));
 
-            // Store metrics
+            // Store metrics (batched to reduce lock contention)
             try {
                 auto timestamp = now_ms();
-                db.add_metric(
+                std::vector<vayu::db::Metric> metrics;
+                metrics.reserve(5);
+
+                metrics.push_back(
                     {0, context->run_id, timestamp, vayu::MetricName::Rps, current_rps, ""});
-                db.add_metric(
+                metrics.push_back(
                     {0, context->run_id, timestamp, vayu::MetricName::ErrorRate, error_rate, ""});
-                db.add_metric({0,
-                               context->run_id,
-                               timestamp,
-                               vayu::MetricName::ConnectionsActive,
-                               static_cast<double>(context->event_loop->active_count()),
-                               ""});
-                db.add_metric({0,
-                               context->run_id,
-                               timestamp,
-                               vayu::MetricName::RequestsSent,
-                               static_cast<double>(context->requests_sent.load()),
-                               ""});
-                db.add_metric({0,
-                               context->run_id,
-                               timestamp,
-                               vayu::MetricName::RequestsExpected,
-                               static_cast<double>(context->requests_expected.load()),
-                               ""});
+                metrics.push_back({0,
+                                   context->run_id,
+                                   timestamp,
+                                   vayu::MetricName::ConnectionsActive,
+                                   static_cast<double>(context->event_loop->active_count()),
+                                   ""});
+                metrics.push_back({0,
+                                   context->run_id,
+                                   timestamp,
+                                   vayu::MetricName::RequestsSent,
+                                   static_cast<double>(context->requests_sent.load()),
+                                   ""});
+                metrics.push_back({0,
+                                   context->run_id,
+                                   timestamp,
+                                   vayu::MetricName::RequestsExpected,
+                                   static_cast<double>(context->requests_expected.load()),
+                                   ""});
+
+                // Single transaction instead of 5 separate lock acquisitions
+                db.add_metrics_batch(metrics);
             } catch (const std::exception& e) {
                 // Continue on error
             }
