@@ -20,12 +20,12 @@
 		"deleteAppDataOnUninstall": false,
 		"allowElevation": true,
 		"runAfterFinish": true,
-		"include": "build/installer.nsh",
+		"include": "installer/installer.nsh",
 		"uninstallDisplayName": "Vayu",
 		"createDesktopShortcut": "always",
 		"createStartMenuShortcut": true,
 		"shortcutName": "Vayu",
-		"license": "build/license.txt"
+		"license": "../LICENSE"
 	},
 	"mac": {
 		"category": "public.app-category.developer-tools",
@@ -35,12 +35,12 @@
 				"arch": ["universal"]
 			}
 		],
-		"icon": "build/icon.icns",
+		"icon": "build/icon.png",
 		"artifactName": "${productName}-${version}-${arch}.${ext}",
 		"hardenedRuntime": true,
 		"gatekeeperAssess": false,
-		"entitlements": "build/entitlements.mac.plist",
-		"entitlementsInherit": "build/entitlements.mac.plist"
+		"entitlements": "installer/entitlements.mac.plist",
+		"entitlementsInherit": "installer/entitlements.mac.plist"
 	},
 	"dmg": {
 		"contents": [
@@ -68,10 +68,10 @@
 		"maintainer": "Atharva Kusumbia <atharvakusumbia@gmail.com>"
 	},
 	"deb": {
-		"afterInstall": "build/linux-postinst.sh",
-		"afterRemove": "build/linux-postrm.sh",
+		"afterInstall": "installer/linux-postinst.sh",
+		"afterRemove": "installer/linux-postrm.sh",
 		"fpm": [
-			"--before-remove=build/linux-prerm.sh"
+			"--before-remove=installer/linux-prerm.sh"
 		]
 	},
 	"win": {

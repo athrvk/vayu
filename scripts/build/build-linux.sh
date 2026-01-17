@@ -439,34 +439,90 @@ main() {
     
     echo ""
     echo "╔════════════════════════════════════════╗"
-    echo "║   Build completed in ${elapsed}s               ║"
+    echo "║   Build completed successfully in ${elapsed}s          ║"
     echo "╚════════════════════════════════════════╝"
     echo ""
     
     if [[ "$BUILD_MODE" == "dev" ]]; then
-        echo "🚀 To start the app in development mode:"
+        # Calculate relative path to app dir from current location for easy copy-paste
+        local current_dir=$(pwd)
+        local relative_app_path
+        if command -v realpath &>/dev/null; then
+            relative_app_path=$(realpath --relative-to="$current_dir" "$APP_DIR" 2>/dev/null || echo "$APP_DIR")
+        else
+            # Fallback: use Python to calculate relative path
+            relative_app_path=$(python3 -c "import os; print(os.path.relpath('$APP_DIR', '$current_dir'))" 2>/dev/null || echo "$APP_DIR")
+        fi
+        
+        echo "To start the Electron app in development mode:"
         echo ""
-        echo "   cd app"
-        echo "   pnpm run electron:dev"
-        echo ""
-        echo "This will:"
-        echo "  • Start Vite dev server (React app on http://localhost:5173)"
-        echo "  • Launch Electron with the app"
-        echo "  • Auto-start the C++ engine sidecar"
+        echo "    cd $relative_app_path; pnpm run electron:dev"
         echo ""
     else
-        echo "✅ Production build created:"
+        echo "Production build created:"
         echo ""
-        if [[ -d "$APP_DIR/release" ]]; then
-            ls -1 "$APP_DIR/release"/*.AppImage 2>/dev/null | while read f; do echo "   $f"; done
-            ls -1 "$APP_DIR/release"/*.deb 2>/dev/null | while read f; do echo "   $f"; done
-            ls -1 "$APP_DIR/release"/*.rpm 2>/dev/null | while read f; do echo "   $f"; done
+        local release_dir="$APP_DIR/release"
+        local has_appimage=false
+        local has_deb=false
+        local has_rpm=false
+        local appimage_files=()
+        local deb_files=()
+        local rpm_files=()
+        
+        if [[ -d "$release_dir" ]]; then
+            # Check what files exist and list them
+            appimage_files=($(ls -1 "$release_dir"/*.AppImage 2>/dev/null || true))
+            if [[ ${#appimage_files[@]} -gt 0 ]]; then
+                has_appimage=true
+                for f in "${appimage_files[@]}"; do echo "   $f"; done
+            fi
+            
+            deb_files=($(ls -1 "$release_dir"/*.deb 2>/dev/null || true))
+            if [[ ${#deb_files[@]} -gt 0 ]]; then
+                has_deb=true
+                for f in "${deb_files[@]}"; do echo "   $f"; done
+            fi
+            
+            rpm_files=($(ls -1 "$release_dir"/*.rpm 2>/dev/null || true))
+            if [[ ${#rpm_files[@]} -gt 0 ]]; then
+                has_rpm=true
+                for f in "${rpm_files[@]}"; do echo "   $f"; done
+            fi
         fi
+        
         echo ""
-        echo "📦 To install:"
-        echo "  AppImage: chmod +x *.AppImage && ./Vayu-*.AppImage"
-        echo "  deb: sudo dpkg -i vayu-client_*.deb"
-        echo "  rpm: sudo rpm -i vayu-client-*.rpm"
+        echo "To install and launch Vayu:"
+        
+        if [[ "$has_appimage" == true ]] || [[ "$has_deb" == true ]] || [[ "$has_rpm" == true ]]; then
+            echo "  1. Install using one of the following methods:"
+            echo ""
+            
+            if [[ "$has_appimage" == true ]] && [[ ${#appimage_files[@]} -gt 0 ]]; then
+                local appimage_name=$(basename "${appimage_files[0]}")
+                echo "     AppImage (portable, no installation needed):"
+                echo "       chmod +x \"$appimage_name\" && ./\"$appimage_name\""
+                echo ""
+            fi
+            
+            if [[ "$has_deb" == true ]] && [[ ${#deb_files[@]} -gt 0 ]]; then
+                local deb_name=$(basename "${deb_files[0]}")
+                echo "     Debian/Ubuntu (.deb package):"
+                echo "       sudo dpkg -i \"$deb_name\""
+                echo ""
+            fi
+            
+            if [[ "$has_rpm" == true ]] && [[ ${#rpm_files[@]} -gt 0 ]]; then
+                local rpm_name=$(basename "${rpm_files[0]}")
+                echo "     Red Hat/Fedora (.rpm package):"
+                echo "       sudo rpm -i \"$rpm_name\""
+                echo ""
+            fi
+        else
+            echo "  1. Install the generated package from the release directory."
+            echo ""
+        fi
+        
+        echo "  2. After installation, launch 'Vayu' from your applications menu."
         echo ""
     fi
 }

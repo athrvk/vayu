@@ -5,10 +5,6 @@ node_modules/
 dist/
 dist-electron/
 build/
-!build/entitlements.mac.plist
-!build/installer.nsh
-!build/license.txt
-!build/.gitkeep
 out/
 .vite/
 .webpack/

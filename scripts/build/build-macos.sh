@@ -317,10 +317,10 @@ setup_icons() {
     # Ensure build directory exists
     mkdir -p "$build_dir"
     
-    # Copy PNG for macOS (512x512 for .icns)
+    # Copy PNG for macOS (512x512 - electron-builder will convert to .icns)
     if [[ -f "$icon_png_dir/vayu_icon_512x512.png" ]]; then
-        cp "$icon_png_dir/vayu_icon_512x512.png" "$build_dir/icon.icns.png"
-        echo "    icon.icns.png (macOS source)"
+        cp "$icon_png_dir/vayu_icon_512x512.png" "$build_dir/icon.png"
+        echo "    icon.png (macOS - will be converted to .icns)"
     fi
     
     # Copy all PNG icon sizes for electron-builder's icon set
@@ -445,32 +445,49 @@ main() {
     
     echo ""
     echo "╔════════════════════════════════════════╗"
-    echo "║   Build completed in ${elapsed}s               ║"
+    echo "║   Build completed successfully in ${elapsed}s          ║"
     echo "╚════════════════════════════════════════╝"
     echo ""
     
     if [[ "$BUILD_MODE" == "dev" ]]; then
-        echo "🚀 To start the app in development mode:"
+        # Calculate relative path to app dir from current location for easy copy-paste
+        local current_dir=$(pwd)
+        local relative_app_path
+        if command -v realpath &>/dev/null; then
+            relative_app_path=$(realpath --relative-to="$current_dir" "$APP_DIR" 2>/dev/null || echo "$APP_DIR")
+        else
+            # Fallback: use Python to calculate relative path
+            relative_app_path=$(python3 -c "import os; print(os.path.relpath('$APP_DIR', '$current_dir'))" 2>/dev/null || echo "$APP_DIR")
+        fi
+        
+        echo "To start the Electron app in development mode:"
         echo ""
-        echo "   cd app"
-        echo "   pnpm run electron:dev"
-        echo ""
-        echo "This will:"
-        echo "  • Start Vite dev server (React app on http://localhost:5173)"
-        echo "  • Launch Electron with the app"
-        echo "  • Auto-start the C++ engine sidecar"
+        echo "    cd $relative_app_path; pnpm run electron:dev"
         echo ""
     else
-        echo "✅ Production build created:"
+        echo "Production build created:"
         echo ""
-        if [[ -d "$APP_DIR/release" ]]; then
-            ls -1 "$APP_DIR/release"/*.dmg 2>/dev/null | while read f; do echo "   $f"; done
+        local release_dir="$APP_DIR/release"
+        local installer_paths=()
+        if [[ -d "$release_dir" ]]; then
+            while IFS= read -r f; do
+                echo "   $f"
+                installer_paths+=("$f")
+            done < <(ls -1 "$release_dir"/*.dmg 2>/dev/null)
         fi
         echo ""
-        echo "📦 To install:"
-        echo "  1. Open the DMG file"
-        echo "  2. Drag Vayu to Applications"
-        echo "  3. Launch from Applications folder"
+        echo "To install and launch Vayu:"
+        if [[ ${#installer_paths[@]} -gt 0 ]]; then
+            echo "  1. Open the DMG file:"
+            for path in "${installer_paths[@]}"; do
+                echo "     open \"$path\""
+            done
+            echo "  2. Drag Vayu to the Applications folder."
+        else
+            echo "  1. Open the generated DMG file in the release directory."
+            echo "  2. Drag Vayu to the Applications folder."
+        fi
+        echo "  3. After installation, launch 'Vayu' from the Applications folder."
         echo ""
     fi
 }
