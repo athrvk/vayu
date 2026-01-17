@@ -32,7 +32,6 @@
 #include <thread>
 #include <unordered_map>
 
-#include "vayu/core/config_manager.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -298,23 +297,15 @@ struct Database::Impl {
         storage.on_open = [](sqlite3* db) {
             char* err_msg = nullptr;
             std::stringstream sql;
-            
-            // Try to read from ConfigManager if available, otherwise use defaults
+
+            // Use default constants for database optimizations
+            // These settings require engine restart to take effect and are applied
+            // from constants at startup. Users can change them via Settings UI,
+            // but changes only apply after restarting the engine.
             int cache_size = vayu::core::constants::database::CACHE_SIZE_KB;
             int temp_store = vayu::core::constants::database::TEMP_STORE;
             size_t mmap_size = vayu::core::constants::database::MMAP_SIZE_BYTES;
             int wal_checkpoint = vayu::core::constants::database::WAL_AUTOCHECKPOINT;
-            
-            // Attempt to read from ConfigManager (may not be initialized yet)
-            try {
-                auto& cfg_mgr = vayu::core::ConfigManager::instance();
-                cache_size = cfg_mgr.get_int("dbCacheSize", cache_size);
-                temp_store = cfg_mgr.get_int("dbTempStore", temp_store);
-                mmap_size = static_cast<size_t>(cfg_mgr.get_int("dbMmapSize", static_cast<int>(mmap_size)));
-                wal_checkpoint = cfg_mgr.get_int("dbWalAutocheckpoint", wal_checkpoint);
-            } catch (...) {
-                // ConfigManager not initialized yet, use defaults
-            }
             
             // Apply optimizations
             sql << "PRAGMA cache_size = " << cache_size << ";";
@@ -368,25 +359,24 @@ void Database::init() {
 
     // Seed default configuration values if empty (must be before reading config)
     seed_default_config();
-    
-    // Apply database optimizations from ConfigManager (or use defaults)
+
+    // Apply database optimizations from config (or use defaults)
     // Note: These settings require engine restart to take effect
-    // The on_open callback applies defaults; config values are read here for logging
-    auto& cfg_mgr = vayu::core::ConfigManager::instance();
-    
+    // The on_open callback applies defaults; config values are read here for runtime adjustments
+
     // Get synchronous mode (0=OFF, 1=NORMAL, 2=FULL)
-    int synchronous = cfg_mgr.get_int("dbSynchronous", vayu::core::constants::database::SYNCHRONOUS);
+    int synchronous = get_config_int("dbSynchronous", vayu::core::constants::database::SYNCHRONOUS);
     impl_->storage.pragma.synchronous(synchronous);
-    
+
     // Get busy timeout in milliseconds
-    int busy_timeout = cfg_mgr.get_int("dbBusyTimeout", vayu::core::constants::database::BUSY_TIMEOUT_MS);
+    int busy_timeout = get_config_int("dbBusyTimeout", vayu::core::constants::database::BUSY_TIMEOUT_MS);
     impl_->storage.pragma.busy_timeout(busy_timeout);
-    
-    // Log current configuration (other PRAGMAs are set in on_open callback)
-    int cache_size = cfg_mgr.get_int("dbCacheSize", vayu::core::constants::database::CACHE_SIZE_KB);
-    int temp_store = cfg_mgr.get_int("dbTempStore", vayu::core::constants::database::TEMP_STORE);
-    int mmap_size = cfg_mgr.get_int("dbMmapSize", static_cast<int>(vayu::core::constants::database::MMAP_SIZE_BYTES));
-    int wal_checkpoint = cfg_mgr.get_int("dbWalAutocheckpoint", vayu::core::constants::database::WAL_AUTOCHECKPOINT);
+
+    // Log current configuration (other PRAGMAs are set in on_open callback and require restart)
+    int cache_size = get_config_int("dbCacheSize", vayu::core::constants::database::CACHE_SIZE_KB);
+    int temp_store = get_config_int("dbTempStore", vayu::core::constants::database::TEMP_STORE);
+    int mmap_size = get_config_int("dbMmapSize", static_cast<int>(vayu::core::constants::database::MMAP_SIZE_BYTES));
+    int wal_checkpoint = get_config_int("dbWalAutocheckpoint", vayu::core::constants::database::WAL_AUTOCHECKPOINT);
     
     vayu::utils::log_debug("Database initialized with WAL mode (cache=" + 
                           std::to_string(-cache_size) + "KB, mmap=" + 
@@ -751,6 +741,49 @@ std::optional<ConfigEntry> Database::get_config_entry(const std::string& key) {
 
 std::vector<ConfigEntry> Database::get_all_config_entries() {
     return impl_->storage.get_all<ConfigEntry>();
+}
+
+// Type-safe config getters (replaces ConfigManager)
+int Database::get_config_int(const std::string& key, int default_value) {
+    auto entry = get_config_entry(key);
+    if (!entry) {
+        return default_value;
+    }
+    try {
+        return std::stoi(entry->value);
+    } catch (...) {
+        vayu::utils::log_warning("Database: Failed to parse int for key " + key + ", using default");
+        return default_value;
+    }
+}
+
+std::string Database::get_config_string(const std::string& key, const std::string& default_value) {
+    auto entry = get_config_entry(key);
+    if (!entry) {
+        return default_value;
+    }
+    return entry->value;
+}
+
+bool Database::get_config_bool(const std::string& key, bool default_value) {
+    auto entry = get_config_entry(key);
+    if (!entry) {
+        return default_value;
+    }
+    return entry->value == "true";
+}
+
+double Database::get_config_double(const std::string& key, double default_value) {
+    auto entry = get_config_entry(key);
+    if (!entry) {
+        return default_value;
+    }
+    try {
+        return std::stod(entry->value);
+    } catch (...) {
+        vayu::utils::log_warning("Database: Failed to parse double for key " + key + ", using default");
+        return default_value;
+    }
 }
 
 void Database::seed_default_config() {

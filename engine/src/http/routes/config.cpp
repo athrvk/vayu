@@ -5,7 +5,6 @@
 
 #include <unordered_map>
 
-#include "vayu/core/config_manager.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -19,8 +18,7 @@ void register_config_routes(RouteContext& ctx) {
     ctx.server.Get("/config", [&ctx](const httplib::Request&, httplib::Response& res) {
         vayu::utils::log_info("GET /config - Fetching configuration entries");
         try {
-            auto& config_mgr = vayu::core::ConfigManager::instance();
-            auto entries = config_mgr.get_all_entries();
+            auto entries = ctx.db.get_all_config_entries();
 
             nlohmann::json response;
             nlohmann::json entries_array = nlohmann::json::array();
@@ -62,7 +60,6 @@ void register_config_routes(RouteContext& ctx) {
         vayu::utils::log_info("POST /config - Updating configuration");
         try {
             auto json = nlohmann::json::parse(req.body);
-            auto& config_mgr = vayu::core::ConfigManager::instance();
 
             std::unordered_map<std::string, std::string> updates;
 
@@ -104,17 +101,83 @@ void register_config_routes(RouteContext& ctx) {
                 return;
             }
 
-            bool success = config_mgr.update_entries(updates);
-            if (!success) {
+            // Validate and update all config entries
+            bool all_valid = true;
+            std::vector<vayu::db::ConfigEntry> to_update;
+
+            for (const auto& [key, value] : updates) {
+                auto existing = ctx.db.get_config_entry(key);
+                if (!existing) {
+                    vayu::utils::log_warning("POST /config - Unknown config key: " + key);
+                    all_valid = false;
+                    continue;
+                }
+
+                // Validate value based on type
+                bool valid = true;
+                if (existing->type == "integer") {
+                    try {
+                        int int_val = std::stoi(value);
+                        if (existing->min_value) {
+                            int min_val = std::stoi(*existing->min_value);
+                            if (int_val < min_val) valid = false;
+                        }
+                        if (existing->max_value) {
+                            int max_val = std::stoi(*existing->max_value);
+                            if (int_val > max_val) valid = false;
+                        }
+                    } catch (...) {
+                        valid = false;
+                    }
+                } else if (existing->type == "number") {
+                    try {
+                        double double_val = std::stod(value);
+                        if (existing->min_value) {
+                            double min_val = std::stod(*existing->min_value);
+                            if (double_val < min_val) valid = false;
+                        }
+                        if (existing->max_value) {
+                            double max_val = std::stod(*existing->max_value);
+                            if (double_val > max_val) valid = false;
+                        }
+                    } catch (...) {
+                        valid = false;
+                    }
+                } else if (existing->type == "boolean") {
+                    if (value != "true" && value != "false") {
+                        valid = false;
+                    }
+                }
+
+                if (!valid) {
+                    vayu::utils::log_error("POST /config - Invalid value for key " + key + ": " + value);
+                    all_valid = false;
+                    continue;
+                }
+
+                // Create updated entry
+                vayu::db::ConfigEntry updated = *existing;
+                updated.value = value;
+                updated.updated_at = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::system_clock::now().time_since_epoch())
+                                         .count();
+                to_update.push_back(updated);
+            }
+
+            if (!all_valid) {
                 send_error(res, 400, "Failed to update configuration. Check logs for details.");
                 return;
             }
 
-            // Reload cache to ensure consistency
-            config_mgr.reload();
+            // Apply all updates to database
+            for (const auto& entry : to_update) {
+                ctx.db.save_config_entry(entry);
+            }
+
+            vayu::utils::log_info("POST /config - Updated " + std::to_string(to_update.size()) + " config entries");
 
             // Return updated entries
-            auto entries = config_mgr.get_all_entries();
+            auto entries = ctx.db.get_all_config_entries();
             nlohmann::json response;
             nlohmann::json entries_array = nlohmann::json::array();
 

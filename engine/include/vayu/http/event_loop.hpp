@@ -65,6 +65,9 @@ struct EventLoopConfig {
     /// Event loop poll timeout in milliseconds
     int poll_timeout_ms = vayu::core::constants::event_loop::POLL_TIMEOUT_MS;
 
+    /// DNS cache timeout in seconds (0 = no caching)
+    long dns_cache_timeout = vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS;
+
     /// Target requests per second (0 = unlimited, no rate limiting)
     double target_rps = 0.0;
 

@@ -9,7 +9,6 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
-#include "vayu/core/config_manager.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
@@ -33,12 +32,8 @@ void Server::start() {
     server_thread_ = std::thread([this]() {
         vayu::utils::log_info("Vayu Engine " + std::string(vayu::Version::string));
 
-        // Initialize ConfigManager
-        vayu::core::ConfigManager::instance().init(db_);
-
         // Load and display config
-        auto& config_mgr = vayu::core::ConfigManager::instance();
-        auto entries = config_mgr.get_all_entries();
+        auto entries = db_.get_all_config_entries();
         nlohmann::json config;
         for (const auto& entry : entries) {
             config[entry.key] = entry.value;

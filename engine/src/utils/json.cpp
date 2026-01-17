@@ -8,7 +8,6 @@
 #include <sstream>
 #include <ostream>
 
-#include "vayu/core/config_manager.hpp"
 #include "vayu/core/constants.hpp"
 
 namespace vayu::json {
@@ -305,10 +304,9 @@ Result<Request> deserialize_request(const Json& json) {
         if (json.contains("timeout")) {
             request.timeout_ms = json["timeout"].get<int>();
         } else {
-            // Use default timeout from config if not specified
-            auto& config_mgr = vayu::core::ConfigManager::instance();
-            request.timeout_ms = config_mgr.get_int("defaultTimeout",
-                                                     vayu::core::constants::server::DEFAULT_TIMEOUT_MS);
+            // Use default timeout constant if not specified
+            // Note: To use a custom default, specify timeout in the request JSON
+            request.timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
         }
         if (json.contains("followRedirects")) {
             request.follow_redirects = json["followRedirects"].get<bool>();
@@ -492,11 +490,9 @@ std::string pretty_print(const Json& json, bool color) {
 // ============================================================================
 
 void serialize_to_stream(const vayu::db::Request& r, std::ostream& out) {
-    // Get max field size from ConfigManager (cached, so fast to access)
-    const size_t max_field_size = static_cast<size_t>(
-        vayu::core::ConfigManager::instance().get_int(
-            "maxJsonFieldSize",
-            vayu::core::constants::json::MAX_FIELD_SIZE));
+    // Use constant for max field size
+    // This is a reasonable default for most use cases
+    const size_t max_field_size = vayu::core::constants::json::MAX_FIELD_SIZE;
 
     // Manually write JSON to stream to avoid building full object in memory
     out << "{";

@@ -4,7 +4,6 @@
 #include <chrono>
 #include <iostream>
 
-#include "vayu/core/config_manager.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -283,15 +282,14 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         // Update status to running
         db.update_run_status(context->run_id, vayu::RunStatus::Running);
 
-        // Get defaults from ConfigManager (set via Settings UI)
-        auto& cfg_mgr = ConfigManager::instance();
-        int default_max_concurrent = cfg_mgr.get_int(
+        // Get defaults from config (set via Settings UI)
+        int default_max_concurrent = db.get_config_int(
             "eventLoopMaxConcurrent",
             vayu::core::constants::event_loop::MAX_CONCURRENT);
-        int default_max_per_host = cfg_mgr.get_int(
+        int default_max_per_host = db.get_config_int(
             "eventLoopMaxPerHost",
             vayu::core::constants::event_loop::MAX_PER_HOST);
-        int configured_workers = cfg_mgr.get_int("workers", 0);  // 0 = auto-detect
+        int configured_workers = db.get_config_int("workers", 0);  // 0 = auto-detect
 
         // Per-test config can override defaults
         size_t concurrency = static_cast<size_t>(config.value("concurrency", default_max_concurrent));
@@ -308,6 +306,7 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         loop_config.max_per_host = static_cast<size_t>(default_max_per_host);
         loop_config.target_rps = target_rps;
         loop_config.burst_size = target_rps > 0 ? target_rps * 2.0 : 0.0;
+        loop_config.dns_cache_timeout = db.get_config_int("dnsCacheTimeout", vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
         // Only enable curl verbose if explicitly requested in config, independent of server verbose
         // mode
         loop_config.verbose = config.value("verbose", false);
@@ -525,8 +524,7 @@ void collect_metrics(std::shared_ptr<RunContext> context, vayu::db::Database* db
     size_t last_total = 0;
 
     // Get stats collection interval from config
-    auto& cfg_mgr = ConfigManager::instance();
-    int stats_interval_ms = cfg_mgr.get_int(
+    int stats_interval_ms = db_ptr->get_config_int(
         "statsInterval",
         vayu::core::constants::server::STATS_INTERVAL_MS);
 

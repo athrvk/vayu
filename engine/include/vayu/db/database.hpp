@@ -8,7 +8,6 @@
 
 #include <sqlite_orm/sqlite_orm.h>
 
-#include "vayu/core/config_manager.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/types.hpp"
 
@@ -40,9 +39,9 @@ public:
      */
     template <typename Callback>
     void iterate_requests_in_collection(const std::string& collection_id, Callback&& callback) {
-        // Get batch size from ConfigManager (cached for performance)
+        // Get batch size from config (or use default constant)
         const size_t batch_size = static_cast<size_t>(
-            vayu::core::ConfigManager::instance().get_int(
+            get_config_int(
                 "requestBatchSize",
                 vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE));
 
@@ -116,6 +115,12 @@ public:
     std::optional<ConfigEntry> get_config_entry(const std::string& key);
     std::vector<ConfigEntry> get_all_config_entries();
     void seed_default_config();  // Initialize default config values if empty
+
+    // Type-safe config getters (replaces ConfigManager)
+    int get_config_int(const std::string& key, int default_value = 0);
+    std::string get_config_string(const std::string& key, const std::string& default_value = "");
+    bool get_config_bool(const std::string& key, bool default_value = false);
+    double get_config_double(const std::string& key, double default_value = 0.0);
 
 private:
     struct Impl;

@@ -3,7 +3,6 @@
  * @brief Request execution routes (Design mode & Load test)
  */
 
-#include "vayu/core/config_manager.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/routes.hpp"
@@ -87,19 +86,18 @@ void register_execution_routes(RouteContext& ctx) {
                 return;
             }
 
-            // Initialize script engine with config from ConfigManager
-            auto& cfg_mgr = vayu::core::ConfigManager::instance();
+            // Initialize script engine with config from database
             vayu::runtime::ScriptConfig script_config;
-            script_config.timeout_ms = static_cast<uint64_t>(cfg_mgr.get_int(
+            script_config.timeout_ms = static_cast<uint64_t>(ctx.db.get_config_int(
                 "scriptTimeout",
                 vayu::core::constants::script_engine::TIMEOUT_MS));
-            script_config.memory_limit = static_cast<size_t>(cfg_mgr.get_int(
+            script_config.memory_limit = static_cast<size_t>(ctx.db.get_config_int(
                 "scriptMemoryLimit",
                 vayu::core::constants::script_engine::MEMORY_LIMIT));
-            script_config.stack_size = static_cast<size_t>(cfg_mgr.get_int(
+            script_config.stack_size = static_cast<size_t>(ctx.db.get_config_int(
                 "scriptStackSize",
                 vayu::core::constants::script_engine::STACK_SIZE));
-            script_config.enable_console = cfg_mgr.get_bool(
+            script_config.enable_console = ctx.db.get_config_bool(
                 "scriptEnableConsole",
                 vayu::core::constants::script_engine::ENABLE_CONSOLE);
 

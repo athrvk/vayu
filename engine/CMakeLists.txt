@@ -209,7 +209,6 @@ add_library(vayu_core STATIC
     src/utils/logger.cpp
     src/utils/metrics_helper.cpp
     src/db/database.cpp
-    src/core/config_manager.cpp
     src/core/load_strategy.cpp
     src/core/run_manager.cpp
     src/core/metrics_collector.cpp

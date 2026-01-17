@@ -4,7 +4,6 @@
 
 #include <regex>
 
-#include "vayu/core/config_manager.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/event_loop/curl_callbacks.hpp"
 #include "vayu/http/event_loop/event_loop_worker.hpp"
@@ -222,28 +221,20 @@ CURL* setup_easy_handle(CURL* curl,
 
     // =========================================================================
     // HIGH-PERFORMANCE OPTIMIZATIONS (Phase 1 - Target: 60k RPS)
-    // Reads from ConfigManager for runtime configurability
+    // Config values passed via EventLoopConfig for runtime configurability
     // =========================================================================
-
-    auto& cfg = vayu::core::ConfigManager::instance();
 
     // DNS Caching: Cache DNS lookups to avoid resolver saturation
     // This is critical - DNS was causing 84% of errors at 10k RPS
     // Setting to 0 disables caching (resolves every request)
-    long dns_cache_timeout = cfg.get_int(
-        "dnsCacheTimeout", 
-        vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
-    curl_easy_setopt(curl, CURLOPT_DNS_CACHE_TIMEOUT, dns_cache_timeout);
+    curl_easy_setopt(curl, CURLOPT_DNS_CACHE_TIMEOUT, config.dns_cache_timeout);
 
     // TCP Keep-Alive: Reuse connections and detect dead sockets faster
     // Setting idle time to 0 disables keep-alive entirely
-    long keepalive_idle = cfg.get_int(
-        "tcpKeepAliveIdle",
-        vayu::core::constants::event_loop::TCP_KEEPALIVE_IDLE_SECONDS);
-    long keepalive_interval = cfg.get_int(
-        "tcpKeepAliveInterval",
-        vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS);
-    
+    // Using constants directly; these settings require restart to take effect
+    long keepalive_idle = vayu::core::constants::event_loop::TCP_KEEPALIVE_IDLE_SECONDS;
+    long keepalive_interval = vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS;
+
     if (keepalive_idle > 0) {
         curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
         curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, keepalive_idle);
