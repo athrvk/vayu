@@ -3,6 +3,7 @@
 
 import { create } from "zustand";
 import type { SidebarTab, MainScreen } from "@/types";
+import { useVariablesStore } from "../variables-store";
 
 export interface NavigationContext {
 	screen: MainScreen;
@@ -171,7 +172,7 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 		};
 
 		set({
-			activeScreen: "welcome",
+			activeScreen: "variables",
 			activeSidebarTab: "variables",
 			tabMemory: {
 				...state.tabMemory,
@@ -269,15 +270,22 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 		if (state.activeScreen === "dashboard") {
 			return "dashboard";
 		}
-		if (state.activeScreen === "history-detail" && state.selectedRunId) {
+		// Check for history-detail: if we have a selectedRunId, show history-detail
+		// This takes precedence over the tab check below
+		if (state.selectedRunId) {
 			return "history-detail";
 		}
 		if (state.activeScreen === "settings") {
 			return "settings";
 		}
 
-		// For history and variables tabs, always show welcome screen
-		if (state.activeSidebarTab === "history" || state.activeSidebarTab === "variables") {
+		// For variables tab: show variables screen if a category is selected, otherwise welcome
+		if (state.activeSidebarTab === "variables") {
+			return "variables";
+		}
+
+		// For history tab, show welcome screen (only if no run is selected)
+		if (state.activeSidebarTab === "history") {
 			return "welcome";
 		}
 

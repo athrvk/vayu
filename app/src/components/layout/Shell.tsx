@@ -8,6 +8,7 @@ import LoadTestDashboard from "@/modules/dashboard";
 import { HistoryDetail } from "@/modules/history/main";
 import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
 import { SettingsMain } from "@/modules/settings";
+import VariablesMain from "@/modules/variables/main/VariablesMain";
 import { cn } from "@/lib/utils";
 
 const MIN_SIDEBAR_WIDTH = 280;
@@ -78,9 +79,10 @@ export default function Shell() {
 				return <HistoryDetail />;
 			case "settings":
 				return <SettingsMain />;
+			case "variables":
+				return <VariablesMain />;
 			case "welcome":
 			case "history": // History tab shows welcome screen
-			case "variables": // Variables tab shows welcome screen (unless category selected)
 			default:
 				return <WelcomeScreen />;
 		}

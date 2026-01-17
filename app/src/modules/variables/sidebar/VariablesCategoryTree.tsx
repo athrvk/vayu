@@ -8,7 +8,7 @@
  */
 
 import { useState } from "react";
-import { useVariablesStore, type VariableCategory } from "@/stores";
+import { useVariablesStore, useNavigationStore, type VariableCategory } from "@/stores";
 import { useCreateEnvironmentMutation, useDeleteEnvironmentMutation } from "@/queries";
 import type { Collection, Environment } from "@/types";
 import {
