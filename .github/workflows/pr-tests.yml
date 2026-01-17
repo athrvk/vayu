@@ -1,0 +1,93 @@
+name: PR CI — run tests
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    timeout-minutes: 60
+    env:
+      VCPKG_DIR: ${{ github.workspace }}/.github/vcpkg
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node (pnpm)
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.VCPKG_DIR }}/installed
+            ${{ env.VCPKG_DIR }}/packages
+            ${{ env.VCPKG_DIR }}/buildtrees
+          key: vcpkg-${{ runner.os }}-v1
+
+      - name: Bootstrap vcpkg
+        run: |
+          if [ ! -d "${{ env.VCPKG_DIR }}" ]; then git clone --depth 1 https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_DIR }}"; fi
+          if [ "${{ runner.os }}" = "Linux" ]; then "${{ env.VCPKG_DIR }}"/bootstrap-vcpkg.sh; else pwsh -NoProfile -Command "${{ env.VCPKG_DIR }}\bootstrap-vcpkg.bat"; fi
+        shell: bash
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pnpm-store
+            ~/.cache/pnpm
+          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+      - name: Install frontend dependencies
+        run: |
+          cd app
+          pnpm install --frozen-lockfile
+        shell: bash
+
+      - name: Run frontend unit tests
+        run: |
+          cd app
+          pnpm test --if-present
+        shell: bash
+
+      - name: Build and run engine unit tests (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -S engine -B engine/build-test -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_DIR }}/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DVAYU_BUILD_TESTS=ON \
+            -DVAYU_BUILD_ENGINE=ON
+          cmake --build engine/build-test -j $(nproc)
+          ctest --test-dir engine/build-test --output-on-failure -j $(nproc)
+        shell: bash
+
+      - name: Build and run engine unit tests (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pwsh -NoProfile -Command {
+            $vcpkg = "${{ env.VCPKG_DIR }}"
+            cmake -S engine -B engine/build-test -G "Visual Studio 17 2022" -A x64 `
+              -DCMAKE_BUILD_TYPE=Release `
+              -DCMAKE_TOOLCHAIN_FILE="$vcpkg\scripts\buildsystems\vcpkg.cmake" `
+              -DVCPKG_TARGET_TRIPLET=x64-windows `
+              -DVCPKG_MANIFEST_MODE=ON `
+              -DVAYU_BUILD_TESTS=ON `
+              -DVAYU_BUILD_ENGINE=ON
+            cmake --build engine/build-test --config Release --parallel
+            ctest --test-dir engine/build-test --output-on-failure
+          }
+        shell: pwsh

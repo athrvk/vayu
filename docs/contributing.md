@@ -391,6 +391,64 @@ Contributors are recognized in:
 - Release notes
 - GitHub contributors page
 
+## Releasing
+
+Vayu uses a simple, explicit release process that relies on a top-level `VERSION` file as the single source of truth.
+
+1. Update the `VERSION` file to the desired version (for example `0.1.2`). Use the helper script to do this:
+
+```bash
+./scripts/bump-version.sh 0.1.2
+```
+
+2. Commit the updated `VERSION` file (some bump scripts may commit automatically — check the script):
+
+```bash
+git add VERSION
+git commit -m "chore(release): 0.1.2"
+```
+
+3. Create a Git tag that is prefixed with `v` and matches the `VERSION` file, then push the tag to the remote:
+
+```bash
+git tag v$(cat VERSION)
+git push origin --tags
+```
+
+4. The GitHub Actions workflow will run on the pushed tag, validate that the tag (without `v`) matches the `VERSION` file, run tests, build the app/engine, and upload installer artifacts to the Release associated with that tag.
+
+Notes:
+
+- The `VERSION` file must be kept accurate — the CI enforces consistency and will fail the build if the tag and `VERSION` do not match.
+- Electron-generated filenames already include the version (for example `Vayu Setup 0.1.2.exe` and `Vayu-0.1.2-x86_64.AppImage`), so the workflow publishes them as-is.
+- If you want the bump script to also create the tag and push, you may extend it, but this project requires an explicit tag push so releases remain deliberate.
+
+
+### Tag and release policy
+
+Because this repository is public, anyone can push tags (if they have push access). To keep releases secure and reliable we recommend the following:
+
+- Protect the `master` branch and restrict who can push to it (Repository Settings → Branches → Add rule for `master` → Restrict who can push). This ensures only trusted maintainers can merge to master.
+- Require pull request reviews and CI success before merging to `master` (enable branch protection checks). That reduces risk of accidental or malicious commits being tagged.
+- Enforce the CI validation in this workflow — the workflow already rejects tags whose commit is not contained in `origin/master`.
+- Limit who can create releases / tags: use a small team of maintainers with write access. Alternatively, use a CI bot (with a deploy key or PAT stored in repository secrets) to create signed releases on behalf of maintainers.
+
+Practical workflows
+
+- Maintainer-driven: maintainers merge PRs into `master`, then run the bump script, create the `vX.Y.Z` tag, and push it. The workflow validates the tag and publishes artifacts.
+- Automated: run the bump-and-release script from a protected CI job (requires a token with permission to push tags). This centralizes tag creation and avoids relying on individual developers' pushes.
+
+Note: the workflow performs a strict check that the tag's commit is included in `origin/master` — tags pointing to arbitrary commits (for example a commit on a personal branch) will be rejected by CI.
+
+## Getting Help
+
+- **GitHub Issues**: Bug reports, feature requests
+- **Documentation**: Check `docs/` for detailed guides
+
+---
+
+Thank you for contributing to Vayu! 🚀
+
 ---
 
 Thank you for contributing to Vayu! 🚀
