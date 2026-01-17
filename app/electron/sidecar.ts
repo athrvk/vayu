@@ -302,15 +302,32 @@ export class EngineSidecar {
 			}
 		);
 
-		// Handle stdout
-		this.process.stdout?.on("data", (data) => {
-			console.log(`[Engine] ${data.toString().trim()}`);
-		});
+		// Handle stdout - set up listeners immediately to prevent buffering issues
+		// On Linux, if pipes aren't read, the process can block waiting for buffer space
+		if (this.process.stdout) {
+			this.process.stdout.setEncoding("utf8");
+			this.process.stdout.on("data", (data) => {
+				const lines = data.toString().split("\n").filter((line: string) => line.trim());
+				for (const line of lines) {
+					console.log(`[Engine] ${line}`);
+				}
+			});
+			// Resume reading to prevent backpressure
+			this.process.stdout.resume();
+		}
 
-		// Handle stderr
-		this.process.stderr?.on("data", (data) => {
-			console.error(`[Engine] ${data.toString().trim()}`);
-		});
+		// Handle stderr - set up listeners immediately to prevent buffering issues
+		if (this.process.stderr) {
+			this.process.stderr.setEncoding("utf8");
+			this.process.stderr.on("data", (data) => {
+				const lines = data.toString().split("\n").filter((line: string) => line.trim());
+				for (const line of lines) {
+					console.error(`[Engine] ${line}`);
+				}
+			});
+			// Resume reading to prevent backpressure
+			this.process.stderr.resume();
+		}
 
 		// Handle process exit
 		this.process.on("exit", (code, signal) => {
@@ -331,7 +348,16 @@ export class EngineSidecar {
 	/**
 	 * Wait for the engine to be ready by polling the health endpoint
 	 */
-	private async waitForEngine(maxAttempts: number = 30, delay: number = 500): Promise<void> {
+	private async waitForEngine(maxAttempts?: number, delay: number = 500): Promise<void> {
+		// Platform-specific timeout: Linux needs more time for DB initialization
+		if (maxAttempts === undefined) {
+			if (process.platform === "linux") {
+				maxAttempts = 60; // 30 seconds on Linux
+			} else {
+				maxAttempts = 30; // 15 seconds on Windows/macOS
+			}
+		}
+
 		const healthUrl = `http://127.0.0.1:${this.port}/health`;
 
 		for (let i = 0; i < maxAttempts; i++) {

@@ -68,8 +68,10 @@ void Logger::log(Level level, const std::string& message) {
     if (should_print_to_console) {
         if (level == Level::ERROR) {
             std::cerr << log_message << "\n";
+            std::cerr.flush();  // Flush immediately on Linux when stdout/stderr are pipes
         } else {
             std::cout << log_message << "\n";
+            std::cout.flush();  // Flush immediately on Linux when stdout/stderr are pipes
         }
     }
 }

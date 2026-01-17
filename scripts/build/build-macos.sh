@@ -15,18 +15,19 @@
 
 set -e
 
-# Colors for output
+# Colors for output (consistent across platforms)
+RED='\033[0;31m'
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[0;33m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Helper functions
-info() { echo -e "${BLUE}==>${NC} $1"; }
-warn() { echo -e "${YELLOW}Warning:${NC} $1"; }
-error() { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
-success() { echo -e "${GREEN}✓${NC} $1"; }
+# Helper functions (consistent style)
+info()    { echo -e "${CYAN}==>${NC} $1"; }
+warn()    { echo -e "${YELLOW}Warning:${NC} $1"; }
+error()   { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
+success() { echo -e "${GREEN}[OK]${NC} $1"; }
 
 # Default values
 BUILD_MODE="prod"
@@ -409,10 +410,10 @@ main() {
     fi
     
     echo ""
-    echo "╔════════════════════════════════════════╗"
-    echo "║   Vayu Build Script for macOS          ║"
-    echo "║   Mode: $(printf '%-20s' "${BUILD_MODE^^}") | $components_str  ║"
-    echo "╚════════════════════════════════════════╝"
+    echo -e "${CYAN}╔════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║   Vayu Build Script for macOS          ║${NC}"
+    echo -e "${CYAN}║   Mode: $(printf '%-20s' "${BUILD_MODE^^}") | $components_str  ║${NC}"
+    echo -e "${CYAN}╚════════════════════════════════════════╝${NC}"
     echo ""
     
     check_prerequisites
