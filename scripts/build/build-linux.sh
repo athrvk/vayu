@@ -119,7 +119,7 @@ done
 
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 ENGINE_DIR="$PROJECT_ROOT/engine"
 APP_DIR="$PROJECT_ROOT/app"
 
