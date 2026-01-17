@@ -1,3 +1,11 @@
+
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
 import { Zap, AlertCircle, CheckCircle, Loader2, Cloud, CloudOff } from "lucide-react";
 import { useEngineConnectionStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";

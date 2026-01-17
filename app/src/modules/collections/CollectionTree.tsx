@@ -1,3 +1,11 @@
+
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
 import { useState, useRef, useEffect } from "react";
 import { Folder, Plus, Trash2, Edit2, Copy, FolderPlus, Loader2 } from "lucide-react";
 import { useNavigationStore, useCollectionsStore, useSaveStore } from "@/stores";

@@ -1,3 +1,11 @@
+
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
 import { useState } from "react";
 import { Search, Clock, Loader2 } from "lucide-react";
 import { useNavigationStore, useHistoryStore } from "@/stores";

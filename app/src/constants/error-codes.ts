@@ -1,3 +1,11 @@
+
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
 /**
  * Error codes matching backend ErrorCode enum
  * Keep in sync with engine/include/vayu/types.hpp

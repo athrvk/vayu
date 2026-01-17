@@ -2,7 +2,7 @@
 
 **High-Performance API Testing Platform**
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Dual-blue.svg)](LICENSE)
 
 Vayu combines the ease of use of API design tools like Postman with the raw performance of high-throughput load testing tools. Build and debug requests visually, then run the same tests at scale—all in one tool.
 
@@ -114,9 +114,14 @@ Contributions are welcome! Please read the [Contributing Guide](docs/contributin
 - Commit message conventions
 - Pull request process
 
-## License
+## ⚖️ License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Vayu is a dual-licensed project:
+
+* **Vayu Engine (`/engine`)**: Licensed under **GNU AGPL v3**.
+* **Vayu UI (`/app`)**: Licensed under **Apache 2.0**.
+
+**Usage Note:** You are free to use Vayu for any purpose. If you modify the **Engine** and provide it as a network service, you must open-source your changes. The **UI** is more permissive and allows for easier plugin development.
 
 ---
 
