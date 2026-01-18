@@ -30,7 +30,7 @@ The Manager communicates with the Engine via a local HTTP API on port 9876 (dyna
 ### Prerequisites
 
 - **C++ Engine**: CMake 3.25+, C++20 compiler, vcpkg
-- **Electron App**: Node.js ≥ 20 LTS, pnpm ≥ 8
+- **Electron App**: Node.js ≥ 20 LTS, pnpm ≥ 10
 
 ### Building from Source
 
@@ -77,7 +77,7 @@ Vayu uses a sidecar pattern where the Electron UI (Manager) communicates with a 
 │                    │ :9876  │                    │
 │  • Request Builder │        │  • Lock-free SPSC  │
 │  • Collections     │        │  • QuickJS Runtime │
-│  • Load Dashboard   │        │  • Multi-Worker    │
+│  • Load Dashboard  │        │  • Multi-Worker    │
 └────────────────────┘        └────────────────────┘
 ```
 
