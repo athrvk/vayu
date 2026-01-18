@@ -31,6 +31,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 VERSION_FILE="$PROJECT_ROOT/VERSION"
 ENGINE_CMAKE="$PROJECT_ROOT/engine/CMakeLists.txt"
 ENGINE_VERSION_HPP="$PROJECT_ROOT/engine/include/vayu/version.hpp"
+ENGINE_VCPKG_JSON="$PROJECT_ROOT/engine/vcpkg.json"
 APP_PACKAGE_JSON="$PROJECT_ROOT/app/package.json"
 
 # Read current version
@@ -89,6 +90,7 @@ if [[ -z "$BUMP_TYPE" && -z "$NEW_VERSION" ]]; then
     echo "  - $VERSION_FILE"
     echo "  - $ENGINE_CMAKE"
     echo "  - $ENGINE_VERSION_HPP"
+    echo "  - $ENGINE_VCPKG_JSON"
     echo "  - $APP_PACKAGE_JSON"
     echo ""
     echo "Run '$0 --help' for usage."
@@ -181,10 +183,30 @@ update_package_json() {
     success "app/package.json"
 }
 
+# Update vcpkg.json
+update_vcpkg_json() {
+    info "Updating engine/vcpkg.json..."
+    if [[ "$DRY_RUN" == false ]]; then
+        # Use node/jq if available, otherwise sed
+        if command -v node &>/dev/null; then
+            node -e "
+                const fs = require('fs');
+                const pkg = JSON.parse(fs.readFileSync('$ENGINE_VCPKG_JSON', 'utf8'));
+                pkg.version = '$NEW_VERSION';
+                fs.writeFileSync('$ENGINE_VCPKG_JSON', JSON.stringify(pkg, null, 2) + '\n');
+            "
+        else
+            sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$ENGINE_VCPKG_JSON"
+        fi
+    fi
+    success "engine/vcpkg.json"
+}
+
 # Run updates
 update_version_file
 update_cmake
 update_version_hpp
+update_vcpkg_json
 update_package_json
 
 echo ""

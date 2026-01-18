@@ -136,7 +136,7 @@ How to create a release (recommended)
 2. Commit the change (some bump scripts automatically commit; confirm the script's behavior):
 
 ```bash
-git add VERSION
+git add VERSION engine/include/vayu/version.hpp engine/CMakeLists.txt engine/vcpkg.json app/package.json
 git commit -m "chore(release): 0.1.2"
 ```
 
