@@ -13,17 +13,17 @@ Vayu uses a **sidecar architecture** that separates the user interface from the 
 - **The Manager** (Electron + React): Provides a modern UI for building requests, managing collections, and viewing results
 - **The Engine** (C++): A high-performance daemon capable of executing thousands of requests per second
 
-The Manager communicates with the Engine via a local HTTP API on port 9876 (dynamically assigned, if not available), allowing each component to be optimized for its specific purpose.
+The Manager communicates with the Engine via a local HTTP API on port 9876, allowing each component to be optimized for its specific purpose.
 
 ## Features
 
-- **High Performance** - Lock-free C++ engine optimized for maximum throughput
+- **High Performance** - C++ engine optimized for maximum throughput
 - **Request Management** - Organize requests into collections with folder hierarchy
 - **Load Testing** - Run load tests with real-time metrics streaming
 - **Environment Variables** - Manage variables across collections and environments
 - **Test Scripting** - QuickJS-based scripting engine compatible with Postman's `pm.test()` syntax
 - **Privacy First** - 100% local execution, no cloud sync required
-- **Cross Platform** - macOS, Windows, and Linux support
+- **Cross Platform** - macOS (Coming Soon), Windows, and Linux support
 
 ## Quick Start
 
@@ -75,7 +75,7 @@ Vayu uses a sidecar pattern where the Electron UI (Manager) communicates with a 
 │   THE MANAGER      │  HTTP  │    THE ENGINE      │
 │  (Electron/React)  │◄──────►│      (C++)         │
 │                    │ :9876  │                    │
-│  • Request Builder │        │  • Lock-free SPSC  │
+│  • Request Builder │        │  • EventLoop       │
 │  • Collections     │        │  • QuickJS Runtime │
 │  • Load Dashboard  │        │  • Multi-Worker    │
 └────────────────────┘        └────────────────────┘
@@ -152,7 +152,6 @@ git push origin --tags
 Notes
 
 - The `VERSION` file is the single source of truth; maintain it before pushing tags.
-- If you want the bump script to create tags and push automatically, you may update it to do so, but the project intentionally requires an explicit tag push to keep releases deliberate.
 
 
 ## ⚖️ License
