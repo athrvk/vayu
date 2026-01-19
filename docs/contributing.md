@@ -404,7 +404,7 @@ Vayu uses a simple, explicit release process that relies on a top-level `VERSION
 2. Commit the updated `VERSION` file (some bump scripts may commit automatically — check the script):
 
 ```bash
-git add VERSION
+git add VERSION engine/include/vayu/version.hpp engine/CMakeLists.txt engine/vcpkg.json app/package.json
 git commit -m "chore(release): 0.1.2"
 ```
 
@@ -444,10 +444,6 @@ Note: to avoid accidental or malicious releases, restrict who can push to `maste
 
 - **GitHub Issues**: Bug reports, feature requests
 - **Documentation**: Check `docs/` for detailed guides
-
----
-
-Thank you for contributing to Vayu! 🚀
 
 ---
 
