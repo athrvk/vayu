@@ -84,10 +84,13 @@ vayu/
 │   ├── src/         # Source files
 │   ├── include/     # Public headers
 │   ├── tests/       # Google Test suite
+|   ├── vendor/      # External dependencies
 │   └── vcpkg.json   # Dependencies
 ├── app/             # Electron + React UI
 │   ├── electron/    # Main process
 │   ├── src/         # Renderer (React)
+|   ├── public/      # Public assets
+|   ├── installer/   # Installer files
 │   └── package.json # Dependencies
 ├── scripts/         # Build scripts
 │   ├── build/       # Platform-specific build scripts
@@ -197,8 +200,6 @@ const MAX_HISTORY_SIZE = 100;
 // Types/Interfaces: PascalCase
 interface RequestConfig {}
 ```
-
-For detailed file naming conventions, see [`app/src/FILE_NAMING_CONVENTIONS.md`](../app/src/FILE_NAMING_CONVENTIONS.md).
 
 #### Formatting and Linting
 
