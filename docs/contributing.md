@@ -217,7 +217,7 @@ We use Google Test for C++ unit tests.
 ```bash
 cd engine
 
-# Build and run all tests
+# Build and run all tests (this script only on linux or macOS)
 ./scripts/build/build-and-test.sh
 
 # Run specific test
@@ -317,66 +317,6 @@ causing retained references to large response bodies.
 - [ ] Commit messages follow conventions
 - [ ] PR description explains changes
 
-### PR Template
-
-```markdown
-## Description
-Brief description of changes.
-
-## Type of Change
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Testing
-How was this tested?
-
-## Checklist
-- [ ] My code follows the style guidelines
-- [ ] I have performed a self-review
-- [ ] I have added tests (if applicable)
-- [ ] I have updated documentation
-
-## Related Issues
-Closes #123
-```
-
-### Review Process
-
-1. **Automated checks** run (if configured: CI, linting, tests)
-2. **Maintainer review** (typically within 48 hours)
-3. **Address feedback** with new commits
-4. **Squash and merge** once approved (or merge commit, depending on project preference)
-
-## Architecture Decisions
-
-Major changes should be discussed before implementation:
-
-1. **Open an issue** describing the proposal
-2. **Tag it** with `discussion` or `rfc` (if labels exist)
-3. **Get feedback** from maintainers
-4. **Document** the decision if significant
-
-### Decision Record Template
-
-```markdown
-# ADR-001: Use QuickJS for Scripting
-
-## Status
-Accepted
-
-## Context
-We need a JavaScript engine for running Postman-compatible scripts.
-
-## Decision
-Use QuickJS instead of V8.
-
-## Consequences
-- Smaller binary size (500KB vs 20MB)
-- Faster startup (µs vs ms)
-- Limited ES2020 support (no ES2021+)
-```
 
 ## Getting Help
 
@@ -384,12 +324,6 @@ Use QuickJS instead of V8.
 - **GitHub Discussions**: Ask questions, share ideas (if enabled)
 - **Documentation**: Check `docs/` folder for detailed guides
 
-## Recognition
-
-Contributors are recognized in:
-- `CONTRIBUTORS.md` file (if present)
-- Release notes
-- GitHub contributors page
 
 ## Releasing
 
