@@ -129,7 +129,7 @@ How to create a release (recommended)
 
 ```bash
 ./scripts/bump-version.sh 0.1.2
-# or, if the script supports it:
+# or
 ./scripts/bump-version.sh patch
 ```
 
