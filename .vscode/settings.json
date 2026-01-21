@@ -12,7 +12,6 @@
     // =========================================================================
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
     "C_Cpp.default.compileCommands": "${workspaceFolder}/engine/build/compile_commands.json",
-    "C_Cpp.intelliSenseEngine": "default",
     "C_Cpp.errorSquiggles": "enabled",
     "C_Cpp.autocompleteAddParentheses": true,
     "C_Cpp.formatting": "clangFormat",
@@ -22,7 +21,7 @@
     // Editor Settings for C++
     // =========================================================================
     "[cpp]": {
-        "editor.defaultFormatter": "ms-vscode.cpptools",
+        "editor.defaultFormatter": "ms-vscode.cmake-tools",
         "editor.formatOnSave": true,
         "editor.formatOnPaste": false,
         "editor.tabSize": 4,
@@ -31,7 +30,7 @@
         "editor.suggest.insertMode": "replace"
     },
     "[c]": {
-        "editor.defaultFormatter": "ms-vscode.cpptools",
+        "editor.defaultFormatter": "ms-vscode.cmake-tools",
         "editor.formatOnSave": true,
         "editor.tabSize": 4
     },
