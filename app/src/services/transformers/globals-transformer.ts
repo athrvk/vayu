@@ -9,34 +9,33 @@
 /**
  * Globals Transformer
  *
- * Transforms between frontend and backend global variables formats.
+ * Transforms backend globals format to frontend format.
+ * Handles date conversion (number to ISO string) for updatedAt field.
  */
 
-import type { GlobalVariables, VariableValue } from "@/types";
+import type { GlobalVariables } from "@/types";
 
 /**
- * Backend globals response format
+ * Backend globals response format (camelCase with number timestamp)
  */
-export interface BackendGlobalsResponse {
-	id: string;
-	variables: Record<string, VariableValue>;
-	updatedAt: number;
+export type BackendGlobals = Omit<GlobalVariables, "updatedAt"> & {
+	updatedAt: number | string;
 }
 
 /**
  * Globals Transformer
  *
- * Handles transformation of global variables between backend and frontend formats.
+ * Converts backend globals (with number timestamp) to frontend format (with ISO string timestamp).
  */
 export class GlobalsTransformer {
 	/**
 	 * Transform backend globals response to frontend format
+	 * Converts updatedAt from number (Unix timestamp ms) to ISO string
 	 */
-	static toFrontend(backendResponse: BackendGlobalsResponse): GlobalVariables {
+	static toFrontend(backendResponse: BackendGlobals): GlobalVariables {
 		return {
-			id: backendResponse.id,
-			variables: backendResponse.variables || {},
-			updated_at: new Date(backendResponse.updatedAt).toISOString(),
+			...backendResponse,
+			updatedAt: new Date(backendResponse.updatedAt).toISOString(),
 		};
 	}
 }

@@ -70,16 +70,18 @@ export default function UnifiedResponseViewer({
 	}
 
 	const handleCopy = async () => {
-		if (effectiveResponse?.body) {
-			await navigator.clipboard.writeText(effectiveResponse.body);
+		const content = effectiveResponse?.bodyRaw || effectiveResponse?.body;
+		if (content) {
+			await navigator.clipboard.writeText(content);
 			setCopied(true);
 			setTimeout(() => setCopied(false), 2000);
 		}
 	};
 
 	const handleDownload = () => {
-		if (effectiveResponse?.body) {
-			const blob = new Blob([effectiveResponse.body], { type: "text/plain" });
+		const content = effectiveResponse?.bodyRaw || effectiveResponse?.body;
+		if (content) {
+			const blob = new Blob([content], { type: "text/plain" });
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement("a");
 			a.href = url;
@@ -93,7 +95,7 @@ export default function UnifiedResponseViewer({
 	if (compact) {
 		return (
 			<div
-				className={cn("flex flex-col bg-card rounded-lg border overflow-hidden", className)}
+				className={cn("flex flex-col bg-card border overflow-hidden", className)}
 			>
 				{/* Simple tab buttons */}
 				<div className="flex gap-2 p-3 border-b bg-muted/30">
@@ -123,6 +125,7 @@ export default function UnifiedResponseViewer({
 					{activeTab === "body" && effectiveResponse?.body && (
 						<ResponseBody
 							body={effectiveResponse.body}
+							bodyRaw={effectiveResponse.bodyRaw}
 							headers={effectiveResponse.headers || {}}
 							compact
 							showModeToggle
@@ -191,14 +194,14 @@ export default function UnifiedResponseViewer({
 					<TabsList className="h-auto p-0 bg-transparent">
 						<TabsTrigger
 							value="body"
-							className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 						>
 							Body
 						</TabsTrigger>
 						{!hiddenTabs.includes("headers") && (
 							<TabsTrigger
 								value="headers"
-								className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 							>
 								Headers
 								{effectiveResponse?.headers && (
@@ -211,7 +214,7 @@ export default function UnifiedResponseViewer({
 						{!hiddenTabs.includes("request") && effectiveRequest && (
 							<TabsTrigger
 								value="request"
-								className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 							>
 								Request
 							</TabsTrigger>
@@ -250,6 +253,7 @@ export default function UnifiedResponseViewer({
 					{activeTab === "body" && effectiveResponse?.body && (
 						<ResponseBody
 							body={effectiveResponse.body}
+							bodyRaw={effectiveResponse.bodyRaw}
 							headers={effectiveResponse.headers || {}}
 							showModeToggle
 						/>

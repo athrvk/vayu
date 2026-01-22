@@ -34,7 +34,7 @@ export interface ListCollectionsResponse {
 export interface CreateCollectionRequest {
 	name: string;
 	description?: string;
-	parent_id?: string;
+	parentId?: string;
 	variables?: Record<string, VariableValue>;
 }
 
@@ -42,13 +42,13 @@ export interface UpdateCollectionRequest {
 	id: string;
 	name?: string;
 	description?: string;
-	parent_id?: string;
+	parentId?: string;
 	variables?: Record<string, VariableValue>;
 }
 
 // Requests API
 export interface ListRequestsParams {
-	collection_id?: string;
+	collectionId?: string;
 }
 
 export interface ListRequestsResponse {
@@ -56,7 +56,7 @@ export interface ListRequestsResponse {
 }
 
 export interface CreateRequestRequest {
-	collection_id: string;
+	collectionId: string;
 	name: string;
 	description?: string;
 	method: string;
@@ -64,10 +64,10 @@ export interface CreateRequestRequest {
 	params?: Record<string, string>;
 	headers?: Record<string, string>;
 	body?: string;
-	body_type?: string;
+	bodyType?: string;
 	auth?: Record<string, any>;
-	pre_request_script?: string;
-	test_script?: string;
+	preRequestScript?: string;
+	postRequestScript?: string;
 }
 
 export interface UpdateRequestRequest {
@@ -79,10 +79,10 @@ export interface UpdateRequestRequest {
 	params?: Record<string, string>;
 	headers?: Record<string, string>;
 	body?: string;
-	body_type?: string;
+	bodyType?: string;
 	auth?: Record<string, any>;
-	pre_request_script?: string;
-	test_script?: string;
+	preRequestScript?: string;
+	postRequestScript?: string;
 }
 
 // Environments API
@@ -93,21 +93,21 @@ export interface ListEnvironmentsResponse {
 export interface CreateEnvironmentRequest {
 	name: string;
 	variables: Record<string, VariableValue>;
-	is_active?: boolean;
+	isActive?: boolean;
 }
 
 export interface UpdateEnvironmentRequest {
 	id: string;
 	name?: string;
 	variables?: Record<string, VariableValue>;
-	is_active?: boolean;
+	isActive?: boolean;
 }
 
 // Globals API
 export interface GlobalsResponse {
 	id: string;
 	variables: Record<string, VariableValue>;
-	updatedAt: number;
+	updatedAt: number | string;
 }
 
 export interface UpdateGlobalsRequest {

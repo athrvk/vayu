@@ -47,7 +47,7 @@ export const ErrorMessages = {
 	[ErrorCode.TIMEOUT]: "Request timed out. The server took too long to respond.",
 	[ErrorCode.DNS_ERROR]: "Could not resolve the domain name. Please check the URL.",
 	[ErrorCode.CONNECTION_FAILED]:
-		"Could not connect to the server. Please verify the URL and ensure the server is running.",
+		"Could not resolve host. Please verify the URL.",
 	[ErrorCode.SSL_ERROR]: "SSL/TLS connection error. Please check the certificate.",
 	[ErrorCode.INVALID_URL]: "Invalid URL format. Please check the URL.",
 	[ErrorCode.INVALID_METHOD]: "Invalid HTTP method.",

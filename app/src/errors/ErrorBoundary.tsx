@@ -206,7 +206,7 @@ export class ErrorBoundary extends Component<Props, State> {
 										Error details{" "}
 										{process.env.NODE_ENV === "development" && "(dev only)"}
 									</summary>
-									<pre className="p-3 bg-muted rounded-md overflow-auto max-h-48 text-muted-foreground whitespace-pre-wrap break-words">
+									<pre className="p-3 bg-muted overflow-auto max-h-48 text-muted-foreground whitespace-pre-wrap break-words">
 										{this.state.error.stack}
 									</pre>
 								</details>

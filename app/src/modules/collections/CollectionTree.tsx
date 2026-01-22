@@ -137,7 +137,7 @@ export default function CollectionTree() {
 
 		await createCollectionMutation.mutateAsync({
 			name: newSubfolderName.trim(),
-			parent_id: parentId,
+			parentId: parentId,
 		});
 		setNewSubfolderName("New Folder");
 		setCreatingSubfolder(null);
@@ -156,7 +156,7 @@ export default function CollectionTree() {
 		}
 
 		const request = await createRequestMutation.mutateAsync({
-			collection_id: collectionId,
+			collectionId: collectionId,
 			name: "New Request",
 			method: "GET",
 			url: "https://api.example.com",
@@ -406,9 +406,9 @@ export default function CollectionTree() {
 				</div>
 			)}
 
-			{/* Root-level collections (no parent_id) - sorted by order */}
+			{/* Root-level collections (no parentId) - sorted by order */}
 			{collections
-				.filter((c) => !c.parent_id)
+				.filter((c) => !c.parentId)
 				.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 				.map((collection) => (
 					<CollectionItem
@@ -457,7 +457,7 @@ export default function CollectionTree() {
 			{contextMenu && (
 				<div
 					ref={contextMenuRef}
-					className="fixed bg-popover border rounded-md shadow-md py-1 z-50 min-w-[180px]"
+					className="fixed bg-popover border shadow-md py-1 z-50 min-w-[180px]"
 					style={{
 						top: contextMenu.y,
 						left: contextMenu.x,

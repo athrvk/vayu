@@ -59,19 +59,19 @@ export default function PerformanceTab({ report }: TabProps) {
 					</CardHeader>
 					<CardContent>
 						<div className="grid grid-cols-3 gap-6">
-							<div className="text-center p-4 bg-muted/50 rounded-lg">
+							<div className="text-center p-4 bg-muted/50">
 								<p className="text-xs text-muted-foreground mb-2">Target RPS</p>
 								<p className="text-2xl font-bold text-foreground">
 									{formatNumber(report.rateControl.targetRps)}
 								</p>
 							</div>
-							<div className="text-center p-4 bg-muted/50 rounded-lg">
+							<div className="text-center p-4 bg-muted/50">
 								<p className="text-xs text-muted-foreground mb-2">Actual RPS</p>
 								<p className="text-2xl font-bold text-foreground">
 									{formatNumber(report.rateControl.actualRps)}
 								</p>
 							</div>
-							<div className="text-center p-4 bg-muted/50 rounded-lg">
+							<div className="text-center p-4 bg-muted/50">
 								<p className="text-xs text-muted-foreground mb-2">
 									Achievement Rate
 								</p>

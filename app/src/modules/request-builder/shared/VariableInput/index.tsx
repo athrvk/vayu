@@ -373,7 +373,7 @@ export default function VariableInput({
 				disabled={disabled}
 				className={cn(
 					// Match shadcn Input styling
-					"flex h-9 w-full rounded-md border border-input px-3 py-1 text-sm shadow-sm transition-colors",
+					"flex h-9 w-full border border-input px-3 py-1 text-sm shadow-sm transition-colors",
 					"placeholder:text-muted-foreground",
 					"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 					"disabled:cursor-not-allowed disabled:opacity-50",
@@ -427,7 +427,7 @@ export default function VariableInput({
 
 			{/* Plain Text Suggestions Popover (e.g., for standard headers) */}
 			{showPlainSuggestions && !showSuggestions && filteredSuggestions.length > 0 && (
-				<div className="absolute left-0 top-full mt-1 z-50 w-64 max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
+				<div className="absolute left-0 top-full mt-1 z-50 w-64 max-h-48 overflow-y-auto border bg-popover shadow-md">
 					{filteredSuggestions.slice(0, 10).map((suggestion, index) => (
 						<button
 							key={suggestion}

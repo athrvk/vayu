@@ -43,7 +43,7 @@ export default function SampleRequestCard({
 	return (
 		<div
 			className={cn(
-				"border rounded-lg overflow-hidden transition-all",
+				"border overflow-hidden transition-all",
 				isError && "border-destructive/30",
 				isSuccess && "border-green-500/20"
 			)}
@@ -78,7 +78,7 @@ export default function SampleRequestCard({
 
 				<div
 					className={cn(
-						"w-2 h-2 rounded-full transition-transform",
+						"w-2 h-2 transition-transform",
 						isExpanded && "rotate-180"
 					)}
 				>
@@ -91,7 +91,7 @@ export default function SampleRequestCard({
 				<div className="p-4 space-y-4 bg-card border-t">
 					{/* Error Message */}
 					{sample.error && (
-						<div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+						<div className="p-3 bg-destructive/10 border border-destructive/20">
 							<p className="text-xs font-medium text-destructive mb-1">Error</p>
 							<p className="text-sm text-destructive font-mono break-all">
 								{sample.error}
@@ -122,7 +122,7 @@ export default function SampleRequestCard({
 							<h4 className="text-xs font-semibold text-muted-foreground mb-2 uppercase">
 								Request Headers
 							</h4>
-							<pre className="bg-muted p-3 rounded text-xs overflow-x-auto max-h-40">
+							<pre className="bg-muted p-3 text-xs overflow-x-auto max-h-40">
 								{typeof sample.trace.request.headers === "object"
 									? JSON.stringify(sample.trace.request.headers, null, 2)
 									: sample.trace.request.headers}

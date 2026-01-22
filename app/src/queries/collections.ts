@@ -55,7 +55,7 @@ export function usePrefetchCollectionsAndRequests() {
 				collections.map((collection) =>
 					queryClient.prefetchQuery({
 						queryKey: queryKeys.requests.listByCollection(collection.id),
-						queryFn: () => apiService.listRequests({ collection_id: collection.id }),
+						queryFn: () => apiService.listRequests({ collectionId: collection.id }),
 						staleTime: 30 * 1000, // Consider fresh for 30 seconds
 					})
 				)
@@ -76,7 +76,7 @@ export function usePrefetchCollectionsAndRequests() {
 export function useRequestsQuery(collectionId: string | null) {
 	return useQuery({
 		queryKey: queryKeys.requests.listByCollection(collectionId ?? ""),
-		queryFn: () => apiService.listRequests({ collection_id: collectionId! }),
+		queryFn: () => apiService.listRequests({ collectionId: collectionId! }),
 		enabled: !!collectionId,
 	});
 }
@@ -90,19 +90,19 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 	const queries = useQueries({
 		queries: collectionIds.map((collectionId) => ({
 			queryKey: queryKeys.requests.listByCollection(collectionId),
-			queryFn: () => apiService.listRequests({ collection_id: collectionId }),
+			queryFn: () => apiService.listRequests({ collectionId: collectionId }),
 		})),
 	});
 
-	// Build a map of collectionId -> requests (sorted by created_at for stable order)
+	// Build a map of collectionId -> requests (sorted by createdAt for stable order)
 	const requestsByCollection = new Map<string, Request[]>();
 	queries.forEach((query, index) => {
 		const collectionId = collectionIds[index];
 		const requests = query.data ?? [];
-		// Sort by created_at to maintain stable order after renames
+		// Sort by createdAt to maintain stable order after renames
 		const sortedRequests = [...requests].sort((a, b) => {
-			const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
-			const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+			const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+			const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
 			return aTime - bTime;
 		});
 		requestsByCollection.set(collectionId, sortedRequests);
@@ -231,7 +231,7 @@ export function useCreateRequestMutation() {
 		onSuccess: (newRequest) => {
 			// Add to collection's requests cache
 			queryClient.setQueryData<Request[]>(
-				queryKeys.requests.listByCollection(newRequest.collection_id),
+				queryKeys.requests.listByCollection(newRequest.collectionId),
 				(old) => (old ? [...old, newRequest] : [newRequest])
 			);
 			// Also set the detail cache so useRequestQuery can find it immediately

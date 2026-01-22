@@ -22,16 +22,16 @@ export interface Collection {
 	id: string;
 	name: string;
 	description?: string;
-	parent_id?: string;
+	parentId?: string;
 	order?: number; // Position in the collection list
 	variables?: Record<string, VariableValue>; // Collection-scoped variables
-	created_at: string;
-	updated_at: string;
+	createdAt: string;
+	updatedAt: string;
 }
 
 export interface Request {
 	id: string;
-	collection_id: string;
+	collectionId: string;
 	name: string;
 	description?: string;
 	method: HttpMethod;
@@ -39,21 +39,21 @@ export interface Request {
 	params?: Record<string, string>; // Query parameters
 	headers?: Record<string, string>;
 	body?: string;
-	body_type?: "json" | "text" | "form-data" | "x-www-form-urlencoded";
+	bodyType?: "json" | "text" | "form-data" | "x-www-form-urlencoded";
 	auth?: Record<string, any>;
-	pre_request_script?: string;
-	test_script?: string;
-	created_at: string;
-	updated_at: string;
+	preRequestScript?: string;
+	postRequestScript?: string;
+	createdAt: string;
+	updatedAt: string;
 }
 
 export interface Environment {
 	id: string;
 	name: string;
 	variables: Record<string, VariableValue>;
-	is_active: boolean;
-	created_at: string;
-	updated_at: string;
+	isActive: boolean;
+	createdAt: string;
+	updatedAt: string;
 }
 
 /**
@@ -62,7 +62,7 @@ export interface Environment {
 export interface GlobalVariables {
 	id: string; // Always "globals"
 	variables: Record<string, VariableValue>;
-	updated_at: string;
+	updatedAt: string;
 }
 
 /**

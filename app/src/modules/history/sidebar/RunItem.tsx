@@ -26,9 +26,10 @@ interface RunItemProps {
 	onSelect: (runId: string) => void;
 	onDelete: (runId: string, event: React.MouseEvent) => Promise<void>;
 	isDeleting: boolean;
+	isSelected?: boolean;
 }
 
-export default function RunItem({ run, onSelect, onDelete, isDeleting }: RunItemProps) {
+export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelected = false }: RunItemProps) {
 	// Format timestamp to relative time
 	const formatTime = (timestamp: number) => {
 		if (!timestamp) return "Unknown";
@@ -65,7 +66,10 @@ export default function RunItem({ run, onSelect, onDelete, isDeleting }: RunItem
 		<div
 			onClick={() => onSelect(run.id)}
 			className={cn(
-				"group relative bg-card border rounded-lg hover:border-primary/50 hover:shadow-sm cursor-pointer transition-all overflow-hidden w-full"
+				"group relative bg-card border cursor-pointer transition-all overflow-hidden w-full",
+				isSelected
+					? "bg-primary/10 hover:bg-primary/15 border-primary/50 ring-1 ring-inset ring-primary/20 shadow-sm"
+					: "hover:border-primary/50 hover:shadow-sm"
 			)}
 		>
 			{/* Status color indicator */}

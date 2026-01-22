@@ -26,6 +26,7 @@ export function useRunsQuery() {
 	return useQuery({
 		queryKey: queryKeys.runs.list(),
 		queryFn: () => apiService.listRuns(),
+		refetchInterval: 5000, // 5 seconds
 	});
 }
 

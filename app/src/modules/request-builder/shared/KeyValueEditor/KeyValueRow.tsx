@@ -103,7 +103,7 @@ function KeyValueRow({
 			{/* Resolved Preview */}
 			{showResolved && (
 				<div className="flex items-center min-w-0">
-					<div className="truncate overflow-x-auto scrollbar-thin text-sm font-mono text-muted-foreground bg-muted/50 px-2 py-1.5 rounded-md w-full h-9 flex items-center">
+					<div className="truncate overflow-x-auto scrollbar-thin text-sm font-mono text-muted-foreground bg-muted/50 px-2 py-1.5 w-full h-9 flex items-center">
 						{item.enabled && (resolvedKey || resolvedValue) ? (
 							<>
 								<span className={hasVariableInKey ? "text-primary" : ""}>

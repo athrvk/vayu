@@ -38,6 +38,7 @@ interface ExtendedResponseBodyProps extends ResponseBodyProps {
 
 export default function ResponseBody({
 	body,
+	bodyRaw,
 	headers,
 	className,
 	defaultMode = "pretty",
@@ -48,23 +49,30 @@ export default function ResponseBody({
 	const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
 
 	// Detect body type from content and headers
-	const detectedType = useMemo(() => detectBodyType(headers, body), [headers, body]);
+	const detectedType = useMemo(() => detectBodyType(headers, bodyRaw || body), [headers, bodyRaw, body]);
 
 	// Check if preview is available
 	const canPreview = detectedType === "html" || detectedType === "image";
 
-	// Format body for pretty view
+	// Format body for display
+	// Raw mode: use bodyRaw (original raw bytes from server) if available, fallback to body
+	// Pretty mode: use formatted body
 	const formattedBody = useMemo(() => {
-		if (viewMode === "raw") return body;
+		if (viewMode === "raw") {
+			// Use bodyRaw for raw view to show actual server response
+			return bodyRaw || body;
+		}
 		return formatBody(body, detectedType);
-	}, [body, detectedType, viewMode]);
+	}, [body, bodyRaw, detectedType, viewMode]);
 
 	// Get Monaco language
 	const language = useMemo(() => getMonacoLanguage(detectedType), [detectedType]);
 
 	// Prepare HTML for preview with disabled links and base styles
+	// Use bodyRaw for preview to show actual server response
 	const previewHtml = useMemo(() => {
-		if (detectedType !== "html") return body;
+		const htmlContent = bodyRaw || body;
+		if (detectedType !== "html") return htmlContent;
 
 		// Inject script to disable link navigation and add base styling
 		const disableLinkScript = `
@@ -89,24 +97,25 @@ export default function ResponseBody({
         `;
 
 		// Insert before </head> or </body> or at the end
-		if (body.includes("</head>")) {
-			return body.replace("</head>", disableLinkScript + "</head>");
-		} else if (body.includes("</body>")) {
-			return body.replace("</body>", disableLinkScript + "</body>");
+		if (htmlContent.includes("</head>")) {
+			return htmlContent.replace("</head>", disableLinkScript + "</head>");
+		} else if (htmlContent.includes("</body>")) {
+			return htmlContent.replace("</body>", disableLinkScript + "</body>");
 		} else {
-			return body + disableLinkScript;
+			return htmlContent + disableLinkScript;
 		}
-	}, [body, detectedType]);
+	}, [body, bodyRaw, detectedType]);
 
-	// Handle image types
+	// Handle image types - use bodyRaw for actual image data
 	if (detectedType === "image") {
 		const contentType = headers["content-type"] || headers["Content-Type"] || "image/png";
+		const imageData = bodyRaw || body;
 		return (
 			<div
 				className={cn("flex-1 flex items-center justify-center p-4 bg-zinc-900", className)}
 			>
 				<div className="text-center space-y-4">
-					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted text-sm text-muted-foreground">
+					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
 						<ImageIcon className="w-4 h-4" />
 						<span>
 							Image Response ({contentType.split("/")[1]?.toUpperCase() || "IMAGE"})
@@ -114,9 +123,9 @@ export default function ResponseBody({
 					</div>
 					<div className="max-w-full max-h-[400px] overflow-auto">
 						<img
-							src={`data:${contentType};base64,${body}`}
+							src={`data:${contentType};base64,${imageData}`}
 							alt="Response"
-							className="max-w-full h-auto rounded-md border border-border"
+							className="max-w-full h-auto border border-border"
 						/>
 					</div>
 				</div>
@@ -131,7 +140,7 @@ export default function ResponseBody({
 				className={cn("flex-1 flex items-center justify-center p-4 bg-zinc-900", className)}
 			>
 				<div className="text-center space-y-4">
-					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted text-sm text-muted-foreground">
+					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
 						<File className="w-4 h-4" />
 						<span>PDF Document</span>
 					</div>
@@ -150,7 +159,7 @@ export default function ResponseBody({
 				className={cn("flex-1 flex items-center justify-center p-4 bg-zinc-900", className)}
 			>
 				<div className="text-center space-y-4">
-					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted text-sm text-muted-foreground">
+					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
 						<FileCode className="w-4 h-4" />
 						<span>Binary Data</span>
 					</div>
@@ -174,7 +183,7 @@ export default function ResponseBody({
 				</div>
 
 				{showModeToggle && (
-					<div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
+					<div className="flex items-center gap-1 bg-muted p-0.5">
 						<Button
 							size="sm"
 							variant="ghost"

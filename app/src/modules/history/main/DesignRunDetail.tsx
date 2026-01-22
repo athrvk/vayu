@@ -12,9 +12,8 @@
  * Displays details for a single design mode request execution.
  */
 
-import { ArrowLeft, XCircle, Clock } from "lucide-react";
+import { XCircle, Clock } from "lucide-react";
 import {
-	Button,
 	Card,
 	CardContent,
 	CardHeader,
@@ -68,48 +67,9 @@ export default function DesignRunDetail({ report, onBack, runId }: DesignRunDeta
 		<div className="flex flex-col h-full bg-background">
 			{/* Header */}
 			<div className="border-b bg-card px-6 py-4">
-				<div className="flex items-center gap-3 mb-3">
-					<Button variant="ghost" size="icon" onClick={onBack} className="shrink-0">
-						<ArrowLeft className="w-5 h-5" />
-					</Button>
-					<div className="flex-1 min-w-0">
-						<div className="flex items-center gap-2">
-							<h1 className="text-lg font-semibold text-foreground truncate">
-								{report.metadata?.requestUrl || "Design Request"}
-							</h1>
-							<Badge variant="outline" className="text-xs shrink-0">
-								Design
-							</Badge>
-						</div>
-						<div className="flex items-center gap-2 mt-1">
-							<span className="text-xs text-muted-foreground font-mono">{runId}</span>
-							{report.metadata?.status && (
-								<>
-									<span className="text-xs text-muted-foreground">•</span>
-									<Badge
-										variant={
-											report.metadata.status === "completed"
-												? "default"
-												: report.metadata.status === "failed"
-													? "destructive"
-													: "outline"
-										}
-										className={`text-xs capitalize ${
-											report.metadata.status === "stopped"
-												? "border-orange-500 text-orange-600 dark:text-orange-400"
-												: ""
-										}`}
-									>
-										{report.metadata.status}
-									</Badge>
-								</>
-							)}
-						</div>
-					</div>
-				</div>
 
 				{/* Request Summary */}
-				<div className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+				<div className="flex items-center gap-3 bg-muted/50 p-3">
 					<Badge variant="outline" className="font-mono font-bold shrink-0">
 						{trace?.request?.method || report.metadata?.requestMethod || "GET"}
 					</Badge>

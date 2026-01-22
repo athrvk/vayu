@@ -82,7 +82,7 @@ export default function Sidebar() {
 										variant="ghost"
 										onClick={() => handleTabClick(tab.id)}
 										className={cn(
-											"flex-1 flex flex-col items-center justify-center gap-1 px-2 py-3 h-auto min-w-0 rounded-none",
+											"flex-1 flex flex-col items-center justify-center gap-1 px-2 py-3 h-auto min-w-0 ",
 											isActive
 												? "text-primary bg-primary/10 border-b-2 border-primary"
 												: "text-muted-foreground hover:text-foreground hover:bg-accent"

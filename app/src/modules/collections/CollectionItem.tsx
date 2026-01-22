@@ -85,7 +85,7 @@ export default function CollectionItem({
 	const isRenaming = renamingId === collection.id;
 	const isDeleting = deletingCollectionId === collection.id;
 	const childCollections = allCollections
-		.filter((c) => c.parent_id === collection.id)
+		.filter((c) => c.parentId === collection.id)
 		.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
 	const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);

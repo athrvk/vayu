@@ -733,6 +733,14 @@ void setup_pm_response(JSContext* ctx, JSValue pm) {
         JS_SetPropertyStr(
             ctx, response, "responseTime", JS_NewFloat64(ctx, data->response->timing.total_ms));
 
+        // Error information (for client-side failures)
+        if (data->response->error_code != vayu::ErrorCode::None) {
+            JS_SetPropertyStr(ctx, response, "errorCode", 
+                JS_NewString(ctx, vayu::to_string(data->response->error_code)));
+            JS_SetPropertyStr(ctx, response, "errorMessage", 
+                JS_NewString(ctx, data->response->error_message.c_str()));
+        }
+
         // pm.response.json()
         JS_SetPropertyStr(ctx, response, "json", JS_NewCFunction(ctx, js_response_json, "json", 0));
 

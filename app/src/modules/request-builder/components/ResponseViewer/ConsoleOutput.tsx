@@ -53,7 +53,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 			{(errors.pre || errors.post) && (
 				<div className="space-y-2">
 					{errors.pre && (
-						<div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md">
+						<div className="p-3 bg-destructive/10 border border-destructive/20">
 							<div className="flex items-start gap-2">
 								<AlertCircle className="w-4 h-4 text-destructive mt-0.5 flex-shrink-0" />
 								<div className="flex-1 min-w-0">
@@ -68,7 +68,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 						</div>
 					)}
 					{errors.post && (
-						<div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md">
+						<div className="p-3 bg-destructive/10 border border-destructive/20">
 							<div className="flex items-start gap-2">
 								<AlertCircle className="w-4 h-4 text-destructive mt-0.5 flex-shrink-0" />
 								<div className="flex-1 min-w-0">
@@ -112,7 +112,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 								</Badge>
 							</CollapsibleTrigger>
 							<CollapsibleContent className="mt-2">
-								<div className="bg-zinc-900 rounded-md p-3 font-mono text-sm space-y-1 border border-zinc-800">
+								<div className="bg-zinc-900 p-3 font-mono text-sm space-y-1 border border-zinc-800">
 									{preLogs.map((log, i) => (
 										<div key={i} className="flex items-start gap-2">
 											<Terminal className="w-4 h-4 text-blue-500/70 mt-0.5 flex-shrink-0" />
@@ -146,7 +146,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 								</Badge>
 							</CollapsibleTrigger>
 							<CollapsibleContent className="mt-2">
-								<div className="bg-zinc-900 rounded-md p-3 font-mono text-sm space-y-1 border border-zinc-800">
+								<div className="bg-zinc-900 p-3 font-mono text-sm space-y-1 border border-zinc-800">
 									{testLogs.map((log, i) => (
 										<div key={i} className="flex items-start gap-2">
 											<Terminal className="w-4 h-4 text-green-500/70 mt-0.5 flex-shrink-0" />

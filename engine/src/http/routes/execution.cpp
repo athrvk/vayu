@@ -206,63 +206,32 @@ void register_execution_routes(RouteContext& ctx) {
 
             auto response_result = client.send(request);
 
-            // Handle request errors
+            // Handle both errors and successful responses
+            // client.send() now always returns Response (never Error), but Response may have error_code set
             if (response_result.is_error()) {
-                const auto& error = response_result.error();
-
-                try {
-                    ctx.db.update_run_status_with_retry(run_id, vayu::RunStatus::Failed);
-                    run.end_time = now_ms();
-
-                    vayu::db::Result db_result;
-                    db_result.run_id = run_id;
-                    db_result.timestamp = run.end_time;
-                    db_result.status_code = 0;
-                    db_result.latency_ms = 0.0;
-                    db_result.error = error.message;
-
-                    // Store request information even on error
-                    nlohmann::json trace;
-                    nlohmann::json request_trace;
-                    request_trace["method"] = to_string(request.method);
-                    request_trace["url"] = request.url;
-                    request_trace["headers"] = request.headers;
-                    if (!request.body.content.empty()) {
-                        request_trace["body"] = request.body.content;
-                    }
-                    trace["request"] = request_trace;
-                    db_result.trace_data = trace.dump();
-
-                    ctx.db.add_result(db_result);
-                } catch (const std::exception& db_error) {
-                    vayu::utils::log_error("Failed to update run status: " +
-                                           std::string(db_error.what()));
-                }
-
-                if (error.code == vayu::ErrorCode::Timeout) {
-                    res.status = 504;
-                } else if (error.code == vayu::ErrorCode::DnsError) {
-                    res.status = 502;
-                } else if (error.code == vayu::ErrorCode::ConnectionFailed) {
-                    res.status = 503;
-                } else {
-                    res.status = 502;
-                }
-
-                res.set_content(vayu::json::serialize(error).dump(), "application/json");
+                // This should not happen anymore, but handle it for safety
+                vayu::utils::log_error("Unexpected error result from client.send()");
+                res.status = 500;
+                nlohmann::json error_json;
+                error_json["error"]["code"] = "INTERNAL_ERROR";
+                error_json["error"]["message"] = "Unexpected error from HTTP client";
+                res.set_content(error_json.dump(), "application/json");
                 return;
             }
 
-            // Store successful result
+            const auto& response = response_result.value();
+            const bool has_error = response.has_error();
+
+            // Store result (both error and success cases)
             try {
                 vayu::db::Result db_result;
                 db_result.run_id = run_id;
                 db_result.timestamp = now_ms();
-                db_result.status_code = response_result.value().status_code;
-                db_result.latency_ms = response_result.value().timing.total_ms;
-                db_result.error = "";
+                db_result.status_code = response.status_code;
+                db_result.latency_ms = response.timing.total_ms;
+                db_result.error = has_error ? response.error_message : "";
 
-                // Store both request and response data in trace
+                // Store request and response data in trace
                 nlohmann::json trace;
 
                 // Request information (what was actually sent)
@@ -275,13 +244,20 @@ void register_execution_routes(RouteContext& ctx) {
                 }
                 trace["request"] = request_trace;
 
-                // Response information
-                nlohmann::json response_trace;
-                response_trace["headers"] = response_result.value().headers;
-                response_trace["body"] = response_result.value().body;
-                trace["response"] = response_trace;
+                // Response information (empty for client-side errors, populated for server responses)
+                if (!has_error) {
+                    nlohmann::json response_trace;
+                    response_trace["headers"] = response.headers;
+                    response_trace["body"] = response.body;
+                    trace["response"] = response_trace;
+                } else {
+                    // For errors, include error details in trace
+                    trace["error_type"] = to_string(response.error_code);
+                    trace["error_message"] = response.error_message;
+                }
 
-                const auto& timing = response_result.value().timing;
+                // Timing information (available even for errors)
+                const auto& timing = response.timing;
                 if (timing.dns_ms > 0) trace["dnsMs"] = timing.dns_ms;
                 if (timing.connect_ms > 0) trace["connectMs"] = timing.connect_ms;
                 if (timing.tls_ms > 0) trace["tlsMs"] = timing.tls_ms;
@@ -291,7 +267,13 @@ void register_execution_routes(RouteContext& ctx) {
                 db_result.trace_data = trace.dump();
 
                 ctx.db.add_result(db_result);
-                ctx.db.update_run_status_with_retry(run_id, vayu::RunStatus::Completed);
+                
+                if (has_error) {
+                    ctx.db.update_run_status_with_retry(run_id, vayu::RunStatus::Failed);
+                    run.end_time = now_ms();
+                } else {
+                    ctx.db.update_run_status_with_retry(run_id, vayu::RunStatus::Completed);
+                }
 
             } catch (const std::exception& e) {
                 vayu::utils::log_error("Failed to save result: " + std::string(e.what()));
@@ -334,6 +316,12 @@ void register_execution_routes(RouteContext& ctx) {
                                            std::string(e.what()));
                 }
             }
+
+            // Always return HTTP 200 for successful request execution
+            // The Response object contains the actual status code:
+            // - 0 for client-side errors (connection failed, invalid URL, timeout, etc.)
+            // - Server status code (200-599) for server responses
+            res.status = 200;
 
             // Build response with script results
             nlohmann::json response_json = vayu::json::serialize(response_result.value());

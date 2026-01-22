@@ -202,7 +202,8 @@ inline auto make_storage(const std::string& path) {
             make_column("name", &Collection::name),
             make_column("variables", &Collection::variables),  // JSON: collection-scoped vars
             make_column("order", &Collection::order),
-            make_column("created_at", &Collection::created_at)),
+            make_column("created_at", &Collection::created_at),
+            make_column("updated_at", &Collection::updated_at)),
 
         // Requests: HTTP request definitions with pre/post scripts
         make_table("requests",
@@ -218,6 +219,7 @@ inline auto make_storage(const std::string& path) {
                    make_column("auth", &Request::auth),                              // JSON
                    make_column("pre_request_script", &Request::pre_request_script),  // JS
                    make_column("post_request_script", &Request::post_request_script),  // JS
+                   make_column("created_at", &Request::created_at),
                    make_column("updated_at", &Request::updated_at)),
 
         // Environments: Named variable sets (dev, staging, prod)
@@ -226,6 +228,8 @@ inline auto make_storage(const std::string& path) {
             make_column("id", &Environment::id, primary_key()),
             make_column("name", &Environment::name),
             make_column("variables", &Environment::variables),  // JSON: {key: {value, enabled}}
+            make_column("is_active", &Environment::is_active),
+            make_column("created_at", &Environment::created_at),
             make_column("updated_at", &Environment::updated_at)),
 
         // ─────────────── EXECUTION ENGINE TABLES ───────────────

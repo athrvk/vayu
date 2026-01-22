@@ -18,7 +18,6 @@ export type MainScreen =
 	| "request-builder"
 	| "dashboard"
 	| "history"
-	| "history-detail"
 	| "variables"
 	| "settings"
 	| "welcome";

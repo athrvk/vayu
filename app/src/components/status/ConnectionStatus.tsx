@@ -20,7 +20,7 @@ function SaveStatusIndicator() {
 	if (status === "pending") {
 		return (
 			<div className="flex items-center gap-1.5 text-warning">
-				<div className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
+				<div className="w-1.5 h-1.5 bg-warning animate-pulse" />
 				<span className="text-xs">Unsaved</span>
 			</div>
 		);

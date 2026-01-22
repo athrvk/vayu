@@ -135,6 +135,7 @@ Json serialize(const vayu::db::Collection& c) {
     json["name"] = c.name;
     json["order"] = c.order;
     json["createdAt"] = c.created_at;
+    json["updatedAt"] = c.updated_at;
 
     // Parse collection variables JSON
     if (c.variables.empty()) {
@@ -208,6 +209,7 @@ Json serialize(const vayu::db::Request& r) {
     json["preRequestScript"] = r.pre_request_script;
     json["postRequestScript"] = r.post_request_script;
     json["updatedAt"] = r.updated_at;
+    json["createdAt"] = r.created_at;
     return json;
 }
 
@@ -360,6 +362,12 @@ Json serialize(const Response& response) {
         json["body"] = nullptr;
     }
     json["bodyRaw"] = response.body;
+
+    // Error information (for client-side failures)
+    if (response.error_code != vayu::ErrorCode::None) {
+        json["errorCode"] = vayu::to_string(response.error_code);
+        json["errorMessage"] = response.error_message;
+    }
 
     // Timing
     Json timing;
@@ -589,7 +597,8 @@ void serialize_to_stream(const vayu::db::Request& r, std::ostream& out) {
     
     out << "\"preRequestScript\":" << Json(r.pre_request_script).dump() << ",";
     out << "\"postRequestScript\":" << Json(r.post_request_script).dump() << ",";
-    out << "\"updatedAt\":" << r.updated_at;
+    out << "\"updatedAt\":" << r.updated_at << ",";
+    out << "\"createdAt\":" << r.created_at;
     out << "}";
 }
 

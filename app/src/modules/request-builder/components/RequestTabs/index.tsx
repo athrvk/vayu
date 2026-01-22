@@ -66,12 +66,12 @@ export default function RequestTabs() {
 			className="flex-1 flex flex-col overflow-hidden"
 		>
 			{/* Tab Headers */}
-			<TabsList className="w-full justify-start rounded-none border-b border-border bg-transparent h-auto p-0">
+			<TabsList className="w-full justify-start border-b border-border bg-transparent h-auto p-0">
 				{tabs.map((tab) => (
 					<TabsTrigger
 						key={tab.id}
 						value={tab.id}
-						className="relative rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2.5 text-sm font-medium"
+						className="relative border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2.5 text-sm font-medium"
 					>
 						{tab.label}
 						{tab.badge !== undefined && (

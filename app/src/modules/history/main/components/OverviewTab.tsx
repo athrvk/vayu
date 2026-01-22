@@ -30,7 +30,7 @@ export default function OverviewTab({ report }: TabProps) {
 					</CardHeader>
 					<CardContent>
 						{report.metadata.configuration?.comment && (
-							<div className="mb-4 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+							<div className="mb-4 p-3 bg-primary/5 border border-primary/20">
 								<p className="text-xs text-primary font-medium mb-1">Comment</p>
 								<p className="text-sm text-foreground">
 									{report.metadata.configuration.comment}
@@ -161,7 +161,7 @@ export default function OverviewTab({ report }: TabProps) {
 										<div
 											key={code}
 											className={cn(
-												"p-3 rounded-lg border text-center",
+												"p-3 border text-center",
 												isError &&
 													"bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900",
 												isSuccess &&
@@ -218,7 +218,7 @@ export default function OverviewTab({ report }: TabProps) {
 						</CardTitle>
 					</CardHeader>
 					<CardContent className="space-y-3">
-						<div className="flex justify-between items-center p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+						<div className="flex justify-between items-center p-3 bg-destructive/10 border border-destructive/20">
 							<span className="text-sm font-medium text-destructive">
 								Total Errors
 							</span>

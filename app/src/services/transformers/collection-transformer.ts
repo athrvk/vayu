@@ -9,93 +9,40 @@
 /**
  * Collection Transformer
  *
- * Transforms between frontend (snake_case) and backend (camelCase) collection formats.
+ * Transforms backend collection format to frontend format.
+ * Handles date conversion (number to ISO string) for createdAt/updatedAt fields.
  */
 
-import type { Collection, CreateCollectionRequest, UpdateCollectionRequest } from "@/types";
+import type { Collection } from "@/types";
 
 /**
- * Backend collection format (camelCase)
+ * Backend collection format (camelCase with number timestamps)
  */
-export interface BackendCollection {
-	id?: string;
-	name: string;
-	description?: string;
-	parentId?: string;
-	variables?: Record<string, any>;
-	order?: number;
-	createdAt?: string | number;
-	updatedAt?: string | number;
-	// Also support snake_case for backward compatibility
-	parent_id?: string;
-	created_at?: string;
-	updated_at?: string;
-}
+export type BackendCollection = Omit<Collection, "createdAt" | "updatedAt"> & {
+	createdAt: number | string;
+	updatedAt: number | string;
+};
 
 /**
  * Collection Transformer
  *
- * Handles transformation between frontend (snake_case) and backend (camelCase) formats.
+ * Converts backend collection (with number timestamps) to frontend format (with ISO string timestamps).
  */
 export class CollectionTransformer {
 	/**
-	 * Transform backend collection (camelCase) to frontend collection (snake_case)
+	 * Transform backend collection to frontend collection
+	 * Converts createdAt/updatedAt from number (Unix timestamp ms) to ISO string
 	 */
 	static toFrontend(backendCollection: BackendCollection): Collection {
 		if (!backendCollection.id) {
 			throw new Error("Collection must have an id");
 		}
 
+		// Handle createdAt/updatedAt conversion from number to string if needed
 		return {
-			id: backendCollection.id,
-			name: backendCollection.name,
-			description: backendCollection.description,
-			parent_id: backendCollection.parentId || backendCollection.parent_id,
-			order: backendCollection.order,
-			variables: backendCollection.variables,
-			created_at: backendCollection.createdAt
-				? typeof backendCollection.createdAt === "string"
-					? backendCollection.createdAt
-					: new Date(backendCollection.createdAt).toISOString()
-				: backendCollection.created_at || new Date().toISOString(),
-			updated_at: backendCollection.updatedAt
-				? typeof backendCollection.updatedAt === "string"
-					? backendCollection.updatedAt
-					: new Date(backendCollection.updatedAt).toISOString()
-				: backendCollection.updated_at || new Date().toISOString(),
+			...backendCollection,
+			createdAt: new Date(backendCollection.createdAt).toISOString(),
+			updatedAt: new Date(backendCollection.updatedAt).toISOString(),
 		};
-	}
-
-	/**
-	 * Transform frontend collection (snake_case) to backend collection (camelCase)
-	 */
-	static toBackend(
-		data: CreateCollectionRequest | UpdateCollectionRequest
-	): Partial<BackendCollection> {
-		const backendData: Partial<BackendCollection> = {
-			name: data.name,
-		};
-
-		// Handle ID for updates
-		if ("id" in data && data.id) {
-			backendData.id = data.id;
-		}
-
-		// Handle description
-		if (data.description !== undefined) {
-			backendData.description = data.description;
-		}
-
-		// Handle parent ID
-		if (data.parent_id) {
-			backendData.parentId = data.parent_id;
-		}
-
-		// Handle variables
-		if (data.variables) {
-			backendData.variables = data.variables;
-		}
-
-		return backendData;
 	}
 }

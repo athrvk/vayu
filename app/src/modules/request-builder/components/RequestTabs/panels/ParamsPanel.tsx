@@ -156,7 +156,7 @@ export default function ParamsPanel() {
 						<label className="text-sm font-medium text-muted-foreground">
 							Full Resolved URL
 						</label>
-						<div className="p-3 bg-muted rounded-md font-mono text-sm break-all">
+						<div className="p-3 bg-muted font-mono text-sm break-all">
 							{resolvedUrl || (
 								<span className="text-muted-foreground italic">No URL</span>
 							)}

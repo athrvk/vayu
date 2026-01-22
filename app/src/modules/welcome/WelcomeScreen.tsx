@@ -61,8 +61,8 @@ export default function WelcomeScreen() {
 				requestCount: requestsByCollection.get(col.id)?.length ?? 0,
 			}))
 			.sort((a, b) => {
-				const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-				const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+				const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+				const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
 				return bTime - aTime;
 			})
 			.slice(0, 3);
@@ -107,7 +107,7 @@ export default function WelcomeScreen() {
 
 			// Create a new request
 			const newRequest = await createRequestMutation.mutateAsync({
-				collection_id: targetCollectionId,
+				collectionId: targetCollectionId,
 				name: "New Request",
 				method: "GET",
 				url: "https://api.example.com",
@@ -127,7 +127,7 @@ export default function WelcomeScreen() {
 				<div className="text-center mb-12">
 					<div className="flex items-center justify-center gap-4 mb-6">
 						<div className="relative">
-							<div className="absolute inset-0 bg-primary/20 blur-2xl rounded-full" />
+							<div className="absolute inset-0 bg-primary/20 blur-2xl" />
 							<Zap className="w-16 h-16 text-primary relative z-10" />
 						</div>
 						<h1 className="text-5xl font-bold text-foreground">Vayu</h1>
@@ -148,7 +148,7 @@ export default function WelcomeScreen() {
 					>
 						<CardHeader className="pb-3">
 							<div className="flex items-center gap-3">
-								<div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+								<div className="p-2  bg-primary/10 group-hover:bg-primary/20 transition-colors">
 									<Plus className="w-5 h-5 text-primary" />
 								</div>
 								<CardTitle className="text-base">New Request</CardTitle>
@@ -167,7 +167,7 @@ export default function WelcomeScreen() {
 					>
 						<CardHeader className="pb-3">
 							<div className="flex items-center gap-3">
-								<div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+								<div className="p-2  bg-primary/10 group-hover:bg-primary/20 transition-colors">
 									<History className="w-5 h-5 text-primary" />
 								</div>
 								<CardTitle className="text-base">View History</CardTitle>
@@ -186,7 +186,7 @@ export default function WelcomeScreen() {
 					>
 						<CardHeader className="pb-3">
 							<div className="flex items-center gap-3">
-								<div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+								<div className="p-2  bg-primary/10 group-hover:bg-primary/20 transition-colors">
 									<Database className="w-5 h-5 text-primary" />
 								</div>
 								<CardTitle className="text-base">Variables</CardTitle>
@@ -205,7 +205,7 @@ export default function WelcomeScreen() {
 					>
 						<CardHeader className="pb-3">
 							<div className="flex items-center gap-3">
-								<div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+								<div className="p-2  bg-primary/10 group-hover:bg-primary/20 transition-colors">
 									<Settings className="w-5 h-5 text-primary" />
 								</div>
 								<CardTitle className="text-base">Settings</CardTitle>
@@ -338,7 +338,7 @@ export default function WelcomeScreen() {
 												onClick={() => {
 													setActiveSidebarTab("collections");
 												}}
-												className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-accent transition-colors text-left group"
+												className="w-full flex items-center justify-between p-3  hover:bg-accent transition-colors text-left group"
 											>
 												<div className="flex-1 min-w-0">
 													<p className="text-sm font-medium truncate">
@@ -376,7 +376,7 @@ export default function WelcomeScreen() {
 												onClick={() => {
 													setActiveSidebarTab("history");
 												}}
-												className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-accent transition-colors text-left group"
+												className="w-full flex items-center justify-between p-3  hover:bg-accent transition-colors text-left group"
 											>
 												<div className="flex-1 min-w-0">
 													<div className="flex items-center gap-2 mb-1">

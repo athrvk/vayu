@@ -393,18 +393,7 @@ Result<Response> Client::send(const Request& request) {
         curl_slist_free_all(headers_list);
     }
 
-    // Check for errors
-    if (res != CURLE_OK) {
-        return curl_to_error(res, impl_->error_buffer);
-    }
-
-    // Get response info
-    long http_code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-    response.status_code = static_cast<int>(http_code);
-    response.status_text = status_text(response.status_code);
-
-    // Get timing info
+    // Get timing info (try to get even on errors, as curl may have partial timing)
     double total_time = 0, namelookup_time = 0, connect_time = 0;
     double appconnect_time = 0, starttransfer_time = 0;
 
@@ -420,6 +409,30 @@ Result<Response> Client::send(const Request& request) {
     response.timing.tls_ms = (appconnect_time - connect_time) * 1000.0;
     response.timing.first_byte_ms = (starttransfer_time - appconnect_time) * 1000.0;
     response.timing.download_ms = (total_time - starttransfer_time) * 1000.0;
+
+    // Check for errors
+    if (res != CURLE_OK) {
+        // Convert curl error to ErrorCode and message
+        Error error = curl_to_error(res, impl_->error_buffer);
+        
+        // Return Response object with error details (Postman-compatible approach)
+        response.status_code = 0;  // 0 indicates client-side error (no server response)
+        response.status_text = "Error";
+        response.error_code = error.code;
+        response.error_message = error.message;
+        // raw_request is already populated above
+        // headers and body remain empty (no server response)
+        // timing info is already set above
+        
+        return response;
+    }
+
+    // Get response info for successful requests
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    response.status_code = static_cast<int>(http_code);
+    response.status_text = status_text(response.status_code);
+    response.error_code = ErrorCode::None;  // Explicitly set to None for successful requests
 
     // Set body
     response.body = std::move(response_body);

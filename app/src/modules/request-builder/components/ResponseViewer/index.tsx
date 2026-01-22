@@ -136,13 +136,13 @@ export default function ResponseViewer() {
 					<TabsList className="h-auto p-0 bg-transparent">
 						<TabsTrigger
 							value="body"
-							className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 						>
 							Body
 						</TabsTrigger>
 						<TabsTrigger
 							value="headers"
-							className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 						>
 							Headers
 							<Badge variant="secondary" className="ml-1.5 text-xs">
@@ -151,14 +151,14 @@ export default function ResponseViewer() {
 						</TabsTrigger>
 						<TabsTrigger
 							value="cookies"
-							className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 						>
 							Cookies
 						</TabsTrigger>
 						{response.consoleLogs && response.consoleLogs.length > 0 && (
 							<TabsTrigger
 								value="console"
-								className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 							>
 								<Terminal className="w-4 h-4 mr-1.5" />
 								Console
@@ -170,7 +170,7 @@ export default function ResponseViewer() {
 						{response.testResults && response.testResults.length > 0 && (
 							<TabsTrigger
 								value="tests"
-								className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 							>
 								Tests
 								<Badge
@@ -189,7 +189,7 @@ export default function ResponseViewer() {
 						{response.rawRequest && (
 							<TabsTrigger
 								value="raw-request"
-								className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 							>
 								Raw
 							</TabsTrigger>
@@ -246,6 +246,7 @@ export default function ResponseViewer() {
 					{activeTab === "body" && (
 						<SharedResponseBody
 							body={response.body}
+							bodyRaw={response.bodyRaw}
 							headers={response.headers}
 							showModeToggle
 						/>

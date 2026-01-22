@@ -46,7 +46,7 @@ function KeyMetricCard({
 	color: keyof typeof colorClasses;
 }) {
 	return (
-		<div className={cn("p-4 rounded-lg border", colorClasses[color])}>
+		<div className={cn("p-4 border", colorClasses[color])}>
 			<p className="text-sm font-medium opacity-75 mb-1">{label}</p>
 			<p className="text-2xl font-bold">{value}</p>
 		</div>

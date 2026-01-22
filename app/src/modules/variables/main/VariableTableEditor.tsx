@@ -204,6 +204,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 						id: environment.id,
 						name: environment.name,
 						variables: variablesObj,
+						isActive: environment.isActive,
 					},
 					{
 						onSuccess: () => {
@@ -412,29 +413,29 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 					<div>
 						<div className="flex items-center gap-2">
 							<h2 className="text-lg font-semibold text-foreground">{title}</h2>
-							{type === "environment" && isActiveEnvironment && (
-								<Badge
-									variant="secondary"
-									className="bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-								>
-									Active
-								</Badge>
-							)}
+
 						</div>
 						<p className="text-xs text-muted-foreground">{editorConfig.subtitle}</p>
 					</div>
 				</div>
 				{type === "environment" && environment && (
 					<div className="flex items-center gap-2">
-						{!isActiveEnvironment && (
+						{!isActiveEnvironment ? (
 							<Button
 								variant="outline"
 								size="sm"
 								onClick={handleSetActiveEnvironment}
-								className="border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
+								className="min-w-30 border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
 							>
 								Set Active
 							</Button>
+						) : (
+							<Badge
+								variant="outline"
+								className="min-w-30 h-8 justify-center border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
+							>
+								Active
+							</Badge>
 						)}
 						<Button
 							variant="ghost"

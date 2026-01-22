@@ -83,8 +83,8 @@ export default function PreScriptPanel() {
 
 			{/* All Variables Panel */}
 			{showVariables && (
-				<div className="p-3 bg-muted/50 rounded-md border border-input max-h-40 overflow-y-auto">
-					<div className="grid grid-cols-2 gap-2 text-xs font-mono">
+				<div className="p-3 bg-muted/50 border border-input max-h-40 overflow-y-auto">
+					<div className="grid grid-cols-2 gap-2 text-xs font-mono">	
 						{Object.entries(allVariables).map(([name, info]) => (
 							<div key={name} className="flex items-center gap-2">
 								<Badge variant="outline" className="text-[10px] px-1">
@@ -99,7 +99,7 @@ export default function PreScriptPanel() {
 			)}
 
 			{/* Script Editor */}
-			<div className="border border-input rounded-md overflow-hidden">
+			<div className="border border-input overflow-hidden">
 				<Editor
 					height="350px"
 					language="javascript"

@@ -9,7 +9,7 @@
 // useEngine Hook - Execute requests and manage load tests
 
 import { useState, useCallback } from "react";
-import { apiService } from "@/services";
+import { ApiError, apiService } from "@/services";
 import type {
 	SanityResult,
 	StartLoadTestRequest,
@@ -44,7 +44,7 @@ export function useEngine(): UseEngineReturn {
 				// Backend expects body as { mode: string, content: string }
 				const bodyPayload = request.body
 					? {
-							mode: request.body_type || "text",
+							mode: request.bodyType || "text",
 							content: request.body,
 						}
 					: undefined;
@@ -55,19 +55,20 @@ export function useEngine(): UseEngineReturn {
 					headers: request.headers,
 					body: bodyPayload,
 					auth: request.auth,
-					preRequestScript: request.pre_request_script,
-					postRequestScript: request.test_script,
+					preRequestScript: request.preRequestScript,
+					postRequestScript: request.postRequestScript,
 					requestId: request.id,
 					environmentId: environmentId,
 				});
 				return result;
 			} catch (err) {
-				// Import ApiError for type checking
+				// Only handle true engine API failures (network errors, engine down, invalid request format)
+				// All valid request executions now return HTTP 200 with Response object
 				if (err && typeof err === "object" && "userFriendlyMessage" in err) {
-					const apiError = err as any;
+					const apiError = err as ApiError;
 					setError(apiError.userFriendlyMessage);
 
-					// Return structured error response for UI to display
+					// Return minimal error structure only for engine API failures
 					return {
 						error: apiError.userFriendlyMessage,
 						errorCode: apiError.errorCode,
@@ -101,7 +102,7 @@ export function useEngine(): UseEngineReturn {
 				// Backend expects body as { mode: string, content: string }
 				const bodyPayload = request.body
 					? {
-							mode: request.body_type || "text",
+							mode: request.bodyType || "text",
 							content: request.body,
 						}
 					: undefined;

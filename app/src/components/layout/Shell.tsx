@@ -83,14 +83,13 @@ export default function Shell() {
 				return <RequestBuilder />;
 			case "dashboard":
 				return <LoadTestDashboard />;
-			case "history-detail":
+			case "history":
 				return <HistoryDetail />;
 			case "settings":
 				return <SettingsMain />;
 			case "variables":
 				return <VariablesMain />;
 			case "welcome":
-			case "history": // History tab shows welcome screen
 			default:
 				return <WelcomeScreen />;
 		}

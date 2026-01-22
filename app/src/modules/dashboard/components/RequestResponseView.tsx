@@ -273,7 +273,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 											{/* Result Header - Clickable */}
 											<Button
 												variant="ghost"
-												className="w-full justify-start px-4 py-3 h-auto rounded-none hover:bg-muted/50"
+												className="w-full justify-start px-4 py-3 h-auto hover:bg-muted/50"
 												onClick={() => toggleResult(index)}
 											>
 												<div className="flex items-center gap-3 w-full">

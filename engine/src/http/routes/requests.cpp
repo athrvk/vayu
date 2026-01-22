@@ -128,6 +128,8 @@ void register_request_routes(RouteContext& ctx) {
                     return;
                 }
                 r.id = id;
+                r.created_at = now_ms();
+                r.updated_at = now_ms();
             }
 
             if (json.contains("collectionId") && !json["collectionId"].is_null()) {
@@ -149,8 +151,6 @@ void register_request_routes(RouteContext& ctx) {
             if (json.contains("body")) r.body = json["body"].dump();
             if (json.contains("bodyType") && !json["bodyType"].is_null()) {
                 r.body_type = json["bodyType"].get<std::string>();
-            } else if (json.contains("body_type") && !json["body_type"].is_null()) {
-                r.body_type = json["body_type"].get<std::string>();
             }
             if (json.contains("auth")) r.auth = json["auth"].dump();
             if (json.contains("preRequestScript"))
@@ -158,7 +158,9 @@ void register_request_routes(RouteContext& ctx) {
             if (json.contains("postRequestScript"))
                 r.post_request_script = json["postRequestScript"].get<std::string>();
 
-            r.updated_at = now_ms();
+            if (is_update) {
+                r.updated_at = now_ms();
+            }
 
             vayu::utils::log_info(
                 "POST /requests - " + std::string(is_update ? "Updating" : "Creating") +

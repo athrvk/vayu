@@ -23,7 +23,7 @@ import {
 import RunItem from "./RunItem";
 
 export default function HistoryList() {
-	const { navigateToRunDetail } = useNavigationStore();
+	const { navigateToRunDetail, selectedRunId } = useNavigationStore();
 	const {
 		searchQuery,
 		setSearchQuery,
@@ -147,7 +147,7 @@ export default function HistoryList() {
 
 					{!isLoading && runs.length === 0 && (
 						<div className="text-center py-16">
-							<div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted/50 flex items-center justify-center">
+							<div className="w-16 h-16 mx-auto mb-4 bg-muted/50 flex items-center justify-center">
 								<Clock className="w-8 h-8 text-muted-foreground/40" />
 							</div>
 							<p className="text-sm font-medium text-foreground">
@@ -169,6 +169,7 @@ export default function HistoryList() {
 								onSelect={navigateToRunDetail}
 								onDelete={handleDelete}
 								isDeleting={deletingId === run.id}
+								isSelected={selectedRunId === run.id}
 							/>
 						))}
 				</div>

@@ -58,7 +58,7 @@ interface NavigationState {
 // Default tab memory
 const defaultTabMemory: Record<SidebarTab, NavigationContext> = {
 	collections: { screen: "welcome", collectionId: null, requestId: null, runId: null },
-	history: { screen: "welcome", collectionId: null, requestId: null, runId: null },
+	history: { screen: "history", collectionId: null, requestId: null, runId: null },
 	variables: { screen: "welcome", collectionId: null, requestId: null, runId: null },
 	settings: { screen: "settings", collectionId: null, requestId: null, runId: null },
 };
@@ -134,12 +134,12 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
 		set({
 			selectedRunId: runId,
-			activeScreen: "history-detail",
+			activeScreen: "history",
 			activeSidebarTab: "history",
 			tabMemory: {
 				...state.tabMemory,
 				history: {
-					screen: "history-detail",
+					screen: "history",
 					collectionId: null,
 					requestId: null,
 					runId,
@@ -152,13 +152,13 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 		const state = get();
 
 		set({
-			activeScreen: "welcome",
+			activeScreen: "history",
 			activeSidebarTab: "history",
 			selectedRunId: null,
 			tabMemory: {
 				...state.tabMemory,
 				history: {
-					screen: "welcome",
+					screen: "history",
 					collectionId: null,
 					requestId: null,
 					runId: null,
@@ -277,11 +277,6 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 		if (state.activeScreen === "dashboard") {
 			return "dashboard";
 		}
-		// Check for history-detail: if we have a selectedRunId, show history-detail
-		// This takes precedence over the tab check below
-		if (state.selectedRunId) {
-			return "history-detail";
-		}
 		if (state.activeScreen === "settings") {
 			return "settings";
 		}
@@ -291,9 +286,9 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 			return "variables";
 		}
 
-		// For history tab, show welcome screen (only if no run is selected)
+		// For history tab, show history screen (handles empty state internally)
 		if (state.activeSidebarTab === "history") {
-			return "welcome";
+			return "history";
 		}
 
 		// Default to welcome screen

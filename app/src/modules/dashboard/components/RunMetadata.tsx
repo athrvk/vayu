@@ -32,7 +32,7 @@ export default function RunMetadata({
 	}
 
 	return (
-		<div className="mb-4 p-3 bg-muted/50 rounded-lg border">
+		<div className="mb-4 p-3 bg-muted/50 border">
 			<div className="flex flex-wrap items-center gap-4 text-sm">
 				{/* API Endpoint */}
 				{requestUrl && (

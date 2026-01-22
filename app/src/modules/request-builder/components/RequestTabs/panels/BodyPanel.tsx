@@ -125,7 +125,7 @@ export default function BodyPanel() {
 								Source
 							</label>
 						)}
-						<div className="border border-input rounded-md overflow-hidden">
+						<div className="border border-input overflow-hidden">
 							<Editor
 								height="320px"
 								language={request.bodyMode === "json" ? "json" : "plaintext"}
@@ -150,7 +150,7 @@ export default function BodyPanel() {
 							<label className="text-xs font-medium text-muted-foreground">
 								Resolved Preview
 							</label>
-							<pre className="h-[320px] p-3 border border-input rounded-md font-mono text-sm bg-muted/50 overflow-auto whitespace-pre-wrap">
+							<pre className="h-[320px] p-3 border border-input font-mono text-sm bg-muted/50 overflow-auto whitespace-pre-wrap">
 								{resolvedBody || (
 									<span className="text-muted-foreground italic">Empty body</span>
 								)}

@@ -117,6 +117,7 @@ export interface ResponseState {
 	requestHeaders?: Record<string, string>;
 	rawRequest?: string;
 	body: string;
+	bodyRaw?: string;  // Raw response body from server (always available, even for non-JSON)
 	bodyType: "json" | "html" | "xml" | "text" | "binary";
 	size: number;
 	time: number;

@@ -13,9 +13,8 @@
  */
 
 import { useState } from "react";
-import { ArrowLeft, CheckCircle, Activity, Zap, TrendingUp, BarChart3 } from "lucide-react";
+import { CheckCircle, Activity, Zap, TrendingUp, BarChart3 } from "lucide-react";
 import {
-	Button,
 	Badge,
 	Tabs,
 	TabsContent,
@@ -41,48 +40,9 @@ export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetail
 		<div className="flex flex-col h-full bg-background">
 			{/* Fixed Header */}
 			<div className="border-b bg-card px-6 py-4">
-				<div className="flex items-center gap-3 mb-3">
-					<Button variant="ghost" size="icon" onClick={onBack} className="shrink-0">
-						<ArrowLeft className="w-5 h-5" />
-					</Button>
-					<div className="flex-1 min-w-0">
-						<div className="flex items-center gap-2">
-							<h1 className="text-lg font-semibold text-foreground truncate">
-								{report.metadata?.requestUrl || "Load Test Report"}
-							</h1>
-							<Badge variant="outline" className="text-xs shrink-0">
-								Load Test
-							</Badge>
-						</div>
-						<div className="flex items-center gap-2 mt-1">
-							<span className="text-xs text-muted-foreground font-mono">{runId}</span>
-							{report.metadata?.status && (
-								<>
-									<span className="text-xs text-muted-foreground">•</span>
-									<Badge
-										variant={
-											report.metadata.status === "completed"
-												? "default"
-												: report.metadata.status === "failed"
-													? "destructive"
-													: "outline"
-										}
-										className={`text-xs capitalize ${
-											report.metadata.status === "stopped"
-												? "border-orange-500 text-orange-600 dark:text-orange-400"
-												: ""
-										}`}
-									>
-										{report.metadata.status}
-									</Badge>
-								</>
-							)}
-						</div>
-					</div>
-				</div>
 
 				{/* Request Info Bar */}
-				<div className="flex items-center gap-3 bg-muted/50 rounded-lg p-3 mb-3">
+				<div className="flex items-center gap-3 bg-muted/50 p-3 mb-3">
 					<Badge variant="outline" className="font-mono font-bold shrink-0">
 						{report.metadata?.requestMethod || "GET"}
 					</Badge>
@@ -93,7 +53,7 @@ export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetail
 
 				{/* Key Metrics Summary Row */}
 				<div className="grid grid-cols-4 gap-3">
-					<div className="bg-muted/50 rounded-lg p-3">
+					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
 							<Activity className="w-4 h-4 text-primary" />
 							<span className="text-xs text-muted-foreground">Total Requests</span>
@@ -102,7 +62,7 @@ export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetail
 							{formatNumber(report.summary.totalRequests)}
 						</p>
 					</div>
-					<div className="bg-muted/50 rounded-lg p-3">
+					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
 							<CheckCircle className="w-4 h-4 text-green-500" />
 							<span className="text-xs text-muted-foreground">Success Rate</span>
@@ -111,7 +71,7 @@ export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetail
 							{successRate.toFixed(1)}%
 						</p>
 					</div>
-					<div className="bg-muted/50 rounded-lg p-3">
+					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
 							<Zap className="w-4 h-4 text-blue-500" />
 							<span className="text-xs text-muted-foreground">Avg RPS</span>
@@ -120,7 +80,7 @@ export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetail
 							{formatNumber(report.summary.avgRps)}
 						</p>
 					</div>
-					<div className="bg-muted/50 rounded-lg p-3">
+					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
 							<TrendingUp className="w-4 h-4 text-purple-500" />
 							<span className="text-xs text-muted-foreground">P50 Latency</span>

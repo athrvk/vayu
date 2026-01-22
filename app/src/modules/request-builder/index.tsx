@@ -57,7 +57,7 @@ export default function RequestBuilder() {
 
 	// Variable resolver for the current request's collection
 	const { resolveString, resolveObject } = useVariableResolver({
-		collectionId: fetchedRequest?.collection_id || undefined,
+		collectionId: fetchedRequest?.collectionId || undefined,
 	});
 
 	// Convert fetched request to RequestState format
@@ -72,13 +72,13 @@ export default function RequestBuilder() {
 			params: recordToKeyValue(fetchedRequest.params || {}, false), // No system headers for params
 			headers: recordToKeyValue(fetchedRequest.headers || {}, true), // System headers only for headers
 			bodyMode:
-				fetchedRequest.body_type === "json"
+				fetchedRequest.bodyType === "json"
 					? "json"
-					: fetchedRequest.body_type === "form-data"
+					: fetchedRequest.bodyType === "form-data"
 						? "form-data"
-						: fetchedRequest.body_type === "x-www-form-urlencoded"
+						: fetchedRequest.bodyType === "x-www-form-urlencoded"
 							? "x-www-form-urlencoded"
-							: fetchedRequest.body_type === "text"
+							: fetchedRequest.bodyType === "text"
 								? "text"
 								: "none",
 			body: fetchedRequest.body || "",
@@ -93,9 +93,9 @@ export default function RequestBuilder() {
 							? "api-key"
 							: "none",
 			authConfig: fetchedRequest.auth || {},
-			preRequestScript: fetchedRequest.pre_request_script || "",
-			testScript: fetchedRequest.test_script || "",
-			collectionId: fetchedRequest.collection_id,
+			preRequestScript: fetchedRequest.preRequestScript || "",
+			testScript: fetchedRequest.postRequestScript || "",
+			collectionId: fetchedRequest.collectionId,
 		};
 	}, [fetchedRequest]);
 
@@ -137,7 +137,7 @@ export default function RequestBuilder() {
 					url: resolvedUrl,
 					headers: resolvedHeaders,
 					body: resolvedBody,
-					body_type:
+					bodyType:
 						request.bodyMode === "json"
 							? "json"
 							: request.bodyMode === "form-data"
@@ -156,13 +156,13 @@ export default function RequestBuilder() {
 											: request.authType === "basic"
 												? "basic"
 												: request.authType === "api-key"
-													? "api_key"
+												? "api-key"
 													: "bearer",
 									...resolvedAuthConfig,
 								}
 							: undefined,
-					pre_request_script: request.preRequestScript || undefined,
-					test_script: request.testScript || undefined,
+					preRequestScript: request.preRequestScript || undefined,
+					postRequestScript: request.testScript || undefined,
 				};
 
 				const result = await engineExecuteRequest(
@@ -172,14 +172,22 @@ export default function RequestBuilder() {
 
 				if (!result) return null;
 
-				// Check for error response
-				if ("error" in result && result.error) {
+				// All valid request executions now return HTTP 200 with Response object
+				// Only true engine API failures (engine down, invalid request format) will have error field
+				// Handle engine API failures
+				if ("error" in result && result.error && !result.bodyRaw && !result.body) {
+					// This is an error from the engine API call itself (engine is down, invalid JSON, etc.)
+					// Return error info but don't create fake JSON - show actual error message
+					// useEngine returns { error, errorCode, statusCode } for engine API failures
+					const errorResult = result as { error: string; errorCode?: string; statusCode?: number };
 					return {
-						status: result.status || 0,
+						status: errorResult.statusCode || 0,
 						statusText: result.error,
 						headers: {},
-						body: JSON.stringify({ error: result.error }, null, 2),
-						bodyType: "json",
+						requestHeaders: {},
+						body: result.error,
+						bodyRaw: result.error,
+						bodyType: "text",
 						time: 0,
 						size: 0,
 					};
@@ -195,16 +203,30 @@ export default function RequestBuilder() {
 							? "xml"
 							: "text";
 
+				// Extract bodyRaw (raw response from server) - always use this for raw view
+				const bodyRaw = result.bodyRaw ||
+					(typeof result.body === "object" && result.body !== null
+						? JSON.stringify(result.body, null, 2)
+						: String(result.body || ""));
+
+				// For pretty view, use parsed body if available, otherwise use raw
+				// Note: typeof null === "object" in JavaScript, so we need to check for null explicitly
+				const body = typeof result.body === "object" && result.body !== null
+					? JSON.stringify(result.body, null, 2)
+					: result.body !== null && result.body !== undefined
+						? String(result.body)
+						: bodyRaw || "";
+
 				return {
-					status: result.status || 200,
-					statusText: result.statusText || "OK",
+					// Use status from result, but don't default to 200 if it's 0 (client-side error)
+					// 0 is a valid status code for client-side errors (no server response)
+					status: result.status !== undefined && result.status !== null ? result.status : 200,
+					statusText: result.statusText || (result.status === 0 ? "Error" : result.status >= 400 ? "Error" : "OK"),
 					headers: result.headers || {},
 					requestHeaders: result.requestHeaders,
 					rawRequest: result.rawRequest,
-					body:
-						typeof result.body === "object"
-							? JSON.stringify(result.body, null, 2)
-							: String(result.body || ""),
+					body,
+					bodyRaw,  // Always include raw body for raw view mode
 					bodyType,
 					time: result.timing?.total || 0,
 					size: result.bodySize || 0,
@@ -242,7 +264,7 @@ export default function RequestBuilder() {
 				headers: keyValueToRecord(request.headers),
 				params: keyValueToRecord(request.params),
 				body: request.body || undefined,
-				body_type: request.bodyMode || undefined,
+				bodyType: request.bodyMode || undefined,
 				auth:
 					request.authType !== "none"
 						? {
@@ -252,13 +274,13 @@ export default function RequestBuilder() {
 										: request.authType === "basic"
 											? "basic"
 											: request.authType === "api-key"
-												? "api_key"
+											? "api-key"
 												: "bearer",
 								...request.authConfig,
 							}
 						: undefined,
-				pre_request_script: request.preRequestScript || undefined,
-				test_script: request.testScript || undefined,
+				preRequestScript: request.preRequestScript || undefined,
+				postRequestScript: request.testScript || undefined,
 			});
 		},
 		[fetchedRequest, updateRequestMutation]
@@ -405,7 +427,7 @@ export default function RequestBuilder() {
 		<>
 			<RequestBuilderProvider
 				initialRequest={initialRequest}
-				collectionId={fetchedRequest.collection_id}
+				collectionId={fetchedRequest.collectionId}
 				onExecute={handleExecute}
 				onSave={handleSave}
 				onStartLoadTest={handleStartLoadTest}

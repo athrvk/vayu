@@ -67,6 +67,9 @@ void register_environment_routes(RouteContext& ctx) {
                     return;
                 }
                 e.id = id;
+                e.is_active = json.value("isActive", false);
+                e.created_at = now_ms();
+                e.updated_at = now_ms();
             }
 
             if (json.contains("name") && !json["name"].is_null()) {
@@ -76,7 +79,9 @@ void register_environment_routes(RouteContext& ctx) {
                 e.variables = json["variables"].dump();
             }
 
-            e.updated_at = now_ms();
+            if (is_update) {
+                e.updated_at = now_ms();
+            }
 
             // Count variables for logging
             int var_count = 0;

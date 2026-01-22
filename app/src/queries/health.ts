@@ -18,7 +18,7 @@ import { queryKeys } from "./keys";
 import { useEngineConnectionStore } from "@/stores";
 import { useEffect } from "react";
 
-const HEALTH_CHECK_INTERVAL_MS = 10000; // 10 seconds
+const HEALTH_CHECK_INTERVAL_MS = 30000; // 30 seconds
 
 /**
  * Engine health check with automatic polling

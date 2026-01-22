@@ -79,6 +79,7 @@
     "terminal.integrated.cwd": "${workspaceFolder}",
     "cSpell.words": [
         "ASAN",
+        "Atharva",
         "BIGNUM",
         "buildsystems",
         "ccache",
@@ -87,6 +88,7 @@
         "DVCPKG",
         "fsanitize",
         "httplib",
+        "Kusumbia",
         "libbf",
         "LIBC",
         "libregexp",

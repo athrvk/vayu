@@ -68,6 +68,7 @@ void register_collection_routes(RouteContext& ctx) {
                 }
                 c.id = id;
                 c.created_at = now_ms();
+                c.updated_at = now_ms();
                 c.order = 0;
             }
 
@@ -97,6 +98,10 @@ void register_collection_routes(RouteContext& ctx) {
             } else if (!is_update) {
                 // New collection - initialize with empty variables
                 c.variables = "{}";
+            }
+
+            if (is_update) {
+                c.updated_at = now_ms();
             }
 
             std::string parent_id = c.parent_id.value_or("root");

@@ -128,39 +128,8 @@ struct Timing {
     double download_ms = 0.0;
 };
 
-/**
- * @brief HTTP Response
- */
-struct Response {
-    int status_code = 0;
-    std::string status_text;
-    Headers headers;
-    Headers request_headers;  // Headers that were sent in the request
-    std::string raw_request;  // Complete raw HTTP request
-    std::string body;
-    size_t body_size = 0;
-    Timing timing;
-
-    // Convenience methods
-    [[nodiscard]] bool is_success() const {
-        return status_code >= 200 && status_code < 300;
-    }
-
-    [[nodiscard]] bool is_redirect() const {
-        return status_code >= 300 && status_code < 400;
-    }
-
-    [[nodiscard]] bool is_client_error() const {
-        return status_code >= 400 && status_code < 500;
-    }
-
-    [[nodiscard]] bool is_server_error() const {
-        return status_code >= 500 && status_code < 600;
-    }
-};
-
 // ============================================================================
-// Error Types
+// Error Types (defined early so Response can use ErrorCode)
 // ============================================================================
 
 enum class ErrorCode {
@@ -201,6 +170,50 @@ inline const char* to_string(ErrorCode code) {
     }
     return "UNKNOWN";
 }
+
+/**
+ * @brief HTTP Response
+ */
+struct Response {
+    int status_code = 0;
+    std::string status_text;
+    Headers headers;
+    Headers request_headers;  // Headers that were sent in the request
+    std::string raw_request;  // Complete raw HTTP request
+    std::string body;
+    size_t body_size = 0;
+    Timing timing;
+    
+    // Error information (for client-side failures like invalid URL, connection errors)
+    // When set, indicates the request failed before receiving a server response
+    ErrorCode error_code = ErrorCode::None;
+    std::string error_message;
+
+    // Convenience methods
+    [[nodiscard]] bool is_success() const {
+        return status_code >= 200 && status_code < 300 && error_code == ErrorCode::None;
+    }
+
+    [[nodiscard]] bool is_redirect() const {
+        return status_code >= 300 && status_code < 400 && error_code == ErrorCode::None;
+    }
+
+    [[nodiscard]] bool is_client_error() const {
+        return status_code >= 400 && status_code < 500 && error_code == ErrorCode::None;
+    }
+
+    [[nodiscard]] bool is_server_error() const {
+        return status_code >= 500 && status_code < 600 && error_code == ErrorCode::None;
+    }
+    
+    [[nodiscard]] bool has_error() const {
+        return error_code != ErrorCode::None;
+    }
+};
+
+// ============================================================================
+// Error Information
+// ============================================================================
 
 /**
  * @brief Error information
@@ -603,6 +616,7 @@ struct Collection {
     std::string variables;  // JSON - Collection-scoped variables
     int order;
     int64_t created_at;
+    int64_t updated_at;
 };
 
 struct Request {
@@ -618,6 +632,7 @@ struct Request {
     std::string auth;                 // JSON
     std::string pre_request_script;   // JS Code
     std::string post_request_script;  // JS Code (Tests)
+    int64_t created_at;
     int64_t updated_at;
 };
 
@@ -625,6 +640,8 @@ struct Environment {
     std::string id;
     std::string name;
     std::string variables;  // JSON
+    bool is_active = false;
+    int64_t created_at;
     int64_t updated_at;
 };
 

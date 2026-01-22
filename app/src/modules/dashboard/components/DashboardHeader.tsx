@@ -47,7 +47,7 @@ export default function DashboardHeader({
 						variant="outline"
 						className="bg-success/10 text-success border-success/20"
 					>
-						<span className="w-2 h-2 bg-success rounded-full animate-pulse mr-2" />
+						<span className="w-2 h-2 bg-success animate-pulse mr-2" />
 						Live
 					</Badge>
 				)}

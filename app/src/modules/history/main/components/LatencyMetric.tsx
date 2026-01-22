@@ -37,7 +37,7 @@ export default function LatencyMetric({ label, value, variant = "default" }: Lat
 	}[variant];
 
 	return (
-		<div className={cn("p-3 rounded-lg text-center", bgClass)}>
+		<div className={cn("p-3 text-center", bgClass)}>
 			<p className="text-xs text-muted-foreground mb-1">{label}</p>
 			<p className={cn("text-lg font-bold", colorClass)}>
 				{formatNumber(value)}

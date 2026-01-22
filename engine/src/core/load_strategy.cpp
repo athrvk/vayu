@@ -34,8 +34,59 @@ void handle_result(std::shared_ptr<RunContext> context,
     int slow_threshold_ms = context->config.value("slow_threshold_ms", 1000);
     bool save_timing_breakdown = context->config.value("save_timing_breakdown", false);
 
-    if (result.is_ok()) {
-        const auto& response = result.value();
+    // client.send() now always returns Response (never Error), but Response may have error_code set
+    if (result.is_error()) {
+        // This should not happen anymore, but handle it for safety
+        vayu::utils::log_error("Unexpected error result in load_strategy::handle_result");
+        return;
+    }
+
+    const auto& response = result.value();
+    
+    // Check if response has a client-side error
+    if (response.has_error()) {
+
+        // Build detailed error trace data
+        nlohmann::json error_json = {{"error_code", static_cast<int>(response.error_code)},
+                                     {"error_type",
+                                      [&response]() {
+                                          switch (response.error_code) {
+                                              case vayu::ErrorCode::Timeout:
+                                                  return "timeout";
+                                              case vayu::ErrorCode::ConnectionFailed:
+                                                  return "connection_failed";
+                                              case vayu::ErrorCode::DnsError:
+                                                  return "dns_failed";
+                                              case vayu::ErrorCode::SslError:
+                                                  return "ssl_error";
+                                              case vayu::ErrorCode::InvalidUrl:
+                                                  return "invalid_url";
+                                              case vayu::ErrorCode::InvalidMethod:
+                                                  return "invalid_method";
+                                              case vayu::ErrorCode::ScriptError:
+                                                  return "script_error";
+                                              case vayu::ErrorCode::InternalError:
+                                                  return "internal_error";
+                                              default:
+                                                  return "unknown";
+                                          }
+                                      }()},
+                                     {"message", response.error_message},
+                                     {"request_number", context->total_requests()}};
+
+        // Include timing info if available
+        if (response.timing.total_ms > 0) {
+            error_json["timing"] = {{"totalMs", response.timing.total_ms},
+                                    {"dnsMs", response.timing.dns_ms},
+                                    {"connectMs", response.timing.connect_ms},
+                                    {"tlsMs", response.timing.tls_ms},
+                                    {"firstByteMs", response.timing.first_byte_ms},
+                                    {"downloadMs", response.timing.download_ms}};
+        }
+
+        context->metrics_collector->record_error(response.error_code, response.error_message, error_json.dump());
+    } else {
+        // Successful response
         double latency = response.timing.total_ms;
 
         // Build trace data if configured
@@ -65,40 +116,6 @@ void handle_result(std::shared_ptr<RunContext> context,
         if (!context->test_script.empty()) {
             context->metrics_collector->record_response_sample(response);
         }
-
-    } else {
-        // Record error to in-memory collector (all errors are preserved)
-        const auto& error = result.error();
-
-        // Build detailed error trace data
-        nlohmann::json error_json = {{"error_code", static_cast<int>(error.code)},
-                                     {"error_type",
-                                      [&error]() {
-                                          switch (error.code) {
-                                              case vayu::ErrorCode::Timeout:
-                                                  return "timeout";
-                                              case vayu::ErrorCode::ConnectionFailed:
-                                                  return "connection_failed";
-                                              case vayu::ErrorCode::DnsError:
-                                                  return "dns_failed";
-                                              case vayu::ErrorCode::SslError:
-                                                  return "ssl_error";
-                                              case vayu::ErrorCode::InvalidUrl:
-                                                  return "invalid_url";
-                                              case vayu::ErrorCode::InvalidMethod:
-                                                  return "invalid_method";
-                                              case vayu::ErrorCode::ScriptError:
-                                                  return "script_error";
-                                              case vayu::ErrorCode::InternalError:
-                                                  return "internal_error";
-                                              default:
-                                                  return "unknown";
-                                          }
-                                      }()},
-                                     {"message", error.message},
-                                     {"request_number", context->total_requests()}};
-
-        context->metrics_collector->record_error(error.code, error.message, error_json.dump());
     }
 }
 }  // namespace

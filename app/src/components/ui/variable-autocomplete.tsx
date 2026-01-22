@@ -56,7 +56,7 @@ export function VariableAutocomplete({
 	}
 
 	return (
-		<div className={cn("w-64 rounded-md border bg-popover shadow-md", className)}>
+		<div className={cn("w-64 border bg-popover shadow-md", className)}>
 			<Command shouldFilter={false}>
 				<CommandList>
 					<CommandEmpty>No variables found.</CommandEmpty>

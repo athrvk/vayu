@@ -103,7 +103,7 @@ export function CompactHeadersViewer({
 					{title}
 				</h4>
 			)}
-			<div className="bg-muted rounded-lg p-3 space-y-1">
+			<div className="bg-muted p-3 space-y-1">
 				{entries.map(([key, value]) => (
 					<div
 						key={key}

@@ -39,7 +39,7 @@ export default function TestResults({ results }: TestResultsProps) {
 					<div
 						key={i}
 						className={cn(
-							"p-3 rounded-md border",
+							"p-3 border",
 							test.passed
 								? "bg-green-500/10 border-green-500/20"
 								: "bg-red-500/10 border-red-500/20"

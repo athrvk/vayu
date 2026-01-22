@@ -31,6 +31,7 @@ export type ViewMode = "pretty" | "raw" | "preview";
 // Response data structure for display
 export interface ResponseData {
 	body: string;
+	bodyRaw?: string;  // Raw response body from server (used for raw view mode)
 	headers: Record<string, string>;
 	status?: number;
 	statusText?: string;
@@ -60,6 +61,7 @@ export interface TraceData {
 // Props for response body component
 export interface ResponseBodyProps {
 	body: string;
+	bodyRaw?: string;  // Raw response body from server (used for raw view mode)
 	headers: Record<string, string>;
 	className?: string;
 }

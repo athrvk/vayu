@@ -42,6 +42,7 @@ import type {
 	GetHealthResponse,
 	GetConfigResponse,
 	UpdateConfigRequest,
+	GlobalsResponse,
 } from "@/types";
 
 export const apiService = {
@@ -69,14 +70,12 @@ export const apiService = {
 	},
 
 	async createCollection(data: CreateCollectionRequest): Promise<Collection> {
-		const backendData = CollectionTransformer.toBackend(data);
-		const response = await httpClient.post<any>(API_ENDPOINTS.COLLECTIONS, backendData);
+		const response = await httpClient.post<any>(API_ENDPOINTS.COLLECTIONS, data);
 		return CollectionTransformer.toFrontend(response);
 	},
 
 	async updateCollection(data: UpdateCollectionRequest): Promise<Collection> {
-		const backendData = CollectionTransformer.toBackend(data);
-		const response = await httpClient.post<any>(API_ENDPOINTS.COLLECTIONS, backendData);
+		const response = await httpClient.post<any>(API_ENDPOINTS.COLLECTIONS, data);
 		return CollectionTransformer.toFrontend(response);
 	},
 
@@ -86,29 +85,31 @@ export const apiService = {
 
 	// Requests
 	async listRequests(params?: ListRequestsParams): Promise<Request[]> {
-		const queryParams = params?.collection_id
-			? { collectionId: params.collection_id }
+		const queryParams = params?.collectionId
+			? { collectionId: params.collectionId }
 			: undefined;
-		const response = await httpClient.get<any[]>(API_ENDPOINTS.REQUESTS, queryParams);
+		console.log("API: Fetching requests from", API_ENDPOINTS.REQUESTS, queryParams);
+		const response = await httpClient.get<Request[]>(API_ENDPOINTS.REQUESTS, queryParams);
+		console.log("API: Received requests:", response);
 		return response.map(RequestTransformer.toFrontend);
 	},
 
 	async getRequest(id: string): Promise<Request> {
-		const response = await httpClient.get<any>(API_ENDPOINTS.REQUEST_BY_ID(id));
+		console.log("API: Fetching request from", API_ENDPOINTS.REQUEST_BY_ID(id));
+		const response = await httpClient.get<Request>(API_ENDPOINTS.REQUEST_BY_ID(id));
+		console.log("API: Received request:", response);
 		return RequestTransformer.toFrontend(response);
 	},
 
 	async createRequest(data: CreateRequestRequest): Promise<Request> {
-		const backendData = RequestTransformer.toBackend(data);
-		console.log("Creating request with data:", backendData);
-		const response = await httpClient.post<any>(API_ENDPOINTS.REQUESTS, backendData);
+		console.log("Creating request with data:", data);
+		const response = await httpClient.post<Request>(API_ENDPOINTS.REQUESTS, data);
 		return RequestTransformer.toFrontend(response);
 	},
 
 	async updateRequest(data: UpdateRequestRequest): Promise<Request> {
-		const backendData = RequestTransformer.toBackend(data);
-		console.log("Updating request with data:", backendData);
-		const response = await httpClient.post<any>(API_ENDPOINTS.REQUESTS, backendData);
+		console.log("Updating request with data:", data);
+		const response = await httpClient.post<Request>(API_ENDPOINTS.REQUESTS, data);
 		return RequestTransformer.toFrontend(response);
 	},
 
@@ -140,20 +141,12 @@ export const apiService = {
 
 	// Global Variables
 	async getGlobals(): Promise<GlobalVariables> {
-		const response = await httpClient.get<{
-			id: string;
-			variables: Record<string, VariableValue>;
-			updatedAt: number;
-		}>(API_ENDPOINTS.GLOBALS);
+		const response = await httpClient.get<GlobalsResponse>(API_ENDPOINTS.GLOBALS);
 		return GlobalsTransformer.toFrontend(response);
 	},
 
 	async updateGlobals(variables: Record<string, VariableValue>): Promise<GlobalVariables> {
-		const response = await httpClient.post<{
-			id: string;
-			variables: Record<string, VariableValue>;
-			updatedAt: number;
-		}>(API_ENDPOINTS.GLOBALS, { variables });
+		const response = await httpClient.post<GlobalsResponse>(API_ENDPOINTS.GLOBALS, { variables });
 		return GlobalsTransformer.toFrontend(response);
 	},
 
