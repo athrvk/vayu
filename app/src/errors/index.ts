@@ -13,11 +13,4 @@
  */
 
 export { ErrorBoundary } from "./ErrorBoundary";
-export {
-	handleApiError,
-	isRetryableError,
-	getErrorSeverity,
-	type UserFriendlyError,
-	type ErrorSeverity,
-} from "./error-handler";
-export { logError, logApiError, type ErrorContext } from "./error-logger";
+export { logError, logApiError, type ErrorContext, type ErrorSeverity } from "./error-logger";

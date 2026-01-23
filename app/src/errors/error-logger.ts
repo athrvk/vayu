@@ -12,7 +12,7 @@
  * Centralized error logging utility.
  */
 
-import type { ErrorSeverity } from "./error-handler";
+export type ErrorSeverity = "low" | "medium" | "high" | "critical";
 
 /**
  * Error context for logging

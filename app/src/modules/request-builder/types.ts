@@ -122,6 +122,9 @@ export interface ResponseState {
 	size: number;
 	time: number;
 	timestamp?: string;
+	// Client-side error information (when status === 0)
+	errorCode?: string;    // "TIMEOUT", "CONNECTION_FAILED", "SSL_ERROR", etc.
+	errorMessage?: string; // Human-readable error from engine
 	// Script execution results
 	consoleLogs?: string[];
 	testResults?: Array<{ name: string; passed: boolean; error?: string }>;

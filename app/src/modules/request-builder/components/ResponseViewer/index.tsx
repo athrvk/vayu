@@ -41,6 +41,7 @@ import ResponseCookies from "./ResponseCookies";
 import ConsoleOutput from "./ConsoleOutput";
 import TestResults from "./TestResults";
 import RawRequestResponse from "./RawRequestResponse";
+import ClientErrorView from "./ClientErrorView";
 
 type ResponseTab = "body" | "headers" | "cookies" | "console" | "tests" | "raw-request";
 
@@ -105,6 +106,9 @@ export default function ResponseViewer() {
 		);
 	}
 
+	// Client-side error state (status === 0 means no server response)
+	const isClientError = response.status === 0;
+
 	const handleCopy = async () => {
 		await navigator.clipboard.writeText(response.body);
 		setCopied(true);
@@ -120,6 +124,19 @@ export default function ResponseViewer() {
 		a.click();
 		URL.revokeObjectURL(url);
 	};
+
+	// Show dedicated error view for client-side errors
+	if (isClientError) {
+		return (
+			<div className="flex-1 flex flex-col bg-card overflow-hidden">
+				<ResponseHeader response={response} />
+				<ClientErrorView
+					errorCode={response.errorCode}
+					errorMessage={response.errorMessage}
+				/>
+			</div>
+		);
+	}
 
 	return (
 		<div className="flex-1 flex flex-col bg-card overflow-hidden">

@@ -62,24 +62,19 @@ export function useEngine(): UseEngineReturn {
 				});
 				return result;
 			} catch (err) {
-				// Only handle true engine API failures (network errors, engine down, invalid request format)
-				// All valid request executions now return HTTP 200 with Response object
-				if (err && typeof err === "object" && "userFriendlyMessage" in err) {
-					const apiError = err as ApiError;
-					setError(apiError.userFriendlyMessage);
-
-					// Return minimal error structure only for engine API failures
-					return {
-						error: apiError.userFriendlyMessage,
-						errorCode: apiError.errorCode,
-						statusCode: apiError.statusCode,
-					} as any;
-				}
+				// Handle engine API failures (engine down, network error to engine, etc.)
+				// All valid request executions return HTTP 200 with response in body
 				const errorMessage =
-					err instanceof Error ? err.message : "Failed to execute request";
+					err instanceof Error ? err.message : "Failed to connect to engine";
+				const errorCode = err instanceof ApiError ? err.errorCode : "ENGINE_ERROR";
+				
 				setError(errorMessage);
 				return {
+					status: 0,
+					statusText: "Error",
 					error: errorMessage,
+					errorCode: errorCode,
+					errorMessage: errorMessage,
 				} as any;
 			} finally {
 				setIsExecuting(false);

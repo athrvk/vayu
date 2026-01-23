@@ -138,6 +138,10 @@ export interface HttpResponse {
 		firstByte: number;
 		download: number;
 	};
+	// Client-side error information (from curl/libcurl)
+	// Present when status === 0 (no server response received)
+	errorCode?: string;    // "TIMEOUT", "CONNECTION_FAILED", "SSL_ERROR", etc.
+	errorMessage?: string; // Human-readable error description
 }
 
 export interface TestResult {

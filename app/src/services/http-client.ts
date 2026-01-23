@@ -6,11 +6,19 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-// HTTP Client - Fetch wrapper with error handling
+// HTTP Client - Fetch wrapper for UI-to-Engine communication
 
 import { API_ENDPOINTS } from "@/config/api-endpoints";
-import { ErrorCode, ErrorMessages, ErrorStatusCodes } from "@/constants/error-codes";
 
+/**
+ * ApiError represents failures in UI-to-Engine communication.
+ * This is NOT for HTTP errors from the target server (those come in the response body).
+ * 
+ * Examples of ApiError scenarios:
+ * - Engine is not running (connection refused)
+ * - Engine returns HTTP 500 (internal engine error)
+ * - Request to engine times out
+ */
 export class ApiError extends Error {
 	constructor(
 		public statusCode: number,
@@ -20,30 +28,6 @@ export class ApiError extends Error {
 	) {
 		super(message);
 		this.name = "ApiError";
-	}
-
-	get isTimeout(): boolean {
-		return this.errorCode === ErrorCode.TIMEOUT || this.statusCode === ErrorStatusCodes.TIMEOUT;
-	}
-
-	get isNetworkError(): boolean {
-		return (
-			[ErrorCode.CONNECTION_FAILED, ErrorCode.DNS_ERROR].includes(
-				this.errorCode as typeof ErrorCode.CONNECTION_FAILED
-			) ||
-			[ErrorStatusCodes.BAD_GATEWAY, ErrorStatusCodes.CONNECTION_FAILED].includes(
-				this.statusCode as typeof ErrorStatusCodes.BAD_GATEWAY
-			)
-		);
-	}
-
-	get isDatabaseError(): boolean {
-		return this.errorCode === ErrorCode.DATABASE_ERROR;
-	}
-
-	get userFriendlyMessage(): string {
-		// Try to get message from constants, fallback to original message
-		return ErrorMessages[this.errorCode as keyof typeof ErrorMessages] || this.message;
 	}
 }
 

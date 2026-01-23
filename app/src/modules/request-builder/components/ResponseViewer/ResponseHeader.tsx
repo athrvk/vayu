@@ -27,13 +27,15 @@ export interface ResponseHeaderProps {
 
 export default function ResponseHeader({ response }: ResponseHeaderProps) {
 	const statusColor =
-		response.status >= 200 && response.status < 300
-			? "bg-green-500"
-			: response.status >= 300 && response.status < 400
-				? "bg-yellow-500"
-				: response.status >= 400 && response.status < 500
-					? "bg-orange-500"
-					: "bg-red-500";
+		response.status === 0
+			? "bg-red-500"  // Client-side error (no server response)
+			: response.status >= 200 && response.status < 300
+				? "bg-green-500"
+				: response.status >= 300 && response.status < 400
+					? "bg-yellow-500"
+					: response.status >= 400 && response.status < 500
+						? "bg-orange-500"
+						: "bg-red-500";
 
 	const formatSize = (bytes: number): string => {
 		if (bytes < 1024) return `${bytes} B`;
@@ -45,7 +47,7 @@ export default function ResponseHeader({ response }: ResponseHeaderProps) {
 		<div className="flex items-center gap-4 px-4 py-3 border-b border-border bg-muted/30">
 			{/* Status */}
 			<Badge className={cn("font-mono", statusColor)}>
-				{response.status} {response.statusText}
+				{response.status === 0 ? "ERR" : response.status} {response.statusText}
 			</Badge>
 
 			{/* Time */}

@@ -172,27 +172,6 @@ export default function RequestBuilder() {
 
 				if (!result) return null;
 
-				// All valid request executions now return HTTP 200 with Response object
-				// Only true engine API failures (engine down, invalid request format) will have error field
-				// Handle engine API failures
-				if ("error" in result && result.error && !result.bodyRaw && !result.body) {
-					// This is an error from the engine API call itself (engine is down, invalid JSON, etc.)
-					// Return error info but don't create fake JSON - show actual error message
-					// useEngine returns { error, errorCode, statusCode } for engine API failures
-					const errorResult = result as { error: string; errorCode?: string; statusCode?: number };
-					return {
-						status: errorResult.statusCode || 0,
-						statusText: result.error,
-						headers: {},
-						requestHeaders: {},
-						body: result.error,
-						bodyRaw: result.error,
-						bodyType: "text",
-						time: 0,
-						size: 0,
-					};
-				}
-
 				// Determine body type from content-type header
 				const contentType = (result.headers?.["content-type"] || "").toLowerCase();
 				const bodyType: ResponseState["bodyType"] = contentType.includes("json")
@@ -230,6 +209,10 @@ export default function RequestBuilder() {
 					bodyType,
 					time: result.timing?.total || 0,
 					size: result.bodySize || 0,
+					// Client-side error info (from engine/curl)
+					errorCode: result.errorCode,
+					errorMessage: result.errorMessage,
+					// Script execution results
 					consoleLogs: result.consoleLogs,
 					testResults: result.testResults,
 					preScriptError: result.preScriptError,
@@ -237,14 +220,17 @@ export default function RequestBuilder() {
 				};
 			} catch (error) {
 				console.error("Execute request failed:", error);
+				const errorMsg = error instanceof Error ? error.message : String(error);
 				return {
 					status: 0,
 					statusText: "Error",
 					headers: {},
-					body: String(error),
+					body: errorMsg,
 					bodyType: "text",
 					time: 0,
 					size: 0,
+					errorCode: "INTERNAL_ERROR",
+					errorMessage: errorMsg,
 				};
 			}
 		},
