@@ -209,6 +209,10 @@ void register_run_routes (RouteContext& ctx) {
                 } else if (m.name == vayu::MetricName::Rps) {
                     report.avg_rps    = m.value;
                     report.actual_rps = m.value;
+                } else if (m.name == vayu::MetricName::SendRate) {
+                    report.send_rate = m.value;
+                } else if (m.name == vayu::MetricName::Throughput) {
+                    report.throughput = m.value;
                 } else if (m.name == vayu::MetricName::TestDuration) {
                     // Use actual test duration (excludes setup/teardown overhead)
                     report.total_duration_s = m.value;
@@ -322,6 +326,8 @@ void register_run_routes (RouteContext& ctx) {
                 { "errorRate", report.error_rate },
                 { "totalDurationSeconds", report.total_duration_s },
                 { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
+                { "sendRate", report.send_rate },
+                { "throughput", report.throughput },
                 { "setupOverhead", report.setup_overhead_s } };
             json_report["latency"]     = { { "min", report.latency_min },
                     { "max", report.latency_max }, { "avg", report.latency_avg },

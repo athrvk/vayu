@@ -517,16 +517,24 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             (static_cast<double> (current_errors) * 100.0 / static_cast<double> (current_total)) :
             0.0;
 
+            // Calculate send rate (requests dispatched per second) and throughput (responses per second)
+            size_t requests_sent = context->requests_sent.load ();
+            double run_elapsed_s = (static_cast<double> (now_ms () - context->start_time_ms)) / 1000.0;
+            double send_rate = run_elapsed_s > 0 ? static_cast<double> (requests_sent) / run_elapsed_s : 0.0;
+            double throughput = run_elapsed_s > 0 ? static_cast<double> (current_total) / run_elapsed_s : 0.0;
+
             vayu::utils::log_debug ("Metrics: rps=" + std::to_string (current_rps) +
+            ", send_rate=" + std::to_string (send_rate) +
+            ", throughput=" + std::to_string (throughput) +
             ", error_rate=" + std::to_string (error_rate) + "%" +
             ", active=" + std::to_string (context->event_loop->active_count ()) +
-            ", sent=" + std::to_string (context->requests_sent.load ()));
+            ", sent=" + std::to_string (requests_sent));
 
             // Store metrics (batched to reduce lock contention)
             try {
                 auto timestamp = now_ms ();
                 std::vector<vayu::db::Metric> metrics;
-                metrics.reserve (5);
+                metrics.reserve (7);
 
                 metrics.push_back ({ 0, context->run_id, timestamp,
                 vayu::MetricName::Rps, current_rps, "" });
@@ -535,9 +543,13 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                 metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::ConnectionsActive,
                 static_cast<double> (context->event_loop->active_count ()), "" });
                 metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::RequestsSent,
-                static_cast<double> (context->requests_sent.load ()), "" });
+                static_cast<double> (requests_sent), "" });
                 metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::RequestsExpected,
                 static_cast<double> (context->requests_expected.load ()), "" });
+                metrics.push_back ({ 0, context->run_id, timestamp,
+                vayu::MetricName::SendRate, send_rate, "" });
+                metrics.push_back ({ 0, context->run_id, timestamp,
+                vayu::MetricName::Throughput, throughput, "" });
 
                 // Single transaction instead of 5 separate lock acquisitions
                 db.add_metrics_batch (metrics);

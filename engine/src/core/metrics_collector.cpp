@@ -263,7 +263,8 @@ size_t MetricsCollector::memory_usage_bytes () const {
 }
 
 nlohmann::json MetricsCollector::get_current_stats (size_t current_active,
-double elapsed_seconds) const {
+double elapsed_seconds,
+size_t requests_sent) const {
     // Lock-free reads from atomic counters
     size_t total    = total_requests ();
     size_t errors   = total_errors ();
@@ -271,8 +272,13 @@ double elapsed_seconds) const {
     double avg_lat  = average_latency ();
     double err_rate = error_rate ();
 
-    // Calculate current RPS
-    double current_rps =
+    // Calculate rate metrics (Open Model)
+    // Send Rate: How fast Vayu is dispatching requests to the server
+    double send_rate =
+    elapsed_seconds > 0 ? static_cast<double> (requests_sent) / elapsed_seconds : 0.0;
+
+    // Throughput: How fast the server is responding (completed requests)
+    double throughput =
     elapsed_seconds > 0 ? static_cast<double> (total) / elapsed_seconds : 0.0;
 
     nlohmann::json stats;
@@ -281,7 +287,8 @@ double elapsed_seconds) const {
     stats["totalSuccess"]      = success;
     stats["errorRate"]         = err_rate;
     stats["avgLatencyMs"]      = avg_lat;
-    stats["currentRps"]        = current_rps;
+    stats["sendRate"]          = send_rate;
+    stats["throughput"]        = throughput;
     stats["activeConnections"] = current_active;
     stats["elapsedSeconds"]    = elapsed_seconds;
 

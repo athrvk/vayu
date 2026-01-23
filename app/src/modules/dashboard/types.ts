@@ -91,6 +91,9 @@ export interface DisplayMetrics {
 	avg_latency_ms: number;
 	bytes_sent: number;
 	bytes_received: number;
+	// Rate metrics (Open Model)
+	send_rate?: number; // Rate at which requests are dispatched to the server
+	throughput?: number; // Rate at which responses are received from the server
 }
 
 // ============================================================================

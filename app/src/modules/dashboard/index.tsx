@@ -217,6 +217,9 @@ export default function LoadTestDashboard() {
 				avg_latency_ms: finalReport.latency.avg,
 				bytes_sent: 0,
 				bytes_received: 0,
+				// Rate metrics from report
+				send_rate: finalReport.summary.sendRate,
+				throughput: finalReport.summary.throughput,
 			};
 		}
 		return (currentMetrics || lastHistoricalMetrics) as DisplayMetrics | null;
@@ -256,7 +259,7 @@ export default function LoadTestDashboard() {
 
 	const startTime =
 		runMetadata?.startTime &&
-		(!historicalStartTime || runMetadata.startTime <= historicalStartTime)
+			(!historicalStartTime || runMetadata.startTime <= historicalStartTime)
 			? runMetadata.startTime
 			: historicalStartTime;
 

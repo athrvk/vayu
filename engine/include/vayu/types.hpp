@@ -390,6 +390,10 @@ struct DetailedReport {
     double actual_rps;      // Actual RPS achieved
     double rps_achievement; // Percentage of target achieved
 
+    // Rate Metrics (Open Model)
+    double send_rate;  // Avg rate at which requests were dispatched (req/s)
+    double throughput; // Avg rate at which responses were received (req/s)
+
     // Phase 2: Timing context
     double setup_overhead_s; // Time from run creation to test start (seconds)
 };
@@ -517,6 +521,9 @@ enum class MetricName {
     ConnectionsActive,
     RequestsSent,
     RequestsExpected,
+    // Rate metrics (Open Model)
+    SendRate,   // Rate at which requests are dispatched to the server
+    Throughput, // Rate at which responses are received from the server
     // Script validation metrics
     TestsValidating,
     TestsPassed,
@@ -542,6 +549,8 @@ inline const char* to_string (MetricName name) {
     case MetricName::ConnectionsActive: return "connections_active";
     case MetricName::RequestsSent: return "requests_sent";
     case MetricName::RequestsExpected: return "requests_expected";
+    case MetricName::SendRate: return "send_rate";
+    case MetricName::Throughput: return "throughput";
     case MetricName::TestsValidating: return "tests_validating";
     case MetricName::TestsPassed: return "tests_passed";
     case MetricName::TestsFailed: return "tests_failed";
@@ -576,6 +585,10 @@ inline std::optional<MetricName> parse_metric_name (const std::string& str) {
         return MetricName::RequestsSent;
     if (str == "requests_expected")
         return MetricName::RequestsExpected;
+    if (str == "send_rate")
+        return MetricName::SendRate;
+    if (str == "throughput")
+        return MetricName::Throughput;
     if (str == "tests_validating")
         return MetricName::TestsValidating;
     if (str == "tests_passed")

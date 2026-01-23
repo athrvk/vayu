@@ -97,6 +97,9 @@ export class SSEClient {
 						avg_latency_ms: metrics.avgLatencyMs || 0,
 						bytes_sent: 0,
 						bytes_received: 0,
+						// Rate metrics (Open Model)
+						send_rate: metrics.sendRate || 0,
+						throughput: metrics.throughput || 0,
 					};
 
 					onMessage({ ...this.currentMetrics });

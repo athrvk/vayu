@@ -235,7 +235,7 @@ build_engine() {
               -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
               -DVCPKG_MANIFEST_MODE=ON \
               -DVAYU_BUILD_TESTS=OFF \
-              -DVAYU_BUILD_CLI=OFF \
+              -DVAYU_BUILD_CLI=ON \
               -DVAYU_BUILD_ENGINE=ON \
               .. 2>&1 | tee /tmp/cmake_config_output.log
         CMAKE_CONFIG_EXIT=${PIPESTATUS[0]}
@@ -247,7 +247,7 @@ build_engine() {
               -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
               -DVCPKG_MANIFEST_MODE=ON \
               -DVAYU_BUILD_TESTS=OFF \
-              -DVAYU_BUILD_CLI=OFF \
+              -DVAYU_BUILD_CLI=ON \
               -DVAYU_BUILD_ENGINE=ON \
               .. > /tmp/cmake_config_output.log 2>&1
         CMAKE_CONFIG_EXIT=$?
@@ -309,13 +309,19 @@ build_engine() {
         error "Build failed with exit code $CMAKE_BUILD_EXIT"
     fi
     
-    # Verify binary
+    # Verify binaries
     if [[ ! -f "$BUILD_DIR/vayu-engine" ]]; then
-        error "Build succeeded but binary not found at: $BUILD_DIR/vayu-engine"
+        error "Build succeeded but engine binary not found at: $BUILD_DIR/vayu-engine"
+    fi
+    
+    if [[ ! -f "$BUILD_DIR/vayu-cli" ]]; then
+        error "Build succeeded but CLI binary not found at: $BUILD_DIR/vayu-cli"
     fi
     
     ENGINE_BINARY="$BUILD_DIR/vayu-engine"
+    CLI_BINARY="$BUILD_DIR/vayu-cli"
     success "Engine built successfully: $ENGINE_BINARY"
+    success "CLI built successfully: $CLI_BINARY"
 }
 
 # Setup application icons

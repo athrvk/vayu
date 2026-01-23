@@ -55,6 +55,8 @@ void register_metrics_routes (RouteContext& ctx) {
             aggregated_metrics["errorRate"]         = 0.0;
             aggregated_metrics["avgLatencyMs"]      = 0.0;
             aggregated_metrics["currentRps"]        = 0.0;
+            aggregated_metrics["sendRate"]          = 0.0;
+            aggregated_metrics["throughput"]        = 0.0;
             aggregated_metrics["activeConnections"] = 0;
             aggregated_metrics["elapsedSeconds"]    = 0.0;
 
@@ -92,6 +94,12 @@ void register_metrics_routes (RouteContext& ctx) {
                                 has_updates = true;
                             } else if (metric.name == vayu::MetricName::LatencyAvg) {
                                 aggregated_metrics["avgLatencyMs"] = metric.value;
+                                has_updates = true;
+                            } else if (metric.name == vayu::MetricName::SendRate) {
+                                aggregated_metrics["sendRate"] = metric.value;
+                                has_updates = true;
+                            } else if (metric.name == vayu::MetricName::Throughput) {
+                                aggregated_metrics["throughput"] = metric.value;
                                 has_updates = true;
                             }
 
@@ -201,15 +209,16 @@ void register_metrics_routes (RouteContext& ctx) {
 
                     size_t active_count =
                     context->event_loop ? context->event_loop->active_count () : 0;
+                    size_t requests_sent = context->requests_sent.load ();
                     auto stats = context->metrics_collector->get_current_stats (
-                    active_count, elapsed_seconds);
+                    active_count, elapsed_seconds, requests_sent);
 
                     stats["runId"] = run_id;
                     stats["timestamp"] =
                     std::chrono::duration_cast<std::chrono::milliseconds> (
                     std::chrono::system_clock::now ().time_since_epoch ())
                     .count ();
-                    stats["requestsSent"] = context->requests_sent.load ();
+                    stats["requestsSent"] = requests_sent;
                     stats["requestsExpected"] = context->requests_expected.load ();
 
                     std::string payload = "event: metrics\ndata: " + stats.dump () + "\n\n";

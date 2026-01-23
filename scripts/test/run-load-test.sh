@@ -34,17 +34,24 @@ fi
 
 cd "$PROJECT_ROOT"
 
-# Ensure CLI is built
-if [ ! -f "engine/build/vayu-cli" ]; then
-    echo "Building vayu-cli..."
-    cmake --build engine/build --target vayu-cli > /dev/null
+# Find CLI binary (check prod build first, then dev build)
+if [ -f "engine/build-release/vayu-cli" ]; then
+    CLI_PATH="engine/build-release/vayu-cli"
+elif [ -f "engine/build/vayu-cli" ]; then
+    CLI_PATH="engine/build/vayu-cli"
+else
+    echo "Error: vayu-cli not found. Please build the engine first:"
+    echo "  ./scripts/build/build-macos.sh -e      # Production build"
+    echo "  ./scripts/build/build-macos.sh dev -e  # Development build"
+    exit 1
 fi
 
+echo "Using CLI: $CLI_PATH"
 echo "Starting load test from $TEST_FILE..."
 # Run the CLI and capture output
 # We use a temporary file to capture output while also showing it if needed, 
 # but here we just capture it to variable to parse Run ID.
-OUTPUT=$(./engine/build/vayu-cli run "$TEST_FILE_ABS")
+OUTPUT=$(./$CLI_PATH run "$TEST_FILE_ABS")
 echo "$OUTPUT"
 
 # Extract Run ID
