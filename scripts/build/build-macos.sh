@@ -17,17 +17,31 @@ set -e
 
 # Colors for output (consistent across platforms)
 RED='\033[0;31m'
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
+# Step counter for progress tracking
+CURRENT_STEP=0
+TOTAL_STEPS=0
+
 # Helper functions (consistent style)
-info()    { echo -e "${CYAN}==>${NC} $1"; }
-warn()    { echo -e "${YELLOW}Warning:${NC} $1"; }
-error()   { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
-success() { echo -e "${GREEN}[OK]${NC} $1"; }
+info()    { echo -e "${CYAN}  ▶${NC} $1"; }
+detail()  { echo -e "${DIM}    $1${NC}"; }
+warn()    { echo -e "${YELLOW}  ⚠${NC} ${YELLOW}$1${NC}"; }
+error()   { echo -e "${RED}  ✗${NC} ${RED}$1${NC}" >&2; exit 1; }
+success() { echo -e "${GREEN}  ✓${NC} $1"; }
+
+# Step function with progress indicator
+step() {
+    ((CURRENT_STEP++))
+    echo ""
+    echo -e "${BOLD}${CYAN}[$CURRENT_STEP/$TOTAL_STEPS]${NC} ${BOLD}$1${NC}"
+    echo -e "${DIM}$( printf '%*s' 60 | tr ' ' '─' )${NC}"
+}
 
 # Default values
 BUILD_MODE="prod"
@@ -129,22 +143,18 @@ fi
 
 # Check prerequisites
 check_prerequisites() {
-    info "Checking prerequisites..."
-    
     local missing=()
     
     # Check cmake
     if command -v cmake &>/dev/null; then
-        local cmake_version=$(cmake --version | head -n1)
-        echo -e "  CMake: $cmake_version"
+        detail "CMake: $(cmake --version | head -n1)"
     else
         missing+=("cmake (brew install cmake)")
     fi
     
     # Check ninja
     if command -v ninja &>/dev/null; then
-        local ninja_version=$(ninja --version)
-        echo -e "  Ninja: $ninja_version"
+        detail "Ninja: $(ninja --version)"
     else
         missing+=("ninja (brew install ninja)")
     fi
@@ -152,12 +162,12 @@ check_prerequisites() {
     # Check vcpkg
     if [[ -n "$VCPKG_ROOT_OVERRIDE" ]]; then
         VCPKG_ROOT="$VCPKG_ROOT_OVERRIDE"
-        echo -e "  vcpkg (overridden): $VCPKG_ROOT"
+        detail "vcpkg: $VCPKG_ROOT (override)"
     elif [[ -n "$VCPKG_ROOT" ]] && [[ -d "$VCPKG_ROOT" ]]; then
-        echo -e "  vcpkg: $VCPKG_ROOT"
+        detail "vcpkg: $VCPKG_ROOT"
     elif command -v vcpkg &>/dev/null; then
         VCPKG_ROOT="$(dirname "$(which vcpkg)")"
-        echo -e "  vcpkg: $VCPKG_ROOT"
+        detail "vcpkg: $VCPKG_ROOT"
     else
         missing+=("vcpkg (https://vcpkg.io/en/getting-started.html)")
     fi
@@ -165,8 +175,7 @@ check_prerequisites() {
     # Check pnpm (only if building app)
     if [[ "$SKIP_APP" == false ]]; then
         if command -v pnpm &>/dev/null; then
-            local pnpm_version=$(pnpm --version)
-            echo -e "  pnpm: $pnpm_version"
+            detail "pnpm: $(pnpm --version)"
         else
             missing+=("pnpm (npm install -g pnpm)")
         fi
@@ -174,12 +183,10 @@ check_prerequisites() {
     
     if [[ ${#missing[@]} -gt 0 ]]; then
         echo ""
-        echo -e "${RED}Missing prerequisites:${NC}"
         for item in "${missing[@]}"; do
-            echo -e "  - $item"
+            echo -e "${RED}    ✗ Missing: $item${NC}"
         done
-        echo ""
-        error "Please install the missing prerequisites and try again."
+        error "Please install missing prerequisites and try again."
     fi
     
     success "All prerequisites found"
@@ -188,11 +195,11 @@ check_prerequisites() {
 # Build engine
 build_engine() {
     if [[ "$BUILD_MODE" == "dev" ]]; then
-        info "Building C++ engine (Debug mode)..."
+        detail "Build type: Debug"
         BUILD_TYPE="Debug"
         BUILD_DIR="$ENGINE_DIR/build"
     else
-        info "Building C++ engine (Release mode)..."
+        detail "Build type: Release"
         BUILD_TYPE="Release"
         BUILD_DIR="$ENGINE_DIR/build-release"
     fi
@@ -399,10 +406,17 @@ build_electron() {
 main() {
     local start_time=$(date +%s)
     
-    # Determine what we're building
+    # Determine what we're building and set total steps
     local build_components=()
-    if [[ "$SKIP_ENGINE" == false ]]; then build_components+=("Engine"); fi
-    if [[ "$SKIP_APP" == false ]]; then build_components+=("App"); fi
+    TOTAL_STEPS=1  # Prerequisites always counted
+    if [[ "$SKIP_ENGINE" == false ]]; then
+        build_components+=("Engine")
+        ((TOTAL_STEPS++))
+    fi
+    if [[ "$SKIP_APP" == false ]]; then
+        build_components+=("App")
+        ((TOTAL_STEPS++))
+    fi
     local components_str=$(echo ${build_components[*]} | tr ' ' '+')
     
     if [[ ${#build_components[@]} -eq 0 ]]; then
@@ -410,17 +424,23 @@ main() {
     fi
     
     echo ""
-    echo -e "${CYAN}╔═════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║   Vayu Build Script for macOS   ║${NC}"
-    echo -e "${CYAN}║   Mode: $(printf "${BUILD_MODE^^}") | $components_str       ║${NC}"
-    echo -e "${CYAN}╚═════════════════════════════════╝${NC}"
-    echo ""
+    echo -e "${BOLD}${CYAN}"
+    echo "  ██████████████████████████████████████"
+    echo "  █  VAYU BUILD SCRIPT             █"
+    echo "  █  Platform: macOS               █"
+    echo "  ██████████████████████████████████████"
+    echo -e "${NC}"
+    local mode_upper=$(echo "$BUILD_MODE" | tr '[:lower:]' '[:upper:]')
+    echo -e "  ${DIM}Mode:${NC} ${BOLD}${mode_upper}${NC}  ${DIM}|${NC}  ${DIM}Components:${NC} ${BOLD}$components_str${NC}"
     
+    # Step 1: Prerequisites
+    step "Checking Prerequisites"
     check_prerequisites
     
     ENGINE_BINARY=""
     
     if [[ "$SKIP_ENGINE" == false ]]; then
+        step "Building C++ Engine"
         build_engine
     else
         warn "Skipping engine build"
@@ -436,6 +456,7 @@ main() {
     fi
     
     if [[ "$SKIP_APP" == false ]]; then
+        step "Building Electron App"
         build_electron
     else
         warn "Skipping app build"
@@ -445,60 +466,82 @@ main() {
     local elapsed=$((end_time - start_time))
     
     echo ""
-    echo "╔════════════════════════════════════════╗"
-    echo "║   Build completed successfully in ${elapsed}s          ║"
-    echo "╚════════════════════════════════════════╝"
+    echo -e "${BOLD}${GREEN}"
+    echo "  ██████████████████████████████████████"
+    echo "  █  BUILD SUCCESSFUL              █"
+    echo "  ██████████████████████████████████████"
+    echo -e "${NC}"
+    echo -e "  ${DIM}Total time:${NC} ${BOLD}${elapsed}s${NC}"
     echo ""
     
-    if [[ "$BUILD_MODE" == "dev" ]]; then
-        # Calculate relative path from project root (so it works from project root)
-        local relative_app_path
-        if command -v realpath &>/dev/null; then
-            relative_app_path=$(realpath --relative-to="$PROJECT_ROOT" "$APP_DIR" 2>/dev/null || echo "app")
-        else
-            # Fallback: use Python to calculate relative path
-            relative_app_path=$(python3 -c "import os; print(os.path.relpath('$APP_DIR', '$PROJECT_ROOT'))" 2>/dev/null || echo "app")
-        fi
-        
-        echo "To start the Electron app in development mode:"
-        echo ""
-        # Show path relative to project root for clarity
-        echo "    cd $relative_app_path; pnpm run electron:dev"
-        echo ""
-    else
-        echo "Production build created:"
-        echo ""
-        local release_dir="$APP_DIR/release"
-        local installer_paths=()
-        if [[ -d "$release_dir" ]]; then
-            while IFS= read -r f; do
-                echo "   $f"
-                installer_paths+=("$f")
-            done < <(ls -1 "$release_dir"/*.dmg 2>/dev/null)
-        fi
-        echo ""
-        echo "To install and launch Vayu:"
-        if [[ ${#installer_paths[@]} -gt 0 ]]; then
-            echo "  1. Open the DMG file:"
-            for path in "${installer_paths[@]}"; do
-                echo "     open \"$path\""
-            done
-            echo "  2. Drag Vayu to the Applications folder."
-        else
-            echo "  1. Open the generated DMG file in the release directory."
-            echo "  2. Drag Vayu to the Applications folder."
-        fi
-        echo "  3. After installation, launch 'Vayu' from the Applications folder."
-        echo ""
+    echo -e "  ${BOLD}Build Artifacts:${NC}"
+    echo -e "  ${DIM}──────────────────────────────────────${NC}"
+    
+    # Show engine binary if it was built
+    if [[ "$SKIP_ENGINE" == false ]] && [[ -n "$ENGINE_BINARY" ]] && [[ -f "$ENGINE_BINARY" ]]; then
+        echo -e "  ${GREEN}✓${NC} Engine: ${CYAN}$ENGINE_BINARY${NC}"
     fi
+    
+    # Show app artifacts if app was built
+    if [[ "$SKIP_APP" == false ]]; then
+        if [[ "$BUILD_MODE" == "dev" ]]; then
+            echo -e "  ${GREEN}✓${NC} App: Development build ready"
+        else
+            local release_dir="$APP_DIR/release"
+            if [[ -d "$release_dir" ]]; then
+                while IFS= read -r f; do
+                    echo -e "  ${GREEN}✓${NC} Installer: ${CYAN}$f${NC}"
+                done < <(ls -1 "$release_dir"/*.dmg 2>/dev/null)
+            fi
+        fi
+    fi
+    
+    echo ""
+    echo -e "  ${BOLD}Next Steps:${NC}"
+    echo -e "  ${DIM}──────────────────────────────────────${NC}"
+    
+    if [[ "$BUILD_MODE" == "dev" ]]; then
+        if [[ "$SKIP_APP" == false ]]; then
+            # Calculate relative path from project root
+            local relative_app_path
+            if command -v realpath &>/dev/null; then
+                relative_app_path=$(realpath --relative-to="$PROJECT_ROOT" "$APP_DIR" 2>/dev/null || echo "app")
+            else
+                relative_app_path=$(python3 -c "import os; print(os.path.relpath('$APP_DIR', '$PROJECT_ROOT'))" 2>/dev/null || echo "app")
+            fi
+            echo -e "  Run the Electron app in development mode:"
+            echo -e "    ${CYAN}cd $relative_app_path && pnpm run electron:dev${NC}"
+        else
+            echo -e "  Engine built successfully. Run it with:"
+            echo -e "    ${CYAN}$ENGINE_BINARY${NC}"
+        fi
+    else
+        if [[ "$SKIP_APP" == false ]]; then
+            local release_dir="$APP_DIR/release"
+            local dmg_file=$(ls -1 "$release_dir"/*.dmg 2>/dev/null | head -n 1)
+            if [[ -n "$dmg_file" ]]; then
+                echo -e "  1. Open the DMG:"
+                echo -e "     ${CYAN}open \"$dmg_file\"${NC}"
+                echo -e "  2. Drag Vayu to Applications"
+                echo -e "  3. Launch ${BOLD}Vayu${NC} from Applications"
+            else
+                echo -e "  Open the DMG from: ${CYAN}$release_dir${NC}"
+            fi
+        else
+            echo -e "  Run the engine directly:"
+            echo -e "    ${CYAN}$ENGINE_BINARY${NC}"
+        fi
+    fi
+    echo ""
 }
 
 # Run main with error handling
 if ! main; then
     echo ""
-    echo "╔════════════════════════════════════════╗"
-    echo "║   Build failed!                        ║"
-    echo "╚════════════════════════════════════════╝"
-    echo ""
+    echo -e "${BOLD}${RED}"
+    echo "  ██████████████████████████████████████"
+    echo "  █  BUILD FAILED                  █"
+    echo "  ██████████████████████████████████████"
+    echo -e "${NC}"
     exit 1
 fi

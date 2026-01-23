@@ -6,6 +6,12 @@
 # This script builds the C++ engine and Electron app for Linux
 # - dev:  Development build with debug symbols
 # - prod: Production build optimized and packaged as AppImage/deb
+#
+# Quick aliases:
+#   ./build-linux.sh -e         # Build only engine (prod)
+#   ./build-linux.sh -a         # Build only app (prod)
+#   ./build-linux.sh dev -e     # Build only engine (dev)
+#   ./build-linux.sh dev -a     # Build only app (dev)
 
 set -e
 
@@ -19,13 +25,28 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
+# Step counter for progress tracking
+CURRENT_STEP=0
+TOTAL_STEPS=0
+
 # Helper functions (consistent style)
-info()    { echo -e "${CYAN}==>${NC} $1"; }
-warn()    { echo -e "${YELLOW}Warning:${NC} $1"; }
-error()   { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
-success() { echo -e "${GREEN}[OK]${NC} $1"; }
+info()    { echo -e "${CYAN}  ▶${NC} $1"; }
+detail()  { echo -e "${DIM}    $1${NC}"; }
+warn()    { echo -e "${YELLOW}  ⚠${NC} ${YELLOW}$1${NC}"; }
+error()   { echo -e "${RED}  ✗${NC} ${RED}$1${NC}" >&2; exit 1; }
+success() { echo -e "${GREEN}  ✓${NC} $1"; }
+
+# Step function with progress indicator
+step() {
+    ((CURRENT_STEP++))
+    echo ""
+    echo -e "${BOLD}${CYAN}[$CURRENT_STEP/$TOTAL_STEPS]${NC} ${BOLD}$1${NC}"
+    echo -e "${DIM}$( printf '%*s' 60 | tr ' ' '─' )${NC}"
+}
 
 # Default values
 BUILD_MODE="prod"
@@ -107,29 +128,47 @@ fi
 
 # Check prerequisites
 check_prerequisites() {
-    info "Checking prerequisites..."
     local missing=()
     
-    if ! command -v cmake &>/dev/null; then missing+=("cmake"); fi
-    if ! command -v ninja &>/dev/null; then missing+=("ninja-build"); fi
+    if command -v cmake &>/dev/null; then
+        detail "CMake: $(cmake --version | head -n1)"
+    else
+        missing+=("cmake")
+    fi
+    
+    if command -v ninja &>/dev/null; then
+        detail "Ninja: $(ninja --version)"
+    else
+        missing+=("ninja-build")
+    fi
     
     # Check vcpkg
     if [[ -n "$VCPKG_ROOT_OVERRIDE" ]]; then
         VCPKG_ROOT="$VCPKG_ROOT_OVERRIDE"
+        detail "vcpkg: $VCPKG_ROOT (override)"
     elif [[ -n "$VCPKG_ROOT" ]] && [[ -d "$VCPKG_ROOT" ]]; then
-        : # VCPKG_ROOT is set
+        detail "vcpkg: $VCPKG_ROOT"
     elif command -v vcpkg &>/dev/null; then
         VCPKG_ROOT="$(dirname "$(which vcpkg)")"
+        detail "vcpkg: $VCPKG_ROOT"
     else
         missing+=("vcpkg")
     fi
     
-    if [[ "$SKIP_APP" == false ]] && ! command -v pnpm &>/dev/null; then
-        missing+=("pnpm");
+    if [[ "$SKIP_APP" == false ]]; then
+        if command -v pnpm &>/dev/null; then
+            detail "pnpm: $(pnpm --version)"
+        else
+            missing+=("pnpm")
+        fi
     fi
     
     if [[ ${#missing[@]} -gt 0 ]]; then
-        error "Missing prerequisites: ${missing[*]}"
+        echo ""
+        for item in "${missing[@]}"; do
+            echo -e "${RED}    ✗ Missing: $item${NC}"
+        done
+        error "Please install missing prerequisites and try again."
     fi
     success "All prerequisites found"
 }
@@ -137,11 +176,11 @@ check_prerequisites() {
 # Build engine
 build_engine() {
     if [[ "$BUILD_MODE" == "dev" ]]; then
-        info "Building C++ engine (Debug mode)..."
+        detail "Build type: Debug"
         BUILD_TYPE="Debug"
         BUILD_DIR="$ENGINE_DIR/build"
     else
-        info "Building C++ engine (Release mode)..."
+        detail "Build type: Release"
         BUILD_TYPE="Release"
         BUILD_DIR="$ENGINE_DIR/build-release"
     fi
@@ -161,26 +200,88 @@ build_engine() {
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
     
+    # Configure CMake
     info "Configuring CMake..."
-    # Simplified logging logic for brevity
-    if ! cmake -GNinja \
-        -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-        -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-        -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
-        -DVCPKG_MANIFEST_MODE=ON \
-        -DVAYU_BUILD_TESTS=OFF \
-        -DVAYU_BUILD_CLI=OFF \
-        -DVAYU_BUILD_ENGINE=ON \
-        .. > /tmp/cmake_config.log 2>&1; then
-        cat /tmp/cmake_config.log
-        error "CMake configuration failed"
+    if [[ "$VERBOSE_OUTPUT" == true ]]; then
+        # In verbose mode, show all output
+        cmake -GNinja \
+              -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
+              -DVCPKG_MANIFEST_MODE=ON \
+              -DVAYU_BUILD_TESTS=OFF \
+              -DVAYU_BUILD_CLI=OFF \
+              -DVAYU_BUILD_ENGINE=ON \
+              .. 2>&1 | tee /tmp/cmake_config_output.log
+        CMAKE_CONFIG_EXIT=${PIPESTATUS[0]}
+    else
+        # In normal mode, capture output silently
+        cmake -GNinja \
+              -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
+              -DVCPKG_MANIFEST_MODE=ON \
+              -DVAYU_BUILD_TESTS=OFF \
+              -DVAYU_BUILD_CLI=OFF \
+              -DVAYU_BUILD_ENGINE=ON \
+              .. > /tmp/cmake_config_output.log 2>&1
+        CMAKE_CONFIG_EXIT=$?
     fi
     
+    if [[ $CMAKE_CONFIG_EXIT -ne 0 ]]; then
+        if [[ "$VERBOSE_OUTPUT" == true ]]; then
+            echo ""
+            echo "╔════════════════════════════════════════╗"
+            echo "║   CMake Configuration Failed!         ║"
+            echo "╚════════════════════════════════════════╝"
+            echo ""
+            echo "CMake output:"
+            cat /tmp/cmake_config_output.log
+            echo ""
+        fi
+        error "CMake configuration failed with exit code $CMAKE_CONFIG_EXIT"
+    fi
+    
+    # Build
     info "Building..."
     local cores=$(nproc 2>/dev/null || echo 4)
-    if ! cmake --build . -j "$cores" > /tmp/cmake_build.log 2>&1; then
-        cat /tmp/cmake_build.log
-        error "Build failed"
+    if [[ "$VERBOSE_OUTPUT" == true ]]; then
+        # In verbose mode, show output in real-time
+        cmake --build . -j "$cores" 2>&1 | tee /tmp/cmake_build_output.log
+        CMAKE_BUILD_EXIT=${PIPESTATUS[0]}
+    else
+        # In normal mode, capture silently
+        cmake --build . -j "$cores" > /tmp/cmake_build_output.log 2>&1
+        CMAKE_BUILD_EXIT=$?
+    fi
+    
+    if [[ $CMAKE_BUILD_EXIT -ne 0 ]]; then
+        if [[ "$VERBOSE_OUTPUT" == true ]]; then
+            echo ""
+            echo "╔════════════════════════════════════════╗"
+            echo "║   Build Failed!                        ║"
+            echo "╚════════════════════════════════════════╝"
+            echo ""
+            
+            # Extract and highlight error lines
+            echo "Error summary (lines containing 'error' or 'failed'):"
+            echo ""
+            grep -i "error\|failed" /tmp/cmake_build_output.log | head -20 || true
+            echo ""
+            
+            # Show last 50 lines for context
+            echo "Last 50 lines of build output:"
+            echo ""
+            tail -50 /tmp/cmake_build_output.log | while IFS= read -r line; do
+                if echo "$line" | grep -qi "error\|failed"; then
+                    echo -e "${RED}$line${NC}"
+                else
+                    echo "$line"
+                fi
+            done
+            echo ""
+        fi
+        error "Build failed with exit code $CMAKE_BUILD_EXIT"
     fi
     
     ENGINE_BINARY="$BUILD_DIR/vayu-engine"
@@ -192,16 +293,31 @@ build_engine() {
 
 # Setup icons
 setup_icons() {
+    info "Setting up application icons..."
+    
     local icon_png_dir="$PROJECT_ROOT/shared/icon_png"
     local build_dir="$APP_DIR/build"
-    mkdir -p "$build_dir/icons"
     
+    # Ensure build directory exists
+    mkdir -p "$build_dir"
+    
+    # Copy PNG for fallback (256x256 is standard for Linux)
     if [[ -f "$icon_png_dir/vayu_icon_256x256.png" ]]; then
         cp "$icon_png_dir/vayu_icon_256x256.png" "$build_dir/icon.png"
+        echo "    icon.png (Linux fallback)"
     fi
+    
+    # Copy all PNG icon sizes for electron-builder's icon set (Linux needs these)
+    # Linux config uses "icon": "build/icons" which expects a folder with multiple sizes
+    local icon_set_dir="$build_dir/icons"
+    mkdir -p "$icon_set_dir"
+    
     if [[ -d "$icon_png_dir" ]]; then
-        cp "$icon_png_dir"/*.png "$build_dir/icons/" 2>/dev/null || true
+        cp "$icon_png_dir"/*.png "$icon_set_dir/" 2>/dev/null || true
+        echo "    icons/ folder (all PNG sizes for Linux)"
     fi
+    
+    success "Icons ready"
 }
 
 # Build Electron app
@@ -248,94 +364,133 @@ build_electron() {
 main() {
     local start_time=$(date +%s)
 
-    # Determine what we're building
-    build_components=()
-    if [[ "$SKIP_ENGINE" == false ]]; then build_components+=("Engine"); fi
-    if [[ "$SKIP_APP" == false ]]; then build_components+=("App"); fi
+    # Determine what we're building and set total steps
+    local build_components=()
+    TOTAL_STEPS=1  # Prerequisites always counted
+    if [[ "$SKIP_ENGINE" == false ]]; then
+        build_components+=("Engine")
+        ((TOTAL_STEPS++))
+    fi
+    if [[ "$SKIP_APP" == false ]]; then
+        build_components+=("App")
+        ((TOTAL_STEPS++))
+    fi
     local components_str=$(echo ${build_components[*]} | tr ' ' '+')
     if [[ ${#build_components[@]} -eq 0 ]]; then
         error "Nothing to build! Use -h for help."
     fi
     
     echo ""
-    echo -e "${CYAN}╔═════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║   Vayu Build Script for Linux   ║${NC}"
-    echo -e "${CYAN}║   Mode: $(printf "${BUILD_MODE^^}") | $components_str       ║${NC}"
-    echo -e "${CYAN}╚═════════════════════════════════╝${NC}"
-    echo ""
+    echo -e "${BOLD}${CYAN}"
+    echo "  ██████████████████████████████████████"
+    echo "  █  VAYU BUILD SCRIPT             █"
+    echo "  █  Platform: Linux               █"
+    echo "  ██████████████████████████████████████"
+    echo -e "${NC}"
+    local mode_upper=$(echo "$BUILD_MODE" | tr '[:lower:]' '[:upper:]')
+    echo -e "  ${DIM}Mode:${NC} ${BOLD}${mode_upper}${NC}  ${DIM}|${NC}  ${DIM}Components:${NC} ${BOLD}$components_str${NC}"
     
+    # Step 1: Prerequisites
+    step "Checking Prerequisites"
     check_prerequisites
     
     ENGINE_BINARY=""
     
     # Engine Build Logic
     if [[ "$SKIP_ENGINE" == false ]]; then
+        step "Building C++ Engine"
         build_engine
     else
-        # Find existing binary if skipping build
+        warn "Skipping engine build"
+        # Try to find existing binary
         if [[ "$BUILD_MODE" == "prod" ]]; then
             ENGINE_BINARY="$ENGINE_DIR/build-release/vayu-engine"
         else
             ENGINE_BINARY="$ENGINE_DIR/build/vayu-engine"
         fi
+        if [[ -f "$ENGINE_BINARY" ]]; then
+            info "Using existing engine binary: $ENGINE_BINARY"
+        fi
     fi
     
     # App Build Logic
     if [[ "$SKIP_APP" == false ]]; then
+        step "Building Electron App"
         build_electron
+    else
+        warn "Skipping app build"
     fi
     
     local end_time=$(date +%s)
     local elapsed=$((end_time - start_time))
     
     echo ""
-    success "Build completed successfully in ${elapsed}s"
-    echo ""
-    echo "To run the application, copy and paste the command below:"
+    echo -e "${BOLD}${GREEN}"
+    echo "  ██████████████████████████████████████"
+    echo "  █  BUILD SUCCESSFUL              █"
+    echo "  ██████████████████████████████████████"
+    echo -e "${NC}"
+    echo -e "  ${DIM}Total time:${NC} ${BOLD}${elapsed}s${NC}"
     echo ""
 
-    # ---------------------------------------------------------
-    # IMPROVED POST-BUILD MESSAGE LOGIC
-    # ---------------------------------------------------------
-
+    echo -e "  ${BOLD}Build Artifacts:${NC}"
+    echo -e "  ${DIM}──────────────────────────────────────${NC}"
+    
+    # Show engine binary if it was built
+    if [[ "$SKIP_ENGINE" == false ]] && [[ -n "$ENGINE_BINARY" ]] && [[ -f "$ENGINE_BINARY" ]]; then
+        echo -e "  ${GREEN}✓${NC} Engine: ${CYAN}$ENGINE_BINARY${NC}"
+    fi
+    
+    # Show app artifacts if app was built
+    if [[ "$SKIP_APP" == false ]]; then
+        if [[ "$BUILD_MODE" == "dev" ]]; then
+            echo -e "  ${GREEN}✓${NC} App: Development build ready"
+        else
+            local release_dir="$APP_DIR/release"
+            local app_image=$(find "$release_dir" -name "*.AppImage" 2>/dev/null | head -n 1)
+            local deb_pkg=$(find "$release_dir" -name "*.deb" 2>/dev/null | head -n 1)
+            
+            if [[ -n "$app_image" ]]; then
+                echo -e "  ${GREEN}✓${NC} AppImage: ${CYAN}$app_image${NC}"
+            fi
+            if [[ -n "$deb_pkg" ]]; then
+                echo -e "  ${GREEN}✓${NC} Debian:   ${CYAN}$deb_pkg${NC}"
+            fi
+        fi
+    fi
+    
+    echo ""
+    echo -e "  ${BOLD}Next Steps:${NC}"
+    echo -e "  ${DIM}──────────────────────────────────────${NC}"
+    
     if [[ "$BUILD_MODE" == "dev" ]]; then
-        # DEV MODE: Calculate relative path from LAUNCH directory to App Directory
-        local rel_app_path=$(get_relative_path "$APP_DIR")
-        
-        echo -e "${CYAN}  cd ./$rel_app_path && pnpm run electron:dev${NC}"
-        
+        if [[ "$SKIP_APP" == false ]]; then
+            local rel_app_path=$(get_relative_path "$APP_DIR")
+            echo -e "  Run the Electron app in development mode:"
+            echo -e "    ${CYAN}cd ./$rel_app_path && pnpm run electron:dev${NC}"
+        else
+            echo -e "  Engine built successfully. Run it with:"
+            echo -e "    ${CYAN}$ENGINE_BINARY${NC}"
+        fi
     else
-        # PROD MODE: Find artifacts and give clear install/run instructions
-        local release_dir="$APP_DIR/release"
-
-        # Try to find AppImage and deb packages
-        local app_image=$(find "$release_dir" -name "*.AppImage" 2>/dev/null | head -n 1)
-        local deb_pkg=$(find "$release_dir" -name "*.deb" 2>/dev/null | head -n 1)
-
-        if [[ -n "$app_image" ]]; then
-            local rel_img_path=$(get_relative_path "$app_image")
-            echo -e "${CYAN}Run AppImage:${NC} ./$rel_img_path"
-            echo ""
-            echo -e "Notes for AppImage:" 
-            echo " - AppImages require FUSE at runtime on many systems (libfuse.so.2)."
-            echo -e "   If you see 'dlopen(): error loading libfuse.so.2', install it: ${CYAN}sudo apt update && sudo apt install libfuse2${NC}"
-            echo -e " - On systems without FUSE (some WSL installations), the AppImage may not run. Consider installing the .deb package instead."
-            echo -e " - You can extract the AppImage contents without FUSE: ${CYAN}./$(basename "$app_image") --appimage-extract && ./squashfs-root/AppRun${NC}"
-            echo ""
-        fi
-
-        if [[ -n "$deb_pkg" ]]; then
-            local rel_deb_path=$(get_relative_path "$deb_pkg")
-            echo -e "${CYAN}Install .deb package (recommended if AppImage fails):${NC}"
-            echo -e "  sudo dpkg -i ./$rel_deb_path"
-            echo -e "  # then fix dependencies if needed: sudo apt-get install -f"
-            echo ""
-            echo -e "Alternative (modern apt): ${CYAN}sudo apt install ././$rel_deb_path${NC}"
-            echo ""
-        fi
-
-        if [[ -z "$app_image" && -z "$deb_pkg" ]]; then
-            echo -e "${YELLOW}  No build artifacts found in $release_dir${NC}"
+        if [[ "$SKIP_APP" == false ]]; then
+            local release_dir="$APP_DIR/release"
+            local app_image=$(find "$release_dir" -name "*.AppImage" 2>/dev/null | head -n 1)
+            local deb_pkg=$(find "$release_dir" -name "*.deb" 2>/dev/null | head -n 1)
+            
+            if [[ -n "$app_image" ]]; then
+                echo -e "  ${BOLD}Option 1: Run AppImage${NC}"
+                echo -e "    ${CYAN}$app_image${NC}"
+                echo -e "    ${DIM}(Requires FUSE: sudo apt install libfuse2)${NC}"
+                echo ""
+            fi
+            if [[ -n "$deb_pkg" ]]; then
+                echo -e "  ${BOLD}Option 2: Install Debian Package${NC}"
+                echo -e "    ${CYAN}sudo dpkg -i $deb_pkg${NC}"
+            fi
+        else
+            echo -e "  Run the engine directly:"
+            echo -e "    ${CYAN}$ENGINE_BINARY${NC}"
         fi
     fi
     echo ""
@@ -343,6 +498,11 @@ main() {
 
 # Run main
 if ! main; then
-    echo -e "${RED}Build failed!${NC}"
+    echo ""
+    echo -e "${BOLD}${RED}"
+    echo "  ██████████████████████████████████████"
+    echo "  █  BUILD FAILED                  █"
+    echo "  ██████████████████████████████████████"
+    echo -e "${NC}"
     exit 1
 fi

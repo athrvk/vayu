@@ -105,26 +105,53 @@ $ErrorColor = 'Red'
 $SuccessColor = 'Green'
 $InfoColor = 'Cyan'
 $WarnColor = 'Yellow'
+$DetailColor = 'DarkGray'
+
+# Step counter for progress tracking
+$script:CurrentStep = 0
+$script:TotalSteps = 0
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "==> $Message" -ForegroundColor $InfoColor
+    Write-Host "  " -NoNewline
+    Write-Host "▶" -ForegroundColor $InfoColor -NoNewline
+    Write-Host " $Message"
+}
+
+function Write-Detail {
+    param([string]$Message)
+    Write-Host "    $Message" -ForegroundColor $DetailColor
 }
 
 function Write-Success {
     param([string]$Message)
-    Write-Host "[OK] $Message" -ForegroundColor $SuccessColor
+    Write-Host "  " -NoNewline
+    Write-Host "✓" -ForegroundColor $SuccessColor -NoNewline
+    Write-Host " $Message"
 }
 
 function Write-Warn {
     param([string]$Message)
-    Write-Host "[WARN] $Message" -ForegroundColor $WarnColor
+    Write-Host "  " -NoNewline
+    Write-Host "⚠" -ForegroundColor $WarnColor -NoNewline
+    Write-Host " $Message" -ForegroundColor $WarnColor
 }
 
 function Write-Error-Custom {
     param([string]$Message)
-    Write-Host "[ERROR] $Message" -ForegroundColor $ErrorColor
+    Write-Host "  " -NoNewline
+    Write-Host "✗" -ForegroundColor $ErrorColor -NoNewline
+    Write-Host " $Message" -ForegroundColor $ErrorColor
     exit 1
+}
+
+function Write-Step {
+    param([string]$Message)
+    $script:CurrentStep++
+    Write-Host ""
+    Write-Host "[$script:CurrentStep/$script:TotalSteps] " -ForegroundColor $InfoColor -NoNewline
+    Write-Host $Message -ForegroundColor White
+    Write-Host ("$([char]0x2500)" * 60) -ForegroundColor $DetailColor
 }
 
 # Paths
@@ -226,14 +253,12 @@ function Find-VcpkgRoot {
 
 # Check prerequisites
 function Test-Prerequisites {
-    Write-Info "Checking prerequisites..."
-    
     $missing = @()
     
     # Check CMake - allow override from parameter
     if ($CMakePathParam) {
         $script:CMakePath = $CMakePathParam
-        Write-Host "  CMake (overridden): $script:CMakePath" -ForegroundColor Gray
+        Write-Detail "CMake: $script:CMakePath (override)"
     } else {
         $script:CMakePath = Find-CMake
     }
@@ -241,7 +266,7 @@ function Test-Prerequisites {
         $missing += "cmake (https://cmake.org/download/)"
     } else {
         $cmakeVersion = & $CMakePath --version | Select-Object -First 1
-        Write-Host "  CMake: $cmakeVersion ($CMakePath)" -ForegroundColor Gray
+        Write-Detail "CMake: $cmakeVersion"
     }
     
     # Check Visual Studio
@@ -249,20 +274,20 @@ function Test-Prerequisites {
     if (-not $vsPath) {
         $missing += "Visual Studio 2022 with C++ workload (https://visualstudio.microsoft.com/)"
     } else {
-        Write-Host "  Visual Studio: $vsPath" -ForegroundColor Gray
+        Write-Detail "Visual Studio: $vsPath"
     }
     
     # Check vcpkg - allow override from parameter
     if ($VcpkgRootParam) {
         $script:VcpkgRoot = $VcpkgRootParam
-        Write-Host "  vcpkg (overridden): $script:VcpkgRoot" -ForegroundColor Gray
+        Write-Detail "vcpkg: $script:VcpkgRoot (override)"
     } else {
         $script:VcpkgRoot = Find-VcpkgRoot
     }
     if (-not $VcpkgRoot) {
         $missing += "vcpkg (https://vcpkg.io/en/getting-started.html)"
     } else {
-        Write-Host "  vcpkg: $VcpkgRoot" -ForegroundColor Gray
+        Write-Detail "vcpkg: $VcpkgRoot"
         # Fix mismatch warning by ensuring environment var is set for the session
         $env:VCPKG_ROOT = $VcpkgRoot
     }
@@ -274,18 +299,18 @@ function Test-Prerequisites {
             $missing += "pnpm (npm install -g pnpm)"
         } else {
             $pnpmVersion = & pnpm --version
-            Write-Host "  pnpm: $pnpmVersion" -ForegroundColor Gray
+            Write-Detail "pnpm: $pnpmVersion"
         }
     }
     
     if ($missing.Count -gt 0) {
         Write-Host ""
-        Write-Host "Missing prerequisites:" -ForegroundColor Red
         foreach ($item in $missing) {
-            Write-Host "  - $item" -ForegroundColor Red
+            Write-Host "    " -NoNewline
+            Write-Host "$([char]0x2717)" -ForegroundColor Red -NoNewline
+            Write-Host " Missing: $item" -ForegroundColor Red
         }
-        Write-Host ""
-        Write-Error-Custom "Please install the missing prerequisites and try again."
+        Write-Error-Custom "Please install missing prerequisites and try again."
     }
     
     Write-Success "All prerequisites found"
@@ -294,11 +319,11 @@ function Test-Prerequisites {
 # Build engine
 function Build-Engine {
     if ($BuildMode -eq 'dev') {
-        Write-Info "Building C++ engine (Debug mode)..."
+        Write-Detail "Build type: Debug"
         $BuildType = 'Debug'
         $BuildDir = Join-Path $EngineDir "build"
     } else {
-        Write-Info "Building C++ engine (Release mode)..."
+        Write-Detail "Build type: Release"
         $BuildType = 'Release'
         $BuildDir = Join-Path $EngineDir "build-release"
     }
@@ -627,10 +652,17 @@ function Build-Electron {
 function Main {
     $StartTime = Get-Date
     
-    # Determine what we're building
+    # Determine what we're building and set total steps
     $BuildComponents = @()
-    if (-not $SkipEngine) { $BuildComponents += "Engine" }
-    if (-not $SkipApp) { $BuildComponents += "App" }
+    $script:TotalSteps = 1  # Prerequisites always counted
+    if (-not $SkipEngine) {
+        $BuildComponents += "Engine"
+        $script:TotalSteps++
+    }
+    if (-not $SkipApp) {
+        $BuildComponents += "App"
+        $script:TotalSteps++
+    }
     $ComponentsStr = $BuildComponents -join " + "
     if ($BuildComponents.Count -eq 0) {
         Write-Host "Nothing to build! Use -h for help." -ForegroundColor Red
@@ -638,18 +670,25 @@ function Main {
     }
     
     Write-Host ""
-    Write-Host "========================================================" -ForegroundColor Cyan
-    Write-Host "        Vayu Build Script for Windows                   " -ForegroundColor Cyan
-    Write-Host "        Mode: $($BuildMode.ToUpper()) | $ComponentsStr  " -ForegroundColor Cyan
-    Write-Host "========================================================" -ForegroundColor Cyan
+    Write-Host "  $([char]0x2588)" * 38 -ForegroundColor Cyan
+    Write-Host "  $([char]0x2588)  VAYU BUILD SCRIPT             $([char]0x2588)" -ForegroundColor Cyan
+    Write-Host "  $([char]0x2588)  Platform: Windows             $([char]0x2588)" -ForegroundColor Cyan
+    Write-Host "  $([char]0x2588)" * 38 -ForegroundColor Cyan
     Write-Host ""
+    Write-Host "  Mode: " -ForegroundColor DarkGray -NoNewline
+    Write-Host $BuildMode.ToUpper() -ForegroundColor White -NoNewline
+    Write-Host "  |  " -ForegroundColor DarkGray -NoNewline
+    Write-Host "Components: " -ForegroundColor DarkGray -NoNewline
+    Write-Host $ComponentsStr -ForegroundColor White
     
+    # Step 1: Prerequisites
+    Write-Step "Checking Prerequisites"
     Test-Prerequisites
     
     $EngineBinary = $null
     
     if (-not $SkipEngine) {
-        # Note: Dependencies handled by CMake manifest mode (vcpkg.json)
+        Write-Step "Building C++ Engine"
         $EngineBinary = Build-Engine
     } else {
         Write-Warn "Skipping engine build"
@@ -659,9 +698,13 @@ function Main {
         } else {
             $EngineBinary = Join-Path $EngineDir "build\Debug\vayu-engine.exe"
         }
+        if (Test-Path $EngineBinary) {
+            Write-Info "Using existing engine binary: $EngineBinary"
+        }
     }
     
     if (-not $SkipApp) {
+        Write-Step "Building Electron App"
         Build-Electron -EngineBinary $EngineBinary
     } else {
         Write-Warn "Skipping app build"
@@ -671,43 +714,54 @@ function Main {
     $Elapsed = [math]::Round(($EndTime - $StartTime).TotalSeconds)
     
     Write-Host ""
-    Write-Host "========================================================" -ForegroundColor Green
-    Write-Host "   Build completed successfully in ${Elapsed}s          " -ForegroundColor Green
-    Write-Host "========================================================" -ForegroundColor Green
+    Write-Host "  $([char]0x2588)" * 38 -ForegroundColor Green
+    Write-Host "  $([char]0x2588)  BUILD SUCCESSFUL              $([char]0x2588)" -ForegroundColor Green
+    Write-Host "  $([char]0x2588)" * 38 -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Total time: " -ForegroundColor DarkGray -NoNewline
+    Write-Host "${Elapsed}s" -ForegroundColor White
     Write-Host ""
     
     if ($BuildMode -eq 'dev') {
         # Calculate relative path to app dir from current location for easy copy-paste
         $RelativeAppPath = Resolve-Path -Path $AppDir -Relative
         
-        Write-Host "To start the Electron app in development mode:" -ForegroundColor Yellow
-        Write-Host "" -ForegroundColor Yellow
-        Write-Host "    cd $RelativeAppPath; pnpm run electron:dev" -ForegroundColor White
-        Write-Host "" -ForegroundColor Yellow
+        Write-Host "  Next Steps:" -ForegroundColor White
+        Write-Host ("  " + "$([char]0x2500)" * 38) -ForegroundColor DarkGray
+        Write-Host "  To start the Electron app in development mode:"
+        Write-Host ""
+        Write-Host "  cd $RelativeAppPath; pnpm run electron:dev" -ForegroundColor Cyan
+        Write-Host ""
     } else {
-        Write-Host "Production build created:" -ForegroundColor Green
-        Write-Host "" -ForegroundColor Green
+        Write-Host "  Build Artifacts:" -ForegroundColor White
+        Write-Host ("  " + "$([char]0x2500)" * 38) -ForegroundColor DarkGray
         $releaseDir = Join-Path $AppDir "release"
         $installerPaths = @()
         if (Test-Path $releaseDir) {
             $installers = Get-ChildItem $releaseDir -Filter "*.exe"
             foreach ($installer in $installers) {
-                Write-Host "   $($installer.FullName)" -ForegroundColor White
+                Write-Host "  " -NoNewline
+                Write-Host "$([char]0x2713)" -ForegroundColor Green -NoNewline
+                Write-Host " $($installer.FullName)"
                 $installerPaths += $installer.FullName
             }
         }
-        Write-Host "" -ForegroundColor Green
-        Write-Host "To install and launch Vayu:" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Installation:" -ForegroundColor White
+        Write-Host ("  " + "$([char]0x2500)" * 38) -ForegroundColor DarkGray
         if ($installerPaths.Count -gt 0) {
-            Write-Host "  1. Run the installer:" -ForegroundColor White
+            Write-Host "  1. Run the installer:"
             foreach ($path in $installerPaths) {
-                Write-Host "     `"$path`"" -ForegroundColor White
+                Write-Host "     " -NoNewline
+                Write-Host "`"$path`"" -ForegroundColor Cyan
             }
         } else {
-            Write-Host "  1. Run the generated installer in the release directory." -ForegroundColor White
+            Write-Host "  1. Run the generated installer in the release directory."
         }
-        Write-Host "  2. After installation, launch 'Vayu' from the Desktop or Windows Start menu." -ForegroundColor White
-        Write-Host "" -ForegroundColor Green
+        Write-Host "  2. Launch " -NoNewline
+        Write-Host "Vayu" -ForegroundColor White -NoNewline
+        Write-Host " from Desktop or Start menu."
+        Write-Host ""
     }
 }
 
@@ -717,13 +771,13 @@ try {
 }
 catch {
     Write-Host ""
-    Write-Host "========================================================" -ForegroundColor Red
-    Write-Host "   Build failed!                                        " -ForegroundColor Red
-    Write-Host "========================================================" -ForegroundColor Red
+    Write-Host "  $([char]0x2588)" * 38 -ForegroundColor Red
+    Write-Host "  $([char]0x2588)  BUILD FAILED                  $([char]0x2588)" -ForegroundColor Red
+    Write-Host "  $([char]0x2588)" * 38 -ForegroundColor Red
     Write-Host ""
-    Write-Host "Error: $_" -ForegroundColor Red
+    Write-Host "  Error: $_" -ForegroundColor Red
     Write-Host ""
-    Write-Host "Stack trace:" -ForegroundColor Gray
-    Write-Host $_.ScriptStackTrace -ForegroundColor Gray
+    Write-Host "  Stack trace:" -ForegroundColor DarkGray
+    Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
     exit 1
 }
