@@ -50,7 +50,6 @@
     // Search/Files Exclusions (faster indexing)
     // =========================================================================
     "files.exclude": {
-        "**/engine/build/**": true,
         "**/node_modules": true,
         "**/.git": true
     },
