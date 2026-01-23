@@ -20,17 +20,17 @@ import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
 import { Input } from "./input";
 import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
+import { Eye, EyeOff, KeyRound } from "lucide-react";
+import type { ResolvedVariable } from "@/types";
 
-export interface VariableInfo {
-	value: string;
-	scope: VariableScope;
-}
+// Re-export ResolvedVariable as VariableInfo for backward compatibility
+export type { ResolvedVariable as VariableInfo };
 
 export interface VariablePopoverProps {
 	/** Variable name */
 	name: string;
 	/** Variable information (value and scope) */
-	varInfo: VariableInfo | null;
+	varInfo: ResolvedVariable | null;
 	/** Whether the variable is resolved */
 	resolved: boolean;
 	/** Callback when value changes (required for editable mode) */
@@ -60,7 +60,15 @@ export function VariablePopover({
 }: VariablePopoverProps) {
 	const [isOpen, setIsOpen] = useState(false);
 	const [editValue, setEditValue] = useState(varInfo?.value || "");
+	const [isSecretRevealed, setIsSecretRevealed] = useState(false);
 	const openValueRef = useRef(varInfo?.value || "");
+
+	// Reset reveal state when popover closes
+	useEffect(() => {
+		if (!isOpen) {
+			setIsSecretRevealed(false);
+		}
+	}, [isOpen]);
 
 	// Keep editValue in sync with varInfo when popover is closed
 	useEffect(() => {
@@ -175,14 +183,41 @@ export function VariablePopover({
 							{/* Current Value Section (for auto mode) */}
 							{shouldShowCurrentValue && (
 								<div className="space-y-2">
-									<label className="text-xs text-muted-foreground">
-										Current Value
-									</label>
-									<div className="font-mono text-sm bg-muted px-2 py-1.5 rounded break-all">
-										{varInfo.value || (
+									<div className="flex items-center justify-between">
+										<label className="text-xs text-muted-foreground">
+											Current Value
+										</label>
+										{varInfo.secret && (
+											<div className="flex items-center gap-1">
+												<KeyRound className="w-3 h-3 text-amber-500" />
+												<span className="text-[10px] text-amber-600 dark:text-amber-400">Secret</span>
+											</div>
+										)}
+									</div>
+									<div className="relative font-mono text-sm bg-muted px-2 py-1.5 rounded break-all">
+										{varInfo.secret && !isSecretRevealed ? (
+											<span className="select-none">••••••••</span>
+										) : varInfo.value ? (
+											varInfo.value
+										) : (
 											<span className="italic text-muted-foreground">
 												empty
 											</span>
+										)}
+										{varInfo.secret && varInfo.value && (
+											<Button
+												variant="ghost"
+												size="icon"
+												onClick={() => setIsSecretRevealed(!isSecretRevealed)}
+												className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 text-muted-foreground hover:text-foreground"
+												title={isSecretRevealed ? "Hide value" : "Reveal value"}
+											>
+												{isSecretRevealed ? (
+													<EyeOff className="w-3 h-3" />
+												) : (
+													<Eye className="w-3 h-3" />
+												)}
+											</Button>
 										)}
 									</div>
 								</div>
@@ -194,13 +229,31 @@ export function VariablePopover({
 									<label className="text-xs text-muted-foreground">
 										{saveMode === "auto" ? "Edit Value" : "Value"}
 									</label>
-									<Input
-										value={editValue}
-										onChange={(e) => setEditValue(e.target.value)}
-										onKeyDown={handleKeyDown}
-										className="h-8 font-mono text-sm"
-										autoFocus
-									/>
+									<div className="relative">
+										<Input
+											type={varInfo.secret && !isSecretRevealed ? "password" : "text"}
+											value={editValue}
+											onChange={(e) => setEditValue(e.target.value)}
+											onKeyDown={handleKeyDown}
+											className={`h-8 font-mono text-sm ${varInfo.secret ? "pr-8" : ""}`}
+											autoFocus
+										/>
+										{varInfo.secret && (
+											<Button
+												variant="ghost"
+												size="icon"
+												onClick={() => setIsSecretRevealed(!isSecretRevealed)}
+												className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
+												title={isSecretRevealed ? "Hide value" : "Reveal value"}
+											>
+												{isSecretRevealed ? (
+													<EyeOff className="w-3.5 h-3.5" />
+												) : (
+													<Eye className="w-3.5 h-3.5" />
+												)}
+											</Button>
+										)}
+									</div>
 								</div>
 							)}
 

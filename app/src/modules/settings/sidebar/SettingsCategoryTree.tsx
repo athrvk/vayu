@@ -19,7 +19,7 @@
 import { useSettingsStore } from "@/stores";
 import { useConfigQuery } from "@/queries";
 import type { SettingsCategory } from "@/types";
-import { Server, Code, Settings, Palette, Network, Activity } from "lucide-react";
+import { Server, Code, Settings, Palette, Network, Activity, Database } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, Skeleton } from "@/components/ui";
 
@@ -36,6 +36,11 @@ const CATEGORY_CONFIG: Record<
 		label: "General & Engine",
 		icon: Server,
 		color: "blue",
+	},
+	database_performance: {
+		label: "Database Performance",
+		icon: Database,
+		color: "amber",
 	},
 	network_performance: {
 		label: "Network & Connectivity",
@@ -69,6 +74,7 @@ export default function SettingsCategoryTree() {
 	const appCategories: SettingsCategory[] = ["ui"];
 	const engineCategories: SettingsCategory[] = [
 		"general_engine",
+		"database_performance",
 		"network_performance",
 		"scripting_sandbox",
 		"observability",
@@ -108,6 +114,9 @@ export default function SettingsCategoryTree() {
 			blue: isSelected
 				? "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/70"
 				: "",
+			amber: isSelected
+				? "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/70"
+				: "",
 			cyan: isSelected
 				? "bg-cyan-50 text-cyan-700 dark:bg-cyan-950/50 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-950/70"
 				: "",
@@ -122,6 +131,7 @@ export default function SettingsCategoryTree() {
 		const badgeClasses: Record<string, string> = {
 			pink: "bg-pink-100 text-pink-600 dark:bg-pink-950 dark:text-pink-300",
 			blue: "bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-300",
+			amber: "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-300",
 			cyan: "bg-cyan-100 text-cyan-600 dark:bg-cyan-950 dark:text-cyan-300",
 			purple: "bg-purple-100 text-purple-600 dark:bg-purple-950 dark:text-purple-300",
 			green: "bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-300",

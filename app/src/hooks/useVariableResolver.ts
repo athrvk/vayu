@@ -18,12 +18,7 @@
 import { useMemo, useCallback } from "react";
 import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import { useVariablesStore } from "@/stores";
-import type { VariableValue } from "@/types";
-
-interface VariableSource {
-	value: string;
-	scope: "global" | "collection" | "environment";
-}
+import type { VariableValue, ResolvedVariable } from "@/types";
 
 interface UseVariableResolverOptions {
 	/** Override collection ID (e.g., from current request) */
@@ -38,10 +33,10 @@ interface UseVariableResolverReturn {
 	resolveObject: <T>(obj: T) => T;
 
 	/** Get resolved value for a specific variable name */
-	getVariable: (name: string) => VariableSource | null;
+	getVariable: (name: string) => ResolvedVariable | null;
 
 	/** Get all available variables with their sources */
-	getAllVariables: () => Record<string, VariableSource>;
+	getAllVariables: () => Record<string, ResolvedVariable>;
 
 	/** Check if a string contains any unresolved variables */
 	hasUnresolvedVariables: (input: string) => boolean;
@@ -65,14 +60,14 @@ export function useVariableResolver(
 
 	// Build flat variable map with sources
 	const variableMap = useMemo(() => {
-		const result: Record<string, VariableSource> = {};
+		const result: Record<string, ResolvedVariable> = {};
 
 		// Add globals first (lowest priority)
 		if (globalsData?.variables) {
 			for (const [key, val] of Object.entries(globalsData.variables)) {
 				const v = val as VariableValue;
 				if (v.enabled) {
-					result[key] = { value: v.value, scope: "global" };
+					result[key] = { value: v.value, scope: "global", secret: v.secret };
 				}
 			}
 		}
@@ -84,7 +79,7 @@ export function useVariableResolver(
 				for (const [key, val] of Object.entries(col.variables)) {
 					const v = val as VariableValue;
 					if (v.enabled) {
-						result[key] = { value: v.value, scope: "collection" };
+						result[key] = { value: v.value, scope: "collection", secret: v.secret };
 					}
 				}
 			}
@@ -97,7 +92,7 @@ export function useVariableResolver(
 				for (const [key, val] of Object.entries(env.variables)) {
 					const v = val as VariableValue;
 					if (v.enabled) {
-						result[key] = { value: v.value, scope: "environment" };
+						result[key] = { value: v.value, scope: "environment", secret: v.secret };
 					}
 				}
 			}

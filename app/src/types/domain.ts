@@ -12,10 +12,12 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | 
 
 /**
  * Variable value with enabled flag (Postman-style)
+ * Note: The `secret` field is a UI hint for masking display - values are NOT encrypted at rest.
  */
 export interface VariableValue {
 	value: string;
 	enabled: boolean;
+	secret?: boolean;
 }
 
 export interface Collection {
@@ -66,17 +68,28 @@ export interface GlobalVariables {
 }
 
 /**
- * Variable scope for UI display
+ * Variable scope for UI display and resolution priority.
+ * Resolution priority: Environment > Collection > Global
  */
 export type VariableScope = "global" | "collection" | "environment";
 
 /**
- * Variable info for autocomplete and quick view
+ * Resolved variable with its value, scope, and secret flag.
+ * This is the base interface used throughout the app for variable resolution and display.
+ * Note: The `secret` field is a UI hint for masking - values are NOT encrypted at rest.
  */
-export interface VariableInfo {
-	name: string;
+export interface ResolvedVariable {
 	value: string;
 	scope: VariableScope;
+	secret?: boolean;
+}
+
+/**
+ * Extended variable info for autocomplete and quick view.
+ * Includes additional context about the variable's source.
+ */
+export interface VariableInfo extends ResolvedVariable {
+	name: string;
 	sourceId?: string; // Collection ID or Environment ID
 	sourceName?: string; // Collection name or Environment name
 }
@@ -314,6 +327,7 @@ export interface ConfigResponse {
  */
 export type SettingsCategory =
 	| "general_engine"
+	| "database_performance"
 	| "network_performance"
 	| "scripting_sandbox"
 	| "observability"

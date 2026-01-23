@@ -62,6 +62,10 @@ const CATEGORY_TITLES: Record<SettingsCategory, { title: string; description: st
 		title: "General & Engine",
 		description: "Core settings defining the application's base capacity and threading model",
 	},
+	database_performance: {
+		title: "Database Performance",
+		description: "SQLite optimization settings for high-throughput load testing and result storage",
+	},
 	network_performance: {
 		title: "Network & Connectivity",
 		description: "Low-level networking tuning for throughput, DNS, and connection persistence",
@@ -510,7 +514,7 @@ export default function SettingsMain() {
 									isModified && !hasError && "border-primary/50",
 									hasError && "border-destructive/50",
 									isPendingRestart &&
-										"border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10"
+									"border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10"
 								)}
 							>
 								<CardHeader className="pb-3">
@@ -568,7 +572,7 @@ export default function SettingsMain() {
 													<Input
 														type={
 															entry.type === "integer" ||
-															entry.type === "number"
+																entry.type === "number"
 																? "number"
 																: "text"
 														}
@@ -600,9 +604,9 @@ export default function SettingsMain() {
 													<span className="text-xs text-muted-foreground whitespace-nowrap">
 														{isSizeConfig(entry.key)
 															? formatSizeRange(
-																	entry.min,
-																	entry.max
-																) || ""
+																entry.min,
+																entry.max
+															) || ""
 															: entry.min && entry.max
 																? `${entry.min} - ${entry.max}`
 																: entry.min
@@ -621,8 +625,8 @@ export default function SettingsMain() {
 													Default:{" "}
 													{isSizeConfig(entry.key)
 														? formatBytes(
-																parseInt(entry.default, 10) || 0
-															)
+															parseInt(entry.default, 10) || 0
+														)
 														: entry.default}
 												</p>
 											)}

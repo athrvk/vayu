@@ -17,8 +17,10 @@
 
 import { Badge } from "./badge";
 import { cn } from "@/lib/utils";
+import type { VariableScope } from "@/types";
 
-export type VariableScope = "global" | "collection" | "environment";
+// Re-export for convenience (components importing from ui/variable-scope-badge)
+export type { VariableScope };
 
 export interface VariableScopeBadgeProps {
 	scope: VariableScope;

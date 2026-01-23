@@ -359,14 +359,116 @@ struct Database::Impl {
     }
 };
 
-Database::Database(const std::string& db_path) : impl_(std::make_unique<Impl>(db_path)) {}
+Database::Database(const std::string& db_path) {
+    namespace fs = std::filesystem;
+    fs::path db_file(db_path);
+    fs::path backup_file = db_file;
+    backup_file += ".bak";
+
+    // Helper to perform safe file copy
+    auto copy_db_files = [](const fs::path& src, const fs::path& dst) {
+        std::error_code ec;
+        if (!fs::exists(src, ec)) return false;
+
+        // Copy main file
+        fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            vayu::utils::log_warning("Backup copy failed: " + ec.message());
+            return false;
+        }
+
+        // Copy WAL/SHM if they exist
+        fs::path src_wal = src.string() + "-wal";
+        fs::path dst_wal = dst.string() + "-wal";
+        if (fs::exists(src_wal, ec)) {
+            fs::copy_file(src_wal, dst_wal, fs::copy_options::overwrite_existing, ec);
+        }
+
+        fs::path src_shm = src.string() + "-shm";
+        fs::path dst_shm = dst.string() + "-shm";
+        if (fs::exists(src_shm, ec)) {
+            fs::copy_file(src_shm, dst_shm, fs::copy_options::overwrite_existing, ec);
+        }
+        return true;
+    };
+
+    // Helper to restore from backup
+    auto restore_from_backup = [&](const fs::path& backup, const fs::path& original) {
+        std::error_code ec;
+        if (!fs::exists(backup, ec)) return false;
+
+        vayu::utils::log_warning("Restoring database from backup...");
+        
+        // Clean up corrupted files
+        fs::remove(original, ec);
+        fs::remove(original.string() + "-wal", ec);
+        fs::remove(original.string() + "-shm", ec);
+
+        // Restore
+        return copy_db_files(backup, original);
+    };
+
+    // 1. Validate current database
+    bool current_db_valid = false;
+    try {
+        // Try to open and verify schema
+        auto temp_impl = std::make_unique<Impl>(db_path);
+        temp_impl->storage.sync_schema();
+        // If we get here, the DB is valid and schema is ok
+        current_db_valid = true;
+        temp_impl.reset(); // Close explicitly before backup
+    } catch (const std::exception& e) {
+        vayu::utils::log_error("Startup DB validation failed: " + std::string(e.what()));
+        // impl_ is not set or local temp_impl is destroyed
+    }
+
+    // 2. Recovery Logic
+    if (!current_db_valid) {
+        // Current DB is bad. Try to restore.
+        if (fs::exists(backup_file) && restore_from_backup(backup_file, db_file)) {
+            vayu::utils::log_info("Database restored from backup. Retrying...");
+            // We assume the backup itself is valid, but let's verify in the final step or let it crash if backup is also bad
+        } else {
+            // No backup or restore failed.
+            // If the file exists but checks failed, we might be in trouble.
+            // If it doesn't exist (fresh install), that's fine, we'll create it.
+            if (fs::exists(db_file)) {
+                 vayu::utils::log_error("Critical: Database corrupted and no backup available.");
+                 // We proceed to try to open it anyway (which will likely re-throw), 
+                 // or we could delete it to start fresh? 
+                 // Starting fresh is better than crashing loop for Vayu.
+                 // TODO: Consider alerting user/admin about data loss.
+                 vayu::utils::log_warning("Deleting corrupted database to start fresh...");
+                 fs::remove(db_file);
+                 fs::remove(db_file.string() + "-wal");
+                 fs::remove(db_file.string() + "-shm");
+            }
+        }
+    } else {
+        // 3. Current DB is VALID. Update the backup for *next* time.
+        // We only backup if validation succeeded. This prevents overwriting good backup with bad DB.
+        vayu::utils::log_debug("Database validation successful. Updating backup...");
+        copy_db_files(db_file, backup_file);
+    }
+
+    // 4. Final Initialization
+    // At this point, we either have a valid original, a restored backup, or a fresh/corrupted file we must attempt to use.
+    impl_ = std::make_unique<Impl>(db_path);
+    // sync_schema might throw if restore failed or backup was also bad
+    impl_->storage.sync_schema();
+}
 
 Database::~Database() = default;
 
 // Initialize database with optimized SQLite settings
 void Database::init() {
+    // Note: Schema sync is now handled in constructor for safety/recovery
+    // We just verify it here or perform post-init operations
+    
     std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     vayu::utils::log_debug("Initializing database...");
+    
+    // Ensure schema is synced (idempotent)
     impl_->storage.sync_schema();
 
     // WAL mode for better concurrent read/write performance

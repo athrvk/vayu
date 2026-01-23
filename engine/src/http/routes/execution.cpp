@@ -170,7 +170,6 @@ void register_execution_routes(RouteContext& ctx) {
             // Track script results for response
             vayu::ScriptResult pre_script_result;
             vayu::ScriptResult post_script_result;
-            bool pre_script_failed = false;
 
             // Get the request (may be modified by pre-request script)
             auto request = request_result.value();
@@ -186,14 +185,12 @@ void register_execution_routes(RouteContext& ctx) {
                     pre_script_result = script_engine.execute(pre_request_script, script_ctx);
 
                     if (!pre_script_result.success) {
-                        pre_script_failed = true;
                         vayu::utils::log_warning("Pre-request script failed: " +
                                                  pre_script_result.error_message);
                     }
                 } catch (const std::exception& e) {
                     pre_script_result.success = false;
                     pre_script_result.error_message = std::string("Script exception: ") + e.what();
-                    pre_script_failed = true;
                     vayu::utils::log_error("Pre-request script exception: " +
                                            std::string(e.what()));
                 }

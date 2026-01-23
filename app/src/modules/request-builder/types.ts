@@ -164,12 +164,8 @@ export interface RequestBuilderContextValue {
 	startLoadTest: () => void;
 }
 
-export interface VariableInfo {
-	value: string;
-	scope: VariableScope;
-}
-
-export type VariableScope = "global" | "collection" | "environment";
+// Re-export from centralized types for backward compatibility
+export type { ResolvedVariable as VariableInfo, VariableScope } from "@/types";
 
 // ============================================================================
 // Component Props Types

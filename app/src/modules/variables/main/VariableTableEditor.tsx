@@ -22,7 +22,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Globe, Cloud, Folder, Trash2, AlertCircle, LucideIcon } from "lucide-react";
+import { Globe, Cloud, Folder, Trash2, AlertCircle, LucideIcon, Eye, EyeOff, KeyRound } from "lucide-react";
 import {
 	useGlobalsQuery,
 	useUpdateGlobalsMutation,
@@ -39,6 +39,7 @@ interface VariableRow {
 	key: string;
 	value: string;
 	enabled: boolean;
+	secret?: boolean;
 	isNew?: boolean;
 }
 
@@ -129,6 +130,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 	const [variables, setVariables] = useState<VariableRow[]>([]);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 	const [hasPendingChanges, setHasPendingChanges] = useState(false);
+	const [revealedSecrets, setRevealedSecrets] = useState<Set<number>>(new Set());
 	const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const variablesRef = useRef<VariableRow[]>([]);
 	const performSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
@@ -175,6 +177,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 				variablesObj[v.key] = {
 					value: v.value,
 					enabled: v.enabled,
+					secret: v.secret ?? false,
 				};
 			}
 		});
@@ -306,11 +309,12 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 				key,
 				value: val.value,
 				enabled: val.enabled,
+				secret: val.secret ?? false,
 			}));
-			rows.push({ key: "", value: "", enabled: true, isNew: true });
+			rows.push({ key: "", value: "", enabled: true, secret: false, isNew: true });
 			setVariables(rows);
 		} else {
-			setVariables([{ key: "", value: "", enabled: true, isNew: true }]);
+			setVariables([{ key: "", value: "", enabled: true, secret: false, isNew: true }]);
 		}
 	}, [
 		type === "globals"
@@ -372,8 +376,8 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 		type === "globals"
 			? (editorConfig.title as string)
 			: (editorConfig.title as (name: string) => string)(
-					type === "environment" ? environment?.name || "" : collection?.name || ""
-				);
+				type === "environment" ? environment?.name || "" : collection?.name || ""
+			);
 
 	if (isDataLoading) {
 		return (
@@ -496,77 +500,142 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 							<th className="pb-2 w-8"></th>
 							<th className="pb-2 px-2">Variable</th>
 							<th className="pb-2 px-2">Value</th>
+							<th className="pb-2 w-8 text-center" title="Mark as secret (masks value in UI)">
+								<KeyRound className="w-3 h-3 inline-block" />
+							</th>
 							<th className="pb-2 w-10"></th>
 						</tr>
 					</thead>
 					<tbody>
-						{variables.map((variable, index) => (
-							<tr key={index} className="group">
-								<td className="py-1">
-									<input
-										type="checkbox"
-										checked={variable.enabled}
-										onChange={(e) => {
-											updateVariable(index, "enabled", e.target.checked);
-											performSaveRef.current();
-										}}
-										className={cn(
-											"w-4 h-4 rounded border-input",
-											editorConfig.checkboxColor
-										)}
-										disabled={variable.isNew && !variable.key}
-									/>
-								</td>
-								<td className="py-1 px-2">
-									<Input
-										type="text"
-										value={variable.key}
-										onChange={(e) =>
-											updateVariable(index, "key", e.target.value)
-										}
-										onFocus={handleFocus}
-										onBlur={handleBlur}
-										placeholder="variable_name"
-										className={cn(
-											"h-8",
-											!variable.enabled &&
+						{variables.map((variable, index) => {
+							const isSecretRevealed = revealedSecrets.has(index);
+							const shouldMask = variable.secret && !isSecretRevealed && !variable.isNew;
+
+							return (
+								<tr key={index} className="group">
+									<td className="py-1">
+										<input
+											type="checkbox"
+											checked={variable.enabled}
+											onChange={(e) => {
+												updateVariable(index, "enabled", e.target.checked);
+												performSaveRef.current();
+											}}
+											className={cn(
+												"w-4 h-4 rounded border-input",
+												editorConfig.checkboxColor
+											)}
+											disabled={variable.isNew && !variable.key}
+										/>
+									</td>
+									<td className="py-1 px-2">
+										<Input
+											type="text"
+											value={variable.key}
+											onChange={(e) =>
+												updateVariable(index, "key", e.target.value)
+											}
+											onFocus={handleFocus}
+											onBlur={handleBlur}
+											placeholder="variable_name"
+											className={cn(
+												"h-8",
+												!variable.enabled &&
 												!variable.isNew &&
 												"text-muted-foreground bg-muted"
+											)}
+										/>
+									</td>
+									<td className="py-1 px-2">
+										<div className="relative">
+											<Input
+												type={shouldMask ? "password" : "text"}
+												value={variable.value}
+												onChange={(e) =>
+													updateVariable(index, "value", e.target.value)
+												}
+												onFocus={handleFocus}
+												onBlur={handleBlur}
+												placeholder="value"
+												className={cn(
+													"h-8 pr-8",
+													!variable.enabled &&
+													!variable.isNew &&
+													"text-muted-foreground bg-muted",
+													variable.secret && "font-mono"
+												)}
+											/>
+											{variable.secret && !variable.isNew && (
+												<Button
+													variant="ghost"
+													size="icon"
+													onClick={() => {
+														setRevealedSecrets(prev => {
+															const newSet = new Set(prev);
+															if (newSet.has(index)) {
+																newSet.delete(index);
+															} else {
+																newSet.add(index);
+															}
+															return newSet;
+														});
+													}}
+													className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
+													title={isSecretRevealed ? "Hide value" : "Reveal value"}
+												>
+													{isSecretRevealed ? (
+														<EyeOff className="w-3.5 h-3.5" />
+													) : (
+														<Eye className="w-3.5 h-3.5" />
+													)}
+												</Button>
+											)}
+										</div>
+									</td>
+									<td className="py-1 text-center">
+										{!variable.isNew && (
+											<Button
+												variant="ghost"
+												size="icon"
+												onClick={() => {
+													updateVariable(index, "secret", !variable.secret);
+													// Clear revealed state when toggling secret off
+													if (variable.secret) {
+														setRevealedSecrets(prev => {
+															const newSet = new Set(prev);
+															newSet.delete(index);
+															return newSet;
+														});
+													}
+													performSaveRef.current();
+												}}
+												className={cn(
+													"h-8 w-8 transition-colors",
+													variable.secret
+														? "text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950"
+														: "text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
+												)}
+												title={variable.secret ? "Unmark as secret" : "Mark as secret (masks value in UI)"}
+											>
+												<KeyRound className="w-4 h-4" />
+											</Button>
 										)}
-									/>
-								</td>
-								<td className="py-1 px-2">
-									<Input
-										type="text"
-										value={variable.value}
-										onChange={(e) =>
-											updateVariable(index, "value", e.target.value)
-										}
-										onFocus={handleFocus}
-										onBlur={handleBlur}
-										placeholder="value"
-										className={cn(
-											"h-8",
-											!variable.enabled &&
-												!variable.isNew &&
-												"text-muted-foreground bg-muted"
+									</td>
+									<td className="py-1">
+										{!variable.isNew && (
+											<Button
+												variant="ghost"
+												size="icon"
+												onClick={() => removeVariable(index)}
+												className="h-8 w-8 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+											>
+												<Trash2 className="w-4 h-4" />
+											</Button>
 										)}
-									/>
-								</td>
-								<td className="py-1">
-									{!variable.isNew && (
-										<Button
-											variant="ghost"
-											size="icon"
-											onClick={() => removeVariable(index)}
-											className="h-8 w-8 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-										>
-											<Trash2 className="w-4 h-4" />
-										</Button>
-									)}
-								</td>
-							</tr>
-						))}
+									</td>
+								</tr>
+							);
+						})}
 					</tbody>
 				</table>
 			</div>

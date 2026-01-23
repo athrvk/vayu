@@ -20,15 +20,14 @@ import { useMemo } from "react";
 import { Command, CommandList, CommandEmpty, CommandGroup, CommandItem } from "./command";
 import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
 import { cn } from "@/lib/utils";
+import type { ResolvedVariable } from "@/types";
 
-export interface VariableInfo {
-	value: string;
-	scope: VariableScope;
-}
+// Re-export ResolvedVariable as VariableInfo for backward compatibility
+export type { ResolvedVariable as VariableInfo };
 
 export interface VariableAutocompleteProps {
 	/** All available variables */
-	variables: Record<string, VariableInfo>;
+	variables: Record<string, ResolvedVariable>;
 	/** Search query to filter variables */
 	searchQuery?: string;
 	/** Callback when a variable is selected */

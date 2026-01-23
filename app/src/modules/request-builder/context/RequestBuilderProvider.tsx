@@ -247,7 +247,7 @@ export default function RequestBuilderProvider({
 		(name: string): VariableInfo | null => {
 			const info = resolverGetVariable(name);
 			if (!info) return null;
-			return { value: info.value, scope: info.scope };
+			return { value: info.value, scope: info.scope, secret: info.secret };
 		},
 		[resolverGetVariable]
 	);
@@ -257,7 +257,7 @@ export default function RequestBuilderProvider({
 		const vars = resolverGetAllVariables();
 		const result: Record<string, VariableInfo> = {};
 		for (const [name, source] of Object.entries(vars)) {
-			result[name] = { value: source.value, scope: source.scope };
+			result[name] = { value: source.value, scope: source.scope, secret: source.secret };
 		}
 		return result;
 	}, [resolverGetAllVariables]);
