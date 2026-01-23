@@ -17,14 +17,14 @@
 
 namespace vayu::core {
 
-struct RunContext;  // Forward declaration
+struct RunContext; // Forward declaration
 
 /**
  * @brief Interface for load testing strategies
  */
 class LoadStrategy {
-public:
-    virtual ~LoadStrategy() = default;
+    public:
+    virtual ~LoadStrategy () = default;
 
     /**
      * @brief Execute the load test strategy
@@ -32,14 +32,14 @@ public:
      * @param db Database for storing results
      * @param request The request to execute
      */
-    virtual void execute(std::shared_ptr<RunContext> context,
-                         vayu::db::Database& db,
-                         const vayu::Request& request) = 0;
+    virtual void execute (std::shared_ptr<RunContext> context,
+    vayu::db::Database& db,
+    const vayu::Request& request) = 0;
 
     /**
      * @brief Create a strategy instance based on configuration
      */
-    static std::unique_ptr<LoadStrategy> create(const nlohmann::json& config);
+    static std::unique_ptr<LoadStrategy> create (const nlohmann::json& config);
 };
 
-}  // namespace vayu::core
+} // namespace vayu::core

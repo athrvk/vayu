@@ -25,9 +25,9 @@ namespace vayu {
 // Time Types
 // ============================================================================
 
-using Clock = std::chrono::steady_clock;
+using Clock     = std::chrono::steady_clock;
 using TimePoint = Clock::time_point;
-using Duration = std::chrono::milliseconds;
+using Duration  = std::chrono::milliseconds;
 
 // ============================================================================
 // HTTP Types
@@ -48,22 +48,15 @@ enum class HttpMethod { GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS };
 /**
  * @brief Convert HttpMethod enum to string
  */
-inline const char* to_string(HttpMethod method) {
+inline const char* to_string (HttpMethod method) {
     switch (method) {
-        case HttpMethod::GET:
-            return "GET";
-        case HttpMethod::POST:
-            return "POST";
-        case HttpMethod::PUT:
-            return "PUT";
-        case HttpMethod::DELETE:
-            return "DELETE";
-        case HttpMethod::PATCH:
-            return "PATCH";
-        case HttpMethod::HEAD:
-            return "HEAD";
-        case HttpMethod::OPTIONS:
-            return "OPTIONS";
+    case HttpMethod::GET: return "GET";
+    case HttpMethod::POST: return "POST";
+    case HttpMethod::PUT: return "PUT";
+    case HttpMethod::DELETE: return "DELETE";
+    case HttpMethod::PATCH: return "PATCH";
+    case HttpMethod::HEAD: return "HEAD";
+    case HttpMethod::OPTIONS: return "OPTIONS";
     }
     return "UNKNOWN";
 }
@@ -71,14 +64,21 @@ inline const char* to_string(HttpMethod method) {
 /**
  * @brief Parse string to HttpMethod
  */
-inline std::optional<HttpMethod> parse_method(const std::string& str) {
-    if (str == "GET") return HttpMethod::GET;
-    if (str == "POST") return HttpMethod::POST;
-    if (str == "PUT") return HttpMethod::PUT;
-    if (str == "DELETE") return HttpMethod::DELETE;
-    if (str == "PATCH") return HttpMethod::PATCH;
-    if (str == "HEAD") return HttpMethod::HEAD;
-    if (str == "OPTIONS") return HttpMethod::OPTIONS;
+inline std::optional<HttpMethod> parse_method (const std::string& str) {
+    if (str == "GET")
+        return HttpMethod::GET;
+    if (str == "POST")
+        return HttpMethod::POST;
+    if (str == "PUT")
+        return HttpMethod::PUT;
+    if (str == "DELETE")
+        return HttpMethod::DELETE;
+    if (str == "PATCH")
+        return HttpMethod::PATCH;
+    if (str == "HEAD")
+        return HttpMethod::HEAD;
+    if (str == "OPTIONS")
+        return HttpMethod::OPTIONS;
     return std::nullopt;
 }
 
@@ -110,22 +110,22 @@ struct Request {
     Body body;
 
     // Options
-    int timeout_ms = 30000;
+    int timeout_ms        = 30000;
     bool follow_redirects = true;
-    int max_redirects = 10;
-    bool verify_ssl = true;
+    int max_redirects     = 10;
+    bool verify_ssl       = true;
 };
 
 /**
  * @brief Timing breakdown for a request
  */
 struct Timing {
-    double total_ms = 0.0;
-    double dns_ms = 0.0;
-    double connect_ms = 0.0;
-    double tls_ms = 0.0;
+    double total_ms      = 0.0;
+    double dns_ms        = 0.0;
+    double connect_ms    = 0.0;
+    double tls_ms        = 0.0;
     double first_byte_ms = 0.0;
-    double download_ms = 0.0;
+    double download_ms   = 0.0;
 };
 
 // ============================================================================
@@ -147,26 +147,17 @@ enum class ErrorCode {
 /**
  * @brief Convert ErrorCode to string
  */
-inline const char* to_string(ErrorCode code) {
+inline const char* to_string (ErrorCode code) {
     switch (code) {
-        case ErrorCode::None:
-            return "NONE";
-        case ErrorCode::Timeout:
-            return "TIMEOUT";
-        case ErrorCode::ConnectionFailed:
-            return "CONNECTION_FAILED";
-        case ErrorCode::DnsError:
-            return "DNS_ERROR";
-        case ErrorCode::SslError:
-            return "SSL_ERROR";
-        case ErrorCode::InvalidUrl:
-            return "INVALID_URL";
-        case ErrorCode::InvalidMethod:
-            return "INVALID_METHOD";
-        case ErrorCode::ScriptError:
-            return "SCRIPT_ERROR";
-        case ErrorCode::InternalError:
-            return "INTERNAL_ERROR";
+    case ErrorCode::None: return "NONE";
+    case ErrorCode::Timeout: return "TIMEOUT";
+    case ErrorCode::ConnectionFailed: return "CONNECTION_FAILED";
+    case ErrorCode::DnsError: return "DNS_ERROR";
+    case ErrorCode::SslError: return "SSL_ERROR";
+    case ErrorCode::InvalidUrl: return "INVALID_URL";
+    case ErrorCode::InvalidMethod: return "INVALID_METHOD";
+    case ErrorCode::ScriptError: return "SCRIPT_ERROR";
+    case ErrorCode::InternalError: return "INTERNAL_ERROR";
     }
     return "UNKNOWN";
 }
@@ -178,35 +169,35 @@ struct Response {
     int status_code = 0;
     std::string status_text;
     Headers headers;
-    Headers request_headers;  // Headers that were sent in the request
-    std::string raw_request;  // Complete raw HTTP request
+    Headers request_headers; // Headers that were sent in the request
+    std::string raw_request; // Complete raw HTTP request
     std::string body;
     size_t body_size = 0;
     Timing timing;
-    
+
     // Error information (for client-side failures like invalid URL, connection errors)
     // When set, indicates the request failed before receiving a server response
     ErrorCode error_code = ErrorCode::None;
     std::string error_message;
 
     // Convenience methods
-    [[nodiscard]] bool is_success() const {
+    [[nodiscard]] bool is_success () const {
         return status_code >= 200 && status_code < 300 && error_code == ErrorCode::None;
     }
 
-    [[nodiscard]] bool is_redirect() const {
+    [[nodiscard]] bool is_redirect () const {
         return status_code >= 300 && status_code < 400 && error_code == ErrorCode::None;
     }
 
-    [[nodiscard]] bool is_client_error() const {
+    [[nodiscard]] bool is_client_error () const {
         return status_code >= 400 && status_code < 500 && error_code == ErrorCode::None;
     }
 
-    [[nodiscard]] bool is_server_error() const {
+    [[nodiscard]] bool is_server_error () const {
         return status_code >= 500 && status_code < 600 && error_code == ErrorCode::None;
     }
-    
-    [[nodiscard]] bool has_error() const {
+
+    [[nodiscard]] bool has_error () const {
         return error_code != ErrorCode::None;
     }
 };
@@ -222,12 +213,12 @@ struct Error {
     ErrorCode code = ErrorCode::None;
     std::string message;
 
-    [[nodiscard]] bool has_error() const {
+    [[nodiscard]] bool has_error () const {
         return code != ErrorCode::None;
     }
 
-    [[nodiscard]] explicit operator bool() const {
-        return has_error();
+    [[nodiscard]] explicit operator bool () const {
+        return has_error ();
     }
 };
 
@@ -238,33 +229,34 @@ struct Error {
 /**
  * @brief Result type that holds either a value or an error
  */
-template <typename T>
-class Result {
-public:
-    Result(T value) : data_(std::move(value)) {}
-    Result(Error error) : data_(std::move(error)) {}
-
-    [[nodiscard]] bool is_ok() const {
-        return std::holds_alternative<T>(data_);
+template <typename T> class Result {
+    public:
+    Result (T value) : data_ (std::move (value)) {
+    }
+    Result (Error error) : data_ (std::move (error)) {
     }
 
-    [[nodiscard]] bool is_error() const {
-        return std::holds_alternative<Error>(data_);
+    [[nodiscard]] bool is_ok () const {
+        return std::holds_alternative<T> (data_);
     }
 
-    [[nodiscard]] const T& value() const& {
-        return std::get<T>(data_);
+    [[nodiscard]] bool is_error () const {
+        return std::holds_alternative<Error> (data_);
     }
 
-    [[nodiscard]] T&& value() && {
-        return std::get<T>(std::move(data_));
+    [[nodiscard]] const T& value () const& {
+        return std::get<T> (data_);
     }
 
-    [[nodiscard]] const Error& error() const& {
-        return std::get<Error>(data_);
+    [[nodiscard]] T&& value () && {
+        return std::get<T> (std::move (data_));
     }
 
-private:
+    [[nodiscard]] const Error& error () const& {
+        return std::get<Error> (data_);
+    }
+
+    private:
     std::variant<T, Error> data_;
 };
 
@@ -293,22 +285,19 @@ struct SseEvent {
  * @brief EventSource connection state
  */
 enum class EventSourceState {
-    Connecting,  ///< Connection is being established
-    Open,        ///< Connection is open and receiving events
-    Closed       ///< Connection is closed
+    Connecting, ///< Connection is being established
+    Open,       ///< Connection is open and receiving events
+    Closed      ///< Connection is closed
 };
 
 /**
  * @brief Convert state to string
  */
-inline const char* to_string(EventSourceState state) {
+inline const char* to_string (EventSourceState state) {
     switch (state) {
-        case EventSourceState::Connecting:
-            return "CONNECTING";
-        case EventSourceState::Open:
-            return "OPEN";
-        case EventSourceState::Closed:
-            return "CLOSED";
+    case EventSourceState::Connecting: return "CONNECTING";
+    case EventSourceState::Open: return "OPEN";
+    case EventSourceState::Closed: return "CLOSED";
     }
     return "UNKNOWN";
 }
@@ -322,8 +311,8 @@ inline const char* to_string(EventSourceState state) {
  */
 struct BatchResult {
     std::vector<Result<Response>> responses;
-    size_t successful = 0;
-    size_t failed = 0;
+    size_t successful    = 0;
+    size_t failed        = 0;
     double total_time_ms = 0.0;
 };
 
@@ -331,9 +320,9 @@ struct BatchResult {
  * @brief Event loop statistics
  */
 struct EventLoopStats {
-    size_t total_requests = 0;
-    size_t active_requests = 0;
-    size_t pending_requests = 0;
+    size_t total_requests     = 0;
+    size_t active_requests    = 0;
+    size_t pending_requests   = 0;
     size_t completed_requests = 0;
 };
 
@@ -368,18 +357,18 @@ struct DetailedReport {
     double latency_max;
     double latency_avg;
     double latency_p50;
-    double latency_p75;  // Phase 1: Additional percentile
+    double latency_p75; // Phase 1: Additional percentile
     double latency_p90;
     double latency_p95;
     double latency_p99;
-    double latency_p999;  // Phase 1: Additional percentile
+    double latency_p999; // Phase 1: Additional percentile
 
     // Distribution
     std::map<int, size_t> status_codes;
 
     // Error Details
-    size_t errors_with_details;                 // Count of errors with trace data
-    std::map<std::string, size_t> error_types;  // e.g., {"timeout": 3, "connection_failed": 2}
+    size_t errors_with_details; // Count of errors with trace data
+    std::map<std::string, size_t> error_types; // e.g., {"timeout": 3, "connection_failed": 2}
 
     // Phase 1: Error categorization by status code
     std::map<int, size_t> errors_by_status_code;
@@ -394,15 +383,15 @@ struct DetailedReport {
 
     // Slow Requests
     size_t slow_requests_count;
-    size_t slow_threshold_ms;  // The threshold used (0 if not set)
+    size_t slow_threshold_ms; // The threshold used (0 if not set)
 
     // Phase 1: Rate Control Metrics
-    double target_rps;       // Configured target RPS (0 if unlimited)
-    double actual_rps;       // Actual RPS achieved
-    double rps_achievement;  // Percentage of target achieved
+    double target_rps;      // Configured target RPS (0 if unlimited)
+    double actual_rps;      // Actual RPS achieved
+    double rps_achievement; // Percentage of target achieved
 
     // Phase 2: Timing context
-    double setup_overhead_s;  // Time from run creation to test start (seconds)
+    double setup_overhead_s; // Time from run creation to test start (seconds)
 };
 
 // ============================================================================
@@ -437,7 +426,7 @@ struct ScriptResult {
  */
 struct Variable {
     std::string value;
-    bool secret = false;
+    bool secret  = false;
     bool enabled = true;
 };
 
@@ -452,67 +441,67 @@ using Environment = std::map<std::string, Variable>;
 
 enum class RunType { Design, Load };
 
-inline const char* to_string(RunType type) {
+inline const char* to_string (RunType type) {
     switch (type) {
-        case RunType::Design:
-            return "design";
-        case RunType::Load:
-            return "load";
+    case RunType::Design: return "design";
+    case RunType::Load: return "load";
     }
     return "unknown";
 }
 
-inline std::optional<RunType> parse_run_type(const std::string& str) {
-    if (str == "design") return RunType::Design;
-    if (str == "load") return RunType::Load;
+inline std::optional<RunType> parse_run_type (const std::string& str) {
+    if (str == "design")
+        return RunType::Design;
+    if (str == "load")
+        return RunType::Load;
     return std::nullopt;
 }
 
 enum class LoadTestType { Constant, RampUp, Iterations };
 
-inline const char* to_string(LoadTestType type) {
+inline const char* to_string (LoadTestType type) {
     switch (type) {
-        case LoadTestType::Constant:
-            return "constant";
-        case LoadTestType::RampUp:
-            return "ramp_up";
-        case LoadTestType::Iterations:
-            return "iterations";
+    case LoadTestType::Constant: return "constant";
+    case LoadTestType::RampUp: return "ramp_up";
+    case LoadTestType::Iterations: return "iterations";
     }
     return "unknown";
 }
 
-inline std::optional<LoadTestType> parse_load_test_type(const std::string& str) {
-    if (str == "constant" || str == "duration") return LoadTestType::Constant;
-    if (str == "ramp_up") return LoadTestType::RampUp;
-    if (str == "iterations") return LoadTestType::Iterations;
+inline std::optional<LoadTestType> parse_load_test_type (const std::string& str) {
+    if (str == "constant" || str == "duration")
+        return LoadTestType::Constant;
+    if (str == "ramp_up")
+        return LoadTestType::RampUp;
+    if (str == "iterations")
+        return LoadTestType::Iterations;
     return std::nullopt;
 }
 
 enum class RunStatus { Pending, Running, Completed, Failed, Stopped };
 
-inline const char* to_string(RunStatus status) {
+inline const char* to_string (RunStatus status) {
     switch (status) {
-        case RunStatus::Pending:
-            return "pending";
-        case RunStatus::Running:
-            return "running";
-        case RunStatus::Completed:
-            return "completed";
-        case RunStatus::Failed:
-            return "failed";
-        case RunStatus::Stopped:
-            return "stopped";
+    case RunStatus::Pending: return "pending";
+    case RunStatus::Running: return "running";
+    case RunStatus::Completed: return "completed";
+    case RunStatus::Failed: return "failed";
+    case RunStatus::Stopped: return "stopped";
     }
     return "unknown";
 }
 
-inline std::optional<RunStatus> parse_run_status(const std::string& str) {
-    if (str == "pending") return RunStatus::Pending;
-    if (str == "running") return RunStatus::Running;
-    if (str == "completed") return RunStatus::Completed;
-    if (str == "failed") return RunStatus::Failed;
-    if (str == "stopped") return RunStatus::Stopped;
+inline std::optional<RunStatus> parse_run_status (const std::string& str) {
+    if (str == "pending")
+        return RunStatus::Pending;
+    if (str == "running")
+        return RunStatus::Running;
+    if (str == "completed")
+        return RunStatus::Completed;
+    if (str == "failed")
+        return RunStatus::Failed;
+    if (str == "stopped")
+        return RunStatus::Stopped;
     return std::nullopt;
 }
 
@@ -536,71 +525,71 @@ enum class MetricName {
     // Status code distribution
     StatusCodes,
     // Duration metrics
-    TestDuration,  // Actual test execution time in seconds
-    SetupOverhead  // Time spent on setup/teardown in seconds
+    TestDuration, // Actual test execution time in seconds
+    SetupOverhead // Time spent on setup/teardown in seconds
 };
 
-inline const char* to_string(MetricName name) {
+inline const char* to_string (MetricName name) {
     switch (name) {
-        case MetricName::Rps:
-            return "rps";
-        case MetricName::LatencyAvg:
-            return "latency_avg";
-        case MetricName::LatencyP50:
-            return "latency_p50";
-        case MetricName::LatencyP95:
-            return "latency_p95";
-        case MetricName::LatencyP99:
-            return "latency_p99";
-        case MetricName::ErrorRate:
-            return "error_rate";
-        case MetricName::TotalRequests:
-            return "total_requests";
-        case MetricName::Completed:
-            return "completed";
-        case MetricName::ConnectionsActive:
-            return "connections_active";
-        case MetricName::RequestsSent:
-            return "requests_sent";
-        case MetricName::RequestsExpected:
-            return "requests_expected";
-        case MetricName::TestsValidating:
-            return "tests_validating";
-        case MetricName::TestsPassed:
-            return "tests_passed";
-        case MetricName::TestsFailed:
-            return "tests_failed";
-        case MetricName::TestsSampled:
-            return "tests_sampled";
-        case MetricName::StatusCodes:
-            return "status_codes";
-        case MetricName::TestDuration:
-            return "test_duration";
-        case MetricName::SetupOverhead:
-            return "setup_overhead";
+    case MetricName::Rps: return "rps";
+    case MetricName::LatencyAvg: return "latency_avg";
+    case MetricName::LatencyP50: return "latency_p50";
+    case MetricName::LatencyP95: return "latency_p95";
+    case MetricName::LatencyP99: return "latency_p99";
+    case MetricName::ErrorRate: return "error_rate";
+    case MetricName::TotalRequests: return "total_requests";
+    case MetricName::Completed: return "completed";
+    case MetricName::ConnectionsActive: return "connections_active";
+    case MetricName::RequestsSent: return "requests_sent";
+    case MetricName::RequestsExpected: return "requests_expected";
+    case MetricName::TestsValidating: return "tests_validating";
+    case MetricName::TestsPassed: return "tests_passed";
+    case MetricName::TestsFailed: return "tests_failed";
+    case MetricName::TestsSampled: return "tests_sampled";
+    case MetricName::StatusCodes: return "status_codes";
+    case MetricName::TestDuration: return "test_duration";
+    case MetricName::SetupOverhead: return "setup_overhead";
     }
     return "unknown";
 }
 
-inline std::optional<MetricName> parse_metric_name(const std::string& str) {
-    if (str == "rps") return MetricName::Rps;
-    if (str == "latency_avg") return MetricName::LatencyAvg;
-    if (str == "latency_p50") return MetricName::LatencyP50;
-    if (str == "latency_p95") return MetricName::LatencyP95;
-    if (str == "latency_p99") return MetricName::LatencyP99;
-    if (str == "error_rate") return MetricName::ErrorRate;
-    if (str == "total_requests") return MetricName::TotalRequests;
-    if (str == "completed") return MetricName::Completed;
-    if (str == "connections_active") return MetricName::ConnectionsActive;
-    if (str == "requests_sent") return MetricName::RequestsSent;
-    if (str == "requests_expected") return MetricName::RequestsExpected;
-    if (str == "tests_validating") return MetricName::TestsValidating;
-    if (str == "tests_passed") return MetricName::TestsPassed;
-    if (str == "tests_failed") return MetricName::TestsFailed;
-    if (str == "tests_sampled") return MetricName::TestsSampled;
-    if (str == "status_codes") return MetricName::StatusCodes;
-    if (str == "test_duration") return MetricName::TestDuration;
-    if (str == "setup_overhead") return MetricName::SetupOverhead;
+inline std::optional<MetricName> parse_metric_name (const std::string& str) {
+    if (str == "rps")
+        return MetricName::Rps;
+    if (str == "latency_avg")
+        return MetricName::LatencyAvg;
+    if (str == "latency_p50")
+        return MetricName::LatencyP50;
+    if (str == "latency_p95")
+        return MetricName::LatencyP95;
+    if (str == "latency_p99")
+        return MetricName::LatencyP99;
+    if (str == "error_rate")
+        return MetricName::ErrorRate;
+    if (str == "total_requests")
+        return MetricName::TotalRequests;
+    if (str == "completed")
+        return MetricName::Completed;
+    if (str == "connections_active")
+        return MetricName::ConnectionsActive;
+    if (str == "requests_sent")
+        return MetricName::RequestsSent;
+    if (str == "requests_expected")
+        return MetricName::RequestsExpected;
+    if (str == "tests_validating")
+        return MetricName::TestsValidating;
+    if (str == "tests_passed")
+        return MetricName::TestsPassed;
+    if (str == "tests_failed")
+        return MetricName::TestsFailed;
+    if (str == "tests_sampled")
+        return MetricName::TestsSampled;
+    if (str == "status_codes")
+        return MetricName::StatusCodes;
+    if (str == "test_duration")
+        return MetricName::TestDuration;
+    if (str == "setup_overhead")
+        return MetricName::SetupOverhead;
     return std::nullopt;
 }
 
@@ -613,7 +602,7 @@ struct Collection {
     std::string id;
     std::optional<std::string> parent_id;
     std::string name;
-    std::string variables;  // JSON - Collection-scoped variables
+    std::string variables; // JSON - Collection-scoped variables
     int order;
     int64_t created_at;
     int64_t updated_at;
@@ -625,13 +614,13 @@ struct Request {
     std::string name;
     HttpMethod method;
     std::string url;
-    std::string params;               // JSON - Query parameters
-    std::string headers;              // JSON
-    std::string body;                 // JSON/Text
-    std::string body_type;  // "json", "text", "form-data", "x-www-form-urlencoded", "none"
-    std::string auth;                 // JSON
-    std::string pre_request_script;   // JS Code
-    std::string post_request_script;  // JS Code (Tests)
+    std::string params;  // JSON - Query parameters
+    std::string headers; // JSON
+    std::string body;    // JSON/Text
+    std::string body_type; // "json", "text", "form-data", "x-www-form-urlencoded", "none"
+    std::string auth;                // JSON
+    std::string pre_request_script;  // JS Code
+    std::string post_request_script; // JS Code (Tests)
     int64_t created_at;
     int64_t updated_at;
 };
@@ -639,7 +628,7 @@ struct Request {
 struct Environment {
     std::string id;
     std::string name;
-    std::string variables;  // JSON
+    std::string variables; // JSON
     bool is_active = false;
     int64_t created_at;
     int64_t updated_at;
@@ -647,11 +636,11 @@ struct Environment {
 
 struct Run {
     std::string id;
-    std::optional<std::string> request_id;      // Linked request (if design mode)
-    std::optional<std::string> environment_id;  // Environment used
-    RunType type;                               // "design" or "load"
-    RunStatus status;                           // "pending", "running", "completed", "failed"
-    std::string config_snapshot;                // JSON string (Full copy of request/env)
+    std::optional<std::string> request_id; // Linked request (if design mode)
+    std::optional<std::string> environment_id; // Environment used
+    RunType type;                              // "design" or "load"
+    RunStatus status;            // "pending", "running", "completed", "failed"
+    std::string config_snapshot; // JSON string (Full copy of request/env)
     int64_t start_time;
     int64_t end_time;
 };
@@ -660,9 +649,9 @@ struct Metric {
     int id;
     std::string run_id;
     int64_t timestamp;
-    MetricName name;  // "rps", "latency", "error_rate"
+    MetricName name; // "rps", "latency", "error_rate"
     double value;
-    std::string labels;  // JSON string
+    std::string labels; // JSON string
 };
 
 struct Result {
@@ -672,33 +661,33 @@ struct Result {
     int status_code;
     double latency_ms;
     std::string error;
-    std::string trace_data;  // JSON (Headers/Body - only for Design Mode or Errors)
+    std::string trace_data; // JSON (Headers/Body - only for Design Mode or Errors)
 };
 
 /**
  * @brief Configuration entry with metadata for UI display
  */
 struct ConfigEntry {
-    std::string key;         // Unique identifier (e.g., "defaultTimeout")
-    std::string value;       // Current value as string (will be parsed based on type)
-    std::string type;        // "integer", "string", "boolean", "number"
-    std::string label;       // Display label (e.g., "Default Request Timeout")
+    std::string key;   // Unique identifier (e.g., "defaultTimeout")
+    std::string value; // Current value as string (will be parsed based on type)
+    std::string type;  // "integer", "string", "boolean", "number"
+    std::string label; // Display label (e.g., "Default Request Timeout")
     std::string description; // Help text for UI
-    std::string category;    // Grouping (e.g., "server", "scripting", "performance")
-    std::string default_value; // Default value as string
-    std::optional<std::string> min_value;  // Optional minimum (for numbers)
-    std::optional<std::string> max_value;  // Optional maximum (for numbers)
-    int64_t updated_at;      // Last update timestamp
+    std::string category; // Grouping (e.g., "server", "scripting", "performance")
+    std::string default_value;            // Default value as string
+    std::optional<std::string> min_value; // Optional minimum (for numbers)
+    std::optional<std::string> max_value; // Optional maximum (for numbers)
+    int64_t updated_at;                   // Last update timestamp
 };
 
 /**
  * @brief Global variables - singleton storage for app-wide variables
  */
 struct Globals {
-    std::string id;         // Always "globals" - singleton
-    std::string variables;  // JSON - Global variables
+    std::string id;        // Always "globals" - singleton
+    std::string variables; // JSON - Global variables
     int64_t updated_at;
 };
-}  // namespace db
+} // namespace db
 
-}  // namespace vayu
+} // namespace vayu

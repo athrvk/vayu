@@ -18,8 +18,9 @@
 namespace vayu::http {
 
 // Forward declarations from event_loop.hpp
-using RequestCallback = std::function<void(size_t request_id, Result<Response>)>;
-using ProgressCallback = std::function<void(size_t request_id, size_t downloaded, size_t total)>;
+using RequestCallback = std::function<void (size_t request_id, Result<Response>)>;
+using ProgressCallback =
+std::function<void (size_t request_id, size_t downloaded, size_t total)>;
 
 namespace detail {
 
@@ -37,13 +38,13 @@ struct TransferData {
     RequestCallback callback;
     ProgressCallback progress;
     std::promise<Result<Response>> promise;
-    bool has_promise = false;
-    char error_buffer[CURL_ERROR_SIZE] = {0};
-    struct curl_slist* headers_list = nullptr;
-    struct curl_slist* resolve_list = nullptr;  // DNS pre-resolution list
+    bool has_promise                   = false;
+    char error_buffer[CURL_ERROR_SIZE] = { 0 };
+    struct curl_slist* headers_list    = nullptr;
+    struct curl_slist* resolve_list    = nullptr; // DNS pre-resolution list
 
-    ~TransferData();
+    ~TransferData ();
 };
 
-}  // namespace detail
-}  // namespace vayu::http
+} // namespace detail
+} // namespace vayu::http

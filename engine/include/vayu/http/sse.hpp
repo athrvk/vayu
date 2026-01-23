@@ -30,13 +30,13 @@ namespace vayu::http {
 /**
  * @brief Callback types for EventSource
  */
-using SseEvent = vayu::SseEvent;
+using SseEvent         = vayu::SseEvent;
 using EventSourceState = vayu::EventSourceState;
 
-using OnEventCallback = std::function<void(const SseEvent& event)>;
-using OnOpenCallback = std::function<void()>;
-using OnErrorCallback = std::function<void(const Error& error)>;
-using OnStateChangeCallback = std::function<void(EventSourceState state)>;
+using OnEventCallback       = std::function<void (const SseEvent& event)>;
+using OnOpenCallback        = std::function<void ()>;
+using OnErrorCallback       = std::function<void (const Error& error)>;
+using OnStateChangeCallback = std::function<void (EventSourceState state)>;
 
 /**
  * @brief EventSource configuration
@@ -94,24 +94,24 @@ struct EventSourceConfig {
  * @endcode
  */
 class EventSource {
-public:
+    public:
     /**
      * @brief Construct an EventSource for the given URL
      */
-    explicit EventSource(std::string url, EventSourceConfig config = {});
+    explicit EventSource (std::string url, EventSourceConfig config = {});
 
     /**
      * @brief Destructor - closes the connection
      */
-    ~EventSource();
+    ~EventSource ();
 
     // Non-copyable
-    EventSource(const EventSource&) = delete;
-    EventSource& operator=(const EventSource&) = delete;
+    EventSource (const EventSource&)            = delete;
+    EventSource& operator= (const EventSource&) = delete;
 
     // Movable
-    EventSource(EventSource&&) noexcept;
-    EventSource& operator=(EventSource&&) noexcept;
+    EventSource (EventSource&&) noexcept;
+    EventSource& operator= (EventSource&&) noexcept;
 
     /**
      * @brief Start the connection
@@ -119,7 +119,7 @@ public:
      * This spawns a background thread to receive events.
      * Events will be delivered via the registered callbacks.
      */
-    void connect();
+    void connect ();
 
     /**
      * @brief Close the connection
@@ -127,29 +127,29 @@ public:
      * Stops receiving events and closes the HTTP connection.
      * Does not call reconnect even if auto_reconnect is enabled.
      */
-    void close();
+    void close ();
 
     /**
      * @brief Get the current connection state
      */
-    [[nodiscard]] EventSourceState state() const;
+    [[nodiscard]] EventSourceState state () const;
 
     /**
      * @brief Get the connection URL
      */
-    [[nodiscard]] const std::string& url() const;
+    [[nodiscard]] const std::string& url () const;
 
     /**
      * @brief Get the last event ID received
      */
-    [[nodiscard]] std::optional<std::string> last_event_id() const;
+    [[nodiscard]] std::optional<std::string> last_event_id () const;
 
     /**
      * @brief Register callback for all events
      *
      * This callback is invoked for every event received.
      */
-    void on_event(OnEventCallback callback);
+    void on_event (OnEventCallback callback);
 
     /**
      * @brief Register callback for a specific event type
@@ -157,24 +157,24 @@ public:
      * @param event_type The event type to listen for
      * @param callback The callback to invoke
      */
-    void on(const std::string& event_type, OnEventCallback callback);
+    void on (const std::string& event_type, OnEventCallback callback);
 
     /**
      * @brief Register callback for connection open
      */
-    void on_open(OnOpenCallback callback);
+    void on_open (OnOpenCallback callback);
 
     /**
      * @brief Register callback for errors
      */
-    void on_error(OnErrorCallback callback);
+    void on_error (OnErrorCallback callback);
 
     /**
      * @brief Register callback for state changes
      */
-    void on_state_change(OnStateChangeCallback callback);
+    void on_state_change (OnStateChangeCallback callback);
 
-private:
+    private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
@@ -186,16 +186,16 @@ private:
  * Call feed() with chunks of data as they arrive.
  */
 class SseParser {
-public:
+    public:
     /**
      * @brief Callback for parsed events
      */
-    using EventCallback = std::function<void(SseEvent event)>;
+    using EventCallback = std::function<void (SseEvent event)>;
 
     /**
      * @brief Construct a parser with an event callback
      */
-    explicit SseParser(EventCallback callback);
+    explicit SseParser (EventCallback callback);
 
     /**
      * @brief Feed data to the parser
@@ -204,7 +204,7 @@ public:
      *
      * @param data Chunk of data from the stream
      */
-    void feed(const std::string& data);
+    void feed (const std::string& data);
 
     /**
      * @brief Feed data to the parser
@@ -212,26 +212,26 @@ public:
      * @param data Pointer to data
      * @param size Size of data
      */
-    void feed(const char* data, size_t size);
+    void feed (const char* data, size_t size);
 
     /**
      * @brief Reset the parser state
      */
-    void reset();
+    void reset ();
 
     /**
      * @brief Get the last event ID seen
      */
-    [[nodiscard]] std::optional<std::string> last_event_id() const;
+    [[nodiscard]] std::optional<std::string> last_event_id () const;
 
     /**
      * @brief Get the retry interval (if server specified one)
      */
-    [[nodiscard]] std::optional<int> retry_ms() const;
+    [[nodiscard]] std::optional<int> retry_ms () const;
 
-private:
-    void process_line(const std::string& line);
-    void dispatch_event();
+    private:
+    void process_line (const std::string& line);
+    void dispatch_event ();
 
     EventCallback callback_;
     std::string buffer_;
@@ -242,4 +242,4 @@ private:
     std::optional<int> retry_ms_;
 };
 
-}  // namespace vayu::http
+} // namespace vayu::http

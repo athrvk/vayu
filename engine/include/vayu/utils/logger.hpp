@@ -27,66 +27,66 @@
 
 namespace vayu::utils {
 class Logger {
-public:
+    public:
     enum class Level { DEBUG = 0, INFO = 1, WARNING = 2, ERROR = 3 };
 
-    static Logger& instance();
+    static Logger& instance ();
 
-    void init(const std::string& log_dir = vayu::core::constants::logging::DIR);
-    void log(Level level, const std::string& message);
-    void debug(const std::string& message);
-    void info(const std::string& message);
-    void warning(const std::string& message);
-    void error(const std::string& message);
+    void init (const std::string& log_dir = vayu::core::constants::logging::DIR);
+    void log (Level level, const std::string& message);
+    void debug (const std::string& message);
+    void info (const std::string& message);
+    void warning (const std::string& message);
+    void error (const std::string& message);
 
-    void set_verbosity(int level) {
+    void set_verbosity (int level) {
         verbosity_level_ = level;
     }
-    int get_verbosity() const {
+    int get_verbosity () const {
         return verbosity_level_;
     }
 
     // Force flush log file
-    void flush();
+    void flush ();
 
     // Legacy support
-    void set_verbose(bool verbose) {
+    void set_verbose (bool verbose) {
         verbosity_level_ = verbose ? 1 : 0;
     }
-    bool is_verbose() const {
+    bool is_verbose () const {
         return verbosity_level_ > 0;
     }
 
-private:
-    Logger() = default;
-    ~Logger();
+    private:
+    Logger () = default;
+    ~Logger ();
 
-    std::string level_to_string(Level level) const;
-    std::string get_timestamp() const;
-    std::string get_thread_id() const;
-    void ensure_log_directory();
+    std::string level_to_string (Level level) const;
+    std::string get_timestamp () const;
+    std::string get_thread_id () const;
+    void ensure_log_directory ();
 
     std::unique_ptr<std::ofstream> log_file_;
     std::mutex mutex_;
-    int verbosity_level_ = 0;  // 0=warn/error, 1=info+, 2=debug+
+    int verbosity_level_ = 0; // 0=warn/error, 1=info+, 2=debug+
     std::string log_dir_;
 };
 
 // Convenience functions
-inline void log_debug(const std::string& msg) {
-    Logger::instance().debug(msg);
+inline void log_debug (const std::string& msg) {
+    Logger::instance ().debug (msg);
 }
 
-inline void log_info(const std::string& msg) {
-    Logger::instance().info(msg);
+inline void log_info (const std::string& msg) {
+    Logger::instance ().info (msg);
 }
 
-inline void log_warning(const std::string& msg) {
-    Logger::instance().warning(msg);
+inline void log_warning (const std::string& msg) {
+    Logger::instance ().warning (msg);
 }
 
-inline void log_error(const std::string& msg) {
-    Logger::instance().error(msg);
+inline void log_error (const std::string& msg) {
+    Logger::instance ().error (msg);
 }
 
-}  // namespace vayu::utils
+} // namespace vayu::utils

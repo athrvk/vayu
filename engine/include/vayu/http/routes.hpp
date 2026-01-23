@@ -20,32 +20,32 @@ namespace vayu::http::routes {
 /**
  * @brief Common utilities for route handlers
  */
-inline int64_t now_ms() {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-               std::chrono::system_clock::now().time_since_epoch())
-        .count();
+inline int64_t now_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+    .count ();
 }
 
 /**
  * @brief Send a JSON error response
  */
-inline void send_error(httplib::Response& res, int status, const std::string& message) {
+inline void send_error (httplib::Response& res, int status, const std::string& message) {
     res.status = status;
-    res.set_content(nlohmann::json{{"error", message}}.dump(), "application/json");
+    res.set_content (nlohmann::json{ { "error", message } }.dump (), "application/json");
 }
 
 /**
  * @brief Send a JSON success response
  */
-inline void send_json(httplib::Response& res, const nlohmann::json& data) {
-    res.set_content(data.dump(), "application/json");
+inline void send_json (httplib::Response& res, const nlohmann::json& data) {
+    res.set_content (data.dump (), "application/json");
 }
 
 /**
  * @brief Callback type for graceful shutdown
  * Called when /shutdown endpoint is hit to perform platform-specific cleanup
  */
-using ShutdownCallback = std::function<void()>;
+using ShutdownCallback = std::function<void ()>;
 
 /**
  * @brief Context passed to route setup functions
@@ -55,19 +55,19 @@ struct RouteContext {
     vayu::db::Database& db;
     vayu::core::RunManager& run_manager;
     bool verbose;
-    ShutdownCallback on_shutdown;  // Optional callback for graceful shutdown
+    ShutdownCallback on_shutdown; // Optional callback for graceful shutdown
 };
 
 // Route registration functions (implemented in separate files)
-void register_health_routes(RouteContext& ctx);
-void register_config_routes(RouteContext& ctx);
-void register_collection_routes(RouteContext& ctx);
-void register_request_routes(RouteContext& ctx);
-void register_environment_routes(RouteContext& ctx);
-void register_globals_routes(RouteContext& ctx);
-void register_run_routes(RouteContext& ctx);
-void register_execution_routes(RouteContext& ctx);
-void register_metrics_routes(RouteContext& ctx);
-void register_scripting_routes(RouteContext& ctx);
+void register_health_routes (RouteContext& ctx);
+void register_config_routes (RouteContext& ctx);
+void register_collection_routes (RouteContext& ctx);
+void register_request_routes (RouteContext& ctx);
+void register_environment_routes (RouteContext& ctx);
+void register_globals_routes (RouteContext& ctx);
+void register_run_routes (RouteContext& ctx);
+void register_execution_routes (RouteContext& ctx);
+void register_metrics_routes (RouteContext& ctx);
+void register_scripting_routes (RouteContext& ctx);
 
-}  // namespace vayu::http::routes
+} // namespace vayu::http::routes

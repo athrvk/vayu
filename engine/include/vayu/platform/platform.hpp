@@ -54,14 +54,14 @@ namespace vayu::platform {
  * @brief Get the current process ID
  * @return Process ID as integer
  */
-int get_process_id();
+int get_process_id ();
 
 /**
  * @brief Check if a process with the given PID is still running
  * @param pid Process ID to check
  * @return true if process is running, false otherwise
  */
-bool is_process_running(int pid);
+bool is_process_running (int pid);
 
 // ============================================================================
 // File Locking (Single Instance)
@@ -72,10 +72,10 @@ bool is_process_running(int pid);
  * On Windows: HANDLE, On Unix: int (file descriptor)
  */
 #if VAYU_PLATFORM_WINDOWS
-using LockHandle = void*;
+using LockHandle                         = void*;
 constexpr LockHandle INVALID_LOCK_HANDLE = nullptr;
 #else
-using LockHandle = int;
+using LockHandle                         = int;
 constexpr LockHandle INVALID_LOCK_HANDLE = -1;
 #endif
 
@@ -88,14 +88,14 @@ constexpr LockHandle INVALID_LOCK_HANDLE = -1;
  * The lock file will be created if it doesn't exist.
  * The lock is exclusive and non-blocking (fails immediately if locked).
  */
-bool acquire_file_lock(const std::string& path, LockHandle& handle);
+bool acquire_file_lock (const std::string& path, LockHandle& handle);
 
 /**
  * @brief Write the current PID to the lock file
  * @param handle Lock handle from acquire_file_lock
  * @return true on success
  */
-bool write_pid_to_lock(LockHandle handle);
+bool write_pid_to_lock (LockHandle handle);
 
 /**
  * @brief Read PID from a lock file
@@ -103,13 +103,13 @@ bool write_pid_to_lock(LockHandle handle);
  * @param pid Output parameter for the PID
  * @return true if PID was successfully read, false otherwise
  */
-bool read_pid_from_lock(const std::string& path, int& pid);
+bool read_pid_from_lock (const std::string& path, int& pid);
 
 /**
  * @brief Release a previously acquired file lock
  * @param handle Lock handle from acquire_file_lock
  */
-void release_file_lock(LockHandle& handle);
+void release_file_lock (LockHandle& handle);
 
 // ============================================================================
 // Directory Operations
@@ -120,21 +120,21 @@ void release_file_lock(LockHandle& handle);
  * @param path Path to check
  * @return true if path exists and is a directory
  */
-bool is_directory(const std::string& path);
+bool is_directory (const std::string& path);
 
 /**
  * @brief Create a directory (and parents if needed)
  * @param path Path to create
  * @return true on success or if directory already exists
  */
-bool create_directory(const std::string& path);
+bool create_directory (const std::string& path);
 
 /**
  * @brief Ensure a directory exists, throw on failure
  * @param path Path to ensure
  * @throws std::runtime_error if directory cannot be created
  */
-void ensure_directory(const std::string& path);
+void ensure_directory (const std::string& path);
 
 // ============================================================================
 // Signal Handling
@@ -143,7 +143,7 @@ void ensure_directory(const std::string& path);
 /**
  * @brief Callback type for shutdown signals
  */
-using ShutdownCallback = std::function<void(bool force)>;
+using ShutdownCallback = std::function<void (bool force)>;
 
 /**
  * @brief Set up signal handlers for graceful shutdown
@@ -154,7 +154,7 @@ using ShutdownCallback = std::function<void(bool force)>;
  *
  * The callback receives 'force=true' on second signal (force quit)
  */
-void setup_signal_handlers(ShutdownCallback callback);
+void setup_signal_handlers (ShutdownCallback callback);
 
 // ============================================================================
 // Path Utilities
@@ -164,7 +164,7 @@ void setup_signal_handlers(ShutdownCallback callback);
  * @brief Get the path separator for the current platform
  * @return "/" on Unix, "\\" on Windows
  */
-constexpr char path_separator() {
+constexpr char path_separator () {
 #if VAYU_PLATFORM_WINDOWS
     return '\\';
 #else
@@ -178,6 +178,6 @@ constexpr char path_separator() {
  * @param component Component to append
  * @return Combined path
  */
-std::string path_join(const std::string& base, const std::string& component);
+std::string path_join (const std::string& base, const std::string& component);
 
-}  // namespace vayu::platform
+} // namespace vayu::platform

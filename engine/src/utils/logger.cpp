@@ -16,44 +16,45 @@
 #include "vayu/core/constants.hpp"
 
 namespace vayu::utils {
-Logger& Logger::instance() {
+Logger& Logger::instance () {
     static Logger logger;
     return logger;
 }
 
-void Logger::init(const std::string& log_dir) {
-    std::lock_guard<std::mutex> lock(mutex_);
+void Logger::init (const std::string& log_dir) {
+    std::lock_guard<std::mutex> lock (mutex_);
     log_dir_ = log_dir;
-    ensure_log_directory();
+    ensure_log_directory ();
 
     // Open log file with timestamp
-    auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
+    auto now  = std::chrono::system_clock::now ();
+    auto time = std::chrono::system_clock::to_time_t (now);
     std::stringstream ss;
-    ss << std::put_time(std::localtime(&time), vayu::core::constants::logging::TIME_FORMAT);
+    ss << std::put_time (std::localtime (&time), vayu::core::constants::logging::TIME_FORMAT);
 
     std::string log_file =
-        log_dir_ + vayu::core::constants::logging::FILE_PREFIX + ss.str() + ".log";
-    log_file_ = std::make_unique<std::ofstream>(log_file, std::ios::app);
+    log_dir_ + vayu::core::constants::logging::FILE_PREFIX + ss.str () + ".log";
+    log_file_ = std::make_unique<std::ofstream> (log_file, std::ios::app);
 
-    if (!log_file_ || !log_file_->is_open()) {
+    if (!log_file_ || !log_file_->is_open ()) {
         std::cerr << "Failed to open log file: " << log_file << "\n";
     }
 }
 
-void Logger::log(Level level, const std::string& message) {
-    std::lock_guard<std::mutex> lock(mutex_);
+void Logger::log (Level level, const std::string& message) {
+    std::lock_guard<std::mutex> lock (mutex_);
 
-    std::string timestamp = get_timestamp();
-    std::string level_str = level_to_string(level);
-    std::string thread_id = get_thread_id();
+    std::string timestamp = get_timestamp ();
+    std::string level_str = level_to_string (level);
+    std::string thread_id = get_thread_id ();
 
-    std::string log_message = timestamp + " [" + level_str + "] [" + thread_id + "] " + message;
+    std::string log_message =
+    timestamp + " [" + level_str + "] [" + thread_id + "] " + message;
 
     // Always write to file (irrespective of log level)
-    if (log_file_ && log_file_->is_open()) {
+    if (log_file_ && log_file_->is_open ()) {
         *log_file_ << log_message << "\n";
-        log_file_->flush();
+        log_file_->flush ();
     } else {
         std::cerr << "Log file is not open." << "\n";
     }
@@ -65,7 +66,7 @@ void Logger::log(Level level, const std::string& message) {
     bool should_print_to_console = false;
 
     if (level == Level::ERROR || level == Level::WARNING) {
-        should_print_to_console = true;  // Always show errors and warnings
+        should_print_to_console = true; // Always show errors and warnings
     } else if (level == Level::INFO && verbosity_level_ >= 1) {
         should_print_to_console = true;
     } else if (level == Level::DEBUG && verbosity_level_ >= 2) {
@@ -75,80 +76,76 @@ void Logger::log(Level level, const std::string& message) {
     if (should_print_to_console) {
         if (level == Level::ERROR) {
             std::cerr << log_message << "\n";
-            std::cerr.flush();  // Flush immediately on Linux when stdout/stderr are pipes
+            std::cerr.flush (); // Flush immediately on Linux when stdout/stderr are pipes
         } else {
             std::cout << log_message << "\n";
-            std::cout.flush();  // Flush immediately on Linux when stdout/stderr are pipes
+            std::cout.flush (); // Flush immediately on Linux when stdout/stderr are pipes
         }
     }
 }
 
-void Logger::debug(const std::string& message) {
-    log(Level::DEBUG, message);
+void Logger::debug (const std::string& message) {
+    log (Level::DEBUG, message);
 }
 
-void Logger::info(const std::string& message) {
-    log(Level::INFO, message);
+void Logger::info (const std::string& message) {
+    log (Level::INFO, message);
 }
 
-void Logger::warning(const std::string& message) {
-    log(Level::WARNING, message);
+void Logger::warning (const std::string& message) {
+    log (Level::WARNING, message);
 }
 
-void Logger::error(const std::string& message) {
-    log(Level::ERROR, message);
+void Logger::error (const std::string& message) {
+    log (Level::ERROR, message);
 }
 
-void Logger::flush() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (log_file_ && log_file_->is_open()) {
-        log_file_->flush();
+void Logger::flush () {
+    std::lock_guard<std::mutex> lock (mutex_);
+    if (log_file_ && log_file_->is_open ()) {
+        log_file_->flush ();
     }
-    std::cout.flush();
-    std::cerr.flush();
+    std::cout.flush ();
+    std::cerr.flush ();
 }
 
-Logger::~Logger() {
-    if (log_file_ && log_file_->is_open()) {
-        log_file_->close();
+Logger::~Logger () {
+    if (log_file_ && log_file_->is_open ()) {
+        log_file_->close ();
     }
 }
 
-std::string Logger::level_to_string(Level level) const {
+std::string Logger::level_to_string (Level level) const {
     switch (level) {
-        case Level::DEBUG:
-            return "DEBUG";
-        case Level::INFO:
-            return "INFO";
-        case Level::WARNING:
-            return "WARNING";
-        case Level::ERROR:
-            return "ERROR";
-        default:
-            return "UNKNOWN";
+    case Level::DEBUG: return "DEBUG";
+    case Level::INFO: return "INFO";
+    case Level::WARNING: return "WARNING";
+    case Level::ERROR: return "ERROR";
+    default: return "UNKNOWN";
     }
 }
 
-std::string Logger::get_timestamp() const {
-    auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+std::string Logger::get_timestamp () const {
+    auto now  = std::chrono::system_clock::now ();
+    auto time = std::chrono::system_clock::to_time_t (now);
+    auto ms =
+    std::chrono::duration_cast<std::chrono::milliseconds> (now.time_since_epoch ()) % 1000;
 
     std::stringstream ss;
-    ss << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S");
-    ss << '.' << std::setfill('0') << std::setw(3) << ms.count();
+    ss << std::put_time (std::localtime (&time), "%Y-%m-%d %H:%M:%S");
+    ss << '.' << std::setfill ('0') << std::setw (3) << ms.count ();
 
-    return ss.str();
+    return ss.str ();
 }
 
-std::string Logger::get_thread_id() const {
+std::string Logger::get_thread_id () const {
     std::stringstream ss;
-    ss << std::this_thread::get_id();
-    return "T:" + ss.str();
+    ss << std::this_thread::get_id ();
+    return "T:" + ss.str ();
 }
 
-void Logger::ensure_log_directory() {
-    std::filesystem::create_directories(log_dir_);
+void Logger::ensure_log_directory () {
+    std::filesystem::create_directories (log_dir_);
 }
 
-}  // namespace vayu::utils
+} // namespace vayu::utils

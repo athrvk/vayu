@@ -36,24 +36,24 @@ struct ClientConfig {
  * For high-concurrency scenarios, see EventLoop which uses curl_multi.
  */
 class Client {
-public:
+    public:
     /**
      * @brief Construct a new Client
      */
-    explicit Client(ClientConfig config = {});
+    explicit Client (ClientConfig config = {});
 
     /**
      * @brief Destructor
      */
-    ~Client();
+    ~Client ();
 
     // Non-copyable
-    Client(const Client&) = delete;
-    Client& operator=(const Client&) = delete;
+    Client (const Client&)            = delete;
+    Client& operator= (const Client&) = delete;
 
     // Movable
-    Client(Client&&) noexcept;
-    Client& operator=(Client&&) noexcept;
+    Client (Client&&) noexcept;
+    Client& operator= (Client&&) noexcept;
 
     /**
      * @brief Send an HTTP request and return the response
@@ -61,26 +61,26 @@ public:
      * @param request The request to send
      * @return Result<Response> The response or an error
      */
-    [[nodiscard]] Result<Response> send(const Request& request);
+    [[nodiscard]] Result<Response> send (const Request& request);
 
     /**
      * @brief Convenience method for GET requests
      */
-    [[nodiscard]] Result<Response> get(const std::string& url, const Headers& headers = {});
+    [[nodiscard]] Result<Response>
+    get (const std::string& url, const Headers& headers = {});
 
     /**
      * @brief Convenience method for POST requests
      */
-    [[nodiscard]] Result<Response> post(const std::string& url,
-                                        const std::string& body,
-                                        const Headers& headers = {});
+    [[nodiscard]] Result<Response>
+    post (const std::string& url, const std::string& body, const Headers& headers = {});
 
     /**
      * @brief Get the last error message from curl
      */
-    [[nodiscard]] std::string last_error() const;
+    [[nodiscard]] std::string last_error () const;
 
-private:
+    private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
@@ -88,11 +88,11 @@ private:
 /**
  * @brief Initialize curl globally (call once at startup)
  */
-void global_init();
+void global_init ();
 
 /**
  * @brief Cleanup curl globally (call once at shutdown)
  */
-void global_cleanup();
+void global_cleanup ();
 
-}  // namespace vayu::http
+} // namespace vayu::http

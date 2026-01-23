@@ -31,7 +31,7 @@ namespace vayu::runtime {
 struct ScriptConfig {
     size_t memory_limit = vayu::core::constants::script_engine::MEMORY_LIMIT;
     uint64_t timeout_ms = vayu::core::constants::script_engine::TIMEOUT_MS;
-    size_t stack_size = vayu::core::constants::script_engine::STACK_SIZE;
+    size_t stack_size   = vayu::core::constants::script_engine::STACK_SIZE;
     bool enable_console = vayu::core::constants::script_engine::ENABLE_CONSOLE;
 };
 
@@ -39,10 +39,10 @@ struct ScriptConfig {
  * @brief Script execution context with request/response data
  */
 struct ScriptContext {
-    const Request* request = nullptr;
-    const Response* response = nullptr;
-    Environment* environment = nullptr;
-    Environment* globals = nullptr;
+    const Request* request           = nullptr;
+    const Response* response         = nullptr;
+    Environment* environment         = nullptr;
+    Environment* globals             = nullptr;
     Environment* collectionVariables = nullptr;
 };
 
@@ -65,23 +65,23 @@ struct ScriptContext {
  * @endcode
  */
 class ScriptEngine {
-public:
+    public:
     /**
      * @brief Construct a new Script Engine
      * @param config Configuration options
      */
-    explicit ScriptEngine(const ScriptConfig& config = {});
+    explicit ScriptEngine (const ScriptConfig& config = {});
 
     /**
      * @brief Destructor - cleans up QuickJS runtime
      */
-    ~ScriptEngine();
+    ~ScriptEngine ();
 
     // Non-copyable, movable
-    ScriptEngine(const ScriptEngine&) = delete;
-    ScriptEngine& operator=(const ScriptEngine&) = delete;
-    ScriptEngine(ScriptEngine&&) noexcept;
-    ScriptEngine& operator=(ScriptEngine&&) noexcept;
+    ScriptEngine (const ScriptEngine&)            = delete;
+    ScriptEngine& operator= (const ScriptEngine&) = delete;
+    ScriptEngine (ScriptEngine&&) noexcept;
+    ScriptEngine& operator= (ScriptEngine&&) noexcept;
 
     /**
      * @brief Execute a script
@@ -89,7 +89,7 @@ public:
      * @param ctx Context with request/response data
      * @return Script execution result with test results
      */
-    [[nodiscard]] ScriptResult execute(const std::string& script, const ScriptContext& ctx);
+    [[nodiscard]] ScriptResult execute (const std::string& script, const ScriptContext& ctx);
 
     /**
      * @brief Execute a pre-request script
@@ -98,9 +98,8 @@ public:
      * @param env Environment variables
      * @return Script result
      */
-    [[nodiscard]] ScriptResult execute_prerequest(const std::string& script,
-                                                  Request& request,
-                                                  Environment& env);
+    [[nodiscard]] ScriptResult
+    execute_prerequest (const std::string& script, Request& request, Environment& env);
 
     /**
      * @brief Execute a test script
@@ -110,26 +109,26 @@ public:
      * @param env Environment variables
      * @return Script result with test outcomes
      */
-    [[nodiscard]] ScriptResult execute_test(const std::string& script,
-                                            const Request& request,
-                                            const Response& response,
-                                            Environment& env);
+    [[nodiscard]] ScriptResult execute_test (const std::string& script,
+    const Request& request,
+    const Response& response,
+    Environment& env);
 
     /**
      * @brief Check if scripting is available
      * @return true if QuickJS is compiled in
      */
-    [[nodiscard]] static bool is_available();
+    [[nodiscard]] static bool is_available ();
 
     /**
      * @brief Get QuickJS version string
      * @return Version string or empty if not available
      */
-    [[nodiscard]] static std::string version();
+    [[nodiscard]] static std::string version ();
 
-private:
+    private:
     class Impl;
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace vayu::runtime
+} // namespace vayu::runtime

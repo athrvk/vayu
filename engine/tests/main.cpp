@@ -7,14 +7,14 @@
 
 #include "vayu/http/client.hpp"
 
-int main(int argc, char** argv) {
+int main (int argc, char** argv) {
     // Initialize curl globally for all tests
-    vayu::http::global_init();
+    vayu::http::global_init ();
 
-    testing::InitGoogleTest(&argc, argv);
-    int result = RUN_ALL_TESTS();
+    testing::InitGoogleTest (&argc, argv);
+    int result = RUN_ALL_TESTS ();
 
-    vayu::http::global_cleanup();
+    vayu::http::global_cleanup ();
 
     return result;
 }

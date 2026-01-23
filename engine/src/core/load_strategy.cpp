@@ -27,161 +27,161 @@ namespace {
  *
  * Results are batch-written to the database after test completion.
  */
-void handle_result(std::shared_ptr<RunContext> context,
-                   vayu::db::Database& /* db - unused, kept for API compat */,
-                   vayu::Result<vayu::Response> result) {
+void handle_result (std::shared_ptr<RunContext> context,
+vayu::db::Database& /* db - unused, kept for API compat */,
+vayu::Result<vayu::Response> result) {
     // Get configuration
-    int slow_threshold_ms = context->config.value("slow_threshold_ms", 1000);
-    bool save_timing_breakdown = context->config.value("save_timing_breakdown", false);
+    int slow_threshold_ms = context->config.value ("slow_threshold_ms", 1000);
+    bool save_timing_breakdown = context->config.value ("save_timing_breakdown", false);
 
     // client.send() now always returns Response (never Error), but Response may have error_code set
-    if (result.is_error()) {
+    if (result.is_error ()) {
         // This should not happen anymore, but handle it for safety
-        vayu::utils::log_error("Unexpected error result in load_strategy::handle_result");
+        vayu::utils::log_error (
+        "Unexpected error result in load_strategy::handle_result");
         return;
     }
 
-    const auto& response = result.value();
-    
+    const auto& response = result.value ();
+
     // Check if response has a client-side error
-    if (response.has_error()) {
+    if (response.has_error ()) {
 
         // Build detailed error trace data
-        nlohmann::json error_json = {{"error_code", static_cast<int>(response.error_code)},
-                                     {"error_type",
-                                      [&response]() {
-                                          switch (response.error_code) {
-                                              case vayu::ErrorCode::Timeout:
-                                                  return "timeout";
-                                              case vayu::ErrorCode::ConnectionFailed:
-                                                  return "connection_failed";
-                                              case vayu::ErrorCode::DnsError:
-                                                  return "dns_failed";
-                                              case vayu::ErrorCode::SslError:
-                                                  return "ssl_error";
-                                              case vayu::ErrorCode::InvalidUrl:
-                                                  return "invalid_url";
-                                              case vayu::ErrorCode::InvalidMethod:
-                                                  return "invalid_method";
-                                              case vayu::ErrorCode::ScriptError:
-                                                  return "script_error";
-                                              case vayu::ErrorCode::InternalError:
-                                                  return "internal_error";
-                                              default:
-                                                  return "unknown";
-                                          }
-                                      }()},
-                                     {"message", response.error_message},
-                                     {"request_number", context->total_requests()}};
+        nlohmann::json error_json = { { "error_code", static_cast<int> (response.error_code) },
+            { "error_type",
+            [&response] () {
+                switch (response.error_code) {
+                case vayu::ErrorCode::Timeout: return "timeout";
+                case vayu::ErrorCode::ConnectionFailed:
+                    return "connection_failed";
+                case vayu::ErrorCode::DnsError: return "dns_failed";
+                case vayu::ErrorCode::SslError: return "ssl_error";
+                case vayu::ErrorCode::InvalidUrl: return "invalid_url";
+                case vayu::ErrorCode::InvalidMethod: return "invalid_method";
+                case vayu::ErrorCode::ScriptError: return "script_error";
+                case vayu::ErrorCode::InternalError: return "internal_error";
+                default: return "unknown";
+                }
+            }() },
+            { "message", response.error_message },
+            { "request_number", context->total_requests () } };
 
         // Include timing info if available
         if (response.timing.total_ms > 0) {
-            error_json["timing"] = {{"totalMs", response.timing.total_ms},
-                                    {"dnsMs", response.timing.dns_ms},
-                                    {"connectMs", response.timing.connect_ms},
-                                    {"tlsMs", response.timing.tls_ms},
-                                    {"firstByteMs", response.timing.first_byte_ms},
-                                    {"downloadMs", response.timing.download_ms}};
+            error_json["timing"] = { { "totalMs", response.timing.total_ms },
+                { "dnsMs", response.timing.dns_ms },
+                { "connectMs", response.timing.connect_ms },
+                { "tlsMs", response.timing.tls_ms },
+                { "firstByteMs", response.timing.first_byte_ms },
+                { "downloadMs", response.timing.download_ms } };
         }
 
-        context->metrics_collector->record_error(response.error_code, response.error_message, error_json.dump());
+        context->metrics_collector->record_error (
+        response.error_code, response.error_message, error_json.dump ());
     } else {
         // Successful response
         double latency = response.timing.total_ms;
 
         // Build trace data if configured
         std::string trace_data;
-        bool is_slow = latency >= static_cast<double>(slow_threshold_ms);
+        bool is_slow = latency >= static_cast<double> (slow_threshold_ms);
 
         if (save_timing_breakdown || is_slow) {
-            nlohmann::json timing_json = {{"totalMs", response.timing.total_ms},
-                                          {"dnsMs", response.timing.dns_ms},
-                                          {"connectMs", response.timing.connect_ms},
-                                          {"tlsMs", response.timing.tls_ms},
-                                          {"firstByteMs", response.timing.first_byte_ms},
-                                          {"downloadMs", response.timing.download_ms}};
+            nlohmann::json timing_json = { { "totalMs", response.timing.total_ms },
+                { "dnsMs", response.timing.dns_ms },
+                { "connectMs", response.timing.connect_ms },
+                { "tlsMs", response.timing.tls_ms },
+                { "firstByteMs", response.timing.first_byte_ms },
+                { "downloadMs", response.timing.download_ms } };
 
             if (is_slow) {
-                timing_json["isSlow"] = true;
+                timing_json["isSlow"]      = true;
                 timing_json["thresholdMs"] = slow_threshold_ms;
             }
 
-            trace_data = timing_json.dump();
+            trace_data = timing_json.dump ();
         }
 
         // Record to in-memory collector (high-performance, no DB writes)
-        context->metrics_collector->record_success(response.status_code, latency, trace_data);
+        context->metrics_collector->record_success (response.status_code, latency, trace_data);
 
         // Sample response for deferred script validation if test script is present
-        if (!context->test_script.empty()) {
-            context->metrics_collector->record_response_sample(response);
+        if (!context->test_script.empty ()) {
+            context->metrics_collector->record_response_sample (response);
         }
     }
 }
-}  // namespace
+} // namespace
 
 // ============================================================================
 // Constant Load Strategy
 // ============================================================================
 
 class ConstantLoadStrategy : public LoadStrategy {
-public:
-    void execute(std::shared_ptr<RunContext> context,
-                 vayu::db::Database& db,
-                 const vayu::Request& request) override {
-        const auto& config = context->config;
-        std::string duration_str = config.value("duration", "60s");
-        int64_t duration_ms = 0;
+    public:
+    void execute (std::shared_ptr<RunContext> context,
+    vayu::db::Database& db,
+    const vayu::Request& request) override {
+        const auto& config       = context->config;
+        std::string duration_str = config.value ("duration", "60s");
+        int64_t duration_ms      = 0;
         try {
-            duration_ms = std::stoll(duration_str.substr(0, duration_str.length() - 1)) * 1000;
+            duration_ms =
+            std::stoll (duration_str.substr (0, duration_str.length () - 1)) * 1000;
         } catch (...) {
             duration_ms = 60000;
         }
 
         // Check for targetRps - if specified, use rate-limited mode
-        double target_rps = config.value("rps", 0.0);
-        if (target_rps == 0.0) target_rps = config.value("targetRps", 0.0);
+        double target_rps = config.value ("rps", 0.0);
+        if (target_rps == 0.0)
+            target_rps = config.value ("targetRps", 0.0);
 
         if (target_rps > 0.0) {
             // Rate-limited mode
-            vayu::utils::log_info("Starting Constant Load Test (Rate-Limited)");
-            vayu::utils::log_info("  Duration: " + std::to_string(duration_ms) + " ms");
-            vayu::utils::log_info("  Target RPS: " + std::to_string(target_rps));
+            vayu::utils::log_info (
+            "Starting Constant Load Test (Rate-Limited)");
+            vayu::utils::log_info ("  Duration: " + std::to_string (duration_ms) + " ms");
+            vayu::utils::log_info ("  Target RPS: " + std::to_string (target_rps));
 
             // Calculate expected requests
-            size_t expected =
-                static_cast<size_t>((static_cast<double>(duration_ms) / 1000.0) * target_rps);
+            size_t expected = static_cast<size_t> (
+            (static_cast<double> (duration_ms) / 1000.0) * target_rps);
             context->requests_expected = expected;
 
             // Calculate correct interval between requests based on target RPS
             // For 10 RPS: interval = 1,000,000 / 10 = 100,000 us = 100ms
             // For 1000 RPS: interval = 1,000,000 / 1000 = 1,000 us = 1ms
             // For high RPS (>1000), we batch multiple requests per interval
-            int64_t base_interval_us = static_cast<int64_t>(1000000.0 / target_rps);
+            int64_t base_interval_us = static_cast<int64_t> (1000000.0 / target_rps);
 
             // Minimum interval of 1ms (1000us) to avoid busy-spinning
             // If target_rps > 1000, we need to submit multiple requests per interval
-            size_t batch_size = 1;
+            size_t batch_size         = 1;
             int64_t batch_interval_us = base_interval_us;
 
             if (base_interval_us < 1000) {
                 // High RPS mode: batch requests every 1ms
                 batch_interval_us = 1000;
-                batch_size = std::max(static_cast<size_t>(target_rps / 1000.0), size_t(1));
+                batch_size =
+                std::max (static_cast<size_t> (target_rps / 1000.0), size_t (1));
             }
 
-            vayu::utils::log_debug("Submission config: batch_size=" + std::to_string(batch_size) +
-                                   ", batch_interval_us=" + std::to_string(batch_interval_us) +
-                                   ", expected_requests=" + std::to_string(expected));
+            vayu::utils::log_debug (
+            "Submission config: batch_size=" + std::to_string (batch_size) +
+            ", batch_interval_us=" + std::to_string (batch_interval_us) +
+            ", expected_requests=" + std::to_string (expected));
 
-            auto test_start = std::chrono::steady_clock::now();
+            auto test_start      = std::chrono::steady_clock::now ();
             auto next_batch_time = test_start;
-            size_t submitted = 0;
+            size_t submitted     = 0;
 
             while (!context->should_stop) {
-                auto now = std::chrono::steady_clock::now();
+                auto now = std::chrono::steady_clock::now ();
                 auto elapsed =
-                    std::chrono::duration_cast<std::chrono::milliseconds>(now - test_start).count();
+                std::chrono::duration_cast<std::chrono::milliseconds> (now - test_start)
+                .count ();
 
                 if (elapsed >= duration_ms) {
                     break;
@@ -191,75 +191,78 @@ public:
                 if (now >= next_batch_time) {
                     // Backpressure check - don't overwhelm the event loop
                     size_t max_pending =
-                        std::max(static_cast<size_t>(target_rps * 10.0), size_t(1000));
+                    std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000));
 
-                    if (context->event_loop->pending_count() < max_pending) {
+                    if (context->event_loop->pending_count () < max_pending) {
                         // Submit batch of requests
                         for (size_t i = 0; i < batch_size && !context->should_stop; ++i) {
-                            context->event_loop->submit(
-                                request,
-                                [context, &db](size_t, vayu::Result<vayu::Response> result) {
-                                    handle_result(context, db, std::move(result));
-                                });
+                            context->event_loop->submit (request,
+                            [context, &db] (size_t, vayu::Result<vayu::Response> result) {
+                                handle_result (context, db, std::move (result));
+                            });
                             submitted++;
                             context->requests_sent++;
                         }
 
                         // Schedule next batch using the correct interval
-                        next_batch_time += std::chrono::microseconds(batch_interval_us);
+                        next_batch_time += std::chrono::microseconds (batch_interval_us);
                     } else {
                         // If we're backed up, skip ahead to avoid flooding
-                        next_batch_time = now + std::chrono::microseconds(batch_interval_us);
+                        next_batch_time =
+                        now + std::chrono::microseconds (batch_interval_us);
                     }
                 }
 
                 // Sleep for remaining time until next batch
                 auto sleep_time =
-                    std::chrono::duration_cast<std::chrono::microseconds>(next_batch_time - now)
-                        .count();
+                std::chrono::duration_cast<std::chrono::microseconds> (next_batch_time - now)
+                .count ();
                 if (sleep_time > 100) {
-                    std::this_thread::sleep_for(std::chrono::microseconds(sleep_time / 2));
+                    std::this_thread::sleep_for (
+                    std::chrono::microseconds (sleep_time / 2));
                 }
             }
 
-            vayu::utils::log_info("Submitted " + std::to_string(submitted) + " requests");
+            vayu::utils::log_info ("Submitted " + std::to_string (submitted) + " requests");
 
         } else {
             // Concurrency-based mode (legacy behavior)
-            size_t concurrency = static_cast<size_t>(config.value("concurrency", 100));
+            size_t concurrency =
+            static_cast<size_t> (config.value ("concurrency", 100));
 
-            vayu::utils::log_info("Starting Constant Load Test (Concurrency-Based)");
-            vayu::utils::log_info("  Duration: " + std::to_string(duration_ms) + " ms");
-            vayu::utils::log_info("  Concurrency: " + std::to_string(concurrency));
+            vayu::utils::log_info (
+            "Starting Constant Load Test (Concurrency-Based)");
+            vayu::utils::log_info ("  Duration: " + std::to_string (duration_ms) + " ms");
+            vayu::utils::log_info ("  Concurrency: " + std::to_string (concurrency));
 
-            auto test_start = std::chrono::steady_clock::now();
+            auto test_start = std::chrono::steady_clock::now ();
 
             while (!context->should_stop) {
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                   std::chrono::steady_clock::now() - test_start)
-                                   .count();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
+                std::chrono::steady_clock::now () - test_start)
+                               .count ();
 
                 if (elapsed >= duration_ms) {
                     break;
                 }
 
                 // Backpressure
-                size_t max_pending = std::max(concurrency * 5U, size_t(1000));
-                if (context->event_loop->pending_count() > max_pending) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                size_t max_pending = std::max (concurrency * 5U, size_t (1000));
+                if (context->event_loop->pending_count () > max_pending) {
+                    std::this_thread::sleep_for (std::chrono::milliseconds (50));
                     continue;
                 }
 
                 // Submit batch
                 for (size_t i = 0; i < concurrency && !context->should_stop; ++i) {
-                    context->event_loop->submit(
-                        request, [context, &db](size_t, vayu::Result<vayu::Response> result) {
-                            handle_result(context, db, std::move(result));
-                        });
+                    context->event_loop->submit (request,
+                    [context, &db] (size_t, vayu::Result<vayu::Response> result) {
+                        handle_result (context, db, std::move (result));
+                    });
                     context->requests_sent++;
                 }
 
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
             }
         }
     }
@@ -270,47 +273,48 @@ public:
 // ============================================================================
 
 class IterationsLoadStrategy : public LoadStrategy {
-public:
-    void execute(std::shared_ptr<RunContext> context,
-                 vayu::db::Database& db,
-                 const vayu::Request& request) override {
+    public:
+    void execute (std::shared_ptr<RunContext> context,
+    vayu::db::Database& db,
+    const vayu::Request& request) override {
         const auto& config = context->config;
-        size_t iterations = static_cast<size_t>(config.value("iterations", 1000));
-        size_t concurrency = static_cast<size_t>(config.value("concurrency", 10));
-        double target_rps = config.value("rps", 0.0);
-        if (target_rps == 0.0) target_rps = config.value("targetRps", 0.0);
+        size_t iterations = static_cast<size_t> (config.value ("iterations", 1000));
+        size_t concurrency = static_cast<size_t> (config.value ("concurrency", 10));
+        double target_rps = config.value ("rps", 0.0);
+        if (target_rps == 0.0)
+            target_rps = config.value ("targetRps", 0.0);
 
-        vayu::utils::log_info("Starting Iterations Load Test");
-        vayu::utils::log_info("  Iterations: " + std::to_string(iterations));
-        vayu::utils::log_info("  Concurrency: " + std::to_string(concurrency));
+        vayu::utils::log_info ("Starting Iterations Load Test");
+        vayu::utils::log_info ("  Iterations: " + std::to_string (iterations));
+        vayu::utils::log_info ("  Concurrency: " + std::to_string (concurrency));
 
         context->requests_expected = iterations;
 
         size_t submitted = 0;
         while (submitted < iterations && !context->should_stop) {
             // Backpressure - don't submit too many at once
-            size_t max_pending = std::max(concurrency * 5U, size_t(100));
-            if (context->event_loop->pending_count() > max_pending) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            size_t max_pending = std::max (concurrency * 5U, size_t (100));
+            if (context->event_loop->pending_count () > max_pending) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
                 continue;
             }
 
             // Submit batch
-            size_t batch_size = std::min(concurrency, iterations - submitted);
+            size_t batch_size = std::min (concurrency, iterations - submitted);
             for (size_t i = 0; i < batch_size && !context->should_stop; ++i) {
-                context->event_loop->submit(
-                    request, [context, &db](size_t, vayu::Result<vayu::Response> result) {
-                        handle_result(context, db, std::move(result));
-                    });
+                context->event_loop->submit (request,
+                [context, &db] (size_t, vayu::Result<vayu::Response> result) {
+                    handle_result (context, db, std::move (result));
+                });
                 submitted++;
                 context->requests_sent++;
             }
 
             // Small sleep to pace submissions
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
         }
 
-        vayu::utils::log_info("Submitted " + std::to_string(submitted) + " requests");
+        vayu::utils::log_info ("Submitted " + std::to_string (submitted) + " requests");
     }
 };
 
@@ -319,46 +323,51 @@ public:
 // ============================================================================
 
 class RampUpLoadStrategy : public LoadStrategy {
-public:
-    void execute(std::shared_ptr<RunContext> context,
-                 vayu::db::Database& db,
-                 const vayu::Request& request) override {
+    public:
+    void execute (std::shared_ptr<RunContext> context,
+    vayu::db::Database& db,
+    const vayu::Request& request) override {
         const auto& config = context->config;
 
         // Parse duration
-        std::string duration_str = config.value("duration", "60s");
-        int64_t duration_ms = 0;
+        std::string duration_str = config.value ("duration", "60s");
+        int64_t duration_ms      = 0;
         try {
-            duration_ms = std::stoll(duration_str.substr(0, duration_str.length() - 1)) * 1000;
+            duration_ms =
+            std::stoll (duration_str.substr (0, duration_str.length () - 1)) * 1000;
         } catch (...) {
             duration_ms = 60000;
         }
 
         // Parse ramp up parameters
-        std::string ramp_duration_str = config.value("rampUpDuration", "10s");
-        int64_t ramp_duration_ms = 0;
+        std::string ramp_duration_str = config.value ("rampUpDuration", "10s");
+        int64_t ramp_duration_ms      = 0;
         try {
             ramp_duration_ms =
-                std::stoll(ramp_duration_str.substr(0, ramp_duration_str.length() - 1)) * 1000;
+            std::stoll (ramp_duration_str.substr (0, ramp_duration_str.length () - 1)) * 1000;
         } catch (...) {
             ramp_duration_ms = 10000;
         }
 
-        size_t start_concurrency = static_cast<size_t>(config.value("startConcurrency", 1));
-        size_t target_concurrency = static_cast<size_t>(config.value("concurrency", 100));
+        size_t start_concurrency =
+        static_cast<size_t> (config.value ("startConcurrency", 1));
+        size_t target_concurrency =
+        static_cast<size_t> (config.value ("concurrency", 100));
 
-        vayu::utils::log_info("Starting Ramp Up Load Test");
-        vayu::utils::log_info("  Total Duration: " + std::to_string(duration_ms) + " ms");
-        vayu::utils::log_info("  Ramp Up Duration: " + std::to_string(ramp_duration_ms) + " ms");
-        vayu::utils::log_info("  Start Concurrency: " + std::to_string(start_concurrency));
-        vayu::utils::log_info("  Target Concurrency: " + std::to_string(target_concurrency));
+        vayu::utils::log_info ("Starting Ramp Up Load Test");
+        vayu::utils::log_info ("  Total Duration: " + std::to_string (duration_ms) + " ms");
+        vayu::utils::log_info (
+        "  Ramp Up Duration: " + std::to_string (ramp_duration_ms) + " ms");
+        vayu::utils::log_info ("  Start Concurrency: " + std::to_string (start_concurrency));
+        vayu::utils::log_info ("  Target Concurrency: " + std::to_string (target_concurrency));
 
-        auto test_start = std::chrono::steady_clock::now();
+        auto test_start = std::chrono::steady_clock::now ();
 
         while (!context->should_stop) {
-            auto now = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now ();
             auto elapsed =
-                std::chrono::duration_cast<std::chrono::milliseconds>(now - test_start).count();
+            std::chrono::duration_cast<std::chrono::milliseconds> (now - test_start)
+            .count ();
 
             if (elapsed >= duration_ms) {
                 break;
@@ -367,30 +376,30 @@ public:
             // Calculate current concurrency
             size_t current_concurrency = target_concurrency;
             if (elapsed < ramp_duration_ms) {
-                double progress =
-                    static_cast<double>(elapsed) / static_cast<double>(ramp_duration_ms);
-                current_concurrency = static_cast<size_t>(
-                    static_cast<double>(start_concurrency) +
-                    (static_cast<double>(target_concurrency - start_concurrency) * progress));
+                double progress = static_cast<double> (elapsed) /
+                static_cast<double> (ramp_duration_ms);
+                current_concurrency =
+                static_cast<size_t> (static_cast<double> (start_concurrency) +
+                (static_cast<double> (target_concurrency - start_concurrency) * progress));
             }
 
             // Backpressure
-            size_t max_pending = std::max(target_concurrency * 5U, size_t(1000));
-            if (context->event_loop->pending_count() > max_pending) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            size_t max_pending = std::max (target_concurrency * 5U, size_t (1000));
+            if (context->event_loop->pending_count () > max_pending) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (50));
                 continue;
             }
 
             // Submit batch based on current concurrency
             for (size_t i = 0; i < current_concurrency && !context->should_stop; ++i) {
-                context->event_loop->submit(
-                    request, [context, &db](size_t, vayu::Result<vayu::Response> result) {
-                        handle_result(context, db, std::move(result));
-                    });
+                context->event_loop->submit (request,
+                [context, &db] (size_t, vayu::Result<vayu::Response> result) {
+                    handle_result (context, db, std::move (result));
+                });
                 context->requests_sent++;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
         }
     }
 };
@@ -399,28 +408,27 @@ public:
 // Factory
 // ============================================================================
 
-std::unique_ptr<LoadStrategy> LoadStrategy::create(const nlohmann::json& config) {
-    std::string mode = config.value("mode", "constant");
-    auto type = parse_load_test_type(mode);
+std::unique_ptr<LoadStrategy> LoadStrategy::create (const nlohmann::json& config) {
+    std::string mode = config.value ("mode", "constant");
+    auto type        = parse_load_test_type (mode);
 
     if (!type) {
         // Fallback logic for backward compatibility
-        if (config.contains("iterations")) {
-            return std::make_unique<IterationsLoadStrategy>();
+        if (config.contains ("iterations")) {
+            return std::make_unique<IterationsLoadStrategy> ();
         }
-        return std::make_unique<ConstantLoadStrategy>();
+        return std::make_unique<ConstantLoadStrategy> ();
     }
 
     switch (*type) {
-        case LoadTestType::Constant:
-            return std::make_unique<ConstantLoadStrategy>();
-        case LoadTestType::Iterations:
-            return std::make_unique<IterationsLoadStrategy>();
-        case LoadTestType::RampUp:
-            return std::make_unique<RampUpLoadStrategy>();
+    case LoadTestType::Constant:
+        return std::make_unique<ConstantLoadStrategy> ();
+    case LoadTestType::Iterations:
+        return std::make_unique<IterationsLoadStrategy> ();
+    case LoadTestType::RampUp: return std::make_unique<RampUpLoadStrategy> ();
     }
 
-    return std::make_unique<ConstantLoadStrategy>();
+    return std::make_unique<ConstantLoadStrategy> ();
 }
 
-}  // namespace vayu::core
+} // namespace vayu::core

@@ -32,19 +32,20 @@ namespace vayu::http {
 namespace detail {
 class EventLoopImpl;
 class ThreadPoolImpl;
-}  // namespace detail
+} // namespace detail
 
 /**
  * @brief Callback invoked when a request completes
  */
-using RequestCallback = std::function<void(size_t request_id, Result<Response>)>;
+using RequestCallback = std::function<void (size_t request_id, Result<Response>)>;
 
 /**
  * @brief Progress callback for tracking request progress
  */
-using ProgressCallback = std::function<void(size_t request_id, size_t downloaded, size_t total)>;
+using ProgressCallback =
+std::function<void (size_t request_id, size_t downloaded, size_t total)>;
 
-using BatchResult = vayu::BatchResult;
+using BatchResult    = vayu::BatchResult;
 using EventLoopStats = vayu::EventLoopStats;
 
 /**
@@ -119,31 +120,31 @@ struct RequestHandle {
  * @endcode
  */
 class EventLoop {
-public:
+    public:
     /**
      * @brief Construct a new Event Loop
      */
-    explicit EventLoop(EventLoopConfig config = {});
+    explicit EventLoop (EventLoopConfig config = {});
 
     /**
      * @brief Destructor - stops the event loop if running
      */
-    ~EventLoop();
+    ~EventLoop ();
 
     // Non-copyable
-    EventLoop(const EventLoop&) = delete;
-    EventLoop& operator=(const EventLoop&) = delete;
+    EventLoop (const EventLoop&)            = delete;
+    EventLoop& operator= (const EventLoop&) = delete;
 
     // Movable (only when stopped)
-    EventLoop(EventLoop&&) noexcept;
-    EventLoop& operator=(EventLoop&&) noexcept;
+    EventLoop (EventLoop&&) noexcept;
+    EventLoop& operator= (EventLoop&&) noexcept;
 
     /**
      * @brief Start the event loop thread
      *
      * Must be called before submitting requests.
      */
-    void start();
+    void start ();
 
     /**
      * @brief Stop the event loop
@@ -151,12 +152,12 @@ public:
      * Waits for all pending requests to complete.
      * @param wait_for_pending If true, waits for pending requests; if false, cancels them
      */
-    void stop(bool wait_for_pending = true);
+    void stop (bool wait_for_pending = true);
 
     /**
      * @brief Check if the event loop is running
      */
-    [[nodiscard]] bool is_running() const;
+    [[nodiscard]] bool is_running () const;
 
     /**
      * @brief Submit a request with a callback
@@ -166,9 +167,9 @@ public:
      * @param progress Optional progress callback
      * @return Request ID for tracking
      */
-    size_t submit(const Request& request,
-                  RequestCallback callback = nullptr,
-                  ProgressCallback progress = nullptr);
+    size_t submit (const Request& request,
+    RequestCallback callback  = nullptr,
+    ProgressCallback progress = nullptr);
 
     /**
      * @brief Submit a request and get a future
@@ -176,7 +177,7 @@ public:
      * @param request The HTTP request to send
      * @return RequestHandle with ID and future for the result
      */
-    [[nodiscard]] RequestHandle submit_async(const Request& request);
+    [[nodiscard]] RequestHandle submit_async (const Request& request);
 
     /**
      * @brief Cancel a pending request
@@ -184,7 +185,7 @@ public:
      * @param request_id The ID returned from submit()
      * @return true if the request was cancelled, false if already completed
      */
-    bool cancel(size_t request_id);
+    bool cancel (size_t request_id);
 
     /**
      * @brief Execute a batch of requests and wait for all to complete
@@ -194,29 +195,29 @@ public:
      * @param requests Vector of requests to execute
      * @return BatchResult with all responses and statistics
      */
-    [[nodiscard]] BatchResult execute_batch(const std::vector<Request>& requests);
+    [[nodiscard]] BatchResult execute_batch (const std::vector<Request>& requests);
 
     /**
      * @brief Get number of active (in-flight) requests
      */
-    [[nodiscard]] size_t active_count() const;
+    [[nodiscard]] size_t active_count () const;
 
     /**
      * @brief Get number of pending (queued) requests
      */
-    [[nodiscard]] size_t pending_count() const;
+    [[nodiscard]] size_t pending_count () const;
 
     /**
      * @brief Get total requests processed since start
      */
-    [[nodiscard]] size_t total_processed() const;
+    [[nodiscard]] size_t total_processed () const;
 
     /**
      * @brief Get comprehensive statistics about the event loop
      */
-    [[nodiscard]] EventLoopStats stats() const;
+    [[nodiscard]] EventLoopStats stats () const;
 
-private:
+    private:
     std::unique_ptr<detail::EventLoopImpl> impl_;
 };
 
@@ -227,58 +228,59 @@ private:
  * Simpler but may use more resources for very high concurrency.
  */
 class ThreadPool {
-public:
+    public:
     /**
      * @brief Construct a thread pool
      * @param num_threads Number of worker threads (default: hardware concurrency)
      */
-    explicit ThreadPool(size_t num_threads = 0);
+    explicit ThreadPool (size_t num_threads = 0);
 
     /**
      * @brief Destructor - stops all threads
      */
-    ~ThreadPool();
+    ~ThreadPool ();
 
     // Non-copyable, non-movable
-    ThreadPool(const ThreadPool&) = delete;
-    ThreadPool& operator=(const ThreadPool&) = delete;
+    ThreadPool (const ThreadPool&)            = delete;
+    ThreadPool& operator= (const ThreadPool&) = delete;
 
     /**
      * @brief Execute requests in parallel using the pool
      */
-    [[nodiscard]] BatchResult execute_batch(const std::vector<Request>& requests);
+    [[nodiscard]] BatchResult execute_batch (const std::vector<Request>& requests);
 
     /**
      * @brief Get number of worker threads
      */
-    [[nodiscard]] size_t thread_count() const;
+    [[nodiscard]] size_t thread_count () const;
 
     /**
      * @brief Get number of queued tasks
      */
-    [[nodiscard]] size_t queue_size() const;
+    [[nodiscard]] size_t queue_size () const;
 
     /**
      * @brief Submit a task to the thread pool
      */
     template <typename F, typename... Args>
-    auto submit(F&& f, Args&&... args) -> std::future<std::invoke_result_t<F, Args...>> {
+    auto submit (F&& f, Args&&... args)
+    -> std::future<std::invoke_result_t<F, Args...>> {
         using return_type = std::invoke_result_t<F, Args...>;
 
-        auto task = std::make_shared<std::packaged_task<return_type()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+        auto task = std::make_shared<std::packaged_task<return_type ()>> (
+        std::bind (std::forward<F> (f), std::forward<Args> (args)...));
 
-        std::future<return_type> result = task->get_future();
+        std::future<return_type> result = task->get_future ();
 
-        submit_impl([task]() { (*task)(); });
+        submit_impl ([task] () { (*task) (); });
 
         return result;
     }
 
-private:
-    void submit_impl(std::function<void()> task);
+    private:
+    void submit_impl (std::function<void ()> task);
 
     std::unique_ptr<detail::ThreadPoolImpl> impl_;
 };
 
-}  // namespace vayu::http
+} // namespace vayu::http

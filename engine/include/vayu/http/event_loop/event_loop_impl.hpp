@@ -27,32 +27,32 @@ class EventLoopWorker;
  * statistics from all workers.
  */
 class EventLoopImpl {
-public:
-    explicit EventLoopImpl(EventLoopConfig cfg);
-    ~EventLoopImpl();
+    public:
+    explicit EventLoopImpl (EventLoopConfig cfg);
+    ~EventLoopImpl ();
 
-    void start();
-    void stop(bool wait_for_pending);
+    void start ();
+    void stop (bool wait_for_pending);
 
-    size_t submit(const Request& request, RequestCallback callback, ProgressCallback progress);
-    RequestHandle submit_async(const Request& request);
-    bool cancel(size_t request_id);
-    BatchResult execute_batch(const std::vector<Request>& requests);
+    size_t submit (const Request& request, RequestCallback callback, ProgressCallback progress);
+    RequestHandle submit_async (const Request& request);
+    bool cancel (size_t request_id);
+    BatchResult execute_batch (const std::vector<Request>& requests);
 
-    size_t active_count() const;
-    size_t pending_count() const;
-    size_t total_processed() const;
-    EventLoopStats stats() const;
+    size_t active_count () const;
+    size_t pending_count () const;
+    size_t total_processed () const;
+    EventLoopStats stats () const;
 
-    std::atomic<bool> running{false};
+    std::atomic<bool> running{ false };
 
-private:
-    void submit(std::unique_ptr<TransferData> data);
+    private:
+    void submit (std::unique_ptr<TransferData> data);
 
     EventLoopConfig config;
     std::vector<std::unique_ptr<EventLoopWorker>> workers;
-    std::atomic<size_t> next_worker{0};
-    std::atomic<size_t> next_request_id{1};
+    std::atomic<size_t> next_worker{ 0 };
+    std::atomic<size_t> next_request_id{ 1 };
 };
 
-}  // namespace vayu::http::detail
+} // namespace vayu::http::detail

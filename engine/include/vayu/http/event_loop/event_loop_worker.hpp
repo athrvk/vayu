@@ -35,22 +35,22 @@ struct TransferData;
  * overwhelming the system DNS resolver under high load.
  */
 class DnsCache {
-public:
+    public:
     /// Pre-resolve a hostname and cache the result
     /// Returns the resolved IP or empty string on failure
-    std::string resolve(const std::string& hostname);
+    std::string resolve (const std::string& hostname);
 
     /// Get cached IP for hostname (empty if not cached)
-    std::string get(const std::string& hostname) const;
+    std::string get (const std::string& hostname) const;
 
     /// Get curl-compatible resolve entry: "hostname:port:ip"
     /// Returns nullptr if not cached
-    struct curl_slist* get_resolve_list(const std::string& hostname, int port);
+    struct curl_slist* get_resolve_list (const std::string& hostname, int port);
 
     /// Clear the cache
-    void clear();
+    void clear ();
 
-private:
+    private:
     mutable std::shared_mutex mutex_;
     std::unordered_map<std::string, std::string> cache_;
 };
@@ -66,39 +66,39 @@ private:
  * EventLoopWorker thread. Each worker has its own pool instance.
  */
 class CurlHandlePool {
-public:
-    explicit CurlHandlePool(size_t initial_size = 100);
-    ~CurlHandlePool();
+    public:
+    explicit CurlHandlePool (size_t initial_size = 100);
+    ~CurlHandlePool ();
 
     // Prevent copying
-    CurlHandlePool(const CurlHandlePool&) = delete;
-    CurlHandlePool& operator=(const CurlHandlePool&) = delete;
+    CurlHandlePool (const CurlHandlePool&)            = delete;
+    CurlHandlePool& operator= (const CurlHandlePool&) = delete;
 
     /// Acquire a handle from the pool (or create new if empty)
     /// The handle is reset and ready for configuration
     /// NOTE: Not thread-safe - call only from owning worker thread
-    CURL* acquire();
+    CURL* acquire ();
 
     /// Return a handle to the pool for reuse
     /// NOTE: Not thread-safe - call only from owning worker thread
-    void release(CURL* handle);
+    void release (CURL* handle);
 
     /// Get pool statistics
-    size_t pool_size() const {
-        return pool_.size();
+    size_t pool_size () const {
+        return pool_.size ();
     }
-    size_t total_created() const {
+    size_t total_created () const {
         return total_created_;
     }
-    size_t total_reused() const {
+    size_t total_reused () const {
         return total_reused_;
     }
 
-private:
+    private:
     // No mutex needed - single-threaded access per worker
     std::queue<CURL*> pool_;
-    size_t total_created_{0};
-    size_t total_reused_{0};
+    size_t total_created_{ 0 };
+    size_t total_reused_{ 0 };
 };
 
 /**
@@ -111,43 +111,43 @@ private:
  * - Rate limiter for controlling throughput
  */
 class EventLoopWorker {
-public:
-    explicit EventLoopWorker(const EventLoopConfig& cfg);
-    ~EventLoopWorker();
+    public:
+    explicit EventLoopWorker (const EventLoopConfig& cfg);
+    ~EventLoopWorker ();
 
     // Prevent copying
-    EventLoopWorker(const EventLoopWorker&) = delete;
-    EventLoopWorker& operator=(const EventLoopWorker&) = delete;
+    EventLoopWorker (const EventLoopWorker&)            = delete;
+    EventLoopWorker& operator= (const EventLoopWorker&) = delete;
 
-    void start();
-    void stop(bool wait_for_pending);
-    void submit(std::unique_ptr<TransferData> data);
+    void start ();
+    void stop (bool wait_for_pending);
+    void submit (std::unique_ptr<TransferData> data);
 
-    size_t active_count() const;
-    size_t pending_count() const;
+    size_t active_count () const;
+    size_t pending_count () const;
 
     // Thread-local stats (lock-free)
-    std::atomic<size_t> local_processed{0};
+    std::atomic<size_t> local_processed{ 0 };
 
-private:
+    private:
     // Allow EventLoopImpl to access private members for cancellation and cleanup
     friend class EventLoopImpl;
 
-    void run_loop();
+    void run_loop ();
 
     CURLM* multi_handle = nullptr;
     std::thread thread;
-    std::atomic<bool> running{false};
-    std::atomic<bool> stop_requested{false};
+    std::atomic<bool> running{ false };
+    std::atomic<bool> stop_requested{ false };
 
     // Lock-free queue for high performance
     vayu::core::SPSCQueue<std::unique_ptr<TransferData>> pending_queue;
 
     // Notification for worker when queue is empty
-    std::atomic<bool> queue_has_items{false};
+    std::atomic<bool> queue_has_items{ false };
 
     // Atomic counter for active transfers to avoid locking in hot loop
-    std::atomic<size_t> current_active_count{0};
+    std::atomic<size_t> current_active_count{ 0 };
 
     // Only accessed by worker thread - no mutex needed
     std::unordered_map<CURL*, std::unique_ptr<TransferData>> active_transfers;
@@ -162,4 +162,4 @@ private:
     CurlHandlePool handle_pool_;
 };
 
-}  // namespace vayu::http::detail
+} // namespace vayu::http::detail

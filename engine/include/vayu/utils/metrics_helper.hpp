@@ -22,8 +22,8 @@ namespace vayu::utils {
  * and handle metric aggregation logic.
  */
 class MetricsHelper {
-public:
-    using RunSummary = vayu::RunSummary;
+    public:
+    using RunSummary     = vayu::RunSummary;
     using DetailedReport = vayu::DetailedReport;
 
     /**
@@ -31,7 +31,7 @@ public:
      * @param context The active run context containing atomic counters.
      * @return RunSummary with computed metrics.
      */
-    static RunSummary calculate_summary(const vayu::core::RunContext& context);
+    static RunSummary calculate_summary (const vayu::core::RunContext& context);
 
     /**
      * Calculates a detailed report from a list of results.
@@ -39,8 +39,8 @@ public:
      * @param duration_s The total duration of the test in seconds.
      * @return DetailedReport with computed statistics.
      */
-    static DetailedReport calculate_detailed_report(const std::vector<vayu::db::Result>& results,
-                                                    double duration_s);
+    static DetailedReport
+    calculate_detailed_report (const std::vector<vayu::db::Result>& results, double duration_s);
 
     /**
      * Creates a JSON response for a stopped run with summary metrics.
@@ -48,15 +48,15 @@ public:
      * @param summary The computed summary metrics.
      * @return JSON object with status, runId, and summary.
      */
-    static nlohmann::json create_stop_response(const std::string& run_id,
-                                               const RunSummary& summary);
+    static nlohmann::json
+    create_stop_response (const std::string& run_id, const RunSummary& summary);
 
     /**
      * Creates a JSON response for an inactive run.
      * @param run_id The unique identifier of the run.
      * @return JSON object with status, runId, and message.
      */
-    static nlohmann::json create_inactive_response(const std::string& run_id);
+    static nlohmann::json create_inactive_response (const std::string& run_id);
 
     /**
      * Creates a JSON response for a run that's already in a terminal state.
@@ -64,8 +64,8 @@ public:
      * @param status The current status of the run (completed/stopped/failed).
      * @return JSON object with status, runId, and message.
      */
-    static nlohmann::json create_already_stopped_response(const std::string& run_id,
-                                                          const std::string& status);
+    static nlohmann::json create_already_stopped_response (const std::string& run_id,
+    const std::string& status);
 
     /**
      * Waits for a run to stop gracefully with a timeout.
@@ -73,7 +73,8 @@ public:
      * @param timeout_seconds Maximum time to wait for graceful shutdown.
      * @return true if the run stopped within the timeout, false otherwise.
      */
-    static bool wait_for_graceful_stop(vayu::core::RunContext& context, int timeout_seconds = 5);
+    static bool wait_for_graceful_stop (vayu::core::RunContext& context,
+    int timeout_seconds = 5);
 };
 
-}  // namespace vayu::utils
+} // namespace vayu::utils

@@ -33,7 +33,7 @@ struct RateLimiterConfig {
     /**
      * @brief Whether rate limiting is enabled
      */
-    bool enabled() const {
+    bool enabled () const {
         return target_rps > 0.0;
     }
 };
@@ -63,13 +63,13 @@ struct RateLimiterConfig {
  * @endcode
  */
 class RateLimiter {
-public:
+    public:
     /**
      * @brief Construct a rate limiter
      *
      * @param config Rate limiter configuration
      */
-    explicit RateLimiter(RateLimiterConfig config = {});
+    explicit RateLimiter (RateLimiterConfig config = {});
 
     /**
      * @brief Acquire a token (blocks if necessary)
@@ -78,14 +78,14 @@ public:
      * Returns immediately if rate limiting is disabled.
      * Thread-safe.
      */
-    void acquire();
+    void acquire ();
 
     /**
      * @brief Try to acquire a token without blocking (thread-safe)
      *
      * @return true if token acquired, false if no tokens available
      */
-    bool try_acquire();
+    bool try_acquire ();
 
     /**
      * @brief Try to acquire a token without blocking (NOT thread-safe)
@@ -96,27 +96,27 @@ public:
      *
      * @return true if token acquired, false if no tokens available
      */
-    bool try_acquire_unlocked();
+    bool try_acquire_unlocked ();
 
     /**
      * @brief Reset the rate limiter state
      */
-    void reset();
+    void reset ();
 
     /**
      * @brief Check if rate limiting is enabled
      */
-    bool enabled() const {
-        return config_.enabled();
+    bool enabled () const {
+        return config_.enabled ();
     }
 
     /**
      * @brief Get current token count (for testing/monitoring)
      */
-    double available_tokens() const;
+    double available_tokens () const;
 
-private:
-    void refill_tokens();
+    private:
+    void refill_tokens ();
 
     RateLimiterConfig config_;
     mutable std::mutex mutex_;
@@ -125,4 +125,4 @@ private:
     std::chrono::steady_clock::time_point last_refill_;
 };
 
-}  // namespace vayu::http
+} // namespace vayu::http
