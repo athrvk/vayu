@@ -56,6 +56,16 @@ func main() {
 		atomic.AddInt64(&totalLatencyNs, time.Since(start).Nanoseconds())
 	})
 
+	//echo string
+	mux.HandleFunc("/string", func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		atomic.AddInt64(&totalRequests, 1)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`hello world`))
+
+		atomic.AddInt64(&totalLatencyNs, time.Since(start).Nanoseconds())
+	})
+
 	// Fast endpoint - minimal processing
 	mux.HandleFunc("/fast", func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
