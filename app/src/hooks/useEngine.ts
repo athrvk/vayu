@@ -108,13 +108,11 @@ export function useEngine(): UseEngineReturn {
 					: undefined;
 
 				const payload: StartLoadTestRequest = {
-					// The HTTP request configuration
-					request: {
-						method: request.method,
-						url: request.url,
-						headers: request.headers,
-						body: bodyPayload,
-					},
+					// HTTP request fields at root level (flat structure)
+					method: request.method,
+					url: request.url,
+					headers: request.headers,
+					body: bodyPayload,
 					// Load test strategy
 					mode:
 						config.mode === "constant_rps" || config.mode === "constant_concurrency"

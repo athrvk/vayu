@@ -139,19 +139,17 @@ export interface ExecuteRequestResponse extends SanityResult {}
 
 /**
  * StartLoadTestRequest - Matches POST /run backend endpoint
- * The backend expects:
- * - request: HTTP request configuration object
+ * The backend expects a flat structure with:
+ * - HTTP request fields (method, url, headers, body) at root level
  * - mode: "constant" | "iterations" | "ramp_up"
  * - Mode-specific params (duration, targetRps, iterations, concurrency, etc.)
  */
 export interface StartLoadTestRequest {
-	// The HTTP request to execute
-	request: {
-		method: string;
-		url: string;
-		headers?: Record<string, string>;
-		body?: any;
-	};
+	// HTTP request fields (same structure as ExecuteRequestRequest)
+	method: string;
+	url: string;
+	headers?: Record<string, string>;
+	body?: any;
 
 	// Load test strategy
 	mode: "constant" | "iterations" | "ramp_up";

@@ -397,9 +397,10 @@ void register_execution_routes(RouteContext& ctx) {
         try {
             auto json = nlohmann::json::parse(req.body);
 
-            if (!json.contains("request")) {
-                vayu::utils::log_warning("POST /run - Missing required field: request");
-                send_error(res, 400, "Missing required field: request");
+            // Validate required HTTP request fields (now at root level, same as /request)
+            if (!json.contains("method") || !json.contains("url")) {
+                vayu::utils::log_warning("POST /run - Missing required fields: method, url");
+                send_error(res, 400, "Missing required fields: method, url");
                 return;
             }
 
@@ -425,14 +426,9 @@ void register_execution_routes(RouteContext& ctx) {
             int rps = json.value("rps", json.value("targetRps", 0));
             int concurrency = json.value("concurrency", 1);
 
-            // Extract request details for logging
-            std::string method_str = "UNKNOWN";
-            std::string url_str = "UNKNOWN";
-            if (json.contains("request")) {
-                auto& req_json = json["request"];
-                method_str = req_json.value("method", "UNKNOWN");
-                url_str = req_json.value("url", "UNKNOWN");
-            }
+            // Extract request details for logging (now at root level)
+            std::string method_str = json.value("method", "UNKNOWN");
+            std::string url_str = json.value("url", "UNKNOWN");
 
             // Create DB run record
             vayu::db::Run run;

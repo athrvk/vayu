@@ -36,11 +36,11 @@ export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelecte
 		return formatRelativeTime(new Date(timestamp).toISOString());
 	};
 
-	// Get URL and method from configSnapshot
+	// Get URL and method from configSnapshot (unified flat structure)
 	const getRequestInfo = () => {
 		if (!run.configSnapshot) return { url: null, method: null };
-		const url = run.configSnapshot.request?.url || run.configSnapshot.url || null;
-		const method = run.configSnapshot.request?.method || run.configSnapshot.method || "GET";
+		const url = run.configSnapshot.url || null;
+		const method = run.configSnapshot.method || "GET";
 		return { url, method };
 	};
 
@@ -137,13 +137,13 @@ export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelecte
 								className={cn(
 									"text-[10px] h-5 px-1.5 font-mono shrink-0",
 									method === "GET" &&
-										"bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900",
+									"bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900",
 									method === "POST" &&
-										"bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-400 dark:border-green-900",
+									"bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-400 dark:border-green-900",
 									method === "PUT" &&
-										"bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-900",
+									"bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-900",
 									method === "DELETE" &&
-										"bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900"
+									"bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900"
 								)}
 							>
 								{method}
@@ -159,27 +159,27 @@ export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelecte
 				)}
 
 				{/* Config Info (if load test) */}
-				{run.type === "load" && run.configSnapshot?.configuration && (
+				{run.type === "load" && run.configSnapshot && (
 					<div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1.5 flex-wrap">
-						{run.configSnapshot.configuration.duration && (
+						{run.configSnapshot.duration && (
 							<span className="flex items-center gap-1 shrink-0">
 								<Clock className="w-3 h-3" />
-								{run.configSnapshot.configuration.duration}
+								{run.configSnapshot.duration}
 							</span>
 						)}
-						{run.configSnapshot.configuration.concurrency && (
+						{run.configSnapshot.concurrency && (
 							<span className="flex items-center gap-1 shrink-0">
 								<Activity className="w-3 h-3" />
-								{run.configSnapshot.configuration.concurrency} workers
+								{run.configSnapshot.concurrency} workers
 							</span>
 						)}
 					</div>
 				)}
 
 				{/* Comment if exists */}
-				{run.configSnapshot?.configuration?.comment && (
+				{run.configSnapshot?.comment && (
 					<p className="text-xs text-muted-foreground italic mt-1.5 break-words">
-						"{run.configSnapshot.configuration.comment}"
+						"{run.configSnapshot.comment}"
 					</p>
 				)}
 			</div>

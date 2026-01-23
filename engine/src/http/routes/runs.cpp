@@ -279,15 +279,10 @@ void register_run_routes(RouteContext& ctx) {
 
                 try {
                     auto config = nlohmann::json::parse(run->config_snapshot);
-                    if (config.contains("request")) {
-                        auto req_config = config["request"];
-                        if (req_config.contains("url")) metadata["requestUrl"] = req_config["url"];
-                        if (req_config.contains("method"))
-                            metadata["requestMethod"] = req_config["method"];
-                    }
+                    // HTTP request fields are at root level (unified structure)
                     if (config.contains("url")) {
                         metadata["requestUrl"] = config["url"];
-                    }  
+                    }
                     if (config.contains("method")) {
                         metadata["requestMethod"] = config["method"];
                     }

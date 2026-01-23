@@ -69,13 +69,11 @@ void validate_scripts(std::shared_ptr<RunContext> context, vayu::db::Database& d
     vayu::runtime::ScriptEngine engine;
     vayu::Environment env;
 
-    // Build a dummy request for script context
+    // Build a dummy request for script context (HTTP request fields are at root level)
     vayu::Request dummy_request;
-    if (context->config.contains("request")) {
-        auto request_result = vayu::json::deserialize_request(context->config["request"]);
-        if (request_result.is_ok()) {
-            dummy_request = request_result.value();
-        }
+    auto request_result = vayu::json::deserialize_request(context->config);
+    if (request_result.is_ok()) {
+        dummy_request = request_result.value();
     }
 
     size_t passed = 0;
@@ -198,12 +196,8 @@ RunContext::RunContext(const std::string& id, nlohmann::json cfg)
         static_cast<size_t>(config.value("max_response_samples", 1000));
     mc_config.response_sample_rate = static_cast<size_t>(config.value("response_sample_rate", 100));
 
-    // Extract test script from request if present
-    if (config.contains("request") && config["request"].contains("tests")) {
-        test_script = config["request"]["tests"].get<std::string>();
-    }
-    // Also check top-level tests field
-    if (test_script.empty() && config.contains("tests")) {
+    // Extract test script from config (now at root level)
+    if (config.contains("tests")) {
         test_script = config["tests"].get<std::string>();
     }
 
@@ -331,9 +325,8 @@ void execute_load_test(std::shared_ptr<RunContext> context,
         context->event_loop = std::make_unique<vayu::http::EventLoop>(loop_config);
         context->event_loop->start();
 
-        // Parse request
-        auto request_json = config["request"];
-        auto request_result = vayu::json::deserialize_request(request_json);
+        // Parse request (HTTP request fields are at root level)
+        auto request_result = vayu::json::deserialize_request(config);
         if (request_result.is_error()) {
             db.update_run_status(context->run_id, vayu::RunStatus::Failed);
             context->is_running = false;

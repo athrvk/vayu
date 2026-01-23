@@ -315,23 +315,22 @@ Start a load test run (Vayu Mode).
 **Request:**
 ```json
 {
-  "request": {
-    "method": "GET",
-    "url": "https://api.example.com/users",
-    "headers": {},
-    "body": {
-      "type": "none",
-      "content": ""
-    }
+  "method": "GET",
+  "url": "https://api.example.com/users",
+  "headers": {},
+  "body": {
+    "type": "none",
+    "content": ""
   },
   "mode": "constant",        // "constant", "ramp_up", or "iterations"
-  "virtualUsers": 100,       // Number of concurrent users
-  "duration": 60,            // Duration in seconds (for constant/ramp_up)
-  "rampUp": 10,              // Ramp-up time in seconds (for ramp_up mode)
-  "iterations": 0,           // Number of iterations per user (for iterations mode)
+  "concurrency": 100,        // Number of concurrent workers
+  "duration": "60s",         // Duration (for constant/ramp_up modes)
+  "rampUpDuration": "10s",   // Ramp-up time (for ramp_up mode)
+  "iterations": 0,           // Number of iterations (for iterations mode)
   "targetRps": 1000,         // Optional, target requests per second
+  "requestId": "req_1234567890",      // Optional, links to saved request
   "environmentId": "env_1234567890",  // Optional
-  "testScript": ""           // Optional, deferred validation script
+  "tests": ""                // Optional, deferred validation script
 }
 ```
 

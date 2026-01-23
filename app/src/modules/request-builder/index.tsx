@@ -150,16 +150,16 @@ export default function RequestBuilder() {
 					auth:
 						request.authType !== "none"
 							? {
-									type:
-										request.authType === "bearer"
-											? "bearer"
-											: request.authType === "basic"
-												? "basic"
-												: request.authType === "api-key"
+								type:
+									request.authType === "bearer"
+										? "bearer"
+										: request.authType === "basic"
+											? "basic"
+											: request.authType === "api-key"
 												? "api-key"
-													: "bearer",
-									...resolvedAuthConfig,
-								}
+												: "bearer",
+								...resolvedAuthConfig,
+							}
 							: undefined,
 					preRequestScript: request.preRequestScript || undefined,
 					postRequestScript: request.testScript || undefined,
@@ -268,16 +268,16 @@ export default function RequestBuilder() {
 				auth:
 					request.authType !== "none"
 						? {
-								type:
-									request.authType === "bearer"
-										? "bearer"
-										: request.authType === "basic"
-											? "basic"
-											: request.authType === "api-key"
+							type:
+								request.authType === "bearer"
+									? "bearer"
+									: request.authType === "basic"
+										? "basic"
+										: request.authType === "api-key"
 											? "api-key"
-												: "bearer",
-								...request.authConfig,
-							}
+											: "bearer",
+							...request.authConfig,
+						}
 						: undefined,
 				preRequestScript: request.preRequestScript || undefined,
 				postRequestScript: request.testScript || undefined,
@@ -313,19 +313,19 @@ export default function RequestBuilder() {
 				// Build body in the format backend expects: { mode, content }
 				const bodyPayload = resolvedBody
 					? {
-							mode: pendingLoadTestRequest.bodyMode || "text",
-							content: resolvedBody,
-						}
+						mode: pendingLoadTestRequest.bodyMode || "text",
+						content: resolvedBody,
+					}
 					: undefined;
 
-				// Convert LoadTestConfig to StartLoadTestRequest
+				// Convert LoadTestConfig to StartLoadTestRequest (flat structure)
 				const apiRequest: StartLoadTestRequest = {
-					request: {
-						method: pendingLoadTestRequest.method,
-						url: resolvedUrl,
-						headers: resolvedHeaders,
-						body: bodyPayload,
-					},
+					// HTTP request fields at root level
+					method: pendingLoadTestRequest.method,
+					url: resolvedUrl,
+					headers: resolvedHeaders,
+					body: bodyPayload,
+					// Load test config
 					mode:
 						config.mode === "constant_rps"
 							? "constant"
@@ -364,8 +364,8 @@ export default function RequestBuilder() {
 						comment: apiRequest.comment,
 					},
 					{
-						method: apiRequest.request.method,
-						url: apiRequest.request.url,
+						method: apiRequest.method,
+						url: apiRequest.url,
 					}
 				);
 
