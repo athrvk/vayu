@@ -151,7 +151,7 @@ function Write-Step {
     Write-Host ''
     Write-Host "[$script:CurrentStep/$script:TotalSteps] " -ForegroundColor $InfoColor -NoNewline
     Write-Host $Message -ForegroundColor White
-    Write-Host ("-" * 60) -ForegroundColor $DetailColor
+    Write-Host ('-' * 60) -ForegroundColor $DetailColor
 }
 
 # Paths
@@ -688,10 +688,10 @@ function Main {
     }
     
     Write-Host ''
-    Write-Host ("  " + ("=" * 38)) -ForegroundColor Cyan
-    Write-Host "  =  VAYU BUILD SCRIPT             =" -ForegroundColor Cyan
-    Write-Host "  =  Platform: Windows             =" -ForegroundColor Cyan
-    Write-Host ("  " + ("=" * 38)) -ForegroundColor Cyan
+    Write-Host ('  ' + ('=' * 38)) -ForegroundColor Cyan
+    Write-Host '  =  VAYU BUILD SCRIPT             =' -ForegroundColor Cyan
+    Write-Host '  =  Platform: Windows             =' -ForegroundColor Cyan
+    Write-Host ('  ' + ('=' * 38)) -ForegroundColor Cyan
     Write-Host ''
     Write-Host '  Mode: ' -ForegroundColor DarkGray -NoNewline
     Write-Host $BuildMode.ToUpper() -ForegroundColor White -NoNewline
@@ -735,9 +735,9 @@ function Main {
     $Elapsed = [math]::Round(($EndTime - $StartTime).TotalSeconds)
     
     Write-Host ''
-    Write-Host ("  " + ("=" * 38)) -ForegroundColor Green
-    Write-Host "  =  BUILD SUCCESSFUL              =" -ForegroundColor Green
-    Write-Host ("  " + ("=" * 38)) -ForegroundColor Green
+    Write-Host ('  ' + ('=' * 38)) -ForegroundColor Green
+    Write-Host '  =  BUILD SUCCESSFUL              =' -ForegroundColor Green
+    Write-Host ('  ' + ('=' * 38)) -ForegroundColor Green
     Write-Host ''
     Write-Host '  Total time: ' -ForegroundColor DarkGray -NoNewline
     Write-Host "${Elapsed}s" -ForegroundColor White
@@ -748,7 +748,7 @@ function Main {
         $RelativeAppPath = Resolve-Path -Path $AppDir -Relative
         
         Write-Host '  Next Steps:' -ForegroundColor White
-        Write-Host ('  ' + ("-" * 38)) -ForegroundColor DarkGray
+        Write-Host ('  ' + ('-' * 38)) -ForegroundColor DarkGray
         Write-Host '  To start the Electron app in development mode:'
         Write-Host ''
         Write-Host "  cd $RelativeAppPath; pnpm run electron:dev" -ForegroundColor Cyan
@@ -756,7 +756,7 @@ function Main {
     }
     else {
         Write-Host '  Build Artifacts:' -ForegroundColor White
-        Write-Host ('  ' + ("-" * 38)) -ForegroundColor DarkGray
+        Write-Host ('  ' + ('-' * 38)) -ForegroundColor DarkGray
         $releaseDir = Join-Path $AppDir 'release'
         $installerPaths = @()
         if (Test-Path $releaseDir) {
@@ -770,7 +770,7 @@ function Main {
         }
         Write-Host ''
         Write-Host '  Installation:' -ForegroundColor White
-        Write-Host ('  ' + ("-" * 38)) -ForegroundColor DarkGray
+        Write-Host ('  ' + ('-' * 38)) -ForegroundColor DarkGray
         if ($installerPaths.Count -gt 0) {
             Write-Host '  1. Run the installer:'
             foreach ($path in $installerPaths) {
@@ -794,9 +794,9 @@ try {
 }
 catch {
     Write-Host ''
-    Write-Host ("  " + ("=" * 38)) -ForegroundColor Red
-    Write-Host "  =  BUILD FAILED                  =" -ForegroundColor Red
-    Write-Host ("  " + ("=" * 38)) -ForegroundColor Red
+    Write-Host ('  ' + ('=' * 38)) -ForegroundColor Red
+    Write-Host '  =  BUILD FAILED                  =' -ForegroundColor Red
+    Write-Host ('  ' + ('=' * 38)) -ForegroundColor Red
     Write-Host ''
     Write-Host "  Error: $_" -ForegroundColor Red
     Write-Host ''
