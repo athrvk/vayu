@@ -1,0 +1,4 @@
+---
+# QuickJS integration - disable all checks
+Checks: '-*'
+...

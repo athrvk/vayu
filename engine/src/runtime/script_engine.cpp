@@ -8,7 +8,11 @@
 /**
  * @file script_engine.cpp
  * @brief QuickJS-based JavaScript scripting engine implementation
+ *
+ * This file interfaces with QuickJS C library and uses different coding conventions.
  */
+
+// NOLINTBEGIN
 
 #include "vayu/runtime/script_engine.hpp"
 
@@ -1216,3 +1220,5 @@ std::string ScriptEngine::version () {
 #endif // VAYU_HAS_QUICKJS
 
 } // namespace vayu::runtime
+
+// NOLINTEND

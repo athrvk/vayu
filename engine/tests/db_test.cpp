@@ -12,6 +12,7 @@
 namespace vayu::db {
 namespace {
 const std::string TEST_DB_PATH = "test_vayu.db";
+const std::string TEST_DB_BACKUP_PATH = "test_vayu.db.bak";
 
 class DatabaseTest : public ::testing::Test {
     protected:
@@ -38,6 +39,9 @@ class DatabaseTest : public ::testing::Test {
         }
         if (std::filesystem::exists (TEST_DB_PATH + "-shm")) {
             std::filesystem::remove (TEST_DB_PATH + "-shm");
+        }
+        if (std::filesystem::exists (TEST_DB_BACKUP_PATH)) {
+            std::filesystem::remove (TEST_DB_BACKUP_PATH);
         }
     }
 };

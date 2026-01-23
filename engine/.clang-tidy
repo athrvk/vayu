@@ -5,10 +5,13 @@ Checks: '
   modernize-*,
   performance-*,
   readability-*,
+  -bugprone-easily-swappable-parameters,
   -modernize-use-trailing-return-type,
+  -readability-convert-member-functions-to-static,
+  -readability-identifier-length,
   -readability-magic-numbers
 '
 WarningsAsErrors: ''
-HeaderFilterRegex: 'src/.*|include/.*'
+HeaderFilterRegex: 'src/.*|include/.*|tests/.*'
 FormatStyle: file
 ...
