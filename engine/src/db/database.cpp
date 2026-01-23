@@ -315,13 +315,15 @@ struct Database::Impl {
             // These settings require engine restart to take effect and are applied
             // from constants at startup. Users can change them via Settings UI,
             // but changes only apply after restarting the engine.
-            int cache_size = vayu::core::constants::database::CACHE_SIZE_KB;
+            int cache_size_bytes = vayu::core::constants::database::CACHE_SIZE_BYTES;
             int temp_store = vayu::core::constants::database::TEMP_STORE;
             size_t mmap_size = vayu::core::constants::database::MMAP_SIZE_BYTES;
             int wal_checkpoint = vayu::core::constants::database::WAL_AUTOCHECKPOINT;
 
             // Apply optimizations
-            sql << "PRAGMA cache_size = " << cache_size << ";";
+            // SQLite cache_size PRAGMA uses negative KB values (e.g., -64000 = 64MB)
+            int cache_size_kb = -(cache_size_bytes / 1024);
+            sql << "PRAGMA cache_size = " << cache_size_kb << ";";
             int rc = sqlite3_exec(db, sql.str().c_str(), nullptr, nullptr, &err_msg);
             if (rc != SQLITE_OK && err_msg) {
                 vayu::utils::log_warning("Failed to set cache_size: " + std::string(err_msg));
@@ -491,7 +493,7 @@ void Database::init() {
     impl_->storage.pragma.busy_timeout(busy_timeout);
 
     // Log current configuration (other PRAGMAs are set in on_open callback and require restart)
-    int cache_size = get_config_int("dbCacheSize", vayu::core::constants::database::CACHE_SIZE_KB);
+    int cache_size_bytes = get_config_int("dbCacheSize", vayu::core::constants::database::CACHE_SIZE_BYTES);
     int temp_store = get_config_int("dbTempStore", vayu::core::constants::database::TEMP_STORE);
     int mmap_size = get_config_int(
         "dbMmapSize", static_cast<int>(vayu::core::constants::database::MMAP_SIZE_BYTES));
@@ -499,7 +501,7 @@ void Database::init() {
         get_config_int("dbWalAutocheckpoint", vayu::core::constants::database::WAL_AUTOCHECKPOINT);
 
     vayu::utils::log_debug(
-        "Database initialized with WAL mode (cache=" + std::to_string(-cache_size) +
+        "Database initialized with WAL mode (cache=" + std::to_string(cache_size_bytes / 1024) +
         "KB, mmap=" + std::to_string(mmap_size / 1024 / 1024) + "MB, " + "temp_store=" +
         std::to_string(temp_store) + ", " + "wal_checkpoint=" + std::to_string(wal_checkpoint) +
         " pages, " + "busy_timeout=" + std::to_string(busy_timeout) + "ms, " +
@@ -1041,30 +1043,29 @@ void Database::seed_default_config() {
 
     upsert_config(ConfigEntry{
         "dbCacheSize",
-        std::to_string(vayu::core::constants::database::CACHE_SIZE_KB),
+        std::to_string(vayu::core::constants::database::CACHE_SIZE_BYTES),
         "integer",
-        "Database Cache Size",
+        "Database Cache Size (Requires Restart)",
         "Memory used to cache test results and metrics during high-RPS load tests. "
-        "Enter a negative number in KB (e.g., -64000 = 64MB). Larger values reduce disk writes "
-        "when storing thousands of results per second, improving test throughput. "
-        "Recommended: 64-128MB for tests generating 10K+ results/second. Default: 64MB. Requires "
-        "engine restart.",
+        "Larger values reduce disk writes when storing thousands of results per second, "
+        "improving test throughput. "
+        "Recommended: 64-128MB for tests generating 10K+ results/second. Default: 64MB.",
         "database_performance",
-        std::to_string(vayu::core::constants::database::CACHE_SIZE_KB),
-        "-1048576",  // min: -1GB
-        "-1000",     // max: -1MB
+        std::to_string(vayu::core::constants::database::CACHE_SIZE_BYTES),
+        "1048576",      // min: 1MB in bytes
+        "1073741824",   // max: 1GB in bytes
         now});
 
     upsert_config(ConfigEntry{
         "dbTempStore",
         std::to_string(vayu::core::constants::database::TEMP_STORE),
         "integer",
-        "Temporary Tables Storage",
+        "Temporary Tables Storage (Requires Restart)",
         "Where temporary data is stored when generating test reports and aggregating metrics. "
         "Options: 0 = Default (file), 1 = Always use file, 2 = Always use memory. "
         "Memory (2) significantly speeds up report generation and metric calculations during "
         "active tests. "
-        "Recommended for high-frequency reporting. Default: Memory. Requires engine restart.",
+        "Recommended for high-frequency reporting. Default: Memory.",
         "database_performance",
         std::to_string(vayu::core::constants::database::TEMP_STORE),
         "0",
@@ -1074,14 +1075,14 @@ void Database::seed_default_config() {
     upsert_config(ConfigEntry{"dbMmapSize",
                               std::to_string(vayu::core::constants::database::MMAP_SIZE_BYTES),
                               "integer",
-                              "Memory-Mapped I/O Size",
+                              "Memory-Mapped I/O Size (Requires Restart)",
                               "Amount of database file accessed directly from memory when reading "
                               "test results and metrics. "
                               "Example: 268435456 = 256MB. Speeds up dashboard updates and report "
                               "generation by avoiding disk reads. "
                               "Larger values improve real-time metric streaming performance. "
                               "Recommended: 256-512MB for large test runs. "
-                              "Default: 256MB. Requires engine restart.",
+                              "Default: 256MB.",
                               "database_performance",
                               std::to_string(vayu::core::constants::database::MMAP_SIZE_BYTES),
                               "0",           // min: disabled
@@ -1092,13 +1093,12 @@ void Database::seed_default_config() {
         "dbWalAutocheckpoint",
         std::to_string(vayu::core::constants::database::WAL_AUTOCHECKPOINT),
         "integer",
-        "WAL Checkpoint Frequency",
+        "WAL Checkpoint Frequency (Requires Restart)",
         "How often SQLite saves accumulated test results to the main database file (in pages). "
         "During high-RPS tests, results accumulate in the WAL file. Lower values save more "
         "frequently (reduces WAL size, but may slow writes). "
         "Higher values batch saves less often (faster result storage, but WAL file grows larger). "
-        "Recommended: 1000-2000 for tests with 50K+ requests. Default: 1000 pages. Requires engine "
-        "restart.",
+        "Recommended: 1000-2000 for tests with 50K+ requests. Default: 1000 pages.",
         "database_performance",
         std::to_string(vayu::core::constants::database::WAL_AUTOCHECKPOINT),
         "100",
@@ -1109,13 +1109,12 @@ void Database::seed_default_config() {
         "dbBusyTimeout",
         std::to_string(vayu::core::constants::database::BUSY_TIMEOUT_MS),
         "integer",
-        "Database Lock Wait Time",
+        "Database Lock Wait Time (Requires Restart)",
         "How long SQLite waits (in milliseconds) when multiple threads try to write test results "
         "simultaneously. "
         "During high-concurrency load tests, result storage threads compete for database access. "
         "Higher values prevent 'database is locked' errors but may delay error reporting. "
-        "Recommended: 10-30 seconds for tests with 100+ concurrent requests. Default: 10 seconds. "
-        "Requires engine restart.",
+        "Recommended: 10-30 seconds for tests with 100+ concurrent requests. Default: 10 seconds. ",
         "database_performance",
         std::to_string(vayu::core::constants::database::BUSY_TIMEOUT_MS),
         "1000",   // min: 1 second
@@ -1125,14 +1124,14 @@ void Database::seed_default_config() {
     upsert_config(ConfigEntry{"dbSynchronous",
                               std::to_string(vayu::core::constants::database::SYNCHRONOUS),
                               "integer",
-                              "Data Safety Mode",
+                              "Data Safety Mode (Requires Restart)",
                               "How aggressively SQLite ensures test results are written to disk. "
                               "Options: 0 = Off (fastest, safe with WAL mode), 1 = Normal "
                               "(balanced), 2 = Full (safest, slowest). "
                               "For load testing, Off (0) is recommended - WAL mode provides "
                               "durability while maximizing write throughput for storing results. "
                               "This setting directly impacts how fast results can be saved during "
-                              "high-RPS tests. Default: Off. Requires engine restart.",
+                              "high-RPS tests. Default: Off.",
                               "database_performance",
                               std::to_string(vayu::core::constants::database::SYNCHRONOUS),
                               "0",

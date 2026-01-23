@@ -179,8 +179,8 @@ constexpr size_t REQUEST_BATCH_SIZE = 5;
  * @brief Database optimization configuration
  */
 namespace database {
-/// SQLite cache size in KB (negative value means KB, -64000 = 64MB)
-constexpr int CACHE_SIZE_KB = -64000;
+/// SQLite cache size in bytes (67108864 = 64MB, converted to negative KB for SQLite PRAGMA)
+constexpr int CACHE_SIZE_BYTES = 67108864;
 /// SQLite temp store mode (0=default, 1=file, 2=memory)
 constexpr int TEMP_STORE = 2;
 /// SQLite memory-mapped I/O size in bytes (256MB)

@@ -72,14 +72,25 @@ export function parseSizeToBytes(sizeStr: string): number | null {
  * Check if a config key is size-related
  */
 export function isSizeConfig(key: string): boolean {
-	const sizeKeys = ["scriptMemoryLimit", "scriptStackSize", "maxJsonFieldSize"];
+	const sizeKeys = [
+		"scriptMemoryLimit",
+		"scriptStackSize",
+		"maxJsonFieldSize",
+		"dbCacheSize",
+		"dbMmapSize",
+	];
 	return sizeKeys.includes(key);
 }
 
 /**
  * Format min/max values for size configs
+ * @param min - Minimum value as string
+ * @param max - Maximum value as string
  */
-export function formatSizeRange(min?: string, max?: string): string | null {
+export function formatSizeRange(
+	min?: string,
+	max?: string,
+): string | null {
 	if (!min && !max) return null;
 
 	const parts: string[] = [];

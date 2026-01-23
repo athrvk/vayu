@@ -469,35 +469,7 @@ export default function WelcomeScreen() {
 					</div>
 				</div>
 
-				{/* CTA Section */}
-				{!hasData && (
-					<div className="text-center">
-						<Card className="border-primary/20 bg-primary/5">
-							<CardContent className="p-8">
-								<Rocket className="w-12 h-12 text-primary mx-auto mb-4" />
-								<h3 className="text-xl font-semibold mb-2">Get Started</h3>
-								<p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
-									Create your first collection and start testing APIs with
-									powerful load testing capabilities
-								</p>
-								<div className="flex flex-col sm:flex-row gap-3 justify-center">
-									<Button
-										onClick={() => setActiveSidebarTab("collections")}
-										size="lg"
-										className="gap-2"
-									>
-										<Plus className="w-4 h-4" />
-										Create Your First Request
-									</Button>
-									<Button variant="outline" size="lg" className="gap-2">
-										<BookOpen className="w-4 h-4" />
-										View Documentation
-									</Button>
-								</div>
-							</CardContent>
-						</Card>
-					</div>
-				)}
+				
 			</div>
 		</div>
 	);
