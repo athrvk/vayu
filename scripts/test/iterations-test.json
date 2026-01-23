@@ -1,12 +1,10 @@
 {
-    "request": {
-        "method": "GET",
-        "url": "https://httpbin.org/get",
-        "headers": {
-            "Accept": "application/json"
-        }
+    "method": "GET",
+    "url": "https://httpbin.org/get",
+    "headers": {
+        "Accept": "application/json"
     },
     "mode": "iterations",
     "iterations": 50,
-    "concurrency": 10
+    "concurrency": 5
 }

@@ -307,7 +307,7 @@ void register_execution_routes (RouteContext& ctx) {
         vayu::http::ClientConfig config;
         config.verbose = ctx.verbose;
         vayu::http::Client client (config);
-        const auto& response = client.send (request).value ();
+        const auto response = client.send (request).value ();
 
         // Store result to database (non-blocking, errors logged)
         store_result (ctx.db, run_id, request, response);

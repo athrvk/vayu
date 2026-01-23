@@ -25,8 +25,8 @@ TEST_FILE_ABS=$(cd "$(dirname "$TEST_FILE")" && pwd)/$(basename "$TEST_FILE")
 # Navigate to project root (assuming script is in scripts/ or root)
 if [ -d "engine" ]; then
     PROJECT_ROOT="."
-elif [ -d "../engine" ]; then
-    PROJECT_ROOT=".."
+elif [ -d "../../engine" ]; then
+    PROJECT_ROOT="../.."
 else
     echo "Error: Could not find project root (engine directory)."
     exit 1
@@ -57,10 +57,11 @@ if [ -z "$RUN_ID" ]; then
 fi
 
 DAEMON_URL="http://127.0.0.1:9876"
+LIVE_METRICS_URL="$DAEMON_URL/metrics/live/$RUN_ID"
 STATS_URL="$DAEMON_URL/stats/$RUN_ID"
 
 echo ""
-echo "Streaming results from $STATS_URL..."
+echo "Streaming live metrics from $LIVE_METRICS_URL..."
 echo "----------------------------------------"
 
 # Function to format JSON output
@@ -75,28 +76,62 @@ format_json() {
 # Track if we've seen the complete event
 COMPLETE_SEEN=false
 
-# Stream the SSE output - we need to keep reading until we see the complete event
-curl -N -s "$STATS_URL" 2>/dev/null | while IFS= read -r line; do
-    # Handle SSE lines
-    if [[ "$line" == "event: complete" ]]; then
-        COMPLETE_SEEN=true
-        echo ""
-        echo "Test Completed!"
-        # Continue reading to get the final data line
-        continue
-    elif [[ "$line" == "data: "* ]]; then
-        JSON_DATA="${line#data: }"
-        
-        # Format and display the JSON data
-        echo "$JSON_DATA" | format_json
-        
-        # If we just saw a complete event and printed the final data, we can exit
-        if [ "$COMPLETE_SEEN" = true ]; then
-            echo "----------------------------------------"
-            exit 0
+# Function to stream from an SSE endpoint
+# Returns 0 if successfully streamed data, 1 otherwise
+stream_sse() {
+    local url="$1"
+    local show_full_report_hint="$2"
+    local got_data=false
+    
+    while IFS= read -r line; do
+        # Check for 404 JSON response (not SSE)
+        if [[ "$line" == "{"*"error"* ]] && [ "$got_data" = false ]; then
+            return 1
         fi
+        
+        if [[ "$line" == "event: complete" ]]; then
+            echo ""
+            echo "Test Completed!"
+            # Read the next data line before exiting
+            read -r next_line
+            if [[ "$next_line" == "data: "* ]]; then
+                JSON_DATA="${next_line#data: }"
+                echo "$JSON_DATA" | format_json
+            fi
+            echo "----------------------------------------"
+            if [ "$show_full_report_hint" = "true" ]; then
+                echo "Full report available at: $STATS_URL"
+            fi
+            return 0
+        elif [[ "$line" == "event: error" ]]; then
+            echo "Error occurred during streaming"
+            continue
+        elif [[ "$line" == "data: "* ]]; then
+            got_data=true
+            JSON_DATA="${line#data: }"
+            echo "$JSON_DATA" | format_json
+        fi
+    done < <(curl -N -s "$url" 2>/dev/null)
+    
+    # If we got data but stream ended without complete event
+    if [ "$got_data" = true ]; then
+        echo "----------------------------------------"
+        return 0
     fi
-done
+    
+    return 1
+}
+
+# Try live metrics endpoint immediately (no delay - test might be fast)
+if stream_sse "$LIVE_METRICS_URL" "true"; then
+    exit 0
+fi
+
+# Fallback to stats endpoint for historical data
+echo "Live metrics not available, using stats endpoint..."
+if stream_sse "$STATS_URL" "false"; then
+    exit 0
+fi
 
 echo "----------------------------------------"
-echo "Stream ended."
+echo "No data received. Is the daemon running?"

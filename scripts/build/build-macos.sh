@@ -15,6 +15,9 @@
 
 set -e
 
+# Store original working directory for relative path calculations
+ORIGINAL_CWD="$(pwd)"
+
 # Colors for output (consistent across platforms)
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -500,36 +503,118 @@ main() {
     echo -e "  ${BOLD}Next Steps:${NC}"
     echo -e "  ${DIM}──────────────────────────────────────${NC}"
     
+    # Helper to calculate relative path from original working directory (pure bash)
+    get_relative_path() {
+        local target="$1"
+        local source="$ORIGINAL_CWD"
+        
+        # Normalize paths (remove trailing slashes)
+        target="${target%/}"
+        source="${source%/}"
+        
+        # If paths are identical, return "."
+        if [[ "$target" == "$source" ]]; then
+            echo "."
+            return
+        fi
+        
+        # Split paths into arrays
+        local IFS='/'
+        read -ra target_parts <<< "$target"
+        read -ra source_parts <<< "$source"
+        
+        # Find common prefix length
+        local common=0
+        local max=${#source_parts[@]}
+        [[ ${#target_parts[@]} -lt $max ]] && max=${#target_parts[@]}
+        
+        for ((i=0; i<max; i++)); do
+            if [[ "${target_parts[$i]}" != "${source_parts[$i]}" ]]; then
+                break
+            fi
+            ((common++))
+        done
+        
+        # Build relative path
+        local result=""
+        
+        # Add ".." for each remaining source directory
+        for ((i=common; i<${#source_parts[@]}; i++)); do
+            if [[ -n "$result" ]]; then
+                result="$result/.."
+            else
+                result=".."
+            fi
+        done
+        
+        # Add remaining target directories
+        for ((i=common; i<${#target_parts[@]}; i++)); do
+            if [[ -n "$result" ]]; then
+                result="$result/${target_parts[$i]}"
+            else
+                result="${target_parts[$i]}"
+            fi
+        done
+        
+        echo "$result"
+    }
+    
+    # Helper to format executable path (add ./ only for relative paths)
+    format_executable_path() {
+        local path="$1"
+        if [[ "$path" == /* ]]; then
+            # Absolute path - use as-is
+            echo "$path"
+        elif [[ "$path" != ./* ]]; then
+            # Relative path without ./ prefix - add it
+            echo "./$path"
+        else
+            # Already has ./ prefix
+            echo "$path"
+        fi
+    }
+    
     if [[ "$BUILD_MODE" == "dev" ]]; then
         if [[ "$SKIP_APP" == false ]]; then
-            # Calculate relative path from project root
+            # Calculate relative path from original working directory
             local relative_app_path
-            if command -v realpath &>/dev/null; then
-                relative_app_path=$(realpath --relative-to="$PROJECT_ROOT" "$APP_DIR" 2>/dev/null || echo "app")
-            else
-                relative_app_path=$(python3 -c "import os; print(os.path.relpath('$APP_DIR', '$PROJECT_ROOT'))" 2>/dev/null || echo "app")
-            fi
+            relative_app_path=$(get_relative_path "$APP_DIR")
             echo -e "  Run the Electron app in development mode:"
             echo -e "    ${CYAN}cd $relative_app_path && pnpm run electron:dev${NC}"
         else
+            # Calculate relative path to engine binary
+            local relative_engine_path
+            relative_engine_path=$(get_relative_path "$ENGINE_BINARY")
+            local exec_path
+            exec_path=$(format_executable_path "$relative_engine_path")
             echo -e "  Engine built successfully. Run it with:"
-            echo -e "    ${CYAN}$ENGINE_BINARY${NC}"
+            echo -e "    ${CYAN}$exec_path${NC}"
         fi
     else
         if [[ "$SKIP_APP" == false ]]; then
             local release_dir="$APP_DIR/release"
             local dmg_file=$(ls -1 "$release_dir"/*.dmg 2>/dev/null | head -n 1)
             if [[ -n "$dmg_file" ]]; then
+                # Calculate relative path to DMG
+                local relative_dmg_path
+                relative_dmg_path=$(get_relative_path "$dmg_file")
                 echo -e "  1. Open the DMG:"
-                echo -e "     ${CYAN}open \"$dmg_file\"${NC}"
+                echo -e "     ${CYAN}open \"$relative_dmg_path\"${NC}"
                 echo -e "  2. Drag Vayu to Applications"
                 echo -e "  3. Launch ${BOLD}Vayu${NC} from Applications"
             else
-                echo -e "  Open the DMG from: ${CYAN}$release_dir${NC}"
+                local relative_release_dir
+                relative_release_dir=$(get_relative_path "$release_dir")
+                echo -e "  Open the DMG from: ${CYAN}$relative_release_dir${NC}"
             fi
         else
+            # Calculate relative path to engine binary
+            local relative_engine_path
+            relative_engine_path=$(get_relative_path "$ENGINE_BINARY")
+            local exec_path
+            exec_path=$(format_executable_path "$relative_engine_path")
             echo -e "  Run the engine directly:"
-            echo -e "    ${CYAN}$ENGINE_BINARY${NC}"
+            echo -e "    ${CYAN}$exec_path${NC}"
         fi
     fi
     echo ""

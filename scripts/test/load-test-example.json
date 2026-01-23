@@ -1,12 +1,10 @@
 {
-    "request": {
-        "method": "GET",
-        "url": "https://api.tokindle.in/health",
-        "headers": {
-            "Accept": "application/json"
-        }
+    "method": "GET",
+    "url": "https://api.tokindle.in/health",
+    "headers": {
+        "Accept": "application/json"
     },
     "mode": "constant",
     "duration": "1s",
-    "targetRps": 10000
+    "targetRps": 100
 }
