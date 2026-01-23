@@ -210,7 +210,7 @@ build_engine() {
               -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
               -DVCPKG_MANIFEST_MODE=ON \
               -DVAYU_BUILD_TESTS=OFF \
-              -DVAYU_BUILD_CLI=OFF \
+              -DVAYU_BUILD_CLI=ON \
               -DVAYU_BUILD_ENGINE=ON \
               .. 2>&1 | tee /tmp/cmake_config_output.log
         CMAKE_CONFIG_EXIT=${PIPESTATUS[0]}
@@ -222,7 +222,7 @@ build_engine() {
               -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
               -DVCPKG_MANIFEST_MODE=ON \
               -DVAYU_BUILD_TESTS=OFF \
-              -DVAYU_BUILD_CLI=OFF \
+              -DVAYU_BUILD_CLI=ON \
               -DVAYU_BUILD_ENGINE=ON \
               .. > /tmp/cmake_config_output.log 2>&1
         CMAKE_CONFIG_EXIT=$?
@@ -462,37 +462,39 @@ main() {
     echo ""
     echo -e "  ${BOLD}Next Steps:${NC}"
     echo -e "  ${DIM}──────────────────────────────────────${NC}"
-    
-    if [[ "$BUILD_MODE" == "dev" ]]; then
-        if [[ "$SKIP_APP" == false ]]; then
+
+    # Always provide copy-pasteable commands for the next step
+    if [[ "$SKIP_APP" == false ]]; then
+        if [[ "$BUILD_MODE" == "dev" ]]; then
             local rel_app_path=$(get_relative_path "$APP_DIR")
-            echo -e "  Run the Electron app in development mode:"
+            echo -e "  To run the Electron app in development mode, copy and paste:"
             echo -e "    ${CYAN}cd ./$rel_app_path && pnpm run electron:dev${NC}"
         else
-            echo -e "  Engine built successfully. Run it with:"
-            echo -e "    ${CYAN}$ENGINE_BINARY${NC}"
-        fi
-    else
-        if [[ "$SKIP_APP" == false ]]; then
             local release_dir="$APP_DIR/release"
             local app_image=$(find "$release_dir" -name "*.AppImage" 2>/dev/null | head -n 1)
             local deb_pkg=$(find "$release_dir" -name "*.deb" 2>/dev/null | head -n 1)
-            
             if [[ -n "$app_image" ]]; then
-                echo -e "  ${BOLD}Option 1: Run AppImage${NC}"
+                echo -e "  To run the AppImage, copy and paste:"
                 echo -e "    ${CYAN}$app_image${NC}"
-                echo -e "    ${DIM}(Requires FUSE: sudo apt install libfuse2)${NC}"
-                echo ""
+                echo -e "    ${DIM}(If needed: sudo apt install libfuse2)${NC}"
             fi
             if [[ -n "$deb_pkg" ]]; then
-                echo -e "  ${BOLD}Option 2: Install Debian Package${NC}"
+                echo -e "  To install the Debian package, copy and paste:"
                 echo -e "    ${CYAN}sudo dpkg -i $deb_pkg${NC}"
             fi
-        else
-            echo -e "  Run the engine directly:"
+            if [[ -z "$app_image" && -z "$deb_pkg" ]]; then
+                echo -e "  App build complete. See the release directory for output packages."
+            fi
+        fi
+    fi
+
+    if [[ "$SKIP_ENGINE" == false ]]; then
+        if [[ -n "$ENGINE_BINARY" && -f "$ENGINE_BINARY" ]]; then
+            echo -e "  To run the engine binary directly, copy and paste:"
             echo -e "    ${CYAN}$ENGINE_BINARY${NC}"
         fi
     fi
+
     echo ""
 }
 
