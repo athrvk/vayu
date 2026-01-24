@@ -13,7 +13,7 @@ jobs:
       contents: write
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     env:
       VCPKG_DIR: ${{ github.workspace }}/.github/vcpkg
 
@@ -60,6 +60,7 @@ jobs:
         with:
           path: |
             ~/.cache/vcpkg/archives
+            ~/Library/Caches/vcpkg/archives
             ~/AppData/Local/vcpkg/archives
           key: vcpkg-archives-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-v1
           restore-keys: |
@@ -75,10 +76,10 @@ jobs:
             git -C "${{ env.VCPKG_DIR }}" fetch --all || true
             git -C "${{ env.VCPKG_DIR }}" reset --hard origin/master || true
           fi
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            "${{ env.VCPKG_DIR }}"/bootstrap-vcpkg.sh
-          else
+          if [ "${{ runner.os }}" = "Windows" ]; then
             pwsh -NoProfile -Command "${{ env.VCPKG_DIR }}\bootstrap-vcpkg.bat"
+          else
+            "${{ env.VCPKG_DIR }}"/bootstrap-vcpkg.sh
           fi
         shell: bash
 
@@ -86,8 +87,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.pnpm-store
-            ~/.cache/pnpm
+            ~/.local/share/pnpm/store
+            ~/Library/pnpm/store
+            ~/AppData/Local/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: |
             pnpm-${{ runner.os }}-
@@ -107,33 +109,26 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ninja-build build-essential pkg-config ca-certificates
-
-          # Build engine with tests into build-release (reused by build script)
-          cmake -S engine -B engine/build-release -GNinja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_DIR }}/scripts/buildsystems/vcpkg.cmake \
-            -DVCPKG_TARGET_TRIPLET=x64-linux \
-            -DVCPKG_MANIFEST_MODE=ON \
-            -DVAYU_BUILD_TESTS=ON \
-            -DVAYU_BUILD_ENGINE=ON
-          cmake --build engine/build-release -j $(nproc)
-          ctest --test-dir engine/build-release --output-on-failure -j $(nproc)
+          chmod +x scripts/build/build-linux.sh
+          # Build engine with tests (reused by app packaging step)
+          scripts/build/build-linux.sh prod -e --with-tests --vcpkg-root "${{ env.VCPKG_DIR }}"
         shell: bash
 
       - name: Build and run engine unit tests (Windows)
         if: runner.os == 'Windows'
         run: |
-          # Build engine with tests into build-release (reused by build script)
-          cmake -S engine -B engine/build-release -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_DIR }}\scripts\buildsystems\vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows `
-            -DVCPKG_MANIFEST_MODE=ON `
-            -DVAYU_BUILD_TESTS=ON `
-            -DVAYU_BUILD_ENGINE=ON
-          cmake --build engine/build-release --config Release --parallel
-          ctest --test-dir engine/build-release --output-on-failure
+          # Build engine with tests (reused by app packaging step)
+          .\scripts\build\build-windows.ps1 -BuildMode prod -Engine -WithTests -VcpkgRootParam "${{ env.VCPKG_DIR }}"
         shell: pwsh
+
+      - name: Build and run engine unit tests (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja
+          chmod +x scripts/build/build-macos.sh
+          # Build engine with tests (reused by app packaging step)
+          scripts/build/build-macos.sh prod -e --with-tests --vcpkg-root "${{ env.VCPKG_DIR }}"
+        shell: bash
 
       - name: Build and package app (Linux)
         if: runner.os == 'Linux'
@@ -150,6 +145,14 @@ jobs:
           .\scripts\build\build-windows.ps1 -BuildMode prod -App -VcpkgRootParam "${{ env.VCPKG_DIR }}" -ArtifactsDirParam "${{ env.ARTIFACTS_DIR }}"
         shell: pwsh
 
+      - name: Build and package app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          chmod +x scripts/build/build-macos.sh
+          # Skip engine build (-a flag) - reuse binary from test step
+          scripts/build/build-macos.sh prod -a --vcpkg-root "${{ env.VCPKG_DIR }}" --artifacts "${{ env.ARTIFACTS_DIR }}"
+        shell: bash
+
       - name: List artifacts
         run: |
           echo "Artifacts for ${{ matrix.os }}:"
@@ -164,5 +167,6 @@ jobs:
             ${{ steps.set-artifacts.outputs.dir }}/*.AppImage
             ${{ steps.set-artifacts.outputs.dir }}/*.deb
             ${{ steps.set-artifacts.outputs.dir }}/*.rpm
+            ${{ steps.set-artifacts.outputs.dir }}/*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

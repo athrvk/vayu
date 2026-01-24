@@ -52,6 +52,7 @@ SKIP_ENGINE=false
 SKIP_APP=false
 CLEAN_BUILD=false
 VERBOSE_OUTPUT=false
+BUILD_TESTS=false
 VCPKG_ROOT_OVERRIDE=""
 ARTIFACTS_DIR=""
 
@@ -62,32 +63,32 @@ show_help() {
     echo "Usage: ./build-macos.sh [dev|prod] [-e|-a] [OPTIONS]"
     echo ""
     echo "Build Mode:"
-    echo "  dev     Development build (Debug mode)"
-    echo "  prod    Production build (Release mode, default)"
+    echo "  dev                 Development build (Debug mode)"
+    echo "  prod                Production build (Release mode, default)"
     echo ""
-    echo "Component Selection (shortcuts):"
+    echo "Component Selection:"
     echo "  -e, --skip-app      Build only the C++ engine"
     echo "  -a, --skip-engine   Build only the Electron app"
     echo "  (no flag)           Build both engine and app"
     echo ""
     echo "Other Options:"
     echo "  --clean             Clean build directories before building"
+    echo "  --with-tests        Build and run unit tests (for CI)"
     echo "  -v, --verbose       Show detailed output when build fails"
-    echo "  --vcpkg-root PATH   Override vcpkg root directory"
-    echo "  --artifacts PATH    Copy build artifacts to this directory (for CI)"
     echo "  -h, --help          Show this help message"
     echo ""
-    echo "Examples:"
-    echo "  ./build-macos.sh              # Build all (prod)"
-    echo "  ./build-macos.sh dev          # Build all (dev)"
-    echo "  ./build-macos.sh -e           # Build engine only (prod)"
-    echo "  ./build-macos.sh dev -e       # Build engine only (dev)"
-    echo "  ./build-macos.sh -a           # Build app only (prod)"
-    echo "  ./build-macos.sh -a --clean   # Build app only, clean first"
-    echo ""
-    echo "CI/Advanced options:"
+    echo "CI/Advanced Options:"
     echo "  --vcpkg-root PATH   Override vcpkg root directory"
-    echo "  --artifacts PATH    Output installer artifacts to this directory"
+    echo "  --artifacts PATH    Copy build artifacts to this directory"
+    echo ""
+    echo "Examples:"
+    echo "  ./build-macos.sh                        # Build all (prod)"
+    echo "  ./build-macos.sh dev                    # Build all (dev)"
+    echo "  ./build-macos.sh -e                     # Build engine only (prod)"
+    echo "  ./build-macos.sh dev -e                 # Build engine only (dev)"
+    echo "  ./build-macos.sh -a                     # Build app only (prod)"
+    echo "  ./build-macos.sh -e --with-tests        # Build engine + run tests"
+    echo "  ./build-macos.sh -a --clean             # Build app only, clean first"
     echo ""
     exit 0
 }
@@ -110,6 +111,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --clean)
             CLEAN_BUILD=true
+            shift
+            ;;
+        --with-tests)
+            BUILD_TESTS=true
             shift
             ;;
         -v|--verbose)
@@ -227,6 +232,12 @@ build_engine() {
     
     # Configure CMake
     info "Configuring CMake..."
+    # Determine test flag
+    local tests_flag="OFF"
+    if [[ "$BUILD_TESTS" == true ]]; then
+        tests_flag="ON"
+    fi
+    
     if [[ "$VERBOSE_OUTPUT" == true ]]; then
         # In verbose mode, show all output
         cmake -GNinja \
@@ -234,7 +245,7 @@ build_engine() {
               -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
               -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
               -DVCPKG_MANIFEST_MODE=ON \
-              -DVAYU_BUILD_TESTS=OFF \
+              -DVAYU_BUILD_TESTS="$tests_flag" \
               -DVAYU_BUILD_CLI=ON \
               -DVAYU_BUILD_ENGINE=ON \
               .. 2>&1 | tee /tmp/cmake_config_output.log
@@ -246,7 +257,7 @@ build_engine() {
               -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
               -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
               -DVCPKG_MANIFEST_MODE=ON \
-              -DVAYU_BUILD_TESTS=OFF \
+              -DVAYU_BUILD_TESTS="$tests_flag" \
               -DVAYU_BUILD_CLI=ON \
               -DVAYU_BUILD_ENGINE=ON \
               .. > /tmp/cmake_config_output.log 2>&1
@@ -322,6 +333,16 @@ build_engine() {
     CLI_BINARY="$BUILD_DIR/vayu-cli"
     success "Engine built successfully: $ENGINE_BINARY"
     success "CLI built successfully: $CLI_BINARY"
+    
+    # Run tests if enabled
+    if [[ "$BUILD_TESTS" == true ]]; then
+        info "Running unit tests..."
+        local cores=$(sysctl -n hw.physicalcpu 2>/dev/null || echo 4)
+        if ! ctest --test-dir "$BUILD_DIR" --output-on-failure -j "$cores"; then
+            error "Unit tests failed"
+        fi
+        success "All unit tests passed"
+    fi
 }
 
 # Setup application icons

@@ -54,6 +54,7 @@ SKIP_ENGINE=false
 SKIP_APP=false
 CLEAN_BUILD=false
 VERBOSE_OUTPUT=false
+BUILD_TESTS=false
 VCPKG_ROOT_OVERRIDE=""
 ARTIFACTS_DIR=""
 
@@ -64,28 +65,32 @@ show_help() {
     echo "Usage: ./build-linux.sh [dev|prod] [-e|-a] [OPTIONS]"
     echo ""
     echo "Build Mode:"
-    echo "  dev     Development build (Debug mode)"
-    echo "  prod    Production build (Release mode, default)"
+    echo "  dev                 Development build (Debug mode)"
+    echo "  prod                Production build (Release mode, default)"
     echo ""
-    echo "Component Selection (shortcuts):"
+    echo "Component Selection:"
     echo "  -e, --skip-app      Build only the C++ engine"
     echo "  -a, --skip-engine   Build only the Electron app"
     echo "  (no flag)           Build both engine and app"
     echo ""
     echo "Other Options:"
     echo "  --clean             Clean build directories before building"
+    echo "  --with-tests        Build and run unit tests (for CI)"
     echo "  -v, --verbose       Show detailed output when build fails"
-    echo "  --vcpkg-root PATH   Override vcpkg root directory"
-    echo "  --artifacts PATH    Copy build artifacts to this directory (for CI)"
     echo "  -h, --help          Show this help message"
     echo ""
+    echo "CI/Advanced Options:"
+    echo "  --vcpkg-root PATH   Override vcpkg root directory"
+    echo "  --artifacts PATH    Copy build artifacts to this directory"
+    echo ""
     echo "Examples:"
-    echo "  ./build-linux.sh              # Build all (prod)"
-    echo "  ./build-linux.sh dev          # Build all (dev)"
-    echo "  ./build-linux.sh -e           # Build engine only (prod)"
-    echo "  ./build-linux.sh dev -e       # Build engine only (dev)"
-    echo "  ./build-linux.sh -a           # Build app only (prod)"
-    echo "  ./build-linux.sh -a --clean   # Build app only, clean first"
+    echo "  ./build-linux.sh                        # Build all (prod)"
+    echo "  ./build-linux.sh dev                    # Build all (dev)"
+    echo "  ./build-linux.sh -e                     # Build engine only (prod)"
+    echo "  ./build-linux.sh dev -e                 # Build engine only (dev)"
+    echo "  ./build-linux.sh -a                     # Build app only (prod)"
+    echo "  ./build-linux.sh -e --with-tests        # Build engine + run tests"
+    echo "  ./build-linux.sh -a --clean             # Build app only, clean first"
     echo ""
     exit 0
 }
@@ -96,6 +101,7 @@ while [[ $# -gt 0 ]]; do
         -e|--skip-app) SKIP_APP=true; SKIP_ENGINE=false; shift ;;
         -a|--skip-engine) SKIP_ENGINE=true; SKIP_APP=false; shift ;;
         --clean) CLEAN_BUILD=true; shift ;;
+        --with-tests) BUILD_TESTS=true; shift ;;
         -v|--verbose) VERBOSE_OUTPUT=true; shift ;;
         --vcpkg-root) VCPKG_ROOT_OVERRIDE="$2"; shift 2 ;;
         --artifacts) ARTIFACTS_DIR="$2"; shift 2 ;;
@@ -202,6 +208,13 @@ build_engine() {
     
     # Configure CMake
     info "Configuring CMake..."
+    
+    # Determine test flag
+    local tests_flag="OFF"
+    if [[ "$BUILD_TESTS" == true ]]; then
+        tests_flag="ON"
+    fi
+    
     if [[ "$VERBOSE_OUTPUT" == true ]]; then
         # In verbose mode, show all output
         cmake -GNinja \
@@ -209,7 +222,7 @@ build_engine() {
               -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
               -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
               -DVCPKG_MANIFEST_MODE=ON \
-              -DVAYU_BUILD_TESTS=OFF \
+              -DVAYU_BUILD_TESTS="$tests_flag" \
               -DVAYU_BUILD_CLI=ON \
               -DVAYU_BUILD_ENGINE=ON \
               .. 2>&1 | tee /tmp/cmake_config_output.log
@@ -221,7 +234,7 @@ build_engine() {
               -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
               -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
               -DVCPKG_MANIFEST_MODE=ON \
-              -DVAYU_BUILD_TESTS=OFF \
+              -DVAYU_BUILD_TESTS="$tests_flag" \
               -DVAYU_BUILD_CLI=ON \
               -DVAYU_BUILD_ENGINE=ON \
               .. > /tmp/cmake_config_output.log 2>&1
@@ -289,6 +302,16 @@ build_engine() {
         error "Binary not found at $ENGINE_BINARY"
     fi
     success "Engine built successfully"
+    
+    # Run tests if enabled
+    if [[ "$BUILD_TESTS" == true ]]; then
+        info "Running unit tests..."
+        local cores=$(nproc 2>/dev/null || echo 4)
+        if ! ctest --test-dir "$BUILD_DIR" --output-on-failure -j "$cores"; then
+            error "Unit tests failed"
+        fi
+        success "All unit tests passed"
+    fi
 }
 
 # Setup icons

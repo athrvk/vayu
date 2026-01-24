@@ -29,6 +29,10 @@ param(
     
     [Alias('c')]
     [switch]$Clean,
+    
+    [Alias('t')]
+    [switch]$WithTests,
+    
     [Alias('v')]
     [switch]$VerboseOutput,
 
@@ -51,41 +55,44 @@ $ErrorActionPreference = 'Stop'
 if ($Help) {
     Write-Host '' -ForegroundColor Cyan
     Write-Host 'Vayu Build Script for Windows' -ForegroundColor Cyan
-    Write-Host 'Usage: .\build-windows.ps1 [dev|prod] [-Engine|-App] [-Clean] [-h]' -ForegroundColor Cyan
+    Write-Host '' -ForegroundColor Cyan
+    Write-Host 'Usage: .\build-windows.ps1 [dev|prod] [-Engine|-App] [OPTIONS]' -ForegroundColor White
     Write-Host '' -ForegroundColor Cyan
     Write-Host 'Build Mode:' -ForegroundColor Cyan
-    Write-Host '  dev           Development build (Debug mode)' -ForegroundColor Cyan
-    Write-Host '  prod          Production build (Release mode, default)' -ForegroundColor Cyan
+    Write-Host '  dev                 Development build (Debug mode)' -ForegroundColor White
+    Write-Host '  prod                Production build (Release mode, default)' -ForegroundColor White
     Write-Host '' -ForegroundColor Cyan
-    Write-Host 'Component Selection (shortcuts):' -ForegroundColor Cyan
-    Write-Host '  -Engine, -e   Build only the C++ engine' -ForegroundColor Cyan
-    Write-Host '  -App, -a      Build only the Electron app' -ForegroundColor Cyan
-    Write-Host '  (no flag)     Build both engine and app' -ForegroundColor Cyan
+    Write-Host 'Component Selection:' -ForegroundColor Cyan
+    Write-Host '  -Engine, -e         Build only the C++ engine' -ForegroundColor White
+    Write-Host '  -App, -a            Build only the Electron app' -ForegroundColor White
+    Write-Host '  (no flag)           Build both engine and app' -ForegroundColor White
     Write-Host '' -ForegroundColor Cyan
     Write-Host 'Other Options:' -ForegroundColor Cyan
-    Write-Host '  -Clean, -c    Clean build directories before building' -ForegroundColor Cyan
-    Write-Host '  -Verbose, -v  Show detailed output when build fails' -ForegroundColor Cyan
-    Write-Host '  -Help, -h     Show this help message' -ForegroundColor Cyan
+    Write-Host '  -Clean, -c          Clean build directories before building' -ForegroundColor White
+    Write-Host '  -WithTests, -t      Build and run unit tests (for CI)' -ForegroundColor White
+    Write-Host '  -VerboseOutput, -v  Show detailed output when build fails' -ForegroundColor White
+    Write-Host '  -Help, -h           Show this help message' -ForegroundColor White
     Write-Host '' -ForegroundColor Cyan
-    Write-Host 'Examples:' -ForegroundColor Yellow
-    Write-Host '  .\build-windows.ps1              # Build all (prod)' -ForegroundColor White
-    Write-Host '  .\build-windows.ps1 dev          # Build all (dev)' -ForegroundColor White
-    Write-Host '  .\build-windows.ps1 -e           # Build engine only (prod)' -ForegroundColor White
-    Write-Host '  .\build-windows.ps1 dev -e       # Build engine only (dev)' -ForegroundColor White
-    Write-Host '  .\build-windows.ps1 -a           # Build app only (prod)' -ForegroundColor White
-    Write-Host '  .\build-windows.ps1 -a -c        # Build app only, clean first' -ForegroundColor White
+    Write-Host 'CI/Advanced Options:' -ForegroundColor Cyan
+    Write-Host '  -VcpkgRootParam <path>     Override vcpkg root directory' -ForegroundColor White
+    Write-Host '  -ArtifactsDirParam <path>  Copy build artifacts to this directory' -ForegroundColor White
+    Write-Host '  -CMakePathParam <path>     Override CMake executable path' -ForegroundColor White
+    Write-Host '  -EngineDirParam <path>     Override engine directory' -ForegroundColor White
+    Write-Host '  -AppDirParam <path>        Override app directory' -ForegroundColor White
+    Write-Host '  -GeneratorParam <name>     Override CMake generator (default: Visual Studio 17 2022)' -ForegroundColor White
     Write-Host '' -ForegroundColor Cyan
     Write-Host 'Legacy flags (still supported):' -ForegroundColor Gray
-    Write-Host '  -SkipEngine   Same as -App (build app only)' -ForegroundColor Gray
-    Write-Host '  -SkipApp      Same as -Engine (build engine only)' -ForegroundColor Gray
+    Write-Host '  -SkipEngine         Same as -App (build app only)' -ForegroundColor Gray
+    Write-Host '  -SkipApp            Same as -Engine (build engine only)' -ForegroundColor Gray
     Write-Host '' -ForegroundColor Cyan
-    Write-Host 'CI/Advanced options:' -ForegroundColor Cyan
-    Write-Host '  -CMakePathParam <path>     Override CMake executable path' -ForegroundColor Cyan
-    Write-Host '  -VcpkgRootParam <path>     Override vcpkg root directory' -ForegroundColor Cyan
-    Write-Host '  -EngineDirParam <path>     Override engine directory' -ForegroundColor Cyan
-    Write-Host '  -AppDirParam <path>        Override app directory' -ForegroundColor Cyan
-    Write-Host '  -ArtifactsDirParam <path>  Output installer artifacts to this directory' -ForegroundColor Cyan
-    Write-Host '  -GeneratorParam <name>     Override CMake generator (default: Visual Studio 17 2022)' -ForegroundColor Cyan
+    Write-Host 'Examples:' -ForegroundColor Yellow
+    Write-Host '  .\build-windows.ps1                        # Build all (prod)' -ForegroundColor White
+    Write-Host '  .\build-windows.ps1 dev                    # Build all (dev)' -ForegroundColor White
+    Write-Host '  .\build-windows.ps1 -e                     # Build engine only (prod)' -ForegroundColor White
+    Write-Host '  .\build-windows.ps1 dev -e                 # Build engine only (dev)' -ForegroundColor White
+    Write-Host '  .\build-windows.ps1 -a                     # Build app only (prod)' -ForegroundColor White
+    Write-Host '  .\build-windows.ps1 -e -t                  # Build engine + run tests' -ForegroundColor White
+    Write-Host '  .\build-windows.ps1 -a -c                  # Build app only, clean first' -ForegroundColor White
     Write-Host '' -ForegroundColor Cyan
     exit 0
 }
@@ -367,6 +374,9 @@ function Build-Engine {
         # Configure CMake
         Write-Info "Configuring CMake (Generator: $GeneratorParam)..."
         
+        # Determine test flag
+        $TestsFlag = if ($WithTests) { 'ON' } else { 'OFF' }
+        
         $cmakeArgs = @(
             '-G', $GeneratorParam,
             '-A', $CMakeArch,
@@ -374,7 +384,7 @@ function Build-Engine {
             "-DCMAKE_TOOLCHAIN_FILE=$VcpkgRoot\scripts\buildsystems\vcpkg.cmake",
             "-DVCPKG_TARGET_TRIPLET=$Triplet",
             '-DVCPKG_MANIFEST_MODE=ON',
-            '-DVAYU_BUILD_TESTS=OFF',
+            "-DVAYU_BUILD_TESTS=$TestsFlag",
             '-DVAYU_BUILD_CLI=OFF',
             '-DVAYU_BUILD_ENGINE=ON',
             $EngineDir
@@ -469,6 +479,18 @@ function Build-Engine {
         }
         
         Write-Success "Engine built successfully: $BinaryPath"
+        
+        # Run tests if enabled
+        if ($WithTests) {
+            Write-Info 'Running unit tests...'
+            $ctestOutput = & ctest --test-dir $BuildDir --build-config $BuildType --output-on-failure 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host $ctestOutput -ForegroundColor Red
+                throw "Unit tests failed with exit code $LASTEXITCODE"
+            }
+            Write-Success 'All unit tests passed'
+        }
+        
         return $BinaryPath
     }
     finally {
