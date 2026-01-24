@@ -523,9 +523,13 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             double send_rate = run_elapsed_s > 0 ? static_cast<double> (requests_sent) / run_elapsed_s : 0.0;
             double throughput = run_elapsed_s > 0 ? static_cast<double> (current_total) / run_elapsed_s : 0.0;
 
+            // Calculate backpressure (queue depth: requests sent but not yet responded)
+            size_t backpressure = requests_sent > current_total ? requests_sent - current_total : 0;
+
             vayu::utils::log_debug ("Metrics: rps=" + std::to_string (current_rps) +
             ", send_rate=" + std::to_string (send_rate) +
             ", throughput=" + std::to_string (throughput) +
+            ", backpressure=" + std::to_string (backpressure) +
             ", error_rate=" + std::to_string (error_rate) + "%" +
             ", active=" + std::to_string (context->event_loop->active_count ()) +
             ", sent=" + std::to_string (requests_sent));
@@ -534,7 +538,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             try {
                 auto timestamp = now_ms ();
                 std::vector<vayu::db::Metric> metrics;
-                metrics.reserve (7);
+                metrics.reserve (8);
 
                 metrics.push_back ({ 0, context->run_id, timestamp,
                 vayu::MetricName::Rps, current_rps, "" });
@@ -550,6 +554,8 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                 vayu::MetricName::SendRate, send_rate, "" });
                 metrics.push_back ({ 0, context->run_id, timestamp,
                 vayu::MetricName::Throughput, throughput, "" });
+                metrics.push_back ({ 0, context->run_id, timestamp,
+                vayu::MetricName::Backpressure, static_cast<double> (backpressure), "" });
 
                 // Single transaction instead of 5 separate lock acquisitions
                 db.add_metrics_batch (metrics);

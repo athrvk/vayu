@@ -57,6 +57,7 @@ void register_metrics_routes (RouteContext& ctx) {
             aggregated_metrics["currentRps"]        = 0.0;
             aggregated_metrics["sendRate"]          = 0.0;
             aggregated_metrics["throughput"]        = 0.0;
+            aggregated_metrics["backpressure"]      = 0;
             aggregated_metrics["activeConnections"] = 0;
             aggregated_metrics["elapsedSeconds"]    = 0.0;
 
@@ -100,6 +101,10 @@ void register_metrics_routes (RouteContext& ctx) {
                                 has_updates = true;
                             } else if (metric.name == vayu::MetricName::Throughput) {
                                 aggregated_metrics["throughput"] = metric.value;
+                                has_updates = true;
+                            } else if (metric.name == vayu::MetricName::Backpressure) {
+                                aggregated_metrics["backpressure"] =
+                                static_cast<int> (metric.value);
                                 has_updates = true;
                             }
 
@@ -197,6 +202,11 @@ void register_metrics_routes (RouteContext& ctx) {
         [&ctx, run_id, context] (size_t offset, httplib::DataSink& sink) {
             auto start_time = std::chrono::steady_clock::now ();
 
+            // State for instantaneous RPS calculation (delta-based)
+            auto last_rps_time      = start_time;
+            size_t last_total_count = 0;
+            double current_rps      = 0.0;
+
             while (context->is_running) {
                 if (!sink.is_writable ()) {
                     break;
@@ -212,6 +222,24 @@ void register_metrics_routes (RouteContext& ctx) {
                     size_t requests_sent = context->requests_sent.load ();
                     auto stats = context->metrics_collector->get_current_stats (
                     active_count, elapsed_seconds, requests_sent);
+
+                    // Calculate instantaneous RPS (delta-based, per-interval)
+                    size_t current_total = stats["totalRequests"].get<size_t> ();
+                    double rps_interval =
+                    std::chrono::duration<double> (now - last_rps_time).count ();
+                    if (rps_interval >= 0.1) { // Update RPS every 100ms minimum
+                        size_t delta = current_total - last_total_count;
+                        current_rps  = static_cast<double> (delta) / rps_interval;
+                        last_total_count = current_total;
+                        last_rps_time    = now;
+                    }
+                    stats["currentRps"] = current_rps;
+
+                    // Calculate backpressure (queue depth: sent but not yet responded)
+                    size_t total_responses = current_total;
+                    size_t backpressure =
+                    requests_sent > total_responses ? requests_sent - total_responses : 0;
+                    stats["backpressure"] = backpressure;
 
                     stats["runId"] = run_id;
                     stats["timestamp"] =

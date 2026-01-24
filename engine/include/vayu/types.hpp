@@ -522,8 +522,9 @@ enum class MetricName {
     RequestsSent,
     RequestsExpected,
     // Rate metrics (Open Model)
-    SendRate,   // Rate at which requests are dispatched to the server
-    Throughput, // Rate at which responses are received from the server
+    SendRate,     // Rate at which requests are dispatched to the server
+    Throughput,   // Rate at which responses are received from the server
+    Backpressure, // Queue depth: requests sent but not yet responded
     // Script validation metrics
     TestsValidating,
     TestsPassed,
@@ -551,6 +552,7 @@ inline const char* to_string (MetricName name) {
     case MetricName::RequestsExpected: return "requests_expected";
     case MetricName::SendRate: return "send_rate";
     case MetricName::Throughput: return "throughput";
+    case MetricName::Backpressure: return "backpressure";
     case MetricName::TestsValidating: return "tests_validating";
     case MetricName::TestsPassed: return "tests_passed";
     case MetricName::TestsFailed: return "tests_failed";
@@ -589,6 +591,8 @@ inline std::optional<MetricName> parse_metric_name (const std::string& str) {
         return MetricName::SendRate;
     if (str == "throughput")
         return MetricName::Throughput;
+    if (str == "backpressure")
+        return MetricName::Backpressure;
     if (str == "tests_validating")
         return MetricName::TestsValidating;
     if (str == "tests_passed")

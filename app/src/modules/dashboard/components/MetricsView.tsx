@@ -155,6 +155,22 @@ export default function MetricsView({ metrics, historicalMetrics, isCompleted }:
 				/>
 			</div>
 
+			{/* Queue & Connection Metrics */}
+			<div className="grid grid-cols-2 gap-4">
+				<KeyMetricCard
+					label="Backpressure"
+					value={formatNumber(metrics.backpressure ?? 0)}
+					color="red"
+					tooltip="Queue depth: requests that have been sent but not yet received a response. High values indicate the server is struggling to keep up with the request rate."
+				/>
+				<KeyMetricCard
+					label="Active Connections"
+					value={formatNumber(metrics.current_concurrency ?? 0)}
+					color="blue"
+					tooltip="Number of concurrent HTTP connections currently open to the server."
+				/>
+			</div>
+
 			{/* Latency Metrics */}
 			<Card>
 				<CardHeader>

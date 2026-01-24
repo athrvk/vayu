@@ -179,6 +179,7 @@ export interface LoadTestMetrics {
 	// Rate metrics (Open Model)
 	send_rate?: number; // Rate at which requests are dispatched to the server
 	throughput?: number; // Rate at which responses are received from the server
+	backpressure?: number; // Queue depth: requests sent but not yet responded
 }
 
 export interface RunReport {
@@ -211,6 +212,7 @@ export interface RunReport {
 		// Rate metrics (Open Model)
 		sendRate?: number; // Rate at which requests are dispatched to the server
 		throughput?: number; // Rate at which responses are received from the server
+		backpressure?: number; // Queue depth: requests sent but not yet responded
 		// Phase 2: Accurate timing metrics
 		testDuration?: number; // Actual test duration in seconds
 		setupOverhead?: number; // Context overhead before test started (seconds)
