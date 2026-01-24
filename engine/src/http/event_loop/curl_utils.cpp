@@ -250,7 +250,14 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
 
 Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode result) {
     if (result != CURLE_OK) {
-        return curl_to_error (result, data->error_buffer);
+        // Instead of returning Error directly, we return a Response with error details
+        // This ensures the load strategy can process it as a "failed response" rather
+        // than an "unexpected error"
+        Error error            = curl_to_error (result, data->error_buffer);
+        Response& response     = data->response;
+        response.error_code    = error.code;
+        response.error_message = error.message;
+        return response;
     }
 
     Response& response = data->response;

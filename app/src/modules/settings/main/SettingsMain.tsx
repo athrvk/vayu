@@ -120,7 +120,7 @@ export default function SettingsMain() {
 	// Filter entries by selected category (calculate before early returns)
 	const categoryEntries =
 		selectedCategory && configResponse?.entries
-			? configResponse.entries.filter((entry) => entry.category === selectedCategory)
+			? configResponse.entries.filter((entry) => entry.category === selectedCategory).sort((a, b) => a.key.localeCompare(b.key))
 			: [];
 	const categoryConfig = selectedCategory ? CATEGORY_TITLES[selectedCategory] : null;
 
