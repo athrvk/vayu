@@ -87,14 +87,17 @@ TEST_F (MetricsCollectorTest, CalculatesPercentilesCorrectly) {
 
     auto percentiles = collector->calculate_percentiles ();
 
-    EXPECT_DOUBLE_EQ (percentiles.min, 1.0);
-    EXPECT_DOUBLE_EQ (percentiles.max, 100.0);
-    // Percentile calculation uses floor(size * p / 100), so:
-    // p50 = arr[50] = 51, p90 = arr[90] = 91, etc.
-    EXPECT_DOUBLE_EQ (percentiles.p50, 51.0);
-    EXPECT_DOUBLE_EQ (percentiles.p90, 91.0);
-    EXPECT_DOUBLE_EQ (percentiles.p95, 96.0);
-    EXPECT_DOUBLE_EQ (percentiles.p99, 100.0);
+    // HdrHistogram has ~0.1% precision at 3 significant figures
+    // Use 1% tolerance for percentile assertions to account for histogram bucketing
+    constexpr double tolerance = 1.0;  // 1ms tolerance
+
+    EXPECT_NEAR (percentiles.min, 1.0, tolerance);
+    EXPECT_NEAR (percentiles.max, 100.0, tolerance);
+    // HdrHistogram percentile calculation may differ slightly from exact index-based calculation
+    EXPECT_NEAR (percentiles.p50, 50.0, tolerance);
+    EXPECT_NEAR (percentiles.p90, 90.0, tolerance);
+    EXPECT_NEAR (percentiles.p95, 95.0, tolerance);
+    EXPECT_NEAR (percentiles.p99, 99.0, tolerance);
 }
 
 TEST_F (MetricsCollectorTest, PercentilesHandleEmptyData) {
@@ -112,10 +115,12 @@ TEST_F (MetricsCollectorTest, PercentilesHandleSingleValue) {
 
     auto percentiles = collector->calculate_percentiles ();
 
-    EXPECT_DOUBLE_EQ (percentiles.min, 42.0);
-    EXPECT_DOUBLE_EQ (percentiles.max, 42.0);
-    EXPECT_DOUBLE_EQ (percentiles.p50, 42.0);
-    EXPECT_DOUBLE_EQ (percentiles.p99, 42.0);
+    // HdrHistogram stores in microseconds, may have slight rounding
+    constexpr double tolerance = 0.1;
+    EXPECT_NEAR (percentiles.min, 42.0, tolerance);
+    EXPECT_NEAR (percentiles.max, 42.0, tolerance);
+    EXPECT_NEAR (percentiles.p50, 42.0, tolerance);
+    EXPECT_NEAR (percentiles.p99, 42.0, tolerance);
 }
 
 // ============================================================================
@@ -212,21 +217,22 @@ TEST_F (MetricsCollectorTest, ReportsMemoryUsage) {
 // Configuration Tests
 // ============================================================================
 
-TEST (MetricsCollectorConfigTest, RespectsMaxLatenciesLimit) {
+TEST (MetricsCollectorConfigTest, HistogramRecordsAllLatencies) {
+    // HdrHistogram stores all latencies (no max_latencies limit)
     MetricsCollectorConfig config;
     config.expected_requests = 100;
-    config.max_latencies     = 10; // Only store 10 latencies
 
     MetricsCollector collector ("test", config);
 
-    // Record more than max
+    // Record many latencies
     for (int i = 0; i < 100; ++i) {
-        collector.record_success (200, static_cast<double> (i));
+        collector.record_success (200, static_cast<double> (i + 1));
     }
 
-    // Should only have max_latencies stored
-    EXPECT_EQ (collector.latencies ().size (), 10);
-    EXPECT_EQ (collector.total_requests (), 100); // But all requests counted
+    // All requests should be counted
+    EXPECT_EQ (collector.total_requests (), 100);
+    // Histogram should have all latency records
+    EXPECT_EQ (collector.latency_count (), 100);
 }
 
 TEST (MetricsCollectorConfigTest, RespectsMaxErrorsLimit) {

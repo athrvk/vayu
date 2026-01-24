@@ -184,6 +184,46 @@ else()
 endif()
 
 # ============================================================================
+# HdrHistogram (Vendored) - Lock-free latency histogram
+# ============================================================================
+
+set(HDRHISTOGRAM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/hdrhistogram)
+
+if(EXISTS ${HDRHISTOGRAM_DIR}/src/hdr_histogram.c)
+    add_library(hdrhistogram STATIC
+        ${HDRHISTOGRAM_DIR}/src/hdr_histogram.c
+        ${HDRHISTOGRAM_DIR}/src/hdr_encoding.c
+        ${HDRHISTOGRAM_DIR}/src/hdr_interval_recorder.c
+        ${HDRHISTOGRAM_DIR}/src/hdr_thread.c
+        ${HDRHISTOGRAM_DIR}/src/hdr_time.c
+        ${HDRHISTOGRAM_DIR}/src/hdr_writer_reader_phaser.c
+        ${HDRHISTOGRAM_DIR}/src/hdr_histogram_log_no_op.c
+    )
+    target_include_directories(hdrhistogram PUBLIC ${HDRHISTOGRAM_DIR}/include)
+    
+    # Platform-specific threading
+    if(NOT WIN32)
+        find_package(Threads REQUIRED)
+        target_link_libraries(hdrhistogram PRIVATE Threads::Threads)
+    endif()
+    
+    # Disable warnings for vendored code
+    if(MSVC)
+        target_compile_options(hdrhistogram PRIVATE /W0)
+    else()
+        target_compile_options(hdrhistogram PRIVATE -w)
+    endif()
+    
+    # Disable clang-tidy for vendored code
+    set_target_properties(hdrhistogram PROPERTIES C_CLANG_TIDY "" CXX_CLANG_TIDY "")
+    
+    set(HDRHISTOGRAM_FOUND TRUE)
+    message(STATUS "Found and configured HdrHistogram at ${HDRHISTOGRAM_DIR}")
+else()
+    message(FATAL_ERROR "HdrHistogram not found in vendor/hdrhistogram. Required for metrics collection.")
+endif()
+
+# ============================================================================
 # Core Library
 # ============================================================================
 
@@ -224,6 +264,7 @@ target_link_libraries(vayu_core PUBLIC
     nlohmann_json::nlohmann_json
     unofficial::sqlite3::sqlite3
     sqlite_orm::sqlite_orm
+    hdrhistogram
     vayu_warnings
     vayu_sanitizers
 )

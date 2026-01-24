@@ -513,8 +513,11 @@ enum class MetricName {
     Rps,
     LatencyAvg,
     LatencyP50,
+    LatencyP75,
+    LatencyP90,
     LatencyP95,
     LatencyP99,
+    LatencyP999,
     ErrorRate,
     TotalRequests,
     Completed,
@@ -542,8 +545,11 @@ inline const char* to_string (MetricName name) {
     case MetricName::Rps: return "rps";
     case MetricName::LatencyAvg: return "latency_avg";
     case MetricName::LatencyP50: return "latency_p50";
+    case MetricName::LatencyP75: return "latency_p75";
+    case MetricName::LatencyP90: return "latency_p90";
     case MetricName::LatencyP95: return "latency_p95";
     case MetricName::LatencyP99: return "latency_p99";
+    case MetricName::LatencyP999: return "latency_p999";
     case MetricName::ErrorRate: return "error_rate";
     case MetricName::TotalRequests: return "total_requests";
     case MetricName::Completed: return "completed";
@@ -571,10 +577,16 @@ inline std::optional<MetricName> parse_metric_name (const std::string& str) {
         return MetricName::LatencyAvg;
     if (str == "latency_p50")
         return MetricName::LatencyP50;
+    if (str == "latency_p75")
+        return MetricName::LatencyP75;
+    if (str == "latency_p90")
+        return MetricName::LatencyP90;
     if (str == "latency_p95")
         return MetricName::LatencyP95;
     if (str == "latency_p99")
         return MetricName::LatencyP99;
+    if (str == "latency_p999")
+        return MetricName::LatencyP999;
     if (str == "error_rate")
         return MetricName::ErrorRate;
     if (str == "total_requests")

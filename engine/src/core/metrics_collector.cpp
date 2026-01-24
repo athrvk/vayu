@@ -27,13 +27,20 @@ inline int64_t now_ms () {
 
 MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorConfig config)
 : run_id_ (run_id), config_ (config) {
+    // Initialize HdrHistogram for lock-free latency recording
+    // 3 significant figures = ~0.1% precision, max 1 hour in microseconds
+    int result = hdr_init (
+        1,  // Minimum value (1 microsecond)
+        constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,  // Maximum value (1 hour in microseconds)
+        constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,  // Significant figures
+        &latency_histogram_
+    );
+    if (result != 0 || latency_histogram_ == nullptr) {
+        throw std::runtime_error ("Failed to initialize HdrHistogram");
+    }
+
     // Pre-allocate vectors to avoid reallocation during test
     size_t expected = config_.expected_requests;
-
-    // Reserve latencies vector
-    size_t latency_reserve =
-    config_.max_latencies > 0 ? std::min (expected, config_.max_latencies) : expected;
-    latencies_.reserve (latency_reserve);
 
     // Reserve errors vector (assume ~5% error rate max)
     size_t error_reserve = config_.max_errors > 0 ?
@@ -51,6 +58,13 @@ MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorC
 
     // Reserve response samples for script validation
     response_samples_.reserve (config_.max_response_samples);
+}
+
+MetricsCollector::~MetricsCollector () {
+    if (latency_histogram_ != nullptr) {
+        hdr_close (latency_histogram_);
+        latency_histogram_ = nullptr;
+    }
 }
 
 void MetricsCollector::atomic_add_double (std::atomic<double>& target, double value) {
@@ -79,13 +93,11 @@ const std::string& trace_data) {
         status_5xx_.fetch_add (1, std::memory_order_relaxed);
     }
 
-    // Record latency (with mutex, but vector append is fast)
-    {
-        std::lock_guard<std::mutex> lock (latencies_mutex_);
-        if (config_.max_latencies == 0 || latencies_.size () < config_.max_latencies) {
-            latencies_.push_back (latency_ms);
-        }
-    }
+    // Record latency in histogram (lock-free, thread-safe)
+    // Convert milliseconds to microseconds for histogram precision
+    int64_t latency_us = static_cast<int64_t> (latency_ms * 1000.0);
+    if (latency_us < 1) latency_us = 1;  // Minimum 1 microsecond
+    hdr_record_value (latency_histogram_, latency_us);
 
     // Track detailed status codes
     {
@@ -142,45 +154,33 @@ const std::string& trace_data) {
 void MetricsCollector::record_latency (double latency_ms) {
     atomic_add_double (total_latency_sum_, latency_ms);
 
-    std::lock_guard<std::mutex> lock (latencies_mutex_);
-    if (config_.max_latencies == 0 || latencies_.size () < config_.max_latencies) {
-        latencies_.push_back (latency_ms);
-    }
+    // Record latency in histogram (lock-free, thread-safe)
+    // Convert milliseconds to microseconds for histogram precision
+    int64_t latency_us = static_cast<int64_t> (latency_ms * 1000.0);
+    if (latency_us < 1) latency_us = 1;  // Minimum 1 microsecond
+    hdr_record_value (latency_histogram_, latency_us);
 }
 
 MetricsCollector::Percentiles MetricsCollector::calculate_percentiles () {
     Percentiles result;
 
-    std::vector<double> sorted;
-    {
-        std::lock_guard<std::mutex> lock (latencies_mutex_);
-        sorted = latencies_; // Copy for sorting
-    }
-
-    if (sorted.empty ()) {
+    if (latency_histogram_ == nullptr || latency_histogram_->total_count == 0) {
         return result;
     }
 
-    std::sort (sorted.begin (), sorted.end ());
-
-    auto percentile = [&sorted] (double p) -> double {
-        if (sorted.empty ())
-            return 0.0;
-        size_t idx =
-        static_cast<size_t> (static_cast<double> (sorted.size ()) * p / 100.0);
-        if (idx >= sorted.size ())
-            idx = sorted.size () - 1;
-        return sorted[idx];
+    // Convert from microseconds back to milliseconds
+    auto us_to_ms = [] (int64_t us) -> double {
+        return static_cast<double> (us) / 1000.0;
     };
 
-    result.min  = sorted.front ();
-    result.max  = sorted.back ();
-    result.p50  = percentile (50);
-    result.p75  = percentile (75);
-    result.p90  = percentile (90);
-    result.p95  = percentile (95);
-    result.p99  = percentile (99);
-    result.p999 = percentile (99.9);
+    result.min  = us_to_ms (hdr_min (latency_histogram_));
+    result.max  = us_to_ms (hdr_max (latency_histogram_));
+    result.p50  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 50.0));
+    result.p75  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 75.0));
+    result.p90  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 90.0));
+    result.p95  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 95.0));
+    result.p99  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 99.0));
+    result.p999 = us_to_ms (hdr_value_at_percentile (latency_histogram_, 99.9));
 
     return result;
 }
@@ -232,13 +232,19 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
     return batch.size ();
 }
 
+int64_t MetricsCollector::latency_count () const {
+    if (latency_histogram_ == nullptr) {
+        return 0;
+    }
+    return latency_histogram_->total_count;
+}
+
 size_t MetricsCollector::memory_usage_bytes () const {
     size_t bytes = sizeof (MetricsCollector);
 
-    // Latencies vector
-    {
-        std::lock_guard<std::mutex> lock (latencies_mutex_);
-        bytes += latencies_.capacity () * sizeof (double);
+    // HdrHistogram memory (fixed size ~20-40KB)
+    if (latency_histogram_ != nullptr) {
+        bytes += hdr_get_memory_size (latency_histogram_);
     }
 
     // Errors vector

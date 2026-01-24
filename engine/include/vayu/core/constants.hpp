@@ -147,6 +147,10 @@ constexpr bool DEFAULT_STORE_SUCCESS_TRACES = false;
 constexpr size_t DEFAULT_MAX_RESPONSE_SAMPLES = 1000;
 /// Sample rate for response storage (1 = all, 100 = 1%, etc.)
 constexpr size_t DEFAULT_RESPONSE_SAMPLE_RATE = 100;
+/// HdrHistogram significant figures (3 = ~0.1% precision)
+constexpr int HISTOGRAM_SIGNIFICANT_FIGURES = 3;
+/// HdrHistogram max trackable latency in microseconds (1 hour)
+constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
 } // namespace metrics_collector
 
 /**

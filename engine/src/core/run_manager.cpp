@@ -373,11 +373,14 @@ RunManager& manager) {
         total_duration_s > 0 ? static_cast<double> (completed) / total_duration_s : 0.0;
         double error_rate = context->metrics_collector->error_rate ();
 
-        // Calculate percentiles using MetricsCollector
+        // Calculate percentiles using MetricsCollector (HdrHistogram)
         auto percentiles = context->metrics_collector->calculate_percentiles ();
         double p50       = percentiles.p50;
+        double p75       = percentiles.p75;
+        double p90       = percentiles.p90;
         double p95       = percentiles.p95;
         double p99       = percentiles.p99;
+        double p999      = percentiles.p999;
 
         // Store final summary metrics (batched in single transaction to reduce lock contention)
         try {
@@ -392,9 +395,15 @@ RunManager& manager) {
             final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::LatencyP50, p50, R"({"percentile":"p50"})" });
             final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::LatencyP75, p75, R"({"percentile":"p75"})" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::LatencyP90, p90, R"({"percentile":"p90"})" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::LatencyP95, p95, R"({"percentile":"p95"})" });
             final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::LatencyP99, p99, R"({"percentile":"p99"})" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::LatencyP999, p999, R"({"percentile":"p999"})" });
             final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::ErrorRate, error_rate, "" });
             final_metrics.push_back ({ 0, context->run_id, timestamp,

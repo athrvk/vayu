@@ -12,6 +12,7 @@ Checks: '
   -readability-magic-numbers
 '
 WarningsAsErrors: ''
-HeaderFilterRegex: 'src/.*|include/.*|tests/.*'
+HeaderFilterRegex: '.*/(?:src|include|tests)/.*'
+ExcludeHeaderFilterRegex: '.*/vendor/.*'
 FormatStyle: file
 ...

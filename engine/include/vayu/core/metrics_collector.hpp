@@ -28,6 +28,8 @@
 #include <string>
 #include <vector>
 
+#include <hdr/hdr_histogram.h>
+
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
@@ -87,9 +89,6 @@ struct MetricsCollectorConfig {
     /// Expected number of requests (for pre-allocation)
     size_t expected_requests = constants::metrics_collector::DEFAULT_EXPECTED_REQUESTS;
 
-    /// Maximum latencies to store (0 = unlimited)
-    size_t max_latencies = 0;
-
     /// Maximum errors to store (prevents OOM at high error rates)
     size_t max_errors = constants::metrics_collector::DEFAULT_MAX_ERRORS;
 
@@ -119,7 +118,7 @@ class MetricsCollector {
     public:
     explicit MetricsCollector (const std::string& run_id,
     MetricsCollectorConfig config = {});
-    ~MetricsCollector () = default;
+    ~MetricsCollector ();
 
     // Non-copyable, non-movable (due to atomics and mutex)
     MetricsCollector (const MetricsCollector&)            = delete;
@@ -219,11 +218,10 @@ class MetricsCollector {
     }
 
     /**
-     * @brief Get all stored latencies
+     * @brief Get latency count from histogram
+     * @note Raw latencies are no longer stored; use calculate_percentiles() for analysis
      */
-    [[nodiscard]] const std::vector<double>& latencies () const {
-        return latencies_;
-    }
+    [[nodiscard]] int64_t latency_count () const;
 
     /**
      * @brief Get stored response samples for script validation
@@ -281,9 +279,8 @@ class MetricsCollector {
     std::atomic<size_t> status_4xx_{ 0 };
     std::atomic<size_t> status_5xx_{ 0 };
 
-    // Protected by mutex (low contention due to batching)
-    mutable std::mutex latencies_mutex_;
-    std::vector<double> latencies_;
+    // Lock-free HdrHistogram for latency recording (thread-safe)
+    struct hdr_histogram* latency_histogram_{ nullptr };
 
     mutable std::mutex errors_mutex_;
     std::vector<ResultRecord> errors_;

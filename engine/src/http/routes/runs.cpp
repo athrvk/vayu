@@ -192,16 +192,21 @@ void register_run_routes (RouteContext& ctx) {
             auto report = vayu::utils::MetricsHelper::calculate_detailed_report (
             results, duration_s);
 
-            // Override calculated percentiles with correct values from Metrics table
-            // Note: P75 and P90 are calculated from results, not stored as metrics
+            // Override calculated percentiles with HdrHistogram values from Metrics table
             auto metrics = ctx.db.get_metrics (run_id);
             for (const auto& m : metrics) {
                 if (m.name == vayu::MetricName::LatencyP50) {
                     report.latency_p50 = m.value;
+                } else if (m.name == vayu::MetricName::LatencyP75) {
+                    report.latency_p75 = m.value;
+                } else if (m.name == vayu::MetricName::LatencyP90) {
+                    report.latency_p90 = m.value;
                 } else if (m.name == vayu::MetricName::LatencyP95) {
                     report.latency_p95 = m.value;
                 } else if (m.name == vayu::MetricName::LatencyP99) {
                     report.latency_p99 = m.value;
+                } else if (m.name == vayu::MetricName::LatencyP999) {
+                    report.latency_p999 = m.value;
                 } else if (m.name == vayu::MetricName::LatencyAvg) {
                     report.latency_avg = m.value;
                 } else if (m.name == vayu::MetricName::TotalRequests) {
