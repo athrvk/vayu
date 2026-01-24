@@ -42,7 +42,9 @@ elif [ -f "engine/build/vayu-cli" ]; then
 else
     echo "Error: vayu-cli not found. Please build the engine first:"
     echo "  ./scripts/build/build-macos.sh -e      # Production build"
+    echo "  ./scripts/build/build-linux.sh -e      # Production build"
     echo "  ./scripts/build/build-macos.sh dev -e  # Development build"
+    echo "  ./scripts/build/build-linux.sh dev -e  # Development build"
     exit 1
 fi
 
