@@ -798,7 +798,7 @@ std::vector<Metric> Database::get_metrics_paginated (const std::string& run_id, 
     return impl_->storage.get_all<Metric> (
     where (c (&Metric::run_id) == run_id),
     order_by (&Metric::timestamp),
-    sqlite_orm::limit (limit, offset));
+    sqlite_orm::limit (offset, limit));
 }
 
 // Count total metrics for a run (for pagination metadata)
