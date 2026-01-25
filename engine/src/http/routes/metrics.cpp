@@ -87,24 +87,23 @@ void register_metrics_routes (RouteContext& ctx) {
                     if (!bucket.contains ("timestamp")) {
                         bucket["timestamp"] = metric.timestamp;
                         bucket["elapsed_seconds"] = static_cast<double> (metric.timestamp - start_time) / 1000.0;
-                        // Initialize with defaults
+                        // Initialize with defaults (only metrics stored periodically during test)
                         bucket["requests_completed"] = 0;
                         bucket["requests_failed"] = 0;
                         bucket["current_rps"] = 0.0;
                         bucket["current_concurrency"] = 0;
-                        bucket["avg_latency_ms"] = 0.0;
-                        bucket["latency_p50_ms"] = 0.0;
-                        bucket["latency_p95_ms"] = 0.0;
-                        bucket["latency_p99_ms"] = 0.0;
                         bucket["send_rate"] = 0.0;
                         bucket["throughput"] = 0.0;
                         bucket["backpressure"] = 0;
+                        bucket["error_rate"] = 0.0;
                     }
 
                     // Map metric values to LoadTestMetrics fields
+                    // Note: LatencyAvg/P50/P95/P99 are only stored as final summary, not periodically
                     if (metric.name == vayu::MetricName::Rps) {
                         bucket["current_rps"] = metric.value;
                     } else if (metric.name == vayu::MetricName::ErrorRate) {
+                        bucket["error_rate"] = metric.value;
                         int total_req = bucket.value ("requests_completed", 0);
                         bucket["requests_failed"] = static_cast<int> ((metric.value / 100.0) * total_req);
                     } else if (metric.name == vayu::MetricName::ConnectionsActive) {
@@ -112,14 +111,6 @@ void register_metrics_routes (RouteContext& ctx) {
                     } else if (metric.name == vayu::MetricName::RequestsSent ||
                     metric.name == vayu::MetricName::TotalRequests) {
                         bucket["requests_completed"] = static_cast<int> (metric.value);
-                    } else if (metric.name == vayu::MetricName::LatencyAvg) {
-                        bucket["avg_latency_ms"] = metric.value;
-                    } else if (metric.name == vayu::MetricName::LatencyP50) {
-                        bucket["latency_p50_ms"] = metric.value;
-                    } else if (metric.name == vayu::MetricName::LatencyP95) {
-                        bucket["latency_p95_ms"] = metric.value;
-                    } else if (metric.name == vayu::MetricName::LatencyP99) {
-                        bucket["latency_p99_ms"] = metric.value;
                     } else if (metric.name == vayu::MetricName::SendRate) {
                         bucket["send_rate"] = metric.value;
                     } else if (metric.name == vayu::MetricName::Throughput) {

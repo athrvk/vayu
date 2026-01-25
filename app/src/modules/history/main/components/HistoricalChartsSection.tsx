@@ -59,6 +59,7 @@ function downsample<T>(data: T[], maxPoints: number = 2000): T[] {
 /**
  * Prepare chart data from LoadTestMetrics array.
  * Groups by elapsed_seconds and downsamples for rendering.
+ * Note: Latency metrics are not stored periodically, only as final summary.
  */
 function prepareChartData(metrics: LoadTestMetrics[]) {
     // Deduplicate by second (keep latest value per second)
@@ -68,8 +69,8 @@ function prepareChartData(metrics: LoadTestMetrics[]) {
             time: number;
             rps: number;
             concurrency: number;
-            avgLatency: number;
             errorRate: number;
+            throughput: number;
         }
     >();
 
@@ -84,8 +85,8 @@ function prepareChartData(metrics: LoadTestMetrics[]) {
             time: second,
             rps: m.current_rps,
             concurrency: m.current_concurrency,
-            avgLatency: m.avg_latency_ms,
             errorRate,
+            throughput: m.throughput ?? 0,
         });
     });
 
@@ -184,10 +185,10 @@ export default function HistoricalChartsSection({
                 </CardContent>
             </Card>
 
-            {/* Latency Chart */}
+            {/* Throughput Chart */}
             <Card>
                 <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Average Latency</CardTitle>
+                    <CardTitle className="text-base">Throughput (Responses/s)</CardTitle>
                 </CardHeader>
                 <CardContent>
                     <ResponsiveContainer width="100%" height={250}>
@@ -204,7 +205,7 @@ export default function HistoricalChartsSection({
                             />
                             <YAxis
                                 label={{
-                                    value: "Latency (ms)",
+                                    value: "Throughput",
                                     angle: -90,
                                     position: "insideLeft",
                                     offset: 10,
@@ -218,16 +219,16 @@ export default function HistoricalChartsSection({
                                     borderRadius: "6px",
                                 }}
                                 labelFormatter={(value: number) => `Time: ${value}s`}
-                                formatter={(value: number) => [`${value.toFixed(2)}ms`, "Latency"]}
+                                formatter={(value: number) => [`${value.toFixed(1)} req/s`, "Throughput"]}
                             />
                             <Line
                                 type="monotone"
-                                dataKey="avgLatency"
+                                dataKey="throughput"
                                 stroke="hsl(var(--chart-2))"
                                 strokeWidth={2}
                                 dot={false}
                                 isAnimationActive={false}
-                                name="Avg Latency"
+                                name="Throughput"
                             />
                         </LineChart>
                     </ResponsiveContainer>
