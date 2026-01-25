@@ -67,7 +67,7 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-          vcpkgGitCommitId: 'master'
+          vcpkgGitCommitId: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
       - name: Build and test engine
