@@ -1,0 +1,169 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            preset: linux-prod
+          - os: windows-latest
+            preset: windows-prod
+          - os: macos-latest
+            preset: macos-prod
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/pnpm/store
+            ~/Library/pnpm/store
+            ~/AppData/Local/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('app/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            build-essential \
+            pkg-config \
+            ca-certificates
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: 'master'
+          vcpkgJsonGlob: 'engine/vcpkg.json'
+
+      - name: Build and test engine
+        uses: lukka/run-cmake@v10
+        with:
+          configurePreset: ${{ matrix.preset }}
+          buildPreset: ${{ matrix.preset }}
+          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      - name: Run engine tests
+        working-directory: engine
+        run: ctest --preset ${{ matrix.preset }}
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup application icons
+        shell: bash
+        run: |
+          mkdir -p app/build/icons
+          cp -r shared/icon_png/* app/build/icons/ || true
+
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp shared/icon_ico/vayu_icon_256x256.ico app/build/icon.ico || true
+          elif [ "${{ runner.os }}" = "Darwin" ]; then
+            cp shared/icon_png/vayu_icon_512x512.png app/build/icon.png || true
+          else
+            cp shared/icon_png/vayu_icon_256x256.png app/build/icon.png || true
+          fi
+
+      - name: Build frontend
+        working-directory: app
+        run: |
+          pnpm run electron:compile
+          pnpm run build
+
+      - name: Copy engine binary to resources (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $resourcesDir = "app/build/resources/bin"
+          New-Item -ItemType Directory -Force -Path $resourcesDir | Out-Null
+          Copy-Item "engine/build-release/Release/vayu-engine.exe" "$resourcesDir/vayu-engine.exe"
+
+          # Copy runtime DLLs
+          $dllDir = "engine/build-release/Release"
+          Get-ChildItem -Path $dllDir -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName -Destination $resourcesDir
+          }
+
+      - name: Copy engine binary to resources (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p app/build/resources/bin
+          cp engine/build-release/vayu-engine app/build/resources/bin/vayu-engine
+          chmod +x app/build/resources/bin/vayu-engine
+
+      - name: Package application
+        working-directory: app
+        run: pnpm run electron:pack
+
+      - name: Collect artifacts (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp app/release/*.AppImage artifacts/ 2>/dev/null || true
+          cp app/release/*.deb artifacts/ 2>/dev/null || true
+          cp app/release/*.rpm artifacts/ 2>/dev/null || true
+          ls -lh artifacts/
+
+      - name: Collect artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Get-ChildItem app/release/*.exe | ForEach-Object {
+            Copy-Item $_.FullName -Destination artifacts/
+          }
+          Get-ChildItem artifacts
+
+      - name: Collect artifacts (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp app/release/*.dmg artifacts/ 2>/dev/null || true
+          ls -lh artifacts/
+
+      - name: Upload artifacts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

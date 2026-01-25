@@ -6,19 +6,19 @@ From the project root:
 
 ```bash
 # Release build + tests
-./scripts/build/build-and-test.sh
+python build.py -e -t
 
 # Debug build + tests
-./scripts/build/build-and-test.sh -d
+python build.py --dev -e -t
 
-# Skip tests
-./scripts/build/build-and-test.sh -s
+# Build without tests
+python build.py -e
 
 # Clean build
-./scripts/build/build-and-test.sh -c
+python build.py -c -e
 
-# Custom job count
-./scripts/build/build-and-test.sh -j 8
+# Run tests only (no rebuild)
+python build.py --test-only
 ```
 
 ## Prerequisites
@@ -33,7 +33,21 @@ From the project root:
 
 ## Manual Build
 
-### Configure
+### Using CMake Presets (Recommended)
+
+```bash
+cd engine
+
+# Release build
+cmake --preset linux-prod    # or macos-prod, windows-prod
+cmake --build --preset linux-prod
+
+# Debug build
+cmake --preset linux-dev     # or macos-dev, windows-dev
+cmake --build --preset linux-dev
+```
+
+### Traditional CMake
 
 ```bash
 cd engine
@@ -44,17 +58,7 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 # Debug build
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 
-# Without Ninja (uses default generator)
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-```
-
-### Build
-
-```bash
-# With Ninja
-ninja -C build
-
-# Without Ninja
+# Build
 cmake --build build
 ```
 
@@ -197,10 +201,10 @@ Set `VCPKG_ROOT` environment variable or install vcpkg in a standard location.
 
 ### Build Script Issues
 
-The build script (`build-and-test.sh`) handles:
-- vcpkg detection and dependency installation
-- Optimal job count detection
-- Platform-specific compiler flags
-- Ninja/ccache/mold auto-detection
+The build script (`build.py`) handles:
+- Cross-platform compatibility (Windows/Linux/macOS)
+- vcpkg detection (including Visual Studio bundled vcpkg on Windows)
+- CMake detection (including Visual Studio bundled CMake)
+- Platform-specific compiler flags via CMakePresets
 
-If issues persist, try manual CMake build as shown above.
+If issues persist, try manual CMake build with presets as shown above.

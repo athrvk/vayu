@@ -121,8 +121,7 @@ The app will:
 
 1. **Build the engine** (see `docs/engine/building.md`):
    ```bash
-   cd engine
-   ./scripts/build/build-and-test.sh
+   python build.py -e
    ```
 
 2. **Copy engine binary** to `app/build/resources/bin/`:
@@ -272,23 +271,15 @@ pnpm type-check
 
 ## CI/CD Integration
 
-For automated builds, ensure:
+For automated builds, see `.github/workflows/release.yml` which uses:
 
-1. Engine is built first
-2. Engine binary is copied to `app/build/resources/bin/`
-3. All dependencies are installed (`pnpm install`)
-4. Build command: `pnpm electron:build`
+- CMake presets for cross-platform builds
+- lukka/run-vcpkg for dependency management
+- lukka/run-cmake for building with presets
+- Automated artifact collection and release publishing
 
-Example GitHub Actions workflow:
-```yaml
-- name: Build Engine
-  run: cd engine && ./scripts/build/build-and-test.sh
-
-- name: Copy Engine Binary
-  run: |
-    mkdir -p app/build/resources/bin
-    cp engine/build/vayu-engine app/build/resources/bin/
-
-- name: Build App
-  run: cd app && pnpm electron:build
-```
+The workflow handles:
+1. Building engine with tests
+2. Copying engine binary to app resources
+3. Building and packaging the Electron app
+4. Creating GitHub releases

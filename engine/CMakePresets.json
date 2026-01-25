@@ -1,91 +1,248 @@
-﻿{
+{
   "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
   "configurePresets": [
     {
-      "name": "windows-base",
-      "description": "Target Windows with the Visual Studio development environment.",
+      "name": "base",
       "hidden": true,
-      "generator": "Visual Studio 18 2026",
-      "binaryDir": "${sourceDir}/engine/build/out/build/${presetName}",
-      "installDir": "${sourceDir}/engine/build/out/install/${presetName}",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "cl.exe",
-        "CMAKE_CXX_COMPILER": "cl.exe",
-        "CMAKE_TOOLCHAIN_FILE": "D:\\Software Installations\\Microsoft Visual Studio\\18\\Community\\VC\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake"
-      },
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      }
-    },
-    {
-      "name": "windows-ninja-msvc",
-      "description": "Target Windows using Ninja generator with the MSVC toolchain (Ninja + vcpkg).",
-      "hidden": false,
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/engine/build/out/build/${presetName}",
-      "installDir": "${sourceDir}/engine/build/out/install/${presetName}",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "D:\\Software Installations\\Microsoft Visual Studio\\18\\Community\\VC\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake"
+        "CMAKE_TOOLCHAIN_FILE": {
+          "type": "FILEPATH",
+          "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        },
+        "VCPKG_MANIFEST_MODE": "ON",
+        "VAYU_BUILD_ENGINE": "ON",
+        "VAYU_BUILD_CLI": "ON"
       },
       "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
+        "type": "notEquals",
+        "lhs": "$env{VCPKG_ROOT}",
+        "rhs": ""
       }
     },
     {
-      "name": "ninja-x64-debug",
-      "displayName": "Ninja x64 Debug",
-      "description": "Ninja generator (MSVC toolchain) x64 Debug",
-      "inherits": "windows-ninja-msvc",
-      "architecture": { "value": "x64", "strategy": "external" },
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "name": "base-fallback",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": {
+          "type": "FILEPATH",
+          "value": "$env{VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        },
+        "VCPKG_MANIFEST_MODE": "ON",
+        "VAYU_BUILD_ENGINE": "ON",
+        "VAYU_BUILD_CLI": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "$env{VCPKG_ROOT}",
+        "rhs": ""
+      }
     },
     {
-      "name": "ninja-x64-release",
-      "displayName": "Ninja x64 Release",
-      "description": "Ninja generator (MSVC toolchain) x64 Release",
-      "inherits": "windows-ninja-msvc",
-      "architecture": { "value": "x64", "strategy": "external" },
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
-    },
-    {
-      "name": "x64-debug",
-      "displayName": "x64 Debug",
-      "description": "Target Windows (64-bit) with the Visual Studio development environment. (Debug)",
-      "inherits": "windows-base",
+      "name": "windows-dev",
+      "displayName": "Windows Debug",
+      "description": "Development build for Windows (Debug)",
+      "inherits": ["base", "base-fallback"],
+      "generator": "Visual Studio 17 2022",
       "architecture": {
         "value": "x64",
-        "strategy": "external"
+        "strategy": "set"
       },
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
     },
     {
-      "name": "x64-release",
-      "displayName": "x64 Release",
-      "description": "Target Windows (64-bit) with the Visual Studio development environment. (RelWithDebInfo)",
-      "inherits": "x64-debug",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
-    },
-    {
-      "name": "x86-debug",
-      "displayName": "x86 Debug",
-      "description": "Target Windows (32-bit) with the Visual Studio development environment. (Debug)",
-      "inherits": "windows-base",
+      "name": "windows-prod",
+      "displayName": "Windows Release",
+      "description": "Production build for Windows (Release)",
+      "inherits": ["base", "base-fallback"],
+      "generator": "Visual Studio 17 2022",
       "architecture": {
-        "value": "x86",
-        "strategy": "external"
+        "value": "x64",
+        "strategy": "set"
       },
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
     },
     {
-      "name": "x86-release",
-      "displayName": "x86 Release",
-      "description": "Target Windows (32-bit) with the Visual Studio development environment. (RelWithDebInfo)",
-      "inherits": "x86-debug",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "name": "linux-dev",
+      "displayName": "Linux Debug",
+      "description": "Development build for Linux (Debug)",
+      "inherits": ["base", "base-fallback"],
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-prod",
+      "displayName": "Linux Release",
+      "description": "Production build for Linux (Release)",
+      "inherits": ["base", "base-fallback"],
+      "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "macos-dev",
+      "displayName": "macOS Debug",
+      "description": "Development build for macOS (Debug)",
+      "inherits": ["base", "base-fallback"],
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
+      "name": "macos-prod",
+      "displayName": "macOS Release",
+      "description": "Production build for macOS (Release)",
+      "inherits": ["base", "base-fallback"],
+      "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-dev",
+      "displayName": "Build Windows Debug",
+      "configurePreset": "windows-dev",
+      "configuration": "Debug",
+      "jobs": 0
+    },
+    {
+      "name": "windows-prod",
+      "displayName": "Build Windows Release",
+      "configurePreset": "windows-prod",
+      "configuration": "Release",
+      "jobs": 0
+    },
+    {
+      "name": "linux-dev",
+      "displayName": "Build Linux Debug",
+      "configurePreset": "linux-dev",
+      "jobs": 0
+    },
+    {
+      "name": "linux-prod",
+      "displayName": "Build Linux Release",
+      "configurePreset": "linux-prod",
+      "jobs": 0
+    },
+    {
+      "name": "macos-dev",
+      "displayName": "Build macOS Debug",
+      "configurePreset": "macos-dev",
+      "jobs": 0
+    },
+    {
+      "name": "macos-prod",
+      "displayName": "Build macOS Release",
+      "configurePreset": "macos-prod",
+      "jobs": 0
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-dev",
+      "displayName": "Test Windows Debug",
+      "configurePreset": "windows-dev",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-prod",
+      "displayName": "Test Windows Release",
+      "configurePreset": "windows-prod",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-dev",
+      "displayName": "Test Linux Debug",
+      "configurePreset": "linux-dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-prod",
+      "displayName": "Test Linux Release",
+      "configurePreset": "linux-prod",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-dev",
+      "displayName": "Test macOS Debug",
+      "configurePreset": "macos-dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-prod",
+      "displayName": "Test macOS Release",
+      "configurePreset": "macos-prod",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

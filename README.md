@@ -41,30 +41,27 @@ git clone https://github.com/athrvk/vayu.git
 cd vayu
 ```
 
-Build for your platform:
-
-**macOS:**
-```bash
-./scripts/build/build-macos.sh dev
-```
-
-**Linux:**
-```bash
-./scripts/build/build-linux.sh dev
-```
-
-**Windows (PowerShell):**
-```powershell
-.\scripts\build\build-windows.ps1 dev
-```
-
-Then start the app:
+Build and run (all platforms):
 
 ```bash
+# Build everything (development mode)
+python build.py --dev
+
+# Then start the app
 cd app && pnpm run electron:dev
 ```
 
-For production builds and detailed platform-specific instructions, see the [Building Documentation](docs/building-macos.md).
+**Quick commands:**
+```bash
+python build.py --dev         # Development build
+python build.py               # Production build
+python build.py -e            # Engine only
+python build.py -a            # App only
+python build.py -t            # Build with tests
+python build.py --help        # See all options
+```
+
+For detailed setup and troubleshooting, see the [Building Documentation](docs/building.md).
 
 ## Architecture
 
@@ -125,15 +122,18 @@ Key points:
 
 How to create a release (recommended)
 
-1. Update the `VERSION` file. Use the provided bump script located at `scripts/bump-version.sh` to avoid mistakes. Example:
+1. Bump the version using the build script:
 
 ```bash
-./scripts/bump-version.sh 0.1.2
+python build.py --bump-version patch    # 0.1.1 -> 0.1.2
 # or
-./scripts/bump-version.sh patch
+python build.py --bump-version 0.1.2    # set specific version
+
+# Preview changes first
+python build.py --bump-version patch --dry-run
 ```
 
-2. Commit the change (some bump scripts automatically commit; confirm the script's behavior):
+2. Commit the changes:
 
 ```bash
 git add VERSION engine/include/vayu/version.hpp engine/CMakeLists.txt engine/vcpkg.json app/package.json

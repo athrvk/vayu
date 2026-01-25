@@ -57,24 +57,14 @@ git remote add upstream https://github.com/athrvk/vayu.git
 # Create feature branch
 git checkout -b feature/my-feature
 
-# Build for your platform
-# macOS:
-./scripts/build/build-macos.sh dev
-
-# Linux:
-./scripts/build/build-linux.sh dev
-
-# Windows:
-.\scripts\build\build-windows.ps1 dev
+# Build (all platforms use the same command)
+python build.py --dev
 
 # Start the app
 cd app && pnpm run electron:dev
 ```
 
-For detailed platform-specific build instructions, see:
-- [Building on macOS](building-macos.md)
-- [Building on Linux](building-linux.md)
-- [Building on Windows](building-windows.md)
+For detailed build instructions and troubleshooting, see [Building Guide](docs/building.md).
 
 ## Project Structure
 
@@ -216,16 +206,17 @@ pnpm type-check
 We use Google Test for C++ unit tests.
 
 ```bash
-cd engine
+# Build and run all tests (all platforms)
+python build.py -e -t
 
-# Build and run all tests (this script only on linux or macOS)
-./scripts/build/build-and-test.sh
+# Run tests only (without rebuilding)
+python build.py --test-only
 
-# Run specific test
-./build/vayu_tests --gtest_filter=HttpClientTest.*
+# Run specific test directly
+./engine/build/vayu_tests --gtest_filter=HttpClientTest.*
 
 # Run with verbose output
-ctest --test-dir build -V
+ctest --test-dir engine/build -V
 ```
 
 #### Writing Tests
@@ -330,13 +321,26 @@ causing retained references to large response bodies.
 
 Vayu uses a simple, explicit release process that relies on a top-level `VERSION` file as the single source of truth.
 
-1. Update the `VERSION` file to the desired version (for example `0.1.2`). Use the helper script to do this:
+1. Bump the version using the build script:
 
 ```bash
-./scripts/bump-version.sh 0.1.2
+# Bump patch version (0.1.1 -> 0.1.2)
+python build.py --bump-version patch
+
+# Or bump minor/major
+python build.py --bump-version minor   # 0.1.1 -> 0.2.0
+python build.py --bump-version major   # 0.1.1 -> 1.0.0
+
+# Or set specific version
+python build.py --bump-version 0.1.2
+
+# Preview changes first
+python build.py --bump-version patch --dry-run
 ```
 
-2. Commit the updated `VERSION` file (some bump scripts may commit automatically — check the script):
+This updates: `VERSION`, `engine/CMakeLists.txt`, `engine/include/vayu/version.hpp`, `engine/vcpkg.json`, `app/package.json`
+
+2. Commit the version bump:
 
 ```bash
 git add VERSION engine/include/vayu/version.hpp engine/CMakeLists.txt engine/vcpkg.json app/package.json
