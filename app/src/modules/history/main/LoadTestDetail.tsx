@@ -32,8 +32,8 @@ export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetail
 	const successRate =
 		report.summary.totalRequests > 0
 			? ((report.summary.totalRequests - report.summary.failedRequests) /
-					report.summary.totalRequests) *
-				100
+				report.summary.totalRequests) *
+			100
 			: 0;
 
 	return (
