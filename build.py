@@ -853,7 +853,7 @@ def print_next_steps(dev_mode: bool, skip_app: bool, artifacts: List[Tuple[str, 
         print(f'  {Style.DIM}Run the development app{Style.RESET}')
         system_name, _ = detect_platform()
         cmd_sep = ";" if system_name == "Windows" else "&&"
-        print(f'  {Style.CYAN} cd {rel_path} {cmd_sep} pnpm run electron:dev{Style.RESET}')
+        print(f'  {Style.CYAN}$ cd {rel_path} {cmd_sep} pnpm run electron:dev{Style.RESET}')
     elif artifacts:
         for label, path in artifacts:
             if label == "Engine":
