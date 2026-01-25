@@ -14,6 +14,7 @@ import type { RunReport } from "@/types";
 
 export interface TabProps {
 	report: RunReport;
+	runId?: string;
 }
 
 export interface DesignRunDetailProps {

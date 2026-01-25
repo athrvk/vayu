@@ -120,7 +120,7 @@ export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetail
 						</TabsContent>
 
 						<TabsContent value="performance" className="mt-0 space-y-4">
-							<PerformanceTab report={report} />
+							<PerformanceTab report={report} runId={runId} />
 						</TabsContent>
 
 						<TabsContent value="samples" className="mt-0 space-y-4">

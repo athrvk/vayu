@@ -9,16 +9,17 @@
 /**
  * PerformanceTab Component
  *
- * Displays latency distribution and rate control metrics.
+ * Displays latency distribution, rate control metrics, and historical charts.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
 import LatencyMetric from "./LatencyMetric";
+import HistoricalCharts from "./HistoricalCharts";
 import type { TabProps } from "../../types";
 
-export default function PerformanceTab({ report }: TabProps) {
+export default function PerformanceTab({ report, runId }: TabProps) {
 	return (
 		<>
 			{/* Latency Statistics */}
@@ -94,6 +95,9 @@ export default function PerformanceTab({ report }: TabProps) {
 					</CardContent>
 				</Card>
 			)}
+
+			{/* Historical Charts */}
+			{runId && <HistoricalCharts runId={runId} />}
 		</>
 	);
 }
