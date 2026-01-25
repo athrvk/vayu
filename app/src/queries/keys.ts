@@ -41,6 +41,7 @@ export const queryKeys = {
 		details: () => [...queryKeys.runs.all, "detail"] as const,
 		detail: (id: string) => [...queryKeys.runs.details(), id] as const,
 		report: (id: string) => [...queryKeys.runs.all, "report", id] as const,
+		timeSeries: (id: string) => [...queryKeys.runs.all, "timeSeries", id] as const,
 	},
 
 	// Environments

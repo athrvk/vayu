@@ -44,6 +44,7 @@ import type {
 	UpdateConfigRequest,
 	GlobalsResponse,
 } from "@/types";
+import type { TimeSeriesResponse } from "@/modules/history/types";
 
 export const apiService = {
 	// Health & Configuration
@@ -181,6 +182,20 @@ export const apiService = {
 
 	async deleteRun(id: string): Promise<void> {
 		await httpClient.delete(API_ENDPOINTS.RUN_BY_ID(id));
+	},
+
+	/**
+	 * Get time-series metrics for a run (paginated)
+	 * Used for rendering historical charts
+	 */
+	async getRunTimeSeries(
+		id: string,
+		options: { limit?: number; offset?: number } = {}
+	): Promise<TimeSeriesResponse> {
+		const { limit = 5000, offset = 0 } = options;
+		return await httpClient.get<TimeSeriesResponse>(
+			API_ENDPOINTS.STATS_TIME_SERIES(id, limit, offset)
+		);
 	},
 
 	// Scripting

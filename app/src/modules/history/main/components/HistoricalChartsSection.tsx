@@ -7,14 +7,13 @@
  */
 
 /**
- * HistoricalCharts Component
+ * HistoricalChartsSection Component
  *
- * Displays time-series charts for historical load test runs using data from /stats endpoint.
+ * Displays time-series charts for historical load test runs.
+ * Uses Recharts for visualization with client-side downsampling for large datasets.
  */
 
 import { useMemo } from "react";
-import { Loader2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import {
     LineChart,
     Line,
@@ -23,67 +22,94 @@ import {
     CartesianGrid,
     Tooltip,
     ResponsiveContainer,
-    Legend,
 } from "recharts";
-import { useHistoricalMetrics } from "../hooks";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { Loader2 } from "lucide-react";
+import type { LoadTestMetrics } from "@/types";
 
-interface HistoricalChartsProps {
-    runId: string;
+interface HistoricalChartsSectionProps {
+    data: LoadTestMetrics[];
+    isLoading?: boolean;
+    isFetchingMore?: boolean;
+    progress?: { loaded: number; total: number };
 }
 
-export default function HistoricalCharts({ runId }: HistoricalChartsProps) {
-    const { metrics, isLoading, error } = useHistoricalMetrics(runId);
+/**
+ * Downsample data for chart rendering performance.
+ * Keeps every Nth point to cap at maxPoints while preserving first and last points.
+ */
+function downsample<T>(data: T[], maxPoints: number = 2000): T[] {
+    if (data.length <= maxPoints) return data;
 
-    // Prepare chart data - deduplicated by second
-    const chartData = useMemo(() => {
-        if (!metrics.length) return [];
+    const step = Math.ceil(data.length / maxPoints);
+    const result: T[] = [];
 
-        const dataBySecond = new Map<
-            number,
-            {
-                time: number;
-                rps: number;
-                concurrency: number;
-                latency: number;
-                throughput: number;
-                sendRate: number;
-            }
-        >();
+    for (let i = 0; i < data.length; i += step) {
+        result.push(data[i]);
+    }
 
-        metrics.forEach((m) => {
-            const second = Math.round(m.elapsedSeconds);
-            dataBySecond.set(second, {
-                time: second,
-                rps: m.currentRps,
-                concurrency: m.activeConnections,
-                latency: m.avgLatencyMs,
-                throughput: m.throughput,
-                sendRate: m.sendRate,
-            });
+    // Ensure last point is included
+    if (result[result.length - 1] !== data[data.length - 1]) {
+        result.push(data[data.length - 1]);
+    }
+
+    return result;
+}
+
+/**
+ * Prepare chart data from LoadTestMetrics array.
+ * Groups by elapsed_seconds and downsamples for rendering.
+ */
+function prepareChartData(metrics: LoadTestMetrics[]) {
+    // Deduplicate by second (keep latest value per second)
+    const dataBySecond = new Map<
+        number,
+        {
+            time: number;
+            rps: number;
+            concurrency: number;
+            avgLatency: number;
+            errorRate: number;
+        }
+    >();
+
+    metrics.forEach((m) => {
+        const second = Math.round(m.elapsed_seconds);
+        const errorRate =
+            m.requests_completed > 0
+                ? ((m.requests_failed || 0) / m.requests_completed) * 100
+                : 0;
+
+        dataBySecond.set(second, {
+            time: second,
+            rps: m.current_rps,
+            concurrency: m.current_concurrency,
+            avgLatency: m.avg_latency_ms,
+            errorRate,
         });
+    });
 
-        return Array.from(dataBySecond.values()).sort((a, b) => a.time - b.time);
-    }, [metrics]);
+    // Convert to sorted array and downsample
+    const sorted = Array.from(dataBySecond.values()).sort((a, b) => a.time - b.time);
+    return downsample(sorted, 2000);
+}
 
-    if (isLoading) {
+export default function HistoricalChartsSection({
+    data,
+    isLoading,
+    isFetchingMore,
+    progress,
+}: HistoricalChartsSectionProps) {
+    const chartData = useMemo(() => prepareChartData(data), [data]);
+
+    if (isLoading && data.length === 0) {
         return (
             <Card>
                 <CardContent className="flex items-center justify-center py-12">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        <span>Loading historical metrics...</span>
+                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <Loader2 className="h-8 w-8 animate-spin" />
+                        <p>Loading time-series data...</p>
                     </div>
-                </CardContent>
-            </Card>
-        );
-    }
-
-    if (error) {
-        return (
-            <Card>
-                <CardContent className="py-8 text-center text-muted-foreground">
-                    <p>Unable to load historical charts</p>
-                    <p className="text-xs mt-1">{error}</p>
                 </CardContent>
             </Card>
         );
@@ -92,10 +118,9 @@ export default function HistoricalCharts({ runId }: HistoricalChartsProps) {
     if (chartData.length < 2) {
         return (
             <Card>
-                <CardContent className="py-8 text-center text-muted-foreground">
-                    <p>Not enough data points to display charts</p>
-                    <p className="text-xs mt-1">
-                        Charts require at least 2 data points over time
+                <CardContent className="flex items-center justify-center py-8">
+                    <p className="text-muted-foreground">
+                        Insufficient data points for charts (need at least 2 seconds of data)
                     </p>
                 </CardContent>
             </Card>
@@ -103,10 +128,21 @@ export default function HistoricalCharts({ runId }: HistoricalChartsProps) {
     }
 
     return (
-        <div className="space-y-6">
-            {/* RPS Over Time */}
+        <div className="space-y-4">
+            {/* Loading indicator for pagination */}
+            {isFetchingMore && progress && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>
+                        Loading more data... ({progress.loaded.toLocaleString()} /{" "}
+                        {progress.total.toLocaleString()} points)
+                    </span>
+                </div>
+            )}
+
+            {/* RPS Chart */}
             <Card>
-                <CardHeader>
+                <CardHeader className="pb-2">
                     <CardTitle className="text-base">Requests per Second</CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -120,15 +156,19 @@ export default function HistoricalCharts({ runId }: HistoricalChartsProps) {
                                     position: "insideBottom",
                                     offset: -5,
                                 }}
+                                tick={{ fontSize: 12 }}
                             />
                             <YAxis
                                 label={{ value: "RPS", angle: -90, position: "insideLeft" }}
+                                tick={{ fontSize: 12 }}
                             />
                             <Tooltip
                                 contentStyle={{
                                     backgroundColor: "hsl(var(--card))",
                                     border: "1px solid hsl(var(--border))",
+                                    borderRadius: "6px",
                                 }}
+                                labelFormatter={(value: number) => `Time: ${value}s`}
                             />
                             <Line
                                 type="monotone"
@@ -136,6 +176,7 @@ export default function HistoricalCharts({ runId }: HistoricalChartsProps) {
                                 stroke="hsl(var(--primary))"
                                 strokeWidth={2}
                                 dot={false}
+                                isAnimationActive={false}
                                 name="RPS"
                             />
                         </LineChart>
@@ -143,10 +184,10 @@ export default function HistoricalCharts({ runId }: HistoricalChartsProps) {
                 </CardContent>
             </Card>
 
-            {/* Throughput vs Send Rate */}
+            {/* Latency Chart */}
             <Card>
-                <CardHeader>
-                    <CardTitle className="text-base">Throughput vs Send Rate</CardTitle>
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Average Latency</CardTitle>
                 </CardHeader>
                 <CardContent>
                     <ResponsiveContainer width="100%" height={250}>
@@ -159,45 +200,43 @@ export default function HistoricalCharts({ runId }: HistoricalChartsProps) {
                                     position: "insideBottom",
                                     offset: -5,
                                 }}
+                                tick={{ fontSize: 12 }}
                             />
                             <YAxis
                                 label={{
-                                    value: "req/s",
+                                    value: "Latency (ms)",
                                     angle: -90,
                                     position: "insideLeft",
+                                    offset: 10,
                                 }}
+                                tick={{ fontSize: 12 }}
                             />
                             <Tooltip
                                 contentStyle={{
                                     backgroundColor: "hsl(var(--card))",
                                     border: "1px solid hsl(var(--border))",
+                                    borderRadius: "6px",
                                 }}
-                            />
-                            <Legend />
-                            <Line
-                                type="monotone"
-                                dataKey="sendRate"
-                                stroke="hsl(var(--chart-1))"
-                                strokeWidth={2}
-                                dot={false}
-                                name="Send Rate"
+                                labelFormatter={(value: number) => `Time: ${value}s`}
+                                formatter={(value: number) => [`${value.toFixed(2)}ms`, "Latency"]}
                             />
                             <Line
                                 type="monotone"
-                                dataKey="throughput"
+                                dataKey="avgLatency"
                                 stroke="hsl(var(--chart-2))"
                                 strokeWidth={2}
                                 dot={false}
-                                name="Throughput"
+                                isAnimationActive={false}
+                                name="Avg Latency"
                             />
                         </LineChart>
                     </ResponsiveContainer>
                 </CardContent>
             </Card>
 
-            {/* Active Connections */}
+            {/* Connections Chart */}
             <Card>
-                <CardHeader>
+                <CardHeader className="pb-2">
                     <CardTitle className="text-base">Active Connections</CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -211,6 +250,7 @@ export default function HistoricalCharts({ runId }: HistoricalChartsProps) {
                                     position: "insideBottom",
                                     offset: -5,
                                 }}
+                                tick={{ fontSize: 12 }}
                             />
                             <YAxis
                                 label={{
@@ -219,12 +259,15 @@ export default function HistoricalCharts({ runId }: HistoricalChartsProps) {
                                     position: "insideLeft",
                                     offset: 5,
                                 }}
+                                tick={{ fontSize: 12 }}
                             />
                             <Tooltip
                                 contentStyle={{
                                     backgroundColor: "hsl(var(--card))",
                                     border: "1px solid hsl(var(--border))",
+                                    borderRadius: "6px",
                                 }}
+                                labelFormatter={(value: number) => `Time: ${value}s`}
                             />
                             <Line
                                 type="monotone"
@@ -232,50 +275,8 @@ export default function HistoricalCharts({ runId }: HistoricalChartsProps) {
                                 stroke="hsl(var(--chart-3))"
                                 strokeWidth={2}
                                 dot={false}
+                                isAnimationActive={false}
                                 name="Connections"
-                            />
-                        </LineChart>
-                    </ResponsiveContainer>
-                </CardContent>
-            </Card>
-
-            {/* Average Latency Over Time */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-base">Average Latency Over Time</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <ResponsiveContainer width="100%" height={250}>
-                        <LineChart data={chartData}>
-                            <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                            <XAxis
-                                dataKey="time"
-                                label={{
-                                    value: "Time (s)",
-                                    position: "insideBottom",
-                                    offset: -5,
-                                }}
-                            />
-                            <YAxis
-                                label={{
-                                    value: "Latency (ms)",
-                                    angle: -90,
-                                    position: "insideLeft",
-                                }}
-                            />
-                            <Tooltip
-                                contentStyle={{
-                                    backgroundColor: "hsl(var(--card))",
-                                    border: "1px solid hsl(var(--border))",
-                                }}
-                            />
-                            <Line
-                                type="monotone"
-                                dataKey="latency"
-                                stroke="hsl(var(--chart-4))"
-                                strokeWidth={2}
-                                dot={false}
-                                name="Avg Latency"
                             />
                         </LineChart>
                     </ResponsiveContainer>

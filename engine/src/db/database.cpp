@@ -792,6 +792,21 @@ std::vector<Metric> Database::get_metrics_since (const std::string& run_id, int6
     order_by (&Metric::id));
 }
 
+// Get metrics with pagination for historical data retrieval
+std::vector<Metric> Database::get_metrics_paginated (const std::string& run_id, int64_t limit, int64_t offset) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<Metric> (
+    where (c (&Metric::run_id) == run_id),
+    order_by (&Metric::timestamp),
+    sqlite_orm::limit (limit, offset));
+}
+
+// Count total metrics for a run (for pagination metadata)
+int64_t Database::count_metrics (const std::string& run_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<Metric> (where (c (&Metric::run_id) == run_id));
+}
+
 // ============================================================================
 // Results - Individual request outcomes with timing breakdown
 // ============================================================================

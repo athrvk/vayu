@@ -104,6 +104,8 @@ class Database {
     void add_metrics_batch (const std::vector<Metric>& metrics); // Transactional batch insert
     std::vector<Metric> get_metrics (const std::string& run_id);
     std::vector<Metric> get_metrics_since (const std::string& run_id, int64_t last_id);
+    std::vector<Metric> get_metrics_paginated (const std::string& run_id, int64_t limit, int64_t offset);
+    int64_t count_metrics (const std::string& run_id);
 
     // Results
     void add_result (const Result& result);

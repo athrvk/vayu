@@ -22,10 +22,137 @@ void register_metrics_routes (RouteContext& ctx) {
      * GET /stats/:runId
      * Streams real-time statistics for a load test run using Server-Sent Events
      * (SSE). Uses database polling for historical data.
+     *
+     * Query Parameters:
+     * - format=json: Return JSON instead of SSE (for historical chart data)
+     * - limit: Max records per page (default 5000, for format=json only)
+     * - offset: Skip N records (default 0, for format=json only)
      */
     ctx.server.Get (R"(/stats/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string run_id = req.matches[1];
+
+        // Check for JSON format (batch retrieval for charts)
+        bool json_format = req.has_param ("format") && req.get_param_value ("format") == "json";
+
+        if (json_format) {
+            vayu::utils::log_info (
+            "GET /stats/:id?format=json - Fetching time-series for run: " + run_id);
+
+            // Parse pagination params
+            int64_t limit = 5000;
+            int64_t offset = 0;
+            if (req.has_param ("limit")) {
+                try {
+                    limit = std::stoll (req.get_param_value ("limit"));
+                    if (limit <= 0) limit = 5000;
+                    if (limit > 50000) limit = 50000; // Cap at 50k for safety
+                } catch (...) {
+                    limit = 5000;
+                }
+            }
+            if (req.has_param ("offset")) {
+                try {
+                    offset = std::stoll (req.get_param_value ("offset"));
+                    if (offset < 0) offset = 0;
+                } catch (...) {
+                    offset = 0;
+                }
+            }
+
+            try {
+                auto run = ctx.db.get_run (run_id);
+                if (!run) {
+                    vayu::utils::log_warning ("GET /stats/:id - Run not found: " + run_id);
+                    send_error (res, 404, "Run not found");
+                    return;
+                }
+
+                // Get total count for pagination
+                int64_t total_count = ctx.db.count_metrics (run_id);
+
+                // Get paginated metrics
+                auto metrics = ctx.db.get_metrics_paginated (run_id, limit, offset);
+
+                // Group metrics by timestamp into LoadTestMetrics-compatible format
+                std::map<int64_t, nlohmann::json> time_buckets;
+                int64_t start_time = 0;
+
+                for (const auto& metric : metrics) {
+                    if (start_time == 0) {
+                        start_time = metric.timestamp;
+                    }
+
+                    auto& bucket = time_buckets[metric.timestamp];
+                    if (!bucket.contains ("timestamp")) {
+                        bucket["timestamp"] = metric.timestamp;
+                        bucket["elapsed_seconds"] = static_cast<double> (metric.timestamp - start_time) / 1000.0;
+                        // Initialize with defaults
+                        bucket["requests_completed"] = 0;
+                        bucket["requests_failed"] = 0;
+                        bucket["current_rps"] = 0.0;
+                        bucket["current_concurrency"] = 0;
+                        bucket["avg_latency_ms"] = 0.0;
+                        bucket["latency_p50_ms"] = 0.0;
+                        bucket["latency_p95_ms"] = 0.0;
+                        bucket["latency_p99_ms"] = 0.0;
+                        bucket["send_rate"] = 0.0;
+                        bucket["throughput"] = 0.0;
+                        bucket["backpressure"] = 0;
+                    }
+
+                    // Map metric values to LoadTestMetrics fields
+                    if (metric.name == vayu::MetricName::Rps) {
+                        bucket["current_rps"] = metric.value;
+                    } else if (metric.name == vayu::MetricName::ErrorRate) {
+                        int total_req = bucket.value ("requests_completed", 0);
+                        bucket["requests_failed"] = static_cast<int> ((metric.value / 100.0) * total_req);
+                    } else if (metric.name == vayu::MetricName::ConnectionsActive) {
+                        bucket["current_concurrency"] = static_cast<int> (metric.value);
+                    } else if (metric.name == vayu::MetricName::RequestsSent ||
+                    metric.name == vayu::MetricName::TotalRequests) {
+                        bucket["requests_completed"] = static_cast<int> (metric.value);
+                    } else if (metric.name == vayu::MetricName::LatencyAvg) {
+                        bucket["avg_latency_ms"] = metric.value;
+                    } else if (metric.name == vayu::MetricName::LatencyP50) {
+                        bucket["latency_p50_ms"] = metric.value;
+                    } else if (metric.name == vayu::MetricName::LatencyP95) {
+                        bucket["latency_p95_ms"] = metric.value;
+                    } else if (metric.name == vayu::MetricName::LatencyP99) {
+                        bucket["latency_p99_ms"] = metric.value;
+                    } else if (metric.name == vayu::MetricName::SendRate) {
+                        bucket["send_rate"] = metric.value;
+                    } else if (metric.name == vayu::MetricName::Throughput) {
+                        bucket["throughput"] = metric.value;
+                    } else if (metric.name == vayu::MetricName::Backpressure) {
+                        bucket["backpressure"] = static_cast<int> (metric.value);
+                    }
+                }
+
+                // Convert map to sorted array
+                nlohmann::json data_array = nlohmann::json::array ();
+                for (const auto& [ts, bucket] : time_buckets) {
+                    data_array.push_back (bucket);
+                }
+
+                // Build response with pagination metadata
+                nlohmann::json response;
+                response["data"] = data_array;
+                response["pagination"]["total"] = total_count;
+                response["pagination"]["limit"] = limit;
+                response["pagination"]["offset"] = offset;
+                response["pagination"]["hasMore"] = (offset + static_cast<int64_t> (metrics.size ())) < total_count;
+                response["pagination"]["returned"] = metrics.size ();
+
+                res.set_content (response.dump (), "application/json");
+            } catch (const std::exception& e) {
+                vayu::utils::log_error ("GET /stats/:id?format=json - Error: " + std::string (e.what ()));
+                send_error (res, 500, e.what ());
+            }
+            return;
+        }
+
+        // SSE streaming mode (existing behavior)
         vayu::utils::log_info (
         "GET /stats/:id - Starting SSE stream for run: " + run_id);
 

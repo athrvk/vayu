@@ -12,10 +12,11 @@
  * TanStack Query hooks for run history operations.
  */
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import type { Run } from "@/types";
+import type { TimeSeriesResponse } from "@/modules/history/types";
 
 // ============ Run Queries ============
 
@@ -40,6 +41,27 @@ export function useRunReportQuery(runId: string | null) {
 		enabled: !!runId,
 		// Reports don't change, cache longer
 		staleTime: 5 * 60 * 1000,
+	});
+}
+
+/**
+ * Fetch time-series metrics for a run (paginated, auto-fetches all pages)
+ * Used for rendering historical charts in load test detail view.
+ */
+export function useRunTimeSeriesQuery(runId: string | null) {
+	return useInfiniteQuery<TimeSeriesResponse, Error>({
+		queryKey: queryKeys.runs.timeSeries(runId ?? ""),
+		queryFn: ({ pageParam = 0 }) =>
+			apiService.getRunTimeSeries(runId!, { limit: 5000, offset: pageParam as number }),
+		enabled: !!runId,
+		// Historical data never changes
+		staleTime: Infinity,
+		gcTime: 30 * 60 * 1000, // Keep in cache for 30 minutes
+		initialPageParam: 0,
+		getNextPageParam: (lastPage) =>
+			lastPage.pagination.hasMore
+				? lastPage.pagination.offset + lastPage.pagination.limit
+				: undefined,
 	});
 }
 

@@ -10,7 +10,7 @@
  * History Component Types
  */
 
-import type { RunReport } from "@/types";
+import type { RunReport, LoadTestMetrics } from "@/types";
 
 export interface TabProps {
 	report: RunReport;
@@ -50,5 +50,19 @@ export interface SampleResult {
 			headers?: Record<string, string>;
 			body?: any;
 		};
+	};
+}
+
+/**
+ * Time-series metrics response from /stats/:runId?format=json
+ */
+export interface TimeSeriesResponse {
+	data: LoadTestMetrics[];
+	pagination: {
+		total: number;
+		limit: number;
+		offset: number;
+		hasMore: boolean;
+		returned: number;
 	};
 }

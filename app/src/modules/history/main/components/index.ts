@@ -17,4 +17,4 @@ export { default as SampleRequestCard } from "./SampleRequestCard";
 export { default as OverviewTab } from "./OverviewTab";
 export { default as PerformanceTab } from "./PerformanceTab";
 export { default as SamplesTab } from "./SamplesTab";
-export { default as HistoricalCharts } from "./HistoricalCharts";
+export { default as HistoricalChartsSection } from "./HistoricalChartsSection";

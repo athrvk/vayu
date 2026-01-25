@@ -9,19 +9,63 @@
 /**
  * PerformanceTab Component
  *
- * Displays latency distribution, rate control metrics, and historical charts.
+ * Displays latency distribution, rate control metrics, and time-series charts.
  */
 
+import { useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
+import { useRunTimeSeriesQuery } from "@/queries/runs";
 import LatencyMetric from "./LatencyMetric";
-import HistoricalCharts from "./HistoricalCharts";
-import type { TabProps } from "../../types";
+import HistoricalChartsSection from "./HistoricalChartsSection";
+import type { TabProps, TimeSeriesResponse } from "../../types";
 
 export default function PerformanceTab({ report, runId }: TabProps) {
+	// Fetch time-series data for charts
+	const {
+		data: timeSeriesData,
+		isLoading,
+		isFetchingNextPage,
+		hasNextPage,
+		fetchNextPage,
+	} = useRunTimeSeriesQuery(runId ?? null);
+
+	// Auto-fetch all pages when component mounts or when more pages are available
+	useEffect(() => {
+		if (hasNextPage && !isFetchingNextPage) {
+			fetchNextPage();
+		}
+	}, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+	// Flatten paginated data into a single array
+	const flattenedData = useMemo(() => {
+		if (!timeSeriesData?.pages) return [];
+		return timeSeriesData.pages.flatMap((page: TimeSeriesResponse) => page.data);
+	}, [timeSeriesData]);
+
+	// Calculate progress for loading indicator
+	const progress = useMemo(() => {
+		if (!timeSeriesData?.pages?.length) return undefined;
+		const lastPage = timeSeriesData.pages[timeSeriesData.pages.length - 1];
+		return {
+			loaded: flattenedData.length,
+			total: lastPage.pagination.total,
+		};
+	}, [timeSeriesData, flattenedData]);
+
 	return (
-		<>
+		<div className="space-y-6">
+			{/* Time-Series Charts */}
+			{runId && (
+				<HistoricalChartsSection
+					data={flattenedData}
+					isLoading={isLoading}
+					isFetchingMore={isFetchingNextPage}
+					progress={progress}
+				/>
+			)}
+
 			{/* Latency Statistics */}
 			<Card>
 				<CardHeader>
@@ -95,9 +139,6 @@ export default function PerformanceTab({ report, runId }: TabProps) {
 					</CardContent>
 				</Card>
 			)}
-
-			{/* Historical Charts */}
-			{runId && <HistoricalCharts runId={runId} />}
-		</>
+		</div>
 	);
 }
