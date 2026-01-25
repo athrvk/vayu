@@ -86,33 +86,31 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
-      - name: Setup application icons (initial)
-        shell: bash
-        run: |
-          mkdir -p app/build/icons
-          cp -r shared/icon_png/* app/build/icons/
-
       - name: Build frontend
         working-directory: app
         run: |
           pnpm run electron:compile
           pnpm run build
 
-      - name: Setup application icon (after build)
+      - name: Setup application icons (after build)
         shell: bash
         run: |
+          mkdir -p app/build
           if [ "${{ runner.os }}" = "Windows" ]; then
-            mkdir -p app/build
+            # Windows: Use .ico file
             cp shared/icon_ico/vayu_icon_256x256.ico app/build/icon.ico
           elif [ "${{ runner.os }}" = "Darwin" ]; then
-            mkdir -p app/build
+            # macOS: Use 512x512 PNG (electron-builder converts to ICNS)
+            # Remove any existing icons directory to avoid conflicts
+            rm -rf app/build/icons
             cp shared/icon_png/vayu_icon_512x512.png app/build/icon.png
-            echo "Icon copied, verifying dimensions:"
+            echo "Icon setup for macOS - verifying:"
             file app/build/icon.png
             sips -g pixelWidth -g pixelHeight app/build/icon.png
           else
-            mkdir -p app/build
-            cp shared/icon_png/vayu_icon_256x256.png app/build/icon.png
+            # Linux: Use icons directory with all sizes
+            mkdir -p app/build/icons
+            cp -r shared/icon_png/* app/build/icons/
           fi
 
       - name: Copy engine binary to resources (Windows)
