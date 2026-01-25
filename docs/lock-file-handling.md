@@ -6,7 +6,7 @@ This document describes how lock files (`vayu.lock`) are handled during installa
 
 The lock file (`vayu.lock`) prevents multiple instances of the Vayu engine from running simultaneously. It contains the PID of the running engine process and is located at:
 
-- **Windows**: `%APPDATA%\vayu-client\vayu.lock`
+- **Windows**: `%APPDATA%\Vayu\vayu.lock`
 - **macOS**: `~/Library/Application Support/vayu/vayu.lock`
 - **Linux**: `~/.config/vayu/vayu.lock`
 
@@ -22,7 +22,7 @@ The lock file (`vayu.lock`) prevents multiple instances of the Vayu engine from 
 **Uninstallation (`installer.nsh`):**
 - Kills running Vayu and engine processes before uninstall
 - Removes lock file when user chooses to keep or remove data
-- Lock file path: `$APPDATA\vayu-client\vayu.lock`
+- Lock file path: `$APPDATA\Vayu\vayu.lock`
 
 ### macOS (DMG)
 
@@ -70,7 +70,7 @@ If needed, users can manually remove the lock file:
 
 **Windows:**
 ```powershell
-Remove-Item "$env:APPDATA\vayu-client\vayu.lock"
+Remove-Item "$env:APPDATA\Vayu\vayu.lock"
 ```
 
 **macOS/Linux:**
@@ -95,7 +95,7 @@ rm ~/Library/Application\ Support/vayu/vayu.lock
 
 ### Electron Sidecar
 - Function: `checkLockFile()` - checks lock file and verifies PID
-- Function: `isProcessRunning()` - cross-platform process check
+- Function: `isVayuEngineRunning()` - cross-platform process check with process name verification
 - Automatic cleanup in `start()` method
 - File: `app/electron/sidecar.ts`
 

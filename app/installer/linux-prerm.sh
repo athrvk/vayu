@@ -6,9 +6,9 @@ set -e
 
 # Kill any running engine processes before uninstall
 # This ensures clean uninstallation
-if pgrep -f "vayu-engine" > /dev/null; then
+if pgrep -x "vayu-engine" > /dev/null; then
     echo "Stopping Vayu engine processes..."
-    pkill -f "vayu-engine" || true
+    pkill -x "vayu-engine" || true
     sleep 1
 fi
 

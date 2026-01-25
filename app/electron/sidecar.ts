@@ -50,34 +50,63 @@ async function isEngineRunning(port: number): Promise<boolean> {
 }
 
 /**
- * Check if a process is still running by PID
- * Cross-platform implementation
+ * Check if a process is still running by PID and verify it's vayu-engine
+ * Cross-platform implementation with process name verification
+ *
+ * This prevents PID reuse issues where a different process might have
+ * reused the same PID that was previously held by vayu-engine.
  */
-function isProcessRunning(pid: number): boolean {
+function isVayuEngineRunning(pid: number): boolean {
 	try {
 		if (process.platform === "win32") {
-			// On Windows, use tasklist to check if process exists
+			// On Windows, use tasklist to check if process exists and verify name
 			try {
-				// Try to get process info - if it fails, process doesn't exist
-				execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { stdio: "ignore" });
-				return true;
+				const output = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, {
+					encoding: "utf-8",
+				});
+
+				// Check if output contains vayu-engine.exe
+				// Format: "vayu-engine.exe","12345","Console","1","12,345 K"
+				if (!output || output.includes("INFO: No tasks are running")) {
+					return false;
+				}
+
+				// Verify the process name is vayu-engine.exe
+				return output.toLowerCase().includes("vayu-engine.exe");
 			} catch {
 				return false;
 			}
 		} else {
-			// On Unix (macOS, Linux), send signal 0 to check if process exists
-			// This doesn't actually send a signal, just checks existence
-			process.kill(pid, 0);
-			return true;
+			// On Unix (macOS, Linux), first check if process exists with signal 0
+			try {
+				process.kill(pid, 0);
+			} catch (err: any) {
+				// ESRCH means process doesn't exist
+				if (err.code === "ESRCH") {
+					return false;
+				}
+				// EPERM means process exists but we don't have permission
+				// Continue to verify process name
+				if (err.code !== "EPERM") {
+					return false;
+				}
+			}
+
+			// Process exists, now verify it's vayu-engine
+			try {
+				const output = execSync(`ps -p ${pid} -o comm=`, {
+					encoding: "utf-8",
+				}).trim();
+
+				// Process name should contain "vayu-engine"
+				return output.includes("vayu-engine");
+			} catch {
+				// If ps fails, assume process doesn't exist or is inaccessible
+				return false;
+			}
 		}
-	} catch (err: any) {
-		// If errno is ESRCH, process doesn't exist
-		// If errno is EPERM, process exists but we don't have permission (still running)
-		if (err.code === "ESRCH") {
-			return false;
-		}
-		// EPERM or other errors mean process might exist
-		return err.code === "EPERM";
+	} catch {
+		return false;
 	}
 }
 
@@ -102,8 +131,11 @@ function readPidFromLock(lockPath: string): number | null {
 }
 
 /**
- * Check lock file and verify if the process is still running
- * Returns true if lock file exists and process is running, false otherwise
+ * Check lock file and verify if the vayu-engine process is still running
+ * Returns true if lock file exists and vayu-engine process is running, false otherwise
+ *
+ * This verifies both that the PID exists AND that it belongs to vayu-engine,
+ * preventing false positives from PID reuse.
  */
 function checkLockFile(lockPath: string): {
 	locked: boolean;
@@ -115,7 +147,7 @@ function checkLockFile(lockPath: string): {
 		return { locked: false, pid: null, running: false };
 	}
 
-	const running = isProcessRunning(pid);
+	const running = isVayuEngineRunning(pid);
 	return { locked: true, pid, running };
 }
 

@@ -12,9 +12,12 @@ if [ -f "$LOCK_FILE" ]; then
     PID=$(cat "$LOCK_FILE" 2>/dev/null | tr -d '\n' || echo "")
     
     if [ -n "$PID" ] && [ "$PID" -eq "$PID" ] 2>/dev/null; then
-        # Check if process is running
-        if ! kill -0 "$PID" 2>/dev/null; then
-            # Process is not running, remove stale lock file
+        # Check if process is running AND is vayu-engine
+        if ps -p "$PID" -o comm= 2>/dev/null | grep -q "^vayu-engine$"; then
+            # Vayu engine is actually running, don't remove lock
+            echo "Vayu engine is running with PID $PID"
+        else
+            # PID doesn't exist or belongs to different process
             rm -f "$LOCK_FILE"
             echo "Removed stale lock file from previous installation"
         fi

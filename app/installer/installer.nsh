@@ -3,10 +3,10 @@
 ;
 ; Process names and directories must match:
 ;   - productName in electron-builder.json: "Vayu" → Vayu.exe
-;   - name in package.json: "vayu-client" → AppData\Roaming\vayu-client
+;   - Electron userData: app.getPath("userData") → AppData\Roaming\Vayu
 ;
 ; Lock file handling:
-;   - Lock file path: %APPDATA%\vayu-client\vayu.lock
+;   - Lock file path: %APPDATA%\Vayu\vayu.lock
 ;   - Cleaned up during install (stale locks) and uninstall
 ;   - Also handled automatically in app startup (sidecar.ts)
 
@@ -49,13 +49,13 @@
   
   cleanupLock:
     ; Clean up any stale lock files from previous installations or crashes
-    ; Lock file path: %APPDATA%\vayu-client\vayu.lock
+    ; Lock file path: %APPDATA%\Vayu\vayu.lock
     ; Check if lock file exists and if the process is still running
-    IfFileExists "$APPDATA\vayu-client\vayu.lock" 0 initDone
+    IfFileExists "$APPDATA\Vayu\vayu.lock" 0 initDone
       ; Lock file exists, check if process is running by reading PID
       ; For simplicity, just remove stale lock files during install
       ; The engine will create a new one if needed
-      Delete "$APPDATA\vayu-client\vayu.lock"
+      Delete "$APPDATA\Vayu\vayu.lock"
   
   initDone:
 !macroend
@@ -89,18 +89,18 @@
   keepData:
     ; User chose to keep data
     ; Still remove the lock file to prevent issues on reinstall
-    ; Lock file path: %APPDATA%\vayu-client\vayu.lock (not in db subdirectory)
-    Delete "$APPDATA\vayu-client\vayu.lock"
+    ; Lock file path: %APPDATA%\Vayu\vayu.lock (not in db subdirectory)
+    Delete "$APPDATA\Vayu\vayu.lock"
     Goto cleanupDone
     
   removeData:
     ; Remove main app data directory (Electron userData)
-    ; Path: %APPDATA%\vayu-client (from package.json name)
-    RMDir /r "$APPDATA\vayu-client"
-    
+    ; Path: %APPDATA%\Vayu (from productName in electron-builder.json)
+    RMDir /r "$APPDATA\Vayu"
+
     ; Remove Electron cache/local storage
-    ; Path: %LOCALAPPDATA%\vayu-client
-    RMDir /r "$LOCALAPPDATA\vayu-client"
+    ; Path: %LOCALAPPDATA%\Vayu
+    RMDir /r "$LOCALAPPDATA\Vayu"
     
   cleanupDone:
 !macroend
