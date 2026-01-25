@@ -133,6 +133,25 @@ jobs:
           cp engine/build-release/vayu-engine app/build/resources/bin/vayu-engine
           chmod +x app/build/resources/bin/vayu-engine
 
+      - name: Verify icon before packaging (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          echo "=== Checking build directory ==="
+          ls -lh app/build/
+          echo "=== Checking if icon exists ==="
+          if [ -f "app/build/icon.png" ]; then
+            echo "Icon exists at app/build/icon.png"
+            file app/build/icon.png
+            sips -g pixelWidth -g pixelHeight app/build/icon.png
+          else
+            echo "Icon NOT found at app/build/icon.png"
+            echo "Copying icon again..."
+            cp shared/icon_png/vayu_icon_512x512.png app/build/icon.png
+            file app/build/icon.png
+            sips -g pixelWidth -g pixelHeight app/build/icon.png
+          fi
+
       - name: Package application
         working-directory: app
         run: pnpm run electron:pack
