@@ -208,7 +208,10 @@ TEST_F (EventLoopTest, HandleInvalidUrl) {
     auto result = handle.future.get ();
     loop.stop ();
 
-    EXPECT_TRUE (result.is_error ());
+    // The event loop returns a Response with error_code set for connection failures
+    // (rather than Result::Error) to allow load testing to process failed requests
+    EXPECT_TRUE (result.is_ok ());
+    EXPECT_TRUE (result.value ().has_error ());
 }
 
 TEST_F (EventLoopTest, CounterStats) {
