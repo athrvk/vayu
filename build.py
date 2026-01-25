@@ -20,6 +20,7 @@ import threading
 # Global flags
 VERBOSE = False
 CMAKE_PATH = "cmake"  # Will be updated if found in non-standard location
+PNPM_PATH = "pnpm"  # Will be updated if found in non-standard location
 
 # ANSI codes
 class Style:
@@ -230,6 +231,84 @@ def find_cmake_windows() -> Optional[str]:
 
     return None
 
+def find_pnpm_windows() -> Optional[str]:
+    """Find pnpm on Windows (PATH, npm global, common locations)."""
+    # Check PATH first
+    pnpm_cmd = shutil.which("pnpm")
+    if pnpm_cmd:
+        return pnpm_cmd
+
+    # Check npm's global prefix (where npm installs global packages)
+    try:
+        result = subprocess.run(
+            ["npm", "config", "get", "prefix"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5
+        )
+        npm_prefix = result.stdout.strip()
+        if npm_prefix and npm_prefix != "undefined":
+            # pnpm is typically in node_modules/.bin or directly in the prefix
+            pnpm_paths = [
+                Path(npm_prefix) / "node_modules" / ".bin" / "pnpm.cmd",
+                Path(npm_prefix) / "node_modules" / ".bin" / "pnpm",
+                Path(npm_prefix) / "pnpm.cmd",
+                Path(npm_prefix) / "pnpm",
+            ]
+            for path in pnpm_paths:
+                if path.exists():
+                    return str(path)
+    except:
+        pass
+
+    # Check npm's global directory (alternative method)
+    try:
+        result = subprocess.run(
+            ["npm", "root", "-g"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5
+        )
+        npm_global = result.stdout.strip()
+        if npm_global:
+            # pnpm might be in the parent directory's node_modules/.bin
+            pnpm_paths = [
+                Path(npm_global).parent / "node_modules" / ".bin" / "pnpm.cmd",
+                Path(npm_global).parent / "node_modules" / ".bin" / "pnpm",
+                Path(npm_global).parent.parent / "node_modules" / ".bin" / "pnpm.cmd",
+            ]
+            for path in pnpm_paths:
+                if path.exists():
+                    return str(path)
+    except:
+        pass
+
+    # Check common npm locations (where npm installs global .cmd wrappers)
+    appdata = os.environ.get('APPDATA', '')
+    if appdata:
+        npm_paths = [
+            Path(appdata) / 'npm' / 'pnpm.cmd',
+            Path(appdata) / 'npm' / 'pnpm',
+        ]
+        for path in npm_paths:
+            if path.exists():
+                return str(path)
+
+    # Check Program Files (Node.js installation directory)
+    program_files = os.environ.get('ProgramFiles', 'C:/Program Files')
+    nodejs_paths = [
+        Path(program_files) / 'nodejs' / 'pnpm.cmd',
+        Path(program_files) / 'nodejs' / 'pnpm',
+        Path(program_files) / 'nodejs' / 'node_modules' / 'pnpm' / 'bin' / 'pnpm.cmd',
+    ]
+    for path in nodejs_paths:
+        if path.exists():
+            return str(path)
+
+    return None
+
 def find_vcpkg_windows() -> Optional[str]:
     """Find vcpkg on Windows (env vars, PATH, VS, common locations)."""
     # Check environment variables first
@@ -267,7 +346,7 @@ def find_vcpkg_windows() -> Optional[str]:
 
 def check_tool(name: str, command: List[str]) -> Tuple[bool, str]:
     """Check if a tool is available."""
-    global CMAKE_PATH
+    global CMAKE_PATH, PNPM_PATH
     system_name, _ = detect_platform()
 
     # Special handling for CMake on Windows
@@ -284,11 +363,42 @@ def check_tool(name: str, command: List[str]) -> Tuple[bool, str]:
                 return False, ""
         return False, ""
 
-    # Standard check for other tools
-    if shutil.which(command[0]):
+    # Special handling for pnpm on Windows
+    if name == "pnpm" and system_name == "Windows":
+        pnpm_path = find_pnpm_windows()
+        if pnpm_path:
+            try:
+                # Use the full path directly - Windows can execute .cmd files this way
+                result = subprocess.run(
+                    [pnpm_path, "--version"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                version = result.stdout.split('\n')[0] if result.stdout else "installed"
+                # Store for later use
+                PNPM_PATH = pnpm_path
+                return True, version
+            except:
+                # If execution fails, fall through to standard check
+                pass
+        # Fall through to standard check if Windows-specific search failed
+
+    # Standard check for other tools (and fallback for pnpm on Windows)
+    tool_path = shutil.which(command[0])
+    if tool_path:
         try:
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            # Use the full path found by shutil.which for better reliability
+            result = subprocess.run(
+                [tool_path] + command[1:],
+                capture_output=True,
+                text=True,
+                check=True
+            )
             version = result.stdout.split('\n')[0] if result.stdout else "installed"
+            # Store pnpm path if found via standard check
+            if name == "pnpm":
+                PNPM_PATH = tool_path
             return True, version
         except:
             return False, ""
@@ -346,9 +456,14 @@ def check_prerequisites(skip_app: bool):
     for name, ok, info in results:
         if ok:
             log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} {name}')
-            # Show path on Windows or in verbose mode
-            if info and (VERBOSE or (system_name == "Windows" and name in ["CMake", "vcpkg"])):
-                log_dim(info)
+            # Show version for tools, or path for vcpkg
+            if info:
+                # Show version for CMake, Ninja, pnpm (always)
+                # Show path for vcpkg (on Windows or in verbose mode)
+                if name in ["CMake", "Ninja", "pnpm"]:
+                    log_dim(info)
+                elif name == "vcpkg" and (VERBOSE or system_name == "Windows"):
+                    log_dim(info)
         else:
             log(f'{Style.RED}{Style.CROSS}{Style.RESET} {name} {Style.GRAY}(missing){Style.RESET}')
 
@@ -366,6 +481,13 @@ def check_prerequisites(skip_app: bool):
 
 def run_command(cmd: List[str], cwd: Optional[Path] = None, description: str = "") -> Tuple[bool, str]:
     """Run command with spinner or verbose output."""
+    global PNPM_PATH
+    system_name, _ = detect_platform()
+    
+    # Resolve pnpm path on Windows if needed
+    if cmd and cmd[0] == "pnpm" and system_name == "Windows" and PNPM_PATH != "pnpm":
+        cmd = [PNPM_PATH] + cmd[1:]
+    
     try:
         if VERBOSE:
             log_dim(f'$ {" ".join(cmd)}')
@@ -729,7 +851,9 @@ def print_next_steps(dev_mode: bool, skip_app: bool, artifacts: List[Tuple[str, 
             rel_path = app_dir
 
         print(f'  {Style.DIM}Run the development app{Style.RESET}')
-        print(f'  {Style.CYAN}$ cd {rel_path} && pnpm run electron:dev{Style.RESET}')
+        system_name, _ = detect_platform()
+        cmd_sep = ";" if system_name == "Windows" else "&&"
+        print(f'  {Style.CYAN} cd {rel_path} {cmd_sep} pnpm run electron:dev{Style.RESET}')
     elif artifacts:
         for label, path in artifacts:
             if label == "Engine":
@@ -846,10 +970,12 @@ def bump_version(bump_type: str, project_root: Path, dry_run: bool = False):
     print(f'  {Style.DIM}Review changes{Style.RESET}')
     print(f'  {Style.CYAN}$ git diff{Style.RESET}')
     print()
+    system_name, _ = detect_platform()
+    cmd_sep = ";" if system_name == "Windows" else "&&"
     print(f'  {Style.DIM}Commit and tag{Style.RESET}')
     print(f'  {Style.CYAN}$ git commit -am "chore: bump version to {new_version}"{Style.RESET}')
     print(f'  {Style.CYAN}$ git tag v{new_version}{Style.RESET}')
-    print(f'  {Style.CYAN}$ git push && git push --tags{Style.RESET}')
+    print(f'  {Style.CYAN}$ git push {cmd_sep} git push --tags{Style.RESET}')
     print()
 
 def main():

@@ -114,5 +114,6 @@
         "Wnull",
         "Wpedantic",
         "Wsign"
-    ]
+    ],
+    "python.languageServer": "Pylance"
 }
