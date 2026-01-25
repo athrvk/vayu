@@ -372,16 +372,7 @@ export class EngineSidecar {
 	/**
 	 * Wait for the engine to be ready by polling the health endpoint
 	 */
-	private async waitForEngine(maxAttempts?: number, delay: number = 500): Promise<void> {
-		// Platform-specific timeout: Linux needs more time for DB initialization
-		if (maxAttempts === undefined) {
-			if (process.platform === "linux") {
-				maxAttempts = 60; // 30 seconds on Linux
-			} else {
-				maxAttempts = 30; // 15 seconds on Windows/macOS
-			}
-		}
-
+	private async waitForEngine(maxAttempts: number = 90, delay: number = 500): Promise<void> {
 		const healthUrl = `http://127.0.0.1:${this.port}/health`;
 
 		for (let i = 0; i < maxAttempts; i++) {
