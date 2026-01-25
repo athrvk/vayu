@@ -102,13 +102,13 @@ export function useVariableResolver(
 	}, [globalsData, collections, environments, activeCollectionId, activeEnvironmentId]);
 
 	const getVariable = useCallback(
-		(name: string): VariableSource | null => {
+		(name: string): ResolvedVariable | null => {
 			return variableMap[name] || null;
 		},
 		[variableMap]
 	);
 
-	const getAllVariables = useCallback((): Record<string, VariableSource> => {
+	const getAllVariables = useCallback((): Record<string, ResolvedVariable> => {
 		return { ...variableMap };
 	}, [variableMap]);
 

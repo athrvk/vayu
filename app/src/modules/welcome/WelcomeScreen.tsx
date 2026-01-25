@@ -17,7 +17,6 @@
 import { useMemo } from "react";
 import {
 	Zap,
-	BookOpen,
 	Plus,
 	Folder,
 	History,
@@ -39,7 +38,7 @@ import {
 	useCreateRequestMutation,
 	useCreateCollectionMutation,
 } from "@/queries";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { formatDistanceToNow } from "date-fns";
 
 export default function WelcomeScreen() {

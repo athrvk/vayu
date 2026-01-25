@@ -12,7 +12,7 @@
  * Centralized type definitions for the request builder module
  */
 
-import type { HttpMethod } from "@/types";
+import type { HttpMethod, ResolvedVariable, VariableScope } from "@/types";
 
 // ============================================================================
 // Key-Value Types (shared across params, headers, form-data)
@@ -157,8 +157,8 @@ export interface RequestBuilderContextValue {
 	// Variable Resolution
 	resolveString: (input: string) => string;
 	resolveVariables: (input: string) => string;
-	getVariable: (name: string) => VariableInfo | null;
-	getAllVariables: () => Record<string, VariableInfo>;
+	getVariable: (name: string) => ResolvedVariable | null;
+	getAllVariables: () => Record<string, ResolvedVariable>;
 	updateVariable: (name: string, value: string, scope: VariableScope) => void;
 
 	// Actions

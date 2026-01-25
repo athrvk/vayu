@@ -94,6 +94,9 @@ export interface DisplayMetrics {
 	// Rate metrics (Open Model)
 	send_rate?: number; // Rate at which requests are dispatched to the server
 	throughput?: number; // Rate at which responses are received from the server
+	// Connection metrics
+	backpressure?: number; // Queue depth: requests sent but not yet responded
+	current_concurrency?: number; // Number of concurrent HTTP connections
 }
 
 // ============================================================================

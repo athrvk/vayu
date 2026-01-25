@@ -219,7 +219,7 @@ export default function HistoricalChartsSection({
                                     borderRadius: "6px",
                                 }}
                                 labelFormatter={(value: number) => `Time: ${value}s`}
-                                formatter={(value: number) => [`${value.toFixed(1)} req/s`, "Throughput"]}
+                                formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(1)} req/s`, "Throughput"]}
                             />
                             <Line
                                 type="monotone"

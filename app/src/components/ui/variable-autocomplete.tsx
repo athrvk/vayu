@@ -18,7 +18,7 @@
 
 import { useMemo } from "react";
 import { Command, CommandList, CommandEmpty, CommandGroup, CommandItem } from "./command";
-import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
+import { VariableScopeBadge } from "./variable-scope-badge";
 import { cn } from "@/lib/utils";
 import type { ResolvedVariable } from "@/types";
 

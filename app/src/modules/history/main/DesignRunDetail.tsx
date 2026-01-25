@@ -25,7 +25,7 @@ import { TimingBreakdown } from "./components";
 import { UnifiedResponseViewer } from "@/components/shared/response-viewer";
 import type { DesignRunDetailProps } from "../types";
 
-export default function DesignRunDetail({ report, onBack, runId }: DesignRunDetailProps) {
+export default function DesignRunDetail({ report, onBack: _onBack, runId }: DesignRunDetailProps) {
 	// Get the result from the report
 	const result = report.results?.[0];
 	const trace = result?.trace as any;

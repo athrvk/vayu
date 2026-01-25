@@ -26,7 +26,7 @@ import { formatNumber } from "@/utils";
 import { OverviewTab, PerformanceTab, SamplesTab } from "./components";
 import type { LoadTestDetailProps } from "../types";
 
-export default function LoadTestDetail({ report, onBack, runId }: LoadTestDetailProps) {
+export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadTestDetailProps) {
 	const [activeTab, setActiveTab] = useState("overview");
 
 	const successRate =
