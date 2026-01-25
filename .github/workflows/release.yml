@@ -90,14 +90,19 @@ jobs:
         shell: bash
         run: |
           mkdir -p app/build/icons
-          cp -r shared/icon_png/* app/build/icons/ || true
+          cp -r shared/icon_png/* app/build/icons/
 
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp shared/icon_ico/vayu_icon_256x256.ico app/build/icon.ico || true
+            mkdir -p app/build
+            cp shared/icon_ico/vayu_icon_256x256.ico app/build/icon.ico
           elif [ "${{ runner.os }}" = "Darwin" ]; then
-            cp shared/icon_png/vayu_icon_512x512.png app/build/icon.png || true
+            mkdir -p app/build
+            cp shared/icon_png/vayu_icon_512x512.png app/build/icon.png
+            # Verify the icon was copied and has correct dimensions
+            ls -lh app/build/icon.png
           else
-            cp shared/icon_png/vayu_icon_256x256.png app/build/icon.png || true
+            mkdir -p app/build
+            cp shared/icon_png/vayu_icon_256x256.png app/build/icon.png
           fi
 
       - name: Build frontend
