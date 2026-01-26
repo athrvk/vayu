@@ -137,6 +137,22 @@
       }
     },
     {
+      "name": "macos-prod",
+      "displayName": "macOS Release (native arch)",
+      "description": "Production build for macOS native architecture (Release)",
+      "inherits": ["base", "base-fallback"],
+      "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
       "name": "macos-prod-arm64",
       "displayName": "macOS Release arm64",
       "description": "Production build for macOS arm64 (Release)",
@@ -205,6 +221,12 @@
       "jobs": 0
     },
     {
+      "name": "macos-prod",
+      "displayName": "Build macOS Release (native arch)",
+      "configurePreset": "macos-prod",
+      "jobs": 0
+    },
+    {
       "name": "macos-prod-arm64",
       "displayName": "Build macOS Release arm64",
       "configurePreset": "macos-prod-arm64",
@@ -256,6 +278,14 @@
       "name": "macos-dev",
       "displayName": "Test macOS Debug",
       "configurePreset": "macos-dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-prod",
+      "displayName": "Test macOS Release (native arch)",
+      "configurePreset": "macos-prod",
       "output": {
         "outputOnFailure": true
       }
