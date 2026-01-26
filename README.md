@@ -2,9 +2,34 @@
 
 **High-Performance API Testing Platform**
 
-[![License](https://img.shields.io/badge/license-Dual-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/athrvk/vayu/releases/tag/v0.1.1)
+[![License](https://img.shields.io/badge/license-AGPL--3.0%20%26%20Apache--2.0-blue.svg)](LICENSE)
+[![Latest Release](https://img.shields.io/badge/release-v0.1.1-green.svg)](https://github.com/athrvk/vayu/releases/latest)
+
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/athrvk/vayu/releases)
+
+[![GitHub stars](https://img.shields.io/github/stars/athrvk/vayu.svg?style=social&label=Star)](https://github.com/athrvk/vayu)
+[![GitHub forks](https://img.shields.io/github/forks/athrvk/vayu.svg?style=social&label=Fork)](https://github.com/athrvk/vayu/fork)
+
+[![GitHub issues](https://img.shields.io/github/issues/athrvk/vayu)](https://github.com/athrvk/vayu/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/athrvk/vayu?label=pull%20requests)](https://github.com/athrvk/vayu/pulls)
+
+![C++](https://img.shields.io/badge/C++-20-blue.svg?logo=cplusplus)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg?logo=typescript)
+![React](https://img.shields.io/badge/React-19-61DAFB.svg?logo=react)
+![Electron](https://img.shields.io/badge/Electron-28-47848F.svg?logo=electron)
 
 Vayu combines the ease of use of API design tools like Postman with the raw performance of high-throughput load testing tools. Build and debug requests visually, then run the same tests at scale—all in one tool.
+
+## 📦 Download Latest Release
+
+**Version 0.1.1** is now available! Download the installer for your platform:
+
+- **Windows**: [Vayu Setup 0.1.1.exe](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu.Setup.0.1.1.exe)
+- **macOS**: [Vayu-0.1.1-universal.dmg](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-universal.dmg)
+- **Linux**: [Vayu-0.1.1-x86_64.AppImage](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-x86_64.AppImage)
+
+[View all releases →](https://github.com/athrvk/vayu/releases)
 
 ## Overview
 
@@ -23,7 +48,7 @@ The Manager communicates with the Engine via a local HTTP API on port 9876, allo
 - **Environment Variables** - Manage variables across collections and environments
 - **Test Scripting** - QuickJS-based scripting engine compatible with Postman's `pm.test()` syntax
 - **Privacy First** - 100% local execution, no cloud sync required
-- **Cross Platform** - macOS (Coming Soon), Windows, and Linux support
+- **Cross Platform** - macOS, Windows, and Linux support
 
 ## Quick Start
 
