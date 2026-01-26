@@ -99,7 +99,7 @@ export default function WelcomeScreen() {
 			if (!targetCollectionId) {
 				// Create a default collection
 				const newCollection = await createCollectionMutation.mutateAsync({
-					name: "My Collection",
+					name: "New Collection",
 				});
 				targetCollectionId = newCollection.id;
 			}
