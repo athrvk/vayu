@@ -19,12 +19,16 @@
 !macro customInit
   ; Check if Vayu is running
   nsExec::ExecToStack 'tasklist /FI "IMAGENAME eq Vayu.exe" /NH'
-  Pop $0
-  Pop $1
+  Pop $0  ; Exit code
+  Pop $1  ; Output
   
-  ; Check if the output contains "Vayu.exe" (means it's running)
-  ${If} $1 != ""
-  ${AndIf} $1 != "INFO: No tasks are running which match the specified criteria."
+  ; Check if the output actually contains "Vayu.exe" (means it's running)
+  ; When tasklist finds the process, output starts with "Vayu.exe"
+  ; When not found, output is empty or contains "INFO: No tasks..."
+  ; We check if output starts with "Vayu.exe" (first 8 chars) to avoid locale issues
+  StrCpy $2 $1 8  ; Extract first 8 characters
+  ${If} $2 == "Vayu.exe"
+    ; Vayu.exe is running
     MessageBox MB_OKCANCEL|MB_ICONINFORMATION \
       "Vayu is currently running.$\n$\nClick OK to close it and continue installation, or Cancel to abort." \
       IDOK closeApp IDCANCEL abortInstall
