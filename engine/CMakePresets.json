@@ -137,14 +137,32 @@
       }
     },
     {
-      "name": "macos-prod",
-      "displayName": "macOS Release",
-      "description": "Production build for macOS (Release)",
+      "name": "macos-prod-arm64",
+      "displayName": "macOS Release arm64",
+      "description": "Production build for macOS arm64 (Release)",
       "inherits": ["base", "base-fallback"],
-      "binaryDir": "${sourceDir}/build-release",
+      "binaryDir": "${sourceDir}/build-release-arm64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "VCPKG_TARGET_TRIPLET": "arm64-osx"
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "CMAKE_OSX_ARCHITECTURES": "arm64"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
+      "name": "macos-prod-x64",
+      "displayName": "macOS Release x64",
+      "description": "Production build for macOS x64 (Release)",
+      "inherits": ["base", "base-fallback"],
+      "binaryDir": "${sourceDir}/build-release-x64",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "x64-osx",
+        "CMAKE_OSX_ARCHITECTURES": "x86_64"
       },
       "condition": {
         "type": "equals",
@@ -187,9 +205,15 @@
       "jobs": 0
     },
     {
-      "name": "macos-prod",
-      "displayName": "Build macOS Release",
-      "configurePreset": "macos-prod",
+      "name": "macos-prod-arm64",
+      "displayName": "Build macOS Release arm64",
+      "configurePreset": "macos-prod-arm64",
+      "jobs": 0
+    },
+    {
+      "name": "macos-prod-x64",
+      "displayName": "Build macOS Release x64",
+      "configurePreset": "macos-prod-x64",
       "jobs": 0
     }
   ],
@@ -237,9 +261,17 @@
       }
     },
     {
-      "name": "macos-prod",
-      "displayName": "Test macOS Release",
-      "configurePreset": "macos-prod",
+      "name": "macos-prod-arm64",
+      "displayName": "Test macOS Release arm64",
+      "configurePreset": "macos-prod-arm64",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-prod-x64",
+      "displayName": "Test macOS Release x64",
+      "configurePreset": "macos-prod-x64",
       "output": {
         "outputOnFailure": true
       }

@@ -22,7 +22,7 @@ jobs:
           - os: windows-latest
             preset: windows-prod
           - os: macos-latest
-            preset: macos-prod
+            preset: macos-prod-arm64
 
     steps:
       - name: Checkout repository
@@ -70,7 +70,49 @@ jobs:
           vcpkgGitCommitId: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      - name: Build and test engine
+      - name: Build and test engine (arm64)
+        if: runner.os == 'macOS'
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          configurePreset: macos-prod-arm64
+          buildPreset: macos-prod-arm64
+          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      - name: Run engine tests (arm64)
+        if: runner.os == 'macOS'
+        working-directory: engine
+        run: ctest --preset macos-prod-arm64
+
+      - name: Build and test engine (x64)
+        if: runner.os == 'macOS'
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          configurePreset: macos-prod-x64
+          buildPreset: macos-prod-x64
+          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      - name: Run engine tests (x64)
+        if: runner.os == 'macOS'
+        working-directory: engine
+        run: ctest --preset macos-prod-x64
+
+      - name: Create universal binary (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p engine/build-universal
+          lipo -create \
+            engine/build-release-arm64/vayu-engine \
+            engine/build-release-x64/vayu-engine \
+            -output engine/build-universal/vayu-engine
+          echo "Universal binary created, verifying architectures:"
+          lipo -info engine/build-universal/vayu-engine
+          chmod +x engine/build-universal/vayu-engine
+
+      - name: Build and test engine (Non-macOS)
+        if: runner.os != 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
@@ -78,7 +120,8 @@ jobs:
           buildPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
 
-      - name: Run engine tests
+      - name: Run engine tests (Non-macOS)
+        if: runner.os != 'macOS'
         working-directory: engine
         run: ctest --preset ${{ matrix.preset }}
 
@@ -127,8 +170,18 @@ jobs:
             Copy-Item $_.FullName -Destination $resourcesDir
           }
 
-      - name: Copy engine binary to resources (Unix)
-        if: runner.os != 'Windows'
+      - name: Copy engine binary to resources (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p app/build/resources/bin
+          cp engine/build-universal/vayu-engine app/build/resources/bin/vayu-engine
+          chmod +x app/build/resources/bin/vayu-engine
+          echo "Universal binary copied, verifying architectures:"
+          lipo -info app/build/resources/bin/vayu-engine
+
+      - name: Copy engine binary to resources (Linux)
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           mkdir -p app/build/resources/bin
