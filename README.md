@@ -6,8 +6,8 @@
 [![License](https://img.shields.io/badge/license-AGPL--3.0%20%26%20Apache--2.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/athrvk/vayu/releases)
 
-[![GitHub stars](https://img.shields.io/github/stars/athrvk/vayu.svg?style=social&label=Star)](https://github.com/athrvk/vayu)
-[![GitHub forks](https://img.shields.io/github/forks/athrvk/vayu.svg?style=social&label=Fork)](https://github.com/athrvk/vayu/fork)
+[![GitHub stars](https://img.shields.io/github/stars/athrvk/vayu?style=social&label=Star)](https://github.com/athrvk/vayu)
+[![GitHub forks](https://img.shields.io/github/forks/athrvk/vayu?style=social&label=Fork)](https://github.com/athrvk/vayu/fork)
 [![GitHub issues](https://img.shields.io/github/issues/athrvk/vayu)](https://github.com/athrvk/vayu/issues)
 [![GitHub pull requests](https://img.shields.io/github/issues-pr/athrvk/vayu?label=pull%20requests)](https://github.com/athrvk/vayu/pulls)
 
