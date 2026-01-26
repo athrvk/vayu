@@ -47,6 +47,8 @@ The Manager communicates with the Engine via a local HTTP API on port 9876, allo
 
 [View all releases →](https://github.com/athrvk/vayu/releases)
 
+## Benchmarks - Coming soon...
+
 ## Quick Start
 
 ### Prerequisites
