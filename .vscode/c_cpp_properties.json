@@ -60,8 +60,7 @@
                 "${workspaceFolder}/engine/include",
                 "${workspaceFolder}/engine/src",
                 "${workspaceFolder}/engine/vendor/**",
-                "${workspaceFolder}/engine/vcpkg_installed/x64-windows/include",
-                "D:/Software Installations/Microsoft Visual Studio/18/Community/VC/vcpkg/installed/x64-windows/include"
+                "${workspaceFolder}/engine/vcpkg_installed/x64-windows/include"
             ],
             "defines": [
                 "_DEBUG",
