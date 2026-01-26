@@ -34,6 +34,14 @@ interface ElectronAPI {
 
 	// Platform info
 	platform: NodeJS.Platform;
+
+	// App paths
+	getAppPaths: () => Promise<{
+		appDir: string;
+		dataDir: string;
+		logsPath: string;
+		dbPath: string;
+	}>;
 }
 
 declare global {

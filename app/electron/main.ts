@@ -294,6 +294,30 @@ function setupIpcHandlers() {
 			window.webContents.send("window:maximized", false);
 		});
 	});
+
+	// Get app paths (app dir, logs path, db path)
+	ipcMain.handle("app:getPaths", () => {
+		const appDir = app.getAppPath();
+		
+		// Get data directory using the same logic as EngineSidecar
+		const isDev = process.env.NODE_ENV === "development";
+		let dataDir: string;
+		if (isDev) {
+			dataDir = path.join(appDir, "..", "engine", "data");
+		} else {
+			dataDir = app.getPath("userData");
+		}
+		
+		const logsPath = path.join(dataDir, "logs");
+		const dbPath = path.join(dataDir, "db");
+		
+		return {
+			appDir,
+			dataDir,
+			logsPath,
+			dbPath,
+		};
+	});
 }
 
 app.whenReady().then(async () => {

@@ -52,6 +52,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
 	// Platform info
 	platform: process.platform,
+
+	// App paths
+	getAppPaths: (): Promise<{
+		appDir: string;
+		dataDir: string;
+		logsPath: string;
+		dbPath: string;
+	}> => ipcRenderer.invoke("app:getPaths"),
 });
 
 window.addEventListener("DOMContentLoaded", () => {
