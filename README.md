@@ -111,9 +111,7 @@ See [Architecture Documentation](docs/architecture.md) for detailed information.
 |----------|-------------|
 | [Architecture](docs/architecture.md) | System architecture and design decisions |
 | [Engine API Reference](docs/engine/api-reference.md) | HTTP API for controlling the engine |
-| [Building (macOS)](docs/building-macos.md) | Build instructions for macOS |
-| [Building (Linux)](docs/building-linux.md) | Build instructions for Linux |
-| [Building (Windows)](docs/building-windows.md) | Build instructions for Windows |
+| [Building](docs/building.md) | Build instructions for all platforms |
 | [Engine Building](docs/engine/building.md) | Building just the C++ engine |
 | [Contributing](docs/contributing.md) | Guidelines for contributing |
 
@@ -186,7 +184,7 @@ Vayu is a dual-licensed project:
 * **Vayu Engine (`/engine`)**: Licensed under **GNU AGPL v3**.
 * **Vayu UI (`/app`)**: Licensed under **Apache 2.0**.
 
-**Usage Note:** You are free to use Vayu for any purpose. If you modify the **Engine** and provide it as a network service, you must open-source your changes. The **UI** is more permissive and allows for easier plugin development.
+**Usage Note:** You are free to use Vayu for any purpose. If you modify the **Engine** and provide it as a network service, you must open-source your changes. The **UI** is more permissive and allows for easier development.
 
 ---
 
