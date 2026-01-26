@@ -73,6 +73,7 @@ jobs:
       - name: Build and test engine
         uses: lukka/run-cmake@v10
         with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
