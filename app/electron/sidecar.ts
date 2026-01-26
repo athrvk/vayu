@@ -166,9 +166,9 @@ export class EngineSidecar {
 	/**
 	 * Get the user data directory for the engine
 	 * Production:
-	 *   - macOS: ~/Library/Application Support/vayu
-	 *   - Windows: %APPDATA%/vayu
-	 *   - Linux: ~/.config/vayu
+	 *   - macOS: ~/Library/Application Support/vayu-client
+	 *   - Windows: %APPDATA%/vayu-client
+	 *   - Linux: ~/.config/vayu-client
 	 * Development: <repo>/engine/data
 	 */
 	private getDataDirectory(): string {
