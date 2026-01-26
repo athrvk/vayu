@@ -2,15 +2,12 @@
 
 **High-Performance API Testing Platform**
 
-[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/athrvk/vayu/releases/tag/v0.1.1)
-[![License](https://img.shields.io/badge/license-AGPL--3.0%20%26%20Apache--2.0-blue.svg)](LICENSE)
 [![Latest Release](https://img.shields.io/badge/release-v0.1.1-green.svg)](https://github.com/athrvk/vayu/releases/latest)
-
+[![License](https://img.shields.io/badge/license-AGPL--3.0%20%26%20Apache--2.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/athrvk/vayu/releases)
 
 [![GitHub stars](https://img.shields.io/github/stars/athrvk/vayu.svg?style=social&label=Star)](https://github.com/athrvk/vayu)
 [![GitHub forks](https://img.shields.io/github/forks/athrvk/vayu.svg?style=social&label=Fork)](https://github.com/athrvk/vayu/fork)
-
 [![GitHub issues](https://img.shields.io/github/issues/athrvk/vayu)](https://github.com/athrvk/vayu/issues)
 [![GitHub pull requests](https://img.shields.io/github/issues-pr/athrvk/vayu?label=pull%20requests)](https://github.com/athrvk/vayu/pulls)
 
@@ -19,19 +16,9 @@
 ![React](https://img.shields.io/badge/React-19-61DAFB.svg?logo=react)
 ![Electron](https://img.shields.io/badge/Electron-28-47848F.svg?logo=electron)
 
-Vayu combines the ease of use of API design tools like Postman with the raw performance of high-throughput load testing tools. Build and debug requests visually, then run the same tests at scale—all in one tool.
-
-## 📦 Download Latest Release
-
-**Version 0.1.1** is now available! Download the installer for your platform:
-
-- **Windows**: [Vayu Setup 0.1.1.exe](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu.Setup.0.1.1.exe)
-- **macOS**: [Vayu-0.1.1-universal.dmg](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-universal.dmg)
-- **Linux**: [Vayu-0.1.1-x86_64.AppImage](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-x86_64.AppImage)
-
-[View all releases →](https://github.com/athrvk/vayu/releases)
-
 ## Overview
+
+Vayu combines the ease of use of API design tools like Postman with the raw performance of high-throughput load testing tools. Build and debug requests visually, then run the same tests at scale—all in one tool.
 
 Vayu uses a **sidecar architecture** that separates the user interface from the execution engine:
 
@@ -49,6 +36,16 @@ The Manager communicates with the Engine via a local HTTP API on port 9876, allo
 - **Test Scripting** - QuickJS-based scripting engine compatible with Postman's `pm.test()` syntax
 - **Privacy First** - 100% local execution, no cloud sync required
 - **Cross Platform** - macOS, Windows, and Linux support
+
+## 📦 Download
+
+**Version 0.1.1** is now available! Download the installer for your platform:
+
+- **Windows**: [Vayu Setup 0.1.1.exe](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu.Setup.0.1.1.exe)
+- **macOS**: [Vayu-0.1.1-universal.dmg](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-universal.dmg)
+- **Linux**: [Vayu-0.1.1-x86_64.AppImage](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-x86_64.AppImage)
+
+[View all releases →](https://github.com/athrvk/vayu/releases)
 
 ## Quick Start
 
@@ -105,6 +102,15 @@ Vayu uses a sidecar pattern where the Electron UI (Manager) communicates with a 
 
 See [Architecture Documentation](docs/architecture.md) for detailed information.
 
+## Tech Stack
+
+- **Engine**: C++20 with lock-free data structures
+- **Networking**: libcurl for HTTP client operations
+- **Scripting**: QuickJS for test script execution
+- **UI**: Electron + React + TypeScript
+- **State Management**: Zustand (UI state) + TanStack Query (server state)
+- **Build System**: CMake + vcpkg for C++, pnpm + Vite for Electron app
+
 ## Documentation
 
 | Document | Description |
@@ -114,15 +120,6 @@ See [Architecture Documentation](docs/architecture.md) for detailed information.
 | [Building](docs/building.md) | Build instructions for all platforms |
 | [Engine Building](docs/engine/building.md) | Building just the C++ engine |
 | [Contributing](docs/contributing.md) | Guidelines for contributing |
-
-## Tech Stack
-
-- **Engine**: C++20 with lock-free data structures
-- **Networking**: libcurl for HTTP client operations
-- **Scripting**: QuickJS for test script execution
-- **UI**: Electron + React + TypeScript
-- **State Management**: Zustand (UI state) + TanStack Query (server state)
-- **Build System**: CMake + vcpkg for C++, pnpm + Vite for Electron app
 
 ## Contributing
 
@@ -138,12 +135,12 @@ Contributions are welcome! Please read the [Contributing Guide](docs/contributin
 
 The canonical version for releases is stored in the top-level `VERSION` file. The CI workflow uses a pushed Git tag to publish artifacts.
 
-Key points:
+**Key points:**
 
 - The workflow triggers on tag pushes that follow the `v*` pattern (for example `v0.1.1`).
 - Electron produces installer filenames that already contain the version (for example `Vayu Setup 0.1.1.exe` and `Vayu-0.1.1-x86_64.AppImage`), and the workflow uploads those files to the Release as-is.
 
-How to create a release (recommended)
+**How to create a release (recommended):**
 
 1. Bump the version using the build script:
 
@@ -172,10 +169,9 @@ git push origin --tags
 
 4. The workflow will run on the pushed tag, execute tests and builds, and upload installers to the Release associated with that tag.
 
-Notes
+**Notes:**
 
 - The `VERSION` file is the single source of truth; maintain it before pushing tags.
-
 
 ## ⚖️ License
 
