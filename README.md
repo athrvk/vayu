@@ -41,7 +41,7 @@ The Manager communicates with the Engine via a local HTTP API on port 9876, allo
 
 **Version 0.1.1** is now available! Download the installer for your platform:
 
-- **Windows**: [Vayu Setup 0.1.1.exe](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu.Setup.0.1.1.exe)
+- **Windows**: [Vayu-0.1.1-x64.exe](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-x64.exe)
 - **macOS**: [Vayu-0.1.1-universal.dmg](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-universal.dmg)
 - **Linux**: [Vayu-0.1.1-x86_64.AppImage](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-x86_64.AppImage)
 
