@@ -39,13 +39,6 @@ Privacy-first, 100% offline execution. Built for developers who hate waiting.
 
 ---
 
-### Key Takeaways
-
-* **Vayu** bridges the gap between the user-friendly interface of **Postman** and the high-performance load generation of **k6/JMeter**. Its C++ sidecar architecture ensures that even during a heavy load test, the UI remains fluid and responsive.
-* **k6** is the industry standard for "Testing as Code," making it ideal for CI/CD pipelines, though it lacks a built-in GUI for exploratory debugging.
-* **Apache JMeter** remains the king of protocol diversity (supporting legacy systems like SOAP and LDAP), but suffers from high resource overhead and a steeper learning curve.
-* **Postman** excels at API documentation and collaboration but is often criticized for its shift toward cloud-only features and slower performance at scale.
-
 Vayu uses a **sidecar architecture**: React/Electron UI talks to a separate C++ daemon via local HTTP → no freezing during massive runs.
 
 ## ✨ Features
