@@ -51,7 +51,7 @@ Vayu uses a **sidecar architecture**: React/Electron UI talks to a separate C++ 
 - **Cross-Platform** — Windows, macOS, Linux installers/AppImage
 
 ## 📸 See It in Action
-
+=======
 <!-- Replace these with actual uploaded GIFs/screenshots -->
 
 ![Request Builder Demo](shared/request-builder.gif)  
@@ -67,9 +67,9 @@ Vayu uses a **sidecar architecture**: React/Electron UI talks to a separate C++ 
 
 Grab the latest release:
 
-- **Windows**: [Vayu-0.1.1-x64.exe](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-x64.exe)
-- ~~**macOS**: [Vayu-0.1.1-universal.dmg](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-universal.dmg)~~ (WIP)
-- **Linux**: [Vayu-0.1.1-x86_64.AppImage](https://github.com/athrvk/vayu/releases/download/v0.1.1/Vayu-0.1.1-x86_64.AppImage)
+- **Windows**: [Vayu-0.1.1-x64.exe](https://github.com/athrvk/vayu/releases/download/v0.1.2/Vayu-0.1.2-x64.exe)
+- ~~**macOS**: [Vayu-0.1.1-universal.dmg](https://github.com/athrvk/vayu/releases/download/v0.1.2/Vayu-0.1.2-universal.dmg)~~ (WIP)
+- **Linux**: [Vayu-0.1.1-x86_64.AppImage](https://github.com/athrvk/vayu/releases/download/v0.1.2/Vayu-0.1.2-x86_64.AppImage)
 
 [All Releases →](https://github.com/athrvk/vayu/releases)
 

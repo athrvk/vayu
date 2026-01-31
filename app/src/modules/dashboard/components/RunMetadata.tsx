@@ -16,6 +16,8 @@ import { Activity, Clock, Globe, Calendar, Timer } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatDuration, getMethodColor, type RunMetadataProps } from "../types";
+import { loadTestTypeToLabel } from "@/utils";
+import { LoadTestConfig } from "@/types";
 
 export default function RunMetadata({
 	requestUrl,
@@ -62,7 +64,7 @@ export default function RunMetadata({
 						<Activity className="w-4 h-4 text-muted-foreground" />
 						<span className="font-medium text-muted-foreground">Mode:</span>
 						<span className="text-foreground capitalize">
-							{configuration.mode.replace("_", " ")}
+							{loadTestTypeToLabel(configuration.mode as LoadTestConfig["mode"])}
 						</span>
 						{configuration.targetRps && (
 							<span className="text-muted-foreground">
@@ -72,6 +74,11 @@ export default function RunMetadata({
 						{configuration.concurrency && (
 							<span className="text-muted-foreground">
 								({configuration.concurrency} concurrent)
+							</span>
+						)}
+						{configuration.duration && (
+							<span className="text-muted-foreground">
+								(for {configuration.duration} seconds)
 							</span>
 						)}
 					</div>
@@ -106,7 +113,7 @@ export default function RunMetadata({
 				{(elapsedDuration > 0 || startTime) && (
 					<div className="flex items-center gap-2">
 						<Timer className="w-4 h-4 text-muted-foreground" />
-						<span className="font-medium text-muted-foreground">Duration:</span>
+						<span className="font-medium text-muted-foreground">Run Duration:</span>
 						<span className="text-foreground">
 							{mode === "completed"
 								? formatDuration(

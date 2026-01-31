@@ -33,6 +33,9 @@ export {
 	DialogDescription,
 } from "./dialog";
 
+export { DeleteConfirmDialog } from "./delete-confirm-dialog";
+export type { DeleteConfirmDialogProps } from "./delete-confirm-dialog";
+
 export {
 	DropdownMenu,
 	DropdownMenuTrigger,

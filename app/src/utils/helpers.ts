@@ -6,6 +6,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { LoadTestConfig } from "@/types";
+
 // Utility Functions
 
 /**
@@ -59,4 +61,19 @@ export function getMethodColor(method: string): string {
 		OPTIONS: "text-gray-600 bg-gray-50",
 	};
 	return colors[method.toUpperCase()] || "text-gray-600 bg-gray-50";
+}
+
+export function loadTestTypeToLabel(type: LoadTestConfig["mode"] | string): string {
+	switch (type) {
+		case "constant_rps":
+			return "Constant RPS";
+		case "constant_concurrency":
+			return "Constant Concurrency";
+		case "iterations":
+			return "Iterations";
+		case "ramp_up":
+			return "Ramp Up";
+		default:
+			return type;
+	}
 }

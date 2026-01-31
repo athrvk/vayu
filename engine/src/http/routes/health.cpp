@@ -40,8 +40,8 @@ void register_health_routes (RouteContext& ctx) {
      *
      * The shutdown sequence:
      * 1. Send response to client
-     * 2. Call the shutdown callback (if set) for platform-specific cleanup
-     * 3. Stop the HTTP server, which exits the main loop in daemon.cpp
+     * 2. Call the shutdown callback (sets g_running = false in daemon.cpp)
+     * 3. Main loop in daemon.cpp exits and calls server.stop() once
      * 4. daemon.cpp then performs final cleanup (stop runs, release lock, flush logs)
      */
     ctx.server.Post ("/shutdown", [&ctx] (const httplib::Request&, httplib::Response& res) {
@@ -51,20 +51,14 @@ void register_health_routes (RouteContext& ctx) {
         response["message"] = "Shutdown initiated";
         res.set_content (response.dump (), "application/json");
 
-        // Schedule shutdown after response is sent
-        // This allows the response to be sent before the server stops
+        // Schedule callback after response is sent so client gets 200 OK
         std::thread ([&ctx] () {
             std::this_thread::sleep_for (std::chrono::milliseconds (100));
-
-            // Call platform-specific shutdown callback if registered
             if (ctx.on_shutdown) {
                 vayu::utils::log_debug (
                 "POST /shutdown - Invoking shutdown callback");
                 ctx.on_shutdown ();
             }
-
-            // Stop the server (this will exit the main loop in daemon.cpp)
-            ctx.server.stop ();
         })
         .detach ();
     });

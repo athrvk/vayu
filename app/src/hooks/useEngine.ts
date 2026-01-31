@@ -109,12 +109,7 @@ export function useEngine(): UseEngineReturn {
 					headers: request.headers,
 					body: bodyPayload,
 					// Load test strategy
-					mode:
-						config.mode === "constant_rps" || config.mode === "constant_concurrency"
-							? "constant"
-							: config.mode === "iterations"
-								? "iterations"
-								: "ramp_up",
+					mode: config.mode,
 					// Duration (convert seconds to string format)
 					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,
 					targetRps: config.rps,

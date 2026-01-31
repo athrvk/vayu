@@ -67,8 +67,8 @@ constexpr double TOKEN_COST = 1.0;
 namespace event_loop {
 /// Maximum concurrent requests per worker
 constexpr size_t MAX_CONCURRENT = 1000;
-/// Maximum concurrent connections per host
-constexpr size_t MAX_PER_HOST = 100;
+/// Maximum concurrent connections per host (per worker).
+constexpr size_t MAX_PER_HOST = 200;
 /// Timeout for event loop polling in milliseconds
 constexpr int POLL_TIMEOUT_MS = 10;
 /// DNS cache timeout in seconds (avoids DNS resolver saturation)

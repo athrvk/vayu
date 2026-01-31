@@ -18,6 +18,7 @@ export interface VariableValue {
 	value: string;
 	enabled: boolean;
 	secret?: boolean;
+	createdAt?: number;
 }
 
 export interface Collection {
@@ -29,6 +30,13 @@ export interface Collection {
 	variables?: Record<string, VariableValue>; // Collection-scoped variables
 	createdAt: string;
 	updatedAt: string;
+}
+
+/** Stable comparator for sorting collections by order, then by id. */
+export function compareCollectionOrder(a: Collection, b: Collection): number {
+	const orderDiff = (a.order ?? 0) - (b.order ?? 0);
+	if (orderDiff !== 0) return orderDiff;
+	return (a.id ?? "").localeCompare(b.id ?? "");
 }
 
 export interface Request {

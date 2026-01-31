@@ -6,7 +6,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatRelativeTime } from "@/utils";
+import { formatRelativeTime, loadTestTypeToLabel } from "@/utils";
 import type { Run } from "@/types";
 import { Button, Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ import {
 interface RunItemProps {
 	run: Run;
 	onSelect: (runId: string) => void;
-	onDelete: (runId: string, event: React.MouseEvent) => Promise<void>;
+	onDelete: (runId: string, event: React.MouseEvent) => void;
 	isDeleting: boolean;
 	isSelected?: boolean;
 }
@@ -41,10 +41,11 @@ export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelecte
 		if (!run.configSnapshot) return { url: null, method: null };
 		const url = run.configSnapshot.url || null;
 		const method = run.configSnapshot.method || "GET";
-		return { url, method };
+		const type = run.configSnapshot.mode;
+		return { url, method, type };
 	};
 
-	const { url: requestUrl, method } = getRequestInfo();
+	const { url: requestUrl, method, type: loadTestType } = getRequestInfo();
 
 	// Get status icon and color
 	const getStatusIcon = () => {
@@ -117,12 +118,15 @@ export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelecte
 							size="icon"
 							onClick={(e) => onDelete(run.id, e)}
 							disabled={isDeleting}
-							className="opacity-0 group-hover:opacity-100 h-7 w-7 hover:bg-destructive/10 hover:text-destructive transition-opacity shrink-0"
+							className={cn(
+								"h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-opacity",
+								isDeleting ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+							)}
 						>
 							{isDeleting ? (
-								<Loader2 className="w-3.5 h-3.5 animate-spin" />
+								<Loader2 className="w-3 h-3 animate-spin" />
 							) : (
-								<Trash2 className="w-3.5 h-3.5" />
+								<Trash2 className="w-3 h-3" />
 							)}
 						</Button>
 					</div>
@@ -171,6 +175,12 @@ export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelecte
 							<span className="flex items-center gap-1 shrink-0">
 								<Activity className="w-3 h-3" />
 								{run.configSnapshot.concurrency} workers
+							</span>
+						)}
+						{loadTestType && (
+							<span className="flex items-center gap-1 shrink-0">
+								<Zap className="w-3 h-3" />
+								{loadTestTypeToLabel(loadTestType)}
 							</span>
 						)}
 					</div>

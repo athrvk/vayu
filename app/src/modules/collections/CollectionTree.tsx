@@ -6,7 +6,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Folder, Plus, Trash2, Edit2, Copy, FolderPlus, Loader2 } from "lucide-react";
 import { useNavigationStore, useCollectionsStore, useSaveStore } from "@/stores";
 import {
@@ -27,9 +27,13 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 	TooltipProvider,
+	DeleteConfirmDialog,
+	ScrollArea,
+	Skeleton,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import type { Collection, Request } from "@/types";
+import { compareCollectionOrder } from "@/types";
 
 export default function CollectionTree() {
 	const {
@@ -43,7 +47,7 @@ export default function CollectionTree() {
 	const { startSaving, completeSave, failSave, setStatus } = useSaveStore();
 
 	// TanStack Query hooks
-	const { data: collections = [] } = useCollectionsQuery();
+	const { data: collections = [], isLoading: isLoadingCollections } = useCollectionsQuery();
 
 	// Fetch requests for ALL collections (prefetched data is already in cache)
 	// This ensures the UI reflects the data immediately on load
@@ -58,14 +62,19 @@ export default function CollectionTree() {
 	const deleteRequestMutation = useDeleteRequestMutation();
 	const updateRequestMutation = useUpdateRequestMutation();
 
-	// Helper to get requests for a collection
-	const getRequestsByCollection = (collectionId: string): Request[] => {
-		return requestsByCollection.get(collectionId) ?? [];
-	};
+	const getRequestsByCollection = useCallback(
+		(collectionId: string): Request[] => requestsByCollection.get(collectionId) ?? [],
+		[requestsByCollection]
+	);
+
+	const rootCollections = useMemo(
+		() => [...collections].filter((c) => !c.parentId).sort(compareCollectionOrder),
+		[collections]
+	);
 	const [creatingCollection, setCreatingCollection] = useState(false);
 	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID
 	const [newCollectionName, setNewCollectionName] = useState("New Collection");
-	const [newSubfolderName, setNewSubfolderName] = useState("New Folder");
+	const [newSubCollectionName, setNewSubCollectionName] = useState("New Folder");
 	const [contextMenu, setContextMenu] = useState<{
 		collectionId: string;
 		x: number;
@@ -77,6 +86,11 @@ export default function CollectionTree() {
 	const [renameRequestValue, setRenameRequestValue] = useState("");
 	const [deletingCollectionId, setDeletingCollectionId] = useState<string | null>(null);
 	const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
+	const [deleteConfirm, setDeleteConfirm] = useState<{
+		type: "collection" | "request";
+		id: string;
+		name: string;
+	} | null>(null);
 	const contextMenuRef = useRef<HTMLDivElement>(null);
 
 	// Close context menu on outside click
@@ -96,22 +110,43 @@ export default function CollectionTree() {
 		};
 	}, [contextMenu]);
 
-	const handleCollectionClick = async (collection: Collection) => {
-		// Set this collection as selected (this will trigger useRequestsQuery to load)
-		setSelectedCollectionId(collection.id);
-		toggleCollectionExpanded(collection.id);
-	};
+	const handleRenameCancel = useCallback(() => {
+		setRenamingId(null);
+		setRenameValue("");
+	}, []);
 
-	// Handle "New Request" button click - use selected collection or first one
+	const handleCancelSubfolder = useCallback(() => {
+		setCreatingSubfolder(null);
+		setNewSubCollectionName("New Folder");
+	}, []);
+
+	const handleCollectionClick = useCallback(
+		(collection: Collection) => {
+			setSelectedCollectionId(collection.id);
+			toggleCollectionExpanded(collection.id);
+		},
+		[setSelectedCollectionId, toggleCollectionExpanded]
+	);
+
+	const handleOpenNewCollectionForm = useCallback(() => {
+		setNewCollectionName("New Collection");
+		setCreatingCollection(true);
+	}, []);
+
+	// Handle "New Request" button click - use selected collection or first root
 	const handleNewRequestClick = () => {
-		if (collections.length === 0) {
+		if (rootCollections.length === 0) {
 			// No collections - prompt to create one first
-			setCreatingCollection(true);
+			handleOpenNewCollectionForm();
 			return;
 		}
 
-		// Use selected collection if available, otherwise use first collection
-		const targetCollection = selectedCollectionId || collections[0].id;
+		// Use selected collection only if it still exists; otherwise first root collection
+		const selectedExists =
+			selectedCollectionId &&
+			collections.some((c) => c.id === selectedCollectionId);
+		const targetCollection =
+			(selectedExists ? selectedCollectionId : null) ?? rootCollections[0].id;
 		handleCreateRequest(targetCollection);
 	};
 
@@ -128,7 +163,7 @@ export default function CollectionTree() {
 	};
 
 	const handleCreateSubfolder = async (parentId: string) => {
-		if (!newSubfolderName.trim() || createCollectionMutation.isPending) return;
+		if (!newSubCollectionName.trim() || createCollectionMutation.isPending) return;
 
 		// Ensure parent collection is expanded
 		if (!expandedCollectionIds.has(parentId)) {
@@ -136,22 +171,16 @@ export default function CollectionTree() {
 		}
 
 		await createCollectionMutation.mutateAsync({
-			name: newSubfolderName.trim(),
+			name: newSubCollectionName.trim(),
 			parentId: parentId,
 		});
-		setNewSubfolderName("New Folder");
-		setCreatingSubfolder(null);
+		handleCancelSubfolder();
 	};
 
 	const handleCreateRequest = async (collectionId: string) => {
 		if (createRequestMutation.isPending) return;
 
-		console.log("Creating request for collection:", collectionId);
-		console.log("Collection expanded before:", expandedCollectionIds.has(collectionId));
-
-		// Ensure collection is expanded
 		if (!expandedCollectionIds.has(collectionId)) {
-			console.log("Expanding collection:", collectionId);
 			toggleCollectionExpanded(collectionId);
 		}
 
@@ -162,7 +191,6 @@ export default function CollectionTree() {
 			url: "https://api.example.com",
 		});
 
-		console.log("Request created, navigating to:", request?.id);
 		if (request) {
 			navigateToRequest(collectionId, request.id);
 		}
@@ -208,22 +236,26 @@ export default function CollectionTree() {
 		setContextMenu(null);
 	};
 
+	const MENU_WIDTH = 180;
+	const MENU_HEIGHT = 260;
+
 	const handleShowContextMenu = (e: React.MouseEvent, collectionId: string) => {
 		e.preventDefault();
 		e.stopPropagation();
+		const x = Math.max(0, Math.min(e.clientX, window.innerWidth - MENU_WIDTH));
+		const y = Math.max(0, Math.min(e.clientY, window.innerHeight - MENU_HEIGHT));
 		setContextMenu({
 			collectionId,
-			x: e.clientX,
-			y: e.clientY,
+			x,
+			y,
 		});
 	};
 
 	const handleDeleteCollection = async (collectionId: string) => {
 		setDeletingCollectionId(collectionId);
-		setContextMenu(null);
+		setDeleteConfirm(null);
 		try {
 			await deleteCollectionMutation.mutateAsync(collectionId);
-			// If the deleted collection was selected, navigate to welcome
 			if (selectedCollectionId === collectionId) {
 				navigateToWelcome();
 			}
@@ -234,9 +266,9 @@ export default function CollectionTree() {
 
 	const handleDeleteRequest = async (requestId: string) => {
 		setDeletingRequestId(requestId);
+		setDeleteConfirm(null);
 		try {
 			await deleteRequestMutation.mutateAsync(requestId);
-			// If the deleted request was selected, navigate to welcome
 			if (selectedRequestId === requestId) {
 				navigateToWelcome();
 			}
@@ -244,6 +276,19 @@ export default function CollectionTree() {
 			setDeletingRequestId(null);
 		}
 	};
+
+	const handleRequestDeleteClick = useCallback((requestId: string, requestName: string) => {
+		setDeleteConfirm({ type: "request", id: requestId, name: requestName });
+	}, []);
+
+	const handleConfirmDelete = useCallback(() => {
+		if (!deleteConfirm) return;
+		if (deleteConfirm.type === "collection") {
+			handleDeleteCollection(deleteConfirm.id);
+		} else {
+			handleDeleteRequest(deleteConfirm.id);
+		}
+	}, [deleteConfirm]);
 
 	const handleStartRequestRename = (request: Request) => {
 		setRenamingRequestId(request.id);
@@ -295,10 +340,10 @@ export default function CollectionTree() {
 		setRenameRequestValue("");
 	};
 
-	const handleRequestRenameCancel = () => {
+	const handleRequestRenameCancel = useCallback(() => {
 		setRenamingRequestId(null);
 		setRenameRequestValue("");
-	};
+	}, []);
 
 	return (
 		<div className="flex flex-col h-full w-full p-4 space-y-2">
@@ -312,7 +357,7 @@ export default function CollectionTree() {
 								<Button
 									variant="ghost"
 									size="icon"
-									onClick={() => setCreatingCollection(true)}
+									onClick={handleOpenNewCollectionForm}
 									disabled={createCollectionMutation.isPending}
 									className="h-8 w-8"
 								>
@@ -323,11 +368,8 @@ export default function CollectionTree() {
 									)}
 								</Button>
 							</TooltipTrigger>
-							<TooltipContent>New Collection</TooltipContent>
+							<TooltipContent>Add collection</TooltipContent>
 						</Tooltip>
-					</TooltipProvider>
-
-					<TooltipProvider>
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button
@@ -346,8 +388,8 @@ export default function CollectionTree() {
 							</TooltipTrigger>
 							<TooltipContent>
 								{selectedCollectionId
-									? `New Request in ${collections.find((c) => c.id === selectedCollectionId)?.name || "selected collection"}`
-									: "New Request"}
+									? `Add request in ${collections.find((c) => c.id === selectedCollectionId)?.name ?? "selected collection"}`
+									: "Add request"}
 							</TooltipContent>
 						</Tooltip>
 					</TooltipProvider>
@@ -361,7 +403,13 @@ export default function CollectionTree() {
 						type="text"
 						value={newCollectionName}
 						onChange={(e) => setNewCollectionName(e.target.value)}
-						onKeyDown={(e) => e.key === "Enter" && handleCreateCollection()}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") handleCreateCollection();
+							if (e.key === "Escape") {
+								setCreatingCollection(false);
+								setNewCollectionName("");
+							}
+						}}
 						placeholder="Collection name"
 						className="flex-1 h-8 text-sm"
 						disabled={createCollectionMutation.isPending}
@@ -391,26 +439,42 @@ export default function CollectionTree() {
 				</div>
 			)}
 
-			{/* Collections List */}
-			{collections.length === 0 && !creatingCollection && (
+			{/* Loading state */}
+			{isLoadingCollections && (
+				<div className="space-y-2 py-2">
+					{[1, 2, 3].map((i) => (
+						<div key={i} className="flex items-center gap-2 px-2 py-1.5">
+							<Skeleton className="h-4 w-4 rounded" />
+							<Skeleton className="h-4 w-5 flex-shrink-0 rounded" />
+							<Skeleton className="h-4 flex-1 rounded" />
+						</div>
+					))}
+				</div>
+			)}
+
+			{/* Zero collections empty state */}
+			{!isLoadingCollections && collections.length === 0 && !creatingCollection && (
 				<div className="text-center py-8 text-sm text-muted-foreground">
 					<Folder className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-					<p>No collections yet</p>
+					<p className="font-medium text-foreground">No collections yet</p>
+					<p className="mt-1 text-muted-foreground">
+						Collections help you group and organize your requests.
+					</p>
 					<Button
 						variant="link"
-						onClick={() => setCreatingCollection(true)}
+						onClick={handleOpenNewCollectionForm}
 						className="mt-3 text-primary"
 					>
-						Create your first collection
+						Add your first collection
 					</Button>
 				</div>
 			)}
 
-			{/* Root-level collections (no parentId) - sorted by order */}
-			{collections
-				.filter((c) => !c.parentId)
-				.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-				.map((collection) => (
+			{/* Root-level collections (no parentId) - sorted by order, scrollable */}
+			{!isLoadingCollections && rootCollections.length > 0 && (
+				<ScrollArea className="flex-1 min-h-0 -mx-1 px-1">
+					<div className="space-y-0.5 pr-2">
+			{rootCollections.map((collection) => (
 					<CollectionItem
 						key={collection.id}
 						collection={collection}
@@ -424,7 +488,7 @@ export default function CollectionTree() {
 						deletingCollectionId={deletingCollectionId}
 						deletingRequestId={deletingRequestId}
 						creatingSubfolder={creatingSubfolder}
-						newSubfolderName={newSubfolderName}
+						newSubCollectionName={newSubCollectionName}
 						isCreatingSubfolder={createCollectionMutation.isPending}
 						getRequestsByCollection={getRequestsByCollection}
 						onCollectionClick={handleCollectionClick}
@@ -432,26 +496,24 @@ export default function CollectionTree() {
 						onShowContextMenu={handleShowContextMenu}
 						onRenameChange={setRenameValue}
 						onRenameSubmit={handleRenameSubmit}
-						onRenameCancel={() => {
-							setRenamingId(null);
-							setRenameValue("");
-						}}
+						onRenameCancel={handleRenameCancel}
 						onStartRename={handleRenameCollection}
 						onDeleteRequest={handleDeleteRequest}
-						onSubfolderNameChange={setNewSubfolderName}
+						onSubCollectionNameChange={setNewSubCollectionName}
 						onCreateSubfolder={handleCreateSubfolder}
-						onCancelSubfolder={() => {
-							setCreatingSubfolder(null);
-							setNewSubfolderName("New Folder");
-						}}
+						onCancelSubfolder={handleCancelSubfolder}
 						renamingRequestId={renamingRequestId}
 						renameRequestValue={renameRequestValue}
 						onRequestRenameChange={setRenameRequestValue}
 						onRequestRenameSubmit={handleRequestRenameSubmit}
 						onRequestRenameCancel={handleRequestRenameCancel}
 						onStartRequestRename={handleStartRequestRename}
+						onRequestDeleteClick={handleRequestDeleteClick}
 					/>
 				))}
+					</div>
+				</ScrollArea>
+			)}
 
 			{/* Context Menu */}
 			{contextMenu && (
@@ -472,14 +534,14 @@ export default function CollectionTree() {
 							if (collection) handleRenameCollection(collection);
 						}}
 					>
-						<Edit2 className="w-4 h-4 mr-2" />
+						<Edit2 className="w-4 h-4 mr-2 flex-shrink-0" />
 						<span>Rename</span>
 					</button>
 					<button
 						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
 						onClick={() => handleDuplicateCollection(contextMenu.collectionId)}
 					>
-						<Copy className="w-4 h-4 mr-2" />
+						<Copy className="w-4 h-4 mr-2 flex-shrink-0" />
 						<span>Duplicate</span>
 					</button>
 					<button
@@ -491,7 +553,7 @@ export default function CollectionTree() {
 							await handleCreateRequest(collectionId);
 						}}
 					>
-						<Plus className="w-4 h-4 mr-2" />
+						<Plus className="w-4 h-4 mr-2 flex-shrink-0" />
 						<span>Add Request</span>
 					</button>
 					<button
@@ -499,35 +561,49 @@ export default function CollectionTree() {
 						onClick={() => {
 							const parentId = contextMenu.collectionId;
 							setContextMenu(null);
-							// Expand parent collection if not already
 							if (!expandedCollectionIds.has(parentId)) {
 								toggleCollectionExpanded(parentId);
 							}
 							setCreatingSubfolder(parentId);
 						}}
 					>
-						<FolderPlus className="w-4 h-4 mr-2" />
+						<FolderPlus className="w-4 h-4 mr-2 flex-shrink-0" />
 						<span>Add Folder</span>
 					</button>
 					<Separator className="my-1" />
 					<button
 						className="flex items-center w-full px-2 py-1.5 text-sm text-destructive hover:bg-accent cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-						onClick={() => handleDeleteCollection(contextMenu.collectionId)}
-						disabled={deletingCollectionId === contextMenu.collectionId}
+						onClick={() => {
+							const collection = collections.find((c) => c.id === contextMenu.collectionId);
+							setDeleteConfirm({
+								type: "collection",
+								id: contextMenu.collectionId,
+								name: collection?.name ?? "Collection",
+							});
+							setContextMenu(null);
+						}}
 					>
-						{deletingCollectionId === contextMenu.collectionId ? (
-							<Loader2 className="w-4 h-4 mr-2 animate-spin" />
-						) : (
-							<Trash2 className="w-4 h-4 mr-2" />
-						)}
-						<span>
-							{deletingCollectionId === contextMenu.collectionId
-								? "Deleting..."
-								: "Delete"}
-						</span>
+						<Trash2 className="w-4 h-4 mr-2 flex-shrink-0" />
+						<span>Delete</span>
 					</button>
 				</div>
 			)}
+
+			<DeleteConfirmDialog
+				open={!!deleteConfirm}
+				onOpenChange={(open) => !open && setDeleteConfirm(null)}
+				title={deleteConfirm?.type === "collection" ? "Delete collection?" : "Delete request?"}
+				description={
+					deleteConfirm?.type === "collection"
+						? `"${deleteConfirm?.name}" and all its requests will be permanently removed. This cannot be undone.`
+						: `"${deleteConfirm?.name}" will be permanently removed. This cannot be undone.`
+				}
+				onConfirm={handleConfirmDelete}
+				isDeleting={
+					(deleteConfirm?.type === "collection" && deletingCollectionId === deleteConfirm?.id) ||
+					(deleteConfirm?.type === "request" && deletingRequestId === deleteConfirm?.id)
+				}
+			/>
 		</div>
 	);
 }

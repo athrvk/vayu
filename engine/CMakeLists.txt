@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(vayu-engine
-    VERSION 0.1.1
+    VERSION 0.1.2
     DESCRIPTION "High-performance API execution engine"
     LANGUAGES C CXX
 )
@@ -271,7 +271,7 @@ target_link_libraries(vayu_core PUBLIC
 
 # Windows-specific libraries
 if(WIN32)
-    target_link_libraries(vayu_core PUBLIC ws2_32)
+    target_link_libraries(vayu_core PUBLIC ws2_32 winmm)
     # MSVC-specific options for vayu_core
     if(MSVC)
         target_compile_definitions(vayu_core PRIVATE

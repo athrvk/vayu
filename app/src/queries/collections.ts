@@ -23,6 +23,7 @@ import type {
 	CreateRequestRequest,
 	UpdateRequestRequest,
 } from "@/types";
+import { compareCollectionOrder } from "@/types";
 
 // ============ Collection Queries ============
 
@@ -169,10 +170,10 @@ export function useCreateCollectionMutation() {
 	return useMutation({
 		mutationFn: (data: CreateCollectionRequest) => apiService.createCollection(data),
 		onSuccess: (newCollection) => {
-			// Add to cache optimistically
-			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) =>
-				old ? [...old, newCollection] : [newCollection]
-			);
+			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) => {
+				const next = old ? [...old, newCollection] : [newCollection];
+				return next.sort(compareCollectionOrder);
+			});
 		},
 	});
 }
@@ -186,11 +187,13 @@ export function useUpdateCollectionMutation() {
 	return useMutation({
 		mutationFn: (data: UpdateCollectionRequest) => apiService.updateCollection(data),
 		onSuccess: (updatedCollection) => {
-			// Update in cache
 			queryClient.setQueryData<Collection[]>(
 				queryKeys.collections.list(),
-				(old) =>
-					old?.map((c) => (c.id === updatedCollection.id ? updatedCollection : c)) ?? []
+				(old) => {
+					const next =
+						old?.map((c) => (c.id === updatedCollection.id ? updatedCollection : c)) ?? [];
+					return next.sort(compareCollectionOrder);
+				}
 			);
 		},
 	});

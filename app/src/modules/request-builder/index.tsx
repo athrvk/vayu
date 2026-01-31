@@ -22,11 +22,12 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { RequestBuilderProvider } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
 import { useNavigationStore, useVariablesStore, useDashboardStore } from "@/stores";
-import { useRequestQuery, useUpdateRequestMutation } from "@/queries";
+import { useRequestQuery, useUpdateRequestMutation, queryKeys } from "@/queries";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
@@ -46,6 +47,7 @@ export default function RequestBuilder() {
 	const { startRun } = useDashboardStore();
 	const { executeRequest: engineExecuteRequest } = useEngine();
 	const updateRequestMutation = useUpdateRequestMutation();
+	const queryClient = useQueryClient();
 
 	// Load test dialog state
 	const [showLoadTestDialog, setShowLoadTestDialog] = useState(false);
@@ -172,6 +174,13 @@ export default function RequestBuilder() {
 
 				if (!result) return null;
 
+				// Refresh variables so script-set values (e.g. pm.environment.set) appear in the UI
+				if (request.preRequestScript.trim()) {
+					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
+					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
+					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+				}
+
 				// Determine body type from content-type header
 				const contentType = (result.headers?.["content-type"] || "").toLowerCase();
 				const bodyType: ResponseState["bodyType"] = contentType.includes("json")
@@ -234,7 +243,7 @@ export default function RequestBuilder() {
 				};
 			}
 		},
-		[fetchedRequest, engineExecuteRequest, activeEnvironmentId, resolveString, resolveObject]
+		[fetchedRequest, engineExecuteRequest, activeEnvironmentId, resolveString, resolveObject, queryClient]
 	);
 
 	// Save request callback
@@ -312,14 +321,7 @@ export default function RequestBuilder() {
 					headers: resolvedHeaders,
 					body: bodyPayload,
 					// Load test config
-					mode:
-						config.mode === "constant_rps"
-							? "constant"
-							: config.mode === "constant_concurrency"
-								? "constant"
-								: config.mode === "iterations"
-									? "iterations"
-									: "ramp_up",
+					mode: config.mode,
 					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,
 					targetRps: config.rps,
 					iterations: config.iterations,

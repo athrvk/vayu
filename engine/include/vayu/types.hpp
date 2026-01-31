@@ -461,11 +461,12 @@ inline std::optional<RunType> parse_run_type (const std::string& str) {
     return std::nullopt;
 }
 
-enum class LoadTestType { Constant, RampUp, Iterations };
+enum class LoadTestType { ConstantRps, ConstantConcurrency, RampUp, Iterations };
 
 inline const char* to_string (LoadTestType type) {
     switch (type) {
-    case LoadTestType::Constant: return "constant";
+    case LoadTestType::ConstantRps: return "constant_rps";
+    case LoadTestType::ConstantConcurrency: return "constant_concurrency";
     case LoadTestType::RampUp: return "ramp_up";
     case LoadTestType::Iterations: return "iterations";
     }
@@ -473,8 +474,10 @@ inline const char* to_string (LoadTestType type) {
 }
 
 inline std::optional<LoadTestType> parse_load_test_type (const std::string& str) {
-    if (str == "constant" || str == "duration")
-        return LoadTestType::Constant;
+    if (str == "constant_rps")
+        return LoadTestType::ConstantRps;
+    if (str == "constant_concurrency")
+        return LoadTestType::ConstantConcurrency;
     if (str == "ramp_up")
         return LoadTestType::RampUp;
     if (str == "iterations")

@@ -18,9 +18,15 @@ import { sseClient } from "./sse-client";
 import { useDashboardStore } from "@/stores";
 import type { LoadTestMetrics } from "@/types";
 
+/** Throttle UI updates to avoid freezing (engine sends every 100ms) */
+const METRICS_UI_THROTTLE_MS = 500;
+
 class LoadTestService {
 	private activeRunId: string | null = null;
 	private isConnected: boolean = false;
+	private lastMetricsPushTime = 0;
+	private pendingMetrics: LoadTestMetrics | null = null;
+	private throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
 	/**
 	 * Start monitoring a load test run
@@ -69,6 +75,12 @@ class LoadTestService {
 			return;
 		}
 
+		if (this.throttleTimer) {
+			clearTimeout(this.throttleTimer);
+			this.throttleTimer = null;
+		}
+		this.pendingMetrics = null;
+		this.lastMetricsPushTime = 0;
 		console.log(`[LoadTestService] Stopping monitoring for run ${this.activeRunId}`);
 		this.activeRunId = null;
 		this.isConnected = false;
@@ -95,8 +107,26 @@ class LoadTestService {
 	// --- Private handlers ---
 
 	private handleMetrics(metrics: LoadTestMetrics): void {
+		this.pendingMetrics = metrics;
+		const now = Date.now();
+		const elapsed = now - this.lastMetricsPushTime;
+		if (elapsed >= METRICS_UI_THROTTLE_MS || this.lastMetricsPushTime === 0) {
+			this.flushMetrics();
+		} else if (!this.throttleTimer) {
+			this.throttleTimer = setTimeout(() => {
+				this.throttleTimer = null;
+				this.flushMetrics();
+			}, METRICS_UI_THROTTLE_MS - elapsed);
+		}
+	}
+
+	private flushMetrics(): void {
+		if (this.pendingMetrics == null) return;
+		this.lastMetricsPushTime = Date.now();
+		const toPush = this.pendingMetrics;
+		this.pendingMetrics = null;
 		const store = useDashboardStore.getState();
-		store.addMetrics(metrics);
+		store.addMetrics(toPush);
 	}
 
 	private handleError(error: Error): void {
@@ -107,7 +137,11 @@ class LoadTestService {
 
 	private handleClose(): void {
 		console.log("[LoadTestService] SSE connection closed (test completed)");
-
+		if (this.throttleTimer) {
+			clearTimeout(this.throttleTimer);
+			this.throttleTimer = null;
+		}
+		this.flushMetrics();
 		const store = useDashboardStore.getState();
 		store.setStreaming(false);
 

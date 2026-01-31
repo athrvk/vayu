@@ -1,6 +1,6 @@
 {
   "name": "vayu-engine",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "High-performance API execution engine",
   "homepage": "https://github.com/vayu/vayu",
   "license": "MIT",

@@ -142,6 +142,11 @@ int main (int argc, char* argv[]) {
         g_running.store (false);
     });
 
+#if VAYU_PLATFORM_WINDOWS
+    // Enable 1 ms timer resolution so short sleeps are accurate (high-RPS load tests)
+    vayu::platform::enable_high_resolution_timer ();
+#endif
+
     // Initialize database
     std::string db_path = vayu::platform::path_join (db_dir, "vayu.db");
     vayu::db::Database db (db_path);
@@ -224,6 +229,10 @@ int main (int argc, char* argv[]) {
     }
 
     vayu::http::global_cleanup ();
+
+#if VAYU_PLATFORM_WINDOWS
+    vayu::platform::disable_high_resolution_timer ();
+#endif
 
     // Release lock file
     vayu::platform::release_file_lock (g_lock_handle);
