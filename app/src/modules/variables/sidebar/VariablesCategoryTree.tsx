@@ -30,7 +30,7 @@ import {
 	Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Badge, Button, Input } from "@/components/ui";
+import { Badge, Button, Input, DeleteConfirmDialog } from "@/components/ui";
 
 interface VariablesCategoryTreeProps {
 	collections: Collection[];
@@ -49,6 +49,7 @@ export default function VariablesCategoryTree({
 	const [creatingEnvironment, setCreatingEnvironment] = useState(false);
 	const [newEnvName, setNewEnvName] = useState("New Environment");
 	const [deletingEnvId, setDeletingEnvId] = useState<string | null>(null);
+	const [deleteConfirmEnvId, setDeleteConfirmEnvId] = useState<string | null>(null);
 
 	// Mutations
 	const createEnvironmentMutation = useCreateEnvironmentMutation();
@@ -86,21 +87,29 @@ export default function VariablesCategoryTree({
 		setSelectedCategory({ type: "environment", environmentId: newEnv.id });
 	};
 
-	const handleDeleteEnvironment = async (envId: string, e: React.MouseEvent) => {
+	const envToDelete = deleteConfirmEnvId ? environments.find((e) => e.id === deleteConfirmEnvId) : null;
+
+	const handleDeleteClick = (envId: string, e: React.MouseEvent) => {
 		e.stopPropagation();
-		if (deleteEnvironmentMutation.isPending) return;
+		setDeleteConfirmEnvId(envId);
+	};
 
-		setDeletingEnvId(envId);
-		await deleteEnvironmentMutation.mutateAsync(envId);
-		setDeletingEnvId(null);
-
-		// If we deleted the selected environment, clear selection
-		if (
-			selectedCategory?.type === "environment" &&
-			(selectedCategory as { type: "environment"; environmentId: string }).environmentId ===
-				envId
-		) {
-			setSelectedCategory(null);
+	const handleConfirmDelete = async () => {
+		if (!deleteConfirmEnvId) return;
+		const envIdToDelete = deleteConfirmEnvId;
+		setDeletingEnvId(envIdToDelete);
+		try {
+			await deleteEnvironmentMutation.mutateAsync(envIdToDelete);
+			setDeleteConfirmEnvId(null);
+			if (
+				selectedCategory?.type === "environment" &&
+				(selectedCategory as { type: "environment"; environmentId: string }).environmentId ===
+					envIdToDelete
+			) {
+				setSelectedCategory(null);
+			}
+		} finally {
+			setDeletingEnvId(null);
 		}
 	};
 
@@ -126,7 +135,7 @@ export default function VariablesCategoryTree({
 				<div className="flex items-center">
 					<button
 						onClick={() => setEnvironmentsExpanded(!environmentsExpanded)}
-						className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left text-xs uppercase tracking-wider text-muted-foreground hover:bg-accent"
+						className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
 					>
 						{environmentsExpanded ? (
 							<ChevronDown className="w-3 h-3" />
@@ -224,9 +233,7 @@ export default function VariablesCategoryTree({
 										<Button
 											variant="ghost"
 											size="icon"
-											onClick={(e) =>
-												handleDeleteEnvironment(environment.id, e)
-											}
+											onClick={(e) => handleDeleteClick(environment.id, e)}
 											disabled={isDeleting}
 											className="h-6 w-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive shrink-0"
 											title="Delete Environment"
@@ -249,7 +256,7 @@ export default function VariablesCategoryTree({
 			<div>
 				<button
 					onClick={() => setCollectionsExpanded(!collectionsExpanded)}
-					className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs uppercase tracking-wider text-muted-foreground hover:bg-accent"
+					className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
 				>
 					{collectionsExpanded ? (
 						<ChevronDown className="w-3 h-3" />
@@ -309,6 +316,19 @@ export default function VariablesCategoryTree({
 					</div>
 				)}
 			</div>
+
+			<DeleteConfirmDialog
+				open={!!deleteConfirmEnvId}
+				onOpenChange={(open) => !open && setDeleteConfirmEnvId(null)}
+				title="Delete environment?"
+				description={
+					envToDelete
+						? `"${envToDelete.name}" will be permanently removed. This cannot be undone.`
+						: "This environment will be permanently removed. This cannot be undone."
+				}
+				onConfirm={handleConfirmDelete}
+				isDeleting={!!deletingEnvId && deletingEnvId === deleteConfirmEnvId}
+			/>
 		</div>
 	);
 }

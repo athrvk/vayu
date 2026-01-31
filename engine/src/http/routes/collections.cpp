@@ -88,6 +88,16 @@ void register_collection_routes (RouteContext& ctx) {
 
             if (json.contains ("order") && !json["order"].is_null ()) {
                 c.order = json["order"].get<int> ();
+            } else if (!is_update) {
+                // New collection: assign next order among siblings for stable ordering
+                auto all     = ctx.db.get_collections ();
+                int max_order = -1;
+                for (const auto& col : all) {
+                    if (col.parent_id == c.parent_id && col.order > max_order) {
+                        max_order = col.order;
+                    }
+                }
+                c.order = max_order + 1;
             }
 
             // Handle collection variables

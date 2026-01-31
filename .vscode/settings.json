@@ -111,6 +111,7 @@
         "Werror",
         "Wextra",
         "Wformat",
+        "winmm",
         "Wnull",
         "Wpedantic",
         "Wsign"

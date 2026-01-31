@@ -177,6 +177,8 @@ class ConstantLoadStrategy : public LoadStrategy {
             auto next_batch_time = test_start;
             size_t submitted     = 0;
 
+            auto duration_end = test_start + std::chrono::milliseconds (duration_ms);
+
             while (!context->should_stop) {
                 auto now = std::chrono::steady_clock::now ();
                 auto elapsed =
@@ -184,17 +186,14 @@ class ConstantLoadStrategy : public LoadStrategy {
                 .count ();
 
                 if (elapsed >= duration_ms) {
-                    break;
-                }
-
-                // Check if it's time to submit next batch
-                if (now >= next_batch_time) {
-                    // Backpressure check - don't overwhelm the event loop
+                    // Before breaking: submit all batches that were due within duration.
+                    // Use strict < so we don't submit the first batch after the window
+                    // (e.g. 5s @ 1000 RPS = batches at 0..4999ms only, not 5000ms).
                     size_t max_pending =
                     std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000));
-
-                    if (context->event_loop->pending_count () < max_pending) {
-                        // Submit batch of requests
+                    while (next_batch_time < duration_end && now >= next_batch_time &&
+                    context->event_loop->pending_count () < max_pending &&
+                    !context->should_stop) {
                         for (size_t i = 0; i < batch_size && !context->should_stop; ++i) {
                             context->event_loop->submit (request,
                             [context, &db] (size_t, vayu::Result<vayu::Response> result) {
@@ -203,23 +202,79 @@ class ConstantLoadStrategy : public LoadStrategy {
                             submitted++;
                             context->requests_sent++;
                         }
-
-                        // Schedule next batch using the correct interval
                         next_batch_time += std::chrono::microseconds (batch_interval_us);
+                    }
+                    break;
+                }
+
+                // Check if it's time to submit (possibly multiple batches if we fell behind)
+                size_t max_pending =
+                std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000));
+
+                if (now >= next_batch_time) {
+                    // How many batches are we due? (catch up after preemption/slow iterations)
+                    int64_t overdue_us =
+                    std::chrono::duration_cast<std::chrono::microseconds> (now - next_batch_time)
+                    .count ();
+                    size_t batches_due = 1U;
+                    if (overdue_us > 0 && batch_interval_us > 0) {
+                        batches_due += static_cast<size_t> (overdue_us / batch_interval_us);
+                    }
+                    // Cap by batches left in the test window
+                    if (next_batch_time < duration_end) {
+                        int64_t remaining_us =
+                        std::chrono::duration_cast<std::chrono::microseconds> (
+                        duration_end - next_batch_time)
+                        .count ();
+                        size_t max_batches_in_window =
+                        (remaining_us > 0 && batch_interval_us > 0)
+                        ? static_cast<size_t> (remaining_us / batch_interval_us)
+                        : 0U;
+                        if (max_batches_in_window < batches_due)
+                            batches_due = max_batches_in_window;
                     } else {
-                        // If we're backed up, skip ahead to avoid flooding
-                        next_batch_time =
-                        now + std::chrono::microseconds (batch_interval_us);
+                        batches_due = 0U;
+                    }
+
+                    size_t batches_submitted = 0U;
+                    while (batches_submitted < batches_due && !context->should_stop) {
+                        if (context->event_loop->pending_count () >= max_pending) {
+                            next_batch_time =
+                            now + std::chrono::microseconds (batch_interval_us);
+                            break;
+                        }
+                        for (size_t i = 0; i < batch_size && !context->should_stop; ++i) {
+                            context->event_loop->submit (request,
+                            [context, &db] (size_t, vayu::Result<vayu::Response> result) {
+                                handle_result (context, db, std::move (result));
+                            });
+                            submitted++;
+                            context->requests_sent++;
+                        }
+                        batches_submitted++;
+                        next_batch_time += std::chrono::microseconds (batch_interval_us);
                     }
                 }
 
-                // Sleep for remaining time until next batch
+                // Wait until next batch: on Windows use busy-wait for short
+                // intervals so we don't depend on timer resolution (10k+ RPS).
                 auto sleep_time =
                 std::chrono::duration_cast<std::chrono::microseconds> (next_batch_time - now)
                 .count ();
                 if (sleep_time > 100) {
-                    std::this_thread::sleep_for (
-                    std::chrono::microseconds (sleep_time / 2));
+#ifdef _WIN32
+                    // Busy-wait for <= 2ms to avoid 15.6ms timer rounding
+                    if (sleep_time <= 2000) {
+                        while (std::chrono::steady_clock::now () < next_batch_time &&
+                        !context->should_stop) {
+                            /* spin */
+                        }
+                    } else
+#endif
+                    {
+                        std::this_thread::sleep_for (
+                        std::chrono::microseconds (sleep_time / 2));
+                    }
                 }
             }
 
@@ -409,11 +464,10 @@ class RampUpLoadStrategy : public LoadStrategy {
 // ============================================================================
 
 std::unique_ptr<LoadStrategy> LoadStrategy::create (const nlohmann::json& config) {
-    std::string mode = config.value ("mode", "constant");
+    std::string mode = config.value ("mode", "constant_rps");
     auto type        = parse_load_test_type (mode);
 
     if (!type) {
-        // Fallback logic for backward compatibility
         if (config.contains ("iterations")) {
             return std::make_unique<IterationsLoadStrategy> ();
         }
@@ -421,11 +475,13 @@ std::unique_ptr<LoadStrategy> LoadStrategy::create (const nlohmann::json& config
     }
 
     switch (*type) {
-    case LoadTestType::Constant:
+    case LoadTestType::ConstantRps:
+    case LoadTestType::ConstantConcurrency:
         return std::make_unique<ConstantLoadStrategy> ();
     case LoadTestType::Iterations:
         return std::make_unique<IterationsLoadStrategy> ();
-    case LoadTestType::RampUp: return std::make_unique<RampUpLoadStrategy> ();
+    case LoadTestType::RampUp:
+        return std::make_unique<RampUpLoadStrategy> ();
     }
 
     return std::make_unique<ConstantLoadStrategy> ();

@@ -43,6 +43,7 @@ export interface RunMetadataProps {
 	setupOverhead?: number; // in seconds
 	configuration?: {
 		mode?: string;
+		duration?: number | string | undefined;
 		targetRps?: number;
 		concurrency?: number;
 		comment?: string;

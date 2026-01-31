@@ -6,10 +6,11 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useRef } from "react";
+import { useRef, useEffect } from "react";
 import { ChevronRight, ChevronDown, Folder, MoreVertical, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import type { Collection, Request } from "@/types";
+import { compareCollectionOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -25,7 +26,7 @@ export interface CollectionItemProps {
 	deletingCollectionId: string | null;
 	deletingRequestId: string | null;
 	creatingSubfolder: string | null;
-	newSubfolderName: string;
+	newSubCollectionName: string;
 	isCreatingSubfolder: boolean;
 	renamingRequestId: string | null;
 	renameRequestValue: string;
@@ -38,7 +39,8 @@ export interface CollectionItemProps {
 	onRenameCancel: () => void;
 	onStartRename: (collection: Collection) => void;
 	onDeleteRequest: (requestId: string) => Promise<void>;
-	onSubfolderNameChange: (value: string) => void;
+	onRequestDeleteClick?: (requestId: string, requestName: string) => void;
+	onSubCollectionNameChange: (value: string) => void;
 	onCreateSubfolder: (parentId: string) => void;
 	onCancelSubfolder: () => void;
 	onRequestRenameChange: (value: string) => void;
@@ -59,7 +61,7 @@ export default function CollectionItem({
 	deletingCollectionId,
 	deletingRequestId,
 	creatingSubfolder,
-	newSubfolderName,
+	newSubCollectionName,
 	isCreatingSubfolder,
 	renamingRequestId,
 	renameRequestValue,
@@ -72,7 +74,8 @@ export default function CollectionItem({
 	onRenameCancel,
 	onStartRename,
 	onDeleteRequest,
-	onSubfolderNameChange,
+	onRequestDeleteClick,
+	onSubCollectionNameChange,
 	onCreateSubfolder,
 	onCancelSubfolder,
 	onRequestRenameChange,
@@ -86,51 +89,56 @@ export default function CollectionItem({
 	const isDeleting = deletingCollectionId === collection.id;
 	const childCollections = allCollections
 		.filter((c) => c.parentId === collection.id)
-		.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+		.sort(compareCollectionOrder);
 
-	const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+	const expandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const CLICK_DELAY_MS = 80;
 
-	const handleClick = () => {
+	useEffect(() => () => {
+		if (expandTimeoutRef.current) clearTimeout(expandTimeoutRef.current);
+	}, []);
+
+	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
+		// Second click of a double-click: ignore (double-click handler will run rename only)
+		if (e.detail === 2) return;
 
-		// Clear any existing timeout
-		if (clickTimeoutRef.current) {
-			clearTimeout(clickTimeoutRef.current);
-			clickTimeoutRef.current = null;
-			// This was a double-click, don't trigger single click
-			return;
+		if (expandTimeoutRef.current) {
+			clearTimeout(expandTimeoutRef.current);
+			expandTimeoutRef.current = null;
 		}
 
-		// Set timeout for single click
-		clickTimeoutRef.current = setTimeout(() => {
+		expandTimeoutRef.current = setTimeout(() => {
+			expandTimeoutRef.current = null;
 			onCollectionClick(collection);
-			clickTimeoutRef.current = null;
-		}, 200); // 200ms delay to detect double-click
+		}, CLICK_DELAY_MS);
 	};
 
 	const handleDoubleClick = (e: React.MouseEvent) => {
 		e.stopPropagation();
 		if (isDeleting || isRenaming) return;
 
-		// Clear single click timeout
-		if (clickTimeoutRef.current) {
-			clearTimeout(clickTimeoutRef.current);
-			clickTimeoutRef.current = null;
+		if (expandTimeoutRef.current) {
+			clearTimeout(expandTimeoutRef.current);
+			expandTimeoutRef.current = null;
 		}
 
 		onStartRename(collection);
 	};
+
+	const indentPx = 2 + depth;
 
 	return (
 		<div className={cn("select-none", isDeleting && "opacity-50")}>
 			{/* Collection Header */}
 			<div
 				className={cn(
-					"flex items-center gap-1 px-2 py-1.5 rounded group transition-colors cursor-pointer",
+					"flex items-center gap-1 py-1.5 pr-2 rounded group transition-colors cursor-pointer",
 					selectedCollectionId === collection.id
 						? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
 						: "hover:bg-accent"
 				)}
+				style={{ paddingLeft: indentPx }}
 			>
 				<button
 					onClick={handleClick}
@@ -200,16 +208,16 @@ export default function CollectionItem({
 				)}
 			</div>
 
-			{/* Children (Subfolders + Requests) */}
+			{/* Children (Subfolders + Requests) - indented by depth */}
 			{isExpanded && (
-				<div className="ml-6 mt-1 space-y-0.5">
+				<div className="mt-1 space-y-0.5" style={{ marginLeft: indentPx + 16 }}>
 					{/* Subfolder Creation Form */}
 					{creatingSubfolder === collection.id && (
 						<div className="flex gap-2 py-1 px-2">
 							<Input
 								type="text"
-								value={newSubfolderName}
-								onChange={(e) => onSubfolderNameChange(e.target.value)}
+								value={newSubCollectionName}
+								onChange={(e) => onSubCollectionNameChange(e.target.value)}
 								onKeyDown={(e) => {
 									if (e.key === "Enter") onCreateSubfolder(collection.id);
 									if (e.key === "Escape") onCancelSubfolder();
@@ -257,7 +265,7 @@ export default function CollectionItem({
 							deletingCollectionId={deletingCollectionId}
 							deletingRequestId={deletingRequestId}
 							creatingSubfolder={creatingSubfolder}
-							newSubfolderName={newSubfolderName}
+							newSubCollectionName={newSubCollectionName}
 							isCreatingSubfolder={isCreatingSubfolder}
 							getRequestsByCollection={getRequestsByCollection}
 							onCollectionClick={onCollectionClick}
@@ -268,7 +276,8 @@ export default function CollectionItem({
 							onRenameCancel={onRenameCancel}
 							onStartRename={onStartRename}
 							onDeleteRequest={onDeleteRequest}
-							onSubfolderNameChange={onSubfolderNameChange}
+							onRequestDeleteClick={onRequestDeleteClick}
+							onSubCollectionNameChange={onSubCollectionNameChange}
 							onCreateSubfolder={onCreateSubfolder}
 							onCancelSubfolder={onCancelSubfolder}
 							onRequestRenameChange={onRequestRenameChange}
@@ -295,6 +304,7 @@ export default function CollectionItem({
 							collectionId={collection.id}
 							onSelect={onRequestClick}
 							onDelete={onDeleteRequest}
+							onBeforeDelete={onRequestDeleteClick}
 							isDeleting={deletingRequestId === request.id}
 							isSelected={
 								selectedCollectionId === collection.id &&

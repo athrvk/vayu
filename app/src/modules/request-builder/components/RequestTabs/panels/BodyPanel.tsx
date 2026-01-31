@@ -13,7 +13,7 @@
  * - none: No body
  * - json: Monaco editor with JSON syntax
  * - text: Plain text editor
- * - form-data: Key-value editor (TODO: file upload)
+ * - form-data: Key-value editor
  * - x-www-form-urlencoded: Key-value editor
  */
 
@@ -26,7 +26,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 	Button,
-	Badge,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "../../../shared/KeyValueEditor";
@@ -82,7 +81,7 @@ export default function BodyPanel() {
 			{/* Mode Selector */}
 			<div className="flex items-center justify-between">
 				<Select value={request.bodyMode} onValueChange={handleModeChange}>
-					<SelectTrigger className="w-48">
+					<SelectTrigger className="w-auto">
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>
@@ -162,11 +161,6 @@ export default function BodyPanel() {
 
 			{request.bodyMode === "form-data" && (
 				<div className="space-y-2">
-					<div className="flex items-center gap-2">
-						<Badge variant="outline" className="text-xs">
-							TODO: File upload support
-						</Badge>
-					</div>
 					<KeyValueEditor
 						items={
 							request.formData.length > 0 ? request.formData : [createEmptyKeyValue()]

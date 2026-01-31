@@ -42,9 +42,7 @@ vayu::Environment parse_variables_json (const std::string& json_str) {
                     std::string var_value = value.value ("value", "");
                     bool enabled          = value.value ("enabled", true);
                     bool secret           = value.value ("secret", false);
-                    if (enabled) {
-                        env[key] = vayu::Variable{ var_value, secret, enabled };
-                    }
+                    env[key] = vayu::Variable{ var_value, secret, enabled };
                 }
             }
         }
@@ -52,6 +50,70 @@ vayu::Environment parse_variables_json (const std::string& json_str) {
         // Return empty environment on parse error
     }
     return env;
+}
+
+// Serialize in-memory variables map to JSON string for DB storage (round-trip with parse_variables_json)
+std::string serialize_variables_json (const vayu::Environment& env) {
+    nlohmann::json obj = nlohmann::json::object ();
+    for (const auto& [key, var] : env) {
+        obj[key] = nlohmann::json::object ();
+        obj[key]["value"]   = var.value;
+        obj[key]["enabled"] = var.enabled;
+        obj[key]["secret"]  = var.secret;
+    }
+    return obj.dump ();
+}
+
+// Persist script-set variables to DB (design mode only). Best-effort: logs errors, does not change response.
+void persist_script_variables (vayu::db::Database& db,
+const vayu::db::Run& run,
+const vayu::Environment& env,
+const vayu::Environment& globals,
+const vayu::Environment& collectionVariables) {
+    if (run.environment_id.has_value ()) {
+        try {
+            if (auto db_env = db.get_environment (*run.environment_id)) {
+                vayu::db::Environment updated = *db_env;
+                updated.variables  = serialize_variables_json (env);
+                updated.updated_at = now_ms ();
+                db.save_environment (updated);
+            }
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "Persist environment variables failed: " + std::string (e.what ()));
+        }
+    }
+
+    try {
+        if (auto db_globals = db.get_globals ()) {
+            vayu::db::Globals updated = *db_globals;
+            updated.variables  = serialize_variables_json (globals);
+            updated.updated_at = now_ms ();
+            db.save_globals (updated);
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "Persist globals failed: " + std::string (e.what ()));
+    }
+
+    if (run.request_id.has_value ()) {
+        try {
+            if (auto db_request = db.get_request (*run.request_id)) {
+                if (!db_request->collection_id.empty ()) {
+                    if (auto db_collection =
+                        db.get_collection (db_request->collection_id)) {
+                        vayu::db::Collection updated = *db_collection;
+                        updated.variables  = serialize_variables_json (collectionVariables);
+                        updated.updated_at = now_ms ();
+                        db.create_collection (updated);
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "Persist collection variables failed: " + std::string (e.what ()));
+        }
+    }
 }
 
 // Execute a script and handle exceptions uniformly
@@ -321,6 +383,9 @@ void register_execution_routes (RouteContext& ctx) {
         post_ctx.collectionVariables = &collectionVariables;
         auto post_script_result =
         execute_script (script_engine, post_request_script, post_ctx, "Post-request");
+
+        // Persist script-set variables (design mode only; best-effort)
+        persist_script_variables (ctx.db, run, env, globals, collectionVariables);
 
         // Build and send response
         // Engine returns 200 - the server's status is in the response body

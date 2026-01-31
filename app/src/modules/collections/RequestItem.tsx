@@ -18,6 +18,7 @@ export interface RequestItemProps {
 	collectionId: string;
 	onSelect: (collectionId: string, requestId: string) => void;
 	onDelete: (requestId: string) => Promise<void>;
+	onBeforeDelete?: (requestId: string, requestName: string) => void;
 	isDeleting?: boolean;
 	isSelected?: boolean;
 	isRenaming?: boolean;
@@ -33,6 +34,7 @@ export default function RequestItem({
 	collectionId,
 	onSelect,
 	onDelete,
+	onBeforeDelete,
 	isDeleting,
 	isSelected,
 	isRenaming,
@@ -128,7 +130,11 @@ export default function RequestItem({
 				<Button
 					variant="ghost"
 					size="icon"
-					onClick={() => onDelete(request.id)}
+					onClick={() =>
+						onBeforeDelete
+							? onBeforeDelete(request.id, request.name)
+							: onDelete(request.id)
+					}
 					disabled={isDeleting}
 					className={cn(
 						"h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-opacity",

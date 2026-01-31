@@ -35,6 +35,7 @@ export interface CreateCollectionRequest {
 	name: string;
 	description?: string;
 	parentId?: string;
+	order?: number;
 	variables?: Record<string, VariableValue>;
 }
 
@@ -43,6 +44,7 @@ export interface UpdateCollectionRequest {
 	name?: string;
 	description?: string;
 	parentId?: string;
+	order?: number;
 	variables?: Record<string, VariableValue>;
 }
 
@@ -141,7 +143,7 @@ export interface ExecuteRequestResponse extends SanityResult {}
  * StartLoadTestRequest - Matches POST /run backend endpoint
  * The backend expects a flat structure with:
  * - HTTP request fields (method, url, headers, body) at root level
- * - mode: "constant" | "iterations" | "ramp_up"
+ * - mode: "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up"
  * - Mode-specific params (duration, targetRps, iterations, concurrency, etc.)
  */
 export interface StartLoadTestRequest {
@@ -152,9 +154,9 @@ export interface StartLoadTestRequest {
 	body?: any;
 
 	// Load test strategy
-	mode: "constant" | "iterations" | "ramp_up";
+	mode: "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
 
-	// For "constant" mode
+	// For constant_rps / constant_concurrency modes
 	duration?: string; // e.g., "10s", "2m"
 	targetRps?: number;
 

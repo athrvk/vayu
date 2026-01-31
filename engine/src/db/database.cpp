@@ -1138,7 +1138,7 @@ void Database::seed_default_config () {
     "1", "10000", now });
 
     upsert_config (ConfigEntry{ "eventLoopMaxPerHost",
-    std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST), "integer", "Max Connections Per Host",
+    std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST), "integer", "Max connections per host (per worker)",
     "Concurrency limit for a specific target API host. Critical for respecting "
     "target rate limits. "
     "Lower values are gentler on the target; higher values maximize "

@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <windows.h>
+#include <timeapi.h>
 
 #include <atomic>
 #include <fstream>
@@ -245,6 +246,29 @@ std::string path_join (const std::string& base, const std::string& component) {
         return base + component;
     } else {
         return base + sep + component;
+    }
+}
+
+// ============================================================================
+// High-Resolution Timer
+// ============================================================================
+// Windows default timer resolution is ~15.6 ms, which makes short sleeps
+// round to 15 ms and caps load-test throughput (~1k RPS). timeBeginPeriod(1)
+// sets 1 ms resolution so sleep_for(microseconds) is accurate (60k+ RPS).
+
+namespace {
+int g_timer_resolution_refcount = 0;
+}
+
+void enable_high_resolution_timer () {
+    if (g_timer_resolution_refcount++ == 0) {
+        (void)timeBeginPeriod (1);
+    }
+}
+
+void disable_high_resolution_timer () {
+    if (g_timer_resolution_refcount > 0 && --g_timer_resolution_refcount == 0) {
+        (void)timeEndPeriod (1);
     }
 }
 

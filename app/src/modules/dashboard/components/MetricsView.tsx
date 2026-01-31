@@ -12,7 +12,7 @@
  * Displays key metrics, latency breakdown, and charts
  */
 
-import { useMemo } from "react";
+import { useMemo, memo } from "react";
 import { Activity, Info } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import {
@@ -77,7 +77,7 @@ function KeyMetricCard({
 	);
 }
 
-export default function MetricsView({ metrics, historicalMetrics, isCompleted }: MetricsViewProps) {
+function MetricsView({ metrics, historicalMetrics, isCompleted }: MetricsViewProps) {
 	if (!metrics || typeof metrics.requests_completed === "undefined") {
 		return (
 			<div className="text-center py-12 text-muted-foreground">
@@ -94,19 +94,19 @@ export default function MetricsView({ metrics, historicalMetrics, isCompleted }:
 			100
 			: 0;
 
-	// Prepare chart data - deduplicated by second, memoized to prevent excessive re-renders
+	// Prepare chart data - last 300 points, deduplicated by 0.5s, to keep charts fast
 	const chartData = useMemo(() => {
-		const dataBySecond = new Map<number, { time: number; rps: number; concurrency: number }>();
-		historicalMetrics.forEach((m) => {
-			const second = Math.round(m.elapsed_seconds);
-			dataBySecond.set(second, {
-				time: second,
+		const window = historicalMetrics.slice(-300);
+		const dataByHalfSec = new Map<number, { time: number; rps: number; concurrency: number }>();
+		window.forEach((m) => {
+			const t = Math.round(m.elapsed_seconds * 2) / 2;
+			dataByHalfSec.set(t, {
+				time: t,
 				rps: m.current_rps,
 				concurrency: m.current_concurrency,
 			});
 		});
-		// Convert to array and sort by time
-		return Array.from(dataBySecond.values()).sort((a, b) => a.time - b.time);
+		return Array.from(dataByHalfSec.values()).sort((a, b) => a.time - b.time);
 	}, [historicalMetrics]);
 
 	return (
@@ -232,7 +232,7 @@ export default function MetricsView({ metrics, historicalMetrics, isCompleted }:
 							<CardTitle className="text-lg">Requests per Second</CardTitle>
 						</CardHeader>
 						<CardContent>
-							<ResponsiveContainer width="100%" height={300} debounce={100}>
+							<ResponsiveContainer width="100%" height={300} debounce={800}>
 								<LineChart data={chartData}>
 									<CartesianGrid
 										strokeDasharray="3 3"
@@ -268,7 +268,7 @@ export default function MetricsView({ metrics, historicalMetrics, isCompleted }:
 							<CardTitle className="text-lg">Active Connections</CardTitle>
 						</CardHeader>
 						<CardContent>
-							<ResponsiveContainer width="100%" height={300} debounce={100}>
+							<ResponsiveContainer width="100%" height={300} debounce={800}>
 								<LineChart data={chartData}>
 									<CartesianGrid
 										strokeDasharray="3 3"
@@ -308,3 +308,5 @@ export default function MetricsView({ metrics, historicalMetrics, isCompleted }:
 		</div>
 	);
 }
+
+export default memo(MetricsView);

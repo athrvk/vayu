@@ -19,11 +19,12 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
+	DeleteConfirmDialog,
 } from "@/components/ui";
 import RunItem from "./RunItem";
 
 export default function HistoryList() {
-	const { navigateToRunDetail, selectedRunId } = useNavigationStore();
+	const { navigateToRunDetail, navigateToHistory, selectedRunId } = useNavigationStore();
 	const {
 		searchQuery,
 		setSearchQuery,
@@ -40,15 +41,31 @@ export default function HistoryList() {
 	const deleteRunMutation = useDeleteRunMutation();
 
 	const [deletingId, setDeletingId] = useState<string | null>(null);
+	const [deleteConfirmRunId, setDeleteConfirmRunId] = useState<string | null>(null);
 
 	// Filter and sort runs using the helper function
 	const runs = filterRuns(allRuns, { searchQuery, filterType, filterStatus, sortBy });
 
-	const handleDelete = async (runId: string, event: React.MouseEvent) => {
+	const runToDelete = deleteConfirmRunId ? allRuns.find((r) => r.id === deleteConfirmRunId) : null;
+	const deleteConfirmLabel =
+		runToDelete?.configSnapshot?.url ?? (deleteConfirmRunId ? `${deleteConfirmRunId.slice(0, 8)}…` : "");
+
+	const handleDeleteClick = (runId: string, event: React.MouseEvent) => {
 		event.stopPropagation();
-		if (confirm("Delete this run?")) {
-			setDeletingId(runId);
-			await deleteRunMutation.mutateAsync(runId);
+		setDeleteConfirmRunId(runId);
+	};
+
+	const handleConfirmDelete = async () => {
+		if (!deleteConfirmRunId) return;
+		const runIdToDelete = deleteConfirmRunId;
+		setDeleteConfirmRunId(null);
+		setDeletingId(runIdToDelete);
+		try {
+			await deleteRunMutation.mutateAsync(runIdToDelete);
+			if (selectedRunId === runIdToDelete) {
+				navigateToHistory();
+			}
+		} finally {
 			setDeletingId(null);
 		}
 	};
@@ -167,13 +184,31 @@ export default function HistoryList() {
 								key={run.id}
 								run={run}
 								onSelect={navigateToRunDetail}
-								onDelete={handleDelete}
+								onDelete={handleDeleteClick}
 								isDeleting={deletingId === run.id}
 								isSelected={selectedRunId === run.id}
 							/>
 						))}
 				</div>
 			</div>
+
+			<DeleteConfirmDialog
+				open={!!deleteConfirmRunId}
+				onOpenChange={(open) => !open && setDeleteConfirmRunId(null)}
+				title="Delete run?"
+				description={
+					<>
+						This run will be permanently removed. This cannot be undone.
+						{deleteConfirmLabel && (
+							<span className="mt-2 block font-mono text-xs text-muted-foreground truncate" title={deleteConfirmLabel}>
+								{deleteConfirmLabel}
+							</span>
+						)}
+					</>
+				}
+				onConfirm={handleConfirmDelete}
+				isDeleting={!!deletingId}
+			/>
 		</div>
 	);
 }

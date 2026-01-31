@@ -180,4 +180,25 @@ constexpr char path_separator () {
  */
 std::string path_join (const std::string& base, const std::string& component);
 
+#if VAYU_PLATFORM_WINDOWS
+// ============================================================================
+// High-Resolution Timer (Windows)
+// ============================================================================
+/**
+ * @brief Enable 1 ms system timer resolution for accurate short sleeps
+ *
+ * On Windows the default timer resolution is ~15.6 ms, which makes
+ * std::this_thread::sleep_for(microseconds) round to 15 ms and severely
+ * limits high-RPS load testing. Calling this at startup allows sub-millisecond
+ * pacing (e.g. 60k+ RPS). Call disable_high_resolution_timer() at shutdown.
+ */
+void enable_high_resolution_timer ();
+
+/**
+ * @brief Restore default system timer resolution
+ * Must be called to match each enable_high_resolution_timer().
+ */
+void disable_high_resolution_timer ();
+#endif
+
 } // namespace vayu::platform

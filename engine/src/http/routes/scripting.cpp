@@ -196,26 +196,6 @@ nlohmann::json get_script_completions () {
     { "sortText", "1_pm_environment_set" } });
 
     // ========================================
-    // pm.variables - Collection/Global variables
-    // ========================================
-    completions.push_back ({ { "label", "pm.variables" }, { "kind", KIND_VARIABLE },
-    { "insertText", "pm.variables" }, { "detail", "Variables object" },
-    { "documentation", "Access collection and global variables." },
-    { "sortText", "0_pm_variables" } });
-
-    completions.push_back ({ { "label", "pm.variables.get" },
-    { "kind", KIND_FUNCTION }, { "insertText", "pm.variables.get(\"${1:variable}\")" },
-    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "pm.variables.get(name: string): any" },
-    { "documentation", "Get a variable value. Searches environment, collection, and global scopes." },
-    { "sortText", "1_pm_variables_get" } });
-
-    completions.push_back ({ { "label", "pm.variables.set" }, { "kind", KIND_FUNCTION },
-    { "insertText", "pm.variables.set(\"${1:variable}\", ${2:value})" },
-    { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.variables.set(name: string, value: any): void" },
-    { "documentation", "Set a variable value." }, { "sortText", "1_pm_variables_set" } });
-
-    // ========================================
     // pm.globals - Global variables
     // ========================================
     completions.push_back ({ { "label", "pm.globals" }, { "kind", KIND_VARIABLE },

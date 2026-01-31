@@ -32,7 +32,7 @@ import {
 } from "@/queries";
 import { useSaveStore, useVariablesStore } from "@/stores";
 import type { VariableValue, Collection, Environment } from "@/types";
-import { Button, Input, Badge } from "@/components/ui";
+import { Button, Input, Badge, DeleteConfirmDialog } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 interface VariableRow {
@@ -40,6 +40,7 @@ interface VariableRow {
 	value: string;
 	enabled: boolean;
 	secret?: boolean;
+	createdAt?: number;
 	isNew?: boolean;
 }
 
@@ -167,19 +168,39 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 		variablesRef.current = variables;
 	}, [variables]);
 
-	// Auto-save function
+	// Sort by createdAt ascending (oldest first, newest at bottom); tie-break by key
+	const sortByCreatedAt = useCallback(
+		(entries: [string, VariableValue][]) =>
+			[...entries].sort(([ka, a], [kb, b]) => {
+				const ta = a.createdAt ?? 0;
+				const tb = b.createdAt ?? 0;
+				if (ta !== tb) return ta - tb;
+				return ka.localeCompare(kb, undefined, { sensitivity: "base" });
+			}),
+		[]
+	);
+
+	// Auto-save function (payload order by createdAt so round-trip preserves order)
 	const performSave = useCallback(async () => {
 		const varsToSave = variablesRef.current;
-		const variablesObj: Record<string, VariableValue> = {};
-
+		const entries: [string, VariableValue][] = [];
 		varsToSave.forEach((v) => {
 			if (v.key && !v.isNew) {
-				variablesObj[v.key] = {
-					value: v.value,
-					enabled: v.enabled,
-					secret: v.secret ?? false,
-				};
+				entries.push([
+					v.key,
+					{
+						value: v.value,
+						enabled: v.enabled,
+						secret: v.secret ?? false,
+						createdAt: v.createdAt ?? Date.now(),
+					},
+				]);
 			}
+		});
+		const sorted = sortByCreatedAt(entries);
+		const variablesObj: Record<string, VariableValue> = {};
+		sorted.forEach(([key, val]) => {
+			variablesObj[key] = val;
 		});
 
 		startSaving();
@@ -248,6 +269,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 		type,
 		environment,
 		collection,
+		sortByCreatedAt,
 		updateGlobalsMutation,
 		updateEnvironmentMutation,
 		updateCollectionMutation,
@@ -302,14 +324,16 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 		}
 	}, []);
 
-	// Initialize variables from data
+	// Initialize variables from data (sorted by createdAt: oldest first, newest at bottom)
 	useEffect(() => {
 		if (dataVariables && Object.keys(dataVariables).length > 0) {
-			const rows: VariableRow[] = Object.entries(dataVariables).map(([key, val]) => ({
+			const entries = sortByCreatedAt(Object.entries(dataVariables));
+			const rows: VariableRow[] = entries.map(([key, val]) => ({
 				key,
 				value: val.value,
 				enabled: val.enabled,
 				secret: val.secret ?? false,
+				createdAt: val.createdAt,
 			}));
 			rows.push({ key: "", value: "", enabled: true, secret: false, isNew: true });
 			setVariables(rows);
@@ -323,6 +347,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 				? environment?.id
 				: collection?.id,
 		dataVariables,
+		sortByCreatedAt,
 	]);
 
 	const updateVariable = (index: number, field: keyof VariableRow, value: string | boolean) => {
@@ -331,6 +356,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 
 		if (newVariables[index].isNew && (newVariables[index].key || newVariables[index].value)) {
 			newVariables[index].isNew = false;
+			newVariables[index].createdAt = Date.now(); // new ones sort to bottom
 			newVariables.push({ key: "", value: "", enabled: true, isNew: true });
 		}
 
@@ -346,6 +372,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 		}
 		setVariables(newVariables);
 		setHasPendingChanges(true);
+		variablesRef.current = newVariables;
 		performSaveRef.current();
 	};
 
@@ -354,6 +381,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 		if (type === "environment" && environment) {
 			deleteEnvironmentMutation.mutate(environment.id, {
 				onSuccess: () => {
+					setShowDeleteConfirm(false);
 					setSelectedCategory(null);
 				},
 			});
@@ -466,30 +494,15 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 				{editorConfig.infoText}
 			</div>
 
-			{/* Delete Confirmation (Environment only) */}
-			{type === "environment" && showDeleteConfirm && environment && (
-				<div className="px-4 py-3 bg-destructive/10 border-b border-destructive/20 flex items-center justify-between">
-					<span className="text-sm text-destructive">
-						Delete "{environment.name}"? This cannot be undone.
-					</span>
-					<div className="flex gap-2">
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={() => setShowDeleteConfirm(false)}
-						>
-							Cancel
-						</Button>
-						<Button
-							variant="destructive"
-							size="sm"
-							onClick={handleDeleteEnvironment}
-							disabled={deleteEnvironmentMutation.isPending}
-						>
-							{deleteEnvironmentMutation.isPending ? "Deleting..." : "Delete"}
-						</Button>
-					</div>
-				</div>
+			{type === "environment" && environment && (
+				<DeleteConfirmDialog
+					open={showDeleteConfirm}
+					onOpenChange={(open) => !open && setShowDeleteConfirm(false)}
+					title="Delete environment?"
+					description={`"${environment.name}" will be permanently removed. This cannot be undone.`}
+					onConfirm={handleDeleteEnvironment}
+					isDeleting={deleteEnvironmentMutation.isPending}
+				/>
 			)}
 
 			{/* Variables Table */}

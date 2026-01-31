@@ -102,15 +102,11 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
 	addMetrics: (metrics) =>
 		set((state) => {
-			// Keep all historical metrics with reasonable limit (10000 points max)
-			const newHistory = [...state.historicalMetrics, metrics];
-			// Trim to last 10000 points if needed (prevents memory issues on very long tests)
-			const trimmedHistory =
-				newHistory.length > 10000 ? newHistory.slice(-10000) : newHistory;
-
+			// Cap at 600 points (~60s at 2 updates/sec) to keep UI responsive and reduce re-renders
+			const newHistory = [...state.historicalMetrics, metrics].slice(-600);
 			return {
 				currentMetrics: metrics,
-				historicalMetrics: trimmedHistory,
+				historicalMetrics: newHistory,
 			};
 		}),
 

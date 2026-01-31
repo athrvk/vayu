@@ -271,7 +271,7 @@ target_link_libraries(vayu_core PUBLIC
 
 # Windows-specific libraries
 if(WIN32)
-    target_link_libraries(vayu_core PUBLIC ws2_32)
+    target_link_libraries(vayu_core PUBLIC ws2_32 winmm)
     # MSVC-specific options for vayu_core
     if(MSVC)
         target_compile_definitions(vayu_core PRIVATE
