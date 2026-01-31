@@ -35,6 +35,7 @@ var (
 
 func main() {
 	port := flag.Int("port", 8080, "Server port")
+	host := flag.String("host", "0.0.0.0", "Server host (0.0.0.0 for all interfaces)")
 	flag.Parse()
 
 	startTime = time.Now()
@@ -174,17 +175,23 @@ func main() {
 	})
 
 	server := &http.Server{
-		Addr:           fmt.Sprintf(":%d", *port),
+		Addr:           fmt.Sprintf("%s:%d", *host, *port),
 		Handler:        mux,
 		ReadTimeout:    5 * time.Second,
 		WriteTimeout:   5 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
 
+	testHost := *host
+	if testHost == "0.0.0.0" {
+		testHost = "localhost"
+	}
+
 	// Print startup info
 	fmt.Printf("╔══════════════════════════════════════════════════════════════╗\n")
 	fmt.Printf("║           High-Performance Mock Server for Vayu              ║\n")
 	fmt.Printf("╠══════════════════════════════════════════════════════════════╣\n")
+	fmt.Printf("║  Host:      %-48s ║\n", *host)
 	fmt.Printf("║  Port:      %-48d ║\n", *port)
 	fmt.Printf("║  CPU Cores: %-48d ║\n", runtime.NumCPU())
 	fmt.Printf("║  PID:       %-48d ║\n", os.Getpid())
@@ -197,7 +204,7 @@ func main() {
 	fmt.Printf("║    GET  /stats   - Performance statistics                    ║\n")
 	fmt.Printf("║    GET  /reset   - Reset statistics                          ║\n")
 	fmt.Printf("╠══════════════════════════════════════════════════════════════╣\n")
-	fmt.Printf("║  Test with: curl http://localhost:%d/health                 ║\n", *port)
+	fmt.Printf("║  Test with: curl http://%s:%d/health                 ║\n", testHost, *port)
 	fmt.Printf("╚══════════════════════════════════════════════════════════════╝\n")
 
 	log.Fatal(server.ListenAndServe())
