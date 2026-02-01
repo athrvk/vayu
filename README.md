@@ -12,7 +12,8 @@ Privacy-first, 100% offline execution. Built for developers who hate waiting.
 
 [![GitHub stars](https://img.shields.io/github/stars/athrvk/vayu?style=social&label=Star)](https://github.com/athrvk/vayu)
 [![GitHub forks](https://img.shields.io/github/forks/athrvk/vayu?style=social&label=Fork)](https://github.com/athrvk/vayu/fork)
-[![GitHub issues](https://img.shields.io/github/issues/athrvk/vayu)](https://github.com/athrvk/vayu/issues)
+[![GitHub issues](https://img.shields.io/github/issues/athrvk/vayu?style=social&label=Issues)](https://github.com/athrvk/vayu/issues)
+
 
 ![C++](https://img.shields.io/badge/C++-20-blue?logo=cplusplus)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
