@@ -22,7 +22,6 @@ Privacy-first, 100% offline execution. Built for developers who hate waiting.
 
 ## Why Vayu? (vs Postman & others)
 
-# Vayu Performance & Capability Comparison
 
 | Feature                   | Vayu                           | k6                             | Apache JMeter                  | Postman                        |
 |---------------------------|--------------------------------|--------------------------------|--------------------------------|--------------------------------|
@@ -49,7 +48,7 @@ Privacy-first, 100% offline execution. Built for developers who hate waiting.
 - **Privacy First** - 100% local execution, no cloud sync required
 - **Cross Platform** - macOS, Windows, and Linux support
 
-## 📦 Download
+## Download
 
 Download the latest version for your platform:
 
