@@ -6,7 +6,7 @@
 Vayu gives you the familiar request builder and collections of Postman, but with a blazing-fast C++ engine that crushes load tests and high-throughput scenarios without slowing down your machine.  
 Privacy-first, 100% offline execution. Built for developers who hate waiting.
 
-[![Latest Release](https://img.shields.io/badge/release-v0.1.1-green.svg)](https://github.com/athrvk/vayu/releases/latest)
+[![Latest Release](https://img.shields.io/github/v/release/athrvk/vayu)](https://github.com/athrvk/vayu/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0%20%26%20Apache--2.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/athrvk/vayu/releases)
 
@@ -37,86 +37,158 @@ Privacy-first, 100% offline execution. Built for developers who hate waiting.
 | **Protocols** | REST      | HTTP, gRPC, WebSockets         | HTTP, FTP, JDBC, LDAP, SOAP    | REST, GraphQL, gRPC            |
 | **Open Source** | Yes (Dual-license)             | Yes (AGPLv3)                   | Yes (Apache 2.0)               | Partial                        |
 
----
 
-Vayu uses a **sidecar architecture**: React/Electron UI talks to a separate C++ daemon via local HTTP → no freezing during massive runs.
+## Features
 
-## ✨ Features
+- **High Performance** - C++ engine optimized for maximum throughput
+- **Request Management** - Organize requests into collections with folder hierarchy
+- **Load Testing** - Run load tests with real-time metrics streaming
+- **Environment Variables** - Manage variables across collections and environments
+- **Test Scripting** - QuickJS-based scripting engine compatible with Postman's `pm.test()` syntax
+- **Privacy First** - 100% local execution, no cloud sync required
+- **Cross Platform** - macOS, Windows, and Linux support
 
-- **Visual Request Builder** — Folders, collections, environments, variables - Similar experience to Postman
-- **High-Throughput Load Testing** — Ramp up to thousands of concurrent requests with live graphs
-- **Postman-Compatible Scripting** — Use `pm.test()`, `pm.expect()`, etc. as you would in Postman
-- **Real-Time Metrics** — Latency histograms, RPS, errors streamed live
-- **Fully Local & Private** — Nothing leaves your machine
-- **Cross-Platform** — Windows, macOS, Linux installers/AppImage
+## 📦 Download
 
-## 📸 See It in Action
-=======
-<!-- Replace these with actual uploaded GIFs/screenshots -->
+Download the latest version for your platform:
 
-![Request Builder Demo](shared/request-builder.gif)  
-*Building & sending requests with variables and tests*
+- **Windows**: [Vayu-x64.exe](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe)
+- **macOS**: [Vayu-universal.dmg](https://github.com/athrvk/vayu/releases/latest/download/Vayu-universal.dmg)
+- **Linux**: [Vayu-x86_64.AppImage](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x86_64.AppImage)
 
-![Load Test Dashboard](shared/load-test-dashboard.gif)  
-*Running 5,000 RPS load test – UI stays smooth*
+[View all releases →](https://github.com/athrvk/vayu/releases)
 
-![Script Editor](shared/script-editor.png)  
-*Writing Postman-style tests that run at native speed*
+## Quick Start
 
-## 📦 Download & Install
+### Prerequisites
 
-Grab the latest release:
+- **C++ Engine**: CMake 3.25+, C++20 compiler, vcpkg
+- **Electron App**: Node.js ≥ 20 LTS, pnpm ≥ 10
 
-- **Windows**: [Vayu-0.1.1-x64.exe](https://github.com/athrvk/vayu/releases/download/v0.1.2/Vayu-0.1.2-x64.exe)
-- ~~**macOS**: [Vayu-0.1.1-universal.dmg](https://github.com/athrvk/vayu/releases/download/v0.1.2/Vayu-0.1.2-universal.dmg)~~ (WIP)
-- **Linux**: [Vayu-0.1.1-x86_64.AppImage](https://github.com/athrvk/vayu/releases/download/v0.1.2/Vayu-0.1.2-x86_64.AppImage)
+### Building from Source
 
-[All Releases →](https://github.com/athrvk/vayu/releases)
+Clone the repository:
 
-## 🚀 Quick Start
+```bash
+git clone https://github.com/athrvk/vayu.git
+cd vayu
+```
 
-1. Download and install from above.
-2. Launch Vayu → it auto-starts the C++ engine in the background.
-3. ~~Import your Postman collections (File → Import).~~~ (WIP)
-4. Build requests, add tests, or create a load test collection.
-5. Run → watch thousands of requests fly.
+Build and run (all platforms):
 
-Want to build from source? See [Building Guide](docs/building.md).
+```bash
+# Build everything (development mode)
+python build.py --dev
 
-## 🛠 Architecture at a Glance
+# Then start the app
+cd app && pnpm run electron:dev
+```
+
+**Quick commands:**
+```bash
+python build.py --dev         # Development build
+python build.py               # Production build
+python build.py -e            # Engine only
+python build.py -a            # App only
+python build.py -t            # Build with tests
+python build.py --help        # See all options
+```
+
+For detailed setup and troubleshooting, see the [Building Documentation](docs/building.md).
+
+## Architecture
+
+Vayu uses a sidecar pattern where the Electron UI (Manager) communicates with a separate C++ daemon (Engine) via HTTP:
 
 ```
 ┌────────────────────┐        ┌────────────────────┐
-│   MANAGER (UI)     │  HTTP  │     ENGINE         │
-│ Electron + React   │◄──────►│     (C++ daemon)   │
-│ • Collections      │ :9876  │ • High-perf runner │
-│ • Request Builder  │        │ • QuickJS scripts  │
-│ • Results Dashboard│        │ • Multi-threaded   │
+│   THE MANAGER      │  HTTP  │    THE ENGINE      │
+│  (Electron/React)  │◄──────►│      (C++)         │
+│                    │ :9876  │                    │
+│  • Request Builder │        │  • EventLoop       │
+│  • Collections     │        │  • QuickJS Runtime │
+│  • Load Dashboard  │        │  • Multi-Worker    │
 └────────────────────┘        └────────────────────┘
 ```
 
-Full details in [Architecture](docs/architecture.md).
+See [Architecture Documentation](docs/architecture.md) for detailed information.
 
 ## Tech Stack
 
-- **Engine**: C++20, libcurl, QuickJS, lock-free structures
-- **UI**: Electron, React 19, TypeScript, Zustand + TanStack Query
-- **Build**: CMake/vcpkg (engine), pnpm/Vite (app)
+- **Engine**: C++20 with lock-free data structures
+- **Networking**: libcurl for HTTP client operations
+- **Scripting**: QuickJS for test script execution
+- **UI**: Electron + React + TypeScript
+- **State Management**: Zustand (UI state) + TanStack Query (server state)
+- **Build System**: CMake + vcpkg for C++, pnpm + Vite for Electron app
 
-## 📖 Documentation
+## Documentation
 
-- [Architecture & Design](docs/architecture.md)
-- [Engine API Reference](docs/engine/api-reference.md)
-- [Building from Source](docs/building.md)
-- [Contributing Guidelines](docs/contributing.md)
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/architecture.md) | System architecture and design decisions |
+| [Engine API Reference](docs/engine/api-reference.md) | HTTP API for controlling the engine |
+| [Building](docs/building.md) | Build instructions for all platforms |
+| [Engine Building](docs/engine/building.md) | Building just the C++ engine |
+| [Contributing](docs/contributing.md) | Guidelines for contributing |
 
 ## Contributing
 
-Love performance and clean code? PRs welcome!  
-Read [Contributing Guide](docs/contributing.md) first.
+Contributions are welcome! Please read the [Contributing Guide](docs/contributing.md) for details on:
 
-Star ⭐ if you're excited — helps spread the word!
+- Development setup
+- Code style guidelines
+- Testing requirements
+- Commit message conventions
+- Pull request process
 
-**Built for devs who demand speed without sacrificing usability.**
+## Versioning & Releases
 
-[Report Bug](https://github.com/athrvk/vayu/issues/new?labels=bug&template=bug_report.md) · [Request Feature](https://github.com/athrvk/vayu/issues/new?labels=enhancement&template=feature_request.md) · [Discussions](https://github.com/athrvk/vayu/discussions)
+The canonical version for releases is stored in the top-level `VERSION` file. The CI workflow uses a pushed Git tag to publish artifacts.
+
+**Key points:**
+
+- The workflow triggers on tag pushes that follow the `v*` pattern (for example `v0.1.1`).
+- Electron produces installer filenames that already contain the version (for example `Vayu Setup 0.1.1.exe` and `Vayu-0.1.1-x86_64.AppImage`), and the workflow uploads those files to the Release as-is.
+
+**How to create a release (recommended):**
+
+1. Bump the version using the build script:
+
+```bash
+python build.py --bump-version patch    # 0.1.1 -> 0.1.2
+# or
+python build.py --bump-version 0.1.2    # set specific version
+
+# Preview changes first
+python build.py --bump-version patch --dry-run
+```
+
+2. Commit the changes:
+
+```bash
+git add VERSION engine/include/vayu/version.hpp engine/CMakeLists.txt engine/vcpkg.json app/package.json
+git commit -m "chore(release): 0.1.2"
+```
+
+3. Create and push a tag that matches the `VERSION` file, prefixed with `v`:
+
+```bash
+git tag v$(cat VERSION)
+git push origin --tags
+```
+
+4. The workflow will run on the pushed tag, execute tests and builds, and upload installers to the Release associated with that tag.
+
+**Notes:**
+
+- The `VERSION` file is the single source of truth; maintain it before pushing tags.
+
+## ⚖️ License
+
+Vayu is a dual-licensed project:
+
+* **Vayu Engine (`/engine`)**: Licensed under **GNU AGPL v3**.
+* **Vayu UI (`/app`)**: Licensed under **Apache 2.0**.
+
+**Usage Note:** You are free to use Vayu for any purpose. If you modify the **Engine** and provide it as a network service, you must open-source your changes. The **UI** is more permissive and allows for easier development.
