@@ -479,6 +479,179 @@ def check_prerequisites(skip_app: bool):
 
     print()
 
+def setup_environment(project_root: Path):
+    """Install all missing prerequisites for vayu (Linux/macOS). Exits on failure."""
+    system_name, _ = detect_platform()
+
+    if system_name == "Windows":
+        print_error("Automated setup is not supported on Windows. Install cmake, ninja, vcpkg, and pnpm manually.")
+
+    print_header()
+    log(f'{Style.BOLD}Setting up vayu environment{Style.RESET}')
+    print()
+
+    # ── System packages (Linux) ──────────────────────────────────────────────
+    if system_name == "Linux":
+        log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Checking system packages...')
+        missing = []
+
+        def apt_missing(pkg: str, check_cmd: Optional[str] = None):
+            cmd = check_cmd or pkg
+            if not shutil.which(cmd):
+                missing.append(pkg)
+
+        apt_missing("cmake")
+        apt_missing("ninja-build", "ninja")
+        apt_missing("g++")
+        apt_missing("pkg-config")
+        apt_missing("zip")
+        apt_missing("unzip")
+        apt_missing("tar")
+
+        # Check header packages via dpkg
+        for hdr_pkg in ("libssl-dev", "libcurl4-openssl-dev"):
+            result = subprocess.run(["dpkg", "-s", hdr_pkg], capture_output=True)
+            if result.returncode != 0:
+                missing.append(hdr_pkg)
+
+        if missing:
+            log_dim(f'Installing: {", ".join(missing)}')
+            subprocess.run(["sudo", "apt-get", "update", "-qq"], check=True)
+            subprocess.run(["sudo", "apt-get", "install", "-y", "--no-install-recommends"] + missing, check=True)
+            log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} System packages installed')
+        else:
+            log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} System packages OK')
+
+        # Ensure cmake >= 3.25
+        try:
+            ver_out = subprocess.check_output(["cmake", "--version"], text=True).split()[2]
+            major, minor = int(ver_out.split(".")[0]), int(ver_out.split(".")[1])
+            if major < 3 or (major == 3 and minor < 25):
+                log_dim(f'cmake {ver_out} is too old — upgrading via Kitware APT...')
+                subprocess.run(["sudo", "apt-get", "install", "-y", "apt-transport-https", "ca-certificates", "gnupg", "wget"], check=True)
+                subprocess.run(
+                    "wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc "
+                    "| gpg --dearmor "
+                    "| sudo tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null",
+                    shell=True, check=True
+                )
+                os_release = {}
+                with open("/etc/os-release") as f:
+                    for line in f:
+                        k, _, v = line.strip().partition("=")
+                        os_release[k] = v.strip('"')
+                codename = os_release.get("UBUNTU_CODENAME", os_release.get("VERSION_CODENAME", "jammy"))
+                with open("/etc/apt/sources.list.d/kitware.list", "w") as f:
+                    f.write(f"deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ {codename} main\n")
+                subprocess.run(["sudo", "apt-get", "update", "-qq"], check=True)
+                subprocess.run(["sudo", "apt-get", "install", "-y", "cmake"], check=True)
+                log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} cmake upgraded')
+        except Exception:
+            pass
+
+    elif system_name == "macOS":
+        log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Checking Homebrew packages...')
+        if not shutil.which("brew"):
+            print_error("Homebrew not found. Install it from https://brew.sh then re-run --setup.")
+        brew_missing = [pkg for pkg, cmd in [("cmake", "cmake"), ("ninja", "ninja"), ("pkg-config", "pkg-config"), ("openssl", None)] if cmd and not shutil.which(cmd)]
+        if brew_missing:
+            log_dim(f'brew install {" ".join(brew_missing)}')
+            subprocess.run(["brew", "install"] + brew_missing, check=True)
+        log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Homebrew packages OK')
+
+    print()
+
+    # ── Node.js ──────────────────────────────────────────────────────────────
+    log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Checking Node.js...')
+    node_ok = False
+    if shutil.which("node"):
+        try:
+            ver = subprocess.check_output(["node", "--version"], text=True).strip().lstrip("v")
+            if int(ver.split(".")[0]) >= 20:
+                log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Node.js v{ver}')
+                node_ok = True
+        except Exception:
+            pass
+
+    if not node_ok:
+        log_dim("Installing Node.js 20 LTS via nvm...")
+        nvm_dir = Path.home() / ".nvm"
+        if not nvm_dir.exists():
+            subprocess.run(
+                "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash",
+                shell=True, check=True
+            )
+        nvm_sh = nvm_dir / "nvm.sh"
+        subprocess.run(f'source "{nvm_sh}" && nvm install 20 --lts && nvm use 20', shell=True, executable="/bin/bash", check=True)
+        log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Node.js 20 installed via nvm')
+        log_dim(f'Add   source "{nvm_sh}"   to your shell profile if not already present.')
+
+    print()
+
+    # ── pnpm ─────────────────────────────────────────────────────────────────
+    log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Checking pnpm...')
+    pnpm_ok = False
+    if shutil.which("pnpm"):
+        try:
+            ver = subprocess.check_output(["pnpm", "--version"], text=True).strip()
+            if int(ver.split(".")[0]) >= 10:
+                log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} pnpm {ver}')
+                pnpm_ok = True
+        except Exception:
+            pass
+
+    if not pnpm_ok:
+        log_dim("Installing pnpm via npm...")
+        subprocess.run(["npm", "install", "-g", "pnpm@latest"], check=True)
+        log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} pnpm installed')
+
+    print()
+
+    # ── vcpkg ────────────────────────────────────────────────────────────────
+    log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Checking vcpkg...')
+    vcpkg_root = check_vcpkg()
+    if not vcpkg_root:
+        vcpkg_dir = Path.home() / ".vcpkg"
+        log_dim(f'Bootstrapping vcpkg at {vcpkg_dir}...')
+        subprocess.run(["git", "clone", "https://github.com/microsoft/vcpkg.git", str(vcpkg_dir), "--depth=1", "--quiet"], check=True)
+        subprocess.run([str(vcpkg_dir / "bootstrap-vcpkg.sh"), "-disableMetrics"], check=True)
+        vcpkg_root = str(vcpkg_dir)
+        os.environ["VCPKG_ROOT"] = vcpkg_root
+        log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} vcpkg bootstrapped at {vcpkg_dir}')
+        log_dim(f'Add   export VCPKG_ROOT="{vcpkg_dir}"   to your shell profile.')
+    else:
+        log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} vcpkg at {vcpkg_root}')
+
+    print()
+
+    # ── vcpkg engine dependencies ─────────────────────────────────────────────
+    log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Pre-installing vcpkg engine dependencies...')
+    vcpkg_bin = Path(vcpkg_root) / "vcpkg"
+    engine_dir = project_root / "engine"
+    triplet = "x64-osx" if system_name == "macOS" else "x64-linux"
+    vcpkg_packages = ["curl", "nlohmann-json", "cpp-httplib", "gtest", "sqlite3", "sqlite-orm"]
+    result = subprocess.run(
+        [str(vcpkg_bin), "install"] + vcpkg_packages + ["--triplet", triplet],
+        cwd=engine_dir,
+    )
+    if result.returncode == 0:
+        log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} vcpkg packages ready')
+    else:
+        log(f'{Style.YELLOW}{Style.WARN}{Style.RESET} vcpkg install had warnings (cmake will retry via manifest mode)')
+
+    print()
+
+    # ── App JS dependencies ───────────────────────────────────────────────────
+    log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Installing app JS dependencies...')
+    app_dir = project_root / "app"
+    pnpm_cmd = shutil.which("pnpm") or "pnpm"
+    subprocess.run([pnpm_cmd, "install", "--frozen-lockfile"], cwd=app_dir, check=True)
+    log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} JS dependencies installed')
+
+    print()
+    log(f'{Style.GREEN}{Style.CHECK} Environment ready.{Style.RESET} Build with:  python build.py --dev')
+    print()
+
 def run_command(cmd: List[str], cwd: Optional[Path] = None, description: str = "") -> Tuple[bool, str]:
     """Run command with spinner or verbose output."""
     global PNPM_PATH
@@ -987,6 +1160,7 @@ def main():
         epilog=f'''
 {Style.BOLD}examples{Style.RESET}
   python build.py                      build everything (production)
+  python build.py --setup              install all prerequisites (first-time setup)
   python build.py --dev                build everything (development)
   python build.py -e                   build engine only
   python build.py -a                   build app only
@@ -1011,12 +1185,18 @@ def main():
     parser.add_argument('--test-only', action='store_true', help='run existing tests without rebuilding')
     parser.add_argument('--bump-version', metavar='VERSION', help='bump version (major|minor|patch|X.Y.Z)')
     parser.add_argument('--dry-run', action='store_true', help='show version changes without applying (use with --bump-version)')
+    parser.add_argument('--setup', action='store_true', help='install all prerequisites (cmake, ninja, vcpkg, pnpm, node)')
     parser.add_argument('-v', '--verbose', action='store_true', help='verbose output')
 
     args = parser.parse_args()
 
     VERBOSE = args.verbose
     project_root = Path(__file__).parent.resolve()
+
+    # Handle environment setup (exits early)
+    if args.setup:
+        setup_environment(project_root)
+        return
 
     # Handle version bumping (exits early)
     if args.bump_version:
