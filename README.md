@@ -23,19 +23,20 @@ Privacy-first, 100% offline execution. Built for developers who hate waiting.
 ## Why Vayu? (vs Postman & others)
 
 
-| Feature                   | Vayu                           | k6                             | Apache JMeter                  | Postman                        |
-|---------------------------|--------------------------------|--------------------------------|--------------------------------|--------------------------------|
-| **Execution Engine** | C++ (High Performance)         | Go (Efficient / Lightweight)   | Java (JVM-based)               | Node.js / Electron             |
-| **Execution Speed** | Tens of Thousands RPS (Native)        | High (Go-routines)             | Moderate (Thread-heavy)        | Limited by JS runtime          |
-| **Scripting Language** | QuickJS (pm syntax support)     | JavaScript (ES6)               | Groovy / BeanShell / GUI       | JavaScript                     |
-| **Load Testing** | Built-in (Real-time metrics)   | Core focus                     | Core focus                     | Requires separate tool         |
-| **UI / UX** | Native App (Sidecar Desktop)   | CLI-first (No native GUI)      | Java Swing GUI (Aged)          | Native App (Feature-rich)      |
-| **UI Snappiness** | Responsive (Sidecar Architecture)| N/A (CLI only)                 | Laggy with large test plans    | Slows with large collections   |
-| **Resource Usage** | Low (Direct memory access)     | Low to Moderate                | High (RAM intensive)           | High (Electron/Chrome)         |
-| **Privacy** | 100% Local-first               | Local / Cloud hybrid           | 100% Local                     | Cloud-heavy (Optional local)   |
-| **Postman Import** | Yes (Native compatibility, WIP)     | Limited (via converters)       | No (Manual migration)          | Native                         |
-| **Protocols** | REST      | HTTP, gRPC, WebSockets         | HTTP, FTP, JDBC, LDAP, SOAP    | REST, GraphQL, gRPC            |
-| **Open Source** | Yes (Dual-license)             | Yes (AGPLv3)                   | Yes (Apache 2.0)               | Partial                        |
+| Feature                   | Vayu                           | Bruno                          | k6                             | Apache JMeter                  | Postman                        |
+|---------------------------|--------------------------------|--------------------------------|--------------------------------|--------------------------------|--------------------------------|
+| **Execution Engine** | C++ (High Performance)         | Node.js / Electron             | Go (Efficient / Lightweight)   | Java (JVM-based)               | Node.js / Electron             |
+| **Execution Speed** | Tens of Thousands RPS (Native) | Limited by JS runtime          | High (Go-routines)             | Moderate (Thread-heavy)        | Limited by JS runtime          |
+| **Scripting Language** | QuickJS (pm syntax support)    | JavaScript (ES6)               | JavaScript (ES6)               | Groovy / BeanShell / GUI       | JavaScript                     |
+| **Load Testing** | Built-in (Real-time metrics)   | Not supported                  | Core focus                     | Core focus                     | Requires separate tool         |
+| **UI / UX** | Native App (Sidecar Desktop)   | Native App (Git-friendly)      | CLI-first (No native GUI)      | Java Swing GUI (Aged)          | Native App (Feature-rich)      |
+| **UI Snappiness** | Responsive (Sidecar Architecture) | Responsive                  | N/A (CLI only)                 | Laggy with large test plans    | Slows with large collections   |
+| **Resource Usage** | Low (Direct memory access)     | Low to Moderate                | Low to Moderate                | High (RAM intensive)           | High (Electron/Chrome)         |
+| **Privacy** | 100% Local-first               | 100% Local-first               | Local / Cloud hybrid           | 100% Local                     | Cloud-heavy (Optional local)   |
+| **Collection Storage** | Local files                    | Plain text (Bru format, VCS-friendly) | Scripts / YAML            | XML files                      | Cloud / JSON export            |
+| **Postman Import** | Yes (Native compatibility, WIP) | Yes (via converter)           | Limited (via converters)       | No (Manual migration)          | Native                         |
+| **Protocols** | REST                           | REST, GraphQL                  | HTTP, gRPC, WebSockets         | HTTP, FTP, JDBC, LDAP, SOAP    | REST, GraphQL, gRPC            |
+| **Open Source** | Yes (Dual-license)             | Yes (MIT)                      | Yes (AGPLv3)                   | Yes (Apache 2.0)               | Partial                        |
 
 
 ## Features
