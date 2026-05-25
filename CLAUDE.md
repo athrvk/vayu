@@ -121,7 +121,8 @@ cd app && pnpm format:check        # Prettier
 - Strict TypeScript — no `any`, no `@ts-ignore` without justification
 - Component files: PascalCase `.tsx`; utilities: camelCase `.ts`
 - State: Zustand for UI state, TanStack Query for server state
-- Styling: Tailwind CSS
+- Styling: Tailwind CSS v4 — all colors via CSS custom properties; see `docs/design-system.md`
+- **Design system:** `docs/design-system.md` — tokens, elevation, typography, component patterns. Read this before touching any UI file.
 
 ## Engine HTTP API
 
@@ -147,5 +148,6 @@ See `docs/engine/api-reference.md` for full reference.
 
 - `docs/architecture.md` — sidecar pattern details
 - `docs/building.md` — platform-specific build notes
+- `docs/design-system.md` — UI tokens, elevation, component patterns, typography
 - `docs/engine/api-reference.md` — engine HTTP API
 - `CONTRIBUTING.md` — PR process and code style
