@@ -97,9 +97,9 @@ export default function RequestItem({
 					variant="outline"
 					className="text-xs font-mono font-semibold px-1.5 py-0.5"
 					style={{
-						color: getMethodColor(request.method),
-						borderColor: `${getMethodColor(request.method)}50`,
-						background: `${getMethodColor(request.method)}12`,
+						color:       `hsl(${getMethodColor(request.method)})`,
+						borderColor: `hsl(${getMethodColor(request.method)} / 0.3)`,
+						background:  `hsl(${getMethodColor(request.method)} / 0.1)`,
 					}}
 				>
 					{request.method}

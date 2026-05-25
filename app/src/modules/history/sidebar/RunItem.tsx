@@ -6,6 +6,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import type React from "react";
 import { formatRelativeTime, loadTestTypeToLabel } from "@/utils";
 import type { Run } from "@/types";
 import { Button } from "@/components/ui";
@@ -29,13 +30,14 @@ interface RunItemProps {
 	isSelected?: boolean;
 }
 
-const METHOD_BADGE_CLASSES: Record<string, string> = {
-	GET:    "text-[#22c55e] bg-green-500/10 border border-green-500/30",
-	POST:   "text-[#3b82f6] bg-blue-500/10 border border-blue-500/30",
-	PUT:    "text-[#f59e0b] bg-amber-500/10 border border-amber-500/30",
-	PATCH:  "text-[#a855f7] bg-purple-500/10 border border-purple-500/30",
-	DELETE: "text-[#ef4444] bg-red-500/10 border border-red-500/30",
-};
+function methodBadgeStyle(method: string): React.CSSProperties {
+	const c = `var(--method-${method.toLowerCase()})`;
+	return {
+		color:      `hsl(${c})`,
+		background: `hsl(${c} / 0.1)`,
+		border:     `1px solid hsl(${c} / 0.3)`,
+	};
+}
 
 export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelected = false }: RunItemProps) {
 	// Format timestamp to relative time
@@ -144,7 +146,10 @@ export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelecte
 				{requestUrl && (
 					<div className="flex items-start gap-2 mb-1.5 min-w-0 flex-wrap">
 						{method && (
-							<span className={cn("text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded", METHOD_BADGE_CLASSES[method] ?? "")}>
+							<span
+								className="text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded"
+								style={methodBadgeStyle(method)}
+							>
 								{method}
 							</span>
 						)}

@@ -87,9 +87,9 @@ export default function DashboardHeader({
 				<span
 					className="text-[11px] font-bold font-mono px-1.5 py-0.5 rounded shrink-0"
 					style={{
-						color: getMethodColor(requestMethod),
-						background: `${getMethodColor(requestMethod)}18`,
-						border: `1px solid ${getMethodColor(requestMethod)}30`,
+						color:       `hsl(${getMethodColor(requestMethod)})`,
+						background:  `hsl(${getMethodColor(requestMethod)} / 0.094)`,
+						border:      `1px solid hsl(${getMethodColor(requestMethod)} / 0.188)`,
 					}}
 				>
 					{requestMethod.toUpperCase()}

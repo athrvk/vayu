@@ -20,13 +20,13 @@ import type { HttpMethod } from "@/types";
 const HTTP_METHODS: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
 const METHOD_COLORS: Record<HttpMethod, string> = {
-	GET: "text-[#22c55e]",
-	POST: "text-[#3b82f6]",
-	PUT: "text-[#f59e0b]",
-	PATCH: "text-[#a855f7]",
-	DELETE: "text-[#ef4444]",
-	HEAD: "text-[#06b6d4]",
-	OPTIONS: "text-[#6b7280]",
+	GET:     "method-get",
+	POST:    "method-post",
+	PUT:     "method-put",
+	PATCH:   "method-patch",
+	DELETE:  "method-delete",
+	HEAD:    "method-head",
+	OPTIONS: "method-options",
 };
 
 export default function MethodSelector() {
