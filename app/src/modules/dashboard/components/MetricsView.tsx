@@ -275,16 +275,16 @@ function MetricsView({ metrics, historicalMetrics, isCompleted }: MetricsViewPro
 					sub={`${totalReqs} total · ${formatNumber(metrics.requests_failed ?? 0)} failed`}
 				/>
 				<HeroCard
-					label="P99 Latency"
+					label={isCompleted ? "P99 Latency" : "Avg Latency"}
 					value={
-						isCompleted && metrics.latency_p99_ms
-							? `${metrics.latency_p99_ms.toFixed(0)}ms`
-							: "—"
+						isCompleted
+							? (metrics.latency_p99_ms != null ? `${metrics.latency_p99_ms.toFixed(0)}ms` : "—")
+							: (metrics.avg_latency_ms != null && metrics.avg_latency_ms > 0 ? `${metrics.avg_latency_ms.toFixed(0)}ms` : "—")
 					}
 					sub={
 						isCompleted
 							? `p50: ${metrics.latency_p50_ms?.toFixed(0) ?? "—"}ms · p95: ${metrics.latency_p95_ms?.toFixed(0) ?? "—"}ms`
-							: "Available after test completes"
+							: "Live average — p50/p95/p99 after test"
 					}
 					sparkColor="#ef4444"
 				/>
@@ -292,9 +292,9 @@ function MetricsView({ metrics, historicalMetrics, isCompleted }: MetricsViewPro
 
 			{/* Row 2 — Latency distribution bar (completed only) */}
 			{isCompleted &&
-				metrics.latency_p50_ms &&
-				metrics.latency_p95_ms &&
-				metrics.latency_p99_ms && (
+				metrics.latency_p50_ms != null &&
+				metrics.latency_p95_ms != null &&
+				metrics.latency_p99_ms != null && (
 					<LatencyBar
 						p50={metrics.latency_p50_ms}
 						p95={metrics.latency_p95_ms}

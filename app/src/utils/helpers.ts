@@ -52,15 +52,15 @@ export function formatPercent(value: number, total: number): string {
  */
 export function getMethodColor(method: string): string {
 	const colors: Record<string, string> = {
-		GET: "text-blue-600 bg-blue-50",
-		POST: "text-green-600 bg-green-50",
-		PUT: "text-yellow-600 bg-yellow-50",
-		PATCH: "text-purple-600 bg-purple-50",
-		DELETE: "text-red-600 bg-red-50",
-		HEAD: "text-gray-600 bg-gray-50",
-		OPTIONS: "text-gray-600 bg-gray-50",
+		GET:     "#22c55e",
+		POST:    "#3b82f6",
+		PUT:     "#f59e0b",
+		PATCH:   "#a855f7",
+		DELETE:  "#ef4444",
+		HEAD:    "#06b6d4",
+		OPTIONS: "#6b7280",
 	};
-	return colors[method.toUpperCase()] || "text-gray-600 bg-gray-50";
+	return colors[method.toUpperCase()] ?? "#6b7280";
 }
 
 export function loadTestTypeToLabel(type: LoadTestConfig["mode"] | string): string {

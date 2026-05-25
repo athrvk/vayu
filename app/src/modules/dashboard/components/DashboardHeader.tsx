@@ -15,18 +15,8 @@
 import { useEffect, useState } from "react";
 import { StopCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui";
+import { getMethodColor } from "@/utils";
 import type { DashboardHeaderProps } from "../types";
-
-function getMethodColor(method: string): string {
-	switch (method.toUpperCase()) {
-		case "GET": return "#22c55e";
-		case "POST": return "#3b82f6";
-		case "PUT": return "#f59e0b";
-		case "PATCH": return "#a855f7";
-		case "DELETE": return "#ef4444";
-		default: return "#6b7280";
-	}
-}
 
 function formatElapsed(ms: number): string {
 	const totalSeconds = Math.floor(ms / 1000);
@@ -45,11 +35,12 @@ export default function DashboardHeader({
 	elapsedDuration = 0,
 	configuration,
 }: DashboardHeaderProps) {
-	// Live counter for running tests
+	// Live counter for running tests — reset to 0 each time a new run starts
 	const [liveTick, setLiveTick] = useState(0);
 
 	useEffect(() => {
 		if (mode === "running" && isStreaming) {
+			setLiveTick(0);
 			const interval = setInterval(() => setLiveTick((t) => t + 1), 1000);
 			return () => clearInterval(interval);
 		}
@@ -62,7 +53,7 @@ export default function DashboardHeader({
 
 	// Config summary line
 	const configParts: string[] = [];
-	if (configuration?.concurrency) configParts.push(`${configuration.concurrency} VUs`);
+	if (configuration?.concurrency != null) configParts.push(`${configuration.concurrency} VUs`);
 	if (configuration?.mode) {
 		const modeLabel =
 			configuration.mode === "rps" ? "RPS Mode" :

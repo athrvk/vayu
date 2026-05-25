@@ -6,7 +6,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 interface UseResizableOptions {
 	defaultSize: number;
@@ -19,14 +19,17 @@ interface UseResizableOptions {
 interface UseResizableReturn {
 	size: number;
 	isResizing: boolean;
-	startResizing: () => void;
+	/** Wire to the drag handle's onMouseDown. Captures the drag origin so size
+	 *  is computed as a delta — works for panels that don't start at x=0. */
+	startResizing: (e: React.MouseEvent) => void;
 }
 
 /**
  * Manages drag-to-resize behavior for a panel along one axis.
  *
- * Returns `size` (px), `isResizing` flag, and `startResizing` to wire up
- * to the drag handle's onMouseDown. Cleans up global listeners automatically.
+ * Uses delta-based calculation: new size = size at drag start + mouse delta.
+ * This means the hook is correct regardless of where the panel sits in the
+ * layout, unlike an approach that sets size = raw clientX.
  */
 export function useResizable({
 	defaultSize,
@@ -36,20 +39,36 @@ export function useResizable({
 }: UseResizableOptions): UseResizableReturn {
 	const [size, setSize] = useState(defaultSize);
 	const [isResizing, setIsResizing] = useState(false);
+	const dragStart = useRef<{ mousePos: number; size: number } | null>(null);
 
-	const startResizing = useCallback(() => {
-		setIsResizing(true);
-	}, []);
+	const startResizing = useCallback(
+		(e: React.MouseEvent) => {
+			dragStart.current = {
+				mousePos: direction === "horizontal" ? e.clientX : e.clientY,
+				size,
+			};
+			setIsResizing(true);
+		},
+		[direction, size],
+	);
 
 	useEffect(() => {
 		if (!isResizing) return;
 
 		const handleMouseMove = (e: MouseEvent) => {
-			const next = direction === "horizontal" ? e.clientX : e.clientY;
-			if (next >= min && next <= max) setSize(next);
+			if (!dragStart.current) return;
+			const current = direction === "horizontal" ? e.clientX : e.clientY;
+			const next = Math.min(
+				max,
+				Math.max(min, dragStart.current.size + (current - dragStart.current.mousePos)),
+			);
+			setSize(next);
 		};
 
-		const handleMouseUp = () => setIsResizing(false);
+		const handleMouseUp = () => {
+			dragStart.current = null;
+			setIsResizing(false);
+		};
 
 		document.addEventListener("mousemove", handleMouseMove);
 		document.addEventListener("mouseup", handleMouseUp);
