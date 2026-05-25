@@ -9,6 +9,8 @@
 import { useEffect } from "react";
 import { useNavigationStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
+import { useResizable } from "@/hooks";
+import { cn } from "@/lib/utils";
 import Sidebar from "./Sidebar";
 import RequestBuilder from "@/modules/request-builder";
 import LoadTestDashboard from "@/modules/dashboard";
@@ -17,10 +19,19 @@ import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
 import { SettingsMain } from "@/modules/settings";
 import VariablesMain from "@/modules/variables/main/VariablesMain";
 
+const MIN_SIDEBAR_WIDTH = 280;
+const MAX_SIDEBAR_WIDTH = 600;
+
 export default function Shell() {
 	const { resolveActiveScreen } = useNavigationStore();
 	const activeScreen = resolveActiveScreen();
 	const { triggerSave } = useSaveStore();
+
+	const { size: sidebarWidth, isResizing, startResizing } = useResizable({
+		defaultSize: 320,
+		min: MIN_SIDEBAR_WIDTH,
+		max: MAX_SIDEBAR_WIDTH,
+	});
 
 	// App-wide Ctrl/Cmd+S keyboard handler
 	useEffect(() => {
@@ -55,7 +66,28 @@ export default function Shell() {
 
 	return (
 		<div className="flex h-full bg-background overflow-hidden">
-			<Sidebar />
+			{/* Sidebar container — controlled width */}
+			<div
+				style={{
+					width: `${sidebarWidth}px`,
+					minWidth: `${MIN_SIDEBAR_WIDTH}px`,
+					maxWidth: `${MAX_SIDEBAR_WIDTH}px`,
+				}}
+				className="flex-shrink-0 flex flex-col overflow-hidden"
+			>
+				<Sidebar />
+			</div>
+
+			{/* Resize handle */}
+			<div
+				onMouseDown={startResizing}
+				className={cn(
+					"w-1 bg-border hover:bg-primary cursor-col-resize transition-colors shrink-0",
+					isResizing && "bg-primary"
+				)}
+			/>
+
+			{/* Main content */}
 			<main className="flex-1 flex flex-col overflow-hidden min-w-0">
 				{renderMainContent()}
 			</main>
