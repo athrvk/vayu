@@ -552,7 +552,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 											onBlur={handleBlur}
 											placeholder="variable_name"
 											className={cn(
-												"h-8",
+												"h-8 text-primary",
 												!variable.enabled &&
 												!variable.isNew &&
 												"text-muted-foreground bg-muted"

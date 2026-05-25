@@ -53,7 +53,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 	if (!report) {
 		return (
-			<div className="text-center py-12 text-gray-500">
+			<div className="p-5 text-center py-12 text-muted-foreground">
 				<p>Request/Response view available after test completion</p>
 			</div>
 		);
@@ -73,7 +73,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 	const hasStatusCodes = Object.keys(statusCodes).length > 0;
 
 	return (
-		<div className="space-y-6">
+		<div className="p-5 space-y-4 max-w-[1080px]">
 			{/* Status Code Distribution */}
 			<Card>
 				<CardHeader>
@@ -83,7 +83,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 					{hasStatusCodes ? (
 						<div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
 							{Object.entries(statusCodes).map(([code, count]) => (
-								<div key={code} className="p-3 bg-muted rounded">
+								<div key={code} className="p-3 bg-card border border-border rounded-md">
 									<span
 										className={cn(
 											"font-mono font-bold text-lg",
@@ -343,7 +343,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 															<p className="text-xs font-medium text-muted-foreground">
 																Error
 															</p>
-															<p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 p-2 rounded font-mono text-xs break-all">
+															<p className="text-sm bg-destructive/10 text-destructive p-2 rounded font-mono text-xs break-all">
 																{result.error}
 															</p>
 														</div>
@@ -379,7 +379,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																	<div className="grid grid-cols-5 gap-2 text-xs">
 																		{result.trace.dnsMs !==
 																			undefined && (
-																			<div className="bg-muted p-2 rounded text-center">
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
 																					DNS
 																				</p>
@@ -393,7 +393,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																		)}
 																		{result.trace.connectMs !==
 																			undefined && (
-																			<div className="bg-muted p-2 rounded text-center">
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
 																					Connect
 																				</p>
@@ -407,7 +407,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																		)}
 																		{result.trace.tlsMs !==
 																			undefined && (
-																			<div className="bg-muted p-2 rounded text-center">
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
 																					TLS
 																				</p>
@@ -422,7 +422,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																		{result.trace
 																			.firstByteMs !==
 																			undefined && (
-																			<div className="bg-muted p-2 rounded text-center">
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
 																					TTFB
 																				</p>
@@ -436,7 +436,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																		)}
 																		{result.trace.downloadMs !==
 																			undefined && (
-																			<div className="bg-muted p-2 rounded text-center">
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
 																					Download
 																				</p>
@@ -454,7 +454,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 															{/* Slow Request Warning */}
 															{result.trace.isSlow && (
-																<div className="flex items-center gap-2 text-xs bg-orange-50 dark:bg-orange-950/30 text-orange-700 dark:text-orange-400 p-2 rounded">
+																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive p-2 rounded">
 																	<Clock className="w-3 h-3" />
 																	<span>
 																		Slow request:{" "}

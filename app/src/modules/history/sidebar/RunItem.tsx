@@ -8,7 +8,7 @@
 
 import { formatRelativeTime, loadTestTypeToLabel } from "@/utils";
 import type { Run } from "@/types";
-import { Button, Badge } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
 	CheckCircle2,
@@ -28,6 +28,14 @@ interface RunItemProps {
 	isDeleting: boolean;
 	isSelected?: boolean;
 }
+
+const METHOD_BADGE_CLASSES: Record<string, string> = {
+	GET:    "text-[#22c55e] bg-green-500/10 border border-green-500/30",
+	POST:   "text-[#3b82f6] bg-blue-500/10 border border-blue-500/30",
+	PUT:    "text-[#f59e0b] bg-amber-500/10 border border-amber-500/30",
+	PATCH:  "text-[#a855f7] bg-purple-500/10 border border-purple-500/30",
+	DELETE: "text-[#ef4444] bg-red-500/10 border border-red-500/30",
+};
 
 export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelected = false }: RunItemProps) {
 	// Format timestamp to relative time
@@ -67,7 +75,7 @@ export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelecte
 		<div
 			onClick={() => onSelect(run.id)}
 			className={cn(
-				"group relative bg-card border cursor-pointer transition-all overflow-hidden w-full",
+				"group relative bg-card border cursor-pointer transition-all transition-colors overflow-hidden w-full",
 				isSelected
 					? "bg-primary/10 hover:bg-primary/15 border-primary/50 ring-1 ring-inset ring-primary/20 shadow-sm"
 					: "hover:border-primary/50 hover:shadow-sm"
@@ -136,22 +144,9 @@ export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelecte
 				{requestUrl && (
 					<div className="flex items-start gap-2 mb-1.5 min-w-0 flex-wrap">
 						{method && (
-							<Badge
-								variant="outline"
-								className={cn(
-									"text-[10px] h-5 px-1.5 font-mono shrink-0",
-									method === "GET" &&
-									"bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900",
-									method === "POST" &&
-									"bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-400 dark:border-green-900",
-									method === "PUT" &&
-									"bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-900",
-									method === "DELETE" &&
-									"bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900"
-								)}
-							>
+							<span className={cn("text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded", METHOD_BADGE_CLASSES[method] ?? "")}>
 								{method}
-							</Badge>
+							</span>
 						)}
 						<p
 							className="text-xs text-foreground font-medium break-words flex-1 min-w-0 leading-5"

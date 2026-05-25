@@ -21,7 +21,7 @@
  */
 
 import { useState } from "react";
-import { FileText, Copy, Check, Download, Terminal, BarChart3 } from "lucide-react";
+import { Copy, Check, Download, Terminal, BarChart3 } from "lucide-react";
 import {
 	Tabs,
 	TabsList,
@@ -62,10 +62,10 @@ export default function ResponseViewer() {
 	// Loading state
 	if (isExecuting) {
 		return (
-			<div className="flex-1 flex items-center justify-center bg-card">
+			<div className="flex-1 flex items-center justify-center bg-panel">
 				<div className="text-center space-y-4">
-					<div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-					<p className="text-muted-foreground">Sending request...</p>
+					<div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-[vayu-spin_0.7s_linear_infinite] mx-auto" />
+					<p className="text-[12px] text-muted-foreground">Sending request…</p>
 				</div>
 			</div>
 		);
@@ -74,30 +74,30 @@ export default function ResponseViewer() {
 	// Empty state
 	if (!response) {
 		return (
-			<div className="flex-1 flex items-center justify-center bg-card">
-				<div className="text-center space-y-4">
-					<FileText className="w-12 h-12 mx-auto text-muted-foreground/50" />
-					<div className="space-y-2">
-						<p className="text-muted-foreground">Response will appear here</p>
-						<p className="text-xs text-muted-foreground/70">
-							Send a request to see the response
+			<div className="flex-1 flex items-center justify-center bg-panel">
+				<div className="flex flex-col items-center gap-3">
+					{/* 48px send icon circle */}
+					<div className="w-12 h-12 rounded-full bg-accent border border-border flex items-center justify-center text-muted-foreground">
+						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+							<line x1="22" y1="2" x2="11" y2="13"/>
+							<polygon points="22 2 15 22 11 13 2 9 22 2"/>
+						</svg>
+					</div>
+					<div className="text-center">
+						<p className="text-[13px] font-medium text-foreground mb-1">No response yet</p>
+						<p className="text-[11px] text-muted-foreground">
+							Press{" "}
+							<kbd className="font-mono bg-card border border-border rounded px-1.5 py-px text-[10px] text-foreground">⌘↵</kbd>
+							{" "}or click Send
 						</p>
 					</div>
-
-					{/* Show button to view load test dashboard if available */}
+					{/* Keep the existing load test dashboard button if it was there */}
 					{hasLoadTestDashboard && (
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={handleViewLoadTest}
-							className="mt-4"
-						>
+						<Button variant="outline" size="sm" onClick={handleViewLoadTest} className="mt-2">
 							<BarChart3 className="w-4 h-4 mr-2" />
 							View Load Test Dashboard
 							{dashboardMode === "running" && (
-								<Badge variant="default" className="ml-2 text-xs">
-									Live
-								</Badge>
+								<Badge variant="default" className="ml-2 text-xs">Live</Badge>
 							)}
 						</Button>
 					)}

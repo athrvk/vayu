@@ -31,6 +31,16 @@ export interface DashboardHeaderProps {
 	isStreaming: boolean;
 	isStopping: boolean;
 	onStop: () => Promise<void>;
+	requestUrl?: string;
+	requestMethod?: string;
+	elapsedDuration?: number;
+	configuration?: {
+		mode?: string;
+		duration?: number | string | undefined;
+		targetRps?: number;
+		concurrency?: number;
+		comment?: string;
+	};
 }
 
 export interface RunMetadataProps {

@@ -9,73 +9,140 @@
 /**
  * DashboardHeader Component
  *
- * Header with title, status badge, back button, and stop button
+ * Compact 52px single-row header with status, method, URL, config info, and stop button
  */
 
-import { Activity, StopCircle, Loader2, ArrowLeft } from "lucide-react";
-import { Button, Badge } from "@/components/ui";
-import { useNavigationStore } from "@/stores";
+import { useEffect, useState } from "react";
+import { StopCircle, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui";
 import type { DashboardHeaderProps } from "../types";
+
+function getMethodColor(method: string): string {
+	switch (method.toUpperCase()) {
+		case "GET": return "#22c55e";
+		case "POST": return "#3b82f6";
+		case "PUT": return "#f59e0b";
+		case "PATCH": return "#a855f7";
+		case "DELETE": return "#ef4444";
+		default: return "#6b7280";
+	}
+}
+
+function formatElapsed(ms: number): string {
+	const totalSeconds = Math.floor(ms / 1000);
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
 
 export default function DashboardHeader({
 	mode,
 	isStreaming,
 	isStopping,
 	onStop,
+	requestUrl,
+	requestMethod,
+	elapsedDuration = 0,
+	configuration,
 }: DashboardHeaderProps) {
-	const { navigateBack, canNavigateBack } = useNavigationStore();
-	const showBackButton = canNavigateBack();
+	// Live counter for running tests
+	const [liveTick, setLiveTick] = useState(0);
+
+	useEffect(() => {
+		if (mode === "running" && isStreaming) {
+			const interval = setInterval(() => setLiveTick((t) => t + 1), 1000);
+			return () => clearInterval(interval);
+		}
+	}, [mode, isStreaming]);
+
+	const displayMs =
+		mode === "running" && isStreaming
+			? elapsedDuration + liveTick * 1000
+			: elapsedDuration;
+
+	// Config summary line
+	const configParts: string[] = [];
+	if (configuration?.concurrency) configParts.push(`${configuration.concurrency} VUs`);
+	if (configuration?.mode) {
+		const modeLabel =
+			configuration.mode === "rps" ? "RPS Mode" :
+			configuration.mode === "concurrency" ? "Concurrency Mode" :
+			configuration.mode;
+		configParts.push(modeLabel);
+	}
+	if (displayMs > 0) configParts.push(`${formatElapsed(displayMs)} elapsed`);
+	const configSummary = configParts.join(" · ");
 
 	return (
-		<div className="flex items-center justify-between">
-			<div className="flex items-center gap-3">
-				{showBackButton && (
-					<Button
-						variant="ghost"
-						size="icon"
-						onClick={navigateBack}
-						className="h-8 w-8"
-						title="Back to Request Builder"
-					>
-						<ArrowLeft className="w-4 h-4" />
-					</Button>
-				)}
-				<Activity className="w-6 h-6 text-primary" />
-				<h2 className="text-xl font-semibold text-foreground">Load Test Dashboard</h2>
-				{isStreaming && (
-					<Badge
-						variant="outline"
-						className="bg-success/10 text-success border-success/20"
-					>
-						<span className="w-2 h-2 bg-success animate-pulse mr-2" />
-						Live
-					</Badge>
-				)}
-				{mode === "completed" && <Badge variant="secondary">Completed</Badge>}
-				{mode === "stopped" && (
-					<Badge variant="outline" className="border-warning text-warning">
-						Stopped
-					</Badge>
-				)}
-			</div>
+		<div className="h-[52px] flex items-center gap-3 px-5 bg-panel border-b border-border shrink-0">
+			{/* Status pill */}
+			{isStreaming ? (
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-green-500/15 text-green-500 border border-green-500/25 shrink-0">
+					<span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+					LIVE
+				</span>
+			) : mode === "completed" ? (
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
+					COMPLETED
+				</span>
+			) : mode === "stopped" ? (
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
+					STOPPED
+				</span>
+			) : null}
 
-			<div className="flex items-center gap-2">
-				{mode === "running" && (
-					<Button variant="destructive" onClick={onStop} disabled={isStopping}>
-						{isStopping ? (
-							<>
-								<Loader2 className="w-4 h-4 animate-spin mr-2" />
-								Stopping...
-							</>
-						) : (
-							<>
-								<StopCircle className="w-4 h-4 mr-2" />
-								Stop Test
-							</>
-						)}
-					</Button>
-				)}
-			</div>
+			{/* Method badge */}
+			{requestMethod && (
+				<span
+					className="text-[11px] font-bold font-mono px-1.5 py-0.5 rounded shrink-0"
+					style={{
+						color: getMethodColor(requestMethod),
+						background: `${getMethodColor(requestMethod)}18`,
+						border: `1px solid ${getMethodColor(requestMethod)}30`,
+					}}
+				>
+					{requestMethod.toUpperCase()}
+				</span>
+			)}
+
+			{/* URL */}
+			{requestUrl ? (
+				<span className="text-[12px] font-mono text-foreground flex-1 truncate min-w-0">
+					{requestUrl}
+				</span>
+			) : (
+				<span className="flex-1" />
+			)}
+
+			{/* Config summary */}
+			{configSummary && (
+				<span className="text-[12px] text-muted-foreground shrink-0 hidden sm:block">
+					{configSummary}
+				</span>
+			)}
+
+			{/* Stop button */}
+			{mode === "running" && (
+				<Button
+					size="sm"
+					variant="ghost"
+					onClick={onStop}
+					disabled={isStopping}
+					className="h-7 px-2.5 text-[12px] text-destructive hover:bg-destructive/10 hover:text-destructive border border-destructive/30 shrink-0"
+				>
+					{isStopping ? (
+						<>
+							<Loader2 className="w-3 h-3 animate-spin mr-1.5" />
+							Stopping…
+						</>
+					) : (
+						<>
+							<StopCircle className="w-3 h-3 mr-1.5" />
+							Stop
+						</>
+					)}
+				</Button>
+			)}
 		</div>
 	);
 }

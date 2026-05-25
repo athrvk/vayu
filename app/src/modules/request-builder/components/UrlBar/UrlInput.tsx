@@ -44,7 +44,11 @@ function parseQueryParams(url: string): KeyValueItem[] {
 	}
 }
 
-export default function UrlInput() {
+interface UrlInputProps {
+	className?: string;
+}
+
+export default function UrlInput({ className }: UrlInputProps) {
 	const { request, updateField } = useRequestBuilderContext();
 
 	// Sync params from URL when URL changes directly
@@ -64,13 +68,11 @@ export default function UrlInput() {
 	);
 
 	return (
-		<div className="flex-1">
-			<VariableInput
-				value={request.url}
-				onChange={handleUrlChange}
-				placeholder="https://api.example.com/endpoint?key={{variable}}"
-				className="w-full"
-			/>
-		</div>
+		<VariableInput
+			value={request.url}
+			onChange={handleUrlChange}
+			placeholder="https://api.example.com/endpoint?key={{variable}}"
+			className={className ?? "w-full"}
+		/>
 	);
 }
