@@ -1,7 +1,7 @@
 # Vayu Design System
 
 > Reference for all UI tokens, component patterns, and visual conventions.
-> Future sessions must use this doc to stay consistent with the established design language.
+> Future sessions must read this before touching any UI file.
 
 ---
 
@@ -22,17 +22,17 @@
 
 ## CSS Custom Properties
 
-All tokens live in `app/src/index.css` as CSS custom properties in HSL channel format (no `hsl()` wrapper — the `@theme inline` block and Tailwind config add that).
+All tokens live in `app/src/index.css` as HSL channel values (no `hsl()` wrapper — `@theme inline` and Tailwind config add that). Separate light and dark values are listed where they differ.
 
 ### Elevation
 
 ```css
-/* Dark mode */
+/* Dark */
 --background: 240 10%  4%;   /* #09090b — outermost canvas */
 --panel:      240  6%  7%;   /* #111113 — sidebar / panel bg */
 --card:       240  6% 11%;   /* #1a1a1f — elevated surface */
 
-/* Light mode */
+/* Light */
 --background: 42 17% 88%;   /* #e6e3dc — warm stone canvas */
 --panel:      42 21% 94%;   /* #f2f0eb — warm panel */
 --card:        0  0% 100%;  /* #ffffff — white card */
@@ -89,11 +89,79 @@ Default is Sunset orange. Overridden by `[data-color-scheme]` attribute.
 
 ### Semantic Status Colors
 
+These differ between light and dark mode.
+
 ```css
---success:   142 76% 36%;   /* green — completed, passing */
---warning:    38 92% 50%;   /* amber — warnings, slow requests */
---info:      199 89% 48%;   /* cyan — informational */
---destructive: 0 84% 60%;   /* red — errors, stop, delete */
+/* Light */
+--success:            142 76% 36%;   /* green */
+--warning:             38 92% 50%;   /* amber */
+--info:               199 89% 48%;   /* cyan */
+--destructive:          0 84% 60%;   /* red */
+
+/* Dark */
+--success:            142 70% 45%;   /* lighter green */
+--warning:             38 92% 50%;   /* same */
+--info:               199 89% 48%;   /* same */
+--destructive:          0 62.8% 30.6%;  /* darker red */
+```
+
+### HTTP Method Color Tokens
+
+Method colors are design tokens defined in `:root`, not hardcoded hex values. They are consistent between light and dark mode.
+
+```css
+--method-get:     142 76% 36%;   /* green */
+--method-post:    217 91% 60%;   /* blue */
+--method-put:      38 92% 50%;   /* amber */
+--method-patch:   262 83% 58%;   /* purple */
+--method-delete:    0 84% 60%;   /* red */
+--method-head:    199 89% 48%;   /* cyan */
+--method-options: 240  5% 64%;   /* gray */
+```
+
+**Utility classes** (defined in `index.css`, available as Tailwind class names):
+- Text color: `.method-get`, `.method-post`, `.method-put`, `.method-patch`, `.method-delete`, `.method-head`, `.method-options`
+- Background: `.bg-method-get`, `.bg-method-post`, etc.
+
+**`getMethodColor(method)`** in `app/src/utils/helpers.ts` returns `var(--method-xxx)` — the raw CSS variable reference. Callers construct full color values:
+
+```tsx
+const c = getMethodColor(method); // e.g. "var(--method-get)"
+
+// Solid color (text, stroke):
+color: `hsl(${c})`
+
+// Tinted background (~10% opacity):
+background: `hsl(${c} / 0.1)`
+
+// Tinted border (~30% opacity):
+borderColor: `hsl(${c} / 0.3)`
+```
+
+**Method badge pattern** (inline `<span>`, not a `<Badge>` component — used in RunItem, DashboardHeader):
+
+```tsx
+const c = `var(--method-${method.toLowerCase()})`;
+<span
+  className="text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded"
+  style={{
+    color:      `hsl(${c})`,
+    background: `hsl(${c} / 0.1)`,
+    border:     `1px solid hsl(${c} / 0.3)`,
+  }}
+>
+  {method}
+</span>
+```
+
+**MethodSelector** uses the `.method-get` etc. utility classes as Tailwind classNames:
+
+```tsx
+const METHOD_COLORS: Record<HttpMethod, string> = {
+  GET: "method-get", POST: "method-post", PUT: "method-put",
+  PATCH: "method-patch", DELETE: "method-delete", HEAD: "method-head", OPTIONS: "method-options",
+};
+// Usage: className={cn("font-mono font-semibold", METHOD_COLORS[method])}
 ```
 
 ### Charts
@@ -101,12 +169,13 @@ Default is Sunset orange. Overridden by `[data-color-scheme]` attribute.
 ```css
 /* Dark */
 --chart-1: 24.6 95% 53.1%;   /* primary (orange by default) */
---chart-2: 160  60% 45%;     /* teal */
---chart-3:  30  80% 55%;     /* amber */
---chart-4: 280  65% 60%;     /* violet */
---chart-5: 340  75% 55%;     /* rose */
+--chart-2: 160  60% 45%;
+--chart-3:  30  80% 55%;
+--chart-4: 280  65% 60%;
+--chart-5: 340  75% 55%;
 
-/* Light — same chart-1; others differ slightly */
+/* Light */
+--chart-1: 24.6 95% 53.1%;   /* same */
 --chart-2: 173 58% 39%;
 --chart-3: 197 37% 24%;
 --chart-4:  43 74% 66%;
@@ -119,46 +188,14 @@ Default is Sunset orange. Overridden by `[data-color-scheme]` attribute.
 
 Applied via `data-color-scheme` attribute on `<html>`. Only `--primary`, `--primary-foreground`, `--ring`, `--variable`, and `--chart-1` change.
 
-| Scheme | Token value (light) | Token value (dark) | Hex approx |
-|--------|--------------------|--------------------|------------|
-| `sunset` (default) | `24.6 95% 53.1%` | same | `#f97316` |
-| `sky` | `188 94% 43%` | same | `#22d3ee` |
-| `ocean` | `217 91% 60%` | `217 78% 51%` | `#3b82f6` |
-| `forest` | `142 76% 36%` | `142 70% 45%` | `#22c55e` |
-| `aurora` | `258 87% 74%` | same | `#a78bfa` |
-| `coral` | `0 72% 65%` | `0 72% 55%` | `#ef4444`-family |
-
----
-
-## HTTP Method Colors
-
-These are **fixed semantic colors**, never substituted with theme tokens. Used in method badges, badges in RunItem, MethodSelector, DashboardHeader, etc.
-
-| Method | Hex | Tailwind approx | Usage |
-|--------|-----|-----------------|-------|
-| GET | `#22c55e` | green-500 | Text + `bg-green-500/10 border-green-500/30` |
-| POST | `#3b82f6` | blue-500 | Text + `bg-blue-500/10 border-blue-500/30` |
-| PUT | `#f59e0b` | amber-500 | Text + `bg-amber-500/10 border-amber-500/30` |
-| PATCH | `#a855f7` | purple-500 | Text + `bg-purple-500/10 border-purple-500/30` |
-| DELETE | `#ef4444` | red-500 | Text + `bg-red-500/10 border-red-500/30` |
-| HEAD | `#06b6d4` | cyan-500 | Text only (badge uncommon) |
-| OPTIONS | `#6b7280` | gray-500 | Text only |
-
-**Method badge pattern** (inline `<span>`, not a `<Badge>` component):
-```tsx
-<span
-  className="text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded"
-  style={{
-    color: methodColor,
-    background: `${methodColor}18`,   // ~10% opacity
-    border: `1px solid ${methodColor}30`,  // ~19% opacity
-  }}
->
-  {method}
-</span>
-```
-
-Or via CSS variable tokens (`--method-get`, `--method-post`, etc.) with utility classes `.method-get`, `.bg-method-get`.
+| Scheme | Light HSL | Dark HSL |
+|--------|-----------|----------|
+| `sunset` (default) | `24.6 95% 53.1%` | same |
+| `sky` | `188 94% 43%` | same |
+| `ocean` | `217 91% 60%` | `217 78% 51%` |
+| `forest` | `142 76% 36%` | `142 70% 45%` |
+| `aurora` | `258 87% 74%` | same |
+| `coral` | `0 72% 65%` | `0 72% 55%` |
 
 ---
 
@@ -186,8 +223,8 @@ body { font-family: "Space Grotesk", system-ui, sans-serif; }
 | Use | Size | Weight | Class |
 |-----|------|--------|-------|
 | Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
-| Hero metric value | 34px | bold | `text-[34px] font-bold font-mono` |
-| Secondary metric value | 22px | semibold | `text-[22px] font-semibold font-mono` |
+| Hero metric value | 34px | bold, tabular | `text-[34px] font-bold leading-none font-mono tabular-nums` |
+| Secondary metric value | 22px | bold | `text-[22px] font-bold font-mono` |
 | Body / default | 13px | regular | `text-[13px]` |
 | Small label | 12px | medium | `text-[12px] font-medium` |
 | Micro / badge | 10–11px | mono bold | `text-[10px] font-mono font-bold` |
@@ -203,10 +240,12 @@ body { font-family: "Space Grotesk", system-ui, sans-serif; }
 
 | Class | Value |
 |-------|-------|
-| `rounded` (default) | 4px |
+| `rounded-sm` | `calc(0.375rem - 4px)` = 2px |
 | `rounded-md` | `calc(0.375rem - 2px)` = 4px |
 | `rounded-lg` | `0.375rem` = 6px |
 | `rounded-full` | pill / circle |
+
+Note: Tailwind's unsuffixed `rounded` is its own default scale (4px) and is not in the custom config. Prefer explicit `rounded-md` or `rounded-lg`.
 
 Cards and panels use `rounded-md`. Badges/chips use `rounded` or `rounded-sm`. Status pills use `rounded-full`.
 
@@ -214,20 +253,20 @@ Cards and panels use `rounded-md`. Badges/chips use `rounded` or `rounded-sm`. S
 
 ## Animations
 
-Defined in both `index.css` and `tailwind.config.js`.
+Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animations have Tailwind shorthand aliases (`animate-vayu-spin`, `animate-vayu-pulse`, `animate-vayu-fadepulse`) in addition to the verbose arbitrary form.
 
-| Name | Duration | Curve | Use |
-|------|----------|-------|-----|
-| `vayu-spin` | 0.7s | linear | Loading spinners |
-| `vayu-pulse` | 1.6s | ease-in-out | Live indicators (0→35% opacity) |
-| `vayu-fadepulse` | 2s | ease-in-out | Subtle breathe (90→50% opacity) |
-| `accordion-down/up` | 0.2s | ease-out | Radix accordion |
-| `fade-in` | 0.2s | ease-out | General reveal |
-| `slide-in` | 0.2s | ease-out | Dropdown/panel entry |
+| Name | Duration | Curve | Tailwind class | Use |
+|------|----------|-------|----------------|-----|
+| `vayu-spin` | 0.7s | linear | `animate-vayu-spin` | Loading spinners |
+| `vayu-pulse` | 1.6s | ease-in-out | `animate-vayu-pulse` | Live indicators (100→35% opacity) |
+| `vayu-fadepulse` | 2s | ease-in-out | `animate-vayu-fadepulse` | Subtle breathe (90→50% opacity) |
+| `accordion-down/up` | 0.2s | ease-out | `animate-accordion-down/up` | Radix accordion |
+| `fade-in` | 0.2s | ease-out | `animate-fade-in` | General reveal |
+| `slide-in` | 0.2s | ease-out | `animate-slide-in` | Dropdown/panel entry |
 
 **Spinner pattern:**
 ```tsx
-<span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-[vayu-spin_0.7s_linear_infinite] inline-block" />
+<span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-vayu-spin inline-block" />
 ```
 
 **Live dot pattern:**
@@ -241,11 +280,45 @@ Defined in both `index.css` and `tailwind.config.js`.
 
 ```
 Shell
-├── Sidebar (shrink-0)
-│   ├── ActivityBar        44px wide   bg-panel border-r border-border
-│   └── SidebarPanel       240px wide  bg-panel border-r border-border  (collapsible)
-└── main (flex-1)          routes render here
+├── Resizable sidebar container  (280–600px, default 320px — useResizable hook)
+│   └── Sidebar
+│       ├── ActivityBar     w-11 (44px)  bg-panel border-r border-border
+│       └── SidebarPanel    w-60 (240px) bg-panel border-r border-border  (collapsible)
+├── Resize handle            w-1  bg-border hover:bg-primary cursor-col-resize
+└── main (flex-1)            routes render here
 ```
+
+### Resizable Sidebar
+
+Shell uses `useResizable` from `app/src/hooks/useResizable.ts`:
+
+```tsx
+const { size: sidebarWidth, isResizing, startResizing } = useResizable({
+  defaultSize: 320,
+  min: 280,
+  max: 600,
+});
+
+// Sidebar container:
+<div style={{ width: `${sidebarWidth}px`, minWidth: "280px", maxWidth: "600px" }} className="flex-shrink-0 ...">
+  <Sidebar />
+</div>
+
+// Drag handle:
+<div
+  onMouseDown={startResizing}
+  className={cn("w-1 bg-border hover:bg-primary cursor-col-resize transition-colors shrink-0", isResizing && "bg-primary")}
+/>
+```
+
+**`useResizable` API:**
+
+```ts
+useResizable({ defaultSize, min, max, direction?: "horizontal" | "vertical" })
+// → { size: number, isResizing: boolean, startResizing: (e: React.MouseEvent) => void }
+```
+
+`startResizing` takes a `React.MouseEvent` (wire directly to `onMouseDown`). Uses delta-based calculation — captures drag origin on mousedown, computes `newSize = startSize + delta` — so it works for panels that don't start at the viewport origin.
 
 ### ActivityBar
 
@@ -264,7 +337,8 @@ Shell
 
 ### SidebarPanel
 
-- **Width:** `w-60` (240px), `bg-panel border-r border-border`, `overflow-hidden`
+- **Width:** `w-60` (240px) internal — the outer resizable container starts at 320px
+- `bg-panel border-r border-border overflow-hidden`
 - **Content:** `ScrollArea` fills available space
 - **Footer:** `ConnectionStatus` pinned to bottom with `border-t border-border`
 
@@ -353,12 +427,12 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
   {/* Primary action */}
   <button className="h-[34px] px-4 rounded-md bg-primary text-white text-[13px] font-semibold ...">
     {isExecuting
-      ? <><Spinner /> Sending</>
+      ? <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-vayu-spin inline-block" /> Sending</>
       : <>▶ Send</>
     }
   </button>
 
-  {/* Secondary action — token-based, never hardcoded purple */}
+  {/* Secondary action — always token-based (text-primary/border-primary/bg-primary/10), never hardcoded purple */}
   <button className="h-[34px] px-3.5 rounded-md text-[12px] font-semibold text-primary border border-primary bg-primary/10 ...">
     <Zap className="w-3.5 h-3.5" /> Load Test
   </button>
@@ -369,18 +443,21 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
 
 ```tsx
 <div className="h-[52px] flex items-center gap-3 px-5 bg-panel border-b border-border shrink-0">
-  {/* Status pill */}
-  {/* Method badge (inline span with style prop, not Tailwind) */}
+  {/* Status pill — LIVE (green animated dot) or COMPLETED/STOPPED (muted) */}
+  {/* Method badge — inline <span> with hsl(var(--method-xxx)) inline style */}
   {/* URL — font-mono text-[12px] flex-1 truncate */}
   {/* Config summary — text-[12px] text-muted-foreground hidden sm:block */}
-  {/* Stop button — ghost variant, destructive color */}
+  {/* Stop button — ghost variant, destructive color, Loader2 spinner while stopping */}
 </div>
 ```
 
-### SVG Sparkline (pure SVG, no Recharts)
+The header has a live elapsed timer (`liveTick` state) that resets to 0 at the start of each run.
+
+### SVG Sparkline
 
 ```tsx
 function Sparkline({ data, color }: { data: number[]; color: string }) {
+  if (!data || data.length < 2) return null;
   const max = Math.max(...data), min = Math.min(...data), rng = max - min || 1;
   const w = 108, h = 26;
   const pts = data.map((v, i) =>
@@ -388,7 +465,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
   );
   const area = `M1,${h + 1} L${pts.join(" L")} L${w + 1},${h + 1}Z`;
   return (
-    <svg width={110} height={28}>
+    <svg width={110} height={28} className="block overflow-visible">
       <path d={area} fill={color} fillOpacity="0.15" />
       <polyline points={pts.join(" ")} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
@@ -396,34 +473,62 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
 }
 ```
 
-### SVG Area Chart (replaces Recharts entirely)
+### SVG Area Chart
 
-Key settings: `viewBox="0 0 600 150"`, padding `PL=42 PR=8 PT=6 PB=20`, grid lines use `hsl(var(--border))` with `strokeDasharray="2 2"`, axis labels use `hsl(var(--muted-foreground))` in JetBrains Mono at `fontSize="9"`.
+`viewBox="0 0 600 150"`, padding `PL=42 PR=8 PT=6 PB=20`. Area fill uses `fillOpacity="0.12"` (slightly less than the sparkline's `0.15`). Grid lines use `hsl(var(--border))` with `strokeDasharray="2 2"`. Axis labels use `hsl(var(--muted-foreground))` in JetBrains Mono at `fontSize="9"`. Requires `data.length >= 2` (returns null otherwise).
 
 ### Hero Metric Card
 
 ```
 ┌─────────────────────────────────────────┐
 │ LABEL (11px, uppercase, muted)          │
-│ 34px bold mono value    [sparkline 110w]│
+│ 34px bold mono value   unit (xs, muted) │
 │ sub-label (11px, muted)                 │
+│ [sparkline 110w] (optional, below)      │
 └─────────────────────────────────────────┘
 ```
 
 ```tsx
 <div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1">
   <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{label}</p>
-  <div className="flex items-end justify-between gap-2">
-    <span className="text-[34px] font-bold font-mono leading-none text-foreground">{value}</span>
-    {sparklineData && <Sparkline data={sparklineData} color={sparklineColor} />}
+  <div className="flex items-baseline gap-1.5 mt-0.5">
+    <span
+      className="text-[34px] font-bold leading-none font-mono tabular-nums"
+      style={{ color: valueColor || "hsl(var(--foreground))" }}
+    >
+      {value}
+    </span>
+    {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
   </div>
-  {sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}
+  {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
+  {sparkData && sparkData.length > 1 && (
+    <div className="mt-2">
+      <Sparkline data={sparkData} color={sparkColor || "hsl(var(--primary))"} />
+    </div>
+  )}
+</div>
+```
+
+Note: sparkline renders **below** the value row, not beside it.
+
+### Secondary Stat Card
+
+```tsx
+<div className="bg-card border border-border rounded-md p-3">
+  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-1.5">{label}</p>
+  <div className="flex items-baseline gap-1">
+    <span className="text-[22px] font-bold font-mono text-foreground">{value}</span>
+    {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
+  </div>
 </div>
 ```
 
 ### Latency Distribution Bar
 
-Gradient track (green→amber→red, 18% opacity), with needle markers at p50/p95/p99. Each marker: absolute-positioned, `w-0.5 h-6 rounded-sm` pin + `w-4 h-4 rounded-full border-2 ring-4` dot + label below.
+Gradient track (green→amber→red at 18% opacity), with absolute-positioned needle markers at p50/p95/p99. Each marker consists of:
+- A 1px-wide, 16px-tall vertical pin: `w-px h-4 mx-auto opacity-85`
+- A dot below it: `w-2 h-2 rounded-full mx-auto -mt-1` with `boxShadow: "0 0 0 2px hsl(var(--card))"` (creates the ring effect without Tailwind ring classes)
+- Value label + percentile label below
 
 ---
 
@@ -446,6 +551,8 @@ Gradient track (green→amber→red, 18% opacity), with needle markers at p50/p9
 | Warning | `text-warning`, `bg-warning/10` |
 | Info | `text-info`, `bg-info/10` |
 | Error | `text-destructive`, `bg-destructive/10` |
+| Method text (GET) | `method-get` (and `method-post`, `method-put`, etc.) |
+| Method bg (GET) | `bg-method-get` (and `bg-method-post`, etc.) |
 | Mono font | `font-mono` |
 | Code font (utility) | `font-code` |
 | Thin scrollbar | `scrollbar-thin` |
@@ -456,15 +563,16 @@ Gradient track (green→amber→red, 18% opacity), with needle markers at p50/p9
 - `bg-gray-*`, `bg-zinc-*`, `bg-slate-*` — use `bg-card`, `bg-panel`, `bg-background`
 - `bg-blue-50`, `bg-red-950`, etc. — use `bg-destructive/10`, `bg-info/10`, etc.
 - `dark:bg-*` hardcoded overrides — tokens handle both modes automatically
-- Hardcoded `purple` for Load Test / secondary actions — use `text-primary/border-primary/bg-primary/10`
-- `text-gray-500` — use `text-muted-foreground`
-- `text-gray-400` in dark — use `text-muted-foreground`
+- `text-gray-500`, `text-gray-400` — use `text-muted-foreground`
+- Hardcoded hex method colors like `text-[#22c55e]` — use `method-get` or `hsl(var(--method-get))`
+- `${hexColor}18` hex-alpha concatenation — use `hsl(var(--method-xxx) / 0.1)`
+- Hardcoded purple for Load Test / secondary actions — use `text-primary/border-primary/bg-primary/10`
 
 ---
 
 ## Response Body Syntax Highlighting
 
-For JSON pretty-printer and code viewer (planned / pending implementation):
+Planned / pending implementation. Intended colors for the JSON pretty-printer:
 
 | Token | Color |
 |-------|-------|
@@ -493,5 +601,8 @@ scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
 | `app/src/index.css` | All CSS custom properties, keyframes, utility classes |
 | `app/tailwind.config.js` | Color mapping, font families, keyframes, animation aliases |
 | `app/index.html` | Google Fonts preconnect + link tags |
-| `app/src/components/layout/Sidebar.tsx` | ActivityBar + SidebarPanel layout |
-| `app/src/components/layout/Shell.tsx` | Root layout (Sidebar + main) |
+| `app/src/components/layout/Shell.tsx` | Root layout — resizable sidebar + drag handle + main |
+| `app/src/components/layout/Sidebar.tsx` | ActivityBar + SidebarPanel |
+| `app/src/hooks/useResizable.ts` | Drag-to-resize hook (delta-based, horizontal/vertical) |
+| `app/src/utils/helpers.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
+| `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |
