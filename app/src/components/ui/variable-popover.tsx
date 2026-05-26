@@ -62,6 +62,7 @@ export function VariablePopover({
 	const [editValue, setEditValue] = useState(varInfo?.value || "");
 	const [isSecretRevealed, setIsSecretRevealed] = useState(false);
 	const openValueRef = useRef(varInfo?.value || "");
+	const pendingCancelRef = useRef(false);
 
 	// Reset reveal state when popover closes
 	useEffect(() => {
@@ -77,24 +78,28 @@ export function VariablePopover({
 		}
 	}, [varInfo?.value, isOpen]);
 
-	// Initialize ref when opening
+	// Initialize ref when opening — varInfo intentionally excluded so external
+	// reference churn (e.g. inline object creation in parent) doesn't reset
+	// editValue while the user is typing.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
 	useEffect(() => {
 		if (isOpen && varInfo) {
 			openValueRef.current = varInfo.value;
 			setEditValue(varInfo.value);
 		}
-	}, [isOpen, varInfo]);
+	}, [isOpen]);
 
 	const handleOpenChange = (open: boolean) => {
 		if (open) {
 			setIsOpen(true);
 		} else {
-			// Closing: auto-save if in auto mode and value changed
-			if (saveMode === "auto" && onValueChange && varInfo) {
+			// Closing: auto-save if in auto mode and value changed (unless cancelled)
+			if (!pendingCancelRef.current && saveMode === "auto" && onValueChange && varInfo) {
 				if (editValue !== openValueRef.current) {
 					onValueChange(name, editValue, varInfo.scope);
 				}
 			}
+			pendingCancelRef.current = false;
 			setIsOpen(false);
 		}
 	};
@@ -121,8 +126,12 @@ export function VariablePopover({
 				handleCancel();
 			}
 		} else {
-			// Auto mode: just close on Enter/Escape
-			if (e.key === "Enter" || e.key === "Escape") {
+			// Auto mode: Enter saves, Escape cancels
+			if (e.key === "Enter") {
+				handleOpenChange(false);
+			} else if (e.key === "Escape") {
+				// Mark as cancelled before Radix fires its own onOpenChange for Escape
+				pendingCancelRef.current = true;
 				setIsOpen(false);
 			}
 		}
@@ -282,7 +291,7 @@ export function VariablePopover({
 							)}
 						</>
 					) : (
-						<div className="text-sm text-destructive">
+						<div className="text-sm text-destructive-text">
 							Variable not defined. Define it in Globals, an Environment, or
 							Collection variables.
 						</div>
