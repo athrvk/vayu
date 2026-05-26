@@ -80,6 +80,8 @@ export function mapPostmanAuth(auth: any): RequestAuth {
     case "aws":
     case "ntlm":
       return { mode: type, config: d } as RequestAuth;
+    case "inherit":
+      return { mode: "inherit" };
     case "noauth":
       return { mode: "none" };
     default:
