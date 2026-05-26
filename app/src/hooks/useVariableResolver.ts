@@ -121,9 +121,9 @@ export function useVariableResolver(
 	const resolveString = useCallback(
 		(input: string): string => {
 			if (!input || typeof input !== "string") return input;
-			return input.replace(VARIABLE_PATTERN, (match, varName) => {
+			return input.replace(VARIABLE_PATTERN, (_match, varName) => {
 				const source = variableMap[varName.trim()];
-				return source ? source.value : match;
+				return source ? source.value : "";
 			});
 		},
 		[variableMap]
