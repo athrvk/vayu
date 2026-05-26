@@ -170,6 +170,36 @@ JSValue js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     for (int i = 0; i < argc; i++) {
         if (i > 0)
             ss << " ";
+
+        // JS_ToCString on an object invokes Object.prototype.toString() →
+        // "[object Object]". Pretty-print objects (and arrays) via
+        // JSON.stringify instead, matching standard console.log behavior.
+        // Functions are left to JS_ToCString (which yields their source).
+        if (JS_IsObject (argv[i]) && !JS_IsFunction (ctx, argv[i])) {
+            JSValue indent = JS_NewInt32 (ctx, 2);
+            JSValue json   = JS_JSONStringify (ctx, argv[i], JS_UNDEFINED, indent);
+            JS_FreeValue (ctx, indent);
+
+            if (!JS_IsException (json) && !JS_IsUndefined (json)) {
+                const char* str = JS_ToCString (ctx, json);
+                if (str) {
+                    ss << str;
+                    JS_FreeCString (ctx, str);
+                }
+                JS_FreeValue (ctx, json);
+                continue;
+            }
+            // Stringify threw (e.g. circular reference) or returned undefined.
+            // Clear any pending exception and emit a readable placeholder.
+            JS_FreeValue (ctx, json);
+            JSValue exc = JS_GetException (ctx);
+            if (!JS_IsNull (exc) && !JS_IsUndefined (exc)) {
+                JS_FreeValue (ctx, exc);
+            }
+            ss << "[Object: unserializable]";
+            continue;
+        }
+
         const char* str = JS_ToCString (ctx, argv[i]);
         if (str) {
             ss << str;
