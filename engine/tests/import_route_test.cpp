@@ -26,6 +26,10 @@ class MockSpecServer {
         svr_.Get ("/spec.json", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content (R"({"openapi":"3.0.0"})", "application/json");
         });
+        svr_.Get ("/missing", [] (const httplib::Request&, httplib::Response& res) {
+            res.status = 404;
+            res.set_content (R"({"error":"not found"})", "application/json");
+        });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] { svr_.listen_after_bind (); });
         while (!svr_.is_running ())
@@ -70,6 +74,15 @@ TEST (ImportFetch, ReturnsBadGatewayOnFetchFailure) {
     // Port 1 is not listening → connection failure.
     auto [status, body] = vayu::http::routes::import_fetch (R"({"url":"http://127.0.0.1:1/x"})");
     EXPECT_EQ (status, 502);
+}
+
+TEST (ImportFetch, ProxiesNon2xxRemoteResponse) {
+    MockSpecServer mock;
+    std::string body =
+    R"({"url":"http://127.0.0.1:)" + std::to_string (mock.port ()) + R"(/missing"})";
+    auto [status, json] = vayu::http::routes::import_fetch (body);
+    EXPECT_EQ (status, 200); // transport OK → proxied through, not 502
+    EXPECT_EQ (json["content"].get<std::string> (), R"({"error":"not found"})");
 }
 
 } // namespace

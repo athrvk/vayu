@@ -48,7 +48,9 @@ std::pair<int, nlohmann::json> import_fetch (const std::string& request_body) {
 
     const auto& resp = result.value ();
     if (resp.has_error ()) {
-        return { 502, nlohmann::json{ { "error", "Failed to fetch: " + resp.error_message } } };
+        const std::string detail =
+        resp.error_message.empty () ? "connection error" : resp.error_message;
+        return { 502, nlohmann::json{ { "error", "Failed to fetch: " + detail } } };
     }
     std::string content_type = "application/octet-stream";
     for (const auto& [key, value] : resp.headers) {
@@ -70,7 +72,9 @@ void register_import_routes (RouteContext& ctx) {
         vayu::utils::log_info ("POST /import/fetch");
         auto [status, body] = import_fetch (req.body);
         res.status = status;
-        res.set_content (body.dump (), "application/json");
+        res.set_content (
+        body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
     });
 }
 
