@@ -42,7 +42,7 @@ export class OpenApiV3Parser implements ImportParser {
   parse(parsed: unknown, _raw: string, _opts: ImportOptions): ImportResult {
     const spec = parsed as any;
     const resolveRef = (ref: string): unknown => {
-      const path = ref.replace(/^#\//, "").split("/");
+      const path = ref.replace(/^#\//, "").split("/").map((s) => s.replace(/~1/g, "/").replace(/~0/g, "~"));
       let cur: any = spec;
       for (const seg of path) cur = cur?.[seg];
       return cur;
@@ -56,11 +56,12 @@ export class OpenApiV3Parser implements ImportParser {
     let requestCount = 0;
 
     for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
+      const pathParams = (pathItem as any)?.parameters ?? [];
       for (const method of HTTP_METHODS) {
         const op = (pathItem as any)?.[method];
         if (!op) continue;
         requestCount += 1;
-        const req = buildOperation(method, path, op, resolveRef);
+        const req = buildOperation(method, path, op, resolveRef, pathParams);
         const tag = op.tags?.[0];
         if (tag) {
           if (!tagCollections.has(tag)) tagCollections.set(tag, makeTagCollection(spec, tag));
@@ -119,12 +120,16 @@ function makeTagCollection(spec: any, tag: string): CollectionDraft {
   };
 }
 
-function buildOperation(method: string, path: string, op: any, resolveRef: (r: string) => unknown): RequestDraft {
+function buildOperation(method: string, path: string, op: any, resolveRef: (r: string) => unknown, pathParams: any[] = []): RequestDraft {
   const params: KeyValueEntry[] = [];
   const headers: KeyValueEntry[] = [];
-  for (const param of op.parameters ?? []) {
-    const resolved = param.$ref ? (resolveRef(param.$ref) as any) : param;
-    if (!resolved) continue;
+  const byKey = new Map<string, any>();
+  for (const param of [...pathParams, ...(op.parameters ?? [])]) {
+    const resolved = param?.$ref ? (resolveRef(param.$ref) as any) : param;
+    if (!resolved || !resolved.in || !resolved.name) continue;
+    byKey.set(`${resolved.in}:${resolved.name}`, resolved); // later (operation) wins
+  }
+  for (const resolved of byKey.values()) {
     if (resolved.in === "query") {
       params.push({ key: resolved.name, value: "", enabled: true, ...(resolved.description ? { description: resolved.description } : {}) });
     } else if (resolved.in === "header") {
@@ -147,12 +152,18 @@ function buildOperation(method: string, path: string, op: any, resolveRef: (r: s
   };
 }
 
+function findJsonMedia(content: Record<string, any>): any {
+  if (content["application/json"]) return content["application/json"];
+  const key = Object.keys(content).find((k) => k.startsWith("application/json") || k.endsWith("+json"));
+  return key ? content[key] : undefined;
+}
+
 function buildBody(requestBody: any, resolveRef: (r: string) => unknown): RequestBody {
   const content = (requestBody?.$ref ? (resolveRef(requestBody.$ref) as any) : requestBody)?.content;
   if (!content) return { mode: "none" };
-  if (content["application/json"]) {
-    const media = content["application/json"];
-    const sample = media.example ?? (media.schema ? sampleSchema(media.schema, resolveRef) : {});
+  const jsonMedia = findJsonMedia(content);
+  if (jsonMedia) {
+    const sample = jsonMedia.example ?? (jsonMedia.schema ? sampleSchema(jsonMedia.schema, resolveRef) : {});
     return { mode: "json", content: JSON.stringify(sample, null, 2) };
   }
   if (content["text/plain"]) return { mode: "text", content: "" };

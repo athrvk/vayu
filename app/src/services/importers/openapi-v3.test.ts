@@ -42,4 +42,62 @@ describe("OpenApiV3Parser", () => {
     const root = p.parse(parsed, raw, opts).collections[0];
     expect(root.requests.find((r) => r.name === "Health")).toBeTruthy();
   });
+
+  it("generates JSON body for charset/+json content types", () => {
+    const spec = {
+      openapi: "3.0.0",
+      paths: {
+        "/things": {
+          post: {
+            summary: "Make thing",
+            requestBody: {
+              content: {
+                "application/json; charset=utf-8": {
+                  schema: { type: "object", properties: { a: { type: "string" } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const root = p.parse(spec, JSON.stringify(spec), opts).collections[0];
+    const req = root.requests.find((r) => r.name === "Make thing")!;
+    expect(req.body).toEqual({ mode: "json", content: JSON.stringify({ a: "" }, null, 2) });
+  });
+
+  it("includes path-item-level parameters shared across methods", () => {
+    const spec = {
+      openapi: "3.0.0",
+      paths: {
+        "/items": {
+          parameters: [{ name: "shared", in: "query", schema: { type: "string" } }],
+          get: { summary: "List items" },
+        },
+      },
+    };
+    const root = p.parse(spec, JSON.stringify(spec), opts).collections[0];
+    const req = root.requests.find((r) => r.name === "List items")!;
+    expect(req.params).toContainEqual({ key: "shared", value: "", enabled: true });
+  });
+
+  it("resolves requestBody.$ref to a referenced request body", () => {
+    const spec = {
+      openapi: "3.0.0",
+      components: {
+        schemas: { Pet: { type: "object", properties: { id: { type: "integer" }, name: { type: "string" } } } },
+        requestBodies: {
+          Body: { content: { "application/json": { schema: { $ref: "#/components/schemas/Pet" } } } },
+        },
+      },
+      paths: {
+        "/pets": {
+          post: { summary: "Create pet", requestBody: { $ref: "#/components/requestBodies/Body" } },
+        },
+      },
+    };
+    const root = p.parse(spec, JSON.stringify(spec), opts).collections[0];
+    const req = root.requests.find((r) => r.name === "Create pet")!;
+    expect(req.body).toEqual({ mode: "json", content: JSON.stringify({ id: 0, name: "" }, null, 2) });
+  });
 });
