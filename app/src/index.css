@@ -41,6 +41,13 @@
 	--radius-lg: var(--radius);
 	--radius-md: calc(var(--radius) - 2px);
 	--radius-sm: calc(var(--radius) - 4px);
+
+	/* Font stacks — Tailwind v4 reads these to build the `font-sans` and
+	 * `font-mono` utilities. Without them, v4 uses its default UI stacks
+	 * (system-ui / ui-monospace), which on macOS resolves to SF Pro / Menlo
+	 * regardless of what's in tailwind.config.js. */
+	--font-sans: "Space Grotesk", system-ui, sans-serif;
+	--font-mono: "JetBrains Mono", "Consolas", "Monaco", monospace;
 }
 
 /*
