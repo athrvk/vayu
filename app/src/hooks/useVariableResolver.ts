@@ -21,6 +21,7 @@ import { useMemo, useCallback } from "react";
 import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import { useVariablesStore } from "@/stores";
 import type { VariableValue, ResolvedVariable, Collection } from "@/types";
+import { castByType } from "@/lib/variable-cast";
 
 interface UseVariableResolverOptions {
 	collectionId?: string;
@@ -64,13 +65,19 @@ export function useVariableResolver(
 	const variableMap = useMemo(() => {
 		const result: Record<string, ResolvedVariable> = {};
 
+		const resolve = (v: VariableValue, scope: ResolvedVariable["scope"]): ResolvedVariable => ({
+			value: v.value,
+			scope,
+			secret: v.secret,
+			type: v.type,
+			typedValue: castByType(v.value, v.type),
+		});
+
 		// 1. Globals (lowest priority)
 		if (globalsData?.variables) {
 			for (const [key, val] of Object.entries(globalsData.variables)) {
 				const v = val as VariableValue;
-				if (v.enabled) {
-					result[key] = { value: v.value, scope: "global", secret: v.secret };
-				}
+				if (v.enabled) result[key] = resolve(v, "global");
 			}
 		}
 
@@ -81,9 +88,7 @@ export function useVariableResolver(
 				if (col.variables) {
 					for (const [key, val] of Object.entries(col.variables)) {
 						const v = val as VariableValue;
-						if (v.enabled) {
-							result[key] = { value: v.value, scope: "collection", secret: v.secret };
-						}
+						if (v.enabled) result[key] = resolve(v, "collection");
 					}
 				}
 			}
@@ -95,9 +100,7 @@ export function useVariableResolver(
 			if (env?.variables) {
 				for (const [key, val] of Object.entries(env.variables)) {
 					const v = val as VariableValue;
-					if (v.enabled) {
-						result[key] = { value: v.value, scope: "environment", secret: v.secret };
-					}
+					if (v.enabled) result[key] = resolve(v, "environment");
 				}
 			}
 		}

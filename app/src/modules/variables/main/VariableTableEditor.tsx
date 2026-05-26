@@ -32,14 +32,34 @@ import {
 } from "@/queries";
 import { useSaveStore, useVariablesStore } from "@/stores";
 import type { VariableValue, Collection, Environment } from "@/types";
-import { Button, Input, Badge, DeleteConfirmDialog } from "@/components/ui";
+import {
+	Button,
+	Input,
+	Badge,
+	DeleteConfirmDialog,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui";
 import { cn } from "@/lib/utils";
+
+type VariableType = NonNullable<VariableValue["type"]>;
+
+const VARIABLE_TYPES: { value: VariableType; label: string }[] = [
+	{ value: "string", label: "String" },
+	{ value: "number", label: "Number" },
+	{ value: "boolean", label: "Boolean" },
+	{ value: "json", label: "JSON" },
+];
 
 interface VariableRow {
 	key: string;
 	value: string;
 	enabled: boolean;
 	secret?: boolean;
+	type?: VariableType;
 	createdAt?: number;
 	isNew?: boolean;
 }
@@ -102,9 +122,16 @@ const EDITOR_CONFIGS = {
 
 interface VariableEditorProps {
 	config: VariableEditorConfig;
+	/**
+	 * Embedded mode strips the standalone-screen chrome (title header, info
+	 * banner, count footer) so the editor can be slotted inside another
+	 * container — e.g. the Variables tab of CollectionDetail — without
+	 * duplicating headings or fighting the host layout.
+	 */
+	embedded?: boolean;
 }
 
-export default function VariableEditor({ config }: VariableEditorProps) {
+export default function VariableEditor({ config, embedded = false }: VariableEditorProps) {
 	const { type, globalsData, isLoading, error, environment, collection } = config;
 	const editorConfig = EDITOR_CONFIGS[type];
 
@@ -192,6 +219,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 						value: v.value,
 						enabled: v.enabled,
 						secret: v.secret ?? false,
+						type: v.type ?? "string",
 						createdAt: v.createdAt ?? Date.now(),
 					},
 				]);
@@ -333,12 +361,13 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 				value: val.value,
 				enabled: val.enabled,
 				secret: val.secret ?? false,
+				type: val.type ?? "string",
 				createdAt: val.createdAt,
 			}));
-			rows.push({ key: "", value: "", enabled: true, secret: false, isNew: true });
+			rows.push({ key: "", value: "", enabled: true, secret: false, type: "string", isNew: true });
 			setVariables(rows);
 		} else {
-			setVariables([{ key: "", value: "", enabled: true, secret: false, isNew: true }]);
+			setVariables([{ key: "", value: "", enabled: true, secret: false, type: "string", isNew: true }]);
 		}
 	}, [
 		type === "globals"
@@ -357,7 +386,8 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 		if (newVariables[index].isNew && (newVariables[index].key || newVariables[index].value)) {
 			newVariables[index].isNew = false;
 			newVariables[index].createdAt = Date.now(); // new ones sort to bottom
-			newVariables.push({ key: "", value: "", enabled: true, isNew: true });
+			newVariables[index].type = newVariables[index].type ?? "string";
+			newVariables.push({ key: "", value: "", enabled: true, type: "string", isNew: true });
 		}
 
 		setVariables(newVariables);
@@ -368,7 +398,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 	const removeVariable = (index: number) => {
 		const newVariables = variables.filter((_, i) => i !== index);
 		if (newVariables.length === 0 || !newVariables.some((v) => v.isNew)) {
-			newVariables.push({ key: "", value: "", enabled: true, isNew: true });
+			newVariables.push({ key: "", value: "", enabled: true, type: "string", isNew: true });
 		}
 		setVariables(newVariables);
 		setHasPendingChanges(true);
@@ -439,6 +469,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 	return (
 		<div className="flex flex-col h-full">
 			{/* Header */}
+			{!embedded && (
 			<div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/50">
 				<div className="flex items-center gap-2">
 					<Icon className={cn("w-5 h-5", editorConfig.iconColor)} />
@@ -481,8 +512,10 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 					</div>
 				)}
 			</div>
+			)}
 
 			{/* Info Banner */}
+			{!embedded && (
 			<div
 				className={cn(
 					"px-4 py-2 text-xs border-b",
@@ -493,6 +526,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 			>
 				{editorConfig.infoText}
 			</div>
+			)}
 
 			{type === "environment" && environment && (
 				<DeleteConfirmDialog
@@ -506,13 +540,14 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 			)}
 
 			{/* Variables Table */}
-			<div className="flex-1 overflow-y-auto p-4">
+			<div className={cn("flex-1 overflow-y-auto", embedded ? "p-0" : "p-4")}>
 				<table className="w-full">
 					<thead>
 						<tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
 							<th className="pb-2 w-8"></th>
 							<th className="pb-2 px-2">Variable</th>
 							<th className="pb-2 px-2">Value</th>
+							<th className="pb-2 px-2 w-[110px]">Type</th>
 							<th className="pb-2 w-8 text-center" title="Mark as secret (masks value in UI)">
 								<KeyRound className="w-3 h-3 inline-block" />
 							</th>
@@ -605,6 +640,35 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 											)}
 										</div>
 									</td>
+									<td className="py-1 px-2">
+										<Select
+											value={variable.type ?? "string"}
+											onValueChange={(v) => {
+												updateVariable(index, "type", v as VariableType);
+												// Only fire an immediate save if the row is already persisted —
+												// otherwise let the key/value entry commit it on first edit.
+												if (!variable.isNew) {
+													performSaveRef.current();
+												}
+											}}
+										>
+											<SelectTrigger
+												className={cn(
+													"h-8 text-xs px-2",
+													!variable.enabled && !variable.isNew && "opacity-60"
+												)}
+											>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												{VARIABLE_TYPES.map((t) => (
+													<SelectItem key={t.value} value={t.value} className="text-xs">
+														{t.label}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</td>
 									<td className="py-1 text-center">
 										{!variable.isNew && (
 											<Button
@@ -654,9 +718,11 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 			</div>
 
 			{/* Footer */}
+			{!embedded && (
 			<div className="px-4 py-2 border-t border-border bg-muted/50 text-xs text-muted-foreground">
 				{variables.filter((v) => v.key && !v.isNew).length} variable(s)
 			</div>
+			)}
 		</div>
 	);
 }

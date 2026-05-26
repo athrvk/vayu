@@ -144,11 +144,17 @@ export type VariableScope = "global" | "collection" | "environment";
 /**
  * Resolved variable with its value, scope, and secret flag.
  * Note: The `secret` field is a UI hint for masking — values are NOT encrypted at rest.
+ *
+ * `value` is always the raw string form (used for `{{var}}` interpolation in
+ * URLs / headers / body). `type` and `typedValue` expose the declared
+ * conversion for consumers that want the cast JS value (scripts, autocomplete).
  */
 export interface ResolvedVariable {
 	value: string;
 	scope: VariableScope;
 	secret?: boolean;
+	type?: VariableValue["type"];
+	typedValue?: unknown;
 }
 
 /**
