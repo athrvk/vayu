@@ -901,7 +901,7 @@ function MetricsView({
 	const testDuration = finalReport?.summary?.testDuration;
 
 	return (
-		<div className="p-5 flex flex-col gap-3.5 max-w-[1180px]">
+		<div className="p-5 flex flex-col gap-3.5">
 			{/* Row 1 — Hero */}
 			<div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3">
 				<RateFidelityCard targetRps={targetRps} actualRps={actualRps} />
