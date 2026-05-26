@@ -39,6 +39,6 @@ describe("sampleSchema", () => {
   });
   it("stops at the depth cap / cycle without infinite recursion", () => {
     const v = sampleSchema({ $ref: "#/components/schemas/Node" }, resolver);
-    expect(typeof v).toBe("object"); // terminates; deep value collapses to {}
+    expect(v).toEqual({ next: {} }); // first level resolves; the self-$ref collapses to {}
   });
 });

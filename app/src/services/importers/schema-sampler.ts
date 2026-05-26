@@ -24,7 +24,12 @@ function walk(node: unknown, resolveRef: RefResolver, depth: number, seenRefs: S
 
   if ("$ref" in schema && typeof schema.$ref === "string") {
     if (seenRefs.has(schema.$ref)) return {}; // cycle guard
-    const resolved = resolveRef(schema.$ref);
+    let resolved: unknown;
+    try {
+      resolved = resolveRef(schema.$ref);
+    } catch {
+      return {};
+    }
     if (resolved == null) return {};
     return walk(resolved, resolveRef, depth + 1, new Set([...seenRefs, schema.$ref]));
   }
@@ -48,6 +53,7 @@ function walk(node: unknown, resolveRef: RefResolver, depth: number, seenRefs: S
       return schema.items ? [walk(schema.items, resolveRef, depth + 1, seenRefs)] : [];
     case "object":
     default: {
+      // no/unknown type: fall back to walking properties
       const props = schema.properties;
       if (props && typeof props === "object") {
         const out: Record<string, unknown> = {};
