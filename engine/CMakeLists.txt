@@ -341,6 +341,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/execution.cpp
         src/http/routes/metrics.cpp
         src/http/routes/scripting.cpp
+        src/http/routes/import.cpp
     )
     
     target_link_libraries(vayu-engine PRIVATE
@@ -369,6 +370,8 @@ if(VAYU_BUILD_TESTS)
         tests/rate_limit_test.cpp
         tests/metrics_helper_test.cpp
         tests/metrics_collector_test.cpp
+        tests/import_route_test.cpp
+        src/http/routes/import.cpp
     )
     
     target_link_libraries(vayu_tests PRIVATE
