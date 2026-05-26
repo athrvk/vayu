@@ -40,6 +40,7 @@ import type {
 	RequestBuilderContextValue,
 } from "../types";
 import { createDefaultRequestState } from "../utils/request-state";
+import { httpStatusText } from "@/lib/http-status";
 
 interface RequestBuilderProviderProps {
 	children: ReactNode;
@@ -134,7 +135,7 @@ export default function RequestBuilderProvider({
 
 				const restoredResponse: ResponseState = {
 					status: lastResult.statusCode || 0,
-					statusText: `${lastResult.statusCode || 0}`,
+					statusText: httpStatusText(lastResult.statusCode || 0),
 					headers: trace.response.headers || {},
 					requestHeaders: trace.request?.headers || {},
 					rawRequest: trace.request

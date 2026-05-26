@@ -24,6 +24,7 @@ import {
 import { TimingBreakdown } from "./components";
 import { UnifiedResponseViewer } from "@/components/shared/response-viewer";
 import type { DesignRunDetailProps } from "../types";
+import { httpStatusText } from "@/lib/http-status";
 
 export default function DesignRunDetail({ report, onBack: _onBack, runId }: DesignRunDetailProps) {
 	// Get the result from the report
@@ -42,11 +43,7 @@ export default function DesignRunDetail({ report, onBack: _onBack, runId }: Desi
 						: trace.response.body || "",
 				headers: trace.response.headers || {},
 				status: result?.statusCode || 0,
-				statusText: result?.statusCode
-					? result.statusCode >= 200 && result.statusCode < 300
-						? "OK"
-						: "Error"
-					: "Error",
+				statusText: httpStatusText(result?.statusCode || 0),
 				time: result?.latencyMs,
 			}
 		: null;
