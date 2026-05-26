@@ -30,6 +30,7 @@ import {
 import { useRequestBuilderContext } from "../../../context";
 import VariableInput from "../../../shared/VariableInput";
 import type { AuthType } from "../../../types";
+import AuthInheritBanner from "./AuthInheritBanner";
 
 const AUTH_TYPES: { value: AuthType; label: string; icon: typeof Key }[] = [
 	{ value: "inherit", label: "Inherit from Collection", icon: Lock },
@@ -94,6 +95,9 @@ export default function AuthPanel() {
 					</SelectContent>
 				</Select>
 			</div>
+
+			{/* Inherit resolution */}
+			{authType === "inherit" && <AuthInheritBanner collectionId={request.collectionId} />}
 
 			{/* Auth Configuration */}
 			{authType === "none" && (
