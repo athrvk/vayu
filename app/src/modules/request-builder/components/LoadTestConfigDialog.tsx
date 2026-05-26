@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -7,7 +6,7 @@
  */
 
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertTriangle } from "lucide-react";
 import type { LoadTestConfig } from "@/types";
 import {
 	Button,
@@ -63,12 +62,17 @@ interface LoadTestConfigDialogProps {
 	onClose: () => void;
 	onStart: (config: LoadTestConfig) => void;
 	isStarting?: boolean;
+	/** True when the pending request has a non-empty preRequestScript.
+	 *  Surfaces a warning that pre-request scripts are not executed during
+	 *  load tests (engine accepts them only on /request, not /run). */
+	hasPreRequestScript?: boolean;
 }
 
 export default function LoadTestConfigDialog({
 	onClose,
 	onStart,
 	isStarting = false,
+	hasPreRequestScript = false,
 }: LoadTestConfigDialogProps) {
 	// Load saved config or use defaults
 	const saved = loadSavedConfig();
@@ -135,6 +139,23 @@ export default function LoadTestConfigDialog({
 
 				{/* Content */}
 				<div className="space-y-4">
+					{/* Pre-request script gap warning — engine accepts pre-request
+					    scripts on /request but not on /run, so the script will be
+					    silently skipped during the load test. */}
+					{hasPreRequestScript && (
+						<div className="flex gap-2.5 rounded-md border border-warning/30 bg-warning/10 px-3 py-2.5 text-[12px] text-warning">
+							<AlertTriangle className="h-4 w-4 shrink-0 mt-px" />
+							<div className="space-y-1">
+								<p className="font-semibold">Pre-request script will not run</p>
+								<p className="text-[11.5px] text-warning/85 leading-relaxed">
+									Vayu's load test engine doesn't execute pre-request scripts
+									(running JS per request would cap throughput). Your test script
+									will still run once after the test, against sampled responses.
+								</p>
+							</div>
+						</div>
+					)}
+
 					{/* Mode Selection */}
 					<div className="space-y-2">
 						<Label>Test Mode</Label>

@@ -595,6 +595,7 @@ export default function RequestBuilder() {
 					onClose={handleCloseLoadTestDialog}
 					onStart={handleConfirmLoadTest}
 					isStarting={isStartingLoadTest}
+					hasPreRequestScript={!!pendingLoadTestRequest?.preRequestScript?.trim()}
 				/>
 			)}
 		</>
