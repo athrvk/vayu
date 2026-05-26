@@ -104,6 +104,7 @@ export interface ListEnvironmentsResponse {
 
 export interface CreateEnvironmentRequest {
 	name: string;
+	description?: string; // engine accepts this (environments.cpp); was missing from the TS type
 	variables: Record<string, VariableValue>;
 	isActive?: boolean;
 }
@@ -237,4 +238,10 @@ export interface UpdateConfigRequest {
 	value?: string;
 	// Bulk update
 	entries?: Record<string, string>;
+}
+
+// Import API
+export interface ImportFetchResponse {
+	content: string;
+	contentType: string;
 }

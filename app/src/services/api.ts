@@ -42,6 +42,7 @@ import type {
 	GetConfigResponse,
 	UpdateConfigRequest,
 	GlobalsResponse,
+	ImportFetchResponse,
 } from "@/types";
 import type { TimeSeriesResponse } from "@/modules/history/types";
 
@@ -202,5 +203,10 @@ export const apiService = {
 	// Scripting
 	async getScriptCompletions(): Promise<ScriptCompletionsResponse> {
 		return await httpClient.get<ScriptCompletionsResponse>(API_ENDPOINTS.SCRIPT_COMPLETIONS);
+	},
+
+	// Import
+	async importFetch(url: string): Promise<ImportFetchResponse> {
+		return await httpClient.post<ImportFetchResponse>(API_ENDPOINTS.IMPORT_FETCH, { url });
 	},
 };
