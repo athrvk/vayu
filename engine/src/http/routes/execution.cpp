@@ -42,7 +42,8 @@ vayu::Environment parse_variables_json (const std::string& json_str) {
                     std::string var_value = value.value ("value", "");
                     bool enabled          = value.value ("enabled", true);
                     bool secret           = value.value ("secret", false);
-                    env[key] = vayu::Variable{ var_value, secret, enabled };
+                    std::string type      = value.value ("type", std::string{ "string" });
+                    env[key] = vayu::Variable{ var_value, secret, enabled, type };
                 }
             }
         }
@@ -60,6 +61,7 @@ std::string serialize_variables_json (const vayu::Environment& env) {
         obj[key]["value"]   = var.value;
         obj[key]["enabled"] = var.enabled;
         obj[key]["secret"]  = var.secret;
+        obj[key]["type"]    = var.type.empty () ? std::string{ "string" } : var.type;
     }
     return obj.dump ();
 }

@@ -17,8 +17,11 @@
 #include "vayu/runtime/script_engine.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <limits>
 #include <mutex>
 #include <sstream>
+#include <string>
 #include <vector>
 
 #include "vayu/utils/json.hpp"
@@ -89,6 +92,71 @@ std::string js_to_string (JSContext* ctx, JSValue val) {
     std::string result (str);
     JS_FreeCString (ctx, str);
     return result;
+}
+
+// ============================================================================
+// Variable Type Casting
+// ============================================================================
+
+// Convert a stored Variable into a JSValue of its declared type. The on-disk
+// value is always a string — type drives the conversion (mirrors the frontend
+// castByType in app/src/lib/variable-cast.ts so reads are consistent across
+// both runtimes).
+JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
+    const std::string& type = var.type.empty () ? std::string{ "string" } : var.type;
+
+    if (type == "number") {
+        if (var.value.empty ())
+            return JS_NewFloat64 (ctx, std::numeric_limits<double>::quiet_NaN ());
+        try {
+            size_t idx = 0;
+            double num = std::stod (var.value, &idx);
+            // If the whole string didn't parse, surface NaN to match the
+            // frontend's Number(value) behavior on partial garbage.
+            if (idx != var.value.size ())
+                return JS_NewFloat64 (ctx, std::numeric_limits<double>::quiet_NaN ());
+            return JS_NewFloat64 (ctx, num);
+        } catch (...) {
+            return JS_NewFloat64 (ctx, std::numeric_limits<double>::quiet_NaN ());
+        }
+    }
+
+    if (type == "boolean") {
+        std::string lowered = var.value;
+        std::transform (lowered.begin (), lowered.end (), lowered.begin (),
+        [] (unsigned char c) { return std::tolower (c); });
+        // Trim whitespace
+        auto isspace_pred = [] (unsigned char c) { return std::isspace (c); };
+        while (!lowered.empty () && isspace_pred (lowered.front ()))
+            lowered.erase (lowered.begin ());
+        while (!lowered.empty () && isspace_pred (lowered.back ()))
+            lowered.pop_back ();
+
+        if (lowered == "true" || lowered == "1" || lowered == "yes")
+            return JS_NewBool (ctx, 1);
+        if (lowered == "false" || lowered == "0" || lowered == "no" || lowered.empty ())
+            return JS_NewBool (ctx, 0);
+        // Non-canonical truthy string: matches Boolean("foo") → true
+        return JS_NewBool (ctx, 1);
+    }
+
+    if (type == "json") {
+        // JS_ParseJSON returns an exception JSValue on parse failure; fall
+        // back to the raw string so the script author can debug.
+        JSValue parsed =
+        JS_ParseJSON (ctx, var.value.c_str (), var.value.size (), "<variable>");
+        if (JS_IsException (parsed)) {
+            JS_FreeValue (ctx, parsed);
+            // Clear the pending exception so it doesn't leak into the script
+            JSValue err = JS_GetException (ctx);
+            JS_FreeValue (ctx, err);
+            return JS_NewString (ctx, var.value.c_str ());
+        }
+        return parsed;
+    }
+
+    // Default / "string"
+    return JS_NewString (ctx, var.value.c_str ());
 }
 
 // ============================================================================
@@ -827,7 +895,7 @@ JSValue js_pm_environment_get (JSContext* ctx, JSValueConst this_val, int argc, 
     std::string key = js_to_string (ctx, argv[0]);
     auto it         = data->environment->find (key);
     if (it != data->environment->end () && it->second.enabled) {
-        return JS_NewString (ctx, it->second.value.c_str ());
+        return cast_variable_to_jsvalue (ctx, it->second);
     }
 
     return JS_UNDEFINED;
@@ -875,7 +943,7 @@ JSValue js_pm_globals_get (JSContext* ctx, JSValueConst this_val, int argc, JSVa
     std::string key = js_to_string (ctx, argv[0]);
     auto it         = data->globals->find (key);
     if (it != data->globals->end () && it->second.enabled) {
-        return JS_NewString (ctx, it->second.value.c_str ());
+        return cast_variable_to_jsvalue (ctx, it->second);
     }
 
     return JS_UNDEFINED;
@@ -923,7 +991,7 @@ JSValue js_pm_collectionVariables_get (JSContext* ctx, JSValueConst this_val, in
     std::string key = js_to_string (ctx, argv[0]);
     auto it         = data->collectionVariables->find (key);
     if (it != data->collectionVariables->end () && it->second.enabled) {
-        return JS_NewString (ctx, it->second.value.c_str ());
+        return cast_variable_to_jsvalue (ctx, it->second);
     }
 
     return JS_UNDEFINED;

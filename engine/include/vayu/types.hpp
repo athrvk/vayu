@@ -426,12 +426,18 @@ struct ScriptResult {
 // ============================================================================
 
 /**
- * @brief Variable value with metadata
+ * @brief Variable value with metadata.
+ *
+ * `value` is always stored as a string on disk. `type` is a UI/script hint
+ * (per data-model PRD §5.2) declaring the conversion applied when scripts
+ * read this variable via pm.*.get(...). One of:
+ *   "string" (default), "number", "boolean", "json".
  */
 struct Variable {
     std::string value;
     bool secret  = false;
     bool enabled = true;
+    std::string type = "string";
 };
 
 /**
