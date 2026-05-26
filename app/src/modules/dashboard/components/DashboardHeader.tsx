@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -13,8 +12,9 @@
  */
 
 import { useEffect, useState } from "react";
-import { StopCircle, Loader2 } from "lucide-react";
+import { ArrowLeft, StopCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui";
+import { useNavigationStore } from "@/stores";
 import { getMethodColor } from "@/utils";
 import type { DashboardHeaderProps } from "../types";
 
@@ -35,6 +35,9 @@ export default function DashboardHeader({
 	elapsedDuration = 0,
 	configuration,
 }: DashboardHeaderProps) {
+	const navigateBack = useNavigationStore((s) => s.navigateBack);
+	const canNavigateBack = useNavigationStore((s) => s.canNavigateBack());
+
 	// Live counter for running tests — reset to 0 each time a new run starts
 	const [liveTick, setLiveTick] = useState(0);
 
@@ -47,18 +50,18 @@ export default function DashboardHeader({
 	}, [mode, isStreaming]);
 
 	const displayMs =
-		mode === "running" && isStreaming
-			? elapsedDuration + liveTick * 1000
-			: elapsedDuration;
+		mode === "running" && isStreaming ? elapsedDuration + liveTick * 1000 : elapsedDuration;
 
 	// Config summary line
 	const configParts: string[] = [];
 	if (configuration?.concurrency != null) configParts.push(`${configuration.concurrency} VUs`);
 	if (configuration?.mode) {
 		const modeLabel =
-			configuration.mode === "rps" ? "RPS Mode" :
-			configuration.mode === "concurrency" ? "Concurrency Mode" :
-			configuration.mode;
+			configuration.mode === "rps"
+				? "RPS Mode"
+				: configuration.mode === "concurrency"
+					? "Concurrency Mode"
+					: configuration.mode;
 		configParts.push(modeLabel);
 	}
 	if (displayMs > 0) configParts.push(`${formatElapsed(displayMs)} elapsed`);
@@ -66,6 +69,19 @@ export default function DashboardHeader({
 
 	return (
 		<div className="h-[52px] flex items-center gap-3 px-5 bg-panel border-b border-border shrink-0">
+			{/* Back button — returns to the previous screen (typically request builder) */}
+			{canNavigateBack && (
+				<Button
+					size="icon"
+					variant="ghost"
+					onClick={navigateBack}
+					className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+					title="Back"
+				>
+					<ArrowLeft className="w-4 h-4" />
+				</Button>
+			)}
+
 			{/* Status pill */}
 			{isStreaming ? (
 				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-green-500/15 text-green-500 border border-green-500/25 shrink-0">
@@ -87,9 +103,9 @@ export default function DashboardHeader({
 				<span
 					className="text-[11px] font-bold font-mono px-1.5 py-0.5 rounded shrink-0"
 					style={{
-						color:       `hsl(${getMethodColor(requestMethod)})`,
-						background:  `hsl(${getMethodColor(requestMethod)} / 0.094)`,
-						border:      `1px solid hsl(${getMethodColor(requestMethod)} / 0.188)`,
+						color: `hsl(${getMethodColor(requestMethod)})`,
+						background: `hsl(${getMethodColor(requestMethod)} / 0.094)`,
+						border: `1px solid hsl(${getMethodColor(requestMethod)} / 0.188)`,
 					}}
 				>
 					{requestMethod.toUpperCase()}
