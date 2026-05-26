@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -24,8 +23,8 @@ export default function VariablesTab({ collection }: VariablesTabProps) {
 	return (
 		<div className="max-w-[720px] flex flex-col gap-4">
 			<InfoBanner>
-				Collection variables are scoped to this collection and its sub-folders. Reference them
-				with{" "}
+				Collection variables are scoped to this collection and its sub-folders. Reference
+				them with{" "}
 				<code className="font-mono text-[11px] bg-accent px-1 rounded-sm">{`{{variable}}`}</code>{" "}
 				in URLs, headers, body, and scripts. Environment variables take precedence.
 			</InfoBanner>

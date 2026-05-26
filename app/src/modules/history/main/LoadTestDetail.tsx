@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -14,14 +13,7 @@
 
 import { useState } from "react";
 import { CheckCircle, Activity, Zap, TrendingUp, BarChart3, Settings2 } from "lucide-react";
-import {
-	Badge,
-	Tabs,
-	TabsContent,
-	TabsList,
-	TabsTrigger,
-	ScrollArea,
-} from "@/components/ui";
+import { Badge, Tabs, TabsContent, TabsList, TabsTrigger, ScrollArea } from "@/components/ui";
 import { formatNumber, loadTestTypeToLabel } from "@/utils";
 import type { LoadTestConfig } from "@/types";
 import { OverviewTab, PerformanceTab, SamplesTab } from "./components";
@@ -34,15 +26,14 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 	const successRate =
 		report.summary.totalRequests > 0
 			? ((report.summary.totalRequests - report.summary.failedRequests) /
-				report.summary.totalRequests) *
-			100
+					report.summary.totalRequests) *
+				100
 			: 0;
 
 	return (
 		<div className="flex flex-col h-full bg-background">
 			{/* Fixed Header */}
 			<div className="border-b bg-card px-6 py-4">
-
 				{/* Request Info Bar */}
 				<div className="flex items-center gap-3 bg-muted/50 p-3 mb-3">
 					<Badge variant="outline" className="font-mono font-bold shrink-0">
@@ -71,25 +62,33 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 						{config.duration != null && config.duration !== "" && (
 							<div className="flex items-center gap-2">
 								<span className="text-muted-foreground">Duration:</span>
-								<span className="text-foreground font-mono">{String(config.duration)}</span>
+								<span className="text-foreground font-mono">
+									{String(config.duration)}
+								</span>
 							</div>
 						)}
 						{config.targetRps != null && config.targetRps > 0 && (
 							<div className="flex items-center gap-2">
 								<span className="text-muted-foreground">Target RPS:</span>
-								<span className="text-foreground font-mono">{config.targetRps}</span>
+								<span className="text-foreground font-mono">
+									{config.targetRps}
+								</span>
 							</div>
 						)}
 						{config.concurrency != null && config.concurrency > 0 && (
 							<div className="flex items-center gap-2">
 								<span className="text-muted-foreground">Concurrency:</span>
-								<span className="text-foreground font-mono">{config.concurrency}</span>
+								<span className="text-foreground font-mono">
+									{config.concurrency}
+								</span>
 							</div>
 						)}
 						{config.timeout != null && config.timeout > 0 && (
 							<div className="flex items-center gap-2">
 								<span className="text-muted-foreground">Timeout:</span>
-								<span className="text-foreground font-mono">{config.timeout}ms</span>
+								<span className="text-foreground font-mono">
+									{config.timeout}ms
+								</span>
 							</div>
 						)}
 						{config.comment && (

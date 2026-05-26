@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -118,14 +117,19 @@ export default function AuthTab({ collection }: AuthTabProps) {
 		<div className="max-w-[520px]">
 			<InfoBanner>
 				Auth set here is <strong>inherited by requests</strong> in this collection that use{" "}
-				<code className="font-mono text-[11px] bg-accent px-1 rounded-sm">Inherit from collection</code>.
-				Nested folders take precedence over parent folders.
+				<code className="font-mono text-[11px] bg-accent px-1 rounded-sm">
+					Inherit from collection
+				</code>
+				. Nested folders take precedence over parent folders.
 			</InfoBanner>
 
 			<div className="mb-5">
 				<SectionLabel>Authentication type</SectionLabel>
 				<div className="max-w-[280px]">
-					<Select value={mode} onValueChange={(v) => handleModeChange(v as CollectionAuthMode)}>
+					<Select
+						value={mode}
+						onValueChange={(v) => handleModeChange(v as CollectionAuthMode)}
+					>
 						<SelectTrigger className="h-9 text-sm">
 							<SelectValue />
 						</SelectTrigger>
@@ -264,7 +268,10 @@ function AuthConfig({ auth, onChange }: AuthConfigProps) {
 							value={auth.value}
 							onChange={(e) => onChange({ ...auth, value: e.target.value })}
 							placeholder="{{apiKey}}"
-							className={cn("font-mono", auth.value.includes("{{") && "text-variable")}
+							className={cn(
+								"font-mono",
+								auth.value.includes("{{") && "text-variable"
+							)}
 						/>
 					</div>
 				</div>

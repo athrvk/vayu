@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -84,7 +83,7 @@ export default function PreScriptPanel() {
 			{/* All Variables Panel */}
 			{showVariables && (
 				<div className="p-3 bg-muted/50 border border-input max-h-40 overflow-y-auto">
-					<div className="grid grid-cols-2 gap-2 text-xs font-mono">	
+					<div className="grid grid-cols-2 gap-2 text-xs font-mono">
 						{Object.entries(allVariables).map(([name, info]) => (
 							<div key={name} className="flex items-center gap-2">
 								<Badge variant="outline" className="text-[10px] px-1">

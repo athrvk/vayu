@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -33,13 +32,19 @@ interface RunItemProps {
 function methodBadgeStyle(method: string): React.CSSProperties {
 	const c = `var(--method-${method.toLowerCase()})`;
 	return {
-		color:      `hsl(${c})`,
+		color: `hsl(${c})`,
 		background: `hsl(${c} / 0.1)`,
-		border:     `1px solid hsl(${c} / 0.3)`,
+		border: `1px solid hsl(${c} / 0.3)`,
 	};
 }
 
-export default function RunItem({ run, onSelect, onDelete, isDeleting, isSelected = false }: RunItemProps) {
+export default function RunItem({
+	run,
+	onSelect,
+	onDelete,
+	isDeleting,
+	isSelected = false,
+}: RunItemProps) {
 	// Format timestamp to relative time
 	const formatTime = (timestamp: number) => {
 		if (!timestamp) return "Unknown";

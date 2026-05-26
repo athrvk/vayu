@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -87,10 +86,7 @@ export function isSizeConfig(key: string): boolean {
  * @param min - Minimum value as string
  * @param max - Maximum value as string
  */
-export function formatSizeRange(
-	min?: string,
-	max?: string,
-): string | null {
+export function formatSizeRange(min?: string, max?: string): string | null {
 	if (!min && !max) return null;
 
 	const parts: string[] = [];

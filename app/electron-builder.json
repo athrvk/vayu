@@ -5,18 +5,12 @@
 		"output": "release",
 		"buildResources": "build"
 	},
-	"files": [
-		"dist/**/*",
-		"dist-electron/**/*",
-		"package.json"
-	],
+	"files": ["dist/**/*", "dist-electron/**/*", "package.json"],
 	"extraResources": [
 		{
 			"from": "build/resources/bin/",
 			"to": "bin",
-			"filter": [
-				"**/*"
-			]
+			"filter": ["**/*"]
 		}
 	],
 	"asar": true,
@@ -40,9 +34,7 @@
 		"target": [
 			{
 				"target": "dmg",
-				"arch": [
-					"universal"
-				]
+				"arch": ["universal"]
 			}
 		],
 		"icon": "build/icon.png",
@@ -72,10 +64,7 @@
 		}
 	},
 	"linux": {
-		"target": [
-			"AppImage",
-			"deb"
-		],
+		"target": ["AppImage", "deb"],
 		"category": "Development",
 		"icon": "build/icons",
 		"maintainer": "Atharva Kusumbia <atharvakusumbia@gmail.com>"
@@ -89,14 +78,10 @@
 	"deb": {
 		"afterInstall": "installer/linux-postinst.sh",
 		"afterRemove": "installer/linux-postrm.sh",
-		"fpm": [
-			"--before-remove=installer/linux-prerm.sh"
-		]
+		"fpm": ["--before-remove=installer/linux-prerm.sh"]
 	},
 	"win": {
-		"target": [
-			"nsis"
-		],
+		"target": ["nsis"],
 		"icon": "build/icon.ico"
 	}
 }

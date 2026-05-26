@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -41,7 +40,11 @@ export default function Shell() {
 	const minSidebarWidth =
 		activeSidebarTab === "history" ? MIN_SIDEBAR_WIDTH_HISTORY : MIN_SIDEBAR_WIDTH;
 
-	const { size: sidebarWidth, isResizing, startResizing } = useResizable({
+	const {
+		size: sidebarWidth,
+		isResizing,
+		startResizing,
+	} = useResizable({
 		defaultSize: 320,
 		min: minSidebarWidth,
 		max: MAX_SIDEBAR_WIDTH,

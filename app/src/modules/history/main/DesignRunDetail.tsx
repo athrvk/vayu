@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -13,14 +12,7 @@
  */
 
 import { XCircle, Clock } from "lucide-react";
-import {
-	Card,
-	CardContent,
-	CardHeader,
-	CardTitle,
-	Badge,
-	ScrollArea,
-} from "@/components/ui";
+import { Card, CardContent, CardHeader, CardTitle, Badge, ScrollArea } from "@/components/ui";
 import { TimingBreakdown } from "./components";
 import { UnifiedResponseViewer } from "@/components/shared/response-viewer";
 import type { DesignRunDetailProps } from "../types";
@@ -63,7 +55,6 @@ export default function DesignRunDetail({ report, onBack: _onBack, runId }: Desi
 		<div className="flex flex-col h-full bg-background">
 			{/* Header */}
 			<div className="border-b bg-card px-6 py-4">
-
 				{/* Request Summary */}
 				<div className="flex items-center gap-3 bg-muted/50 p-3">
 					<Badge variant="outline" className="font-mono font-bold shrink-0">

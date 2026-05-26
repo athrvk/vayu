@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -27,8 +26,8 @@ import ConnectionStatus from "../status/ConnectionStatus";
 
 const TOP_TABS: Array<{ id: SidebarTab; label: string; icon: typeof Folder }> = [
 	{ id: "collections", label: "Collections", icon: Folder },
-	{ id: "history",     label: "History",     icon: Clock },
-	{ id: "variables",   label: "Variables",   icon: Code2 },
+	{ id: "history", label: "History", icon: Clock },
+	{ id: "variables", label: "Variables", icon: Code2 },
 ];
 
 const BOTTOM_TAB = { id: "settings" as SidebarTab, label: "Settings", icon: Settings2 };

@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -20,12 +19,12 @@ import type { HttpMethod } from "@/types";
 const HTTP_METHODS: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
 const METHOD_COLORS: Record<HttpMethod, string> = {
-	GET:     "method-get",
-	POST:    "method-post",
-	PUT:     "method-put",
-	PATCH:   "method-patch",
-	DELETE:  "method-delete",
-	HEAD:    "method-head",
+	GET: "method-get",
+	POST: "method-post",
+	PUT: "method-put",
+	PATCH: "method-patch",
+	DELETE: "method-delete",
+	HEAD: "method-head",
 	OPTIONS: "method-options",
 };
 
@@ -38,7 +37,10 @@ export default function MethodSelector() {
 			onValueChange={(value) => updateField("method", value as HttpMethod)}
 		>
 			<SelectTrigger
-				className={cn("w-[76px] h-[34px] font-mono font-bold text-[11px] bg-accent border-border", METHOD_COLORS[request.method])}
+				className={cn(
+					"w-[76px] h-[34px] font-mono font-bold text-[11px] bg-accent border-border",
+					METHOD_COLORS[request.method]
+				)}
 			>
 				<SelectValue />
 			</SelectTrigger>

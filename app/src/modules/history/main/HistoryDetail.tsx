@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -39,9 +38,7 @@ export default function HistoryDetail() {
 				<History className="w-12 h-12 opacity-50" />
 				<div className="text-center">
 					<p className="text-lg font-medium">No Run Selected</p>
-					<p className="text-sm mt-1">
-						Select a run from the sidebar to view details
-					</p>
+					<p className="text-sm mt-1">Select a run from the sidebar to view details</p>
 				</div>
 			</div>
 		);
@@ -76,20 +73,28 @@ export default function HistoryDetail() {
 			{/* Header with Back Button */}
 			<div className="border-b bg-card px-6 py-4 shrink-0">
 				<div className="flex items-center gap-3">
-					<Button variant="ghost" size="icon" onClick={navigateToHistory} className="shrink-0">
+					<Button
+						variant="ghost"
+						size="icon"
+						onClick={navigateToHistory}
+						className="shrink-0"
+					>
 						<ArrowLeft className="w-5 h-5" />
 					</Button>
 					<div className="flex-1 min-w-0">
 						<div className="flex items-center gap-2">
 							<h1 className="text-lg font-semibold text-foreground truncate">
-								{report.metadata?.requestUrl || (isDesignRun ? "Design Request" : "Load Test Report")}
+								{report.metadata?.requestUrl ||
+									(isDesignRun ? "Design Request" : "Load Test Report")}
 							</h1>
 							<Badge variant="outline" className="text-xs shrink-0">
 								{isDesignRun ? "Design" : "Load Test"}
 							</Badge>
 						</div>
 						<div className="flex items-center gap-2 mt-1">
-							<span className="text-xs text-muted-foreground font-mono">{selectedRunId}</span>
+							<span className="text-xs text-muted-foreground font-mono">
+								{selectedRunId}
+							</span>
 							{report.metadata?.status && (
 								<>
 									<span className="text-xs text-muted-foreground">•</span>
@@ -101,10 +106,11 @@ export default function HistoryDetail() {
 													? "destructive"
 													: "outline"
 										}
-										className={`text-xs capitalize ${report.metadata.status === "stopped"
+										className={`text-xs capitalize ${
+											report.metadata.status === "stopped"
 												? "border-orange-500 text-orange-600 dark:text-orange-400"
 												: ""
-											}`}
+										}`}
 									>
 										{report.metadata.status}
 									</Badge>
@@ -117,9 +123,17 @@ export default function HistoryDetail() {
 			{/* Detail Content */}
 			<div className="flex-1 min-h-0 overflow-hidden">
 				{isDesignRun ? (
-					<DesignRunDetail report={report} onBack={navigateToHistory} runId={selectedRunId} />
+					<DesignRunDetail
+						report={report}
+						onBack={navigateToHistory}
+						runId={selectedRunId}
+					/>
 				) : (
-					<LoadTestDetail report={report} onBack={navigateToHistory} runId={selectedRunId} />
+					<LoadTestDetail
+						report={report}
+						onBack={navigateToHistory}
+						runId={selectedRunId}
+					/>
 				)}
 			</div>
 		</div>

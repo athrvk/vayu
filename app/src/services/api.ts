@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -147,7 +146,9 @@ export const apiService = {
 	},
 
 	async updateGlobals(variables: Record<string, VariableValue>): Promise<GlobalVariables> {
-		const response = await httpClient.post<GlobalsResponse>(API_ENDPOINTS.GLOBALS, { variables });
+		const response = await httpClient.post<GlobalsResponse>(API_ENDPOINTS.GLOBALS, {
+			variables,
+		});
 		return GlobalsTransformer.toFrontend(response);
 	},
 

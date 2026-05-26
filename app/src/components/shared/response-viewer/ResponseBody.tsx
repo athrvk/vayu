@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -49,7 +48,10 @@ export default function ResponseBody({
 	const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
 
 	// Detect body type from content and headers
-	const detectedType = useMemo(() => detectBodyType(headers, bodyRaw || body), [headers, bodyRaw, body]);
+	const detectedType = useMemo(
+		() => detectBodyType(headers, bodyRaw || body),
+		[headers, bodyRaw, body]
+	);
 
 	// Check if preview is available
 	const canPreview = detectedType === "html" || detectedType === "image";

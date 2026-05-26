@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -64,7 +63,8 @@ const CATEGORY_TITLES: Record<SettingsCategory, { title: string; description: st
 	},
 	database_performance: {
 		title: "Database Performance",
-		description: "SQLite optimization settings for high-throughput load testing and result storage",
+		description:
+			"SQLite optimization settings for high-throughput load testing and result storage",
 	},
 	network_performance: {
 		title: "Network & Connectivity",
@@ -120,7 +120,9 @@ export default function SettingsMain() {
 	// Filter entries by selected category (calculate before early returns)
 	const categoryEntries =
 		selectedCategory && configResponse?.entries
-			? configResponse.entries.filter((entry) => entry.category === selectedCategory).sort((a, b) => a.key.localeCompare(b.key))
+			? configResponse.entries
+					.filter((entry) => entry.category === selectedCategory)
+					.sort((a, b) => a.key.localeCompare(b.key))
 			: [];
 	const categoryConfig = selectedCategory ? CATEGORY_TITLES[selectedCategory] : null;
 
@@ -514,7 +516,7 @@ export default function SettingsMain() {
 									isModified && !hasError && "border-primary/50",
 									hasError && "border-destructive/50",
 									isPendingRestart &&
-									"border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10"
+										"border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10"
 								)}
 							>
 								<CardHeader className="pb-3">
@@ -572,7 +574,7 @@ export default function SettingsMain() {
 													<Input
 														type={
 															entry.type === "integer" ||
-																entry.type === "number"
+															entry.type === "number"
 																? "number"
 																: "text"
 														}
@@ -604,9 +606,9 @@ export default function SettingsMain() {
 													<span className="text-xs text-muted-foreground whitespace-nowrap">
 														{isSizeConfig(entry.key)
 															? formatSizeRange(
-																entry.min,
-																entry.max
-															) || ""
+																	entry.min,
+																	entry.max
+																) || ""
 															: entry.min && entry.max
 																? `${entry.min} - ${entry.max}`
 																: entry.min
@@ -625,8 +627,8 @@ export default function SettingsMain() {
 													Default:{" "}
 													{isSizeConfig(entry.key)
 														? formatBytes(
-															parseInt(entry.default, 10) || 0
-														)
+																parseInt(entry.default, 10) || 0
+															)
 														: entry.default}
 												</p>
 											)}

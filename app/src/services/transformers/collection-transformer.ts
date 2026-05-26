@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -21,7 +20,12 @@ export class CollectionTransformer {
 
 		// Auth: defaults to {mode: "none"} if missing or malformed
 		let auth: Exclude<RequestAuth, { mode: "inherit" }> = { mode: "none" };
-		if (raw.auth && typeof raw.auth === "object" && raw.auth.mode && raw.auth.mode !== "inherit") {
+		if (
+			raw.auth &&
+			typeof raw.auth === "object" &&
+			raw.auth.mode &&
+			raw.auth.mode !== "inherit"
+		) {
 			auth = raw.auth as Exclude<RequestAuth, { mode: "inherit" }>;
 		}
 

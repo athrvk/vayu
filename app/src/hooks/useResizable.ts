@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -56,7 +55,7 @@ export function useResizable({
 			};
 			setIsResizing(true);
 		},
-		[direction, size],
+		[direction, size]
 	);
 
 	useEffect(() => {
@@ -67,7 +66,7 @@ export function useResizable({
 			const current = direction === "horizontal" ? e.clientX : e.clientY;
 			const next = Math.min(
 				max,
-				Math.max(min, dragStart.current.size + (current - dragStart.current.mousePos)),
+				Math.max(min, dragStart.current.size + (current - dragStart.current.mousePos))
 			);
 			setSize(next);
 		};

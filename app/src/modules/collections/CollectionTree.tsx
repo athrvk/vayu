@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -122,10 +121,16 @@ export default function CollectionTree() {
 
 	const handleCollectionClick = useCallback(
 		(collection: Collection) => {
-			toggleCollectionExpanded(collection.id);
 			navigateToCollection(collection.id);
 		},
-		[navigateToCollection, toggleCollectionExpanded]
+		[navigateToCollection]
+	);
+
+	const handleCollectionToggle = useCallback(
+		(collection: Collection) => {
+			toggleCollectionExpanded(collection.id);
+		},
+		[toggleCollectionExpanded]
 	);
 
 	const handleOpenNewCollectionForm = useCallback(() => {
@@ -143,8 +148,7 @@ export default function CollectionTree() {
 
 		// Use selected collection only if it still exists; otherwise first root collection
 		const selectedExists =
-			selectedCollectionId &&
-			collections.some((c) => c.id === selectedCollectionId);
+			selectedCollectionId && collections.some((c) => c.id === selectedCollectionId);
 		const targetCollection =
 			(selectedExists ? selectedCollectionId : null) ?? rootCollections[0].id;
 		handleCreateRequest(targetCollection);
@@ -474,43 +478,44 @@ export default function CollectionTree() {
 			{!isLoadingCollections && rootCollections.length > 0 && (
 				<ScrollArea className="flex-1 min-h-0 -mx-1 px-1">
 					<div className="space-y-0.5 pr-2">
-			{rootCollections.map((collection) => (
-					<CollectionItem
-						key={collection.id}
-						collection={collection}
-						allCollections={collections}
-						depth={0}
-						expandedCollectionIds={expandedCollectionIds}
-						selectedCollectionId={selectedCollectionId}
-						selectedRequestId={selectedRequestId}
-						renamingId={renamingId}
-						renameValue={renameValue}
-						deletingCollectionId={deletingCollectionId}
-						deletingRequestId={deletingRequestId}
-						creatingSubfolder={creatingSubfolder}
-						newSubCollectionName={newSubCollectionName}
-						isCreatingSubfolder={createCollectionMutation.isPending}
-						getRequestsByCollection={getRequestsByCollection}
-						onCollectionClick={handleCollectionClick}
-						onRequestClick={handleRequestClick}
-						onShowContextMenu={handleShowContextMenu}
-						onRenameChange={setRenameValue}
-						onRenameSubmit={handleRenameSubmit}
-						onRenameCancel={handleRenameCancel}
-						onStartRename={handleRenameCollection}
-						onDeleteRequest={handleDeleteRequest}
-						onSubCollectionNameChange={setNewSubCollectionName}
-						onCreateSubfolder={handleCreateSubfolder}
-						onCancelSubfolder={handleCancelSubfolder}
-						renamingRequestId={renamingRequestId}
-						renameRequestValue={renameRequestValue}
-						onRequestRenameChange={setRenameRequestValue}
-						onRequestRenameSubmit={handleRequestRenameSubmit}
-						onRequestRenameCancel={handleRequestRenameCancel}
-						onStartRequestRename={handleStartRequestRename}
-						onRequestDeleteClick={handleRequestDeleteClick}
-					/>
-				))}
+						{rootCollections.map((collection) => (
+							<CollectionItem
+								key={collection.id}
+								collection={collection}
+								allCollections={collections}
+								depth={0}
+								expandedCollectionIds={expandedCollectionIds}
+								selectedCollectionId={selectedCollectionId}
+								selectedRequestId={selectedRequestId}
+								renamingId={renamingId}
+								renameValue={renameValue}
+								deletingCollectionId={deletingCollectionId}
+								deletingRequestId={deletingRequestId}
+								creatingSubfolder={creatingSubfolder}
+								newSubCollectionName={newSubCollectionName}
+								isCreatingSubfolder={createCollectionMutation.isPending}
+								getRequestsByCollection={getRequestsByCollection}
+								onCollectionClick={handleCollectionClick}
+								onCollectionToggle={handleCollectionToggle}
+								onRequestClick={handleRequestClick}
+								onShowContextMenu={handleShowContextMenu}
+								onRenameChange={setRenameValue}
+								onRenameSubmit={handleRenameSubmit}
+								onRenameCancel={handleRenameCancel}
+								onStartRename={handleRenameCollection}
+								onDeleteRequest={handleDeleteRequest}
+								onSubCollectionNameChange={setNewSubCollectionName}
+								onCreateSubfolder={handleCreateSubfolder}
+								onCancelSubfolder={handleCancelSubfolder}
+								renamingRequestId={renamingRequestId}
+								renameRequestValue={renameRequestValue}
+								onRequestRenameChange={setRenameRequestValue}
+								onRequestRenameSubmit={handleRequestRenameSubmit}
+								onRequestRenameCancel={handleRequestRenameCancel}
+								onStartRequestRename={handleStartRequestRename}
+								onRequestDeleteClick={handleRequestDeleteClick}
+							/>
+						))}
 					</div>
 				</ScrollArea>
 			)}
@@ -574,7 +579,9 @@ export default function CollectionTree() {
 					<button
 						className="flex items-center w-full px-2 py-1.5 text-sm text-destructive hover:bg-accent cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
 						onClick={() => {
-							const collection = collections.find((c) => c.id === contextMenu.collectionId);
+							const collection = collections.find(
+								(c) => c.id === contextMenu.collectionId
+							);
 							setDeleteConfirm({
 								type: "collection",
 								id: contextMenu.collectionId,
@@ -592,7 +599,9 @@ export default function CollectionTree() {
 			<DeleteConfirmDialog
 				open={!!deleteConfirm}
 				onOpenChange={(open) => !open && setDeleteConfirm(null)}
-				title={deleteConfirm?.type === "collection" ? "Delete collection?" : "Delete request?"}
+				title={
+					deleteConfirm?.type === "collection" ? "Delete collection?" : "Delete request?"
+				}
 				description={
 					deleteConfirm?.type === "collection"
 						? `"${deleteConfirm?.name}" and all its requests will be permanently removed. This cannot be undone.`
@@ -600,7 +609,8 @@ export default function CollectionTree() {
 				}
 				onConfirm={handleConfirmDelete}
 				isDeleting={
-					(deleteConfirm?.type === "collection" && deletingCollectionId === deleteConfirm?.id) ||
+					(deleteConfirm?.type === "collection" &&
+						deletingCollectionId === deleteConfirm?.id) ||
 					(deleteConfirm?.type === "request" && deletingRequestId === deleteConfirm?.id)
 				}
 			/>

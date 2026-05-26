@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -87,7 +86,9 @@ export default function VariablesCategoryTree({
 		setSelectedCategory({ type: "environment", environmentId: newEnv.id });
 	};
 
-	const envToDelete = deleteConfirmEnvId ? environments.find((e) => e.id === deleteConfirmEnvId) : null;
+	const envToDelete = deleteConfirmEnvId
+		? environments.find((e) => e.id === deleteConfirmEnvId)
+		: null;
 
 	const handleDeleteClick = (envId: string, e: React.MouseEvent) => {
 		e.stopPropagation();
@@ -103,8 +104,8 @@ export default function VariablesCategoryTree({
 			setDeleteConfirmEnvId(null);
 			if (
 				selectedCategory?.type === "environment" &&
-				(selectedCategory as { type: "environment"; environmentId: string }).environmentId ===
-					envIdToDelete
+				(selectedCategory as { type: "environment"; environmentId: string })
+					.environmentId === envIdToDelete
 			) {
 				setSelectedCategory(null);
 			}

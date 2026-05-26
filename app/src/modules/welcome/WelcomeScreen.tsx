@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -467,8 +466,6 @@ export default function WelcomeScreen() {
 						</Card>
 					</div>
 				</div>
-
-				
 			</div>
 		</div>
 	);

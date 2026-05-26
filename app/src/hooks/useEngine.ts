@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -10,10 +9,7 @@
 
 import { useState, useCallback } from "react";
 import { ApiError, apiService } from "@/services";
-import type {
-	SanityResult,
-	ExecuteRequestRequest,
-} from "@/types";
+import type { SanityResult, ExecuteRequestRequest } from "@/types";
 
 interface UseEngineReturn {
 	/**

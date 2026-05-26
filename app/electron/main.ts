@@ -300,7 +300,7 @@ function setupIpcHandlers() {
 	// Get app paths (app dir, logs path, db path)
 	ipcMain.handle("app:getPaths", () => {
 		const appDir = app.getAppPath();
-		
+
 		// Get data directory using the same logic as EngineSidecar
 		const isDev = process.env.NODE_ENV === "development";
 		let dataDir: string;
@@ -309,10 +309,10 @@ function setupIpcHandlers() {
 		} else {
 			dataDir = app.getPath("userData");
 		}
-		
+
 		const logsPath = path.join(dataDir, "logs");
 		const dbPath = path.join(dataDir, "db");
-		
+
 		return {
 			appDir,
 			dataDir,

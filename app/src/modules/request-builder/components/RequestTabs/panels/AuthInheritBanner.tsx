@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -102,9 +101,8 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 				<Info className="w-3.5 h-3.5 text-primary shrink-0 mt-px" />
 				<div className="flex-1 min-w-0">
 					<p className="m-0 text-xs leading-relaxed text-foreground">
-						Inheriting{" "}
-						<span className="font-semibold text-primary">{authLabel}</span> from{" "}
-						<span className="font-mono font-medium">{source.name}</span>.
+						Inheriting <span className="font-semibold text-primary">{authLabel}</span>{" "}
+						from <span className="font-mono font-medium">{source.name}</span>.
 					</p>
 					{secret && (
 						<p className="mt-1 m-0 text-[11px] text-muted-foreground font-mono truncate">
@@ -146,7 +144,9 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 								<span
 									className={cn(
 										"text-[11px] font-mono truncate",
-										isSource ? "text-foreground font-semibold" : "text-muted-foreground"
+										isSource
+											? "text-foreground font-semibold"
+											: "text-muted-foreground"
 									)}
 								>
 									{c.name}

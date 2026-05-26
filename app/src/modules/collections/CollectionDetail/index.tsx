@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -97,7 +96,9 @@ export default function CollectionDetail() {
 
 				{/* Content */}
 				<div className="flex-1 overflow-auto p-6 bg-background">
-					{tab === "info" && <InfoTab collection={collection} requestCount={requests.length} />}
+					{tab === "info" && (
+						<InfoTab collection={collection} requestCount={requests.length} />
+					)}
 					{tab === "auth" && <AuthTab collection={collection} />}
 					{tab === "pre-script" && <ScriptTab collection={collection} kind="pre" />}
 					{tab === "post-script" && <ScriptTab collection={collection} kind="post" />}

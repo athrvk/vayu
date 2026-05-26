@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -50,7 +49,10 @@ export default function TitleBar() {
 			style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 		>
 			{/* Left side - App branding */}
-			<div className="flex items-center gap-2 px-3" style={{ marginLeft: isMac ? 70 : 0 }}>
+			<div
+				className="flex items-center gap-2 px-3 pt-[4px]"
+				style={{ marginLeft: isMac ? 70 : 0 }}
+			>
 				<img
 					src="/icon.png"
 					alt="Vayu"

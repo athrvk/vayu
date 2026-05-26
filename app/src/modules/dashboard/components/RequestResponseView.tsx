@@ -91,11 +91,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 											"font-mono font-bold text-lg",
 											code === "0" && "text-red-600 dark:text-red-400",
 											code.startsWith("2") &&
-											"text-green-600 dark:text-green-400",
+												"text-green-600 dark:text-green-400",
 											code.startsWith("3") &&
-											"text-blue-600 dark:text-blue-400",
+												"text-blue-600 dark:text-blue-400",
 											code.startsWith("4") &&
-											"text-yellow-600 dark:text-yellow-400",
+												"text-yellow-600 dark:text-yellow-400",
 											code.startsWith("5") && "text-red-600 dark:text-red-400"
 										)}
 									>
@@ -316,7 +316,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 														className={cn(
 															"text-sm font-mono shrink-0",
 															isSlow &&
-															"text-orange-600 dark:text-orange-400"
+																"text-orange-600 dark:text-orange-400"
 														)}
 													>
 														{result.latencyMs.toFixed(1)}ms
@@ -368,91 +368,91 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 															{/* Timing Breakdown - using camelCase field names from backend */}
 															{(result.trace.dnsMs !== undefined ||
 																result.trace.connectMs !==
-																undefined ||
+																	undefined ||
 																result.trace.tlsMs !== undefined ||
 																result.trace.firstByteMs !==
-																undefined ||
+																	undefined ||
 																result.trace.downloadMs !==
-																undefined) && (
-																	<div className="space-y-1">
-																		<p className="text-xs font-medium text-muted-foreground">
-																			Timing Breakdown
-																		</p>
-																		<div className="grid grid-cols-[repeat(auto-fit,minmax(90px,1fr))] gap-2 text-xs">
-																			{result.trace.dnsMs !==
-																				undefined && (
-																					<div className="bg-card border border-border rounded-md p-2 text-center">
-																						<p className="text-muted-foreground">
-																							DNS
-																						</p>
-																						<p className="font-mono font-medium">
-																							{result.trace.dnsMs.toFixed(
-																								1
-																							)}
-																							ms
-																						</p>
-																					</div>
-																				)}
-																			{result.trace.connectMs !==
-																				undefined && (
-																					<div className="bg-card border border-border rounded-md p-2 text-center">
-																						<p className="text-muted-foreground">
-																							Connect
-																						</p>
-																						<p className="font-mono font-medium">
-																							{result.trace.connectMs.toFixed(
-																								1
-																							)}
-																							ms
-																						</p>
-																					</div>
-																				)}
-																			{result.trace.tlsMs !==
-																				undefined && (
-																					<div className="bg-card border border-border rounded-md p-2 text-center">
-																						<p className="text-muted-foreground">
-																							TLS
-																						</p>
-																						<p className="font-mono font-medium">
-																							{result.trace.tlsMs.toFixed(
-																								1
-																							)}
-																							ms
-																						</p>
-																					</div>
-																				)}
-																			{result.trace
-																				.firstByteMs !==
-																				undefined && (
-																					<div className="bg-card border border-border rounded-md p-2 text-center">
-																						<p className="text-muted-foreground">
-																							TTFB
-																						</p>
-																						<p className="font-mono font-medium">
-																							{result.trace.firstByteMs.toFixed(
-																								1
-																							)}
-																							ms
-																						</p>
-																					</div>
-																				)}
-																			{result.trace.downloadMs !==
-																				undefined && (
-																					<div className="bg-card border border-border rounded-md p-2 text-center">
-																						<p className="text-muted-foreground">
-																							Download
-																						</p>
-																						<p className="font-mono font-medium">
-																							{result.trace.downloadMs.toFixed(
-																								1
-																							)}
-																							ms
-																						</p>
-																					</div>
-																				)}
-																		</div>
+																	undefined) && (
+																<div className="space-y-1">
+																	<p className="text-xs font-medium text-muted-foreground">
+																		Timing Breakdown
+																	</p>
+																	<div className="grid grid-cols-[repeat(auto-fit,minmax(90px,1fr))] gap-2 text-xs">
+																		{result.trace.dnsMs !==
+																			undefined && (
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
+																				<p className="text-muted-foreground">
+																					DNS
+																				</p>
+																				<p className="font-mono font-medium">
+																					{result.trace.dnsMs.toFixed(
+																						1
+																					)}
+																					ms
+																				</p>
+																			</div>
+																		)}
+																		{result.trace.connectMs !==
+																			undefined && (
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
+																				<p className="text-muted-foreground">
+																					Connect
+																				</p>
+																				<p className="font-mono font-medium">
+																					{result.trace.connectMs.toFixed(
+																						1
+																					)}
+																					ms
+																				</p>
+																			</div>
+																		)}
+																		{result.trace.tlsMs !==
+																			undefined && (
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
+																				<p className="text-muted-foreground">
+																					TLS
+																				</p>
+																				<p className="font-mono font-medium">
+																					{result.trace.tlsMs.toFixed(
+																						1
+																					)}
+																					ms
+																				</p>
+																			</div>
+																		)}
+																		{result.trace
+																			.firstByteMs !==
+																			undefined && (
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
+																				<p className="text-muted-foreground">
+																					TTFB
+																				</p>
+																				<p className="font-mono font-medium">
+																					{result.trace.firstByteMs.toFixed(
+																						1
+																					)}
+																					ms
+																				</p>
+																			</div>
+																		)}
+																		{result.trace.downloadMs !==
+																			undefined && (
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
+																				<p className="text-muted-foreground">
+																					Download
+																				</p>
+																				<p className="font-mono font-medium">
+																					{result.trace.downloadMs.toFixed(
+																						1
+																					)}
+																					ms
+																				</p>
+																			</div>
+																		)}
 																	</div>
-																)}
+																</div>
+															)}
 
 															{/* Slow Request Warning */}
 															{result.trace.isSlow && (
@@ -466,15 +466,15 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																		ms
 																		{result.trace
 																			.thresholdMs && (
-																				<span className="text-muted-foreground ml-1">
-																					(threshold:{" "}
-																					{
-																						result.trace
-																							.thresholdMs
-																					}
-																					ms)
-																				</span>
-																			)}
+																			<span className="text-muted-foreground ml-1">
+																				(threshold:{" "}
+																				{
+																					result.trace
+																						.thresholdMs
+																				}
+																				ms)
+																			</span>
+																		)}
 																	</span>
 																</div>
 															)}

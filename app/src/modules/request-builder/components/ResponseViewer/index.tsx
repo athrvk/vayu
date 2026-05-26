@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -103,7 +102,12 @@ export default function ResponseViewer() {
 					</div>
 
 					{hasLoadTestDashboard && (
-						<Button variant="outline" size="sm" onClick={handleViewLoadTest} className="mt-6">
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={handleViewLoadTest}
+							className="mt-6"
+						>
 							<BarChart3 className="w-4 h-4 mr-2" />
 							View Load Test Dashboard
 							{dashboardMode === "running" && (

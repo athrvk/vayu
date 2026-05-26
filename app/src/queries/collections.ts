@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -210,14 +209,11 @@ export function useUpdateCollectionMutation() {
 	return useMutation({
 		mutationFn: (data: UpdateCollectionRequest) => apiService.updateCollection(data),
 		onSuccess: (updatedCollection) => {
-			queryClient.setQueryData<Collection[]>(
-				queryKeys.collections.list(),
-				(old) => {
-					const next =
-						old?.map((c) => (c.id === updatedCollection.id ? updatedCollection : c)) ?? [];
-					return next.sort(compareCollectionOrder);
-				}
-			);
+			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) => {
+				const next =
+					old?.map((c) => (c.id === updatedCollection.id ? updatedCollection : c)) ?? [];
+				return next.sort(compareCollectionOrder);
+			});
 		},
 	});
 }

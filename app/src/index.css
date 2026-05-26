@@ -66,70 +66,70 @@
 		/* ── Light mode — Warm Stone ── */
 
 		/* 3-level elevation */
-		--background: 42 17% 88%;     /* #e6e3dc — warm stone canvas */
-		--card:        0 0% 100%;     /* #ffffff — white card (floats on bg) */
-		--panel:      42 21% 94%;     /* #f2f0eb — sidebar/panel (between canvas and card) */
+		--background: 42 17% 88%; /* #e6e3dc — warm stone canvas */
+		--card: 0 0% 100%; /* #ffffff — white card (floats on bg) */
+		--panel: 42 21% 94%; /* #f2f0eb — sidebar/panel (between canvas and card) */
 
-		--card-foreground:    240 6% 10%;
-		--popover:             0 0% 100%;
+		--card-foreground: 240 6% 10%;
+		--popover: 0 0% 100%;
 		--popover-foreground: 240 6% 10%;
 
 		/* Primary — Sunset orange (default) */
-		--primary:            24.6 95% 53.1%;  /* #f97316 orange-500 */
-		--primary-foreground:  0 0% 100%;
+		--primary: 24.6 95% 53.1%; /* #f97316 orange-500 */
+		--primary-foreground: 0 0% 100%;
 
 		/* Secondary */
-		--secondary:          42 21% 94%;
+		--secondary: 42 21% 94%;
 		--secondary-foreground: 240 6% 10%;
 
 		/* Hover / active states */
-		--muted:              38 20% 89%;      /* #e9e5de — accent-hover */
-		--muted-foreground:  240 4% 46%;       /* #71717a — zinc-500 */
-		--accent:             38 20% 89%;      /* #e9e5de — accent-hover */
+		--muted: 38 20% 89%; /* #e9e5de — accent-hover */
+		--muted-foreground: 240 4% 46%; /* #71717a — zinc-500 */
+		--accent: 38 20% 89%; /* #e9e5de — accent-hover */
 		--accent-foreground: 240 6% 10%;
-		--accent-active:     40 16% 85%;       /* #dedad2 — accent-active / selected */
+		--accent-active: 40 16% 85%; /* #dedad2 — accent-active / selected */
 
 		/* Foreground scale */
-		--foreground:         240 6% 10%;      /* #18181b — zinc-900 */
-		--subtle-foreground: 240 7% 78%;       /* #c4c4cc — muted placeholder */
+		--foreground: 240 6% 10%; /* #18181b — zinc-900 */
+		--subtle-foreground: 240 7% 78%; /* #c4c4cc — muted placeholder */
 
 		/* Borders */
-		--border:        40 9% 80%;            /* ≈ rgba(0,0,0,0.09) on warm stone */
-		--border-strong: 40 6% 72%;            /* ≈ rgba(0,0,0,0.18) on warm stone */
-		--input:         40 9% 80%;
-		--ring:          24.6 95% 53.1%;
+		--border: 40 9% 80%; /* ≈ rgba(0,0,0,0.09) on warm stone */
+		--border-strong: 40 6% 72%; /* ≈ rgba(0,0,0,0.18) on warm stone */
+		--input: 40 9% 80%;
+		--ring: 24.6 95% 53.1%;
 
 		/* Destructive */
-		--destructive:            0 84.2% 60.2%;
+		--destructive: 0 84.2% 60.2%;
 		--destructive-foreground: 0 0% 98%;
-		--destructive-text:       0 60% 48%;   /* muted rose — accessible text on light bg, ~4.8:1 */
+		--destructive-text: 0 60% 48%; /* muted rose — accessible text on light bg, ~4.8:1 */
 
 		/* Charts */
 		--chart-1: 24.6 95% 53.1%;
 		--chart-2: 173 58% 39%;
 		--chart-3: 197 37% 24%;
-		--chart-4:  43 74% 66%;
-		--chart-5:  27 87% 67%;
+		--chart-4: 43 74% 66%;
+		--chart-5: 27 87% 67%;
 
 		/* HTTP method colors */
-		--method-get:     142 76% 36%;
-		--method-post:    217 91% 60%;
-		--method-put:      38 92% 50%;
-		--method-patch:   262 83% 58%;
-		--method-delete:    0 84% 60%;
-		--method-head:    199 89% 48%;
-		--method-options: 240  5% 64%;
+		--method-get: 142 76% 36%;
+		--method-post: 217 91% 60%;
+		--method-put: 38 92% 50%;
+		--method-patch: 262 83% 58%;
+		--method-delete: 0 84% 60%;
+		--method-head: 199 89% 48%;
+		--method-options: 240 5% 64%;
 
 		/* Variable highlight */
 		--variable: 24.6 95% 53.1%;
 
 		/* Semantic */
-		--success:            142 76% 36%;
-		--success-foreground:   0  0% 100%;
-		--warning:             38 92% 50%;
-		--warning-foreground:   0  0% 100%;
-		--info:               199 89% 48%;
-		--info-foreground:      0  0% 100%;
+		--success: 142 76% 36%;
+		--success-foreground: 0 0% 100%;
+		--warning: 38 92% 50%;
+		--warning-foreground: 0 0% 100%;
+		--info: 199 89% 48%;
+		--info-foreground: 0 0% 100%;
 
 		/* Geometry */
 		--radius: 0.375rem;
@@ -138,162 +138,162 @@
 	/* ── Accent color schemes (light mode) ── */
 
 	[data-color-scheme="sunset"] {
-		--primary:            24.6 95% 53.1%;
-		--primary-foreground:  0 0% 100%;
-		--ring:               24.6 95% 53.1%;
-		--variable:           24.6 95% 53.1%;
-		--chart-1:            24.6 95% 53.1%;
+		--primary: 24.6 95% 53.1%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 24.6 95% 53.1%;
+		--variable: 24.6 95% 53.1%;
+		--chart-1: 24.6 95% 53.1%;
 	}
 
 	[data-color-scheme="sky"] {
-		--primary:           188 94% 43%;      /* #22d3ee cyan-400 */
-		--primary-foreground:  0  0% 100%;
-		--ring:              188 94% 43%;
-		--variable:          188 94% 43%;
-		--chart-1:           188 94% 43%;
+		--primary: 188 94% 43%; /* #22d3ee cyan-400 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 188 94% 43%;
+		--variable: 188 94% 43%;
+		--chart-1: 188 94% 43%;
 	}
 
 	[data-color-scheme="ocean"] {
-		--primary:           217 91% 60%;
-		--primary-foreground:  0  0% 100%;
-		--ring:              217 91% 60%;
-		--variable:          217 91% 60%;
-		--chart-1:           217 91% 60%;
+		--primary: 217 91% 60%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 217 91% 60%;
+		--variable: 217 91% 60%;
+		--chart-1: 217 91% 60%;
 	}
 
 	[data-color-scheme="forest"] {
-		--primary:           142 76% 36%;
-		--primary-foreground:  0  0% 100%;
-		--ring:              142 76% 36%;
-		--variable:          142 76% 36%;
-		--chart-1:           142 76% 36%;
+		--primary: 142 76% 36%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 142 76% 36%;
+		--variable: 142 76% 36%;
+		--chart-1: 142 76% 36%;
 	}
 
 	[data-color-scheme="aurora"] {
-		--primary:           258 87% 74%;      /* #a78bfa violet-400 */
-		--primary-foreground:  0  0% 100%;
-		--ring:              258 87% 74%;
-		--variable:          258 87% 74%;
-		--chart-1:           258 87% 74%;
+		--primary: 258 87% 74%; /* #a78bfa violet-400 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 258 87% 74%;
+		--variable: 258 87% 74%;
+		--chart-1: 258 87% 74%;
 	}
 
 	[data-color-scheme="coral"] {
-		--primary:             0 72% 65%;
-		--primary-foreground:  0  0% 100%;
-		--ring:                0 72% 65%;
-		--variable:            0 72% 65%;
-		--chart-1:             0 72% 65%;
+		--primary: 0 72% 65%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 0 72% 65%;
+		--variable: 0 72% 65%;
+		--chart-1: 0 72% 65%;
 	}
 
 	/* ── Dark mode ── */
 
 	.dark {
 		/* 3-level elevation */
-		--background: 240 10%  4%;    /* #09090b — outermost canvas */
-		--card:       240  6% 11%;    /* #1a1a1f — elevated surface */
-		--panel:      240  6%  7%;    /* #111113 — sidebar/panel bg */
+		--background: 240 10% 4%; /* #09090b — outermost canvas */
+		--card: 240 6% 11%; /* #1a1a1f — elevated surface */
+		--panel: 240 6% 7%; /* #111113 — sidebar/panel bg */
 
-		--card-foreground:    240  5% 96%;
-		--popover:            240  6% 11%;
-		--popover-foreground: 240  5% 96%;
+		--card-foreground: 240 5% 96%;
+		--popover: 240 6% 11%;
+		--popover-foreground: 240 5% 96%;
 
 		/* Primary — Sunset orange (default) */
-		--primary:            24.6 95% 53.1%;
-		--primary-foreground:  0   0% 100%;
+		--primary: 24.6 95% 53.1%;
+		--primary-foreground: 0 0% 100%;
 
 		/* Secondary */
-		--secondary:          240  7% 16%;
+		--secondary: 240 7% 16%;
 		--secondary-foreground: 240 5% 96%;
 
 		/* Hover / active states */
-		--muted:              240  7% 16%;     /* #26262c — accent-hover */
-		--muted-foreground:   240  5% 65%;     /* #a1a1aa — zinc-400 */
-		--accent:             240  7% 16%;     /* #26262c — accent-hover */
-		--accent-foreground:  240  5% 96%;
-		--accent-active:      240  6% 21%;     /* #323238 — accent-active / selected */
+		--muted: 240 7% 16%; /* #26262c — accent-hover */
+		--muted-foreground: 240 5% 65%; /* #a1a1aa — zinc-400 */
+		--accent: 240 7% 16%; /* #26262c — accent-hover */
+		--accent-foreground: 240 5% 96%;
+		--accent-active: 240 6% 21%; /* #323238 — accent-active / selected */
 
 		/* Foreground scale */
-		--foreground:         240  5% 96%;     /* #f4f4f5 — zinc-100 */
-		--subtle-foreground:  240  5% 34%;     /* #52525b — zinc-600 */
+		--foreground: 240 5% 96%; /* #f4f4f5 — zinc-100 */
+		--subtle-foreground: 240 5% 34%; /* #52525b — zinc-600 */
 
 		/* Borders */
-		--border:              0   0% 10%;     /* ≈ rgba(255,255,255,0.07) on dark canvas */
-		--border-strong:       0   0% 18%;     /* ≈ rgba(255,255,255,0.15) on dark canvas */
-		--input:              240  6% 11%;
-		--ring:               24.6 95% 53.1%;
+		--border: 0 0% 10%; /* ≈ rgba(255,255,255,0.07) on dark canvas */
+		--border-strong: 0 0% 18%; /* ≈ rgba(255,255,255,0.15) on dark canvas */
+		--input: 240 6% 11%;
+		--ring: 24.6 95% 53.1%;
 
 		/* Destructive */
-		--destructive:             0 62.8% 30.6%;
-		--destructive-foreground:  0  0% 98%;
-		--destructive-text:        0 65% 63%;  /* muted rose — accessible text on dark bg, ~4.5:1 */
+		--destructive: 0 62.8% 30.6%;
+		--destructive-foreground: 0 0% 98%;
+		--destructive-text: 0 65% 63%; /* muted rose — accessible text on dark bg, ~4.5:1 */
 
 		/* Charts */
 		--chart-1: 24.6 95% 53.1%;
-		--chart-2: 160  60% 45%;
-		--chart-3:  30  80% 55%;
-		--chart-4: 280  65% 60%;
-		--chart-5: 340  75% 55%;
+		--chart-2: 160 60% 45%;
+		--chart-3: 30 80% 55%;
+		--chart-4: 280 65% 60%;
+		--chart-5: 340 75% 55%;
 
 		/* Variable highlight */
 		--variable: 24.6 95% 53.1%;
 
 		/* Semantic */
-		--success:            142 70% 45%;
-		--success-foreground:   0  0% 100%;
-		--warning:             38 92% 50%;
-		--warning-foreground:   0  0% 100%;
-		--info:               199 89% 48%;
-		--info-foreground:      0  0% 100%;
+		--success: 142 70% 45%;
+		--success-foreground: 0 0% 100%;
+		--warning: 38 92% 50%;
+		--warning-foreground: 0 0% 100%;
+		--info: 199 89% 48%;
+		--info-foreground: 0 0% 100%;
 	}
 
 	/* ── Accent color schemes (dark mode) ── */
 
 	.dark[data-color-scheme="sunset"] {
-		--primary:            24.6 95% 53.1%;
-		--primary-foreground:  0   0% 100%;
-		--ring:               24.6 95% 53.1%;
-		--variable:           24.6 95% 53.1%;
-		--chart-1:            24.6 95% 53.1%;
+		--primary: 24.6 95% 53.1%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 24.6 95% 53.1%;
+		--variable: 24.6 95% 53.1%;
+		--chart-1: 24.6 95% 53.1%;
 	}
 
 	.dark[data-color-scheme="sky"] {
-		--primary:           188 94% 43%;
-		--primary-foreground:  0  0% 100%;
-		--ring:              188 94% 43%;
-		--variable:          188 94% 43%;
-		--chart-1:           188 94% 43%;
+		--primary: 188 94% 43%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 188 94% 43%;
+		--variable: 188 94% 43%;
+		--chart-1: 188 94% 43%;
 	}
 
 	.dark[data-color-scheme="ocean"] {
-		--primary:           217 78% 51%;
-		--primary-foreground:  0  0% 100%;
-		--ring:              217 78% 51%;
-		--variable:          217 78% 51%;
-		--chart-1:           217 78% 51%;
+		--primary: 217 78% 51%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 217 78% 51%;
+		--variable: 217 78% 51%;
+		--chart-1: 217 78% 51%;
 	}
 
 	.dark[data-color-scheme="forest"] {
-		--primary:           142 70% 45%;
-		--primary-foreground:  0  0% 100%;
-		--ring:              142 70% 45%;
-		--variable:          142 70% 45%;
-		--chart-1:           142 70% 45%;
+		--primary: 142 70% 45%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 142 70% 45%;
+		--variable: 142 70% 45%;
+		--chart-1: 142 70% 45%;
 	}
 
 	.dark[data-color-scheme="aurora"] {
-		--primary:           258 87% 74%;
-		--primary-foreground:  0  0% 100%;
-		--ring:              258 87% 74%;
-		--variable:          258 87% 74%;
-		--chart-1:           258 87% 74%;
+		--primary: 258 87% 74%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 258 87% 74%;
+		--variable: 258 87% 74%;
+		--chart-1: 258 87% 74%;
 	}
 
 	.dark[data-color-scheme="coral"] {
-		--primary:             0 72% 55%;
-		--primary-foreground:  0  0% 100%;
-		--ring:                0 72% 55%;
-		--variable:            0 72% 55%;
-		--chart-1:             0 72% 55%;
+		--primary: 0 72% 55%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 0 72% 55%;
+		--variable: 0 72% 55%;
+		--chart-1: 0 72% 55%;
 	}
 }
 
@@ -324,17 +324,29 @@
 
 /* Animations */
 @keyframes vayu-spin {
-	to { transform: rotate(360deg); }
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 @keyframes vayu-pulse {
-	0%, 100% { opacity: 1; }
-	50%       { opacity: 0.35; }
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
 }
 
 @keyframes vayu-fadepulse {
-	0%, 100% { opacity: 0.9; }
-	50%       { opacity: 0.5; }
+	0%,
+	100% {
+		opacity: 0.9;
+	}
+	50% {
+		opacity: 0.5;
+	}
 }
 
 /* Custom scrollbar */
@@ -380,19 +392,47 @@
 
 /* HTTP Method color utilities */
 @layer utilities {
-	.method-get     { @apply text-[hsl(var(--method-get))]; }
-	.method-post    { @apply text-[hsl(var(--method-post))]; }
-	.method-put     { @apply text-[hsl(var(--method-put))]; }
-	.method-patch   { @apply text-[hsl(var(--method-patch))]; }
-	.method-delete  { @apply text-[hsl(var(--method-delete))]; }
-	.method-head    { @apply text-[hsl(var(--method-head))]; }
-	.method-options { @apply text-[hsl(var(--method-options))]; }
+	.method-get {
+		@apply text-[hsl(var(--method-get))];
+	}
+	.method-post {
+		@apply text-[hsl(var(--method-post))];
+	}
+	.method-put {
+		@apply text-[hsl(var(--method-put))];
+	}
+	.method-patch {
+		@apply text-[hsl(var(--method-patch))];
+	}
+	.method-delete {
+		@apply text-[hsl(var(--method-delete))];
+	}
+	.method-head {
+		@apply text-[hsl(var(--method-head))];
+	}
+	.method-options {
+		@apply text-[hsl(var(--method-options))];
+	}
 
-	.bg-method-get     { @apply bg-[hsl(var(--method-get))]; }
-	.bg-method-post    { @apply bg-[hsl(var(--method-post))]; }
-	.bg-method-put     { @apply bg-[hsl(var(--method-put))]; }
-	.bg-method-patch   { @apply bg-[hsl(var(--method-patch))]; }
-	.bg-method-delete  { @apply bg-[hsl(var(--method-delete))]; }
-	.bg-method-head    { @apply bg-[hsl(var(--method-head))]; }
-	.bg-method-options { @apply bg-[hsl(var(--method-options))]; }
+	.bg-method-get {
+		@apply bg-[hsl(var(--method-get))];
+	}
+	.bg-method-post {
+		@apply bg-[hsl(var(--method-post))];
+	}
+	.bg-method-put {
+		@apply bg-[hsl(var(--method-put))];
+	}
+	.bg-method-patch {
+		@apply bg-[hsl(var(--method-patch))];
+	}
+	.bg-method-delete {
+		@apply bg-[hsl(var(--method-delete))];
+	}
+	.bg-method-head {
+		@apply bg-[hsl(var(--method-head))];
+	}
+	.bg-method-options {
+		@apply bg-[hsl(var(--method-options))];
+	}
 }

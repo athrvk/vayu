@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -199,7 +198,9 @@ export function VariablePopover({
 										{varInfo.secret && (
 											<div className="flex items-center gap-1">
 												<KeyRound className="w-3 h-3 text-amber-500" />
-												<span className="text-[10px] text-amber-600 dark:text-amber-400">Secret</span>
+												<span className="text-[10px] text-amber-600 dark:text-amber-400">
+													Secret
+												</span>
 											</div>
 										)}
 									</div>
@@ -217,9 +218,13 @@ export function VariablePopover({
 											<Button
 												variant="ghost"
 												size="icon"
-												onClick={() => setIsSecretRevealed(!isSecretRevealed)}
+												onClick={() =>
+													setIsSecretRevealed(!isSecretRevealed)
+												}
 												className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 text-muted-foreground hover:text-foreground"
-												title={isSecretRevealed ? "Hide value" : "Reveal value"}
+												title={
+													isSecretRevealed ? "Hide value" : "Reveal value"
+												}
 											>
 												{isSecretRevealed ? (
 													<EyeOff className="w-3 h-3" />
@@ -240,7 +245,11 @@ export function VariablePopover({
 									</label>
 									<div className="relative">
 										<Input
-											type={varInfo.secret && !isSecretRevealed ? "password" : "text"}
+											type={
+												varInfo.secret && !isSecretRevealed
+													? "password"
+													: "text"
+											}
 											value={editValue}
 											onChange={(e) => setEditValue(e.target.value)}
 											onKeyDown={handleKeyDown}
@@ -251,9 +260,13 @@ export function VariablePopover({
 											<Button
 												variant="ghost"
 												size="icon"
-												onClick={() => setIsSecretRevealed(!isSecretRevealed)}
+												onClick={() =>
+													setIsSecretRevealed(!isSecretRevealed)
+												}
 												className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
-												title={isSecretRevealed ? "Hide value" : "Reveal value"}
+												title={
+													isSecretRevealed ? "Hide value" : "Reveal value"
+												}
 											>
 												{isSecretRevealed ? (
 													<EyeOff className="w-3.5 h-3.5" />

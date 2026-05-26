@@ -59,11 +59,7 @@ export function DeleteConfirmDialog({
 					>
 						Cancel
 					</Button>
-					<Button
-						variant="destructive"
-						onClick={onConfirm}
-						disabled={isDeleting}
-					>
+					<Button variant="destructive" onClick={onConfirm} disabled={isDeleting}>
 						{isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete"}
 					</Button>
 				</DialogFooter>

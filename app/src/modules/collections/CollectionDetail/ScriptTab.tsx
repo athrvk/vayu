@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -82,7 +81,11 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 				{isPre
 					? "Scripts compose outer→inner: the parent collection runs first, then child folders, then the request's own script."
 					: "Scripts compose inner→outer: the request's script runs first, then its folder, then parent collections."}{" "}
-				This enables centralized {isPre ? "auth refresh and pre-flight setup" : "shared test assertions and teardown"}.
+				This enables centralized{" "}
+				{isPre
+					? "auth refresh and pre-flight setup"
+					: "shared test assertions and teardown"}
+				.
 			</InfoBanner>
 
 			{usedVars.length > 0 && (
@@ -98,7 +101,9 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 						</Badge>
 					))}
 					{usedVars.length > 8 && (
-						<span className="text-[10px] text-muted-foreground">+{usedVars.length - 8} more</span>
+						<span className="text-[10px] text-muted-foreground">
+							+{usedVars.length - 8} more
+						</span>
 					)}
 				</div>
 			)}
@@ -144,7 +149,10 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 				{showRef && (
 					<div className="mt-2 grid grid-cols-2 gap-2">
 						{QUICK_REF.map(([title, code]) => (
-							<div key={title} className="bg-card border border-border rounded-md px-3 py-2.5">
+							<div
+								key={title}
+								className="bg-card border border-border rounded-md px-3 py-2.5"
+							>
 								<div className="text-[10px] font-semibold text-muted-foreground mb-1.5">
 									{title}
 								</div>

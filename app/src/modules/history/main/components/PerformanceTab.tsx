@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -127,7 +126,7 @@ export default function PerformanceTab({ report, runId }: TabProps) {
 											report.rateControl.achievement <= 105
 											? "text-green-600 dark:text-green-400"
 											: report.rateControl.achievement >= 80 &&
-												report.rateControl.achievement <= 120
+												  report.rateControl.achievement <= 120
 												? "text-yellow-600 dark:text-yellow-400"
 												: "text-destructive"
 									)}

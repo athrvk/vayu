@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -57,9 +56,7 @@ export default function InheritanceChain({ collectionId }: InheritanceChainProps
 
 	// Resolution walks root → leaf and picks the nearest non-none auth (handoff
 	// says nested folders take precedence, i.e. closer to leaf wins).
-	const sourceId = [...ancestors]
-		.reverse()
-		.find((c) => c.auth.mode !== "none")?.id;
+	const sourceId = [...ancestors].reverse().find((c) => c.auth.mode !== "none")?.id;
 
 	return (
 		<div className="mt-7 p-3.5 px-4 bg-card border border-border rounded-md">
@@ -81,7 +78,10 @@ export default function InheritanceChain({ collectionId }: InheritanceChainProps
 							!isLast && "border-b border-border"
 						)}
 					>
-						<span style={{ paddingLeft: indent }} className="flex items-center gap-2 flex-1 min-w-0">
+						<span
+							style={{ paddingLeft: indent }}
+							className="flex items-center gap-2 flex-1 min-w-0"
+						>
 							<Folder
 								className={cn(
 									"w-3 h-3 shrink-0",
@@ -91,7 +91,9 @@ export default function InheritanceChain({ collectionId }: InheritanceChainProps
 							<span
 								className={cn(
 									"text-[11px] font-mono truncate",
-									isThis ? "text-foreground font-semibold" : "text-muted-foreground"
+									isThis
+										? "text-foreground font-semibold"
+										: "text-muted-foreground"
 								)}
 							>
 								{c.name}
