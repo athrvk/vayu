@@ -55,6 +55,23 @@ describe("PostmanV21Parser", () => {
     expect(root.preRequestScript).toBe("");
   });
 
+  it("preserves '=' in string-URL query values (splits on first '=' only)", () => {
+    const obj = {
+      info: { name: "CB", schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
+      item: [
+        {
+          name: "Callback",
+          request: { method: "GET", url: "https://api.acme.com/cb?code=dGVzdA==&state=1" },
+        },
+      ],
+    };
+    const root = p.parse(obj, JSON.stringify(obj), opts).collections[0];
+    expect(root.requests[0].params).toEqual([
+      { key: "code", value: "dGVzdA==", enabled: true },
+      { key: "state", value: "1", enabled: true },
+    ]);
+  });
+
   it("reports meta counts", () => {
     const m = p.parse(parsed, raw, opts).meta;
     expect(m.requestCount).toBe(2);

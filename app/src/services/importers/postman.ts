@@ -70,7 +70,9 @@ function pmUrl(url: any): { url: string; params: ReturnType<typeof mapKeyValues>
       .split("&")
       .filter(Boolean)
       .map((pair: string) => {
-        const [k, v = ""] = pair.split("=");
+        const eqIdx = pair.indexOf("=");
+        const k = eqIdx === -1 ? pair : pair.slice(0, eqIdx);
+        const v = eqIdx === -1 ? "" : pair.slice(eqIdx + 1);
         return { key: decodeURIComponent(k), value: normalizeVars(decodeURIComponent(v)), enabled: true };
       });
     return { url: normalizeVars(base), params };

@@ -39,6 +39,9 @@ describe("mapPostmanAuth", () => {
   it("unknown type → none", () => {
     expect(mapPostmanAuth({ type: "weird" })).toEqual({ mode: "none" });
   });
+  it('inherit → {mode:"inherit"}', () => {
+    expect(mapPostmanAuth({ type: "inherit" })).toEqual({ mode: "inherit" });
+  });
 });
 
 describe("rawBody", () => {
