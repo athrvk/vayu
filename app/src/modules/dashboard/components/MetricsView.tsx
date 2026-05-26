@@ -903,7 +903,7 @@ function MetricsView({
 	return (
 		<div className="p-5 flex flex-col gap-3.5 max-w-[1180px]">
 			{/* Row 1 — Hero */}
-			<div className="grid grid-cols-3 gap-3">
+			<div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3">
 				<RateFidelityCard targetRps={targetRps} actualRps={actualRps} />
 				<ThroughputTwinCard sendRate={sendRate} throughput={throughput} />
 				<ErrorRateCard
@@ -956,7 +956,7 @@ function MetricsView({
 			)}
 
 			{/* Row 3 — HDR plot + Timing waterfall */}
-			<div className="grid grid-cols-[1.15fr_1fr] gap-3">
+			<div className="grid grid-cols-[repeat(auto-fit,minmax(380px,1fr))] gap-3">
 				{/* HDR */}
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
@@ -1005,7 +1005,7 @@ function MetricsView({
 			</div>
 
 			{/* Row 4 — Bottom stat row */}
-			<div className="grid grid-cols-4 gap-3">
+			<div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
 				<StatCard
 					label="Duration"
 					value={fmt(testDuration, 2)}
