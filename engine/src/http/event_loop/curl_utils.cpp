@@ -266,7 +266,12 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     long http_code = 0;
     curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &http_code);
     response.status_code = static_cast<int> (http_code);
-    response.status_text = status_text (response.status_code);
+    // header_callback captures the wire reason phrase. Only fall back to
+    // the code→phrase lookup when the server (or HTTP/2+ stack) didn't
+    // supply one.
+    if (response.status_text.empty ()) {
+        response.status_text = status_text (response.status_code);
+    }
 
     // Get timing info
     double total_time = 0, namelookup_time = 0, connect_time = 0;
