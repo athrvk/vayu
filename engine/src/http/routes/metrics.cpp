@@ -318,12 +318,14 @@ void register_metrics_routes (RouteContext& ctx) {
 
         res.set_content_provider ("text/event-stream",
         [&ctx, run_id, context] (size_t offset, httplib::DataSink& sink) {
-            auto start_time = std::chrono::steady_clock::now ();
-
-            // State for instantaneous RPS calculation (delta-based)
-            auto last_rps_time      = start_time;
+            // State for instantaneous RPS calculation (delta-based).
+            // last_total_count is locked-in on the first tick so it spans the
+            // gap between run start and SSE attach (~500ms client delay),
+            // avoiding a one-tick currentRps spike.
+            auto last_rps_time      = std::chrono::steady_clock::now ();
             size_t last_total_count = 0;
             double current_rps      = 0.0;
+            bool first_tick         = true;
 
             while (context->is_running) {
                 if (!sink.is_writable ()) {
@@ -331,25 +333,43 @@ void register_metrics_routes (RouteContext& ctx) {
                 }
 
                 try {
-                    auto now = std::chrono::steady_clock::now ();
+                    // Compute elapsed_seconds from the run's actual start time
+                    // (context->start_time_ms, set in run_manager.cpp:start_run).
+                    // Using the SSE handler's local clock would give a tiny
+                    // denominator on the first tick and spike send_rate /
+                    // throughput to thousands of req/s.
+                    int64_t now_wall_ms =
+                    std::chrono::duration_cast<std::chrono::milliseconds> (
+                    std::chrono::system_clock::now ().time_since_epoch ())
+                    .count ();
                     double elapsed_seconds =
-                    std::chrono::duration<double> (now - start_time).count ();
+                    context->start_time_ms > 0 ?
+                    static_cast<double> (now_wall_ms - context->start_time_ms) / 1000.0 :
+                    0.0;
 
+                    auto now = std::chrono::steady_clock::now ();
                     size_t active_count =
                     context->event_loop ? context->event_loop->active_count () : 0;
                     size_t requests_sent = context->requests_sent.load ();
                     auto stats = context->metrics_collector->get_current_stats (
                     active_count, elapsed_seconds, requests_sent);
 
-                    // Calculate instantaneous RPS (delta-based, per-interval)
+                    // Calculate instantaneous RPS (delta-based, per-interval).
                     size_t current_total = stats["totalRequests"].get<size_t> ();
-                    double rps_interval =
-                    std::chrono::duration<double> (now - last_rps_time).count ();
-                    if (rps_interval >= 0.1) { // Update RPS every 100ms minimum
-                        size_t delta = current_total - last_total_count;
-                        current_rps  = static_cast<double> (delta) / rps_interval;
+                    if (first_tick) {
                         last_total_count = current_total;
                         last_rps_time    = now;
+                        first_tick       = false;
+                    } else {
+                        double rps_interval =
+                        std::chrono::duration<double> (now - last_rps_time).count ();
+                        if (rps_interval >= 0.1) { // Update RPS every 100ms minimum
+                            size_t delta = current_total - last_total_count;
+                            current_rps =
+                            static_cast<double> (delta) / rps_interval;
+                            last_total_count = current_total;
+                            last_rps_time    = now;
+                        }
                     }
                     stats["currentRps"] = current_rps;
 
@@ -359,12 +379,9 @@ void register_metrics_routes (RouteContext& ctx) {
                     requests_sent > total_responses ? requests_sent - total_responses : 0;
                     stats["backpressure"] = backpressure;
 
-                    stats["runId"] = run_id;
-                    stats["timestamp"] =
-                    std::chrono::duration_cast<std::chrono::milliseconds> (
-                    std::chrono::system_clock::now ().time_since_epoch ())
-                    .count ();
-                    stats["requestsSent"] = requests_sent;
+                    stats["runId"]            = run_id;
+                    stats["timestamp"]        = now_wall_ms;
+                    stats["requestsSent"]     = requests_sent;
                     stats["requestsExpected"] = context->requests_expected.load ();
 
                     std::string payload = "event: metrics\ndata: " + stats.dump () + "\n\n";
