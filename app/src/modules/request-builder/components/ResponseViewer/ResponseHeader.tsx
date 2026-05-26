@@ -53,7 +53,7 @@ export default function ResponseHeader({ response }: ResponseHeaderProps) {
 			{/* Time */}
 			<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
 				<Clock className="w-4 h-4" />
-				<span>{response.time} ms</span>
+				<span>{response.time.toFixed(4)} ms</span>
 			</div>
 
 			{/* Size */}

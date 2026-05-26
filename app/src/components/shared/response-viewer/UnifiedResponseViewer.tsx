@@ -349,7 +349,7 @@ function ResponseStatusBar({
 			{time !== undefined && (
 				<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
 					<Clock className="w-4 h-4" />
-					<span>{time} ms</span>
+					<span>{time.toFixed(4)} ms</span>
 				</div>
 			)}
 

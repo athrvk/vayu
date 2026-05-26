@@ -133,7 +133,7 @@ function SidebarPanel({
 	};
 
 	return (
-		<div className="w-60 h-full bg-panel border-r border-border flex flex-col overflow-hidden shrink-0">
+		<div className="flex-1 min-w-0 h-full bg-panel border-r border-border flex flex-col overflow-hidden">
 			<div className="flex-1 min-h-0 overflow-hidden">
 				<ScrollArea className="h-full w-full">
 					<div className="w-full min-w-0">{renderContent()}</div>

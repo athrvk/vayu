@@ -76,7 +76,7 @@ export default function AuthPanel() {
 			<div className="space-y-2">
 				<Label>Authentication Type</Label>
 				<Select value={authType} onValueChange={handleTypeChange}>
-					<SelectTrigger className="w-48">
+					<SelectTrigger className="w-auto">
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>

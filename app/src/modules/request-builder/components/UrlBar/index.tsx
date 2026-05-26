@@ -28,7 +28,7 @@ export default function UrlBar() {
 	return (
 		<div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel shrink-0">
 			<MethodSelector />
-			<UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-[13px] font-mono focus:border-primary focus:outline-none transition-colors" />
+			<UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-[13px] font-mono focus-within:border-primary focus-within:ring-0 transition-colors shadow-none" />
 			{/* Send button with loading state */}
 			<button
 				onClick={executeRequest}

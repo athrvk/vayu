@@ -40,12 +40,12 @@ function createWindow() {
 		titleBarStyle: "hidden",
 		titleBarOverlay:
 			process.platform === "darwin"
-				? {
+				? false
+				: {
 						color: nativeTheme.shouldUseDarkColors ? "#1a1a1a" : "#ffffff",
 						symbolColor: nativeTheme.shouldUseDarkColors ? "#ffffff" : "#1a1a1a",
 						height: 40,
-					}
-				: false,
+					},
 		webPreferences: {
 			nodeIntegration: false,
 			contextIsolation: true,
@@ -87,8 +87,8 @@ function createWindow() {
 			themeSource: nativeTheme.themeSource,
 		});
 
-		// Update titlebar overlay color on macOS
-		if (process.platform === "darwin" && mainWindow) {
+		// Update titlebar overlay color (Windows/Linux only — unsupported on macOS)
+		if (process.platform !== "darwin" && mainWindow) {
 			mainWindow.setTitleBarOverlay({
 				color: nativeTheme.shouldUseDarkColors ? "#1a1a1a" : "#ffffff",
 				symbolColor: nativeTheme.shouldUseDarkColors ? "#ffffff" : "#1a1a1a",
