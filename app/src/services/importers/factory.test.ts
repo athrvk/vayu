@@ -30,7 +30,23 @@ describe("parseImport", () => {
   it("throws on unrecognised input", () => {
     expect(() => parseImport('{"hello":"world"}', opts)).toThrow(UnrecognisedFormatError);
   });
-  it("throws on malformed input", () => {
-    expect(() => parseImport("not json or yaml: : :", opts)).toThrow();
+  it("propagates a YAML parse error on genuinely malformed input", () => {
+    // Unclosed flow mapping → js-yaml throws YAMLException (NOT UnrecognisedFormatError).
+    let err: unknown;
+    try {
+      parseImport("{ unclosed: [1, 2", opts);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(UnrecognisedFormatError);
+  });
+
+  it("throws UnrecognisedFormatError on empty input", () => {
+    expect(() => parseImport("", opts)).toThrow(UnrecognisedFormatError);
+  });
+
+  it("throws UnrecognisedFormatError on a bare YAML scalar", () => {
+    expect(() => parseImport("42", opts)).toThrow(UnrecognisedFormatError);
   });
 });
