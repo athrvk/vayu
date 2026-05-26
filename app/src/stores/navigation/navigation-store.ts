@@ -42,6 +42,7 @@ interface NavigationState {
 
 	// Navigation helpers
 	navigateToRequest: (collectionId: string, requestId: string) => void;
+	navigateToCollection: (collectionId: string) => void;
 	navigateToRunDetail: (runId: string) => void;
 	navigateToHistory: () => void;
 	navigateToVariables: () => void;
@@ -123,6 +124,26 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 					screen: "request-builder",
 					collectionId,
 					requestId,
+					runId: null,
+				},
+			},
+		});
+	},
+
+	navigateToCollection: (collectionId) => {
+		const state = get();
+
+		set({
+			selectedCollectionId: collectionId,
+			selectedRequestId: null,
+			activeScreen: "collection-detail",
+			activeSidebarTab: "collections",
+			tabMemory: {
+				...state.tabMemory,
+				collections: {
+					screen: "collection-detail",
+					collectionId,
+					requestId: null,
 					runId: null,
 				},
 			},
@@ -273,6 +294,9 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 		// If there's a specific screen set, use it (unless it's a tab-only screen)
 		if (state.activeScreen === "request-builder" && state.selectedRequestId) {
 			return "request-builder";
+		}
+		if (state.activeScreen === "collection-detail" && state.selectedCollectionId) {
+			return "collection-detail";
 		}
 		if (state.activeScreen === "dashboard") {
 			return "dashboard";

@@ -38,9 +38,9 @@ import { compareCollectionOrder } from "@/types";
 export default function CollectionTree() {
 	const {
 		navigateToRequest,
+		navigateToCollection,
 		navigateToWelcome,
 		selectedCollectionId,
-		setSelectedCollectionId,
 		selectedRequestId,
 	} = useNavigationStore();
 	const { expandedCollectionIds, toggleCollectionExpanded } = useCollectionsStore();
@@ -122,10 +122,10 @@ export default function CollectionTree() {
 
 	const handleCollectionClick = useCallback(
 		(collection: Collection) => {
-			setSelectedCollectionId(collection.id);
 			toggleCollectionExpanded(collection.id);
+			navigateToCollection(collection.id);
 		},
-		[setSelectedCollectionId, toggleCollectionExpanded]
+		[navigateToCollection, toggleCollectionExpanded]
 	);
 
 	const handleOpenNewCollectionForm = useCallback(() => {

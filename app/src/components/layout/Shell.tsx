@@ -13,6 +13,7 @@ import { useResizable } from "@/hooks";
 import { cn } from "@/lib/utils";
 import Sidebar from "./Sidebar";
 import RequestBuilder from "@/modules/request-builder";
+import CollectionDetail from "@/modules/collections/CollectionDetail";
 import LoadTestDashboard from "@/modules/dashboard";
 import { HistoryDetail } from "@/modules/history/main";
 import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
@@ -50,6 +51,8 @@ export default function Shell() {
 		switch (activeScreen) {
 			case "request-builder":
 				return <RequestBuilder />;
+			case "collection-detail":
+				return <CollectionDetail />;
 			case "dashboard":
 				return <LoadTestDashboard />;
 			case "history":
