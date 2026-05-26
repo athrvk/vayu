@@ -16,7 +16,7 @@
 		"electron:compile": "tsc -p tsconfig.node.json",
 		"electron:watch": "tsc -p tsconfig.node.json --watch",
 		"kill-ports": "npx kill-port 5173 9876",
-		"electron:dev": "pnpm kill-ports && concurrently -k -r \"pnpm:dev\" \"pnpm:electron:watch\" \"wait-on http://localhost:5173 && pnpm electron:compile && pnpm electron:start\"",
+		"electron:dev": "node scripts/electron-dev.mjs",
 		"electron:start": "cross-env NODE_ENV=development electron .",
 		"electron:build": "pnpm electron:compile && pnpm build && electron-builder --config electron-builder.json",
 		"electron:pack": "electron-builder --config electron-builder.json",
