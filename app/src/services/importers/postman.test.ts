@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PostmanV21Parser } from "./postman";
+import { PostmanV21Parser, PostmanV20Parser } from "./postman";
 
 const raw = readFileSync(join(__dirname, "__fixtures__/postman-v21.json"), "utf8");
 const parsed = JSON.parse(raw);
@@ -77,5 +77,25 @@ describe("PostmanV21Parser", () => {
     expect(m.requestCount).toBe(2);
     expect(m.folderCount).toBe(1);
     expect(m.format).toBe("Postman Collection v2.1");
+  });
+});
+
+describe("PostmanV20Parser", () => {
+  const raw20 = readFileSync(join(__dirname, "__fixtures__/postman-v20.json"), "utf8");
+  const parsed20 = JSON.parse(raw20);
+  const p = new PostmanV20Parser();
+  const opts = { importEnvironments: true, importScripts: true };
+
+  it("detects v2.0 by schema and by info+item without schema", () => {
+    expect(p.detect(parsed20, raw20)).toBe(true);
+    expect(p.detect({ info: { name: "x" }, item: [] }, "")).toBe(true);
+    expect(p.detect({ info: { schema: "v2.1.0" } }, "")).toBe(false);
+  });
+
+  it("parses string URL with query and v2.0 object-shape bearer auth", () => {
+    const req = p.parse(parsed20, raw20, opts).collections[0].requests[0];
+    expect(req.url).toBe("https://api.legacy.com/things");
+    expect(req.params).toEqual([{ key: "id", value: "5", enabled: true }]);
+    expect(req.auth).toEqual({ mode: "bearer", token: "LEGACY" });
   });
 });
