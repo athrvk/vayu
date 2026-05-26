@@ -65,4 +65,36 @@ describe("ImportOrchestrator", () => {
     expect(c.deletedCols).toHaveLength(1);
     expect(api.deleteCollection).toHaveBeenCalledWith(c.collections[0].id);
   });
+
+  it("throws (no creates) when given a result whose drafts have no ids", async () => {
+    const { api, calls } = fakeApi();
+    const result: ImportResult = {
+      collections: [{ name: "root", description: "", variables: {}, auth: { mode: "none" }, preRequestScript: "", postRequestScript: "", requests: [], children: [] }],
+      environments: [{ name: "e", description: "", variables: {} }],
+      meta: { format: "x", requestCount: 0, folderCount: 1, environmentCount: 1, skipped: [], nonExecutableAuth: 0 },
+    };
+    await expect(new ImportOrchestrator(api).run(result, opts)).rejects.toThrow(/assignIds/);
+    expect(calls.collections).toHaveLength(0);
+    expect(calls.environments).toHaveLength(0);
+  });
+
+  it("rolls back ALL created roots when a request in a later root's subtree fails", async () => {
+    const { api, calls } = fakeApi({
+      createRequest: vi.fn(async (d: any) => { if (d.name === "fail") throw new Error("boom"); return { id: d.id } as any; }),
+    });
+    const result = assignIds({
+      collections: [
+        { name: "root0", description: "", variables: {}, auth: { mode: "none" }, preRequestScript: "", postRequestScript: "",
+          requests: [{ name: "ok", description: "", method: "GET", url: "u", params: [], headers: [], body: { mode: "none" }, auth: { mode: "inherit" }, preRequestScript: "", postRequestScript: "" }], children: [] },
+        { name: "root1", description: "", variables: {}, auth: { mode: "none" }, preRequestScript: "", postRequestScript: "",
+          requests: [{ name: "fail", description: "", method: "GET", url: "u", params: [], headers: [], body: { mode: "none" }, auth: { mode: "inherit" }, preRequestScript: "", postRequestScript: "" }], children: [] },
+      ],
+      environments: [],
+      meta: { format: "x", requestCount: 2, folderCount: 2, environmentCount: 0, skipped: [], nonExecutableAuth: 0 },
+    });
+    await expect(new ImportOrchestrator(api).run(result, opts)).rejects.toThrow("boom");
+    expect(calls.deletedCols).toContain(result.collections[0].id);
+    expect(calls.deletedCols).toContain(result.collections[1].id);
+    expect(calls.deletedCols).toHaveLength(2);
+  });
 });

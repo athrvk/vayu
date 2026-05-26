@@ -32,6 +32,11 @@ export class ImportOrchestrator {
 
   /** Drafts must already have IDs assigned (see assignIds). */
   async run(result: ImportResult, opts: ImportOptions): Promise<void> {
+    if (result.collections.some((c) => !c.id) || result.environments.some((e) => !e.id)) {
+      throw new Error("ImportOrchestrator.run: assignIds() must be called before run()");
+    }
+    // Note: opts.importScripts is applied at PARSE time by the parsers (they emit empty scripts
+    // when false). The orchestrator only needs importEnvironments.
     try {
       for (let i = 0; i < result.collections.length; i++) {
         const root = result.collections[i];
@@ -94,7 +99,8 @@ export class ImportOrchestrator {
     }
   }
 
-  /** Best-effort: delete created roots (cascade wipes subtrees) + created envs. */
+  // Best-effort. Deleting a root cascades to its child collections + requests on the engine
+  // (delete_collection BFS). This rollback's completeness depends on that engine cascade behavior.
   private async rollback(): Promise<void> {
     for (const id of this.createdRootIds) {
       try {

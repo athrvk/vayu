@@ -11,6 +11,8 @@ import type { CollectionDraft, ImportResult } from "./types";
  * Assign client-side unique IDs to every draft before any create call.
  * Eliminates the engine's now_ms() id-collision risk and lets parent references
  * (parentId / collectionId) resolve without server round-trips.
+ *
+ * Mutates the result in place (and returns it).
  */
 export function assignIds(result: ImportResult): ImportResult {
   for (const c of result.collections) assignCollection(c);
