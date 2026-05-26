@@ -13,10 +13,6 @@ import { ApiError, apiService } from "@/services";
 import type {
 	SanityResult,
 	ExecuteRequestRequest,
-	StartLoadTestRequest,
-	StartLoadTestResponse,
-	LoadTestConfig,
-	Request,
 } from "@/types";
 
 interface UseEngineReturn {
@@ -28,11 +24,6 @@ interface UseEngineReturn {
 		params: ExecuteRequestRequest,
 		environmentId?: string
 	) => Promise<SanityResult | null>;
-	startLoadTest: (
-		request: Request,
-		config: LoadTestConfig,
-		environmentId?: string
-	) => Promise<StartLoadTestResponse | null>;
 	stopLoadTest: (runId: string) => Promise<boolean>;
 	isExecuting: boolean;
 	error: string | null;
@@ -76,51 +67,6 @@ export function useEngine(): UseEngineReturn {
 		[]
 	);
 
-	const startLoadTest = useCallback(
-		async (
-			request: Request,
-			config: LoadTestConfig,
-			environmentId?: string
-		): Promise<StartLoadTestResponse | null> => {
-			setIsExecuting(true);
-			setError(null);
-
-			try {
-				const payload: StartLoadTestRequest = {
-					method: request.method,
-					url: request.url,
-					// Flat headers passed in from caller (already resolved)
-					headers: {},
-					mode: config.mode,
-					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,
-					targetRps: config.rps,
-					iterations: config.iterations,
-					concurrency: config.concurrency,
-					rampUpDuration: config.ramp_duration_seconds
-						? `${config.ramp_duration_seconds}s`
-						: undefined,
-					requestId: request.id,
-					environmentId: environmentId,
-					success_sample_rate: config.data_sample_rate,
-					slow_threshold_ms: config.slow_threshold_ms,
-					save_timing_breakdown: config.save_timing_breakdown,
-					comment: config.comment,
-				};
-
-				const response = await apiService.startLoadTest(payload);
-				return response;
-			} catch (err) {
-				const errorMessage =
-					err instanceof Error ? err.message : "Failed to start load test";
-				setError(errorMessage);
-				return null;
-			} finally {
-				setIsExecuting(false);
-			}
-		},
-		[]
-	);
-
 	const stopLoadTest = useCallback(async (runId: string): Promise<boolean> => {
 		setError(null);
 
@@ -136,7 +82,6 @@ export function useEngine(): UseEngineReturn {
 
 	return {
 		executeRequest,
-		startLoadTest,
 		stopLoadTest,
 		isExecuting,
 		error,

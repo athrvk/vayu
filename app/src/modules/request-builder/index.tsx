@@ -143,11 +143,29 @@ export default function RequestBuilder() {
 				);
 				const resolvedBody = request.body ? resolveString(request.body) : request.body;
 
-				// Build body payload for engine: {mode, content}
-				const execBody =
-					request.bodyMode !== "none" && resolvedBody
-						? { mode: request.bodyMode || "text", content: resolvedBody }
-						: undefined;
+				// Build body payload for engine matching the discriminated union
+				let execBody: { mode: string; content?: string; fields?: Array<{ key: string; value: string; enabled: boolean }> } | undefined;
+				if (request.bodyMode === "form-data") {
+					execBody = {
+						mode: "form-data",
+						fields: toKeyValueEntries(request.formData).map((e) => ({
+							key: resolveString(e.key),
+							value: resolveString(e.value),
+							enabled: e.enabled,
+						})),
+					};
+				} else if (request.bodyMode === "x-www-form-urlencoded") {
+					execBody = {
+						mode: "x-www-form-urlencoded",
+						fields: toKeyValueEntries(request.urlEncoded).map((e) => ({
+							key: resolveString(e.key),
+							value: resolveString(e.value),
+							enabled: e.enabled,
+						})),
+					};
+				} else if (request.bodyMode !== "none" && resolvedBody) {
+					execBody = { mode: request.bodyMode || "text", content: resolvedBody };
+				}
 
 				// Build resolved auth for engine (exclude inherit — engine needs concrete auth)
 				const execAuth =
@@ -316,13 +334,32 @@ export default function RequestBuilder() {
 					? resolveString(pendingLoadTestRequest.body)
 					: pendingLoadTestRequest.body;
 
-				// Build body in the format backend expects: { mode, content }
-				const bodyPayload = resolvedBody
-					? {
+				// Build body payload matching the discriminated union
+				let bodyPayload: { mode: string; content?: string; fields?: Array<{ key: string; value: string; enabled: boolean }> } | undefined;
+				if (pendingLoadTestRequest.bodyMode === "form-data") {
+					bodyPayload = {
+						mode: "form-data",
+						fields: toKeyValueEntries(pendingLoadTestRequest.formData).map((e) => ({
+							key: resolveString(e.key),
+							value: resolveString(e.value),
+							enabled: e.enabled,
+						})),
+					};
+				} else if (pendingLoadTestRequest.bodyMode === "x-www-form-urlencoded") {
+					bodyPayload = {
+						mode: "x-www-form-urlencoded",
+						fields: toKeyValueEntries(pendingLoadTestRequest.urlEncoded).map((e) => ({
+							key: resolveString(e.key),
+							value: resolveString(e.value),
+							enabled: e.enabled,
+						})),
+					};
+				} else if (resolvedBody) {
+					bodyPayload = {
 						mode: pendingLoadTestRequest.bodyMode || "text",
 						content: resolvedBody,
-					}
-					: undefined;
+					};
+				}
 
 				// Convert LoadTestConfig to StartLoadTestRequest (flat structure)
 				const apiRequest: StartLoadTestRequest = {
