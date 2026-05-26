@@ -30,7 +30,7 @@ import VariablesMain from "@/modules/variables/main/VariablesMain";
  * characters.
  */
 const MIN_SIDEBAR_WIDTH = 280;
-const MIN_SIDEBAR_WIDTH_HISTORY = 340;
+const MIN_SIDEBAR_WIDTH_HISTORY = 420;
 const MAX_SIDEBAR_WIDTH = 600;
 
 export default function Shell() {
