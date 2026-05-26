@@ -45,16 +45,18 @@ function insomniaAuth(auth: any, ctx: { nonExec: number }): RequestAuth {
     case "apikey":
       return { mode: "apikey", key: normalizeVars(asString(auth.key)), value: normalizeVars(asString(auth.value)), in: auth.addTo === "queryParams" ? "query" : "header" };
     case "oauth2":
-    case "digest":
+    case "digest": {
       ctx.nonExec += 1;
-      return { mode: auth.type, config: auth } as RequestAuth;
+      const { type: _type, disabled: _disabled, ...config } = auth;
+      return { mode: auth.type, config } as RequestAuth;
+    }
     default:
       return { mode: "inherit" };
   }
 }
 
 function insomniaBody(body: any): RequestBody {
-  const mime = body?.mimeType;
+  const mime = (body?.mimeType ?? "").split(";")[0].trim();
   switch (mime) {
     case "application/json":
       return { mode: "json", content: normalizeVars(asString(body.text)) };

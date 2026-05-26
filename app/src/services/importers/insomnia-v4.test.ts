@@ -52,4 +52,45 @@ describe("InsomniaV4Parser", () => {
     expect(prod.variables.baseUrl.value).toBe("https://prod.acme.com");
     expect(prod.variables.timeout.value).toBe("30");
   });
+
+  it("handles charset-suffixed json mimeType", () => {
+    const doc = {
+      _type: "export", __export_format: 4,
+      resources: [
+        { _id: "w", _type: "workspace", name: "W" },
+        { _id: "r", _type: "request", parentId: "w", name: "R", method: "post",
+          url: "https://x/y", body: { mimeType: "application/json; charset=utf-8", text: "{\"a\":1}" } },
+      ],
+    };
+    const req = p.parse(doc, JSON.stringify(doc), opts).collections[0].requests[0];
+    expect(req.body).toEqual({ mode: "json", content: '{"a":1}' });
+  });
+
+  it("disabled auth → none; collection inherit → none", () => {
+    const doc = {
+      _type: "export", __export_format: 4,
+      resources: [
+        { _id: "w", _type: "workspace", name: "W" },
+        { _id: "r", _type: "request", parentId: "w", name: "R", method: "get", url: "https://x",
+          authentication: { type: "bearer", token: "T", disabled: true } },
+      ],
+    };
+    const result = p.parse(doc, JSON.stringify(doc), opts);
+    expect(result.collections[0].requests[0].auth).toEqual({ mode: "none" });
+    expect(result.collections[0].auth).toEqual({ mode: "none" }); // workspace had no auth → inherit → none
+  });
+
+  it("base environment with no sub-envs becomes one Environment named after the base", () => {
+    const doc = {
+      _type: "export", __export_format: 4,
+      resources: [
+        { _id: "w", _type: "workspace", name: "W" },
+        { _id: "e", _type: "environment", parentId: "w", name: "Base", data: { k: 1 } },
+      ],
+    };
+    const envs = p.parse(doc, JSON.stringify(doc), opts).environments;
+    expect(envs).toHaveLength(1);
+    expect(envs[0].name).toBe("Base");
+    expect(envs[0].variables.k.value).toBe("1");
+  });
 });
