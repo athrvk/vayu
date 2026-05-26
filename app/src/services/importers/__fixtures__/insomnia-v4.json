@@ -1,0 +1,18 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "resources": [
+    { "_id": "wrk_1", "_type": "workspace", "name": "Acme", "description": "ws" },
+    { "_id": "grp_1", "_type": "request_group", "parentId": "wrk_1", "name": "Users",
+      "authentication": { "type": "bearer", "token": "{{ _.token }}" } },
+    { "_id": "req_1", "_type": "request", "parentId": "grp_1", "name": "List",
+      "method": "get", "url": "{{ _.baseUrl }}/users",
+      "parameters": [{ "name": "page", "value": "1" }, { "name": "trace", "value": "1", "disabled": true }],
+      "headers": [{ "name": "Accept", "value": "application/json" }],
+      "body": { "mimeType": "application/json", "text": "{\"a\":1}" } },
+    { "_id": "req_2", "_type": "request", "parentId": "wrk_1", "name": "Ping", "method": "get", "url": "{{ _.baseUrl }}/ping" },
+    { "_id": "grpc_1", "_type": "grpc_request", "parentId": "wrk_1", "name": "stream" },
+    { "_id": "env_base", "_type": "environment", "parentId": "wrk_1", "name": "Base", "data": { "baseUrl": "https://api.acme.com", "timeout": 30 } },
+    { "_id": "env_prod", "_type": "environment", "parentId": "env_base", "name": "Production", "data": { "baseUrl": "https://prod.acme.com" } }
+  ]
+}
