@@ -27,13 +27,35 @@ import { RequestBuilderProvider } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
 import { useNavigationStore, useVariablesStore, useDashboardStore } from "@/stores";
-import { useRequestQuery, useUpdateRequestMutation, queryKeys } from "@/queries";
+import { useRequestQuery, useUpdateRequestMutation, useCollectionAncestors, queryKeys } from "@/queries";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
-import type { HttpMethod, LoadTestConfig, StartLoadTestRequest, RequestBody, RequestAuth } from "@/types";
+import type { HttpMethod, LoadTestConfig, StartLoadTestRequest, RequestBody, RequestAuth, Collection } from "@/types";
+
+/**
+ * Walk the ancestor chain leaf-first and return the first non-none auth.
+ * Collections are always concrete auth sources (never inherit), so the first
+ * non-none one found is the effective inherited auth for the request.
+ */
+function resolveInheritedAuth(ancestors: Collection[]): Record<string, unknown> | undefined {
+	for (let i = ancestors.length - 1; i >= 0; i--) {
+		const auth = ancestors[i].auth;
+		if (auth.mode !== "none") {
+			// Spread the discriminated union into a plain record for the engine
+			return { ...auth } as Record<string, unknown>;
+		}
+	}
+	return undefined;
+}
+
+/** Convert a concrete RequestAuth (non-inherit) to the flat record the engine expects. */
+function authToRecord(auth: Exclude<RequestAuth, { mode: "inherit" }>): Record<string, unknown> | undefined {
+	if (auth.mode === "none") return undefined;
+	return { ...auth } as Record<string, unknown>;
+}
 
 /**
  * RequestBuilder - Main entry point
@@ -56,6 +78,9 @@ export default function RequestBuilder() {
 
 	// Fetch request data
 	const { data: fetchedRequest, isLoading } = useRequestQuery(selectedRequestId);
+
+	// Ancestor chain for the current request's collection (root-first)
+	const collectionAncestors = useCollectionAncestors(fetchedRequest?.collectionId);
 
 	// Variable resolver for the current request's collection
 	const { resolveString, resolveObject } = useVariableResolver({
@@ -167,11 +192,26 @@ export default function RequestBuilder() {
 					execBody = { mode: request.bodyMode || "text", content: resolvedBody };
 				}
 
-				// Build resolved auth for engine (exclude inherit — engine needs concrete auth)
-				const execAuth =
-					request.authType !== "none" && request.authType !== "inherit"
-						? resolveObject(request.authConfig)
-						: undefined;
+				// Resolve auth — walk collection chain for inherit, resolve variables for concrete
+				let execAuth: Record<string, unknown> | undefined;
+				if (request.authType === "inherit") {
+					execAuth = resolveInheritedAuth(collectionAncestors);
+					if (execAuth) execAuth = resolveObject(execAuth) as Record<string, unknown>;
+				} else if (request.authType !== "none") {
+					const concreteAuth = { mode: request.authType, ...request.authConfig } as Exclude<RequestAuth, { mode: "inherit" }>;
+					const raw = authToRecord(concreteAuth);
+					execAuth = raw ? (resolveObject(raw) as Record<string, unknown>) : undefined;
+				}
+
+				// Compose pre/post scripts: collection chain root→leaf, then the request's own script
+				const composedPreScript = [
+					...collectionAncestors.map((c) => c.preRequestScript).filter(Boolean),
+					request.preRequestScript,
+				].filter(Boolean).join("\n\n");
+				const composedPostScript = [
+					...collectionAncestors.map((c) => c.postRequestScript).filter(Boolean),
+					request.testScript,
+				].filter(Boolean).join("\n\n");
 
 				const result = await engineExecuteRequest(
 					{
@@ -179,9 +219,9 @@ export default function RequestBuilder() {
 						url: resolvedUrl,
 						headers: resolvedHeaders,
 						body: execBody,
-						auth: execAuth as Record<string, unknown> | undefined,
-						preRequestScript: request.preRequestScript || undefined,
-						postRequestScript: request.testScript || undefined,
+						auth: execAuth,
+						preRequestScript: composedPreScript || undefined,
+						postRequestScript: composedPostScript || undefined,
 						requestId: fetchedRequest.id,
 					},
 					activeEnvironmentId || undefined
@@ -190,7 +230,7 @@ export default function RequestBuilder() {
 				if (!result) return null;
 
 				// Refresh variables so script-set values (e.g. pm.environment.set) appear in the UI
-				if (request.preRequestScript.trim()) {
+				if (composedPreScript) {
 					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
@@ -258,7 +298,7 @@ export default function RequestBuilder() {
 				};
 			}
 		},
-		[fetchedRequest, engineExecuteRequest, activeEnvironmentId, resolveString, resolveObject, queryClient]
+		[fetchedRequest, engineExecuteRequest, activeEnvironmentId, resolveString, resolveObject, queryClient, collectionAncestors]
 	);
 
 	// Save request callback
@@ -361,12 +401,24 @@ export default function RequestBuilder() {
 					};
 				}
 
+				// Resolve auth for load test (same inherit logic as regular execute)
+				let loadTestAuth: Record<string, unknown> | undefined;
+				if (pendingLoadTestRequest.authType === "inherit") {
+					loadTestAuth = resolveInheritedAuth(collectionAncestors);
+					if (loadTestAuth) loadTestAuth = resolveObject(loadTestAuth) as Record<string, unknown>;
+				} else if (pendingLoadTestRequest.authType !== "none") {
+					const concreteAuth = { mode: pendingLoadTestRequest.authType, ...pendingLoadTestRequest.authConfig } as Exclude<RequestAuth, { mode: "inherit" }>;
+					const raw = authToRecord(concreteAuth);
+					loadTestAuth = raw ? (resolveObject(raw) as Record<string, unknown>) : undefined;
+				}
+
 				// Convert LoadTestConfig to StartLoadTestRequest (flat structure)
 				const apiRequest: StartLoadTestRequest = {
 					method: pendingLoadTestRequest.method,
 					url: resolvedUrl,
 					headers: resolvedHeaders,
 					body: bodyPayload,
+					auth: loadTestAuth,
 					// Load test config
 					mode: config.mode,
 					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,
@@ -424,6 +476,8 @@ export default function RequestBuilder() {
 			startRun,
 			navigateToDashboard,
 			resolveString,
+			resolveObject,
+			collectionAncestors,
 		]
 	);
 

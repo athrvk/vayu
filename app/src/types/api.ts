@@ -157,6 +157,7 @@ export interface StartLoadTestRequest {
 	// Engine load-test endpoint expects flat headers (resolved, enabled-only)
 	headers?: Record<string, string>;
 	body?: any;
+	auth?: Record<string, unknown>;
 
 	// Load test strategy
 	mode: "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
