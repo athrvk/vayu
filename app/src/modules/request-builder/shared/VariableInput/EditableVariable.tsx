@@ -81,9 +81,11 @@ export default function EditableVariable({
 			}
 			triggerClassName={cn(
 				"inline cursor-pointer transition-colors rounded",
-				resolved
-					? "text-primary hover:bg-primary/20"
-					: "text-destructive hover:bg-destructive/20",
+				!resolved
+					? "text-destructive-text hover:bg-destructive-text/10"
+					: !value
+						? "text-muted-foreground hover:bg-muted"
+						: "text-primary hover:bg-primary/10",
 				disabled && "cursor-default opacity-50"
 			)}
 		/>
