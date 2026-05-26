@@ -32,6 +32,7 @@ import VariableInput from "../../../shared/VariableInput";
 import type { AuthType } from "../../../types";
 
 const AUTH_TYPES: { value: AuthType; label: string; icon: typeof Key }[] = [
+	{ value: "inherit", label: "Inherit from Collection", icon: Lock },
 	{ value: "none", label: "No Auth", icon: Lock },
 	{ value: "bearer", label: "Bearer Token", icon: Key },
 	{ value: "basic", label: "Basic Auth", icon: User },

@@ -17,6 +17,9 @@ import type {
 	RunReport,
 	EngineHealth,
 	VariableValue,
+	KeyValueEntry,
+	RequestBody,
+	RequestAuth,
 } from "./domain";
 
 // API Response wrapper
@@ -37,6 +40,9 @@ export interface CreateCollectionRequest {
 	parentId?: string;
 	order?: number;
 	variables?: Record<string, VariableValue>;
+	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
+	preRequestScript?: string;
+	postRequestScript?: string;
 }
 
 export interface UpdateCollectionRequest {
@@ -46,6 +52,9 @@ export interface UpdateCollectionRequest {
 	parentId?: string;
 	order?: number;
 	variables?: Record<string, VariableValue>;
+	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
+	preRequestScript?: string;
+	postRequestScript?: string;
 }
 
 // Requests API
@@ -63,13 +72,14 @@ export interface CreateRequestRequest {
 	description?: string;
 	method: string;
 	url: string;
-	params?: Record<string, string>;
-	headers?: Record<string, string>;
-	body?: string;
+	params?: KeyValueEntry[];
+	headers?: KeyValueEntry[];
+	body?: RequestBody;
 	bodyType?: string;
-	auth?: Record<string, any>;
+	auth?: RequestAuth;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	order?: number;
 }
 
 export interface UpdateRequestRequest {
@@ -78,13 +88,14 @@ export interface UpdateRequestRequest {
 	description?: string;
 	method?: string;
 	url?: string;
-	params?: Record<string, string>;
-	headers?: Record<string, string>;
-	body?: string;
+	params?: KeyValueEntry[];
+	headers?: KeyValueEntry[];
+	body?: RequestBody;
 	bodyType?: string;
-	auth?: Record<string, any>;
+	auth?: RequestAuth;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	order?: number;
 }
 
 // Environments API
@@ -119,20 +130,14 @@ export interface UpdateGlobalsRequest {
 // Execution API
 // Execute Request API - matches /request endpoint
 export interface ExecuteRequestRequest {
-	// Required HTTP request fields
 	method: string;
 	url: string;
-
-	// Optional HTTP request fields
+	// Engine execution endpoint expects flat headers (resolved, enabled-only)
 	headers?: Record<string, string>;
 	body?: any;
-	auth?: Record<string, any>;
-
-	// Scripts
+	auth?: Record<string, unknown>;
 	preRequestScript?: string;
 	postRequestScript?: string;
-
-	// Optional linking fields (camelCase as per API docs)
 	requestId?: string;
 	environmentId?: string;
 }
@@ -147,11 +152,12 @@ export interface ExecuteRequestResponse extends SanityResult {}
  * - Mode-specific params (duration, targetRps, iterations, concurrency, etc.)
  */
 export interface StartLoadTestRequest {
-	// HTTP request fields (same structure as ExecuteRequestRequest)
 	method: string;
 	url: string;
+	// Engine load-test endpoint expects flat headers (resolved, enabled-only)
 	headers?: Record<string, string>;
 	body?: any;
+	auth?: Record<string, unknown>;
 
 	// Load test strategy
 	mode: "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";

@@ -144,6 +144,11 @@ void register_request_routes (RouteContext& ctx) {
             if (json.contains ("name") && !json["name"].is_null ()) {
                 r.name = json["name"].get<std::string> ();
             }
+            if (json.contains ("description")) {
+                r.description = json["description"].is_null ()
+                ? ""
+                : json["description"].get<std::string> ();
+            }
             if (json.contains ("method") && !json["method"].is_null ()) {
                 auto method = vayu::parse_method (json["method"].get<std::string> ());
                 if (!method)
@@ -153,21 +158,73 @@ void register_request_routes (RouteContext& ctx) {
             if (json.contains ("url") && !json["url"].is_null ()) {
                 r.url = json["url"].get<std::string> ();
             }
-            if (json.contains ("params"))
-                r.params = json["params"].dump ();
-            if (json.contains ("headers"))
-                r.headers = json["headers"].dump ();
+
+            // Validate and store params — must be an array of KeyValueEntry
+            if (json.contains ("params")) {
+                const auto& p = json["params"];
+                if (!p.is_array () && !p.is_null ()) {
+                    send_error (res, 400,
+                    "Invalid 'params': must be an array of {key, value, enabled}");
+                    return;
+                }
+                if (p.is_array ()) {
+                    for (size_t i = 0; i < p.size (); ++i) {
+                        const auto& entry = p[i];
+                        if (!entry.contains ("key") || !entry["key"].is_string () ||
+                        !entry.contains ("value") || !entry["value"].is_string () ||
+                        !entry.contains ("enabled") || !entry["enabled"].is_boolean ()) {
+                            send_error (res, 400,
+                            "Invalid params entry at index " + std::to_string (i) +
+                            ": missing required field (key, value, or enabled)");
+                            return;
+                        }
+                    }
+                }
+                r.params = p.is_null () ? "[]" : p.dump ();
+            }
+
+            // Validate and store headers — must be an array of KeyValueEntry
+            if (json.contains ("headers")) {
+                const auto& h = json["headers"];
+                if (!h.is_array () && !h.is_null ()) {
+                    send_error (res, 400,
+                    "Invalid 'headers': must be an array of {key, value, enabled}");
+                    return;
+                }
+                if (h.is_array ()) {
+                    for (size_t i = 0; i < h.size (); ++i) {
+                        const auto& entry = h[i];
+                        if (!entry.contains ("key") || !entry["key"].is_string () ||
+                        !entry.contains ("value") || !entry["value"].is_string () ||
+                        !entry.contains ("enabled") || !entry["enabled"].is_boolean ()) {
+                            send_error (res, 400,
+                            "Invalid headers entry at index " + std::to_string (i) +
+                            ": missing required field (key, value, or enabled)");
+                            return;
+                        }
+                    }
+                }
+                r.headers = h.is_null () ? "[]" : h.dump ();
+            }
+
             if (json.contains ("body"))
-                r.body = json["body"].dump ();
+                r.body = json["body"].is_null () ? "{\"mode\":\"none\"}" : json["body"].dump ();
             if (json.contains ("bodyType") && !json["bodyType"].is_null ()) {
                 r.body_type = json["bodyType"].get<std::string> ();
             }
             if (json.contains ("auth"))
-                r.auth = json["auth"].dump ();
+                r.auth = json["auth"].is_null () ? "{\"mode\":\"inherit\"}" : json["auth"].dump ();
             if (json.contains ("preRequestScript"))
-                r.pre_request_script = json["preRequestScript"].get<std::string> ();
+                r.pre_request_script = json["preRequestScript"].is_null ()
+                ? ""
+                : json["preRequestScript"].get<std::string> ();
             if (json.contains ("postRequestScript"))
-                r.post_request_script = json["postRequestScript"].get<std::string> ();
+                r.post_request_script = json["postRequestScript"].is_null ()
+                ? ""
+                : json["postRequestScript"].get<std::string> ();
+            if (json.contains ("order") && !json["order"].is_null ()) {
+                r.order = json["order"].get<int> ();
+            }
 
             if (is_update) {
                 r.updated_at = now_ms ();

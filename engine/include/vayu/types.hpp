@@ -634,7 +634,11 @@ struct Collection {
     std::string id;
     std::optional<std::string> parent_id;
     std::string name;
-    std::string variables; // JSON - Collection-scoped variables
+    std::string description;  // TEXT NOT NULL DEFAULT ''
+    std::string variables;    // JSON - Collection-scoped variables
+    std::string auth;         // JSON - Auth config (mode + fields), never 'inherit'
+    std::string pre_request_script;  // JS - runs before every request in this collection
+    std::string post_request_script; // JS - runs after every request in this collection
     int order;
     int64_t created_at;
     int64_t updated_at;
@@ -644,15 +648,17 @@ struct Request {
     std::string id;
     std::string collection_id;
     std::string name;
+    std::string description; // TEXT NOT NULL DEFAULT ''
     HttpMethod method;
     std::string url;
-    std::string params;  // JSON - Query parameters
-    std::string headers; // JSON
-    std::string body;    // JSON/Text
-    std::string body_type; // "json", "text", "form-data", "x-www-form-urlencoded", "none"
-    std::string auth;                // JSON
+    std::string params;    // JSON array of KeyValueEntry: [{key,value,enabled,description?}]
+    std::string headers;   // JSON array of KeyValueEntry
+    std::string body;      // JSON discriminated union: {mode,content?} | {mode,fields?}
+    std::string body_type; // Denormalized: equals body.mode for queryability
+    std::string auth;      // JSON - RequestAuth (mode + fields, may be 'inherit')
     std::string pre_request_script;  // JS Code
     std::string post_request_script; // JS Code (Tests)
+    int order;             // INTEGER NOT NULL DEFAULT 0 — position within collection
     int64_t created_at;
     int64_t updated_at;
 };
@@ -660,7 +666,8 @@ struct Request {
 struct Environment {
     std::string id;
     std::string name;
-    std::string variables; // JSON
+    std::string description; // TEXT NOT NULL DEFAULT ''
+    std::string variables;   // JSON
     bool is_active = false;
     int64_t created_at;
     int64_t updated_at;

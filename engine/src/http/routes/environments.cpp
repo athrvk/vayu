@@ -77,6 +77,11 @@ void register_environment_routes (RouteContext& ctx) {
             if (json.contains ("name") && !json["name"].is_null ()) {
                 e.name = json["name"].get<std::string> ();
             }
+            if (json.contains ("description")) {
+                e.description = json["description"].is_null ()
+                ? ""
+                : json["description"].get<std::string> ();
+            }
             if (json.contains ("variables")) {
                 e.variables = json["variables"].dump ();
             }

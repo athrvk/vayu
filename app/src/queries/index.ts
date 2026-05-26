@@ -22,6 +22,7 @@ export {
 	useRequestsQuery,
 	useMultipleCollectionRequests,
 	useRequestQuery,
+	useCollectionAncestors,
 	useCreateCollectionMutation,
 	useUpdateCollectionMutation,
 	useDeleteCollectionMutation,
