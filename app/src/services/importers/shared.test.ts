@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toVarRecord, mapPostmanAuth, rawBody, joinExec } from "./shared";
+import { toVarRecord, mapPostmanAuth, rawBody, joinExec, asString, mapKeyValues } from "./shared";
 
 describe("toVarRecord", () => {
   it("builds a VariableValue record, stringifying values, defaulting enabled", () => {
@@ -34,6 +34,10 @@ describe("mapPostmanAuth", () => {
   it("oauth2 stored as config", () => {
     const r = mapPostmanAuth({ type: "oauth2", oauth2: [{ key: "accessToken", value: "A" }] });
     expect(r.mode).toBe("oauth2");
+    expect((r as any).config.accessToken).toBe("A");
+  });
+  it("unknown type → none", () => {
+    expect(mapPostmanAuth({ type: "weird" })).toEqual({ mode: "none" });
   });
 });
 
@@ -55,5 +59,36 @@ describe("joinExec", () => {
   });
   it("missing → empty string", () => {
     expect(joinExec(undefined)).toBe("");
+  });
+});
+
+describe("asString", () => {
+  it("coerces scalars and objects", () => {
+    expect(asString(null)).toBe("");
+    expect(asString(undefined)).toBe("");
+    expect(asString("x")).toBe("x");
+    expect(asString(5)).toBe("5");
+    expect(asString(true)).toBe("true");
+    expect(asString({ a: 1 })).toBe('{"a":1}');
+    expect(asString([1, 2])).toBe("[1,2]");
+  });
+});
+
+describe("mapKeyValues", () => {
+  it("maps rows, preserves disabled + duplicates, drops blank keys, omits absent description", () => {
+    expect(
+      mapKeyValues([
+        { key: "Accept", value: "application/json" },
+        { key: "X", value: "1", disabled: true },
+        { key: "Accept", value: "text/html" },
+        { key: "", value: "ignored" },
+        { key: "Trace", value: "on", description: "d" },
+      ])
+    ).toEqual([
+      { key: "Accept", value: "application/json", enabled: true },
+      { key: "X", value: "1", enabled: false },
+      { key: "Accept", value: "text/html", enabled: true },
+      { key: "Trace", value: "on", enabled: true, description: "d" },
+    ]);
   });
 });

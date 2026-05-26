@@ -34,7 +34,7 @@ export function mapKeyValues(
   rows: Array<{ key?: string; value?: unknown; disabled?: boolean; description?: string }> | undefined
 ): KeyValueEntry[] {
   return (rows ?? [])
-    .filter((r) => r && r.key != null)
+    .filter((r) => r && r.key)
     .map((r) => ({
       key: r.key as string,
       value: normalizeVars(asString(r.value)),
