@@ -20,17 +20,30 @@ import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
 import { SettingsMain } from "@/modules/settings";
 import VariablesMain from "@/modules/variables/main/VariablesMain";
 
+/**
+ * Sidebar width bounds.
+ *
+ * `History` runs need more breathing room than the Collections tree —
+ * each RunItem renders a method badge, status text, relative timestamp,
+ * URL, and (for load tests) duration / workers / mode chips. Bump the
+ * floor when that tab is active so URLs don't truncate into single
+ * characters.
+ */
 const MIN_SIDEBAR_WIDTH = 280;
+const MIN_SIDEBAR_WIDTH_HISTORY = 340;
 const MAX_SIDEBAR_WIDTH = 600;
 
 export default function Shell() {
-	const { resolveActiveScreen } = useNavigationStore();
+	const { resolveActiveScreen, activeSidebarTab } = useNavigationStore();
 	const activeScreen = resolveActiveScreen();
 	const { triggerSave } = useSaveStore();
 
+	const minSidebarWidth =
+		activeSidebarTab === "history" ? MIN_SIDEBAR_WIDTH_HISTORY : MIN_SIDEBAR_WIDTH;
+
 	const { size: sidebarWidth, isResizing, startResizing } = useResizable({
 		defaultSize: 320,
-		min: MIN_SIDEBAR_WIDTH,
+		min: minSidebarWidth,
 		max: MAX_SIDEBAR_WIDTH,
 	});
 
@@ -73,7 +86,7 @@ export default function Shell() {
 			<div
 				style={{
 					width: `${sidebarWidth}px`,
-					minWidth: `${MIN_SIDEBAR_WIDTH}px`,
+					minWidth: `${minSidebarWidth}px`,
 					maxWidth: `${MAX_SIDEBAR_WIDTH}px`,
 				}}
 				className="flex-shrink-0 flex flex-col overflow-hidden"

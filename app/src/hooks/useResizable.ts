@@ -41,6 +41,13 @@ export function useResizable({
 	const [isResizing, setIsResizing] = useState(false);
 	const dragStart = useRef<{ mousePos: number; size: number } | null>(null);
 
+	// Re-clamp size whenever the bounds change (e.g. a per-context min that
+	// rises when the active tab demands more room). Without this, an
+	// already-narrow size would silently violate the new floor.
+	useEffect(() => {
+		setSize((s) => Math.min(max, Math.max(min, s)));
+	}, [min, max]);
+
 	const startResizing = useCallback(
 		(e: React.MouseEvent) => {
 			dragStart.current = {
