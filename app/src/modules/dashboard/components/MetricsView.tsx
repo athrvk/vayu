@@ -281,7 +281,7 @@ function ErrorRateCard({
 		<div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1.5">
 			<Eyebrow>
 				Error Rate
-				<InfoChip tip="Share of requests that did not return a 2xx response — counts both HTTP errors (4xx/5xx) and transport-layer failures (connection refused, TLS, timeout)." />
+				<InfoChip tip="Share of requests that failed at the transport layer (timeout, connection refused, TLS handshake failure, DNS). HTTP responses with 4xx / 5xx status codes are counted separately in the bar below — they don't contribute to this percentage." />
 			</Eyebrow>
 			<div className="flex items-baseline gap-2 mt-0.5">
 				<span
@@ -994,10 +994,10 @@ function MetricsView({
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-[12px] font-semibold text-foreground">
 							Avg request timing
-							<InfoChip tip="Average breakdown of where each HTTP request spent time, in flight order. Helps isolate whether latency lives in DNS, network setup, or the server. The dominant segment is the bottleneck to optimize." />
+							<InfoChip tip="Average breakdown of where each HTTP request spent time, in flight order. Computed across the timing-sampled subset of requests (enable save_timing_breakdown to populate). Helps isolate whether latency lives in DNS, network setup, or the server." />
 						</h3>
 						<span className="text-[10.5px] font-mono text-subtle-foreground">
-							avg of {formatNumber(totalRequests)} req
+							{finalReport?.timingBreakdown ? "from timing samples" : "—"}
 						</span>
 					</div>
 					<TimingWaterfall report={finalReport} />
@@ -1012,7 +1012,7 @@ function MetricsView({
 					unit="s"
 					sub={
 						<>
-							setup overhead{" "}
+							cleanup overhead{" "}
 							{setupOverhead !== undefined ? (
 								<span className="text-muted-foreground">
 									{setupOverhead.toFixed(2)}s
@@ -1022,7 +1022,7 @@ function MetricsView({
 							)}
 						</>
 					}
-					infoTip="Total wall-clock time of the active load test. Setup overhead is the engine's context-init time before the test started — subtract it to get a fair attack-window duration."
+					infoTip="Total wall-clock duration of the active attack window. Cleanup overhead is the time the engine spent after the test ended joining the metrics thread and finalising state — it's not counted in the load test duration but is reported for transparency."
 				/>
 				<StatCard
 					label="Total requests"

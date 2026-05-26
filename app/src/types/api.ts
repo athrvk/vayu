@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -183,6 +182,7 @@ export interface StartLoadTestRequest {
 	success_sample_rate?: number; // 0-100
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
+	tests?: string;
 }
 
 export interface StartLoadTestResponse {

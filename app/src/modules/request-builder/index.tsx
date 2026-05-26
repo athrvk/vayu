@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -27,13 +26,25 @@ import { RequestBuilderProvider } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
 import { useNavigationStore, useVariablesStore, useDashboardStore } from "@/stores";
-import { useRequestQuery, useUpdateRequestMutation, useCollectionAncestors, queryKeys } from "@/queries";
+import {
+	useRequestQuery,
+	useUpdateRequestMutation,
+	useCollectionAncestors,
+	queryKeys,
+} from "@/queries";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
-import type { HttpMethod, LoadTestConfig, StartLoadTestRequest, RequestBody, RequestAuth, Collection } from "@/types";
+import type {
+	HttpMethod,
+	LoadTestConfig,
+	StartLoadTestRequest,
+	RequestBody,
+	RequestAuth,
+	Collection,
+} from "@/types";
 
 /**
  * Walk the ancestor chain leaf-first and return the first non-none auth.
@@ -52,7 +63,9 @@ function resolveInheritedAuth(ancestors: Collection[]): Record<string, unknown> 
 }
 
 /** Convert a concrete RequestAuth (non-inherit) to the flat record the engine expects. */
-function authToRecord(auth: Exclude<RequestAuth, { mode: "inherit" }>): Record<string, unknown> | undefined {
+function authToRecord(
+	auth: Exclude<RequestAuth, { mode: "inherit" }>
+): Record<string, unknown> | undefined {
 	if (auth.mode === "none") return undefined;
 	return { ...auth } as Record<string, unknown>;
 }
@@ -169,7 +182,13 @@ export default function RequestBuilder() {
 				const resolvedBody = request.body ? resolveString(request.body) : request.body;
 
 				// Build body payload for engine matching the discriminated union
-				let execBody: { mode: string; content?: string; fields?: Array<{ key: string; value: string; enabled: boolean }> } | undefined;
+				let execBody:
+					| {
+							mode: string;
+							content?: string;
+							fields?: Array<{ key: string; value: string; enabled: boolean }>;
+					  }
+					| undefined;
 				if (request.bodyMode === "form-data") {
 					execBody = {
 						mode: "form-data",
@@ -198,7 +217,10 @@ export default function RequestBuilder() {
 					execAuth = resolveInheritedAuth(collectionAncestors);
 					if (execAuth) execAuth = resolveObject(execAuth) as Record<string, unknown>;
 				} else if (request.authType !== "none") {
-					const concreteAuth = { mode: request.authType, ...request.authConfig } as Exclude<RequestAuth, { mode: "inherit" }>;
+					const concreteAuth = {
+						mode: request.authType,
+						...request.authConfig,
+					} as Exclude<RequestAuth, { mode: "inherit" }>;
 					const raw = authToRecord(concreteAuth);
 					execAuth = raw ? (resolveObject(raw) as Record<string, unknown>) : undefined;
 				}
@@ -207,11 +229,15 @@ export default function RequestBuilder() {
 				const composedPreScript = [
 					...collectionAncestors.map((c) => c.preRequestScript).filter(Boolean),
 					request.preRequestScript,
-				].filter(Boolean).join("\n\n");
+				]
+					.filter(Boolean)
+					.join("\n\n");
 				const composedPostScript = [
 					...collectionAncestors.map((c) => c.postRequestScript).filter(Boolean),
 					request.testScript,
-				].filter(Boolean).join("\n\n");
+				]
+					.filter(Boolean)
+					.join("\n\n");
 
 				const result = await engineExecuteRequest(
 					{
@@ -247,29 +273,32 @@ export default function RequestBuilder() {
 							: "text";
 
 				// Extract bodyRaw (raw response from server) - always use this for raw view
-				const bodyRaw = result.bodyRaw ||
+				const bodyRaw =
+					result.bodyRaw ||
 					(typeof result.body === "object" && result.body !== null
 						? JSON.stringify(result.body, null, 2)
 						: String(result.body || ""));
 
 				// For pretty view, use parsed body if available, otherwise use raw
 				// Note: typeof null === "object" in JavaScript, so we need to check for null explicitly
-				const body = typeof result.body === "object" && result.body !== null
-					? JSON.stringify(result.body, null, 2)
-					: result.body !== null && result.body !== undefined
-						? String(result.body)
-						: bodyRaw || "";
+				const body =
+					typeof result.body === "object" && result.body !== null
+						? JSON.stringify(result.body, null, 2)
+						: result.body !== null && result.body !== undefined
+							? String(result.body)
+							: bodyRaw || "";
 
 				return {
 					// Use status from result, but don't default to 200 if it's 0 (client-side error)
 					// 0 is a valid status code for client-side errors (no server response)
-					status: result.status !== undefined && result.status !== null ? result.status : 200,
+					status:
+						result.status !== undefined && result.status !== null ? result.status : 200,
 					statusText: result.statusText || "",
 					headers: result.headers || {},
 					requestHeaders: result.requestHeaders,
 					rawRequest: result.rawRequest,
 					body,
-					bodyRaw,  // Always include raw body for raw view mode
+					bodyRaw, // Always include raw body for raw view mode
 					bodyType,
 					time: result.timing?.total || 0,
 					size: result.bodySize || 0,
@@ -298,7 +327,15 @@ export default function RequestBuilder() {
 				};
 			}
 		},
-		[fetchedRequest, engineExecuteRequest, activeEnvironmentId, resolveString, resolveObject, queryClient, collectionAncestors]
+		[
+			fetchedRequest,
+			engineExecuteRequest,
+			activeEnvironmentId,
+			resolveString,
+			resolveObject,
+			queryClient,
+			collectionAncestors,
+		]
 	);
 
 	// Save request callback
@@ -307,32 +344,47 @@ export default function RequestBuilder() {
 			if (!fetchedRequest) return;
 
 			// Build RequestBody discriminated union from flat UI state
-		let bodyPayload: RequestBody;
-		if (request.bodyMode === "form-data") {
-			bodyPayload = { mode: "form-data", fields: toKeyValueEntries(request.formData) };
-		} else if (request.bodyMode === "x-www-form-urlencoded") {
-			bodyPayload = { mode: "x-www-form-urlencoded", fields: toKeyValueEntries(request.urlEncoded) };
-		} else if (request.bodyMode !== "none" && request.body) {
-			bodyPayload = { mode: request.bodyMode as "json" | "text" | "graphql", content: request.body };
-		} else {
-			bodyPayload = { mode: "none" };
-		}
+			let bodyPayload: RequestBody;
+			if (request.bodyMode === "form-data") {
+				bodyPayload = { mode: "form-data", fields: toKeyValueEntries(request.formData) };
+			} else if (request.bodyMode === "x-www-form-urlencoded") {
+				bodyPayload = {
+					mode: "x-www-form-urlencoded",
+					fields: toKeyValueEntries(request.urlEncoded),
+				};
+			} else if (request.bodyMode !== "none" && request.body) {
+				bodyPayload = {
+					mode: request.bodyMode as "json" | "text" | "graphql",
+					content: request.body,
+				};
+			} else {
+				bodyPayload = { mode: "none" };
+			}
 
-		// Build RequestAuth from UI state
-		let authPayload: RequestAuth;
-		if (request.authType === "bearer") {
-			authPayload = { mode: "bearer", token: request.authConfig.token ?? "" };
-		} else if (request.authType === "basic") {
-			authPayload = { mode: "basic", username: request.authConfig.username ?? "", password: request.authConfig.password ?? "" };
-		} else if (request.authType === "api-key") {
-			authPayload = { mode: "apikey", key: request.authConfig.key ?? "", value: request.authConfig.value ?? "", in: request.authConfig.addTo ?? "header" };
-		} else if (request.authType === "inherit") {
-			authPayload = { mode: "inherit" };
-		} else {
-			authPayload = { mode: "none" };
-		}
+			// Build RequestAuth from UI state
+			let authPayload: RequestAuth;
+			if (request.authType === "bearer") {
+				authPayload = { mode: "bearer", token: request.authConfig.token ?? "" };
+			} else if (request.authType === "basic") {
+				authPayload = {
+					mode: "basic",
+					username: request.authConfig.username ?? "",
+					password: request.authConfig.password ?? "",
+				};
+			} else if (request.authType === "api-key") {
+				authPayload = {
+					mode: "apikey",
+					key: request.authConfig.key ?? "",
+					value: request.authConfig.value ?? "",
+					in: request.authConfig.addTo ?? "header",
+				};
+			} else if (request.authType === "inherit") {
+				authPayload = { mode: "inherit" };
+			} else {
+				authPayload = { mode: "none" };
+			}
 
-		await updateRequestMutation.mutateAsync({
+			await updateRequestMutation.mutateAsync({
 				id: fetchedRequest.id,
 				name: request.name,
 				description: request.description,
@@ -375,7 +427,13 @@ export default function RequestBuilder() {
 					: pendingLoadTestRequest.body;
 
 				// Build body payload matching the discriminated union
-				let bodyPayload: { mode: string; content?: string; fields?: Array<{ key: string; value: string; enabled: boolean }> } | undefined;
+				let bodyPayload:
+					| {
+							mode: string;
+							content?: string;
+							fields?: Array<{ key: string; value: string; enabled: boolean }>;
+					  }
+					| undefined;
 				if (pendingLoadTestRequest.bodyMode === "form-data") {
 					bodyPayload = {
 						mode: "form-data",
@@ -405,11 +463,17 @@ export default function RequestBuilder() {
 				let loadTestAuth: Record<string, unknown> | undefined;
 				if (pendingLoadTestRequest.authType === "inherit") {
 					loadTestAuth = resolveInheritedAuth(collectionAncestors);
-					if (loadTestAuth) loadTestAuth = resolveObject(loadTestAuth) as Record<string, unknown>;
+					if (loadTestAuth)
+						loadTestAuth = resolveObject(loadTestAuth) as Record<string, unknown>;
 				} else if (pendingLoadTestRequest.authType !== "none") {
-					const concreteAuth = { mode: pendingLoadTestRequest.authType, ...pendingLoadTestRequest.authConfig } as Exclude<RequestAuth, { mode: "inherit" }>;
+					const concreteAuth = {
+						mode: pendingLoadTestRequest.authType,
+						...pendingLoadTestRequest.authConfig,
+					} as Exclude<RequestAuth, { mode: "inherit" }>;
 					const raw = authToRecord(concreteAuth);
-					loadTestAuth = raw ? (resolveObject(raw) as Record<string, unknown>) : undefined;
+					loadTestAuth = raw
+						? (resolveObject(raw) as Record<string, unknown>)
+						: undefined;
 				}
 
 				// Convert LoadTestConfig to StartLoadTestRequest (flat structure)
@@ -434,6 +498,7 @@ export default function RequestBuilder() {
 					success_sample_rate: config.data_sample_rate,
 					slow_threshold_ms: config.slow_threshold_ms,
 					save_timing_breakdown: config.save_timing_breakdown,
+					tests: pendingLoadTestRequest.testScript || undefined,
 				};
 
 				const result = await apiService.startLoadTest(apiRequest);
