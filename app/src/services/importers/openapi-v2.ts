@@ -18,7 +18,7 @@ import { normalizeVars } from "./var-normalize";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
-function swaggerSchemeToAuth(scheme: any): Exclude<RequestAuth, { mode: "inherit" }> {
+export function swaggerSchemeToAuth(scheme: any): Exclude<RequestAuth, { mode: "inherit" }> {
   if (!scheme || !scheme.type) return { mode: "none" };
   if (scheme.type === "basic") return { mode: "basic", username: "", password: "" };
   if (scheme.type === "apiKey") {
@@ -113,8 +113,19 @@ function buildSwaggerOp(method: string, path: string, op: any, spec: any, resolv
   const formFields: KeyValueEntry[] = [];
 
   const consumes: string[] = op.consumes ?? spec.consumes ?? [];
+  const isJsonConsume =
+    consumes.length === 0 ||
+    consumes.some((c) => c === "application/json" || c.startsWith("application/json;") || c.endsWith("+json"));
 
+  // Resolve $ref params and dedupe by name+in (operation overrides path-item).
+  const byKey = new Map<string, any>();
   for (const param of [...pathParams, ...(op.parameters ?? [])]) {
+    const resolved = param?.$ref ? (resolveRef(param.$ref) as any) : param;
+    if (!resolved || !resolved.in || !resolved.name) continue;
+    byKey.set(`${resolved.in}:${resolved.name}`, resolved);
+  }
+
+  for (const param of byKey.values()) {
     switch (param.in) {
       case "query":
         params.push({ key: param.name, value: "", enabled: true, ...(param.description ? { description: param.description } : {}) });
@@ -126,7 +137,7 @@ function buildSwaggerOp(method: string, path: string, op: any, spec: any, resolv
       }
       case "body": {
         const sample = param.schema ? sampleSchema(param.schema, resolveRef) : {};
-        body = consumes.includes("application/json") || consumes.length === 0
+        body = isJsonConsume
           ? { mode: "json", content: JSON.stringify(sample, null, 2) }
           : { mode: "text", content: JSON.stringify(sample, null, 2) };
         break;
