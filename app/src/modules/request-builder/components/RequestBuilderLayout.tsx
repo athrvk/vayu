@@ -19,6 +19,7 @@ import { useEffect } from "react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui";
 import { useRequestBuilderContext } from "../context";
 import UrlBar from "./UrlBar";
+import RequestDescription from "./RequestDescription";
 import RequestTabs from "./RequestTabs";
 import ResponseViewer from "./ResponseViewer";
 
@@ -66,6 +67,9 @@ export default function RequestBuilderLayout() {
 		<div className="h-full flex flex-col">
 			{/* URL Bar - Always visible at top */}
 			<UrlBar />
+
+			{/* Description - collapsible row between URL bar and tabs */}
+			<RequestDescription />
 
 			{/* Main content area with resizable panels */}
 			<ResizablePanelGroup orientation="horizontal" className="flex-1">
