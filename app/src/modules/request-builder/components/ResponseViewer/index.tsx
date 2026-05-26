@@ -28,6 +28,7 @@ import {
 	TabsTrigger,
 	Badge,
 	Button,
+	Kbd,
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
@@ -75,29 +76,40 @@ export default function ResponseViewer() {
 	if (!response) {
 		return (
 			<div className="flex-1 flex items-center justify-center bg-panel">
-				<div className="flex flex-col items-center gap-3">
-					{/* 48px send icon circle */}
-					<div className="w-12 h-12 rounded-full bg-accent border border-border flex items-center justify-center text-muted-foreground">
-						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-							<line x1="22" y1="2" x2="11" y2="13"/>
-							<polygon points="22 2 15 22 11 13 2 9 22 2"/>
-						</svg>
+				<div className="flex flex-col items-center text-center">
+					<svg
+						width="64"
+						height="64"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="1.5"
+						strokeLinecap="round"
+						strokeLinejoin="round"
+						className="text-primary mb-5"
+					>
+						<line x1="22" y1="2" x2="11" y2="13" />
+						<polygon points="22 2 15 22 11 13 2 9 22 2" />
+					</svg>
+
+					<p className="text-[15px] font-medium text-foreground mb-1.5">
+						No response yet
+					</p>
+					<div className="flex items-center justify-center gap-1.5 text-[12px] text-muted-foreground">
+						<span>Press</span>
+						<Kbd>⌘</Kbd>
+						<Kbd>↵</Kbd>
+						<span>or click Send</span>
 					</div>
-					<div className="text-center">
-						<p className="text-[13px] font-medium text-foreground mb-1">No response yet</p>
-						<p className="text-[11px] text-muted-foreground">
-							Press{" "}
-							<kbd className="font-mono bg-card border border-border rounded px-1.5 py-px text-[10px] text-foreground">⌘↵</kbd>
-							{" "}or click Send
-						</p>
-					</div>
-					{/* Keep the existing load test dashboard button if it was there */}
+
 					{hasLoadTestDashboard && (
-						<Button variant="outline" size="sm" onClick={handleViewLoadTest} className="mt-2">
+						<Button variant="outline" size="sm" onClick={handleViewLoadTest} className="mt-6">
 							<BarChart3 className="w-4 h-4 mr-2" />
 							View Load Test Dashboard
 							{dashboardMode === "running" && (
-								<Badge variant="default" className="ml-2 text-xs">Live</Badge>
+								<Badge variant="default" className="ml-2 text-xs">
+									Live
+								</Badge>
 							)}
 						</Button>
 					)}

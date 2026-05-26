@@ -61,9 +61,12 @@ export default function UnifiedResponseViewer({
 	if (!effectiveResponse?.body && !effectiveRequest) {
 		return (
 			<div className={cn("flex-1 flex items-center justify-center bg-card", className)}>
-				<div className="text-center space-y-2">
-					<FileText className="w-8 h-8 mx-auto text-muted-foreground/50" />
-					<p className="text-sm text-muted-foreground">No response data available</p>
+				<div className="flex flex-col items-center text-center">
+					<FileText className="w-16 h-16 text-muted-foreground mb-5" strokeWidth={1.5} />
+					<p className="text-[15px] font-medium text-foreground mb-1.5">No response captured</p>
+					<p className="text-[12px] text-muted-foreground">
+						This run finished without recording request or response data.
+					</p>
 				</div>
 			</div>
 		);

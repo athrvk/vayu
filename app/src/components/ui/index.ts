@@ -18,6 +18,9 @@ export type { TextareaProps } from "./textarea";
 
 export { Badge, badgeVariants } from "./badge";
 
+export { Kbd } from "./kbd";
+export type { KbdProps } from "./kbd";
+
 export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from "./card";
 
 export {
