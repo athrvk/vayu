@@ -482,26 +482,30 @@ void Database::delete_collection(const std::string& id) {
 | `app/src/modules/variables/` | Add `type` dropdown per variable; typed inputs |
 | `app/src/modules/collections/` (new files) | Collection settings view: description, auth, scripts editors |
 
-## 8. Open Questions
+## 8. Resolved Decisions
 
-1. **`params` execution path.** Currently, the frontend bakes query params into the URL string before sending. Should we keep doing that, or send `params` separately and let the engine append them? Sending separately would enable engine-side scripts to mutate `pm.request.params` and have it affect the final URL. Recommendation: **send separately**, append in engine. This is a small engine change but architecturally cleaner.
+The following questions were raised during design and resolved with the noted decisions. They are committed scope, not open items.
 
-2. **Script scope boundary comments.** Inserting `// ─── scope boundary ───` between concatenated scripts is helpful for stack traces but is just a string. Should we use sourcemap-style metadata so errors can be attributed to the correct collection? Recommendation: defer — concat with comments is fine for V1.
+1. **`params` execution path.** Decided in §11.6 — `params` stored and round-tripped as `KeyValueEntry[]`, but the frontend continues to bake the enabled subset into the URL string before sending to the engine. Engine-side `params` parsing and `pm.request.params` script exposure are tracked in §10 as future work.
 
-3. **`auth.mode === 'inherit'` for collections?** I propose collections cannot inherit (they're the source). Alternative: collections can also inherit from their parent collection. Recommendation: keep collections non-inheriting in V1; revisit if real workflows demand it.
+2. **Script scope boundary comments.** Concatenated scripts are joined with `// ─── scope boundary ─── ` plain-string comments. No sourcemap metadata in V1. Errors attributed by string-search if needed; sourcemap support tracked in §10.
 
-4. **`variables` `type: 'json'` semantics.** Should JSON-typed variables be auto-parsed when interpolated into a JSON request body (so `{{user}}` → `{"id":1}` not `"{\"id\":1}"`)? Recommendation: yes, but only when the surrounding context is JSON. Track as a follow-up; initial implementation treats it as string.
+3. **`auth.mode === 'inherit'` for collections?** Collections cannot inherit. They are always the auth source. A collection's `auth.mode` may be `'none'` or any concrete type, never `'inherit'`. The type system enforces this — collection auth is typed as `Exclude<RequestAuth, { mode: 'inherit' }>`.
 
-## 9. Risks
+4. **`variables` `type: 'json'` semantics.** Initial implementation treats all variable values as strings during interpolation, regardless of `type`. The `type` field only affects UI rendering (number input vs text) and validation. Context-aware interpolation (auto-parsing JSON-typed variables when substituted into a JSON body) is tracked in §10 as future work.
 
-| Risk | Mitigation |
+## 9. Risks and Mitigations
+
+All mitigations below are committed decisions, not proposals.
+
+| Risk | Mitigation (committed) |
 |---|---|
-| Wire format change breaks any external scripts/integrations | None exist; pre-release |
-| Cascade delete becomes accidentally destructive | Add UI confirmation dialog ("Delete 'Users API' and 18 child items?") |
-| Script concatenation produces hard-to-debug errors | Scope-boundary comments + future sourcemap work |
-| Hierarchical variable walk is slow for deep trees | Cache the merged var map per request; invalidate on parent collection edit |
-| Engine accepts arbitrary JSON in `params`/`headers` without validation | Add lightweight schema check; reject if not array of `{key, value, enabled}` |
-| Frontend `KeyValueEntry` array order matters for execution but is fragile | Use stable array indices; preserve order on save |
+| Wire format change breaks any external scripts/integrations | None exist; pre-release product. No mitigation needed. |
+| Cascade delete becomes accidentally destructive | Add a UI confirmation dialog before any collection delete that has descendants. Format: `"Delete 'Users API' and 18 child items?"` — count must include all descendant collections + all requests across them. Dialog only shown when descendants exist (leaf collections delete without confirmation). |
+| Script concatenation produces hard-to-debug errors | Scope-boundary comments between concatenated script blocks. Sourcemap-style metadata deferred to §10. |
+| Hierarchical variable walk is slow for deep trees | Cache the merged variable map per `(requestId, environmentId)` pair in a `useMemo`. Invalidate when any of the following change: the request's `collectionId`, any ancestor collection's `variables`, the active environment's `variables`, or globals. Use TanStack Query cache keys for ancestor invalidation. |
+| Engine accepts arbitrary JSON in `params`/`headers` without validation | Add a lightweight schema check in `engine/src/http/routes/requests.cpp` on `POST /requests`. Reject (HTTP 400) if `params` or `headers` is not an array, or if any entry lacks `key` (string), `value` (string), or `enabled` (boolean). `description` is optional. Return error: `"Invalid headers entry at index N: missing required field 'enabled'"`. |
+| Frontend `KeyValueEntry` array order matters for execution but is fragile | Storage and wire format preserve array order as authored. The `KeyValueEditor` component uses stable array indices for React keys (or an ephemeral `_id` symbol attached client-side). On save, the array is sent verbatim — no reordering, no deduplication, no sorting. |
 
 ## 10. Future Work (Explicitly Deferred)
 
@@ -570,7 +574,65 @@ Rationale: separating params at the engine level is a meaningful additional refa
 
 This means `params` round-trips faithfully through storage but at execution time still gets flattened to `Record<string,string>` (enabled only) and concatenated into the URL — the same lossy step that exists today, but only for the wire-to-execute hop, not for storage.
 
-## 12. Acceptance Criteria
+## 12. Documentation Updates Required
+
+The refactor invalidates field shapes, wire formats, and behavior described in several existing docs. Each must be updated as part of the implementation work, not after. Group them into the same PR as the corresponding code phase so the docs never lag behind the code.
+
+### Update with Phase 1 (engine schema + API)
+
+| File | Section / change |
+|---|---|
+| `docs/engine/api-reference.md` | Lines 65–82: `POST /collections` body schema — add `description`, `auth`, `preRequestScript`, `postRequestScript`. Lines 112–148: `POST /requests` body schema — change `params` and `headers` from `{}` (object) to `[]` (array of `KeyValueEntry`), change `body` from string to `{mode, content?, fields?}` discriminated object, add `description` and `order`. Lines 172–205: `POST /environments` — add `description`. Lines 240–250: globals — add `type` to variable value shape. Update `DELETE /collections/:id` to document the new cascade semantics. |
+| `docs/engine/architecture.md` | Update the DB schema diagram or list to reflect the new columns on `collections`, `requests`, `environments`. Note the cascade-delete behavior. |
+| `docs/request-storage-design.md` | Lines 26, 58, 64, 93: example JSON blobs show `headers` as an object — rewrite to `KeyValueEntry[]` array form. Update the "execution flow" section if it describes header flattening (now happens engine-side, not frontend-side). |
+
+### Update with Phase 2 (frontend types)
+
+| File | Section / change |
+|---|---|
+| `docs/app/api-integration.md` | Any example request/response payload showing headers/params/body as flat shapes. Mirror the engine API reference changes. |
+| `docs/app/state-management.md` | Remove references to `KeyValueItem` UI-only type and the `keyValueToRecord` / `recordToKeyValue` helpers. The `RequestState` shape now matches the domain `Request` shape directly. |
+| `docs/app/COMPONENTS.md` | If it documents `KeyValueEditor` props as accepting `KeyValueItem[]`, retype to `KeyValueEntry[]`. |
+
+### Update with Phase 3 (composition layer)
+
+| File | Section / change |
+|---|---|
+| `docs/request-storage-design.md` | "Variable Resolution" section — replace the flat 3-tier merge description with the new hierarchical walk (globals → parent-chain collections root-to-leaf → environment). Add a note that resolution caches per `(requestId, environmentId)`. |
+| `docs/engine/scripting.md` | If it documents script execution order, add a section explaining that pre-request scripts now run outer-to-inner (root collection → leaf collection → request) and post-request scripts run inner-to-outer. Note that scripts are concatenated client-side with scope-boundary comments. |
+
+### Update with Phase 4 (UI)
+
+| File | Section / change |
+|---|---|
+| `docs/design-system.md` | If it has component patterns for KeyValueEditor or auth selectors, update for the new `enabled`/`description` per-row fields and the `'inherit'` auth option. |
+| `docs/app/architecture.md` | Note the new collection settings view (description, auth, scripts editors) in the module map. |
+
+### Update with Phase 5 (import PRD revisions)
+
+| File | Section / change |
+|---|---|
+| `docs/features/import-collections-prd.md` | "Out of Scope" section — review whether any deferred items are now achievable. Update "What this means for the Import PRD" cross-reference. |
+| `docs/features/import-format-mappings.md` | **Compromise Summary** tables (all four: Universal, Postman, Insomnia, OpenAPI) — strike through compromises eliminated by the refactor. Specifically: drop "disabled silently skipped", "duplicate keys collapse", "description fields dropped", "form-data flattened", "folder-level scripts dropped", "auth inheritance baked in at parse time", "variable type metadata dropped", "Postman `secret` flag". Add a header note: "Updated after data-model refactor v1." |
+
+### New docs to create (during this refactor)
+
+| File | Why |
+|---|---|
+| `docs/engine/db-schema.md` | The engine has no canonical schema reference today — schema is buried in `database.cpp`. Create a single source-of-truth doc describing every table, column, and JSON-field shape. Cross-link from `engine/architecture.md` and `request-storage-design.md`. |
+| `docs/app/variable-resolution.md` | Hierarchical variable walk + caching strategy deserves a dedicated doc rather than burying in `request-storage-design.md`. Include the resolution diagram and the cache invalidation rules from §9. |
+
+### Verification
+
+Before merging the final phase, grep the docs tree for stale terms that should no longer appear:
+
+```
+grep -rn "KeyValueItem\|keyValueToRecord\|recordToKeyValue\|headers.*Record<string\|params.*Record<string" docs/
+```
+
+This should return zero results outside `data-model-refactor-prd.md` (which describes the old state as context) and `import-format-mappings.md` (which describes the per-format mappings).
+
+## 13. Acceptance Criteria
 
 - [ ] User can disable a header, save, reload — disabled state persists
 - [ ] User can add two headers with the same key — both persist and both are sent
