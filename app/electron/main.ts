@@ -38,6 +38,8 @@ function createWindow() {
 		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
+		// Center the macOS traffic lights inside our 32px titlebar (lights are ~12px)
+		trafficLightPosition: process.platform === "darwin" ? { x: 12, y: 10 } : undefined,
 		titleBarOverlay:
 			process.platform === "darwin"
 				? false
