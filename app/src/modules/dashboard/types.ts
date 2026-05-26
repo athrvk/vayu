@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -64,6 +63,8 @@ export interface MetricsViewProps {
 	metrics: DisplayMetrics | null;
 	historicalMetrics: LoadTestMetrics[];
 	isCompleted: boolean;
+	finalReport: RunReport | null;
+	targetRps?: number;
 }
 
 export interface MetricCardProps {

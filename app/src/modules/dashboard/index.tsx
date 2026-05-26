@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -258,7 +257,7 @@ export default function LoadTestDashboard() {
 
 	const startTime =
 		runMetadata?.startTime &&
-			(!historicalStartTime || runMetadata.startTime <= historicalStartTime)
+		(!historicalStartTime || runMetadata.startTime <= historicalStartTime)
 			? runMetadata.startTime
 			: historicalStartTime;
 
@@ -320,6 +319,11 @@ export default function LoadTestDashboard() {
 						metrics={displayMetrics}
 						historicalMetrics={historicalMetrics}
 						isCompleted={mode === "completed"}
+						finalReport={finalReport}
+						targetRps={
+							displayConfiguration?.targetRps ??
+							finalReport?.metadata?.configuration?.targetRps
+						}
 					/>
 				) : (
 					<RequestResponseView report={finalReport} />
