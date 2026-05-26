@@ -84,7 +84,17 @@ app/src/modules/collections/
 
 ### Core Interfaces
 
+These mirror the post-refactor domain types in `app/src/types/domain.ts`. Drafts use the same shapes as the persisted entities so the orchestrator can pass them straight to the create endpoints (minus server-assigned fields like `id`, `createdAt`, `updatedAt`).
+
 ```typescript
+import type {
+  HttpMethod,
+  KeyValueEntry,
+  RequestBody,
+  RequestAuth,
+  VariableValue,
+} from "@/types";
+
 interface ImportParser {
   readonly formatName: string;       // "Postman Collection v2.1"
   readonly formatKey: string;        // "postman-v21"
@@ -100,26 +110,35 @@ interface ImportResult {
 
 interface CollectionDraft {
   name: string;
+  description: string;
   variables: Record<string, VariableValue>;
+  // Collections are always concrete auth sources (never "inherit")
+  auth: Exclude<RequestAuth, { mode: "inherit" }>;
+  preRequestScript: string;
+  postRequestScript: string;
   children: CollectionDraft[];       // Sub-folders (recursive)
   requests: RequestDraft[];          // Requests directly in this collection
 }
 
 interface RequestDraft {
   name: string;
+  description: string;
   method: HttpMethod;
   url: string;
-  params: Record<string, string>;
-  headers: Record<string, string>;
-  body: string;
-  bodyType: "json" | "text" | "form-data" | "x-www-form-urlencoded" | "none";
-  auth: Record<string, unknown>;
+  // Arrays — preserves disabled rows and duplicate keys
+  params: KeyValueEntry[];
+  headers: KeyValueEntry[];
+  // Discriminated union — engine reads body.mode to know how to interpret it
+  body: RequestBody;
+  // Discriminated union — "inherit" is allowed and resolved at execution time
+  auth: RequestAuth;
   preRequestScript: string;
   postRequestScript: string;
 }
 
 interface EnvironmentDraft {
   name: string;
+  description: string;
   variables: Record<string, VariableValue>;
 }
 
@@ -133,7 +152,7 @@ interface ImportMeta {
 
 interface ImportOptions {
   importEnvironments: boolean;       // Checkbox: "Import environments & variables"
-  importScripts: boolean;            // Checkbox: "Import pre-request & test scripts"
+  importScripts: boolean;            // Checkbox: "Import pre-request & test scripts" (applies to both collection and request scripts)
 }
 ```
 
@@ -209,5 +228,5 @@ If no parser matches: show error state "Unrecognised format".
 - Bruno `.bru` format
 - Postman standalone environment JSON import
 - Postman workspace-level data export (ZIP)
-- GraphQL-specific body type
-- OAuth2 token execution (stored as JSON, not executed)
+- OAuth2 / Digest / AWS / NTLM token execution (auth stored as JSON, not executed)
+- File / binary request bodies (no file attachment support in Vayu)

@@ -3,40 +3,55 @@
 Reference for how each external format maps to Vayu's internal data model.
 Read alongside `import-collections-prd.md`.
 
+> **2026-05 refresh:** This doc was updated after the data-model refactor (PR #11).
+> Many compromises listed in older revisions — folder scripts dropped, descriptions
+> dropped, duplicate header collapse, etc. — are no longer needed.
+
 ## Vayu Data Model Constraints
 
 Understanding these constraints is essential before reading the format tables.
+See `docs/engine/db-schema.md` for the full column-by-column reference.
 
 **Collection** (engine `db::Collection`):
 - `id: string`
 - `parent_id: optional<string>` — nesting supported at any depth
 - `name: string`
+- `description: string` — preserved end-to-end
 - `variables: string` — JSON `Record<string, {value, enabled, secret?}>`
+- `auth: string` — JSON discriminated union (`none` / `bearer` / `basic` / `apikey` / …); collections are always concrete auth sources, **never** `inherit`
+- `pre_request_script: string` — JS, runs in `pm.*` runtime before the request
+- `post_request_script: string` — JS, runs after the response
 - `order: int`
-- **No `description` column** — frontend type has it, engine DB does not
 
 **Request** (engine `db::Request`):
 - `id: string`
-- `collection_id: string` — belongs to exactly **one** Collection node
+- `collection_id: string`
 - `name: string`
+- `description: string`
 - `method: HttpMethod` — GET | POST | PUT | PATCH | DELETE | HEAD | OPTIONS
 - `url: string`
-- `params: string` — JSON `Record<string, string>` — **flat, no duplicate keys**
-- `headers: string` — JSON `Record<string, string>` — **flat, no duplicate keys**
-- `body: string` — raw string content
-- `body_type: string` — `"json" | "text" | "form-data" | "x-www-form-urlencoded" | "none"`
-- `auth: string` — opaque JSON; engine stores but only executes bearer/basic/apikey
-- `pre_request_script: string` — JS; Vayu runtime supports `pm.*` API
-- `post_request_script: string` — JS
-- **No `description` column**
+- `params: string` — JSON **array** of `KeyValueEntry[]`; duplicates allowed; `enabled:false` preserved
+- `headers: string` — JSON **array** of `KeyValueEntry[]`; same semantics
+- `body: string` — JSON **discriminated union**:
+  - `{"mode":"none"}`
+  - `{"mode":"json"|"text"|"graphql","content":"..."}`
+  - `{"mode":"form-data"|"x-www-form-urlencoded","fields":KeyValueEntry[]}`
+- `body_type: string` — denormalized mirror of `body.mode`, kept for queryability
+- `auth: string` — JSON discriminated union; requests can be `{"mode":"inherit"}` and are resolved against the collection chain at execution time
+- `pre_request_script: string`
+- `post_request_script: string`
+- `order: int`
 
 **Environment** (engine `db::Environment`):
 - `id: string`
 - `name: string`
+- `description: string`
 - `variables: string` — JSON `Record<string, {value, enabled, secret?}>`
 - `is_active: bool`
 
-**Delete cascade note:** `delete_collection` removes Requests with that `collection_id` but does NOT cascade to child Collections. Deleting a parent orphans children — pre-existing limitation, not introduced by import.
+`KeyValueEntry`: `{ key: string, value: string, enabled: boolean, description?: string }`.
+
+**Cascade delete:** `delete_collection` recursively deletes all descendant collections and their requests (BFS, deepest-first).
 
 ---
 
@@ -58,30 +73,35 @@ Walk is recursive. Depth is unbounded — Vayu supports arbitrary nesting via `p
 | Postman field | Vayu field | Notes |
 |---|---|---|
 | `info.name` | `collection.name` | |
-| `variable[].key/value/enabled` | `collection.variables` | `secret` preserved if present |
+| `info.description` | `collection.description` | Postman supports string or object form; flatten to string |
+| `variable[].{key,value,enabled,description?}` | `collection.variables` | Stringify non-string values; `enabled` defaults to `true` |
 | `variable[].type` | dropped | Vayu stores all values as strings |
+| `auth` (non-inherit) | `collection.auth` | See Auth section |
+| `event[prerequest].script.exec[]` | `collection.preRequestScript` | Lines joined with `\n` |
+| `event[test].script.exec[]` | `collection.postRequestScript` | Lines joined with `\n` |
 
 **Collection (from Postman Folder):**
 | Postman field | Vayu field | Notes |
 |---|---|---|
 | `name` | `collection.name` | |
-| Folder-level `variable[]` | `collection.variables` | Same mapping |
-| Folder-level `auth` | resolved into child requests | See Auth section |
-| Folder-level `event[]` scripts | **dropped** | No folder-level scripts in Vayu |
+| `description` | `collection.description` | |
+| Folder-level `variable[]` | `collection.variables` | Same shape |
+| Folder-level `auth` (non-inherit) | `collection.auth` | Collections cannot inherit — folders that say `inherit` are imported as `{"mode":"none"}` (parent already supplied auth via the chain) |
+| Folder-level `event[]` scripts | `collection.preRequestScript` / `collection.postRequestScript` | Now supported — Vayu composes parent→child→request at execution time |
 
 **Request:**
 | Postman field | Vayu field | Notes |
 |---|---|---|
 | `name` | `request.name` | |
+| `description` | `request.description` | |
 | `request.method` | `request.method` | Uppercased |
 | `request.url.raw` (object) or `request.url` (string) | `request.url` | See URL section |
-| `request.url.query[]` (filtered) | `request.params` | Filter `disabled: true`; last value wins on duplicate keys |
-| `request.header[]` (filtered) | `request.headers` | Filter `disabled: true`; last value wins |
-| `request.body` | `request.body` + `request.bodyType` | See Body section |
-| `request.auth` (resolved) | `request.auth` | See Auth section |
+| `request.url.query[]` | `request.params` | Mapped to `KeyValueEntry[]`; preserves `disabled:true` rows as `enabled:false`; duplicates preserved |
+| `request.header[]` | `request.headers` | Same — `KeyValueEntry[]` with `enabled` flag |
+| `request.body` | `request.body` (discriminated union) | See Body section |
+| `request.auth` | `request.auth` | `inherit` → `{"mode":"inherit"}`; resolved at execution time |
 | `event[prerequest].script.exec[]` | `request.preRequestScript` | Lines joined with `\n` |
 | `event[test].script.exec[]` | `request.postRequestScript` | Lines joined with `\n` |
-| `description` | **dropped** | Engine DB has no description column |
 
 ### URL Handling
 
@@ -99,39 +119,39 @@ Postman v2.1 URL can be a **string** or an **object**:
 ```
 
 Strategy:
-- If object: use `url.raw` as `request.url`. Extract `url.query[]` (non-disabled) into `params`. Strip query string from `url.raw` to avoid duplication.
-- If string: use as-is for `request.url`. Parse and strip the `?query` portion into `params`.
+- If object: use `url.raw` as `request.url` (strip query string to avoid duplication). Map `url.query[]` directly to `KeyValueEntry[]`, preserving all rows including `disabled`.
+- If string: use as-is. Parse the `?query` portion into `KeyValueEntry[]` with `enabled:true`.
 
 ### Body Mapping
 
-| Postman `body.mode` | Postman detail | Vayu `bodyType` | Vayu `body` |
-|---|---|---|---|
-| `raw` | `options.raw.language = "json"` | `"json"` | `body.raw` |
-| `raw` | `options.raw.language = "text"` | `"text"` | `body.raw` |
-| `raw` | no language set | `"json"` if `JSON.parse` succeeds, else `"text"` | `body.raw` |
-| `urlencoded` | `body.urlencoded[]` | `"x-www-form-urlencoded"` | `key=value&key2=value2` (non-disabled entries) |
-| `formdata` | `body.formdata[]` | `"form-data"` | `key=value&key2=value2` (text fields only, non-disabled) |
-| `none` / absent | — | `"none"` | `""` |
-| `graphql` | `body.graphql` | `"text"` | `JSON.stringify(body.graphql)` |
-| `file` / `binary` | — | **dropped** | Vayu has no binary body support |
+| Postman `body.mode` | Postman detail | Vayu `body` |
+|---|---|---|
+| `raw` | `options.raw.language = "json"` | `{"mode":"json","content":body.raw}` |
+| `raw` | `options.raw.language = "text"` | `{"mode":"text","content":body.raw}` |
+| `raw` | no language set | `{"mode":"json","content":body.raw}` if `JSON.parse` succeeds, else `{"mode":"text",...}` |
+| `urlencoded` | `body.urlencoded[]` | `{"mode":"x-www-form-urlencoded","fields":KeyValueEntry[]}` — `disabled:true` preserved as `enabled:false` |
+| `formdata` | `body.formdata[]` text fields | `{"mode":"form-data","fields":KeyValueEntry[]}` — file fields dropped (no binary support) |
+| `none` / absent | — | `{"mode":"none"}` |
+| `graphql` | `body.graphql = {query, variables}` | `{"mode":"graphql","content":JSON.stringify({...})}` |
+| `file` / `binary` | — | **dropped** — Vayu has no binary body support |
 
-### Auth Resolution
+### Auth Mapping
 
 Postman auth exists at three levels: collection, folder, request. Each can be `"noauth"`, a specific type, or `"inherit"`.
 
-Resolution at parse time (bottom-up):
-1. Start at the request's own `auth`
-2. If `type === "inherit"` (or auth absent): walk up to parent folder, then collection
-3. Apply the first non-inherit auth found
+**New strategy (post-refactor):** preserve the hierarchy. Don't flatten at import time.
+- Collection / folder `auth` is stored on the matching Vayu Collection (`{"mode":"none"}` if Postman says `noauth` or `inherit`, since collections cannot themselves inherit).
+- Request `auth` set to `"inherit"` → store `{"mode":"inherit"}` on the Request; Vayu resolves it at execution time by walking the collection chain leaf-first.
 
 | Postman auth type | Vayu `auth` JSON |
 |---|---|
-| `bearer` | `{ "type": "bearer", "token": "<value>" }` |
-| `basic` | `{ "type": "basic", "username": "<u>", "password": "<p>" }` |
-| `apikey` | `{ "type": "apikey", "key": "<k>", "value": "<v>", "in": "header"\|"query" }` |
-| `oauth2` | stored as-is (not executed by engine) |
-| `digest` / `aws` / `ntlm` | stored as-is (not executed by engine) |
-| `noauth` / resolved to nothing | `{}` (empty) |
+| `bearer` | `{"mode":"bearer","token":"<value>"}` |
+| `basic` | `{"mode":"basic","username":"<u>","password":"<p>"}` |
+| `apikey` | `{"mode":"apikey","key":"<k>","value":"<v>","in":"header"\|"query"}` |
+| `oauth2` | `{"mode":"oauth2","config":{...}}` (stored as-is; not executed) |
+| `digest` / `aws` / `ntlm` | `{"mode":"digest"\|"aws"\|"ntlm","config":{...}}` (stored as-is; not executed) |
+| `noauth` | `{"mode":"none"}` |
+| `inherit` (request-level only) | `{"mode":"inherit"}` |
 
 ### Environments
 
@@ -188,7 +208,7 @@ Insomnia uses Nunjucks-style templates. Normalize to Vayu's `{{variable}}` synta
 | `{% now %}` / `{% uuid %}` / `{% randomInt %}` | kept as-is | **No Vayu equivalent** — will render as literal text |
 | `{{ variable \| lower }}` | kept as-is | Nunjucks filter — will render as literal text |
 
-Apply normalization to: URL, all header values, all param values, body text.
+Apply normalization to: URL, all header values, all param values, body text/fields.
 
 ### Field Mapping
 
@@ -196,43 +216,46 @@ Apply normalization to: URL, all header values, all param values, body text.
 | Insomnia field | Vayu field | Notes |
 |---|---|---|
 | `name` | `collection.name` | |
-| `description` | **dropped** | |
+| `description` | `collection.description` | |
 | `environment` (workspace-level base vars) | `collection.variables` | Only for workspace resources; normalize values |
+| `authentication` (group-level) | `collection.auth` | If present and not `disabled` |
 
 **Request:**
 | Insomnia field | Vayu field | Notes |
 |---|---|---|
 | `name` | `request.name` | |
+| `description` | `request.description` | |
 | `method` | `request.method` | Uppercased |
 | `url` (normalized) | `request.url` | Apply template normalization |
-| `parameters[]` (non-disabled) | `request.params` | `{name, value}` → `Record<string,string>` |
-| `headers[]` (non-disabled) | `request.headers` | `{name, value}` → `Record<string,string>` |
-| `body` | `request.body` + `request.bodyType` | See Body section |
+| `parameters[]` | `request.params` | `{name,value,disabled}` → `KeyValueEntry[]` with `enabled = !disabled` |
+| `headers[]` | `request.headers` | Same shape; preserves duplicates and disabled rows |
+| `body` | `request.body` (discriminated union) | See Body section |
 | `authentication` | `request.auth` | See Auth section |
 | `preRequestScript` | `request.preRequestScript` | Non-standard; present only in Insomnia versions with scripting |
 | `afterResponseScript` | `request.postRequestScript` | Same note |
-| `description` | **dropped** | |
 
 ### Body Mapping
 
-| Insomnia `body.mimeType` | Vayu `bodyType` | Vayu `body` |
-|---|---|---|
-| `application/json` | `"json"` | `body.text` |
-| `text/plain` | `"text"` | `body.text` |
-| `application/x-www-form-urlencoded` | `"x-www-form-urlencoded"` | rebuild from `body.params[]` |
-| `multipart/form-data` | `"form-data"` | text fields from `body.params[]`; file fields dropped |
-| `application/graphql` | `"text"` | `body.text` |
-| absent / empty | `"none"` | `""` |
+| Insomnia `body.mimeType` | Vayu `body` |
+|---|---|
+| `application/json` | `{"mode":"json","content":body.text}` |
+| `text/plain` | `{"mode":"text","content":body.text}` |
+| `application/x-www-form-urlencoded` | `{"mode":"x-www-form-urlencoded","fields":KeyValueEntry[]}` from `body.params[]` |
+| `multipart/form-data` | `{"mode":"form-data","fields":KeyValueEntry[]}` from `body.params[]` text fields; file fields dropped |
+| `application/graphql` | `{"mode":"graphql","content":body.text}` |
+| absent / empty | `{"mode":"none"}` |
 
 ### Auth Mapping
 
 | Insomnia `authentication.type` | Vayu `auth` JSON |
 |---|---|
-| `bearer` | `{ "type": "bearer", "token": auth.token }` |
-| `basic` | `{ "type": "basic", "username": auth.username, "password": auth.password }` |
-| `apikey` | `{ "type": "apikey", "key": auth.key, "value": auth.value, "in": auth.addTo }` |
-| `oauth2` | stored as-is (not executed) |
-| `disabled: true` (any type) | `{}` (empty auth) |
+| `bearer` | `{"mode":"bearer","token":auth.token}` |
+| `basic` | `{"mode":"basic","username":auth.username,"password":auth.password}` |
+| `apikey` | `{"mode":"apikey","key":auth.key,"value":auth.value,"in":auth.addTo}` |
+| `oauth2` | `{"mode":"oauth2","config":{...}}` (stored as-is; not executed) |
+| `disabled: true` (any type) | `{"mode":"none"}` |
+
+Insomnia has no first-class `"inherit"` concept; if a request has no `authentication`, it imports as `{"mode":"inherit"}` so the parent collection's auth (if any) applies at execution time.
 
 ### Environments
 
@@ -282,23 +305,31 @@ OpenAPI is an **API specification**, not a test collection. We generate syntheti
 | OpenAPI field | Vayu field | Notes |
 |---|---|---|
 | `info.title` | `collection.name` | |
+| `info.description` | `collection.description` | |
 | `servers[0].url` | `collection.variables.baseUrl` | `{ value: url, enabled: true }` |
-| Additional servers | **dropped** | Only first server used |
-| `info.description` | **dropped** | |
+| Additional servers | dropped | Only first server used |
+
+**Collection (per tag):**
+| OpenAPI field | Vayu field | Notes |
+|---|---|---|
+| `tags[].name` | `collection.name` | |
+| `tags[].description` | `collection.description` | |
 
 **Request (per operation):**
 | OpenAPI field | Vayu field | Notes |
 |---|---|---|
 | `summary` → `operationId` → `METHOD /path` | `request.name` | Prefers summary, falls back in order |
+| `description` | `request.description` | |
 | HTTP method (lowercased key) | `request.method` | Uppercased |
 | `{{baseUrl}}` + path | `request.url` | Path params `{x}` → `{{x}}` |
-| `parameters[in=query]` | `request.params` | Example/default value used; else `""` |
-| `parameters[in=header]` | `request.headers` | Skip standard headers (Authorization, Content-Type) |
-| `requestBody.content[application/json]` | `body` + `bodyType="json"` | See Body generation section |
-| `requestBody.content[text/plain]` | `body=""` + `bodyType="text"` | |
-| `security[]` / `securitySchemes` | **dropped** | No auth set; user fills in post-import |
+| `parameters[in=query]` | `request.params` | Mapped to `KeyValueEntry[]`; one entry per parameter; description from spec preserved on the entry |
+| `parameters[in=header]` | `request.headers` | Same; skip Authorization and Content-Type (added by Vayu) |
+| `requestBody.content[application/json]` | `{"mode":"json","content":<generated>}` | See Body generation section |
+| `requestBody.content[text/plain]` | `{"mode":"text","content":""}` | |
+| `requestBody.content[application/x-www-form-urlencoded]` | `{"mode":"x-www-form-urlencoded","fields":KeyValueEntry[]}` | Generated stub per property |
+| `requestBody.content[multipart/form-data]` | `{"mode":"form-data","fields":KeyValueEntry[]}` | Same |
+| `security[]` / `securitySchemes` | `request.auth = {"mode":"inherit"}` | Lets the user set auth at the collection level once and have it apply to all child requests |
 | `tags[0]` | determines parent Collection | |
-| `description` / `externalDocs` | **dropped** | |
 
 ### Body Generation from Schema
 
@@ -306,7 +337,7 @@ One level deep only — no recursion into nested objects or `$ref` chains.
 
 | Schema type | Generated value |
 |---|---|
-| `string` | `""` |
+| `string` | `""` (or `enum[0]` if present) |
 | `integer` / `number` | `0` |
 | `boolean` | `false` |
 | `array` | `[]` |
@@ -315,7 +346,7 @@ One level deep only — no recursion into nested objects or `$ref` chains.
 | `oneOf` / `anyOf` / `allOf` | `{}` — too ambiguous to resolve |
 | `$ref` | resolved one level; if that resolves to another `$ref`, stops and returns `{}` |
 
-Resulting JSON is pretty-printed and stored as `body` string with `bodyType = "json"`.
+Resulting JSON is pretty-printed and stored as `content` in `{"mode":"json","content":"..."}`.
 
 ### Path Parameters
 
@@ -343,20 +374,20 @@ baseUrl = (schemes[0] || "https") + "://" + host + (basePath !== "/" ? basePath 
 Stored as `collection.variables.baseUrl`. Multiple schemes → only the first used.
 
 **Body content type:** Swagger doesn't define `requestBody` per-operation. Uses `consumes[]` at spec level or operation level. Strategy:
-- If operation has `consumes: ["application/json"]` → generate JSON body from `parameters[in=body]` schema
+- If operation has `consumes: ["application/json"]` → generate JSON body from `parameters[in=body]` schema → `{"mode":"json","content":...}`
 - If spec-level `consumes` has `application/json` → same
-- If `in=body` parameter exists but no JSON consume → store body as `bodyType: "text"`
+- If `in=body` parameter exists but no JSON consume → `{"mode":"text","content":...}`
 
 **Parameter location:** Swagger `parameters[in=body]` is equivalent to OpenAPI `requestBody`. All other `in` values (`query`, `header`, `path`, `formData`) map the same way.
 
-**`formData` parameters:** Swagger uses `in=formData` instead of `requestBody`. Map to `bodyType: "form-data"` with values joined as `key=value&...`.
+**`formData` parameters:** Swagger uses `in=formData` instead of `requestBody`. Map to `{"mode":"form-data","fields":KeyValueEntry[]}`, one entry per `formData` parameter.
 
 **`$ref` resolution:** Swagger uses `#/definitions/ModelName`. Resolved one level deep (same constraint as OpenAPI 3.0).
 
-**`collectionFormat` for array query params:**
-- `csv` → join values with `,` into a single string
-- `multi` → **collapses to last value** (Vayu params is a flat Record)
-- `ssv` / `tsv` / `pipes` → join with respective separator into single string
+**`collectionFormat` for array query params:** Now that `request.params` is `KeyValueEntry[]`, we can preserve repeated values rather than collapsing.
+- `csv` → join values with `,` into a single entry value
+- `multi` → **one `KeyValueEntry` per value, same key, all enabled** (no more loss)
+- `ssv` / `tsv` / `pipes` → join with respective separator into single entry value
 
 ---
 
@@ -366,10 +397,12 @@ Stored as `collection.variables.baseUrl`. Multiple schemes → only the first us
 
 | Loss | Root cause |
 |---|---|
-| `description` fields dropped | Engine DB has no description column |
-| Duplicate query param keys → last value wins | `params` is `Record<string,string>` |
-| Duplicate header keys → last value wins | `headers` is `Record<string,string>` |
 | File/binary upload body dropped | Vayu has no file attachment in requests |
+| Variable type metadata (`type: "secret"`, etc.) reduced to `secret: boolean` | Vayu has no rich type system |
+
+> Removed from this list after the data model refactor: `description` drops,
+> duplicate-key collapse on params/headers, disabled-row loss, folder-script drops,
+> auth-inheritance flattening, body-type opacity. All of these now round-trip.
 
 ### Postman v2.1 / v2.0
 
@@ -377,12 +410,8 @@ Stored as `collection.variables.baseUrl`. Multiple schemes → only the first us
 |---|---|
 | Environments not in collection file | High — separate import needed |
 | Disabled requests/folders silently skipped | Medium |
-| Folder-level scripts (pre/post) dropped | Medium |
 | `postman.*` deprecated API in scripts → runtime errors | Medium |
-| Auth inheritance resolved at import time (not dynamic) | Low |
 | OAuth2 / Digest / AWS / NTLM stored but not executed | Low |
-| `urlencoded`/`formdata` body rebuilt as flat string | Low |
-| GraphQL body stored as text | Low |
 | Variable type metadata dropped | Low |
 
 ### Insomnia v4
@@ -401,10 +430,9 @@ Stored as `collection.variables.baseUrl`. Multiple schemes → only the first us
 | Loss | Severity |
 |---|---|
 | No real values — all params/body are stubs | High — expected for spec import |
-| Security schemes / auth dropped | High — user fills in post-import |
+| Security schemes / auth set to inherit (user fills at collection level) | Medium — better than dropping |
 | `oneOf`/`anyOf`/`allOf` body → empty `{}` | Medium |
 | Multi-tag operations → first tag only (no duplication) | Medium |
 | Additional servers beyond first dropped | Low |
 | Deep `$ref` chains → one level resolved | Low |
 | Response schemas dropped | Low |
-| `collectionFormat: multi` collapses to last value | Low |
