@@ -21,8 +21,6 @@
 import { spawn } from "node:child_process";
 
 const command = [
-	"pnpm kill-ports",
-	"&&",
 	"concurrently -k -r",
 	'"pnpm:dev"',
 	'"pnpm:electron:watch"',
