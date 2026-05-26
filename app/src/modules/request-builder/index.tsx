@@ -31,9 +31,9 @@ import { useRequestQuery, useUpdateRequestMutation, queryKeys } from "@/queries"
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
-import { recordToKeyValue, keyValueToRecord } from "./utils/key-value";
+import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
-import type { Request, HttpMethod, LoadTestConfig, StartLoadTestRequest } from "@/types";
+import type { HttpMethod, LoadTestConfig, StartLoadTestRequest, RequestBody, RequestAuth } from "@/types";
 
 /**
  * RequestBuilder - Main entry point
@@ -66,37 +66,55 @@ export default function RequestBuilder() {
 	const initialRequest = useMemo((): Partial<RequestState> | undefined => {
 		if (!fetchedRequest) return undefined;
 
+		const body = fetchedRequest.body;
+		const bodyMode =
+			body.mode === "json"
+				? "json"
+				: body.mode === "form-data"
+					? "form-data"
+					: body.mode === "x-www-form-urlencoded"
+						? "x-www-form-urlencoded"
+						: body.mode === "text"
+							? "text"
+							: body.mode === "graphql"
+								? "text"
+								: "none";
+
+		const rawBody = "content" in body ? body.content : "";
+		const formFields = "fields" in body && body.mode === "form-data" ? body.fields : [];
+		const urlEncodedFields =
+			"fields" in body && body.mode === "x-www-form-urlencoded" ? body.fields : [];
+
+		const auth = fetchedRequest.auth;
+		const authType =
+			auth.mode === "bearer"
+				? "bearer"
+				: auth.mode === "basic"
+					? "basic"
+					: auth.mode === "apikey"
+						? "api-key"
+						: auth.mode === "inherit"
+							? "inherit"
+							: "none";
+		const authConfig: Record<string, any> =
+			auth.mode !== "none" && auth.mode !== "inherit" ? (auth as any) : {};
+
 		return {
 			id: fetchedRequest.id,
 			name: fetchedRequest.name,
+			description: fetchedRequest.description,
 			method: fetchedRequest.method,
 			url: fetchedRequest.url,
-			params: recordToKeyValue(fetchedRequest.params || {}, false), // No system headers for params
-			headers: recordToKeyValue(fetchedRequest.headers || {}, true), // System headers only for headers
-			bodyMode:
-				fetchedRequest.bodyType === "json"
-					? "json"
-					: fetchedRequest.bodyType === "form-data"
-						? "form-data"
-						: fetchedRequest.bodyType === "x-www-form-urlencoded"
-							? "x-www-form-urlencoded"
-							: fetchedRequest.bodyType === "text"
-								? "text"
-								: "none",
-			body: fetchedRequest.body || "",
-			formData: [],
-			urlEncoded: [],
-			authType:
-				fetchedRequest.auth?.type === "bearer"
-					? "bearer"
-					: fetchedRequest.auth?.type === "basic"
-						? "basic"
-						: fetchedRequest.auth?.type === "api_key"
-							? "api-key"
-							: "none",
-			authConfig: fetchedRequest.auth || {},
-			preRequestScript: fetchedRequest.preRequestScript || "",
-			testScript: fetchedRequest.postRequestScript || "",
+			params: toKeyValueItems(fetchedRequest.params),
+			headers: toKeyValueItems(fetchedRequest.headers, true), // inject system headers
+			bodyMode,
+			body: rawBody,
+			formData: toKeyValueItems(formFields),
+			urlEncoded: toKeyValueItems(urlEncodedFields),
+			authType,
+			authConfig,
+			preRequestScript: fetchedRequest.preRequestScript,
+			testScript: fetchedRequest.postRequestScript,
 			collectionId: fetchedRequest.collectionId,
 		};
 	}, [fetchedRequest]);
@@ -110,9 +128,8 @@ export default function RequestBuilder() {
 				// Resolve variables in URL, headers, and body before sending
 				const resolvedUrl = resolveString(request.url);
 
-				// Regenerate UUID for X-Request-ID header on each execution
-				// Also ensure version header is always from package.json (protected)
-				const headersRecord = keyValueToRecord(request.headers);
+				// Flatten enabled headers for execution; inject per-request system headers
+				const headersRecord = toFlatHeaders(request.headers);
 				headersRecord["X-Request-ID"] = generateUUID();
 				const version =
 					typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.1.1";
@@ -126,49 +143,29 @@ export default function RequestBuilder() {
 				);
 				const resolvedBody = request.body ? resolveString(request.body) : request.body;
 
-				// Resolve auth config if present
-				const resolvedAuthConfig =
-					request.authType !== "none" && request.authConfig
-						? resolveObject(request.authConfig)
-						: request.authConfig;
+				// Build body payload for engine: {mode, content}
+				const execBody =
+					request.bodyMode !== "none" && resolvedBody
+						? { mode: request.bodyMode || "text", content: resolvedBody }
+						: undefined;
 
-				// Convert RequestState back to Request format for the engine
-				const engineRequest: Request = {
-					...fetchedRequest,
-					method: request.method as HttpMethod,
-					url: resolvedUrl,
-					headers: resolvedHeaders,
-					body: resolvedBody,
-					bodyType:
-						request.bodyMode === "json"
-							? "json"
-							: request.bodyMode === "form-data"
-								? "form-data"
-								: request.bodyMode === "x-www-form-urlencoded"
-									? "x-www-form-urlencoded"
-									: request.bodyMode === "text"
-										? "text"
-										: undefined,
-					auth:
-						request.authType !== "none"
-							? {
-								type:
-									request.authType === "bearer"
-										? "bearer"
-										: request.authType === "basic"
-											? "basic"
-											: request.authType === "api-key"
-												? "api-key"
-												: "bearer",
-								...resolvedAuthConfig,
-							}
-							: undefined,
-					preRequestScript: request.preRequestScript || undefined,
-					postRequestScript: request.testScript || undefined,
-				};
+				// Build resolved auth for engine (exclude inherit — engine needs concrete auth)
+				const execAuth =
+					request.authType !== "none" && request.authType !== "inherit"
+						? resolveObject(request.authConfig)
+						: undefined;
 
 				const result = await engineExecuteRequest(
-					engineRequest,
+					{
+						method: request.method,
+						url: resolvedUrl,
+						headers: resolvedHeaders,
+						body: execBody,
+						auth: execAuth as Record<string, unknown> | undefined,
+						preRequestScript: request.preRequestScript || undefined,
+						postRequestScript: request.testScript || undefined,
+						requestId: fetchedRequest.id,
+					},
 					activeEnvironmentId || undefined
 				);
 
@@ -251,29 +248,43 @@ export default function RequestBuilder() {
 		async (request: RequestState) => {
 			if (!fetchedRequest) return;
 
-			await updateRequestMutation.mutateAsync({
+			// Build RequestBody discriminated union from flat UI state
+		let bodyPayload: RequestBody;
+		if (request.bodyMode === "form-data") {
+			bodyPayload = { mode: "form-data", fields: toKeyValueEntries(request.formData) };
+		} else if (request.bodyMode === "x-www-form-urlencoded") {
+			bodyPayload = { mode: "x-www-form-urlencoded", fields: toKeyValueEntries(request.urlEncoded) };
+		} else if (request.bodyMode !== "none" && request.body) {
+			bodyPayload = { mode: request.bodyMode as "json" | "text" | "graphql", content: request.body };
+		} else {
+			bodyPayload = { mode: "none" };
+		}
+
+		// Build RequestAuth from UI state
+		let authPayload: RequestAuth;
+		if (request.authType === "bearer") {
+			authPayload = { mode: "bearer", token: request.authConfig.token ?? "" };
+		} else if (request.authType === "basic") {
+			authPayload = { mode: "basic", username: request.authConfig.username ?? "", password: request.authConfig.password ?? "" };
+		} else if (request.authType === "api-key") {
+			authPayload = { mode: "apikey", key: request.authConfig.key ?? "", value: request.authConfig.value ?? "", in: request.authConfig.addTo ?? "header" };
+		} else if (request.authType === "inherit") {
+			authPayload = { mode: "inherit" };
+		} else {
+			authPayload = { mode: "none" };
+		}
+
+		await updateRequestMutation.mutateAsync({
 				id: fetchedRequest.id,
 				name: request.name,
+				description: request.description,
 				method: request.method as HttpMethod,
 				url: request.url,
-				headers: keyValueToRecord(request.headers),
-				params: keyValueToRecord(request.params),
-				body: request.body || undefined,
-				bodyType: request.bodyMode || undefined,
-				auth:
-					request.authType !== "none"
-						? {
-							type:
-								request.authType === "bearer"
-									? "bearer"
-									: request.authType === "basic"
-										? "basic"
-										: request.authType === "api-key"
-											? "api-key"
-											: "bearer",
-							...request.authConfig,
-						}
-						: undefined,
+				params: toKeyValueEntries(request.params),
+				headers: toKeyValueEntries(request.headers),
+				body: bodyPayload,
+				bodyType: bodyPayload.mode,
+				auth: authPayload,
 				preRequestScript: request.preRequestScript || undefined,
 				postRequestScript: request.testScript || undefined,
 			});
@@ -297,7 +308,7 @@ export default function RequestBuilder() {
 				// Resolve variables in URL, headers, and body before sending
 				const resolvedUrl = resolveString(pendingLoadTestRequest.url);
 				const resolvedHeaders = Object.fromEntries(
-					Object.entries(keyValueToRecord(pendingLoadTestRequest.headers)).map(
+					Object.entries(toFlatHeaders(pendingLoadTestRequest.headers)).map(
 						([key, value]) => [resolveString(key), resolveString(value)]
 					)
 				);
@@ -315,7 +326,6 @@ export default function RequestBuilder() {
 
 				// Convert LoadTestConfig to StartLoadTestRequest (flat structure)
 				const apiRequest: StartLoadTestRequest = {
-					// HTTP request fields at root level
 					method: pendingLoadTestRequest.method,
 					url: resolvedUrl,
 					headers: resolvedHeaders,

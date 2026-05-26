@@ -12,6 +12,7 @@ import { useState, useCallback } from "react";
 import { ApiError, apiService } from "@/services";
 import type {
 	SanityResult,
+	ExecuteRequestRequest,
 	StartLoadTestRequest,
 	StartLoadTestResponse,
 	LoadTestConfig,
@@ -19,7 +20,14 @@ import type {
 } from "@/types";
 
 interface UseEngineReturn {
-	executeRequest: (request: Request, environmentId?: string) => Promise<SanityResult | null>;
+	/**
+	 * Execute a request against the engine.
+	 * Accepts a pre-resolved ExecuteRequestRequest (flat headers, resolved auth/body).
+	 */
+	executeRequest: (
+		params: ExecuteRequestRequest,
+		environmentId?: string
+	) => Promise<SanityResult | null>;
 	startLoadTest: (
 		request: Request,
 		config: LoadTestConfig,
@@ -35,39 +43,24 @@ export function useEngine(): UseEngineReturn {
 	const [error, setError] = useState<string | null>(null);
 
 	const executeRequest = useCallback(
-		async (request: Request, environmentId?: string): Promise<SanityResult | null> => {
+		async (
+			params: ExecuteRequestRequest,
+			environmentId?: string
+		): Promise<SanityResult | null> => {
 			setIsExecuting(true);
 			setError(null);
 
 			try {
-				// Build the request body according to API documentation
-				// Backend expects body as { mode: string, content: string }
-				const bodyPayload = request.body
-					? {
-							mode: request.bodyType || "text",
-							content: request.body,
-						}
-					: undefined;
-
 				const result = await apiService.executeRequest({
-					method: request.method,
-					url: request.url,
-					headers: request.headers,
-					body: bodyPayload,
-					auth: request.auth,
-					preRequestScript: request.preRequestScript,
-					postRequestScript: request.postRequestScript,
-					requestId: request.id,
-					environmentId: environmentId,
+					...params,
+					environmentId: params.environmentId ?? environmentId,
 				});
 				return result;
 			} catch (err) {
-				// Handle engine API failures (engine down, network error to engine, etc.)
-				// All valid request executions return HTTP 200 with response in body
 				const errorMessage =
 					err instanceof Error ? err.message : "Failed to connect to engine";
 				const errorCode = err instanceof ApiError ? err.errorCode : "ENGINE_ERROR";
-				
+
 				setError(errorMessage);
 				return {
 					status: 0,
@@ -93,40 +86,24 @@ export function useEngine(): UseEngineReturn {
 			setError(null);
 
 			try {
-				// Build payload matching backend POST /run expectations
-				// Backend expects body as { mode: string, content: string }
-				const bodyPayload = request.body
-					? {
-							mode: request.bodyType || "text",
-							content: request.body,
-						}
-					: undefined;
-
 				const payload: StartLoadTestRequest = {
-					// HTTP request fields at root level (flat structure)
 					method: request.method,
 					url: request.url,
-					headers: request.headers,
-					body: bodyPayload,
-					// Load test strategy
+					// Flat headers passed in from caller (already resolved)
+					headers: {},
 					mode: config.mode,
-					// Duration (convert seconds to string format)
 					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,
 					targetRps: config.rps,
 					iterations: config.iterations,
 					concurrency: config.concurrency,
-					// Ramp-up settings
 					rampUpDuration: config.ramp_duration_seconds
 						? `${config.ramp_duration_seconds}s`
 						: undefined,
-					// Linking
 					requestId: request.id,
 					environmentId: environmentId,
-					// Data capture options
 					success_sample_rate: config.data_sample_rate,
 					slow_threshold_ms: config.slow_threshold_ms,
 					save_timing_breakdown: config.save_timing_breakdown,
-					// Metadata
 					comment: config.comment,
 				};
 

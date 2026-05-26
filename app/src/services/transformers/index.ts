@@ -16,6 +16,6 @@
  */
 
 export { RequestTransformer, type BackendRequest } from "./request-transformer";
-export { CollectionTransformer, type BackendCollection } from "./collection-transformer";
+export { CollectionTransformer } from "./collection-transformer";
 export { RunReportTransformer } from "./run-report-transformer";
 export { GlobalsTransformer, type BackendGlobals } from "./globals-transformer";

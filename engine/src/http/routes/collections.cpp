@@ -78,6 +78,12 @@ void register_collection_routes (RouteContext& ctx) {
                 c.name = json["name"].get<std::string> ();
             }
 
+            if (json.contains ("description")) {
+                c.description = json["description"].is_null ()
+                ? ""
+                : json["description"].get<std::string> ();
+            }
+
             if (json.contains ("parentId")) {
                 if (json["parentId"].is_null ()) {
                     c.parent_id = std::nullopt;
@@ -90,7 +96,7 @@ void register_collection_routes (RouteContext& ctx) {
                 c.order = json["order"].get<int> ();
             } else if (!is_update) {
                 // New collection: assign next order among siblings for stable ordering
-                auto all     = ctx.db.get_collections ();
+                auto all      = ctx.db.get_collections ();
                 int max_order = -1;
                 for (const auto& col : all) {
                     if (col.parent_id == c.parent_id && col.order > max_order) {
@@ -100,16 +106,30 @@ void register_collection_routes (RouteContext& ctx) {
                 c.order = max_order + 1;
             }
 
-            // Handle collection variables
+            // Collection variables
             if (json.contains ("variables")) {
-                if (json["variables"].is_null ()) {
-                    c.variables = "{}";
-                } else {
-                    c.variables = json["variables"].dump ();
-                }
+                c.variables = json["variables"].is_null () ? "{}" : json["variables"].dump ();
             } else if (!is_update) {
-                // New collection - initialize with empty variables
                 c.variables = "{}";
+            }
+
+            // Collection auth — never 'inherit'; defaults to {mode: "none"}
+            if (json.contains ("auth")) {
+                c.auth = json["auth"].is_null () ? "{\"mode\":\"none\"}" : json["auth"].dump ();
+            } else if (!is_update) {
+                c.auth = "{\"mode\":\"none\"}";
+            }
+
+            if (json.contains ("preRequestScript")) {
+                c.pre_request_script = json["preRequestScript"].is_null ()
+                ? ""
+                : json["preRequestScript"].get<std::string> ();
+            }
+
+            if (json.contains ("postRequestScript")) {
+                c.post_request_script = json["postRequestScript"].is_null ()
+                ? ""
+                : json["postRequestScript"].get<std::string> ();
             }
 
             if (is_update) {

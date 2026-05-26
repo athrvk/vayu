@@ -10,24 +10,75 @@
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
+export type BodyMode = "none" | "json" | "text" | "graphql" | "form-data" | "x-www-form-urlencoded";
+
+export type AuthMode =
+	| "none"
+	| "inherit"
+	| "bearer"
+	| "basic"
+	| "apikey"
+	| "oauth2"
+	| "digest"
+	| "aws"
+	| "ntlm";
+
 /**
- * Variable value with enabled flag (Postman-style)
- * Note: The `secret` field is a UI hint for masking display - values are NOT encrypted at rest.
+ * A single key-value entry (headers, params, form fields).
+ * `enabled: false` rows are preserved in storage and excluded only at HTTP-execution time.
+ * Duplicates are allowed (useful for multiple `Accept` headers etc.).
+ */
+export interface KeyValueEntry {
+	key: string;
+	value: string;
+	enabled: boolean;
+	description?: string;
+}
+
+/**
+ * Variable value with enabled flag and optional type hint.
+ * Note: `secret` is a UI masking hint — values are NOT encrypted at rest.
+ * Note: `type` affects UI rendering and validation only; values are always stored as strings.
  */
 export interface VariableValue {
 	value: string;
 	enabled: boolean;
 	secret?: boolean;
+	type?: "string" | "number" | "boolean" | "json";
 	createdAt?: number;
 }
+
+/**
+ * Request body as a discriminated union.
+ * `body_type` on the domain `Request` is a denormalized mirror of `body.mode`.
+ */
+export type RequestBody =
+	| { mode: "none" }
+	| { mode: "json" | "text" | "graphql"; content: string }
+	| { mode: "form-data" | "x-www-form-urlencoded"; fields: KeyValueEntry[] };
+
+/**
+ * Auth configuration for requests.
+ * `inherit` resolves by walking the parent collection chain at execution time.
+ * Collections never use `inherit` — they are always the auth source.
+ */
+export type RequestAuth =
+	| { mode: "none" | "inherit" }
+	| { mode: "bearer"; token: string }
+	| { mode: "basic"; username: string; password: string }
+	| { mode: "apikey"; key: string; value: string; in: "header" | "query" }
+	| { mode: "oauth2" | "digest" | "aws" | "ntlm"; config: Record<string, unknown> };
 
 export interface Collection {
 	id: string;
 	name: string;
-	description?: string;
+	description: string;
 	parentId?: string;
-	order?: number; // Position in the collection list
-	variables?: Record<string, VariableValue>; // Collection-scoped variables
+	order: number;
+	variables: Record<string, VariableValue>;
+	auth: Exclude<RequestAuth, { mode: "inherit" }>; // Collections are auth sources, never inherit
+	preRequestScript: string;
+	postRequestScript: string;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -43,23 +94,32 @@ export interface Request {
 	id: string;
 	collectionId: string;
 	name: string;
-	description?: string;
+	description: string;
 	method: HttpMethod;
 	url: string;
-	params?: Record<string, string>; // Query parameters
-	headers?: Record<string, string>;
-	body?: string;
-	bodyType?: "json" | "text" | "form-data" | "x-www-form-urlencoded";
-	auth?: Record<string, any>;
-	preRequestScript?: string;
-	postRequestScript?: string;
+	params: KeyValueEntry[];
+	headers: KeyValueEntry[];
+	body: RequestBody;
+	bodyType: BodyMode; // Denormalized mirror of body.mode — kept for queryability
+	auth: RequestAuth;
+	preRequestScript: string;
+	postRequestScript: string;
+	order: number;
 	createdAt: string;
 	updatedAt: string;
+}
+
+/** Stable comparator for sorting requests within a collection. */
+export function compareRequestOrder(a: Request, b: Request): number {
+	const orderDiff = (a.order ?? 0) - (b.order ?? 0);
+	if (orderDiff !== 0) return orderDiff;
+	return (a.id ?? "").localeCompare(b.id ?? "");
 }
 
 export interface Environment {
 	id: string;
 	name: string;
+	description: string;
 	variables: Record<string, VariableValue>;
 	isActive: boolean;
 	createdAt: string;
@@ -77,14 +137,13 @@ export interface GlobalVariables {
 
 /**
  * Variable scope for UI display and resolution priority.
- * Resolution priority: Environment > Collection > Global
+ * Resolution priority: Environment > Collection (leaf-to-root) > Global
  */
 export type VariableScope = "global" | "collection" | "environment";
 
 /**
  * Resolved variable with its value, scope, and secret flag.
- * This is the base interface used throughout the app for variable resolution and display.
- * Note: The `secret` field is a UI hint for masking - values are NOT encrypted at rest.
+ * Note: The `secret` field is a UI hint for masking — values are NOT encrypted at rest.
  */
 export interface ResolvedVariable {
 	value: string;
@@ -94,7 +153,6 @@ export interface ResolvedVariable {
 
 /**
  * Extended variable info for autocomplete and quick view.
- * Includes additional context about the variable's source.
  */
 export interface VariableInfo extends ResolvedVariable {
 	name: string;
@@ -104,11 +162,11 @@ export interface VariableInfo extends ResolvedVariable {
 
 export interface Run {
 	id: string;
-	type: "load" | "design"; // Backend uses "design" not "sanity"
+	type: "load" | "design";
 	status: "pending" | "running" | "completed" | "stopped" | "failed";
 	startTime: number; // Unix timestamp in ms
 	endTime: number;
-	configSnapshot?: any; // The request config used for this run
+	configSnapshot?: any;
 	requestId?: string | null;
 	environmentId?: string | null;
 }
@@ -120,11 +178,9 @@ export interface LoadTestConfig {
 	iterations?: number;
 	mode: "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
 	ramp_duration_seconds?: number;
-	// Data capture options
 	data_sample_rate?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
-	// Metadata
 	comment?: string;
 	latency_percentiles?: number[];
 }
@@ -146,10 +202,8 @@ export interface HttpResponse {
 		firstByte: number;
 		download: number;
 	};
-	// Client-side error information (from curl/libcurl)
-	// Present when status === 0 (no server response received)
-	errorCode?: string;    // "TIMEOUT", "CONNECTION_FAILED", "SSL_ERROR", etc.
-	errorMessage?: string; // Human-readable error description
+	errorCode?: string;
+	errorMessage?: string;
 }
 
 export interface TestResult {
@@ -158,14 +212,10 @@ export interface TestResult {
 	error?: string;
 }
 
-// SanityResult is the response from /request endpoint
-// It directly contains the HTTP response fields
 export interface SanityResult extends HttpResponse {
 	requestId?: string;
-	// Script execution results (camelCase from backend)
 	testResults?: TestResult[];
 	consoleLogs?: string[];
-	// Script errors
 	preScriptError?: string;
 	postScriptError?: string;
 	error?: string;
@@ -184,14 +234,12 @@ export interface LoadTestMetrics {
 	avg_latency_ms: number;
 	bytes_sent: number;
 	bytes_received: number;
-	// Rate metrics (Open Model)
-	send_rate?: number; // Rate at which requests are dispatched to the server
-	throughput?: number; // Rate at which responses are received from the server
-	backpressure?: number; // Queue depth: requests sent but not yet responded
+	send_rate?: number;
+	throughput?: number;
+	backpressure?: number;
 }
 
 export interface RunReport {
-	// Phase 1: Metadata section
 	metadata?: {
 		runId: string;
 		runType: string;
@@ -209,7 +257,6 @@ export interface RunReport {
 			comment?: string;
 		};
 	};
-	// Summary section
 	summary: {
 		totalRequests: number;
 		successfulRequests: number;
@@ -217,43 +264,36 @@ export interface RunReport {
 		errorRate: number;
 		totalDurationSeconds: number;
 		avgRps: number;
-		// Rate metrics (Open Model)
-		sendRate?: number; // Rate at which requests are dispatched to the server
-		throughput?: number; // Rate at which responses are received from the server
-		backpressure?: number; // Queue depth: requests sent but not yet responded
-		// Phase 2: Accurate timing metrics
-		testDuration?: number; // Actual test duration in seconds
-		setupOverhead?: number; // Context overhead before test started (seconds)
+		sendRate?: number;
+		throughput?: number;
+		backpressure?: number;
+		testDuration?: number;
+		setupOverhead?: number;
 	};
-	// Latency section
 	latency: {
 		min: number;
 		max: number;
 		avg: number;
-		median?: number; // Phase 1: Renamed from p50
+		median?: number;
 		p50: number;
-		p75?: number; // Phase 1
+		p75?: number;
 		p90: number;
 		p95: number;
 		p99: number;
-		p999?: number; // Phase 1
+		p999?: number;
 	};
-	// Status code distribution
 	statusCodes: Record<string, number>;
-	// Error details
 	errors: {
 		total: number;
 		withDetails: number;
 		types: Record<string, number>;
-		byStatusCode?: Record<string, number>; // Phase 1
+		byStatusCode?: Record<string, number>;
 	};
-	// Phase 1: Rate control metrics
 	rateControl?: {
 		targetRps: number;
 		actualRps: number;
 		achievement: number;
 	};
-	// Optional timing breakdown
 	timingBreakdown?: {
 		avgDnsMs: number;
 		avgConnectMs: number;
@@ -261,28 +301,23 @@ export interface RunReport {
 		avgFirstByteMs: number;
 		avgDownloadMs: number;
 	};
-	// Optional slow requests info
 	slowRequests?: {
 		count: number;
 		thresholdMs: number;
 		percentage: number;
 	};
-	// Optional test validation results
 	testValidation?: {
 		samplesTested: number;
 		testsPassed: number;
 		testsFailed: number;
 		successRate: number;
 	};
-	// Request/Response results (errors + sampled successes)
-	// Backend returns this as a direct array
 	results?: Array<{
 		timestamp: number;
 		statusCode: number;
 		latencyMs: number;
 		error?: string;
 		trace?: {
-			// Success trace fields (camelCase from backend)
 			totalMs?: number;
 			dnsMs?: number;
 			connectMs?: number;
@@ -291,12 +326,10 @@ export interface RunReport {
 			downloadMs?: number;
 			isSlow?: boolean;
 			thresholdMs?: number;
-			// Error trace fields
 			request_number?: number;
 			error_code?: number;
 			error_type?: string;
 			message?: string;
-			// Legacy/optional fields
 			headers?: Record<string, string>;
 			body?: string;
 		};
@@ -316,9 +349,6 @@ export interface EngineConfig {
 	verify_ssl: boolean;
 }
 
-/**
- * Configuration entry with metadata for UI display
- */
 export interface ConfigEntry {
 	key: string;
 	value: string;
@@ -330,21 +360,14 @@ export interface ConfigEntry {
 	min?: string;
 	max?: string;
 	updatedAt: number;
-	/** Whether changing this config requires an engine restart */
 	requiresRestart?: boolean;
 }
 
-/**
- * Configuration response from backend
- */
 export interface ConfigResponse {
 	entries: ConfigEntry[];
 	success?: boolean;
 }
 
-/**
- * Settings category for UI grouping
- */
 export type SettingsCategory =
 	| "general_engine"
 	| "database_performance"
@@ -353,7 +376,6 @@ export type SettingsCategory =
 	| "observability"
 	| "ui";
 
-// Script Editor Completions (from backend)
 export interface ScriptCompletion {
 	label: string;
 	kind: number;
