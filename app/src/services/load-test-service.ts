@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -18,14 +17,18 @@ import { sseClient } from "./sse-client";
 import { useDashboardStore } from "@/stores";
 import type { LoadTestMetrics } from "@/types";
 
-/** Throttle UI updates to avoid freezing (engine sends every 100ms) */
+/**
+ * Engine emits at 10 Hz (100ms cadence — see engine/src/http/routes/metrics.cpp).
+ * We throttle UI commits to 2 Hz to keep render cost bounded, but BUFFER every
+ * tick the engine sends so historicalMetrics keeps the full 10 Hz signal.
+ */
 const METRICS_UI_THROTTLE_MS = 500;
 
 class LoadTestService {
 	private activeRunId: string | null = null;
 	private isConnected: boolean = false;
 	private lastMetricsPushTime = 0;
-	private pendingMetrics: LoadTestMetrics | null = null;
+	private pendingBuffer: LoadTestMetrics[] = [];
 	private throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
 	/**
@@ -79,7 +82,7 @@ class LoadTestService {
 			clearTimeout(this.throttleTimer);
 			this.throttleTimer = null;
 		}
-		this.pendingMetrics = null;
+		this.pendingBuffer = [];
 		this.lastMetricsPushTime = 0;
 		console.log(`[LoadTestService] Stopping monitoring for run ${this.activeRunId}`);
 		this.activeRunId = null;
@@ -107,7 +110,7 @@ class LoadTestService {
 	// --- Private handlers ---
 
 	private handleMetrics(metrics: LoadTestMetrics): void {
-		this.pendingMetrics = metrics;
+		this.pendingBuffer.push(metrics);
 		const now = Date.now();
 		const elapsed = now - this.lastMetricsPushTime;
 		if (elapsed >= METRICS_UI_THROTTLE_MS || this.lastMetricsPushTime === 0) {
@@ -121,12 +124,12 @@ class LoadTestService {
 	}
 
 	private flushMetrics(): void {
-		if (this.pendingMetrics == null) return;
+		if (this.pendingBuffer.length === 0) return;
 		this.lastMetricsPushTime = Date.now();
-		const toPush = this.pendingMetrics;
-		this.pendingMetrics = null;
+		const batch = this.pendingBuffer;
+		this.pendingBuffer = [];
 		const store = useDashboardStore.getState();
-		store.addMetrics(toPush);
+		store.addMetricsBatch(batch);
 	}
 
 	private handleError(error: Error): void {
