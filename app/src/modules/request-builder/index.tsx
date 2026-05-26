@@ -31,7 +31,6 @@ import { useRequestQuery, useUpdateRequestMutation, useCollectionAncestors, quer
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
-import { httpStatusText } from "@/lib/http-status";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
 import type { HttpMethod, LoadTestConfig, StartLoadTestRequest, RequestBody, RequestAuth, Collection } from "@/types";
@@ -265,7 +264,7 @@ export default function RequestBuilder() {
 					// Use status from result, but don't default to 200 if it's 0 (client-side error)
 					// 0 is a valid status code for client-side errors (no server response)
 					status: result.status !== undefined && result.status !== null ? result.status : 200,
-					statusText: result.statusText || httpStatusText(result.status ?? 0),
+					statusText: result.statusText || "",
 					headers: result.headers || {},
 					requestHeaders: result.requestHeaders,
 					rawRequest: result.rawRequest,

@@ -704,6 +704,7 @@ struct Result {
     std::string run_id;
     int64_t timestamp;
     int status_code;
+    std::string status_text; // Wire reason phrase, or canonical IANA text
     double latency_ms;
     std::string error;
     std::string trace_data; // JSON (Headers/Body - only for Design Mode or Errors)

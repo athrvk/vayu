@@ -321,6 +321,7 @@ export interface RunReport {
 	results?: Array<{
 		timestamp: number;
 		statusCode: number;
+		statusText?: string;
 		latencyMs: number;
 		error?: string;
 		trace?: {

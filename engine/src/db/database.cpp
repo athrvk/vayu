@@ -241,6 +241,7 @@ inline auto make_storage (const std::string& path) {
     make_table ("results", make_column ("id", &Result::id, primary_key ().autoincrement ()),
     make_column ("run_id", &Result::run_id), make_column ("timestamp", &Result::timestamp),
     make_column ("status_code", &Result::status_code),
+    make_column ("status_text", &Result::status_text), // Wire reason phrase
     make_column ("latency_ms", &Result::latency_ms), make_column ("error", &Result::error),
     make_column ("trace_data", &Result::trace_data)), // JSON: headers/body for errors
 

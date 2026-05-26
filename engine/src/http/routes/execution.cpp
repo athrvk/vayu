@@ -198,6 +198,7 @@ const vayu::Response& response) {
         db_result.run_id      = run_id;
         db_result.timestamp   = now_ms ();
         db_result.status_code = response.status_code;
+        db_result.status_text = response.status_text;
         db_result.latency_ms  = response.timing.total_ms;
         db_result.error       = has_error ? response.error_message : "";
 
