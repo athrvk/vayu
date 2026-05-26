@@ -18,6 +18,7 @@ import { HistoryDetail } from "@/modules/history/main";
 import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
 import { SettingsMain } from "@/modules/settings";
 import VariablesMain from "@/modules/variables/main/VariablesMain";
+import { ImportModal } from "@/modules/collections/ImportModal";
 
 /**
  * Sidebar width bounds.
@@ -85,6 +86,7 @@ export default function Shell() {
 
 	return (
 		<div className="flex h-full bg-background overflow-hidden">
+			<ImportModal />
 			{/* Sidebar container — controlled width */}
 			<div
 				style={{
