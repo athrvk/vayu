@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-publish:
     name: Build on ${{ matrix.os }}
@@ -23,29 +27,15 @@ jobs:
             preset: windows-prod
           - os: macos-latest
             preset: macos-prod-arm64
+    timeout-minutes: 120
+    env:
+      VCPKG_COMMIT: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+      SCCACHE_GHA_ENABLED: 'true'
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-
-      - name: Setup pnpm
-        run: npm install -g pnpm@10
-
-      - name: Cache pnpm store
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.local/share/pnpm/store
-            ~/Library/pnpm/store
-            ~/AppData/Local/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('app/pnpm-lock.yaml') }}
-          restore-keys: |
-            pnpm-${{ runner.os }}-
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -59,42 +49,64 @@ jobs:
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: command -v ninja || brew install ninja
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-          vcpkgGitCommitId: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      - name: Build and test engine (arm64)
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Build and run engine tests (arm64)
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-arm64
           buildPreset: macos-prod-arm64
+          testPreset: macos-prod-arm64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          CMAKE_C_COMPILER_LAUNCHER: sccache
 
-      - name: Run engine tests (arm64)
-        if: runner.os == 'macOS'
-        working-directory: engine
-        run: ctest --preset macos-prod-arm64
-
-      - name: Build and test engine (x64)
+      - name: Build and run engine tests (x64)
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-x64
           buildPreset: macos-prod-x64
+          testPreset: macos-prod-x64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-
-      - name: Run engine tests (x64)
-        if: runner.os == 'macOS'
-        working-directory: engine
-        run: ctest --preset macos-prod-x64
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          CMAKE_C_COMPILER_LAUNCHER: sccache
 
       - name: Create universal binary (macOS)
         if: runner.os == 'macOS'
@@ -109,19 +121,18 @@ jobs:
           lipo -info engine/build-universal/vayu-engine
           chmod +x engine/build-universal/vayu-engine
 
-      - name: Build and test engine (Non-macOS)
+      - name: Build and run engine tests (Non-macOS)
         if: runner.os != 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
+          testPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-
-      - name: Run engine tests (Non-macOS)
-        if: runner.os != 'macOS'
-        working-directory: engine
-        run: ctest --preset ${{ matrix.preset }}
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          CMAKE_C_COMPILER_LAUNCHER: sccache
 
       - name: Install frontend dependencies
         working-directory: app
@@ -198,6 +209,11 @@ jobs:
           cp app/release/*.AppImage artifacts/ 2>/dev/null || true
           cp app/release/*.deb artifacts/ 2>/dev/null || true
           cp app/release/*.rpm artifacts/ 2>/dev/null || true
+          artifact_count=$(ls artifacts/ 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$artifact_count" -eq 0 ]; then
+            echo "::error::No Linux artifacts built — AppImage/deb/rpm all missing." >&2
+            exit 1
+          fi
           ls -lh artifacts/
 
       - name: Collect artifacts (Windows)
@@ -205,9 +221,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Get-ChildItem app/release/*.exe | ForEach-Object {
-            Copy-Item $_.FullName -Destination artifacts/
+          $exeFiles = Get-ChildItem app/release/*.exe -ErrorAction SilentlyContinue
+          if ($exeFiles.Count -eq 0) {
+            Write-Error "No Windows .exe artifact built."
+            exit 1
           }
+          $exeFiles | ForEach-Object { Copy-Item $_.FullName -Destination artifacts/ }
           Get-ChildItem artifacts
 
       - name: Collect artifacts (macOS)
@@ -229,6 +248,7 @@ jobs:
           ls -lh artifacts/
 
       - name: Upload artifacts to release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           files: |

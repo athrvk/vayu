@@ -4,11 +4,24 @@ on:
   pull_request:
     branches:
       - master
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'scripts/install-git-hooks.sh'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      checks: write
     strategy:
       fail-fast: false
       matrix:
@@ -21,45 +34,16 @@ jobs:
           - os: macos-latest
             preset: macos-prod
     timeout-minutes: 60
+    env:
+      VCPKG_COMMIT: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+      SCCACHE_GHA_ENABLED: 'true'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-
-      - name: Lint and test installer script
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          command -v shellcheck >/dev/null 2>&1 || {
-            if [ "$RUNNER_OS" = "Linux" ]; then
-              sudo apt-get update && sudo apt-get install -y shellcheck
-            else
-              brew install shellcheck
-            fi
-          }
-          shellcheck install.sh
-          bash scripts/test/install_test.sh
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-
-      - name: Setup pnpm
-        run: npm install -g pnpm@10
-
-      - name: Cache pnpm store
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.local/share/pnpm/store
-            ~/Library/pnpm/store
-            ~/AppData/Local/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('app/pnpm-lock.yaml') }}
-          restore-keys: |
-            pnpm-${{ runner.os }}-
+          fetch-depth: 1
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -69,30 +53,75 @@ jobs:
             ninja-build \
             build-essential \
             pkg-config \
-            ca-certificates
+            ca-certificates \
+            shellcheck
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: |
+          command -v ninja || brew install ninja
+          brew install shellcheck
+
+      - name: Lint and test installer script
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          shellcheck install.sh
+          bash scripts/test/install_test.sh
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-          vcpkgGitCommitId: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      - name: Build and test engine
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Build engine
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          CMAKE_C_COMPILER_LAUNCHER: sccache
 
       - name: Run engine tests
         working-directory: engine
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+        shell: bash
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine/test-results.xml"
+
+      - name: Publish C++ test results
+        uses: mikepenz/action-junit-report@v6
+        if: always()
+        with:
+          report_paths: 'engine/test-results.xml'
+          check_name: 'C++ Tests (${{ matrix.os }})'
 
       - name: Install frontend dependencies
         working-directory: app
@@ -105,3 +134,19 @@ jobs:
       - name: Run frontend tests
         working-directory: app
         run: pnpm test
+
+  ci-gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: always()
+    steps:
+      - name: Pass if tests succeeded or were skipped
+        run: |
+          result="${{ needs.test.result }}"
+          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
+            echo "CI passed (tests: $result)"
+          else
+            echo "CI failed (tests: $result)"
+            exit 1
+          fi
