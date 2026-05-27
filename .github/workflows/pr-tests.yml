@@ -11,7 +11,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
-      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -25,7 +24,7 @@ jobs:
             preset: macos-prod
     timeout-minutes: 60
     env:
-      VCPKG_BINARY_SOURCES: 'clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite'
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
 
     steps:
       - name: Checkout
@@ -66,6 +65,15 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
           cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-bb1ad44ed8d7
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
