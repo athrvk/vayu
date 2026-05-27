@@ -38,6 +38,7 @@ import type { BodyMode, KeyValueItem } from "../../../types";
 import { createEmptyKeyValue, toFlatHeaders } from "../../../utils/key-value";
 import { generateUUID } from "../../../utils/id";
 import { useSchemaCache } from "@/lib/graphql/schema-cache";
+import { applyVariablesSchema } from "@/lib/graphql/variables-schema";
 import { useResizable } from "@/hooks/useResizable";
 import { cn } from "@/lib/utils";
 
@@ -134,6 +135,7 @@ export default function BodyPanel() {
 	const [showPreview, setShowPreview] = useState(false);
 
 	const schemaStatus = useSchemaCache((s) => s.getActiveStatus());
+	const activeSchema = useSchemaCache((s) => s.getActiveSchema());
 
 	// Drag-to-resize editor height, shared across body modes that host an editor.
 	const {
@@ -154,6 +156,17 @@ export default function BodyPanel() {
 	useEffect(() => {
 		for (const editorInstance of editorsRef.current) editorInstance.layout();
 	}, [editorHeight]);
+
+	// Variables-editor smartness: validate/autocomplete the variables JSON against
+	// the query's declared `$variables`. Capture the monaco instance + the
+	// variables model URI on mount, then (re)apply the derived JSON schema.
+	const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+	const [variablesModelUri, setVariablesModelUri] = useState<string | null>(null);
+	const handleVariablesMount: OnMount = (editorInstance, monacoInstance) => {
+		handleEditorMount(editorInstance, monacoInstance);
+		monacoRef.current = monacoInstance;
+		setVariablesModelUri(editorInstance.getModel()?.uri.toString() ?? null);
+	};
 
 	const resolvedGqlUrl = resolveString(request.url || "").trim();
 	const buildResolvedHeaders = (): Record<string, string> =>
@@ -258,6 +271,19 @@ export default function BodyPanel() {
 		lastWrittenBody.current = body;
 		updateField("body", body);
 	};
+
+	// Drive the variables editor's JSON schema from the query's `$variables` +
+	// the introspected schema, so it validates/autocompletes against what the
+	// operation expects. Clears the schema outside GraphQL mode.
+	useEffect(() => {
+		const monaco = monacoRef.current;
+		if (!monaco || !variablesModelUri) return;
+		if (request.bodyMode !== "graphql") {
+			applyVariablesSchema(monaco, variablesModelUri, "", null);
+			return;
+		}
+		applyVariablesSchema(monaco, variablesModelUri, gqlQuery, activeSchema);
+	}, [request.bodyMode, gqlQuery, activeSchema, variablesModelUri]);
 
 	return (
 		<div className="space-y-4">
@@ -402,7 +428,7 @@ export default function BodyPanel() {
 											setGqlVariables(v);
 											writeGraphqlBody(gqlQuery, v);
 										}}
-										onMount={handleEditorMount}
+										onMount={handleVariablesMount}
 									/>
 								</div>
 							</ResizablePanel>
