@@ -1,329 +1,214 @@
 # Component Architecture
 
-This document describes the React component structure of the Vayu Manager application.
+The React component structure of the Vayu app (`app/src`).
+
+The UI is organized into two top-level trees:
+
+- **`components/`** — app-shell layout, status, shared response rendering, and the `ui/` primitive library. Cross-cutting pieces not owned by a single feature.
+- **`modules/`** — feature modules, each self-contained (its own components, and where needed `context/`, `hooks/`, `utils/`, `shared/`): `request-builder`, `collections`, `dashboard`, `history`, `variables`, `settings`, `welcome`.
+
+State lives outside components: **Zustand** stores (`stores/`) for UI/navigation state, **TanStack Query** (`queries/`) for server state from the engine.
 
 ## Component Hierarchy
 
 ```
-<App />
-└── <Shell />
-    ├── <Sidebar />
-    │   ├── <CollectionTree />
-    │   ├── <HistoryList />
-    │   ├── <VariablesCategoryTree />
-    │   └── <ConnectionStatus />
+<App />                                  // App.tsx — mounts providers, kicks off health/prefetch queries, OS theme sync
+├── <TitleBar />                         // components/layout/TitleBar.tsx
+└── <Shell />                            // components/layout/Shell.tsx — resizable sidebar + routed main area, Ctrl/Cmd+S
+    ├── <ImportModal />                  // modules/collections/ImportModal.tsx — global overlay, open-state in a store
+    ├── <Sidebar />                      // components/layout/Sidebar.tsx — VS Code-style activity bar + collapsible panel
+    │   ├── <CollectionTree />           //   collections tab
+    │   ├── <HistoryList />              //   history tab
+    │   ├── <VariablesCategoryTree />    //   variables tab
+    │   ├── <SettingsCategoryTree />     //   settings tab (bottom)
+    │   └── <ConnectionStatus />         //   pinned to panel footer
     │
-    └── <MainContent /> (based on activeScreen)
-        ├── <WelcomeScreen />
-        ├── <RequestBuilder />
-        │   ├── <UrlBar />
-        │   ├── <RequestTabs />
-        │   │   ├── ParamsTab
-        │   │   ├── HeadersTab
-        │   │   ├── BodyTab
-        │   │   ├── AuthTab
-        │   │   └── ScriptsTab
-        │   └── <ResponseViewer />
-        ├── <LoadTestDashboard />
-        │   ├── <DashboardHeader />
-        │   ├── <RunMetadata />
-        │   ├── <MetricsView />
-        │   └── <RequestResponseView />
-        ├── <HistoryDetail />
-        └── <VariablesEditor />
+    └── main content (switched on navigationStore.resolveActiveScreen())
+        ├── <WelcomeScreen />            // "welcome"          modules/welcome/
+        ├── <RequestBuilder />           // "request-builder"  modules/request-builder/
+        ├── <CollectionDetail />         // "collection-detail" modules/collections/CollectionDetail/
+        ├── <LoadTestDashboard />        // "dashboard"        modules/dashboard/
+        ├── <HistoryDetail />            // "history"          modules/history/main/
+        ├── <VariablesMain />            // "variables"        modules/variables/main/
+        └── <SettingsMain />             // "settings"         modules/settings/main/
 ```
 
-## Core Layout Components
+## App Shell
+
+### `App` (`App.tsx`)
+
+Root component. Renders `<TitleBar />` over `<Shell />`. On mount it wires up app-wide concerns via hooks/queries: OS/Electron theme sync (`useElectronTheme`), engine health polling (`useHealthQuery`), and prefetching of server state (`usePrefetchCollectionsAndRequests`, `useRunsQuery`, `useScriptCompletionsQuery`).
 
 ### `Shell` (`components/layout/Shell.tsx`)
 
-Main application layout with resizable sidebar and content area.
+Main layout: a resizable sidebar beside a routed content area.
 
-**Features:**
-- Resizable sidebar (200px - 600px width)
-- Keyboard shortcut handler (`Ctrl/Cmd+S` for save)
-- Routes to correct screen based on `activeScreen` from `useAppStore()`
+- **Routing:** reads `resolveActiveScreen()` from `useNavigationStore()` and renders one of the seven screens (see hierarchy). Default/fallback is `WelcomeScreen`.
+- **Resizable sidebar** via `useResizable` — width 280–600px; the floor rises to 420px while the History tab is active (RunItems need room for URL + chips).
+- **`Ctrl/Cmd+S`** global handler → `useSaveStore().triggerSave()`.
+- Mounts **`<ImportModal />`** once, at the shell level, as a global overlay (visibility lives in an import-modal store).
 
-**State:**
-- Sidebar width (local state)
-- Resizing state (local state)
+### `TitleBar` (`components/layout/TitleBar.tsx`)
+
+Custom window title bar (Electron frameless window chrome).
 
 ### `Sidebar` (`components/layout/Sidebar.tsx`)
 
-Tab-based navigation with four tabs: Collections, History, Variables, Settings.
+VS Code–style **activity bar + collapsible panel**.
 
-**Features:**
-- Tab switching with memory (remembers last screen per tab)
-- Connection status indicator
-- Active tab highlighting
+- **Activity bar:** top tabs `Collections`, `History`, `Variables`; bottom tab `Settings`. Clicking the active tab while open collapses the panel.
+- **Panel** renders per tab: `CollectionTree` / `HistoryList` / `VariablesCategoryTree` / `SettingsCategoryTree`, with `ConnectionStatus` pinned to the footer.
+- Tab state and navigation come from `useNavigationStore()` (`activeSidebarTab`, `navigateToVariables`, `navigateToSettings`, …).
 
-**State:**
-- Active tab from `useAppStore().activeSidebarTab`
+### `ConnectionStatus` (`components/status/ConnectionStatus.tsx`)
 
-## Request Builder Components
+Engine connection indicator, driven by the engine-connection store + health query.
 
-### `RequestBuilder` (`components/request-builder/index.tsx`)
+## Request Builder (`modules/request-builder/`)
 
-Main container for the request editor. Provides context and orchestrates sub-components.
+The request editor. Entry: `modules/request-builder/index.tsx`.
 
-**Architecture:**
-- Wrapped in `RequestBuilderProvider` for state management
-- Uses `ResizablePanelGroup` for vertical layout
-- Handles request execution and load test initiation
+**Container (`index.tsx`)** — fetches the selected request (`useRequestQuery(selectedRequestId)`), maps the stored `Request` (discriminated-union `body`/`auth`) into flat UI state, and provides callbacks through `RequestBuilderProvider` to `RequestBuilderLayout`. Responsibilities:
 
-**Key Responsibilities:**
-- Fetches request data via `useRequestQuery()`
-- Converts between domain types and component state
-- Resolves variables before sending requests
-- Manages load test dialog
+- **Execute:** resolves `{{variables}}` in URL/headers/body, injects per-request system headers (`X-Request-ID`, `X-Vayu-Version`), resolves auth, composes scripts, and calls the engine via `useEngine()`.
+- **Auth inheritance:** for `auth.mode === "inherit"` it walks the collection ancestor chain **leaf-first** (`useCollectionAncestors`) and uses the first non-`none` auth.
+- **Script composition:** concatenates ancestor collection pre/post scripts **root→leaf**, then the request's own script.
+- **Load test:** opens `LoadTestConfigDialog`, then starts the run (`apiService.startLoadTest` + `loadTestService.startMonitoring`) and navigates to the dashboard.
+- **Save:** rebuilds the `RequestBody`/`RequestAuth` unions from flat UI state via `useUpdateRequestMutation`.
 
-**Sub-components:**
-- `UrlBar`: Method selector, URL input, Send button
-- `RequestTabs`: Tabs for params, headers, body, auth, scripts
-- `ResponseViewer`: Displays response, headers, test results
+**Structure:**
 
-### `UrlBar` (`components/request-builder/components/UrlBar.tsx`)
+| Path | Role |
+|---|---|
+| `context/RequestBuilderProvider.tsx`, `context/RequestBuilderContext.tsx` | Local request-editing state + the execute/save/load-test callbacks |
+| `components/RequestBuilderLayout.tsx` | Resizable vertical layout composing UrlBar / RequestTabs / ResponseViewer |
+| `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` — method dropdown, URL input (variable highlighting), Send + Load Test buttons |
+| `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel` |
+| `components/ResponseViewer/` | `index`, `ResponseHeader`, `ResponseHeadersTab`, `ResponseCookies`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` |
+| `components/RequestDescription.tsx` | Editable request description |
+| `components/LoadTestConfigDialog.tsx` | Load-test configuration dialog (mode, duration, RPS, concurrency, …) |
+| `shared/KeyValueEditor/` | `index`, `KeyValueRow` — reusable key/value table (params, headers, form fields) |
+| `shared/VariableInput/` | `index`, `EditableVariable` — input with `{{variable}}` highlighting + autocomplete |
+| `hooks/`, `utils/` | Module hooks; `utils/key-value` (flat↔entry conversions), `utils/id` |
 
-URL bar with HTTP method selector and Send button.
+> **Body tabs** support `json` / `text` / `form-data` / `x-www-form-urlencoded` (graphql collapses to text in the editor). **Scripts** are two separate panels — pre-request and test — not a single tab.
 
-**Features:**
-- Method dropdown (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)
-- URL input with variable highlighting
-- Send button (executes request)
-- Load Test button (opens load test config dialog)
+## Collections (`modules/collections/`)
 
-### `RequestTabs` (`components/request-builder/components/RequestTabs.tsx`)
+| Component | Role |
+|---|---|
+| `CollectionTree.tsx` | Hierarchical tree of collections + requests in the sidebar; expandable folders, context menus, method badges. State from `useCollectionsStore` + `useCollectionsQuery`/`useRequestsQuery` |
+| `CollectionItem.tsx` | A collection (folder) row |
+| `RequestItem.tsx` | A request row (method badge, click → open in RequestBuilder, context menu) |
+| `ImportModal.tsx` | Import collections from file/URL/paste (Postman / Insomnia / OpenAPI). Mounted globally in `Shell`; open-state in a dedicated store. See [import-collections/](./import-collections/README.md) for the parser pipeline |
+| `CollectionDetail/` | The collection editor screen (see below) |
 
-Tabbed interface for request configuration.
+### `CollectionDetail/` (screen `"collection-detail"`)
 
-**Tabs:**
-1. **Params**: Query parameters (key-value pairs)
-2. **Headers**: HTTP headers (key-value pairs)
-3. **Body**: Request body (JSON, text, form-data, x-www-form-urlencoded)
-4. **Auth**: Authentication (Bearer, Basic, API Key)
-5. **Scripts**: Pre-request and test scripts (Monaco Editor)
+Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows name + request count; five tabs:
 
-### `ResponseViewer` (`components/shared/response-viewer/`)
+| Tab | Component | Notes |
+|---|---|---|
+| Info | `InfoTab.tsx` | Name, description, request count |
+| Auth | `AuthTab.tsx` | Collection-level auth (concrete; never `inherit`) |
+| Pre-request | `ScriptTab.tsx` (`kind="pre"`) | Collection pre-request script |
+| Post-request | `ScriptTab.tsx` (`kind="post"`) | Collection post-request script |
+| Variables | `VariablesTab.tsx` | Collection-scoped variables (count badge) |
 
-Displays HTTP response with multiple views.
+`InheritanceChain.tsx` and `shared.tsx` are helpers used by these tabs (e.g. visualizing the auth/variable inheritance chain).
 
-**Features:**
-- Response body viewer (JSON, text, HTML)
-- Headers display
-- Test results (pass/fail)
-- Console logs from scripts
-- Timing breakdown
-- Status code and status text
+## Load Test Dashboard (`modules/dashboard/`)
 
-## Load Test Dashboard Components
+Live load-test metrics. Entry: `modules/dashboard/index.tsx`.
 
-### `LoadTestDashboard` (`components/load-test-dashboard/index.tsx`)
+Connects to the engine SSE metrics stream (via the load-test service / dashboard store), shows live metrics while running, and loads the final report on completion. Stop action supported.
 
-Main container for load test metrics display.
+| Component | Role |
+|---|---|
+| `components/DashboardHeader.tsx` | Title, run status, stop button |
+| `components/RunMetadata.tsx` | Endpoint, config (mode/duration/RPS/concurrency), timing |
+| `components/MetricsView.tsx` | Live metrics + charts (RPS, latency percentiles, error rate, concurrency) |
+| `components/RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests |
+| `components/MetricCard.tsx` | Single metric stat card |
 
-**Architecture:**
-- Connects to SSE stream via `useSSE()` hook
-- Manages two views: Metrics and Request/Response
-- Loads final report when test completes
+## History (`modules/history/`)
 
-**Key Responsibilities:**
-- Initializes dashboard state when load test starts
-- Streams real-time metrics from engine
-- Fetches final report after completion
-- Handles stop action
+Past runs (single executions and load tests), split into a sidebar list and a main detail view.
 
-**Sub-components:**
-- `DashboardHeader`: Title, status, stop button
-- `RunMetadata`: API endpoint, config, timing info
-- `MetricsView`: Live metrics, charts (RPS, latency, errors)
-- `RequestResponseView`: Status codes, errors, timing breakdown
+**Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row — method badge, status, relative time, URL, load-test chips).
 
-### `MetricsView` (`components/load-test-dashboard/components/MetricsView.tsx`)
+**Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunDetail.tsx` (single request execution — reuses the shared response viewer) or `LoadTestDetail.tsx` (load-test report). `LoadTestDetail` composes the tabbed report under `main/components/`:
 
-Real-time metrics visualization with charts.
+| Component | Role |
+|---|---|
+| `OverviewTab.tsx` | Summary metrics |
+| `PerformanceTab.tsx` | Latency/throughput detail |
+| `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs |
+| `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
+| `LatencyMetric.tsx`, `MetricCard.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts |
 
-**Metrics Displayed:**
-- Requests per second (RPS)
-- Latency percentiles (P50, P95, P99)
-- Error rate
-- Total requests (completed/failed)
-- Current concurrency
+## Variables (`modules/variables/`)
 
-**Charts:**
-- RPS over time (line chart)
-- Latency over time (line chart)
-- Error rate over time (line chart)
+- **Sidebar (`sidebar/VariablesCategoryTree.tsx`)** — tree of variable scopes (globals, collections, environments); receives `collections` + `environments` from the Sidebar.
+- **Main (`main/`)** — `VariablesMain.tsx` (screen `"variables"`) hosts `VariableTableEditor.tsx`, the table editor for the selected scope, including the active-environment selector.
 
-### `RequestResponseView` (`components/load-test-dashboard/components/RequestResponseView.tsx`)
+## Settings (`modules/settings/`)
 
-Detailed view of request/response data.
+- **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** — settings category navigation.
+- **Main (`main/`)** — `SettingsMain.tsx` (screen `"settings"`) hosting category panels such as `UISettingsPanel.tsx`.
 
-**Features:**
-- Status code distribution (bar chart)
-- Error breakdown by type
-- Timing breakdown (DNS, connect, TLS, first byte, download)
-- Slow requests list
-- Sampled request/response pairs
+## Welcome (`modules/welcome/`)
 
-## History Components
+`WelcomeScreen.tsx` — default screen when no request/collection is selected; entry points include opening the import modal.
 
-### `HistoryList` (`components/history/HistoryList.tsx`)
+## Shared Response Viewer (`components/shared/response-viewer/`)
 
-List of all runs (design and load tests).
+Response-rendering primitives reused outside the request builder (e.g. history detail):
 
-**Features:**
-- Filtering by type, status, date range
-- Sorting by date, status
-- Click to view details
+- `UnifiedResponseViewer.tsx` — top-level response view
+- `ResponseBody.tsx` — body rendering (JSON/text/HTML/XML)
+- `HeadersViewer.tsx` — response headers
 
-**State:**
-- Filter state from `useHistoryStore()`
-- Run data from `useRunsQuery()`
+> Note: the request builder has its own richer `components/ResponseViewer/` (with console output, test results, cookies, raw request/response, client-error view). The `shared/response-viewer/` set is the lighter, reusable one.
 
-### `HistoryDetail` (`components/history/HistoryDetail.tsx`)
+## UI Primitives (`components/ui/`)
 
-Detailed view of a single run.
+Primitives built on Radix UI + cmdk:
 
-**Features:**
-- Run metadata (config, timing)
-- For design runs: Response viewer
-- For load tests: Final report display (same as dashboard)
-
-**Sub-components:**
-- `DesignRunDetail`: Single request execution details
-- `LoadTestDetail`: Load test report (reuses dashboard components)
-
-## Variables Components
-
-### `VariablesEditor` (`components/variables/VariablesEditor.tsx`)
-
-Main container for variable management.
-
-**Features:**
-- Tree view of variable scopes (globals, collections, environments)
-- Editor for selected scope
-- Active environment selector
-
-**Sub-components:**
-- `VariablesCategoryTree`: Tree navigation
-- `GlobalsEditor`: Global variables editor
-- `CollectionVariablesEditor`: Collection-scoped variables
-- `EnvironmentEditor`: Environment variables with active toggle
-
-### `VariableInput` (`components/variables/VariableInput.tsx`)
-
-Input component with variable highlighting and autocomplete.
-
-**Features:**
-- Syntax highlighting for `{{variables}}`
-- Autocomplete dropdown
-- Inline variable editing
-- Scope badges (global/collection/environment)
-
-## Collections Components
-
-### `CollectionTree` (`components/collections/CollectionTree.tsx`)
-
-Hierarchical tree view of collections and requests.
-
-**Features:**
-- Expandable/collapsible folders
-- Drag-and-drop reordering (future)
-- Context menu (rename, delete, new request)
-- Request icons by HTTP method
-
-**State:**
-- Expansion state from `useCollectionsStore()`
-- Data from `useCollectionsQuery()` and `useRequestsQuery()`
-
-### `CollectionItem` (`components/collections/CollectionItem.tsx`)
-
-Individual collection folder item.
-
-**Features:**
-- Click to select
-- Context menu
-- Nested children display
-
-### `RequestItem` (`components/collections/RequestItem.tsx`)
-
-Individual request item in tree.
-
-**Features:**
-- Method badge (GET, POST, etc.)
-- Click to open in RequestBuilder
-- Context menu (rename, delete, duplicate)
-
-## Shared UI Components (`components/ui/`)
-
-Primitive components built on Radix UI:
-
-- **Button**: Various variants and sizes
-- **Input**: Text input with labels
-- **Label**: Form labels
-- **Dialog**: Modal dialogs
-- **Popover**: Popover menus
-- **DropdownMenu**: Dropdown menus
-- **Tabs**: Tab interface
-- **Select**: Dropdown select
-- **ScrollArea**: Scrollable containers
-- **Card**: Card containers
-- **Badge**: Status badges
-- **Separator**: Visual separators
-- **Tooltip**: Tooltips
-- **Collapsible**: Expandable sections
-- **Command**: Command palette (cmdk)
-- **Resizable**: Resizable panels
-- **TemplatedInput**: Input with variable highlighting
+`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `input`, `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`.
 
 ## Component Patterns
 
-### Context Pattern
+### Context for module-local state
 
-Components like `RequestBuilder` use React Context for local state:
+`RequestBuilder` uses React Context (`RequestBuilderProvider`) for editing state and the execute/save/load-test callbacks, so deep children read it without prop drilling.
 
-```typescript
-<RequestBuilderProvider>
-  <UrlBar />
-  <RequestTabs />
-  <ResponseViewer />
-</RequestBuilderProvider>
-```
+### Compound components
 
-### Compound Components
+Radix-based primitives use the compound pattern, e.g.:
 
-Some components use compound component pattern (e.g., `Tabs`, `Dialog`):
-
-```typescript
-<Tabs>
+```tsx
+<Tabs value={tab} onValueChange={setTab}>
   <TabsList>
-    <TabsTrigger>Tab 1</TabsTrigger>
+    <TabsTrigger value="info">Info</TabsTrigger>
   </TabsList>
-  <TabsContent>Content</TabsContent>
+  {/* content rendered conditionally on `tab` */}
 </Tabs>
 ```
 
-### Controlled Components
+### Controlled inputs
 
-Most form components are controlled, with state managed by parent or store:
-
-```typescript
-<Input
-  value={request.url}
-  onChange={(e) => updateField('url', e.target.value)}
-/>
-```
+Form inputs are controlled; values flow from module context/stores and changes flow back via callbacks/mutations.
 
 ## State Management in Components
 
-- **Local State**: Use `useState` for component-specific UI state (e.g., dialog open/close)
-- **Zustand Stores**: Use for shared UI state (navigation, dashboard metrics)
-- **TanStack Query**: Use for server state (collections, requests, runs)
+- **Local `useState`** — component-only UI state (dialog open/close, active tab, sidebar width).
+- **Zustand stores (`stores/`)** — navigation (`useNavigationStore`), dashboard metrics (`useDashboardStore`), variables (`useVariablesStore`), save (`useSaveStore`), engine connection, history filters, import-modal open-state.
+- **TanStack Query (`queries/`)** — server state: collections, requests, runs, environments, globals, health, script completions; mutations for create/update/delete.
 
 ## Component Communication
 
-- **Props**: Parent-to-child data flow
-- **Callbacks**: Child-to-parent events
-- **Context**: Shared state within component tree
-- **Stores**: Global state access
-- **Queries**: Server state access
+- **Props / callbacks** — parent↔child.
+- **Context** — module-local shared state (request builder).
+- **Stores** — cross-module UI state + navigation.
+- **Queries/mutations** — engine-backed server state.
