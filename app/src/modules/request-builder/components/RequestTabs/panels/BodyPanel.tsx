@@ -354,7 +354,7 @@ export default function BodyPanel() {
 									/>
 								</div>
 							</ResizablePanel>
-							<ResizableHandle />
+							<ResizableHandle className="data-[panel-group-direction=vertical]:h-1.5 bg-border hover:bg-primary transition-colors" />
 							<ResizablePanel defaultSize={35} minSize={15} className="flex flex-col">
 								<div className="px-3 py-1.5 border-b border-border bg-panel shrink-0">
 									<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">

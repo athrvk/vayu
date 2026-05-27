@@ -31,6 +31,9 @@ const DEFAULT_OPTIONS = {
 	// Render suggestion/hover/context-menu widgets in a body-level overlay so they
 	// are not clipped by editor containers with `overflow: hidden` + fixed height.
 	fixedOverflowWidgets: true,
+	autoIndent: "full",
+	autoClosingBrackets: "always",
+	autoClosingQuotes: "always",
 } satisfies EditorOptions;
 
 export interface CodeEditorProps {
