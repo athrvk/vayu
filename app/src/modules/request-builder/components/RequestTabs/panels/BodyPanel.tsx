@@ -17,7 +17,7 @@
  * - x-www-form-urlencoded: Key-value editor
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
 	Select,
 	SelectContent,
@@ -35,6 +35,7 @@ import KeyValueEditor from "../../../shared/KeyValueEditor";
 import type { BodyMode, KeyValueItem } from "../../../types";
 import { createEmptyKeyValue } from "../../../utils/key-value";
 import { generateUUID } from "../../../utils/id";
+import { useSchemaCache } from "@/lib/graphql/schema-cache";
 
 const BODY_MODES: { value: BodyMode; label: string; description: string }[] = [
 	{ value: "none", label: "None", description: "No request body" },
@@ -78,6 +79,31 @@ function serializeGraphQLBody(query: string, variables: string): string {
 export default function BodyPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();
 	const [showPreview, setShowPreview] = useState(false);
+
+	const schemaStatus = useSchemaCache((s) =>
+		s.activeUrl ? (s.byUrl[s.activeUrl]?.status ?? "idle") : "idle"
+	);
+
+	// In GraphQL mode, track the resolved endpoint as the active schema URL and
+	// (debounced) introspect it so the editor's language providers can validate
+	// and autocomplete against the schema.
+	useEffect(() => {
+		if (request.bodyMode !== "graphql") {
+			useSchemaCache.getState().setActiveUrl(null);
+			return;
+		}
+		const url = resolveString(request.url || "").trim();
+		useSchemaCache.getState().setActiveUrl(url || null);
+		if (!url) return;
+		const headers: Record<string, string> = {};
+		for (const h of request.headers) {
+			if (h.enabled && h.key) headers[resolveString(h.key)] = resolveString(h.value);
+		}
+		const id = setTimeout(() => {
+			void useSchemaCache.getState().ensureSchema(url, headers);
+		}, 400);
+		return () => clearTimeout(id);
+	}, [request.bodyMode, request.url, request.headers, resolveString]);
 
 	const handleModeChange = (mode: BodyMode) => {
 		updateField("bodyMode", mode);
@@ -208,10 +234,19 @@ export default function BodyPanel() {
 				<div className="border border-border overflow-hidden" style={{ height: 320 }}>
 					<ResizablePanelGroup orientation="vertical" className="h-full">
 						<ResizablePanel defaultSize={65} minSize={25} className="flex flex-col">
-							<div className="px-3 py-1.5 border-b border-border bg-panel shrink-0">
+							<div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-panel shrink-0">
 								<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
 									Query
 								</span>
+								{schemaStatus !== "idle" && (
+									<span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+										{schemaStatus === "ready"
+											? "Schema: loaded"
+											: schemaStatus === "loading"
+												? "Schema: loading…"
+												: "Schema: unavailable"}
+									</span>
+								)}
 							</div>
 							<div className="flex-1">
 								<CodeEditor
