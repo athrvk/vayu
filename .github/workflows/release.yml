@@ -216,7 +216,12 @@ jobs:
         run: |
           mkdir -p artifacts
           cp app/release/*.dmg artifacts/ 2>/dev/null || true
-          cp app/release/*.zip artifacts/ 2>/dev/null || true
+          zip_count=$(ls app/release/*.zip 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$zip_count" -eq 0 ]; then
+            echo "::error::No macOS .zip artifact built - the curl installer would 404. Failing the release." >&2
+            exit 1
+          fi
+          cp app/release/*.zip artifacts/
           for f in artifacts/*.zip; do
             [ -e "$f" ] || continue
             shasum -a 256 "$f" | awk '{print $1}' > "$f.sha256"
