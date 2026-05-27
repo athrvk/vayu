@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Source the installer in test mode so main() does not run.
+# Source the installer (at repo root) in test mode so main() does not run.
 VAYU_TEST=1
 # shellcheck source=/dev/null
-. "$(cd "$(dirname "$0")/.." && pwd)/../install.sh"
+. "$(cd "$(dirname "$0")/../.." && pwd)/install.sh"
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
