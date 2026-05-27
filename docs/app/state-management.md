@@ -126,6 +126,30 @@ const { activeEnvironmentId, setActiveEnvironment } = useVariablesStore();
 setActiveEnvironment(envId);
 ```
 
+### `schema-cache.ts` (GraphQL) - Schema Introspection Cache
+
+Lives in `lib/graphql/schema-cache.ts`. Caches introspected `GraphQLSchema` objects keyed by resolved endpoint URL, and tracks which URL is currently active (set by `BodyPanel` when the `graphql` body mode is active). Used by Monaco language providers to validate and autocomplete GraphQL queries.
+
+**State:**
+```typescript
+{
+  byUrl: Record<string, { status: "idle" | "loading" | "ready" | "error"; schema: GraphQLSchema | null; error: string | null; fetchedAt: number | null }>
+  activeUrl: string | null
+}
+```
+
+**Key methods:**
+- `ensureSchema(url, headers)` — introspects only if the URL hasn't been attempted yet
+- `refreshSchema(url, headers)` — forces a re-introspection regardless of cached state
+- `getActiveSchema()` — returns the ready schema for `activeUrl`, or `null`
+- `getActiveStatus()` — returns the status for `activeUrl`
+
+**Usage:**
+```typescript
+const schemaStatus = useSchemaCache((s) => s.getActiveStatus());
+useSchemaCache.getState().ensureSchema(url, headers);
+```
+
 ### `collections-store.ts` - Collection Tree State
 
 Manages collection tree expansion state.
