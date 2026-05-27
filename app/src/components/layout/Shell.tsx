@@ -32,9 +32,11 @@ import { ImportModal } from "@/modules/collections/ImportModal";
 const MIN_SIDEBAR_WIDTH = 280;
 const MIN_SIDEBAR_WIDTH_HISTORY = 420;
 const MAX_SIDEBAR_WIDTH = 600;
+// Width of the collapsed sidebar — matches the activity bar's `w-11` (44px) in Sidebar.
+const ACTIVITY_BAR_WIDTH = 44;
 
 export default function Shell() {
-	const { resolveActiveScreen, activeSidebarTab } = useNavigationStore();
+	const { resolveActiveScreen, activeSidebarTab, sidebarPanelOpen } = useNavigationStore();
 	const activeScreen = resolveActiveScreen();
 	const { triggerSave } = useSaveStore();
 
@@ -87,26 +89,32 @@ export default function Shell() {
 	return (
 		<div className="flex h-full bg-background overflow-hidden">
 			<ImportModal />
-			{/* Sidebar container — controlled width */}
+			{/* Sidebar container — controlled width; collapses to the activity bar */}
 			<div
-				style={{
-					width: `${sidebarWidth}px`,
-					minWidth: `${minSidebarWidth}px`,
-					maxWidth: `${MAX_SIDEBAR_WIDTH}px`,
-				}}
+				style={
+					sidebarPanelOpen
+						? {
+								width: `${sidebarWidth}px`,
+								minWidth: `${minSidebarWidth}px`,
+								maxWidth: `${MAX_SIDEBAR_WIDTH}px`,
+							}
+						: { width: `${ACTIVITY_BAR_WIDTH}px` }
+				}
 				className="flex-shrink-0 flex flex-col overflow-hidden"
 			>
 				<Sidebar />
 			</div>
 
-			{/* Resize handle */}
-			<div
-				onMouseDown={startResizing}
-				className={cn(
-					"w-1 bg-border hover:bg-primary cursor-col-resize transition-colors shrink-0",
-					isResizing && "bg-primary"
-				)}
-			/>
+			{/* Resize handle — only when the panel is expanded */}
+			{sidebarPanelOpen && (
+				<div
+					onMouseDown={startResizing}
+					className={cn(
+						"w-1 bg-border hover:bg-primary cursor-col-resize transition-colors shrink-0",
+						isResizing && "bg-primary"
+					)}
+				/>
+			)}
 
 			{/* Main content */}
 			<main className="flex-1 flex flex-col overflow-hidden min-w-0">

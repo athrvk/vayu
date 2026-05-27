@@ -5,7 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useState } from "react";
 import { Folder, Clock, Code2, Settings2 } from "lucide-react";
 import { useNavigationStore } from "@/stores";
 import type { SidebarTab } from "@/types";
@@ -147,20 +146,25 @@ function SidebarPanel({
 }
 
 export default function Sidebar() {
-	const { activeSidebarTab, setActiveSidebarTab, navigateToVariables, navigateToSettings } =
-		useNavigationStore();
+	const {
+		activeSidebarTab,
+		setActiveSidebarTab,
+		sidebarPanelOpen,
+		setSidebarPanelOpen,
+		navigateToVariables,
+		navigateToSettings,
+	} = useNavigationStore();
 	const { data: collections } = useCollectionsQuery();
 	const { data: environments } = useEnvironmentsQuery();
-	const [panelOpen, setPanelOpen] = useState(true);
 
 	const handleTabClick = (tabId: SidebarTab) => {
 		// Clicking the active tab while panel is open → collapse
-		if (tabId === activeSidebarTab && panelOpen) {
-			setPanelOpen(false);
+		if (tabId === activeSidebarTab && sidebarPanelOpen) {
+			setSidebarPanelOpen(false);
 			return;
 		}
 
-		setPanelOpen(true);
+		setSidebarPanelOpen(true);
 
 		if (tabId === "variables") {
 			navigateToVariables();
@@ -176,10 +180,10 @@ export default function Sidebar() {
 			<div className="flex h-full shrink-0">
 				<ActivityBar
 					activeSidebarTab={activeSidebarTab}
-					panelOpen={panelOpen}
+					panelOpen={sidebarPanelOpen}
 					onTabClick={handleTabClick}
 				/>
-				{panelOpen && (
+				{sidebarPanelOpen && (
 					<SidebarPanel
 						activeSidebarTab={activeSidebarTab}
 						collections={collections}

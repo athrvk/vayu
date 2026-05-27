@@ -26,6 +26,9 @@ interface NavigationState {
 	selectedRequestId: string | null;
 	selectedRunId: string | null;
 
+	// Whether the sidebar's content panel is expanded (vs. collapsed to the activity bar)
+	sidebarPanelOpen: boolean;
+
 	// Navigation history - for back navigation
 	previousContext: NavigationContext | null;
 
@@ -34,6 +37,7 @@ interface NavigationState {
 
 	// Actions
 	setActiveSidebarTab: (tab: SidebarTab) => void;
+	setSidebarPanelOpen: (open: boolean) => void;
 	setActiveScreen: (screen: MainScreen) => void;
 	setSelectedCollectionId: (id: string | null) => void;
 	setSelectedRequestId: (id: string | null) => void;
@@ -70,6 +74,7 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 	selectedCollectionId: null,
 	selectedRequestId: null,
 	selectedRunId: null,
+	sidebarPanelOpen: true,
 	previousContext: null,
 	tabMemory: { ...defaultTabMemory },
 
@@ -101,6 +106,8 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 			},
 		});
 	},
+
+	setSidebarPanelOpen: (open) => set({ sidebarPanelOpen: open }),
 
 	setActiveScreen: (screen) => set({ activeScreen: screen }),
 	setSelectedCollectionId: (id) => set({ selectedCollectionId: id }),
