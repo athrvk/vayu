@@ -9,6 +9,9 @@ jobs:
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -21,45 +24,14 @@ jobs:
           - os: macos-latest
             preset: macos-prod
     timeout-minutes: 60
+    env:
+      VCPKG_BINARY_SOURCES: 'clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-
-      - name: Lint and test installer script
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          command -v shellcheck >/dev/null 2>&1 || {
-            if [ "$RUNNER_OS" = "Linux" ]; then
-              sudo apt-get update && sudo apt-get install -y shellcheck
-            else
-              brew install shellcheck
-            fi
-          }
-          shellcheck install.sh
-          bash scripts/test/install_test.sh
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-
-      - name: Setup pnpm
-        run: npm install -g pnpm@10
-
-      - name: Cache pnpm store
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.local/share/pnpm/store
-            ~/Library/pnpm/store
-            ~/AppData/Local/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('app/pnpm-lock.yaml') }}
-          restore-keys: |
-            pnpm-${{ runner.os }}-
+          fetch-depth: 1
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -69,11 +41,31 @@ jobs:
             ninja-build \
             build-essential \
             pkg-config \
-            ca-certificates
+            ca-certificates \
+            shellcheck
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: brew install ninja shellcheck
+
+      - name: Lint and test installer script
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          shellcheck install.sh
+          bash scripts/test/install_test.sh
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11

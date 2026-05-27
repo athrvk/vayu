@@ -12,6 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -23,29 +24,12 @@ jobs:
             preset: windows-prod
           - os: macos-latest
             preset: macos-prod-arm64
+    env:
+      VCPKG_BINARY_SOURCES: 'clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite'
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-
-      - name: Setup pnpm
-        run: npm install -g pnpm@10
-
-      - name: Cache pnpm store
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.local/share/pnpm/store
-            ~/Library/pnpm/store
-            ~/AppData/Local/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('app/pnpm-lock.yaml') }}
-          restore-keys: |
-            pnpm-${{ runner.os }}-
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -60,6 +44,18 @@ jobs:
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install ninja
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
@@ -80,7 +76,7 @@ jobs:
       - name: Run engine tests (arm64)
         if: runner.os == 'macOS'
         working-directory: engine
-        run: ctest --preset macos-prod-arm64
+        run: ctest --preset macos-prod-arm64 --output-on-failure
 
       - name: Build and test engine (x64)
         if: runner.os == 'macOS'
@@ -94,7 +90,7 @@ jobs:
       - name: Run engine tests (x64)
         if: runner.os == 'macOS'
         working-directory: engine
-        run: ctest --preset macos-prod-x64
+        run: ctest --preset macos-prod-x64 --output-on-failure
 
       - name: Create universal binary (macOS)
         if: runner.os == 'macOS'
@@ -121,7 +117,7 @@ jobs:
       - name: Run engine tests (Non-macOS)
         if: runner.os != 'macOS'
         working-directory: engine
-        run: ctest --preset ${{ matrix.preset }}
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
 
       - name: Install frontend dependencies
         working-directory: app
