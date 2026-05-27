@@ -51,6 +51,7 @@ download_url() {
 }
 
 require_macos() {
+	[ "${VAYU_DRYRUN:-0}" = "1" ] && return 0
 	[ "$(uname -s)" = "Darwin" ] || { printf 'Vayu installer supports macOS only.\n' >&2; exit 1; }
 	for tool in curl unzip codesign xattr shasum; do
 		command -v "$tool" >/dev/null 2>&1 || { printf 'Required tool missing: %s\n' "$tool" >&2; exit 1; }
