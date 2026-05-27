@@ -24,6 +24,23 @@ parse_args() {
 	done
 }
 
+resolve_version() {
+	if [ -n "${VAYU_VERSION:-}" ]; then
+		printf '%s' "$VAYU_VERSION"
+		return 0
+	fi
+	curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+		| grep '"tag_name"' \
+		| head -1 \
+		| sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v?([^"]+)".*/\1/'
+}
+
+download_url() {
+	version="$1"
+	printf 'https://github.com/%s/releases/download/v%s/%s-%s-universal.zip' \
+		"$REPO" "$version" "$APP_NAME" "$version"
+}
+
 main() {
 	parse_args "$@"
 	case "$MODE" in

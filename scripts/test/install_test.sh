@@ -26,3 +26,15 @@ parse_args --help
 if parse_args --bogus 2>/dev/null; then fail "unknown arg should fail"; fi
 
 printf 'PASS: parse_args\n'
+
+# resolve_version: pinned via env (no network)
+VAYU_VERSION=0.1.2
+[ "$(resolve_version)" = "0.1.2" ] || fail "pinned version should be 0.1.2, got $(resolve_version)"
+unset VAYU_VERSION
+
+# download_url: builds the GitHub release asset URL from a version
+got="$(download_url 0.1.3)"
+want="https://github.com/athrvk/vayu/releases/download/v0.1.3/Vayu-0.1.3-universal.zip"
+[ "$got" = "$want" ] || fail "download_url mismatch: $got"
+
+printf 'PASS: version + url\n'
