@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Upload, CheckCircle2, X, Folder, AlertTriangle } from "lucide-react";
 import { useImportModalStore } from "@/stores/import-modal-store";
 import { useImportMutation } from "@/queries/import";
@@ -32,8 +32,6 @@ export function ImportModal() {
   const [importEnvironments, setImportEnvironments] = useState(true);
   const [importScripts, setImportScripts] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  if (!isOpen) return null;
 
   const reset = () => {
     setPhase("idle");
@@ -76,6 +74,10 @@ export function ImportModal() {
   const handleFile = (file: File) => {
     const reader = new FileReader();
     reader.onload = () => runDetect(String(reader.result), file.name);
+    reader.onerror = () => {
+      setError("Could not read file");
+      setPhase("error");
+    };
     reader.readAsText(file);
   };
 
@@ -92,8 +94,14 @@ export function ImportModal() {
 
   const handleImport = async () => {
     if (!result) return;
-    await importMutation.mutateAsync({ result, opts: { importEnvironments, importScripts } });
-    handleClose();
+    try {
+      await importMutation.mutateAsync({ result, opts: { importEnvironments, importScripts } });
+      handleClose();
+    } catch (e) {
+      // Import failed (orchestrator rolled back) — surface it instead of silently re-enabling.
+      setError((e as Error).message || "Import failed");
+      setPhase("error");
+    }
   };
 
   const toggleEnvironments = (v: boolean) => {
@@ -105,12 +113,27 @@ export function ImportModal() {
     redetect({ importEnvironments, importScripts: v });
   };
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handleClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, importMutation.isPending]);
+
+  if (!isOpen) return null;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
       onClick={handleClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Import Collection"
         className="flex w-[500px] max-h-[82vh] flex-col overflow-hidden rounded-[10px] border border-border-strong bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -126,7 +149,9 @@ export function ImportModal() {
             <button
               key={t}
               role="tab"
+              id={`import-tab-${t}`}
               aria-selected={tab === t}
+              aria-controls="import-tabpanel"
               onClick={() => { setTab(t); reset(); }}
               className={`-mb-px border-b-2 py-2 text-[13px] ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`}
             >
@@ -135,7 +160,7 @@ export function ImportModal() {
           ))}
         </div>
 
-        <div className="overflow-y-auto p-5">
+        <div role="tabpanel" id="import-tabpanel" aria-labelledby={`import-tab-${tab}`} className="overflow-y-auto p-5">
           {phase === "preview" && result ? (
             <PreviewView result={result} onDismiss={reset} />
           ) : (
