@@ -28,6 +28,9 @@ const DEFAULT_OPTIONS = {
 	wordWrap: "on",
 	tabSize: 2,
 	automaticLayout: true,
+	// Render suggestion/hover/context-menu widgets in a body-level overlay so they
+	// are not clipped by editor containers with `overflow: hidden` + fixed height.
+	fixedOverflowWidgets: true,
 } satisfies EditorOptions;
 
 export interface CodeEditorProps {

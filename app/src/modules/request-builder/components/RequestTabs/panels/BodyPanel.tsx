@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import {
 	Select,
 	SelectContent,
@@ -74,6 +75,35 @@ function serializeGraphQLBody(query: string, variables: string): string {
 		// Variables panel has in-progress invalid JSON — preserve query only
 		return JSON.stringify({ query });
 	}
+}
+
+function SchemaStatusBadge({ status }: { status: "idle" | "loading" | "ready" | "error" }) {
+	if (status === "idle") return null;
+	if (status === "loading") {
+		return (
+			<span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+				<Loader2 className="w-3 h-3 animate-spin" />
+				Schema
+			</span>
+		);
+	}
+	if (status === "ready") {
+		return (
+			<span className="flex items-center gap-1 text-[10px] text-success">
+				<CheckCircle2 className="w-3 h-3" />
+				Schema
+			</span>
+		);
+	}
+	return (
+		<span
+			className="flex items-center gap-1 text-[10px] text-destructive"
+			title="Schema introspection failed — syntax checking only"
+		>
+			<AlertCircle className="w-3 h-3" />
+			No schema
+		</span>
+	);
 }
 
 export default function BodyPanel() {
@@ -231,22 +261,14 @@ export default function BodyPanel() {
 			)}
 
 			{request.bodyMode === "graphql" && (
-				<div className="border border-border overflow-hidden" style={{ height: 320 }}>
+				<div className="h-80 border border-input overflow-hidden">
 					<ResizablePanelGroup orientation="vertical" className="h-full">
 						<ResizablePanel defaultSize={65} minSize={25} className="flex flex-col">
 							<div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-panel shrink-0">
 								<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
 									Query
 								</span>
-								{schemaStatus !== "idle" && (
-									<span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-										{schemaStatus === "ready"
-											? "Schema: loaded"
-											: schemaStatus === "loading"
-												? "Schema: loading…"
-												: "Schema: unavailable"}
-									</span>
-								)}
+								<SchemaStatusBadge status={schemaStatus} />
 							</div>
 							<div className="flex-1">
 								<CodeEditor
