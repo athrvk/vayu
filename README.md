@@ -17,6 +17,14 @@ Vayu is a free, open source desktop app for REST API testing and load testing on
 
 ---
 
+## Screenshots
+
+![GraphQL request builder](docs/images/vayu-graphql.png)
+
+![Load test dashboard](docs/images/vayu-loadtest.png)
+
+---
+
 ## What is Vayu?
 
 Vayu is a desktop API client and load testing tool that runs entirely on your local machine. Unlike Postman or Insomnia, there is no account required, no cloud sync, and no usage limits. You organize HTTP requests into collections, run them against any API, and launch high-throughput load tests — all from the same UI.
