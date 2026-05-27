@@ -115,7 +115,7 @@ export default function RequestBuilder() {
 						: body.mode === "text"
 							? "text"
 							: body.mode === "graphql"
-								? "text"
+								? "graphql"
 								: "none";
 
 		const rawBody = "content" in body ? body.content : "";

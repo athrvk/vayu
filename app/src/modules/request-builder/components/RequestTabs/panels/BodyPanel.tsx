@@ -12,6 +12,7 @@
  * - none: No body
  * - json: Monaco editor with JSON syntax
  * - text: Plain text editor
+ * - graphql: Split editor — query (top) + variables JSON (bottom)
  * - form-data: Key-value editor
  * - x-www-form-urlencoded: Key-value editor
  */
@@ -25,16 +26,21 @@ import {
 	SelectValue,
 	Button,
 	CodeEditor,
+	ResizablePanelGroup,
+	ResizablePanel,
+	ResizableHandle,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "../../../shared/KeyValueEditor";
 import type { BodyMode, KeyValueItem } from "../../../types";
 import { createEmptyKeyValue } from "../../../utils/key-value";
+import { generateUUID } from "../../../utils/id";
 
 const BODY_MODES: { value: BodyMode; label: string; description: string }[] = [
 	{ value: "none", label: "None", description: "No request body" },
 	{ value: "json", label: "JSON", description: "application/json" },
 	{ value: "text", label: "Text", description: "text/plain" },
+	{ value: "graphql", label: "GraphQL", description: "application/json" },
 	{ value: "form-data", label: "Form Data", description: "multipart/form-data" },
 	{
 		value: "x-www-form-urlencoded",
@@ -42,6 +48,32 @@ const BODY_MODES: { value: BodyMode; label: string; description: string }[] = [
 		description: "application/x-www-form-urlencoded",
 	},
 ];
+
+function parseGraphQLBody(body: string): { query: string; variables: string } {
+	try {
+		const parsed = JSON.parse(body);
+		if (parsed && typeof parsed.query === "string") {
+			return {
+				query: parsed.query,
+				variables: parsed.variables ? JSON.stringify(parsed.variables, null, 2) : "",
+			};
+		}
+	} catch {
+		// Body is not JSON — treat as a raw query string (e.g. Insomnia import)
+	}
+	// Raw query string — show as-is, no variables
+	return { query: body, variables: "" };
+}
+
+function serializeGraphQLBody(query: string, variables: string): string {
+	try {
+		const vars = variables.trim() ? JSON.parse(variables) : undefined;
+		return JSON.stringify({ query, ...(vars !== undefined && { variables: vars }) });
+	} catch {
+		// Variables panel has in-progress invalid JSON — preserve query only
+		return JSON.stringify({ query });
+	}
+}
 
 export default function BodyPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();
@@ -56,6 +88,24 @@ export default function BodyPanel() {
 		}
 		if (mode === "x-www-form-urlencoded" && request.urlEncoded.length === 0) {
 			updateField("urlEncoded", [createEmptyKeyValue()]);
+		}
+
+		// Auto-inject Content-Type: application/json for GraphQL if not already present
+		if (mode === "graphql") {
+			const hasContentType = request.headers.some(
+				(h) => h.key.toLowerCase() === "content-type" && h.enabled
+			);
+			if (!hasContentType) {
+				updateField("headers", [
+					...request.headers,
+					{
+						id: generateUUID(),
+						key: "Content-Type",
+						value: "application/json",
+						enabled: true,
+					},
+				]);
+			}
 		}
 	};
 
@@ -74,6 +124,12 @@ export default function BodyPanel() {
 	// Check for variables in body
 	const hasVariables = request.body ? /\{\{[^{}]+\}\}/.test(request.body) : false;
 	const resolvedBody = request.body ? resolveString(request.body) : "";
+
+	// Parse GraphQL body once at render time so handlers close over stable values
+	const { query: gqlQuery, variables: gqlVariables } =
+		request.bodyMode === "graphql"
+			? parseGraphQLBody(request.body || "")
+			: { query: "", variables: "" };
 
 	return (
 		<div className="space-y-4">
@@ -97,7 +153,7 @@ export default function BodyPanel() {
 					</SelectContent>
 				</Select>
 
-				{hasVariables && request.bodyMode !== "none" && (
+				{hasVariables && request.bodyMode !== "none" && request.bodyMode !== "graphql" && (
 					<Button
 						size="sm"
 						variant={showPreview ? "secondary" : "outline"}
@@ -145,6 +201,48 @@ export default function BodyPanel() {
 							</pre>
 						</div>
 					)}
+				</div>
+			)}
+
+			{request.bodyMode === "graphql" && (
+				<div className="border border-border overflow-hidden" style={{ height: 320 }}>
+					<ResizablePanelGroup orientation="vertical" className="h-full">
+						<ResizablePanel defaultSize={65} minSize={25} className="flex flex-col">
+							<div className="px-3 py-1.5 border-b border-border bg-panel shrink-0">
+								<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+									Query
+								</span>
+							</div>
+							<div className="flex-1">
+								<CodeEditor
+									height="100%"
+									language="graphql"
+									value={gqlQuery}
+									onChange={(q) =>
+										handleRawChange(serializeGraphQLBody(q, gqlVariables))
+									}
+								/>
+							</div>
+						</ResizablePanel>
+						<ResizableHandle />
+						<ResizablePanel defaultSize={35} minSize={15} className="flex flex-col">
+							<div className="px-3 py-1.5 border-b border-border bg-panel shrink-0">
+								<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+									Variables
+								</span>
+							</div>
+							<div className="flex-1">
+								<CodeEditor
+									height="100%"
+									language="json"
+									value={gqlVariables}
+									onChange={(v) =>
+										handleRawChange(serializeGraphQLBody(gqlQuery, v))
+									}
+								/>
+							</div>
+						</ResizablePanel>
+					</ResizablePanelGroup>
 				</div>
 			)}
 
