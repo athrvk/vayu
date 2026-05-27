@@ -61,7 +61,7 @@ require_macos() {
 do_install() {
 	require_macos
 	(
-		local version url workdir zip expected actual
+		local version url workdir zip expected actual staged
 		version="$(resolve_version)"
 		[ -n "$version" ] || { printf 'Could not determine version to install.\n' >&2; exit 1; }
 		url="$(download_url "$version")"
@@ -84,15 +84,18 @@ do_install() {
 
 		printf 'Extracting...\n'
 		run unzip -q -o "$zip" -d "$workdir"
+		staged="$workdir/${APP_NAME}.app"
+
+		# Ad-hoc sign + de-quarantine in the temp dir first, so a failure
+		# never leaves a broken bundle in /Applications. No sudo needed here.
+		printf 'Signing (ad-hoc) and removing quarantine...\n'
+		run codesign --force --sign - "$staged/$SIDECAR_REL"
+		run codesign --force --deep --sign - "$staged"
+		run xattr -cr "$staged"
 
 		printf 'Installing to %s (you may be prompted for your password)...\n' "$INSTALL_DIR"
 		run sudo rm -rf "$APP_PATH"
-		run sudo cp -R "$workdir/${APP_NAME}.app" "$APP_PATH"
-
-		printf 'Signing (ad-hoc) and removing quarantine...\n'
-		run sudo codesign --force --sign - "$APP_PATH/$SIDECAR_REL"
-		run sudo codesign --force --deep --sign - "$APP_PATH"
-		run sudo xattr -cr "$APP_PATH"
+		run sudo ditto "$staged" "$APP_PATH"
 
 		printf 'Done. Launch Vayu from Launchpad/Spotlight, or run: open "%s"\n' "$APP_PATH"
 	)

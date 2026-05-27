@@ -45,8 +45,10 @@ echo "$out" | grep -q "codesign --force --sign - .*${APP_NAME}.app/Contents/Reso
 	|| fail "install should ad-hoc sign the sidecar"
 echo "$out" | grep -q "codesign --force --deep --sign - .*${APP_NAME}.app" \
 	|| fail "install should ad-hoc sign the app bundle"
-echo "$out" | grep -q "xattr -cr ${APP_PATH}" \
-	|| fail "install should strip quarantine"
+echo "$out" | grep -q "xattr -cr .*${APP_NAME}.app" \
+	|| fail "install should strip quarantine on the staged app"
+echo "$out" | grep -q "sudo ditto .*${APP_NAME}.app ${APP_PATH}" \
+	|| fail "install should ditto the signed app into /Applications"
 
 printf 'PASS: install dry-run\n'
 
