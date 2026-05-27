@@ -35,11 +35,14 @@
 			{
 				"target": "dmg",
 				"arch": ["universal"]
+			},
+			{
+				"target": "zip",
+				"arch": ["universal"]
 			}
 		],
 		"icon": "build/icon.png",
 		"artifactName": "${productName}-${version}-${arch}.${ext}",
-		"hardenedRuntime": true,
 		"gatekeeperAssess": false,
 		"entitlements": "installer/entitlements.mac.plist",
 		"entitlementsInherit": "installer/entitlements.mac.plist"
