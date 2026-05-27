@@ -59,40 +59,42 @@ require_macos() {
 
 do_install() {
 	require_macos
-	local version url workdir zip expected actual
-	version="$(resolve_version)"
-	[ -n "$version" ] || { printf 'Could not determine version to install.\n' >&2; exit 1; }
-	url="$(download_url "$version")"
-	printf 'Installing Vayu %s...\n' "$version"
+	(
+		local version url workdir zip expected actual
+		version="$(resolve_version)"
+		[ -n "$version" ] || { printf 'Could not determine version to install.\n' >&2; exit 1; }
+		url="$(download_url "$version")"
+		printf 'Installing Vayu %s...\n' "$version"
 
-	workdir="$(mktemp -d)"
-	trap 'rm -rf "$workdir"' EXIT
-	zip="$workdir/vayu.zip"
+		workdir="$(mktemp -d)"
+		trap 'rm -rf "$workdir"' EXIT
+		zip="$workdir/vayu.zip"
 
-	printf 'Downloading %s\n' "$url"
-	run curl -fsSL "$url" -o "$zip"
+		printf 'Downloading %s\n' "$url"
+		run curl -fsSL "$url" -o "$zip"
 
-	# Optional integrity check if the release publishes a .sha256
-	if [ "${VAYU_DRYRUN:-0}" != "1" ] && curl -fsSL "$url.sha256" -o "$zip.sha256" 2>/dev/null; then
-		expected="$(cat "$zip.sha256")"
-		actual="$(shasum -a 256 "$zip" | awk '{print $1}')"
-		[ "$expected" = "$actual" ] || { printf 'Checksum mismatch - aborting.\n' >&2; exit 1; }
-		printf 'Checksum verified.\n'
-	fi
+		# Optional integrity check if the release publishes a .sha256
+		if [ "${VAYU_DRYRUN:-0}" != "1" ] && curl -fsSL "$url.sha256" -o "$zip.sha256" 2>/dev/null; then
+			expected="$(awk '{print $1}' "$zip.sha256")"
+			actual="$(shasum -a 256 "$zip" | awk '{print $1}')"
+			[ "$expected" = "$actual" ] || { printf 'Checksum mismatch - aborting.\n' >&2; exit 1; }
+			printf 'Checksum verified.\n'
+		fi
 
-	printf 'Extracting...\n'
-	run unzip -q -o "$zip" -d "$workdir"
+		printf 'Extracting...\n'
+		run unzip -q -o "$zip" -d "$workdir"
 
-	printf 'Installing to %s (you may be prompted for your password)...\n' "$INSTALL_DIR"
-	run sudo rm -rf "$APP_PATH"
-	run sudo cp -R "$workdir/${APP_NAME}.app" "$APP_PATH"
+		printf 'Installing to %s (you may be prompted for your password)...\n' "$INSTALL_DIR"
+		run sudo rm -rf "$APP_PATH"
+		run sudo cp -R "$workdir/${APP_NAME}.app" "$APP_PATH"
 
-	printf 'Signing (ad-hoc) and removing quarantine...\n'
-	run sudo codesign --force --sign - "$APP_PATH/$SIDECAR_REL"
-	run sudo codesign --force --deep --sign - "$APP_PATH"
-	run sudo xattr -cr "$APP_PATH"
+		printf 'Signing (ad-hoc) and removing quarantine...\n'
+		run sudo codesign --force --sign - "$APP_PATH/$SIDECAR_REL"
+		run sudo codesign --force --deep --sign - "$APP_PATH"
+		run sudo xattr -cr "$APP_PATH"
 
-	printf 'Done. Launch Vayu from Launchpad/Spotlight, or run: open "%s"\n' "$APP_PATH"
+		printf 'Done. Launch Vayu from Launchpad/Spotlight, or run: open "%s"\n' "$APP_PATH"
+	)
 }
 
 main() {
