@@ -21,6 +21,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+      checks: write
     strategy:
       fail-fast: false
       matrix:
@@ -95,14 +96,24 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      - name: Build and run engine tests
+      - name: Build engine
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
-          testPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      - name: Run engine tests
+        working-directory: engine
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit test-results.xml
+
+      - name: Publish C++ test results
+        uses: mikepenz/action-junit-report@v6
+        if: always()
+        with:
+          report_paths: 'engine/test-results.xml'
+          check_name: 'C++ Tests (${{ matrix.os }})'
 
       - name: Install frontend dependencies
         working-directory: app
