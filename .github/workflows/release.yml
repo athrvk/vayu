@@ -72,33 +72,25 @@ jobs:
           vcpkgGitCommitId: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      - name: Build and test engine (arm64)
+      - name: Build and run engine tests (arm64)
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-arm64
           buildPreset: macos-prod-arm64
+          testPreset: macos-prod-arm64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
 
-      - name: Run engine tests (arm64)
-        if: runner.os == 'macOS'
-        working-directory: engine
-        run: ctest --preset macos-prod-arm64 --output-on-failure
-
-      - name: Build and test engine (x64)
+      - name: Build and run engine tests (x64)
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-x64
           buildPreset: macos-prod-x64
+          testPreset: macos-prod-x64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-
-      - name: Run engine tests (x64)
-        if: runner.os == 'macOS'
-        working-directory: engine
-        run: ctest --preset macos-prod-x64 --output-on-failure
 
       - name: Create universal binary (macOS)
         if: runner.os == 'macOS'
@@ -113,19 +105,15 @@ jobs:
           lipo -info engine/build-universal/vayu-engine
           chmod +x engine/build-universal/vayu-engine
 
-      - name: Build and test engine (Non-macOS)
+      - name: Build and run engine tests (Non-macOS)
         if: runner.os != 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
+          testPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-
-      - name: Run engine tests (Non-macOS)
-        if: runner.os != 'macOS'
-        working-directory: engine
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure
 
       - name: Install frontend dependencies
         working-directory: app

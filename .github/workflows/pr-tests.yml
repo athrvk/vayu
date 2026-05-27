@@ -82,17 +82,14 @@ jobs:
           vcpkgGitCommitId: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      - name: Build and test engine
+      - name: Build and run engine tests
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
+          testPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-
-      - name: Run engine tests
-        working-directory: engine
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure
 
       - name: Install frontend dependencies
         working-directory: app
