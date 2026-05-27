@@ -54,7 +54,7 @@ Privacy-first, 100% offline execution. Built for developers who hate waiting.
 Download the latest version for your platform:
 
 - **Windows**: [Vayu-x64.exe](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe)
-- **macOS**: [Vayu-universal.dmg](https://github.com/athrvk/vayu/releases/latest/download/Vayu-universal.dmg)
+- ~~**macOS**: [Vayu-universal.dmg](https://github.com/athrvk/vayu/releases/latest/download/Vayu-universal.dmg)~~
 - **Linux**: [Vayu-x86_64.AppImage](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x86_64.AppImage)
 
 [View all releases →](https://github.com/athrvk/vayu/releases)
