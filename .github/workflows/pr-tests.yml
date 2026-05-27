@@ -28,6 +28,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Lint and test installer script
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck install.sh
+          bash scripts/test/install_test.sh
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
