@@ -216,6 +216,11 @@ jobs:
         run: |
           mkdir -p artifacts
           cp app/release/*.dmg artifacts/ 2>/dev/null || true
+          cp app/release/*.zip artifacts/ 2>/dev/null || true
+          for f in artifacts/*.zip; do
+            [ -e "$f" ] || continue
+            shasum -a 256 "$f" | awk '{print $1}' > "$f.sha256"
+          done
           ls -lh artifacts/
 
       - name: Upload artifacts to release
