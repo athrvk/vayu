@@ -71,7 +71,11 @@ export function registerGraphqlProviders(monaco: typeof Monaco): void {
 	});
 
 	monaco.languages.registerCompletionItemProvider("graphql", {
-		triggerCharacters: [" ", ":", "(", "\n", "{", "@", "$"],
+		// Structural triggers only — NOT space/newline. Triggering on "\n" popped
+		// the suggestion widget after every Enter, so a second Enter (meant as a
+		// newline) accepted the first suggestion instead. Typing a field name still
+		// shows suggestions via Monaco's quick-suggest.
+		triggerCharacters: [":", "(", "{", "@", "$", " "],
 		provideCompletionItems(model, position) {
 			const schema = useSchemaCache.getState().getActiveSchema();
 			if (!schema) return { suggestions: [] };
