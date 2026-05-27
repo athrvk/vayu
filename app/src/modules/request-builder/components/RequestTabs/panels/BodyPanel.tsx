@@ -17,7 +17,7 @@
  * - x-www-form-urlencoded: Key-value editor
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, AlertCircle, Loader2, RefreshCw } from "lucide-react";
 import {
 	Select,
@@ -34,7 +34,7 @@ import {
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "../../../shared/KeyValueEditor";
 import type { BodyMode, KeyValueItem } from "../../../types";
-import { createEmptyKeyValue } from "../../../utils/key-value";
+import { createEmptyKeyValue, toFlatHeaders } from "../../../utils/key-value";
 import { generateUUID } from "../../../utils/id";
 import { useSchemaCache } from "@/lib/graphql/schema-cache";
 import { useResizable } from "@/hooks/useResizable";
@@ -132,9 +132,7 @@ export default function BodyPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();
 	const [showPreview, setShowPreview] = useState(false);
 
-	const schemaStatus = useSchemaCache((s) =>
-		s.activeUrl ? (s.byUrl[s.activeUrl]?.status ?? "idle") : "idle"
-	);
+	const schemaStatus = useSchemaCache((s) => s.getActiveStatus());
 
 	// Drag-to-resize editor height, shared across body modes that host an editor.
 	const {
@@ -144,13 +142,13 @@ export default function BodyPanel() {
 	} = useResizable({ defaultSize: 320, min: 160, max: 800, direction: "vertical" });
 
 	const resolvedGqlUrl = resolveString(request.url || "").trim();
-	const buildResolvedHeaders = (): Record<string, string> => {
-		const headers: Record<string, string> = {};
-		for (const h of request.headers) {
-			if (h.enabled && h.key) headers[resolveString(h.key)] = resolveString(h.value);
-		}
-		return headers;
-	};
+	const buildResolvedHeaders = (): Record<string, string> =>
+		Object.fromEntries(
+			Object.entries(toFlatHeaders(request.headers)).map(([k, v]) => [
+				resolveString(k),
+				resolveString(v),
+			])
+		);
 
 	// In GraphQL mode, track the resolved endpoint as the active schema URL and
 	// (debounced) introspect it so the editor's language providers can validate
@@ -221,11 +219,14 @@ export default function BodyPanel() {
 	const hasVariables = request.body ? /\{\{[^{}]+\}\}/.test(request.body) : false;
 	const resolvedBody = request.body ? resolveString(request.body) : "";
 
-	// Parse GraphQL body once at render time so handlers close over stable values
-	const { query: gqlQuery, variables: gqlVariables } =
-		request.bodyMode === "graphql"
-			? parseGraphQLBody(request.body || "")
-			: { query: "", variables: "" };
+	// Parse GraphQL body only when it changes so handlers close over stable values
+	const { query: gqlQuery, variables: gqlVariables } = useMemo(
+		() =>
+			request.bodyMode === "graphql"
+				? parseGraphQLBody(request.body || "")
+				: { query: "", variables: "" },
+		[request.bodyMode, request.body]
+	);
 
 	return (
 		<div className="space-y-4">

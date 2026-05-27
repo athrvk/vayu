@@ -12,6 +12,7 @@
  */
 
 import type * as Monaco from "monaco-editor";
+import { parse, print } from "graphql";
 import {
 	getAutocompleteSuggestions,
 	getHoverInformation,
@@ -56,8 +57,14 @@ export function registerGraphqlProviders(monaco: typeof Monaco): void {
 		model.onDidChangeContent(() => scheduleDiagnostics(model));
 	});
 
-	// Re-run diagnostics for open graphql models when the active schema changes.
-	useSchemaCache.subscribe(() => {
+	// Re-run diagnostics for open graphql models only when the active schema
+	// reference actually changes — the store also mutates on activeUrl/status
+	// changes, which must not trigger a full re-validation pass.
+	let lastSchema = useSchemaCache.getState().getActiveSchema();
+	useSchemaCache.subscribe((state) => {
+		const schema = state.activeUrl ? (state.byUrl[state.activeUrl]?.schema ?? null) : null;
+		if (schema === lastSchema) return;
+		lastSchema = schema;
 		for (const model of monaco.editor.getModels()) {
 			if (model.getLanguageId() === "graphql") runDiagnostics(model);
 		}
@@ -105,6 +112,18 @@ export function registerGraphqlProviders(monaco: typeof Monaco): void {
 			);
 			const text = typeof info === "string" ? info : String(info ?? "");
 			return text ? { contents: [{ value: text }] } : null;
+		},
+	});
+
+	// Enables the "Format Document" command (palette / Shift+Alt+F / right-click)
+	// for GraphQL by pretty-printing the parsed AST. No-ops on unparseable input.
+	monaco.languages.registerDocumentFormattingEditProvider("graphql", {
+		provideDocumentFormattingEdits(model) {
+			try {
+				return [{ range: model.getFullModelRange(), text: print(parse(model.getValue())) }];
+			} catch {
+				return [];
+			}
 		},
 	});
 }
