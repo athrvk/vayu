@@ -12,8 +12,7 @@
  */
 
 import { useState } from "react";
-import Editor from "@monaco-editor/react";
-import { Button, Badge } from "@/components/ui";
+import { Button, Badge, CodeEditor } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 
 export default function PreScriptPanel() {
@@ -34,8 +33,8 @@ export default function PreScriptPanel() {
 	const allVariables = getAllVariables();
 	const hasReferencedVars = usedVars.length > 0;
 
-	const handleChange = (value: string | undefined) => {
-		updateField("preRequestScript", value || "");
+	const handleChange = (value: string) => {
+		updateField("preRequestScript", value);
 	};
 
 	return (
@@ -99,21 +98,11 @@ export default function PreScriptPanel() {
 
 			{/* Script Editor */}
 			<div className="border border-input overflow-hidden">
-				<Editor
+				<CodeEditor
 					height="350px"
 					language="javascript"
 					value={request.preRequestScript}
 					onChange={handleChange}
-					theme="vs-dark"
-					options={{
-						minimap: { enabled: false },
-						fontSize: 13,
-						lineNumbers: "on",
-						scrollBeyondLastLine: false,
-						wordWrap: "on",
-						tabSize: 2,
-						automaticLayout: true,
-					}}
 				/>
 			</div>
 

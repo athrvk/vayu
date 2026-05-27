@@ -8,13 +8,9 @@
 import Shell from "./components/layout/Shell";
 import TitleBar from "./components/layout/TitleBar";
 import { useEngineConnectionStore } from "./stores";
-import {
-	useHealthQuery,
-	usePrefetchCollectionsAndRequests,
-	useRunsQuery,
-	useScriptCompletionsQuery,
-} from "./queries";
+import { useHealthQuery, usePrefetchCollectionsAndRequests, useRunsQuery } from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
+import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
 
 function App() {
 	const { isEngineConnected } = useEngineConnectionStore();
@@ -28,7 +24,9 @@ function App() {
 	// Prefetch collections and all their requests (TanStack handles caching automatically)
 	usePrefetchCollectionsAndRequests();
 	useRunsQuery();
-	useScriptCompletionsQuery();
+
+	// Fetch pm.* completions and register them with Monaco's JavaScript language
+	useScriptCompletionProvider();
 
 	// Log connection status for debugging
 	if (isEngineConnected) {

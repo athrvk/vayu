@@ -20,8 +20,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import Editor from "@monaco-editor/react";
-import { Badge, Button } from "@/components/ui";
+import { Badge, Button, CodeEditor } from "@/components/ui";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { InfoBanner } from "./shared";
@@ -115,21 +114,12 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 					</span>
 					<span className="ml-auto text-[10px] text-muted-foreground">JavaScript</span>
 				</div>
-				<Editor
+				<CodeEditor
 					height="320px"
 					language="javascript"
 					value={script}
-					onChange={(v) => setScript(v ?? "")}
-					theme="vs-dark"
-					options={{
-						minimap: { enabled: false },
-						fontSize: 12,
-						lineNumbers: "on",
-						scrollBeyondLastLine: false,
-						wordWrap: "on",
-						tabSize: 2,
-						automaticLayout: true,
-					}}
+					onChange={setScript}
+					fontSize={12}
 				/>
 			</div>
 

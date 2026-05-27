@@ -23,13 +23,13 @@ namespace vayu::http::routes {
  * uses this data to provide autocomplete in the Monaco editor.
  */
 nlohmann::json get_script_completions () {
-    // CompletionItem kinds (Monaco editor constants)
+    // CompletionItem kinds (monaco.languages.CompletionItemKind values)
     constexpr int KIND_FUNCTION = 1;
-    constexpr int KIND_FIELD    = 5;
-    constexpr int KIND_VARIABLE = 6;
-    constexpr int KIND_SNIPPET  = 27;
+    constexpr int KIND_FIELD    = 3;
+    constexpr int KIND_VARIABLE = 4;
+    constexpr int KIND_SNIPPET  = 28;
 
-    // InsertTextRules
+    // InsertTextRules (monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet)
     constexpr int INSERT_AS_SNIPPET = 4;
 
     nlohmann::json completions = nlohmann::json::array ();
@@ -38,10 +38,10 @@ nlohmann::json get_script_completions () {
     // pm object
     // ========================================
     completions.push_back ({ { "label", "pm" }, { "kind", KIND_VARIABLE },
-    { "insertText", "pm" }, { "detail", "Postman API object" },
+    { "insertText", "pm" }, { "detail", "pm object (Postman-compatible)" },
     { "documentation",
     "The pm object provides access to request, response, environment, and "
-    "testing utilities." },
+    "testing utilities. Vayu implements a Postman-compatible scripting API." },
     { "sortText", "0_pm" } });
 
     // ========================================
