@@ -38,3 +38,14 @@ want="https://github.com/athrvk/vayu/releases/download/v0.1.3/Vayu-0.1.3-univers
 [ "$got" = "$want" ] || fail "download_url mismatch: $got"
 
 printf 'PASS: version + url\n'
+
+# do_install in dry-run prints the key steps without touching the system
+out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"
+echo "$out" | grep -q "codesign --force --sign - .*${APP_NAME}.app/Contents/Resources/bin/vayu-engine" \
+	|| fail "install should ad-hoc sign the sidecar"
+echo "$out" | grep -q "codesign --force --deep --sign - .*${APP_NAME}.app" \
+	|| fail "install should ad-hoc sign the app bundle"
+echo "$out" | grep -q "xattr -cr ${APP_PATH}" \
+	|| fail "install should strip quarantine"
+
+printf 'PASS: install dry-run\n'

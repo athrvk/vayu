@@ -10,6 +10,15 @@ SIDECAR_REL="Contents/Resources/bin/vayu-engine"
 MODE="install"
 PURGE=0
 
+# Run a command, or just print it when VAYU_DRYRUN=1.
+run() {
+	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
+		printf '[dry-run] %s\n' "$*"
+	else
+		"$@"
+	fi
+}
+
 parse_args() {
 	MODE="install"
 	PURGE=0
@@ -36,16 +45,62 @@ resolve_version() {
 }
 
 download_url() {
-	version="$1"
+	local version="$1"
 	printf 'https://github.com/%s/releases/download/v%s/%s-%s-universal.zip' \
 		"$REPO" "$version" "$APP_NAME" "$version"
+}
+
+require_macos() {
+	[ "$(uname -s)" = "Darwin" ] || { printf 'Vayu installer supports macOS only.\n' >&2; exit 1; }
+	for tool in curl unzip codesign xattr shasum; do
+		command -v "$tool" >/dev/null 2>&1 || { printf 'Required tool missing: %s\n' "$tool" >&2; exit 1; }
+	done
+}
+
+do_install() {
+	require_macos
+	local version url workdir zip expected actual
+	version="$(resolve_version)"
+	[ -n "$version" ] || { printf 'Could not determine version to install.\n' >&2; exit 1; }
+	url="$(download_url "$version")"
+	printf 'Installing Vayu %s...\n' "$version"
+
+	workdir="$(mktemp -d)"
+	trap 'rm -rf "$workdir"' EXIT
+	zip="$workdir/vayu.zip"
+
+	printf 'Downloading %s\n' "$url"
+	run curl -fsSL "$url" -o "$zip"
+
+	# Optional integrity check if the release publishes a .sha256
+	if [ "${VAYU_DRYRUN:-0}" != "1" ] && curl -fsSL "$url.sha256" -o "$zip.sha256" 2>/dev/null; then
+		expected="$(cat "$zip.sha256")"
+		actual="$(shasum -a 256 "$zip" | awk '{print $1}')"
+		[ "$expected" = "$actual" ] || { printf 'Checksum mismatch - aborting.\n' >&2; exit 1; }
+		printf 'Checksum verified.\n'
+	fi
+
+	printf 'Extracting...\n'
+	run unzip -q -o "$zip" -d "$workdir"
+
+	printf 'Installing to %s (you may be prompted for your password)...\n' "$INSTALL_DIR"
+	run sudo rm -rf "$APP_PATH"
+	run sudo cp -R "$workdir/${APP_NAME}.app" "$APP_PATH"
+
+	printf 'Signing (ad-hoc) and removing quarantine...\n'
+	run sudo codesign --force --sign - "$APP_PATH/$SIDECAR_REL"
+	run sudo codesign --force --deep --sign - "$APP_PATH"
+	run sudo xattr -cr "$APP_PATH"
+
+	printf 'Done. Launch Vayu from Launchpad/Spotlight, or run: open "%s"\n' "$APP_PATH"
 }
 
 main() {
 	parse_args "$@"
 	case "$MODE" in
 		help) usage ;;
-		*) printf 'mode=%s purge=%s (not yet implemented)\n' "$MODE" "$PURGE" ;;
+		install) do_install ;;
+		uninstall) do_uninstall ;;
 	esac
 }
 
