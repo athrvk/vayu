@@ -49,3 +49,16 @@ echo "$out" | grep -q "xattr -cr ${APP_PATH}" \
 	|| fail "install should strip quarantine"
 
 printf 'PASS: install dry-run\n'
+
+# uninstall (no purge): removes the app, keeps + reports data dirs
+out="$(VAYU_DRYRUN=1 do_uninstall 2>&1)"
+echo "$out" | grep -q "rm -rf ${APP_PATH}" || fail "uninstall should remove the app bundle"
+echo "$out" | grep -q "Application Support/vayu-client" || fail "uninstall should mention the data dir"
+echo "$out" | grep -qi "kept" || fail "uninstall (no purge) should say data was kept"
+
+# uninstall --purge: also removes data dirs
+out="$(VAYU_DRYRUN=1 PURGE=1 do_uninstall 2>&1)"
+echo "$out" | grep -q "rm -rf .*Application Support/vayu-client" || fail "purge should remove the data dir"
+echo "$out" | grep -q "rm -f .*com.vayu.client.plist" || fail "purge should remove prefs"
+
+printf 'PASS: uninstall dry-run\n'

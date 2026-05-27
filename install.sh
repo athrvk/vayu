@@ -97,6 +97,35 @@ do_install() {
 	)
 }
 
+do_uninstall() {
+	require_macos
+	local support prefs logs caches savedstate
+	support="$HOME/Library/Application Support/vayu-client"
+	prefs="$HOME/Library/Preferences/com.vayu.client.plist"
+	logs="$HOME/Library/Logs/vayu-client"
+	caches="$HOME/Library/Caches/com.vayu.client"
+	savedstate="$HOME/Library/Saved Application State/com.vayu.client.savedState"
+
+	printf 'Removing %s (you may be prompted for your password)...\n' "$APP_PATH"
+	run sudo rm -rf "$APP_PATH"
+
+	if [ "${PURGE:-0}" = "1" ]; then
+		printf 'Purging user data...\n'
+		run rm -rf "$support"
+		run rm -f "$prefs"
+		run rm -rf "$logs"
+		run rm -rf "$caches"
+		run rm -rf "$savedstate"
+		printf 'Vayu and its data have been removed.\n'
+	else
+		printf 'Vayu removed. User data was kept at:\n'
+		printf '  %s\n' "$support"
+		printf '  %s\n' "$prefs"
+		printf '  %s\n' "$logs"
+		printf 'Re-run with --purge to remove these too.\n'
+	fi
+}
+
 main() {
 	parse_args "$@"
 	case "$MODE" in
