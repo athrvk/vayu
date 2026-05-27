@@ -50,6 +50,7 @@
 		"date-fns": "^4.1.0",
 		"electron-store": "^11.0.2",
 		"graphql": "^16.14.0",
+		"graphql-language-service": "^5.5.1",
 		"js-yaml": "^4.1.1",
 		"lucide-react": "^0.562.0",
 		"monaco-editor": "^0.55.1",
