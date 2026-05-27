@@ -79,7 +79,7 @@ Installs the latest release to `/Applications`. You'll be prompted for your pass
 To pin a specific version:
 
 ```sh
-VAYU_VERSION=0.1.3 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)"
+VAYU_VERSION=0.2.1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)"
 ```
 
 To uninstall:
