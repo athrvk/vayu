@@ -14,26 +14,26 @@ import type { ImportOptions, ImportResult } from "@/services/importers/types";
 
 /** Build an ImportApi backed by the real apiService. */
 export function createImportApi(): ImportApi {
-  return {
-    createCollection: (d) => apiService.createCollection(d),
-    createRequest: (d) => apiService.createRequest(d),
-    createEnvironment: (d) => apiService.createEnvironment(d),
-    deleteCollection: (id) => apiService.deleteCollection(id),
-    deleteEnvironment: (id) => apiService.deleteEnvironment(id),
-  };
+	return {
+		createCollection: (d) => apiService.createCollection(d),
+		createRequest: (d) => apiService.createRequest(d),
+		createEnvironment: (d) => apiService.createEnvironment(d),
+		deleteCollection: (id) => apiService.deleteCollection(id),
+		deleteEnvironment: (id) => apiService.deleteEnvironment(id),
+	};
 }
 
 export function useImportMutation() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ result, opts }: { result: ImportResult; opts: ImportOptions }) => {
-      const withIds = assignIds(result);
-      await new ImportOrchestrator(createImportApi()).run(withIds, opts);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
-    },
-  });
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async ({ result, opts }: { result: ImportResult; opts: ImportOptions }) => {
+			const withIds = assignIds(result);
+			await new ImportOrchestrator(createImportApi()).run(withIds, opts);
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+			queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
+			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+		},
+	});
 }

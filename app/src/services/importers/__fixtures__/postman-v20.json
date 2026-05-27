@@ -1,13 +1,16 @@
 {
-  "info": { "name": "Legacy API", "schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json" },
-  "item": [
-    {
-      "name": "Get thing",
-      "request": {
-        "method": "GET",
-        "url": "https://api.legacy.com/things?id=5",
-        "auth": { "type": "bearer", "bearer": { "token": "LEGACY" } }
-      }
-    }
-  ]
+	"info": {
+		"name": "Legacy API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Get thing",
+			"request": {
+				"method": "GET",
+				"url": "https://api.legacy.com/things?id=5",
+				"auth": { "type": "bearer", "bearer": { "token": "LEGACY" } }
+			}
+		}
+	]
 }

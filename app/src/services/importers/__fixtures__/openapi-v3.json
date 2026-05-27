@@ -1,22 +1,47 @@
 {
-  "openapi": "3.0.1",
-  "info": { "title": "Pet API", "description": "pets" },
-  "servers": [{ "url": "https://api.pets.com/v1" }],
-  "components": {
-    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
-    "schemas": { "Pet": { "type": "object", "properties": { "id": { "type": "integer" }, "name": { "type": "string" } } } }
-  },
-  "security": [{ "bearerAuth": [] }],
-  "tags": [{ "name": "pets", "description": "Pet ops" }],
-  "paths": {
-    "/pets/{petId}": {
-      "get": { "summary": "Get pet", "tags": ["pets"], "operationId": "getPet",
-        "parameters": [{ "name": "petId", "in": "path", "required": true, "schema": { "type": "string" } }, { "name": "verbose", "in": "query", "schema": { "type": "boolean" } }] }
-    },
-    "/pets": {
-      "post": { "summary": "Create pet", "tags": ["pets"], "operationId": "createPet",
-        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } } } } }
-    },
-    "/health": { "get": { "summary": "Health" } }
-  }
+	"openapi": "3.0.1",
+	"info": { "title": "Pet API", "description": "pets" },
+	"servers": [{ "url": "https://api.pets.com/v1" }],
+	"components": {
+		"securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
+		"schemas": {
+			"Pet": {
+				"type": "object",
+				"properties": { "id": { "type": "integer" }, "name": { "type": "string" } }
+			}
+		}
+	},
+	"security": [{ "bearerAuth": [] }],
+	"tags": [{ "name": "pets", "description": "Pet ops" }],
+	"paths": {
+		"/pets/{petId}": {
+			"get": {
+				"summary": "Get pet",
+				"tags": ["pets"],
+				"operationId": "getPet",
+				"parameters": [
+					{
+						"name": "petId",
+						"in": "path",
+						"required": true,
+						"schema": { "type": "string" }
+					},
+					{ "name": "verbose", "in": "query", "schema": { "type": "boolean" } }
+				]
+			}
+		},
+		"/pets": {
+			"post": {
+				"summary": "Create pet",
+				"tags": ["pets"],
+				"operationId": "createPet",
+				"requestBody": {
+					"content": {
+						"application/json": { "schema": { "$ref": "#/components/schemas/Pet" } }
+					}
+				}
+			}
+		},
+		"/health": { "get": { "summary": "Health" } }
+	}
 }

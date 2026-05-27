@@ -1,19 +1,41 @@
 {
-  "swagger": "2.0",
-  "info": { "title": "Store API", "description": "store" },
-  "host": "api.store.com",
-  "basePath": "/v2",
-  "schemes": ["https"],
-  "securityDefinitions": { "apiKey": { "type": "apiKey", "name": "X-API-Key", "in": "header" } },
-  "security": [{ "apiKey": [] }],
-  "definitions": { "Order": { "type": "object", "properties": { "id": { "type": "integer" }, "status": { "type": "string" } } } },
-  "tags": [{ "name": "orders" }],
-  "paths": {
-    "/orders": {
-      "post": { "summary": "Place order", "tags": ["orders"], "consumes": ["application/json"],
-        "parameters": [{ "name": "body", "in": "body", "schema": { "$ref": "#/definitions/Order" } }] },
-      "get": { "summary": "List orders", "tags": ["orders"],
-        "parameters": [{ "name": "status", "in": "query", "type": "array", "collectionFormat": "multi", "items": { "type": "string" } }] }
-    }
-  }
+	"swagger": "2.0",
+	"info": { "title": "Store API", "description": "store" },
+	"host": "api.store.com",
+	"basePath": "/v2",
+	"schemes": ["https"],
+	"securityDefinitions": { "apiKey": { "type": "apiKey", "name": "X-API-Key", "in": "header" } },
+	"security": [{ "apiKey": [] }],
+	"definitions": {
+		"Order": {
+			"type": "object",
+			"properties": { "id": { "type": "integer" }, "status": { "type": "string" } }
+		}
+	},
+	"tags": [{ "name": "orders" }],
+	"paths": {
+		"/orders": {
+			"post": {
+				"summary": "Place order",
+				"tags": ["orders"],
+				"consumes": ["application/json"],
+				"parameters": [
+					{ "name": "body", "in": "body", "schema": { "$ref": "#/definitions/Order" } }
+				]
+			},
+			"get": {
+				"summary": "List orders",
+				"tags": ["orders"],
+				"parameters": [
+					{
+						"name": "status",
+						"in": "query",
+						"type": "array",
+						"collectionFormat": "multi",
+						"items": { "type": "string" }
+					}
+				]
+			}
+		}
+	}
 }

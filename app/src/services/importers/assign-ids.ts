@@ -15,13 +15,13 @@ import type { CollectionDraft, ImportResult } from "./types";
  * Mutates the result in place (and returns it).
  */
 export function assignIds(result: ImportResult): ImportResult {
-  for (const c of result.collections) assignCollection(c);
-  for (const e of result.environments) e.id = `env_${crypto.randomUUID()}`;
-  return result;
+	for (const c of result.collections) assignCollection(c);
+	for (const e of result.environments) e.id = `env_${crypto.randomUUID()}`;
+	return result;
 }
 
 function assignCollection(c: CollectionDraft): void {
-  c.id = `col_${crypto.randomUUID()}`;
-  for (const r of c.requests) r.id = `req_${crypto.randomUUID()}`;
-  for (const child of c.children) assignCollection(child);
+	c.id = `col_${crypto.randomUUID()}`;
+	for (const r of c.requests) r.id = `req_${crypto.randomUUID()}`;
+	for (const child of c.children) assignCollection(child);
 }
