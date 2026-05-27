@@ -84,6 +84,10 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
+      - name: Type-check frontend
+        working-directory: app
+        run: pnpm type-check
+
       - name: Run frontend tests
         working-directory: app
-        run: pnpm test --if-present
+        run: pnpm test
