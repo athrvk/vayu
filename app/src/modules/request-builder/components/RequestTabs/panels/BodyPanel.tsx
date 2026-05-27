@@ -17,7 +17,7 @@
  * - x-www-form-urlencoded: Key-value editor
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, AlertCircle, Loader2, RefreshCw } from "lucide-react";
 import {
 	Select,
@@ -219,14 +219,31 @@ export default function BodyPanel() {
 	const hasVariables = request.body ? /\{\{[^{}]+\}\}/.test(request.body) : false;
 	const resolvedBody = request.body ? resolveString(request.body) : "";
 
-	// Parse GraphQL body only when it changes so handlers close over stable values
-	const { query: gqlQuery, variables: gqlVariables } = useMemo(
-		() =>
-			request.bodyMode === "graphql"
-				? parseGraphQLBody(request.body || "")
-				: { query: "", variables: "" },
+	// The query is always a valid string, so derive it from the body directly.
+	const gqlQuery = useMemo(
+		() => (request.bodyMode === "graphql" ? parseGraphQLBody(request.body || "").query : ""),
 		[request.bodyMode, request.body]
 	);
+
+	// The variables editor keeps its own raw text as the source of truth: while
+	// the user types an object, intermediate states are invalid JSON which
+	// serializeGraphQLBody drops — so re-deriving the editor value from the body
+	// would wipe their input. Re-sync from the body only on external changes
+	// (request switch, mode switch), tracked via the body value we last wrote.
+	const [gqlVariables, setGqlVariables] = useState("");
+	const lastWrittenBody = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		if (request.bodyMode !== "graphql") return;
+		if (request.body === lastWrittenBody.current) return;
+		setGqlVariables(parseGraphQLBody(request.body || "").variables);
+		lastWrittenBody.current = request.body;
+	}, [request.bodyMode, request.body]);
+
+	const writeGraphqlBody = (query: string, variables: string) => {
+		const body = serializeGraphQLBody(query, variables);
+		lastWrittenBody.current = body;
+		updateField("body", body);
+	};
 
 	return (
 		<div className="space-y-4">
@@ -349,9 +366,7 @@ export default function BodyPanel() {
 										height="100%"
 										language="graphql"
 										value={gqlQuery}
-										onChange={(q) =>
-											handleRawChange(serializeGraphQLBody(q, gqlVariables))
-										}
+										onChange={(q) => writeGraphqlBody(q, gqlVariables)}
 									/>
 								</div>
 							</ResizablePanel>
@@ -367,9 +382,10 @@ export default function BodyPanel() {
 										height="100%"
 										language="json"
 										value={gqlVariables}
-										onChange={(v) =>
-											handleRawChange(serializeGraphQLBody(gqlQuery, v))
-										}
+										onChange={(v) => {
+											setGqlVariables(v);
+											writeGraphqlBody(gqlQuery, v);
+										}}
 									/>
 								</div>
 							</ResizablePanel>
