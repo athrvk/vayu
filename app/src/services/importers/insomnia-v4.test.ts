@@ -80,6 +80,26 @@ describe("InsomniaV4Parser", () => {
     expect(result.collections[0].auth).toEqual({ mode: "none" }); // workspace had no auth → inherit → none
   });
 
+  it("maps iam→aws and ntlm to stored-not-executed config and counts them (parity with Postman)", () => {
+    const doc = {
+      _type: "export", __export_format: 4,
+      resources: [
+        { _id: "w", _type: "workspace", name: "W" },
+        { _id: "r1", _type: "request", parentId: "w", name: "Iam", method: "get", url: "https://x",
+          authentication: { type: "iam", accessKeyId: "AK", secretAccessKey: "SK" } },
+        { _id: "r2", _type: "request", parentId: "w", name: "Ntlm", method: "get", url: "https://y",
+          authentication: { type: "ntlm", username: "u", password: "p" } },
+      ],
+    };
+    const result = p.parse(doc, JSON.stringify(doc), opts);
+    const iam = result.collections[0].requests.find((r) => r.name === "Iam")!;
+    const ntlm = result.collections[0].requests.find((r) => r.name === "Ntlm")!;
+    expect(iam.auth.mode).toBe("aws");
+    expect((iam.auth as { config: Record<string, unknown> }).config.accessKeyId).toBe("AK");
+    expect(ntlm.auth.mode).toBe("ntlm");
+    expect(result.meta.nonExecutableAuth).toBe(2);
+  });
+
   it("base environment with no sub-envs becomes one Environment named after the base", () => {
     const doc = {
       _type: "export", __export_format: 4,

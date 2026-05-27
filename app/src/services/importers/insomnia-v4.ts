@@ -45,10 +45,17 @@ function insomniaAuth(auth: any, ctx: { nonExec: number }): RequestAuth {
     case "apikey":
       return { mode: "apikey", key: normalizeVars(asString(auth.key)), value: normalizeVars(asString(auth.value)), in: auth.addTo === "queryParams" ? "query" : "header" };
     case "oauth2":
-    case "digest": {
+    case "digest":
+    case "ntlm": {
       ctx.nonExec += 1;
       const { type: _type, disabled: _disabled, ...config } = auth;
       return { mode: auth.type, config } as RequestAuth;
+    }
+    case "iam": {
+      // Insomnia names AWS IAM auth "iam"; Vayu stores it as the "aws" config bag (not executed).
+      ctx.nonExec += 1;
+      const { type: _type, disabled: _disabled, ...config } = auth;
+      return { mode: "aws", config } as RequestAuth;
     }
     default:
       return { mode: "inherit" };
