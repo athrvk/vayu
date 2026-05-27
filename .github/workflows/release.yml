@@ -121,12 +121,6 @@ jobs:
           lipo -info engine/build-universal/vayu-engine
           chmod +x engine/build-universal/vayu-engine
 
-      - name: Setup MSVC environment (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
       - name: Build and run engine tests (Non-macOS)
         if: runner.os != 'macOS'
         uses: lukka/run-cmake@v10
