@@ -62,71 +62,55 @@ Vayu supports importing collections from **Postman** (v2.0, v2.1), **Insomnia** 
 
 ## Download
 
-| Platform | Installer |
-|---|---|
-| **Windows** | [Vayu-x64.exe](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe) |
-| **macOS** | One-command install (see below) |
-| **Linux** | [Vayu-x86_64.AppImage](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x86_64.AppImage) |
+### Windows
 
-[View all releases →](https://github.com/athrvk/vayu/releases)
+1. Download [Vayu-x64.exe](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe)
+2. Run the installer and follow the setup wizard
+3. Launch **Vayu** from the Start menu
 
-No installation wizard needed on Linux — mark the AppImage executable and run it.
-
-### macOS (one-command install)
+### macOS
 
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)"
 ```
 
-Installs the latest release to `/Applications` (you'll be prompted for your password). To pin a version:
+Installs the latest release to `/Applications`. You'll be prompted for your password once. Vayu is distributed unsigned — the installer ad-hoc signs it and clears the quarantine flag so it opens without the "damaged app" warning.
+
+To pin a specific version:
 
 ```sh
 VAYU_VERSION=0.1.3 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)"
 ```
 
-Vayu is distributed unsigned (no Apple Developer certificate); the installer ad-hoc signs it and clears the download quarantine so it launches without the "damaged" warning. You can read the script before running it at the URL above.
-
-**Uninstall** (keep your data):
+To uninstall:
 
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)" -- --uninstall
 ```
 
-Add `--purge` to also delete settings and data. Alternatively, drag `Vayu.app` from `/Applications` to the Trash.
+Add `--purge` to also remove settings and data. Or drag `Vayu.app` from `/Applications` to the Trash.
+
+### Linux
+
+1. Download [Vayu-x86_64.AppImage](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x86_64.AppImage)
+2. Make it executable:
+   ```sh
+   chmod +x Vayu-x86_64.AppImage
+   ```
+3. Run it:
+   ```sh
+   ./Vayu-x86_64.AppImage
+   ```
+
+No installation wizard or root access required. The AppImage is self-contained.
+
+[View all releases →](https://github.com/athrvk/vayu/releases)
 
 ---
 
-## Quick Start
+## Building from Source
 
-### Prerequisites
-
-- **C++ Engine**: CMake 3.25+, C++20 compiler (g++ or clang++), vcpkg
-- **Electron App**: Node.js ≥ 20 LTS, pnpm ≥ 10
-
-### Building from Source
-
-```bash
-git clone https://github.com/athrvk/vayu.git
-cd vayu
-
-# Development build (engine + app)
-python build.py --dev
-
-# Start the app
-cd app && pnpm run electron:dev
-```
-
-**All build commands:**
-```bash
-python build.py --dev    # Development build
-python build.py          # Production build
-python build.py -e       # Engine only
-python build.py -a       # App only
-python build.py -t       # Build with tests
-python build.py --help   # All options
-```
-
-For platform-specific setup and troubleshooting, see [Building Documentation](docs/building.md).
+For contributors and developers who want to build Vayu locally, see **[docs/building.md](docs/building.md)** for full setup instructions (prerequisites, platform-specific steps, CMake presets, and all build commands).
 
 ---
 
@@ -172,7 +156,7 @@ See [Architecture Documentation](docs/architecture.md) for more detail.
 | [Engine API Reference](docs/engine/api-reference.md) | Full HTTP API for the C++ engine |
 | [DB Schema](docs/engine/db-schema.md) | SQLite table definitions and JSON shapes |
 | [Variable Resolution](docs/app/variable-resolution.md) | How `{{variables}}` are resolved at runtime |
-| [Building](docs/building.md) | Build instructions for all platforms |
+| [Building from Source](docs/building.md) | Prerequisites, CMake presets, all build commands |
 | [Contributing](CONTRIBUTING.md) | Dev setup, code style, PR process |
 
 ---
