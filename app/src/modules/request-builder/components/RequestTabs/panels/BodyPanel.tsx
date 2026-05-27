@@ -19,6 +19,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, AlertCircle, Loader2, RefreshCw } from "lucide-react";
+import type { OnMount } from "@monaco-editor/react";
 import {
 	Select,
 	SelectContent,
@@ -140,6 +141,19 @@ export default function BodyPanel() {
 		isResizing,
 		startResizing,
 	} = useResizable({ defaultSize: 320, min: 160, max: 800, direction: "vertical" });
+
+	// Monaco's automaticLayout doesn't reliably catch the container shrinking via
+	// the drag handle, leaving the editor's viewport stuck at its old height (so
+	// scrolling appears broken). Relayout every mounted editor when the height
+	// changes.
+	const editorsRef = useRef(new Set<Parameters<OnMount>[0]>());
+	const handleEditorMount: OnMount = (editorInstance) => {
+		editorsRef.current.add(editorInstance);
+		editorInstance.onDidDispose(() => editorsRef.current.delete(editorInstance));
+	};
+	useEffect(() => {
+		for (const editorInstance of editorsRef.current) editorInstance.layout();
+	}, [editorHeight]);
 
 	const resolvedGqlUrl = resolveString(request.url || "").trim();
 	const buildResolvedHeaders = (): Record<string, string> =>
@@ -303,6 +317,7 @@ export default function BodyPanel() {
 									language={request.bodyMode === "json" ? "json" : "plaintext"}
 									value={request.body || ""}
 									onChange={handleRawChange}
+									onMount={handleEditorMount}
 								/>
 							</div>
 						</div>
@@ -367,6 +382,7 @@ export default function BodyPanel() {
 										language="graphql"
 										value={gqlQuery}
 										onChange={(q) => writeGraphqlBody(q, gqlVariables)}
+										onMount={handleEditorMount}
 									/>
 								</div>
 							</ResizablePanel>
@@ -386,6 +402,7 @@ export default function BodyPanel() {
 											setGqlVariables(v);
 											writeGraphqlBody(gqlQuery, v);
 										}}
+										onMount={handleEditorMount}
 									/>
 								</div>
 							</ResizablePanel>
