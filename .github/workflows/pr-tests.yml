@@ -29,10 +29,16 @@ jobs:
           fetch-depth: 0
 
       - name: Lint and test installer script
-        if: runner.os == 'Linux'
+        if: runner.os != 'Windows'
         shell: bash
         run: |
-          sudo apt-get update && sudo apt-get install -y shellcheck
+          command -v shellcheck >/dev/null 2>&1 || {
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              sudo apt-get update && sudo apt-get install -y shellcheck
+            else
+              brew install shellcheck
+            fi
+          }
           shellcheck install.sh
           bash scripts/test/install_test.sh
 
