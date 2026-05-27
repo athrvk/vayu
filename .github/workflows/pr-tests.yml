@@ -37,6 +37,7 @@ jobs:
     env:
       VCPKG_COMMIT: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+      SCCACHE_GHA_ENABLED: 'true'
 
     steps:
       - name: Checkout
@@ -96,6 +97,9 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
       - name: Build engine
         uses: lukka/run-cmake@v10
         with:
@@ -103,6 +107,9 @@ jobs:
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          CMAKE_C_COMPILER_LAUNCHER: sccache
 
       - name: Run engine tests
         working-directory: engine
