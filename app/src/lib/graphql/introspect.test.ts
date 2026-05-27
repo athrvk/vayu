@@ -31,7 +31,8 @@ describe("buildIntrospectionRequest", () => {
 		expect(req.url).toBe("https://api.test/gql");
 		expect(req.headers?.["Content-Type"]).toBe("application/json");
 		expect(req.headers?.Authorization).toBe("Bearer x");
-		expect(JSON.parse(req.body).query).toContain("IntrospectionQuery");
+		expect(req.body.mode).toBe("json");
+		expect(JSON.parse(req.body.content).query).toContain("IntrospectionQuery");
 	});
 });
 

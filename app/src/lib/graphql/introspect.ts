@@ -23,7 +23,9 @@ export function buildIntrospectionRequest(
 		method: "POST",
 		url,
 		headers: { ...headers, "Content-Type": "application/json" },
-		body: JSON.stringify({ query: getIntrospectionQuery() }),
+		// The engine expects a structured body ({ mode, content }), not a raw
+		// string — content is the serialized JSON the server receives.
+		body: { mode: "json", content: JSON.stringify({ query: getIntrospectionQuery() }) },
 	};
 }
 
