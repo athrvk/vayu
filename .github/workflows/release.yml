@@ -221,6 +221,7 @@ jobs:
           ls -lh artifacts/
 
       - name: Upload artifacts to release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           files: |
