@@ -6,8 +6,9 @@
  */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Folder, Plus, Trash2, Edit2, Copy, FolderPlus, Loader2 } from "lucide-react";
+import { Folder, Plus, Trash2, Edit2, Copy, FolderPlus, Loader2, Download } from "lucide-react";
 import { useNavigationStore, useCollectionsStore, useSaveStore } from "@/stores";
+import { useImportModalStore } from "@/stores/import-modal-store";
 import {
 	useCollectionsQuery,
 	useMultipleCollectionRequests,
@@ -35,6 +36,7 @@ import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
 
 export default function CollectionTree() {
+	const openImport = useImportModalStore((s) => s.open);
 	const {
 		navigateToRequest,
 		navigateToCollection,
@@ -395,6 +397,20 @@ export default function CollectionTree() {
 									? `Add request in ${collections.find((c) => c.id === selectedCollectionId)?.name ?? "selected collection"}`
 									: "Add request"}
 							</TooltipContent>
+						</Tooltip>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									variant="ghost"
+									size="icon"
+									onClick={openImport}
+									className="h-8 w-8"
+									aria-label="Import collection"
+								>
+									<Download className="w-4 h-4" />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>Import collection</TooltipContent>
 						</Tooltip>
 					</TooltipProvider>
 				</div>
