@@ -113,7 +113,8 @@ jobs:
 
       - name: Run engine tests
         working-directory: engine
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit test-results.xml
+        shell: bash
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine/test-results.xml"
 
       - name: Publish C++ test results
         uses: mikepenz/action-junit-report@v6
