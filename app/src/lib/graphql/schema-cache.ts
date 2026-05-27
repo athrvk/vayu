@@ -31,7 +31,10 @@ interface SchemaCacheState {
 	setActiveUrl: (url: string | null) => void;
 	getActiveSchema: () => GraphQLSchema | null;
 	getActiveStatus: () => SchemaStatus;
+	/** Introspect only if this url has not been attempted yet. */
 	ensureSchema: (url: string, headers: Record<string, string>) => Promise<void>;
+	/** Force a re-introspection regardless of any cached result for this url. */
+	refreshSchema: (url: string, headers: Record<string, string>) => Promise<void>;
 }
 
 export const useSchemaCache = create<SchemaCacheState>((set, get) => ({
@@ -54,6 +57,11 @@ export const useSchemaCache = create<SchemaCacheState>((set, get) => ({
 		if (!url) return;
 		const existing = get().byUrl[url];
 		if (existing && existing.status !== "idle") return;
+		await get().refreshSchema(url, headers);
+	},
+
+	refreshSchema: async (url, headers) => {
+		if (!url) return;
 		set((s) => ({
 			byUrl: {
 				...s.byUrl,

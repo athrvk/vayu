@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, AlertCircle, Loader2, RefreshCw } from "lucide-react";
 import {
 	Select,
 	SelectContent,
@@ -37,6 +37,8 @@ import type { BodyMode, KeyValueItem } from "../../../types";
 import { createEmptyKeyValue } from "../../../utils/key-value";
 import { generateUUID } from "../../../utils/id";
 import { useSchemaCache } from "@/lib/graphql/schema-cache";
+import { useResizable } from "@/hooks/useResizable";
+import { cn } from "@/lib/utils";
 
 const BODY_MODES: { value: BodyMode; label: string; description: string }[] = [
 	{ value: "none", label: "None", description: "No request body" },
@@ -106,6 +108,26 @@ function SchemaStatusBadge({ status }: { status: "idle" | "loading" | "ready" | 
 	);
 }
 
+function ResizeHandle({
+	onMouseDown,
+	active,
+}: {
+	onMouseDown: (e: React.MouseEvent) => void;
+	active: boolean;
+}) {
+	return (
+		<div
+			role="separator"
+			aria-orientation="horizontal"
+			onMouseDown={onMouseDown}
+			className={cn(
+				"h-1.5 cursor-row-resize bg-border hover:bg-primary transition-colors",
+				active && "bg-primary"
+			)}
+		/>
+	);
+}
+
 export default function BodyPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();
 	const [showPreview, setShowPreview] = useState(false);
@@ -113,6 +135,22 @@ export default function BodyPanel() {
 	const schemaStatus = useSchemaCache((s) =>
 		s.activeUrl ? (s.byUrl[s.activeUrl]?.status ?? "idle") : "idle"
 	);
+
+	// Drag-to-resize editor height, shared across body modes that host an editor.
+	const {
+		size: editorHeight,
+		isResizing,
+		startResizing,
+	} = useResizable({ defaultSize: 320, min: 160, max: 800, direction: "vertical" });
+
+	const resolvedGqlUrl = resolveString(request.url || "").trim();
+	const buildResolvedHeaders = (): Record<string, string> => {
+		const headers: Record<string, string> = {};
+		for (const h of request.headers) {
+			if (h.enabled && h.key) headers[resolveString(h.key)] = resolveString(h.value);
+		}
+		return headers;
+	};
 
 	// In GraphQL mode, track the resolved endpoint as the active schema URL and
 	// (debounced) introspect it so the editor's language providers can validate
@@ -122,18 +160,20 @@ export default function BodyPanel() {
 			useSchemaCache.getState().setActiveUrl(null);
 			return;
 		}
-		const url = resolveString(request.url || "").trim();
-		useSchemaCache.getState().setActiveUrl(url || null);
-		if (!url) return;
-		const headers: Record<string, string> = {};
-		for (const h of request.headers) {
-			if (h.enabled && h.key) headers[resolveString(h.key)] = resolveString(h.value);
-		}
+		useSchemaCache.getState().setActiveUrl(resolvedGqlUrl || null);
+		if (!resolvedGqlUrl) return;
+		const headers = buildResolvedHeaders();
 		const id = setTimeout(() => {
-			void useSchemaCache.getState().ensureSchema(url, headers);
+			void useSchemaCache.getState().ensureSchema(resolvedGqlUrl, headers);
 		}, 400);
 		return () => clearTimeout(id);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [request.bodyMode, request.url, request.headers, resolveString]);
+
+	const handleRefreshSchema = () => {
+		if (!resolvedGqlUrl) return;
+		void useSchemaCache.getState().refreshSchema(resolvedGqlUrl, buildResolvedHeaders());
+	};
 
 	const handleModeChange = (mode: BodyMode) => {
 		updateField("bodyMode", mode);
@@ -228,78 +268,113 @@ export default function BodyPanel() {
 			)}
 
 			{(request.bodyMode === "json" || request.bodyMode === "text") && (
-				<div className={showPreview ? "grid grid-cols-2 gap-4" : ""}>
-					<div className="space-y-2">
-						{showPreview && (
-							<label className="text-xs font-medium text-muted-foreground">
-								Source
-							</label>
-						)}
-						<div className="border border-input overflow-hidden">
-							<CodeEditor
-								height="320px"
-								language={request.bodyMode === "json" ? "json" : "plaintext"}
-								value={request.body || ""}
-								onChange={handleRawChange}
-							/>
-						</div>
-					</div>
-
-					{showPreview && (
+				<div>
+					<div className={showPreview ? "grid grid-cols-2 gap-4" : ""}>
 						<div className="space-y-2">
-							<label className="text-xs font-medium text-muted-foreground">
-								Resolved Preview
-							</label>
-							<pre className="h-[320px] p-3 border border-input font-mono text-sm bg-muted/50 overflow-auto whitespace-pre-wrap">
-								{resolvedBody || (
-									<span className="text-muted-foreground italic">Empty body</span>
-								)}
-							</pre>
+							{showPreview && (
+								<label className="text-xs font-medium text-muted-foreground">
+									Source
+								</label>
+							)}
+							<div
+								className="border border-input overflow-hidden"
+								style={{ height: editorHeight }}
+							>
+								<CodeEditor
+									height="100%"
+									language={request.bodyMode === "json" ? "json" : "plaintext"}
+									value={request.body || ""}
+									onChange={handleRawChange}
+								/>
+							</div>
 						</div>
-					)}
+
+						{showPreview && (
+							<div className="space-y-2">
+								<label className="text-xs font-medium text-muted-foreground">
+									Resolved Preview
+								</label>
+								<pre
+									className="p-3 border border-input font-mono text-sm bg-muted/50 overflow-auto whitespace-pre-wrap"
+									style={{ height: editorHeight }}
+								>
+									{resolvedBody || (
+										<span className="text-muted-foreground italic">
+											Empty body
+										</span>
+									)}
+								</pre>
+							</div>
+						)}
+					</div>
+					<ResizeHandle onMouseDown={startResizing} active={isResizing} />
 				</div>
 			)}
 
 			{request.bodyMode === "graphql" && (
-				<div className="h-80 border border-input overflow-hidden">
-					<ResizablePanelGroup orientation="vertical" className="h-full">
-						<ResizablePanel defaultSize={65} minSize={25} className="flex flex-col">
-							<div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-panel shrink-0">
-								<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-									Query
-								</span>
-								<SchemaStatusBadge status={schemaStatus} />
-							</div>
-							<div className="flex-1">
-								<CodeEditor
-									height="100%"
-									language="graphql"
-									value={gqlQuery}
-									onChange={(q) =>
-										handleRawChange(serializeGraphQLBody(q, gqlVariables))
-									}
-								/>
-							</div>
-						</ResizablePanel>
-						<ResizableHandle />
-						<ResizablePanel defaultSize={35} minSize={15} className="flex flex-col">
-							<div className="px-3 py-1.5 border-b border-border bg-panel shrink-0">
-								<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-									Variables
-								</span>
-							</div>
-							<div className="flex-1">
-								<CodeEditor
-									height="100%"
-									language="json"
-									value={gqlVariables}
-									onChange={(v) =>
-										handleRawChange(serializeGraphQLBody(gqlQuery, v))
-									}
-								/>
-							</div>
-						</ResizablePanel>
-					</ResizablePanelGroup>
+				<div>
+					<div
+						className="border border-input overflow-hidden"
+						style={{ height: editorHeight }}
+					>
+						<ResizablePanelGroup orientation="vertical" className="h-full">
+							<ResizablePanel defaultSize={65} minSize={25} className="flex flex-col">
+								<div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-panel shrink-0">
+									<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+										Query
+									</span>
+									<div className="flex items-center gap-2">
+										<SchemaStatusBadge status={schemaStatus} />
+										{resolvedGqlUrl && (
+											<button
+												type="button"
+												onClick={handleRefreshSchema}
+												disabled={schemaStatus === "loading"}
+												title="Refresh schema"
+												className="text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+											>
+												<RefreshCw
+													className={cn(
+														"w-3 h-3",
+														schemaStatus === "loading" && "animate-spin"
+													)}
+												/>
+											</button>
+										)}
+									</div>
+								</div>
+								<div className="flex-1">
+									<CodeEditor
+										height="100%"
+										language="graphql"
+										value={gqlQuery}
+										onChange={(q) =>
+											handleRawChange(serializeGraphQLBody(q, gqlVariables))
+										}
+									/>
+								</div>
+							</ResizablePanel>
+							<ResizableHandle />
+							<ResizablePanel defaultSize={35} minSize={15} className="flex flex-col">
+								<div className="px-3 py-1.5 border-b border-border bg-panel shrink-0">
+									<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+										Variables
+									</span>
+								</div>
+								<div className="flex-1">
+									<CodeEditor
+										height="100%"
+										language="json"
+										value={gqlVariables}
+										onChange={(v) =>
+											handleRawChange(serializeGraphQLBody(gqlQuery, v))
+										}
+									/>
+								</div>
+							</ResizablePanel>
+						</ResizablePanelGroup>
+					</div>
+					<ResizeHandle onMouseDown={startResizing} active={isResizing} />
 				</div>
 			)}
 

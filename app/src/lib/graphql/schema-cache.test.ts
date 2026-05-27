@@ -51,6 +51,14 @@ describe("schema cache", () => {
 		expect(introspectSchema).toHaveBeenCalledTimes(1);
 	});
 
+	it("refreshSchema re-introspects even when already ready", async () => {
+		(introspectSchema as any).mockResolvedValue(schema);
+		await useSchemaCache.getState().ensureSchema(URL, {});
+		await useSchemaCache.getState().refreshSchema(URL, {});
+		expect(introspectSchema).toHaveBeenCalledTimes(2);
+		expect(useSchemaCache.getState().byUrl[URL].status).toBe("ready");
+	});
+
 	it("getActiveSchema follows activeUrl", async () => {
 		(introspectSchema as any).mockResolvedValue(schema);
 		await useSchemaCache.getState().ensureSchema(URL, {});
