@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-publish:
     name: Build on ${{ matrix.os }}
@@ -23,7 +27,9 @@ jobs:
             preset: windows-prod
           - os: macos-latest
             preset: macos-prod-arm64
+    timeout-minutes: 120
     env:
+      VCPKG_COMMIT: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
 
     steps:
@@ -42,7 +48,7 @@ jobs:
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: command -v ninja || brew install ninja
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -60,7 +66,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-bb1ad44ed8d7
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
           restore-keys: |
             vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
             vcpkg-${{ runner.os }}-
@@ -69,7 +75,7 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-          vcpkgGitCommitId: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
       - name: Build and run engine tests (arm64)
@@ -190,6 +196,11 @@ jobs:
           cp app/release/*.AppImage artifacts/ 2>/dev/null || true
           cp app/release/*.deb artifacts/ 2>/dev/null || true
           cp app/release/*.rpm artifacts/ 2>/dev/null || true
+          artifact_count=$(ls artifacts/ 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$artifact_count" -eq 0 ]; then
+            echo "::error::No Linux artifacts built — AppImage/deb/rpm all missing." >&2
+            exit 1
+          fi
           ls -lh artifacts/
 
       - name: Collect artifacts (Windows)
@@ -197,9 +208,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Get-ChildItem app/release/*.exe | ForEach-Object {
-            Copy-Item $_.FullName -Destination artifacts/
+          $exeFiles = Get-ChildItem app/release/*.exe -ErrorAction SilentlyContinue
+          if ($exeFiles.Count -eq 0) {
+            Write-Error "No Windows .exe artifact built."
+            exit 1
           }
+          $exeFiles | ForEach-Object { Copy-Item $_.FullName -Destination artifacts/ }
           Get-ChildItem artifacts
 
       - name: Collect artifacts (macOS)
