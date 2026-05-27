@@ -29,7 +29,7 @@ export function registerGraphqlProviders(monaco: typeof Monaco): void {
 		s === "warning" ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error;
 
 	const runDiagnostics = (model: Monaco.editor.ITextModel) => {
-		if (model.getLanguageId() !== "graphql") return;
+		if (model.isDisposed() || model.getLanguageId() !== "graphql") return;
 		const markers = computeGraphqlDiagnostics(
 			model.getValue(),
 			useSchemaCache.getState().getActiveSchema()
@@ -55,6 +55,12 @@ export function registerGraphqlProviders(monaco: typeof Monaco): void {
 		if (model.getLanguageId() !== "graphql") return;
 		runDiagnostics(model);
 		model.onDidChangeContent(() => scheduleDiagnostics(model));
+		// Cancel any pending debounce so it can't fire on a disposed model.
+		model.onWillDispose(() => {
+			const pending = timers.get(model);
+			if (pending) clearTimeout(pending);
+			timers.delete(model);
+		});
 	});
 
 	// Re-run diagnostics for open graphql models only when the active schema
