@@ -294,7 +294,7 @@ export default function CollectionTree() {
 		} else {
 			handleDeleteRequest(deleteConfirm.id);
 		}
-	}, [deleteConfirm]);
+	}, [deleteConfirm, handleDeleteCollection, handleDeleteRequest]);
 
 	const handleStartRequestRename = (request: Request) => {
 		setRenamingRequestId(request.id);

@@ -5,6 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import "@/lib/monaco-setup";
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";

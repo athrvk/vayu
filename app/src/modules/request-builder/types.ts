@@ -67,7 +67,7 @@ export interface AuthConfig {
 // Body Types
 // ============================================================================
 
-export type BodyMode = "none" | "json" | "text" | "form-data" | "x-www-form-urlencoded";
+export type BodyMode = "none" | "json" | "text" | "graphql" | "form-data" | "x-www-form-urlencoded";
 
 export interface BodyConfig {
 	mode: BodyMode;
