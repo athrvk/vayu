@@ -1,195 +1,224 @@
-# Vayu
+# Vayu — Open Source API Testing & Load Testing Desktop App
 
-**High-Performance API Testing & Load Platform**  
-**Postman-compatible UI + C++ speed for thousands of requests/sec — all local, no cloud.**
+**Local-first Postman alternative with a C++ engine built for load testing — no cloud, no subscription, no limits.**
 
-Vayu gives you the familiar request builder and collections of Postman, but with a blazing-fast C++ engine that crushes load tests and high-throughput scenarios without slowing down your machine.  
-Privacy-first, 100% offline execution. Built for developers who hate waiting.
+Vayu is a free, open source desktop app for REST API testing and load testing on Windows, macOS, and Linux. It combines the familiar request-builder and collections UI of Postman with a native C++ execution engine that sustains tens of thousands of requests per second — all running locally on your machine, with zero data leaving your network.
 
 [![Latest Release](https://img.shields.io/github/v/release/athrvk/vayu)](https://github.com/athrvk/vayu/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0%20%26%20Apache--2.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/athrvk/vayu/releases)
-
 [![GitHub stars](https://img.shields.io/github/stars/athrvk/vayu?style=social&label=Star)](https://github.com/athrvk/vayu)
-[![GitHub forks](https://img.shields.io/github/forks/athrvk/vayu?style=social&label=Fork)](https://github.com/athrvk/vayu/fork)
 [![GitHub issues](https://img.shields.io/github/issues/athrvk/vayu?style=social&label=Issues)](https://github.com/athrvk/vayu/issues)
-
 
 ![C++](https://img.shields.io/badge/C++-20-blue?logo=cplusplus)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
-![Electron](https://img.shields.io/badge/Electron-28-47848F?logo=electron)
+![Electron](https://img.shields.io/badge/Electron-39-47848F?logo=electron)
 
-## Why Vayu? (vs Postman & others)
+---
 
+## What is Vayu?
 
-| Feature                   | Vayu                           | Bruno                          | k6                             | Apache JMeter                  | Postman                        |
-|---------------------------|--------------------------------|--------------------------------|--------------------------------|--------------------------------|--------------------------------|
-| **Execution Engine** | C++ (High Performance)         | Node.js / Electron             | Go (Efficient / Lightweight)   | Java (JVM-based)               | Node.js / Electron             |
-| **Execution Speed** | Tens of Thousands RPS (Native) | Limited by JS runtime          | High (Go-routines)             | Moderate (Thread-heavy)        | Limited by JS runtime          |
-| **Scripting Language** | QuickJS (pm syntax support)    | JavaScript (ES6)               | JavaScript (ES6)               | Groovy / BeanShell / GUI       | JavaScript                     |
-| **Load Testing** | Built-in (Real-time metrics)   | Not supported                  | Core focus                     | Core focus                     | Requires separate tool         |
-| **UI / UX** | Native App (Sidecar Desktop)   | Native App (Git-friendly)      | CLI-first (No native GUI)      | Java Swing GUI (Aged)          | Native App (Feature-rich)      |
-| **UI Snappiness** | Responsive (Sidecar Architecture) | Responsive                  | N/A (CLI only)                 | Laggy with large test plans    | Slows with large collections   |
-| **Resource Usage** | Low (Direct memory access)     | Low to Moderate                | Low to Moderate                | High (RAM intensive)           | High (Electron/Chrome)         |
-| **Privacy** | 100% Local-first               | 100% Local-first               | Local / Cloud hybrid           | 100% Local                     | Cloud-heavy (Optional local)   |
-| **Collection Storage** | Local files                    | Plain text (Bru format, VCS-friendly) | Scripts / YAML            | XML files                      | Cloud / JSON export            |
-| **Postman Import** | Yes (Native compatibility, WIP) | Yes (via converter)           | Limited (via converters)       | No (Manual migration)          | Native                         |
-| **Protocols** | REST                           | REST, GraphQL                  | HTTP, gRPC, WebSockets         | HTTP, FTP, JDBC, LDAP, SOAP    | REST, GraphQL, gRPC            |
-| **Open Source** | Yes (Dual-license)             | Yes (MIT)                      | Yes (AGPLv3)                   | Yes (Apache 2.0)               | Partial                        |
+Vayu is a desktop API client and load testing tool that runs entirely on your local machine. Unlike Postman or Insomnia, there is no account required, no cloud sync, and no usage limits. You organize HTTP requests into collections, run them against any API, and launch high-throughput load tests — all from the same UI.
 
+The key difference from other API clients is the execution engine: Vayu's HTTP engine is written in C++20 and uses a multi-worker event loop backed by libcurl. This lets it sustain load test throughput that Node.js-based tools (Postman, Bruno, Insomnia) cannot match, while keeping the Electron UI fully responsive during a test run.
+
+Vayu supports importing collections from **Postman** (v2.0, v2.1), **Insomnia** (v4), and **OpenAPI / Swagger** (2.0, 3.0) specs, so migrating an existing workspace takes seconds.
+
+---
+
+## Why Vayu? (vs Postman, Bruno, k6, JMeter)
+
+| Feature | Vayu | Bruno | k6 | Apache JMeter | Postman |
+|---|---|---|---|---|---|
+| **Execution Engine** | C++ (Native) | Node.js / Electron | Go | Java (JVM) | Node.js / Electron |
+| **Load Test Throughput** | Tens of thousands RPS | Limited by JS runtime | High (Go routines) | Moderate (thread-heavy) | Requires separate tool |
+| **Scripting** | QuickJS (`pm.*` syntax) | JavaScript (ES6) | JavaScript (ES6) | Groovy / BeanShell | JavaScript |
+| **Built-in Load Testing** | Yes — real-time metrics | No | Core focus | Core focus | No |
+| **UI** | Native desktop app | Native desktop app | CLI only | Java Swing (dated) | Native desktop app |
+| **UI Responsiveness** | High (sidecar arch) | Good | N/A | Laggy under load | Slows with large collections |
+| **Memory Usage** | Low (direct memory) | Low–Moderate | Low–Moderate | High (RAM-intensive) | High (Electron + Chrome) |
+| **Privacy / Offline** | 100% local, no account | 100% local | Local / cloud hybrid | 100% local | Cloud-heavy (optional local) |
+| **Postman Collection Import** | Yes (v2.0 + v2.1) | Yes (via converter) | Limited | No | Native |
+| **OpenAPI Import** | Yes (2.0 + 3.0) | No | No | No | Yes |
+| **Open Source** | Yes (dual-license) | Yes (MIT) | Yes (AGPL v3) | Yes (Apache 2.0) | Partial |
+
+---
 
 ## Features
 
-- **High Performance** - C++ engine optimized for maximum throughput
-- **Request Management** - Organize requests into collections with folder hierarchy
-- **Load Testing** - Run load tests with real-time metrics streaming
-- **Environment Variables** - Manage variables across collections and environments
-- **Test Scripting** - QuickJS-based scripting engine compatible with Postman's `pm.test()` syntax
-- **Privacy First** - 100% local execution, no cloud sync required
-- **Cross Platform** - macOS, Windows, and Linux support
+- **High-throughput load testing** — C++ event loop sustains tens of thousands of requests/sec with real-time metrics streaming; no separate tool (k6, JMeter) needed
+- **REST API request builder** — send GET, POST, PUT, PATCH, DELETE and more; supports JSON, form-data, URL-encoded, raw text, and GraphQL bodies
+- **Collections & folder hierarchy** — organise requests into nested collections with per-collection variables, auth, and pre/post scripts
+- **Collection import** — import from Postman v2.0/v2.1, Insomnia v4, OpenAPI 3.0, and Swagger 2.0 in one file drop
+- **Environment & variable management** — layered variable resolution: globals → collection chain → active environment
+- **Auth support** — Bearer token, Basic auth, API key (header or query); auth inherits down the collection tree
+- **Test scripting** — QuickJS engine with `pm.test()`, `pm.expect()`, `pm.environment.set()` — compatible with Postman test scripts
+- **Script composition** — pre-request and post-request scripts compose across the collection hierarchy (root → folder → request)
+- **Privacy-first** — 100% offline execution; no telemetry, no account, no cloud sync
+- **Cross-platform** — native installers for Windows (x64), macOS (universal), and Linux (AppImage)
+
+---
 
 ## Download
 
-Download the latest version for your platform:
+### Windows
 
-- **Windows**: [Vayu-x64.exe](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe)
-- **macOS**: [Vayu-universal.dmg](https://github.com/athrvk/vayu/releases/latest/download/Vayu-universal.dmg)
-- **Linux**: [Vayu-x86_64.AppImage](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x86_64.AppImage)
+1. Download [Vayu-x64.exe](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe)
+2. Run the installer and follow the setup wizard
+3. Launch **Vayu** from the Start menu
+
+### macOS
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)"
+```
+
+Installs the latest release to `/Applications`. You'll be prompted for your password once. Vayu is distributed unsigned — the installer ad-hoc signs it and clears the quarantine flag so it opens without the "damaged app" warning.
+
+To pin a specific version:
+
+```sh
+VAYU_VERSION=0.1.3 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)"
+```
+
+To uninstall:
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/athrvk/vayu/master/install.sh)" -- --uninstall
+```
+
+Add `--purge` to also remove settings and data. Or drag `Vayu.app` from `/Applications` to the Trash.
+
+### Linux
+
+1. Download [Vayu-x86_64.AppImage](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x86_64.AppImage)
+2. Make it executable:
+   ```sh
+   chmod +x Vayu-x86_64.AppImage
+   ```
+3. Run it:
+   ```sh
+   ./Vayu-x86_64.AppImage
+   ```
+
+No installation wizard or root access required. The AppImage is self-contained.
 
 [View all releases →](https://github.com/athrvk/vayu/releases)
 
-## Quick Start
+---
 
-### Prerequisites
+## Building from Source
 
-- **C++ Engine**: CMake 3.25+, C++20 compiler, vcpkg
-- **Electron App**: Node.js ≥ 20 LTS, pnpm ≥ 10
+For contributors and developers who want to build Vayu locally, see **[docs/building.md](docs/building.md)** for full setup instructions (prerequisites, platform-specific steps, CMake presets, and all build commands).
 
-### Building from Source
-
-Clone the repository:
-
-```bash
-git clone https://github.com/athrvk/vayu.git
-cd vayu
-```
-
-Build and run (all platforms):
-
-```bash
-# Build everything (development mode)
-python build.py --dev
-
-# Then start the app
-cd app && pnpm run electron:dev
-```
-
-**Quick commands:**
-```bash
-python build.py --dev         # Development build
-python build.py               # Production build
-python build.py -e            # Engine only
-python build.py -a            # App only
-python build.py -t            # Build with tests
-python build.py --help        # See all options
-```
-
-For detailed setup and troubleshooting, see the [Building Documentation](docs/building.md).
+---
 
 ## Architecture
 
-Vayu uses a sidecar pattern where the Electron UI (Manager) communicates with a separate C++ daemon (Engine) via HTTP:
+Vayu uses a **sidecar architecture**: the Electron UI (Manager) and the C++ daemon (Engine) are separate processes that communicate over HTTP on `localhost:9876`. This keeps the UI fully responsive even when the engine is saturating the network under a load test.
 
 ```
 ┌────────────────────┐        ┌────────────────────┐
 │   THE MANAGER      │  HTTP  │    THE ENGINE      │
 │  (Electron/React)  │◄──────►│      (C++)         │
 │                    │ :9876  │                    │
-│  • Request Builder │        │  • EventLoop       │
+│  • Request Builder │        │  • Event Loop      │
 │  • Collections     │        │  • QuickJS Runtime │
 │  • Load Dashboard  │        │  • Multi-Worker    │
 └────────────────────┘        └────────────────────┘
 ```
 
-See [Architecture Documentation](docs/architecture.md) for detailed information.
+See [Architecture Documentation](docs/architecture.md) for more detail.
+
+---
 
 ## Tech Stack
 
-- **Engine**: C++20 with lock-free data structures
-- **Networking**: libcurl for HTTP client operations
-- **Scripting**: QuickJS for test script execution
-- **UI**: Electron + React + TypeScript
-- **State Management**: Zustand (UI state) + TanStack Query (server state)
-- **Build System**: CMake + vcpkg for C++, pnpm + Vite for Electron app
+| Layer | Technology |
+|---|---|
+| UI | Electron + React 19 + TypeScript 5 |
+| UI state | Zustand |
+| Server state | TanStack Query |
+| Styling | Tailwind CSS v4 |
+| HTTP engine | C++20 + libcurl |
+| Scripting | QuickJS (embedded JS engine) |
+| Database | SQLite via sqlite_orm |
+| Build | CMake + vcpkg (C++), pnpm + Vite (app) |
+
+---
 
 ## Documentation
 
 | Document | Description |
-|----------|-------------|
-| [Architecture](docs/architecture.md) | System architecture and design decisions |
-| [Engine API Reference](docs/engine/api-reference.md) | HTTP API for controlling the engine |
-| [Building](docs/building.md) | Build instructions for all platforms |
-| [Engine Building](docs/engine/building.md) | Building just the C++ engine |
-| [Contributing](docs/contributing.md) | Guidelines for contributing |
+|---|---|
+| [Architecture](docs/architecture.md) | Sidecar pattern, process model, IPC |
+| [Engine API Reference](docs/engine/api-reference.md) | Full HTTP API for the C++ engine |
+| [DB Schema](docs/engine/db-schema.md) | SQLite table definitions and JSON shapes |
+| [Variable Resolution](docs/app/variable-resolution.md) | How `{{variables}}` are resolved at runtime |
+| [Building from Source](docs/building.md) | Prerequisites, CMake presets, all build commands |
+| [Contributing](CONTRIBUTING.md) | Dev setup, code style, PR process |
+
+---
 
 ## Contributing
 
-Contributions are welcome! Please read the [Contributing Guide](docs/contributing.md) for details on:
+Contributions are welcome. Read the [Contributing Guide](CONTRIBUTING.md) for dev setup, code style, testing requirements, and the PR process.
 
-- Development setup
-- Code style guidelines
-- Testing requirements
-- Commit message conventions
-- Pull request process
+---
 
 ## Versioning & Releases
 
-The canonical version for releases is stored in the top-level `VERSION` file. The CI workflow uses a pushed Git tag to publish artifacts.
-
-**Key points:**
-
-- The workflow triggers on tag pushes that follow the `v*` pattern (for example `v0.1.1`).
-- Electron produces installer filenames that already contain the version (for example `Vayu Setup 0.1.1.exe` and `Vayu-0.1.1-x86_64.AppImage`), and the workflow uploads those files to the Release as-is.
-
-**How to create a release (recommended):**
-
-1. Bump the version using the build script:
+The canonical version is stored in the top-level `VERSION` file. CI builds and uploads installers when a matching `v*` tag is pushed.
 
 ```bash
-python build.py --bump-version patch    # 0.1.1 -> 0.1.2
-# or
-python build.py --bump-version 0.1.2    # set specific version
+# 1. Bump version
+python build.py --bump-version patch   # 0.1.1 → 0.1.2
 
-# Preview changes first
-python build.py --bump-version patch --dry-run
-```
-
-2. Commit the changes:
-
-```bash
-git add VERSION engine/include/vayu/version.hpp engine/CMakeLists.txt engine/vcpkg.json app/package.json
+# 2. Commit
+git add VERSION engine/CMakeLists.txt engine/vcpkg.json app/package.json
 git commit -m "chore(release): 0.1.2"
-```
 
-3. Create and push a tag that matches the `VERSION` file, prefixed with `v`:
-
-```bash
+# 3. Tag and push — CI takes it from here
 git tag v$(cat VERSION)
 git push origin --tags
 ```
 
-4. The workflow will run on the pushed tag, execute tests and builds, and upload installers to the Release associated with that tag.
+---
 
-**Notes:**
+## FAQ
 
-- The `VERSION` file is the single source of truth; maintain it before pushing tags.
+**Is Vayu free?**
+Yes. Vayu is fully free and open source. The engine is licensed AGPL-3.0; the UI is Apache-2.0. There is no paid tier, no subscription, and no feature gating.
 
-## ⚖️ License
+**Does Vayu work offline?**
+Yes. All execution happens locally. Vayu never contacts external servers during normal use — no telemetry, no license checks, no cloud sync.
 
-Vayu is a dual-licensed project:
+**Does Vayu require an account?**
+No. Download, install, and use it immediately with no sign-up.
 
-* **Vayu Engine (`/engine`)**: Licensed under **GNU AGPL v3**.
-* **Vayu UI (`/app`)**: Licensed under **Apache 2.0**.
+**Can I import my Postman collections into Vayu?**
+Yes. Vayu imports Postman Collection v2.0 and v2.1 JSON exports directly, including folders, environments, variables, auth settings, and pre/post-request scripts.
 
-**Usage Note:** You are free to use Vayu for any purpose. If you modify the **Engine** and provide it as a network service, you must open-source your changes. The **UI** is more permissive and allows for easier development.
+**Can I import OpenAPI / Swagger specs?**
+Yes. Drop in an OpenAPI 3.0 or Swagger 2.0 file (JSON or YAML) and Vayu generates a ready-to-use request collection from the spec.
+
+**How fast is the load testing?**
+The C++ engine sustains tens of thousands of requests per second on modern hardware. Exact numbers depend on your machine, the target server, and network conditions.
+
+**What scripting syntax does Vayu support?**
+Vayu uses QuickJS and implements the `pm.*` API (`pm.test()`, `pm.expect()`, `pm.environment.get/set()`, `pm.response.*`) so most Postman test scripts run without modification.
+
+**Which platforms does Vayu support?**
+Windows (x64), macOS (Apple Silicon + Intel universal), and Linux (x86_64 AppImage).
+
+---
+
+## License
+
+Vayu is dual-licensed:
+
+- **Engine (`/engine`)** — [GNU AGPL v3](https://www.gnu.org/licenses/agpl-3.0.html): if you modify the engine and offer it as a network service, you must publish your changes.
+- **UI (`/app`)** — [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0): permissive; use freely in any project.
+
+You are free to use Vayu for any purpose, commercial or personal, at no cost.

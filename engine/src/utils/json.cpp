@@ -134,10 +134,11 @@ Json serialize (const vayu::db::Collection& c) {
     json["id"] = c.id;
     json["parentId"] =
     c.parent_id.has_value () ? Json (c.parent_id.value ()) : Json (nullptr);
-    json["name"]      = c.name;
-    json["order"]     = c.order;
-    json["createdAt"] = c.created_at;
-    json["updatedAt"] = c.updated_at;
+    json["name"]        = c.name;
+    json["description"] = c.description;
+    json["order"]       = c.order;
+    json["createdAt"]   = c.created_at;
+    json["updatedAt"]   = c.updated_at;
 
     // Parse collection variables JSON
     if (c.variables.empty ()) {
@@ -150,6 +151,20 @@ Json serialize (const vayu::db::Collection& c) {
         }
     }
 
+    // Parse auth JSON
+    if (c.auth.empty ()) {
+        json["auth"] = Json::object ({ { "mode", "none" } });
+    } else {
+        try {
+            json["auth"] = Json::parse (c.auth);
+        } catch (const std::exception&) {
+            json["auth"] = Json::object ({ { "mode", "none" } });
+        }
+    }
+
+    json["preRequestScript"]  = c.pre_request_script;
+    json["postRequestScript"] = c.post_request_script;
+
     return json;
 }
 
@@ -158,53 +173,53 @@ Json serialize (const vayu::db::Request& r) {
     json["id"]           = r.id;
     json["collectionId"] = r.collection_id;
     json["name"]         = r.name;
+    json["description"]  = r.description;
     json["method"]       = to_string (r.method);
     json["url"]          = r.url;
+    json["order"]        = r.order;
 
-    // Query params
+    // Query params — stored as JSON array of KeyValueEntry
     if (r.params.empty ()) {
-        json["params"] = Json::object ();
+        json["params"] = Json::array ();
     } else {
         try {
             json["params"] = Json::parse (r.params);
         } catch (const std::exception&) {
-            json["params"] = Json::object ();
+            json["params"] = Json::array ();
         }
     }
 
-    // Safely parse JSON fields with exception handling to prevent "out of
-    // memory" errors from invalid JSON strings stored in the database
+    // Headers — stored as JSON array of KeyValueEntry
     if (r.headers.empty ()) {
-        json["headers"] = Json::object ();
+        json["headers"] = Json::array ();
     } else {
         try {
             json["headers"] = Json::parse (r.headers);
         } catch (const std::exception&) {
-            json["headers"] = Json::object ();
+            json["headers"] = Json::array ();
         }
     }
 
+    // Body — stored as JSON discriminated union {mode, content?} | {mode, fields?}
     if (r.body.empty ()) {
-        json["body"] = Json ();
+        json["body"] = Json::object ({ { "mode", "none" } });
     } else {
         try {
             json["body"] = Json::parse (r.body);
         } catch (const std::exception&) {
-            // If body is not valid JSON, store it as a string
-            json["body"] = r.body;
+            json["body"] = Json::object ({ { "mode", "none" } });
         }
     }
 
-    // Body type
     json["bodyType"] = r.body_type.empty () ? "none" : r.body_type;
 
     if (r.auth.empty ()) {
-        json["auth"] = Json::object ();
+        json["auth"] = Json::object ({ { "mode", "inherit" } });
     } else {
         try {
             json["auth"] = Json::parse (r.auth);
         } catch (const std::exception&) {
-            json["auth"] = Json::object ();
+            json["auth"] = Json::object ({ { "mode", "inherit" } });
         }
     }
 
@@ -217,8 +232,9 @@ Json serialize (const vayu::db::Request& r) {
 
 Json serialize (const vayu::db::Environment& e) {
     Json json;
-    json["id"]   = e.id;
-    json["name"] = e.name;
+    json["id"]          = e.id;
+    json["name"]        = e.name;
+    json["description"] = e.description;
 
     // Safely parse variables JSON with exception handling
     if (e.variables.empty ()) {
@@ -231,6 +247,7 @@ Json serialize (const vayu::db::Environment& e) {
         }
     }
 
+    json["isActive"]  = e.is_active;
     json["updatedAt"] = e.updated_at;
     return json;
 }
@@ -506,93 +523,88 @@ std::string pretty_print (const Json& json, bool color) {
 // ============================================================================
 
 void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
-    // Use constant for max field size
-    // This is a reasonable default for most use cases
     const size_t max_field_size = vayu::core::constants::json::MAX_FIELD_SIZE;
 
-    // Manually write JSON to stream to avoid building full object in memory
     out << "{";
     out << "\"id\":" << Json (r.id).dump () << ",";
     out << "\"collectionId\":" << Json (r.collection_id).dump () << ",";
     out << "\"name\":" << Json (r.name).dump () << ",";
+    out << "\"description\":" << Json (r.description).dump () << ",";
     out << "\"method\":" << Json (to_string (r.method)).dump () << ",";
     out << "\"url\":" << Json (r.url).dump () << ",";
+    out << "\"order\":" << r.order << ",";
 
-    // Query params
+    // Query params — JSON array of KeyValueEntry
     out << "\"params\":";
     if (r.params.empty ()) {
-        out << "{}";
+        out << "[]";
     } else {
         try {
-            // Validate size before parsing to prevent OOM
             if (r.params.size () > max_field_size) {
-                out << "{}";
+                out << "[]";
             } else {
                 auto parsed = Json::parse (r.params);
                 out << parsed.dump ();
             }
         } catch (const std::exception&) {
-            out << "{}";
+            out << "[]";
         }
     }
     out << ",";
 
-    // Headers
+    // Headers — JSON array of KeyValueEntry
     out << "\"headers\":";
     if (r.headers.empty ()) {
-        out << "{}";
+        out << "[]";
     } else {
         try {
             if (r.headers.size () > max_field_size) {
-                out << "{}";
+                out << "[]";
             } else {
                 auto parsed = Json::parse (r.headers);
                 out << parsed.dump ();
             }
         } catch (const std::exception&) {
-            out << "{}";
+            out << "[]";
         }
     }
     out << ",";
 
-    // Body
+    // Body — JSON discriminated union
     out << "\"body\":";
     if (r.body.empty ()) {
-        out << "null";
+        out << "{\"mode\":\"none\"}";
     } else {
         try {
             if (r.body.size () > max_field_size) {
-                // For very large bodies, just return as string
-                out << Json (r.body).dump ();
+                out << "{\"mode\":\"none\"}";
             } else {
                 auto parsed = Json::parse (r.body);
                 out << parsed.dump ();
             }
         } catch (const std::exception&) {
-            // If body is not valid JSON, store it as a string
-            out << Json (r.body).dump ();
+            out << "{\"mode\":\"none\"}";
         }
     }
     out << ",";
 
-    // Body type
     out << "\"bodyType\":" << Json (r.body_type.empty () ? "none" : r.body_type).dump ()
         << ",";
 
-    // Auth
+    // Auth — JSON RequestAuth object
     out << "\"auth\":";
     if (r.auth.empty ()) {
-        out << "{}";
+        out << "{\"mode\":\"inherit\"}";
     } else {
         try {
             if (r.auth.size () > max_field_size) {
-                out << "{}";
+                out << "{\"mode\":\"inherit\"}";
             } else {
                 auto parsed = Json::parse (r.auth);
                 out << parsed.dump ();
             }
         } catch (const std::exception&) {
-            out << "{}";
+            out << "{\"mode\":\"inherit\"}";
         }
     }
     out << ",";

@@ -51,8 +51,28 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
         line.pop_back ();
     }
 
-    // Skip empty lines and status line
-    if (line.empty () || line.starts_with ("HTTP/")) {
+    if (line.empty ()) {
+        return total_size;
+    }
+
+    // Status line: "HTTP/<version> <code> [<reason phrase>]"
+    // Capture the wire reason phrase so we can preserve server-custom
+    // text (e.g. "422 Unprocessable Entity", "404 Object Not Found").
+    // HTTP/2+ status lines have no phrase — leave status_text empty and
+    // let the caller fall back to a code→phrase lookup.
+    if (line.starts_with ("HTTP/")) {
+        auto first_space = line.find (' ');
+        if (first_space != std::string::npos) {
+            auto second_space = line.find (' ', first_space + 1);
+            if (second_space != std::string::npos && second_space + 1 < line.size ()) {
+                data->response.status_text = line.substr (second_space + 1);
+            } else {
+                data->response.status_text.clear ();
+            }
+        }
+        // Reset headers between redirect hops so we end up with the
+        // final response's set.
+        data->response.headers.clear ();
         return total_size;
     }
 

@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -10,90 +9,97 @@
  * useVariableResolver Hook
  *
  * Provides functions to resolve {{variables}} in strings using the current
- * variable context (globals, active collection, active environment).
+ * variable context (globals, collection chain, active environment).
  *
- * Resolution priority: Environment > Collection > Global
+ * Resolution priority (highest wins): Environment > Collection chain (leaf → root) > Global
+ * Within the collection chain, variables closer to the leaf override those closer to the root.
+ * Cached per (collectionId, environmentId) via useMemo.
  */
 
 import { useMemo, useCallback } from "react";
 import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import { useVariablesStore } from "@/stores";
-import type { VariableValue, ResolvedVariable } from "@/types";
+import type { VariableValue, ResolvedVariable, Collection } from "@/types";
+import { castByType } from "@/lib/variable-cast";
 
 interface UseVariableResolverOptions {
-	/** Override collection ID (e.g., from current request) */
 	collectionId?: string;
 }
 
 interface UseVariableResolverReturn {
-	/** Resolve all {{variables}} in a string */
 	resolveString: (input: string) => string;
-
-	/** Resolve variables in an object (deep, including nested strings) */
 	resolveObject: <T>(obj: T) => T;
-
-	/** Get resolved value for a specific variable name */
 	getVariable: (name: string) => ResolvedVariable | null;
-
-	/** Get all available variables with their sources */
 	getAllVariables: () => Record<string, ResolvedVariable>;
-
-	/** Check if a string contains any unresolved variables */
 	hasUnresolvedVariables: (input: string) => boolean;
 }
 
 const VARIABLE_PATTERN = /\{\{([^{}]+)\}\}/g;
 
+/** Build root-first ancestor chain for a collection (inclusive of the collection itself). */
+function buildCollectionChain(startId: string, collections: Collection[]): Collection[] {
+	const chain: Collection[] = [];
+	let currentId: string | undefined = startId;
+	while (currentId) {
+		const col = collections.find((c) => c.id === currentId);
+		if (!col) break;
+		chain.unshift(col); // root first
+		currentId = col.parentId;
+	}
+	return chain;
+}
+
 export function useVariableResolver(
 	options?: UseVariableResolverOptions
 ): UseVariableResolverReturn {
-	// Fetch all variable sources
 	const { data: globalsData } = useGlobalsQuery();
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
 
-	// Get active environment from variables store (set by VariableEditor when editing environments)
 	const { activeEnvironmentId, activeCollectionId: storeCollectionId } = useVariablesStore();
-
-	// Use option collectionId if provided, otherwise fall back to store
 	const activeCollectionId = options?.collectionId || storeCollectionId;
 
-	// Build flat variable map with sources
+	// Build variable map with hierarchical resolution:
+	// globals < collection chain (root → leaf) < environment
 	const variableMap = useMemo(() => {
 		const result: Record<string, ResolvedVariable> = {};
 
-		// Add globals first (lowest priority)
+		const resolve = (v: VariableValue, scope: ResolvedVariable["scope"]): ResolvedVariable => ({
+			value: v.value,
+			scope,
+			secret: v.secret,
+			type: v.type,
+			typedValue: castByType(v.value, v.type),
+		});
+
+		// 1. Globals (lowest priority)
 		if (globalsData?.variables) {
 			for (const [key, val] of Object.entries(globalsData.variables)) {
 				const v = val as VariableValue;
-				if (v.enabled) {
-					result[key] = { value: v.value, scope: "global", secret: v.secret };
-				}
+				if (v.enabled) result[key] = resolve(v, "global");
 			}
 		}
 
-		// Add collection variables (medium priority, overwrites globals)
+		// 2. Collection chain — root-first so leaf variables override parent variables
 		if (activeCollectionId) {
-			const col = collections.find((c) => c.id === activeCollectionId);
-			if (col?.variables) {
-				for (const [key, val] of Object.entries(col.variables)) {
-					const v = val as VariableValue;
-					if (v.enabled) {
-						result[key] = { value: v.value, scope: "collection", secret: v.secret };
+			const chain = buildCollectionChain(activeCollectionId, collections);
+			for (const col of chain) {
+				if (col.variables) {
+					for (const [key, val] of Object.entries(col.variables)) {
+						const v = val as VariableValue;
+						if (v.enabled) result[key] = resolve(v, "collection");
 					}
 				}
 			}
 		}
 
-		// Add environment variables (highest priority, overwrites all)
+		// 3. Environment (highest priority)
 		if (activeEnvironmentId) {
 			const env = environments.find((e) => e.id === activeEnvironmentId);
 			if (env?.variables) {
 				for (const [key, val] of Object.entries(env.variables)) {
 					const v = val as VariableValue;
-					if (v.enabled) {
-						result[key] = { value: v.value, scope: "environment", secret: v.secret };
-					}
+					if (v.enabled) result[key] = resolve(v, "environment");
 				}
 			}
 		}
@@ -102,24 +108,21 @@ export function useVariableResolver(
 	}, [globalsData, collections, environments, activeCollectionId, activeEnvironmentId]);
 
 	const getVariable = useCallback(
-		(name: string): ResolvedVariable | null => {
-			return variableMap[name] || null;
-		},
+		(name: string): ResolvedVariable | null => variableMap[name] || null,
 		[variableMap]
 	);
 
-	const getAllVariables = useCallback((): Record<string, ResolvedVariable> => {
-		return { ...variableMap };
-	}, [variableMap]);
+	const getAllVariables = useCallback(
+		(): Record<string, ResolvedVariable> => ({ ...variableMap }),
+		[variableMap]
+	);
 
 	const resolveString = useCallback(
 		(input: string): string => {
 			if (!input || typeof input !== "string") return input;
-
-			return input.replace(VARIABLE_PATTERN, (match, varName) => {
-				const trimmedName = varName.trim();
-				const source = variableMap[trimmedName];
-				return source ? source.value : match; // Keep original if not found
+			return input.replace(VARIABLE_PATTERN, (_match, varName) => {
+				const source = variableMap[varName.trim()];
+				return source ? source.value : "";
 			});
 		},
 		[variableMap]
@@ -128,15 +131,8 @@ export function useVariableResolver(
 	const resolveObject = useCallback(
 		<T>(obj: T): T => {
 			if (obj === null || obj === undefined) return obj;
-
-			if (typeof obj === "string") {
-				return resolveString(obj) as unknown as T;
-			}
-
-			if (Array.isArray(obj)) {
-				return obj.map((item) => resolveObject(item)) as unknown as T;
-			}
-
+			if (typeof obj === "string") return resolveString(obj) as unknown as T;
+			if (Array.isArray(obj)) return obj.map((item) => resolveObject(item)) as unknown as T;
 			if (typeof obj === "object") {
 				const result: Record<string, unknown> = {};
 				for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
@@ -144,7 +140,6 @@ export function useVariableResolver(
 				}
 				return result as T;
 			}
-
 			return obj;
 		},
 		[resolveString]
@@ -153,23 +148,12 @@ export function useVariableResolver(
 	const hasUnresolvedVariables = useCallback(
 		(input: string): boolean => {
 			if (!input || typeof input !== "string") return false;
-
 			const matches = input.match(VARIABLE_PATTERN);
 			if (!matches) return false;
-
-			return matches.some((match) => {
-				const varName = match.slice(2, -2).trim();
-				return !variableMap[varName];
-			});
+			return matches.some((match) => !variableMap[match.slice(2, -2).trim()]);
 		},
 		[variableMap]
 	);
 
-	return {
-		resolveString,
-		resolveObject,
-		getVariable,
-		getAllVariables,
-		hasUnresolvedVariables,
-	};
+	return { resolveString, resolveObject, getVariable, getAllVariables, hasUnresolvedVariables };
 }

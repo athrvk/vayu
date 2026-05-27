@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -134,7 +133,7 @@ export default function RequestBuilderProvider({
 
 				const restoredResponse: ResponseState = {
 					status: lastResult.statusCode || 0,
-					statusText: `${lastResult.statusCode || 0}`,
+					statusText: lastResult.statusText || "",
 					headers: trace.response.headers || {},
 					requestHeaders: trace.request?.headers || {},
 					rawRequest: trace.request

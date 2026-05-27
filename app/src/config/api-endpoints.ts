@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -63,4 +62,7 @@ export const API_ENDPOINTS = {
 	// Time-series metrics (JSON, paginated)
 	STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0) =>
 		`/stats/${runId}?format=json&limit=${limit}&offset=${offset}`,
+
+	// Import
+	IMPORT_FETCH: `/import/fetch`,
 } as const;

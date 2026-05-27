@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -61,9 +60,14 @@ export default function UnifiedResponseViewer({
 	if (!effectiveResponse?.body && !effectiveRequest) {
 		return (
 			<div className={cn("flex-1 flex items-center justify-center bg-card", className)}>
-				<div className="text-center space-y-2">
-					<FileText className="w-8 h-8 mx-auto text-muted-foreground/50" />
-					<p className="text-sm text-muted-foreground">No response data available</p>
+				<div className="flex flex-col items-center text-center">
+					<FileText className="w-16 h-16 text-muted-foreground mb-5" strokeWidth={1.5} />
+					<p className="text-[15px] font-medium text-foreground mb-1.5">
+						No response captured
+					</p>
+					<p className="text-[12px] text-muted-foreground">
+						This run finished without recording request or response data.
+					</p>
 				</div>
 			</div>
 		);
@@ -94,9 +98,7 @@ export default function UnifiedResponseViewer({
 	// Compact mode: simpler layout for embedded views
 	if (compact) {
 		return (
-			<div
-				className={cn("flex flex-col bg-card border overflow-hidden", className)}
-			>
+			<div className={cn("flex flex-col bg-card border overflow-hidden", className)}>
 				{/* Simple tab buttons */}
 				<div className="flex gap-2 p-3 border-b bg-muted/30">
 					<Button
@@ -349,7 +351,7 @@ function ResponseStatusBar({
 			{time !== undefined && (
 				<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
 					<Clock className="w-4 h-4" />
-					<span>{time} ms</span>
+					<span>{time.toFixed(4)} ms</span>
 				</div>
 			)}
 

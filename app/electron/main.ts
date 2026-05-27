@@ -38,14 +38,16 @@ function createWindow() {
 		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
+		// Center the macOS traffic lights inside our 32px titlebar (lights are ~12px)
+		trafficLightPosition: process.platform === "darwin" ? { x: 12, y: 10 } : undefined,
 		titleBarOverlay:
 			process.platform === "darwin"
-				? {
+				? false
+				: {
 						color: nativeTheme.shouldUseDarkColors ? "#1a1a1a" : "#ffffff",
 						symbolColor: nativeTheme.shouldUseDarkColors ? "#ffffff" : "#1a1a1a",
 						height: 40,
-					}
-				: false,
+					},
 		webPreferences: {
 			nodeIntegration: false,
 			contextIsolation: true,
@@ -87,8 +89,8 @@ function createWindow() {
 			themeSource: nativeTheme.themeSource,
 		});
 
-		// Update titlebar overlay color on macOS
-		if (process.platform === "darwin" && mainWindow) {
+		// Update titlebar overlay color (Windows/Linux only — unsupported on macOS)
+		if (process.platform !== "darwin" && mainWindow) {
 			mainWindow.setTitleBarOverlay({
 				color: nativeTheme.shouldUseDarkColors ? "#1a1a1a" : "#ffffff",
 				symbolColor: nativeTheme.shouldUseDarkColors ? "#ffffff" : "#1a1a1a",
@@ -298,7 +300,7 @@ function setupIpcHandlers() {
 	// Get app paths (app dir, logs path, db path)
 	ipcMain.handle("app:getPaths", () => {
 		const appDir = app.getAppPath();
-		
+
 		// Get data directory using the same logic as EngineSidecar
 		const isDev = process.env.NODE_ENV === "development";
 		let dataDir: string;
@@ -307,10 +309,10 @@ function setupIpcHandlers() {
 		} else {
 			dataDir = app.getPath("userData");
 		}
-		
+
 		const logsPath = path.join(dataDir, "logs");
 		const dbPath = path.join(dataDir, "db");
-		
+
 		return {
 			appDir,
 			dataDir,

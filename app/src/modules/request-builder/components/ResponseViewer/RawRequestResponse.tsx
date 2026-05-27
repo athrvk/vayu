@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -12,7 +11,7 @@
  * Displays raw HTTP request and response (similar to Postman).
  */
 
-import Editor from "@monaco-editor/react";
+import { CodeEditor } from "@/components/ui";
 import { buildRawResponse } from "@/components/shared/response-viewer";
 
 export interface RawRequestResponseProps {
@@ -44,21 +43,12 @@ export default function RawRequestResponse({ rawRequest, response }: RawRequestR
 	}
 
 	return (
-		<Editor
+		<CodeEditor
 			height="100%"
 			language="http"
 			value={combinedRaw}
-			theme="vs-dark"
-			options={{
-				readOnly: true,
-				minimap: { enabled: false },
-				fontSize: 13,
-				lineNumbers: "on",
-				scrollBeyondLastLine: false,
-				wordWrap: "on",
-				automaticLayout: true,
-				folding: false,
-			}}
+			readOnly
+			options={{ folding: false }}
 		/>
 	);
 }

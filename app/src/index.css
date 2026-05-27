@@ -2,8 +2,6 @@
 @config "../tailwind.config.js";
 
 /* Tailwind 4 theme configuration for custom colors */
-/* Define custom semantic colors that reference CSS variables */
-/* Using 'inline' preserves default Tailwind colors (green, red, etc.) */
 @theme inline {
 	--color-background: hsl(var(--background));
 	--color-foreground: hsl(var(--foreground));
@@ -19,11 +17,16 @@
 	--color-muted-foreground: hsl(var(--muted-foreground));
 	--color-accent: hsl(var(--accent));
 	--color-accent-foreground: hsl(var(--accent-foreground));
+	--color-accent-active: hsl(var(--accent-active));
 	--color-destructive: hsl(var(--destructive));
 	--color-destructive-foreground: hsl(var(--destructive-foreground));
+	--color-destructive-text: hsl(var(--destructive-text));
 	--color-border: hsl(var(--border));
+	--color-border-strong: hsl(var(--border-strong));
 	--color-input: hsl(var(--input));
 	--color-ring: hsl(var(--ring));
+	--color-panel: hsl(var(--panel));
+	--color-subtle-foreground: hsl(var(--subtle-foreground));
 	--color-success: hsl(var(--success));
 	--color-success-foreground: hsl(var(--success-foreground));
 	--color-warning: hsl(var(--warning));
@@ -39,98 +42,119 @@
 	--radius-lg: var(--radius);
 	--radius-md: calc(var(--radius) - 2px);
 	--radius-sm: calc(var(--radius) - 4px);
+
+	/* Font stacks — Tailwind v4 reads these to build the `font-sans` and
+	 * `font-mono` utilities. Without them, v4 uses its default UI stacks
+	 * (system-ui / ui-monospace), which on macOS resolves to SF Pro / Menlo
+	 * regardless of what's in tailwind.config.js. */
+	--font-sans: "Space Grotesk", system-ui, sans-serif;
+	--font-mono: "JetBrains Mono", "Consolas", "Monaco", monospace;
 }
 
 /*
  * Vayu Design System
- * 
- * Color Philosophy: Clean gray palette with orange accent
- * - Primary: Warm orange for actions, variables, highlights
- * - Neutral: Zinc-based grays for backgrounds, text, borders
- * 
- * Usage:
- * - bg-background, text-foreground (main app)
- * - bg-card, text-card-foreground (cards, panels)
- * - bg-primary, text-primary-foreground (buttons, badges)
- * - bg-muted, text-muted-foreground (subtle backgrounds, secondary text)
- * - bg-accent, text-accent-foreground (hover states)
- * - bg-destructive (errors, delete actions)
- * - border-border, border-input (borders)
- * - ring-ring (focus rings)
+ *
+ * Color Philosophy: 3-level elevation system
+ * Dark:  canvas (#09090b) → panel (#111113) → card (#1a1a1f)
+ * Light: warm stone canvas (#e6e3dc) → warm panel (#f2f0eb) → white card (#ffffff)
+ *
+ * Primary accent: Sunset orange (default), Electric cyan, Royal violet
  */
 
 @layer base {
 	:root {
-		/* Base colors - Light mode */
-		--background: 0 0% 100%; /* white */
-		--foreground: 240 10% 3.9%; /* near black */
+		/* ── Light mode — Warm Stone ── */
 
-		/* Card/Panel surfaces */
-		--card: 0 0% 100%; /* white */
-		--card-foreground: 240 10% 3.9%;
+		/* 3-level elevation */
+		--background: 42 17% 88%; /* #e6e3dc — warm stone canvas */
+		--card: 0 0% 100%; /* #ffffff — white card (floats on bg) */
+		--panel: 42 21% 94%; /* #f2f0eb — sidebar/panel (between canvas and card) */
 
-		/* Popover/Dropdown surfaces */
+		--card-foreground: 240 6% 10%;
 		--popover: 0 0% 100%;
-		--popover-foreground: 240 10% 3.9%;
+		--popover-foreground: 240 6% 10%;
 
-		/* Primary - Sunset (default, warm and energetic) */
-		--primary: 24.6 95% 53.1%; /* orange-500 */
-		--primary-foreground: 0 0% 100%; /* white text on orange */
+		/* Primary — Sunset orange (default) */
+		--primary: 24.6 95% 53.1%; /* #f97316 orange-500 */
+		--primary-foreground: 0 0% 100%;
 
-		/* Secondary - Subtle gray */
-		--secondary: 240 4.8% 95.9%; /* zinc-100 */
-		--secondary-foreground: 240 5.9% 10%;
+		/* Secondary */
+		--secondary: 42 21% 94%;
+		--secondary-foreground: 240 6% 10%;
 
-		/* Muted - For subtle backgrounds and disabled states */
-		--muted: 240 4.8% 95.9%; /* zinc-100 */
-		--muted-foreground: 240 3.8% 46.1%; /* zinc-500 */
+		/* Hover / active states */
+		--muted: 38 20% 89%; /* #e9e5de — accent-hover */
+		--muted-foreground: 240 4% 46%; /* #71717a — zinc-500 */
+		--accent: 38 20% 89%; /* #e9e5de — accent-hover */
+		--accent-foreground: 240 6% 10%;
+		--accent-active: 40 16% 85%; /* #dedad2 — accent-active / selected */
 
-		/* Accent - For hover states */
-		--accent: 240 4.8% 95.9%;
-		--accent-foreground: 240 5.9% 10%;
-
-		/* Destructive - For errors and delete actions */
-		--destructive: 0 84.2% 60.2%; /* red-500 */
-		--destructive-foreground: 0 0% 98%;
+		/* Foreground scale */
+		--foreground: 240 6% 10%; /* #18181b — zinc-900 */
+		--subtle-foreground: 240 7% 78%; /* #c4c4cc — muted placeholder */
 
 		/* Borders */
-		--border: 240 5.9% 90%; /* zinc-200 */
-		--input: 240 5.9% 90%; /* zinc-200 */
-		--ring: 24.6 95% 53.1%; /* orange for focus rings */
+		--border: 40 9% 80%; /* ≈ rgba(0,0,0,0.09) on warm stone */
+		--border-strong: 40 6% 72%; /* ≈ rgba(0,0,0,0.18) on warm stone */
+		--input: 40 9% 80%;
+		--ring: 24.6 95% 53.1%;
 
-		/* Chart colors */
-		--chart-1: 24.6 95% 53.1%; /* orange */
-		--chart-2: 173 58% 39%; /* teal */
-		--chart-3: 197 37% 24%; /* dark cyan */
-		--chart-4: 43 74% 66%; /* yellow */
-		--chart-5: 27 87% 67%; /* light orange */
+		/* Destructive */
+		--destructive: 0 84.2% 60.2%;
+		--destructive-foreground: 0 0% 98%;
+		--destructive-text: 0 60% 48%; /* muted rose — accessible text on light bg, ~4.8:1 */
 
-		/* Semantic colors for HTTP methods */
-		--method-get: 142 76% 36%; /* green */
-		--method-post: 217 91% 60%; /* blue */
-		--method-put: 38 92% 50%; /* amber */
-		--method-patch: 262 83% 58%; /* purple */
-		--method-delete: 0 84% 60%; /* red */
-		--method-head: 199 89% 48%; /* cyan */
-		--method-options: 240 5% 64%; /* gray */
+		/* Charts */
+		--chart-1: 24.6 95% 53.1%;
+		--chart-2: 173 58% 39%;
+		--chart-3: 197 37% 24%;
+		--chart-4: 43 74% 66%;
+		--chart-5: 27 87% 67%;
 
-		/* Variables highlight */
-		--variable: 24.6 95% 53.1%; /* sunset orange for {{variables}} */
+		/* HTTP method colors */
+		--method-get: 142 76% 36%;
+		--method-post: 217 91% 60%;
+		--method-put: 38 92% 50%;
+		--method-patch: 262 83% 58%;
+		--method-delete: 0 84% 60%;
+		--method-head: 199 89% 48%;
+		--method-options: 240 5% 64%;
+
+		/* Variable highlight */
+		--variable: 24.6 95% 53.1%;
+
+		/* Semantic */
+		--success: 142 76% 36%;
+		--success-foreground: 0 0% 100%;
+		--warning: 38 92% 50%;
+		--warning-foreground: 0 0% 100%;
+		--info: 199 89% 48%;
+		--info-foreground: 0 0% 100%;
+
+		/* Geometry */
+		--radius: 0.375rem;
 	}
 
-	/* Color Schemes - Modern Themes */
-	[data-color-scheme="sky"] {
-		/* Sky - Light sky blue, calm and airy like clouds */
-		--primary: 199 89% 48%; /* sky-500 */
+	/* ── Accent color schemes (light mode) ── */
+
+	[data-color-scheme="sunset"] {
+		--primary: 24.6 95% 53.1%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 199 89% 48%;
-		--variable: 199 89% 48%;
-		--chart-1: 199 89% 48%;
+		--ring: 24.6 95% 53.1%;
+		--variable: 24.6 95% 53.1%;
+		--chart-1: 24.6 95% 53.1%;
+	}
+
+	[data-color-scheme="sky"] {
+		--primary: 188 94% 43%; /* #22d3ee cyan-400 */
+		--primary-foreground: 0 0% 100%;
+		--ring: 188 94% 43%;
+		--variable: 188 94% 43%;
+		--chart-1: 188 94% 43%;
 	}
 
 	[data-color-scheme="ocean"] {
-		/* Ocean - Deep blue, calm and professional */
-		--primary: 217 91% 60%; /* blue-500 */
+		--primary: 217 91% 60%;
 		--primary-foreground: 0 0% 100%;
 		--ring: 217 91% 60%;
 		--variable: 217 91% 60%;
@@ -138,103 +162,82 @@
 	}
 
 	[data-color-scheme="forest"] {
-		/* Forest - Fresh green, nature-inspired and calm */
-		--primary: 142 76% 36%; /* green-600 */
+		--primary: 142 76% 36%;
 		--primary-foreground: 0 0% 100%;
 		--ring: 142 76% 36%;
 		--variable: 142 76% 36%;
 		--chart-1: 142 76% 36%;
 	}
 
-	[data-color-scheme="sunset"] {
-		/* Sunset - Warm orange, energetic and vibrant */
-		--primary: 24.6 95% 53.1%; /* orange-500 */
-		--primary-foreground: 0 0% 100%;
-		--ring: 24.6 95% 53.1%;
-		--variable: 24.6 95% 53.1%;
-		--chart-1: 24.6 95% 53.1%;
-	}
-
 	[data-color-scheme="aurora"] {
-		/* Aurora - Purple/blue, magical and modern */
-		--primary: 262 83% 58%; /* purple-500 */
+		--primary: 258 87% 74%; /* #a78bfa violet-400 */
 		--primary-foreground: 0 0% 100%;
-		--ring: 262 83% 58%;
-		--variable: 262 83% 58%;
-		--chart-1: 262 83% 58%;
+		--ring: 258 87% 74%;
+		--variable: 258 87% 74%;
+		--chart-1: 258 87% 74%;
 	}
 
 	[data-color-scheme="coral"] {
-		/* Coral - Warm pink/coral, vibrant and energetic */
-		--primary: 0 72% 65%; /* rose-400 */
+		--primary: 0 72% 65%;
 		--primary-foreground: 0 0% 100%;
 		--ring: 0 72% 65%;
 		--variable: 0 72% 65%;
 		--chart-1: 0 72% 65%;
 	}
 
-	/* Success/Warning/Info */
-	:root {
-		--success: 142 76% 36%; /* green-600 */
-		--success-foreground: 0 0% 100%;
-		--warning: 38 92% 50%; /* amber-500 */
-		--warning-foreground: 0 0% 100%;
-		--info: 199 89% 48%; /* sky-500 */
-		--info-foreground: 0 0% 100%;
-
-		/* Radius */
-		--radius: 0.2rem;
-	}
+	/* ── Dark mode ── */
 
 	.dark {
-		/* Base colors - Dark mode */
-		--background: 240 10% 3.9%; /* near black */
-		--foreground: 0 0% 98%; /* near white */
+		/* 3-level elevation */
+		--background: 240 10% 4%; /* #09090b — outermost canvas */
+		--card: 240 6% 11%; /* #1a1a1f — elevated surface */
+		--panel: 240 6% 7%; /* #111113 — sidebar/panel bg */
 
-		/* Card/Panel surfaces */
-		--card: 240 10% 3.9%;
-		--card-foreground: 0 0% 98%;
+		--card-foreground: 240 5% 96%;
+		--popover: 240 6% 11%;
+		--popover-foreground: 240 5% 96%;
 
-		/* Popover/Dropdown surfaces */
-		--popover: 240 10% 3.9%;
-		--popover-foreground: 0 0% 98%;
-
-		/* Primary - Sunset (slightly adjusted for dark, default) */
-		--primary: 20.5 90.2% 48.2%; /* orange-600 */
+		/* Primary — Sunset orange (default) */
+		--primary: 24.6 95% 53.1%;
 		--primary-foreground: 0 0% 100%;
 
 		/* Secondary */
-		--secondary: 240 3.7% 15.9%; /* zinc-800 */
-		--secondary-foreground: 0 0% 98%;
+		--secondary: 240 7% 16%;
+		--secondary-foreground: 240 5% 96%;
 
-		/* Muted */
-		--muted: 240 3.7% 15.9%;
-		--muted-foreground: 240 5% 64.9%;
+		/* Hover / active states */
+		--muted: 240 7% 16%; /* #26262c — accent-hover */
+		--muted-foreground: 240 5% 65%; /* #a1a1aa — zinc-400 */
+		--accent: 240 7% 16%; /* #26262c — accent-hover */
+		--accent-foreground: 240 5% 96%;
+		--accent-active: 240 6% 21%; /* #323238 — accent-active / selected */
 
-		/* Accent */
-		--accent: 240 3.7% 15.9%;
-		--accent-foreground: 0 0% 98%;
+		/* Foreground scale */
+		--foreground: 240 5% 96%; /* #f4f4f5 — zinc-100 */
+		--subtle-foreground: 240 5% 34%; /* #52525b — zinc-600 */
+
+		/* Borders */
+		--border: 0 0% 10%; /* ≈ rgba(255,255,255,0.07) on dark canvas */
+		--border-strong: 0 0% 18%; /* ≈ rgba(255,255,255,0.15) on dark canvas */
+		--input: 240 6% 11%;
+		--ring: 24.6 95% 53.1%;
 
 		/* Destructive */
 		--destructive: 0 62.8% 30.6%;
 		--destructive-foreground: 0 0% 98%;
+		--destructive-text: 0 65% 63%; /* muted rose — accessible text on dark bg, ~4.5:1 */
 
-		/* Borders */
-		--border: 240 3.7% 15.9%;
-		--input: 240 3.7% 15.9%;
-		--ring: 20.5 90.2% 48.2%;
-
-		/* Chart colors (adjusted for dark mode) */
-		--chart-1: 20.5 90.2% 48.2%;
+		/* Charts */
+		--chart-1: 24.6 95% 53.1%;
 		--chart-2: 160 60% 45%;
 		--chart-3: 30 80% 55%;
 		--chart-4: 280 65% 60%;
 		--chart-5: 340 75% 55%;
 
-		/* Variables highlight (dark mode) */
-		--variable: 20.5 90.2% 48.2%; /* sunset orange */
+		/* Variable highlight */
+		--variable: 24.6 95% 53.1%;
 
-		/* Success/Warning/Info (dark mode) */
+		/* Semantic */
 		--success: 142 70% 45%;
 		--success-foreground: 0 0% 100%;
 		--warning: 38 92% 50%;
@@ -243,19 +246,26 @@
 		--info-foreground: 0 0% 100%;
 	}
 
-	/* Color Schemes - Dark Mode */
-	.dark[data-color-scheme="sky"] {
-		/* Sky - Adjusted for dark mode */
-		--primary: 199 89% 48%; /* sky-500 */
+	/* ── Accent color schemes (dark mode) ── */
+
+	.dark[data-color-scheme="sunset"] {
+		--primary: 24.6 95% 53.1%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 199 89% 48%;
-		--variable: 199 89% 48%;
-		--chart-1: 199 89% 48%;
+		--ring: 24.6 95% 53.1%;
+		--variable: 24.6 95% 53.1%;
+		--chart-1: 24.6 95% 53.1%;
+	}
+
+	.dark[data-color-scheme="sky"] {
+		--primary: 188 94% 43%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 188 94% 43%;
+		--variable: 188 94% 43%;
+		--chart-1: 188 94% 43%;
 	}
 
 	.dark[data-color-scheme="ocean"] {
-		/* Ocean - Deep blue for dark mode */
-		--primary: 217 78% 51%; /* blue-600 */
+		--primary: 217 78% 51%;
 		--primary-foreground: 0 0% 100%;
 		--ring: 217 78% 51%;
 		--variable: 217 78% 51%;
@@ -263,35 +273,23 @@
 	}
 
 	.dark[data-color-scheme="forest"] {
-		/* Forest - Fresh green for dark mode */
-		--primary: 142 70% 45%; /* green-600 */
+		--primary: 142 70% 45%;
 		--primary-foreground: 0 0% 100%;
 		--ring: 142 70% 45%;
 		--variable: 142 70% 45%;
 		--chart-1: 142 70% 45%;
 	}
 
-	.dark[data-color-scheme="sunset"] {
-		/* Sunset - Warm orange for dark mode */
-		--primary: 20.5 90.2% 48.2%; /* orange-600 */
-		--primary-foreground: 0 0% 100%;
-		--ring: 20.5 90.2% 48.2%;
-		--variable: 20.5 90.2% 48.2%;
-		--chart-1: 20.5 90.2% 48.2%;
-	}
-
 	.dark[data-color-scheme="aurora"] {
-		/* Aurora - Purple/blue for dark mode */
-		--primary: 262 80% 50%; /* purple-600 */
+		--primary: 258 87% 74%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 262 80% 50%;
-		--variable: 262 80% 50%;
-		--chart-1: 262 80% 50%;
+		--ring: 258 87% 74%;
+		--variable: 258 87% 74%;
+		--chart-1: 258 87% 74%;
 	}
 
 	.dark[data-color-scheme="coral"] {
-		/* Coral - Warm pink for dark mode */
-		--primary: 0 72% 55%; /* rose-500 */
+		--primary: 0 72% 55%;
 		--primary-foreground: 0 0% 100%;
 		--ring: 0 72% 55%;
 		--variable: 0 72% 55%;
@@ -312,7 +310,7 @@
 
 	body {
 		@apply bg-background text-foreground;
-		font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+		font-family: "Space Grotesk", system-ui, sans-serif;
 		height: 100%;
 		margin: 0;
 		padding: 0;
@@ -324,7 +322,34 @@
 	}
 }
 
-/* Custom scrollbar using theme colors */
+/* Animations */
+@keyframes vayu-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes vayu-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+
+@keyframes vayu-fadepulse {
+	0%,
+	100% {
+		opacity: 0.9;
+	}
+	50% {
+		opacity: 0.5;
+	}
+}
+
+/* Custom scrollbar */
 @layer components {
 	.scrollbar-thin {
 		scrollbar-width: thin;
@@ -348,10 +373,9 @@
 	}
 }
 
-/* Code/Mono styling */
 @layer utilities {
 	.font-code {
-		font-family: "Consolas", "Monaco", "Courier New", monospace;
+		font-family: "JetBrains Mono", "Consolas", "Monaco", monospace;
 	}
 
 	.truncate-2-lines {
@@ -361,13 +385,12 @@
 		overflow: hidden;
 	}
 
-	/* Variable highlight in text */
 	.variable-highlight {
 		@apply text-[hsl(var(--variable))] font-medium;
 	}
 }
 
-/* HTTP Method colors - utility classes */
+/* HTTP Method color utilities */
 @layer utilities {
 	.method-get {
 		@apply text-[hsl(var(--method-get))];

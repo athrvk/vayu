@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -19,8 +18,7 @@
 
 import { useState, useMemo } from "react";
 import { FileCode, Image as ImageIcon, File, Eye, Code, FileText } from "lucide-react";
-import Editor from "@monaco-editor/react";
-import { Button } from "@/components/ui";
+import { Button, CodeEditor } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { detectBodyType, getMonacoLanguage, formatBody } from "./utils";
 import type { ResponseBodyProps, ViewMode } from "./types";
@@ -49,7 +47,10 @@ export default function ResponseBody({
 	const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
 
 	// Detect body type from content and headers
-	const detectedType = useMemo(() => detectBodyType(headers, bodyRaw || body), [headers, bodyRaw, body]);
+	const detectedType = useMemo(
+		() => detectBodyType(headers, bodyRaw || body),
+		[headers, bodyRaw, body]
+	);
 
 	// Check if preview is available
 	const canPreview = detectedType === "html" || detectedType === "image";
@@ -245,20 +246,12 @@ export default function ResponseBody({
 						title="HTML Preview"
 					/>
 				) : (
-					<Editor
+					<CodeEditor
 						height={height}
 						language={viewMode === "raw" ? "plaintext" : language}
 						value={formattedBody}
-						theme="vs-dark"
-						options={{
-							readOnly: true,
-							minimap: { enabled: false },
-							fontSize: compact ? 12 : 13,
-							lineNumbers: "on",
-							scrollBeyondLastLine: false,
-							wordWrap: "on",
-							automaticLayout: true,
-						}}
+						readOnly
+						fontSize={compact ? 12 : 13}
 					/>
 				)}
 			</div>

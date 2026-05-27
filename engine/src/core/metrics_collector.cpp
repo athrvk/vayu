@@ -11,6 +11,7 @@
  */
 
 #include "vayu/core/metrics_collector.hpp"
+#include "vayu/http/status.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -203,6 +204,7 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
             db_result.run_id      = run_id_;
             db_result.timestamp   = error.timestamp;
             db_result.status_code = 0;
+            db_result.status_text = vayu::http::status_text (0);
             db_result.latency_ms  = 0.0;
             db_result.error       = error.error_message;
             db_result.trace_data  = error.trace_data;
@@ -218,6 +220,10 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
             db_result.run_id      = run_id_;
             db_result.timestamp   = success.timestamp;
             db_result.status_code = success.status_code;
+            // ResultRecord doesn't carry the wire reason phrase; derive
+            // from code via the shared helper. The single-request design
+            // path (execution.cpp) preserves the wire phrase directly.
+            db_result.status_text = vayu::http::status_text (success.status_code);
             db_result.latency_ms  = success.latency_ms;
             db_result.trace_data  = success.trace_data;
             batch.push_back (std::move (db_result));

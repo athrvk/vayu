@@ -120,8 +120,11 @@ cd app && pnpm format:check        # Prettier
 
 - Strict TypeScript — no `any`, no `@ts-ignore` without justification
 - Component files: PascalCase `.tsx`; utilities: camelCase `.ts`
+- App UI is feature-organized: `app/src/modules/<feature>/` (request-builder, collections, dashboard, history, variables, settings, welcome); shared shell + primitives in `app/src/components/` (layout, ui, shared, status). See `docs/app/COMPONENTS.md`.
+- Import parsers: `app/src/services/importers/` (factory → ordered detectors → drafts → orchestrator); per-format docs in `docs/app/import-collections/`.
 - State: Zustand for UI state, TanStack Query for server state
-- Styling: Tailwind CSS
+- Styling: Tailwind CSS v4 — all colors via CSS custom properties; see `docs/design-system.md`
+- **Design system:** `docs/design-system.md` — tokens, elevation, typography, component patterns. Read this before touching any UI file.
 
 ## Engine HTTP API
 
@@ -143,9 +146,14 @@ See `docs/engine/api-reference.md` for full reference.
 3. Tag: `git tag v$(cat VERSION) && git push origin --tags`
 4. CI builds and uploads installers automatically.
 
+macOS also ships a one-command installer: `install.sh` (repo root) downloads the release zip, ad-hoc signs the app + sidecar on-device, and strips quarantine (no Apple Developer cert). Unit-tested via `scripts/test/install_test.sh` (set `VAYU_DRYRUN=1`), shellchecked in CI on Linux + macOS.
+
 ## Key Docs
 
 - `docs/architecture.md` — sidecar pattern details
 - `docs/building.md` — platform-specific build notes
+- `docs/design-system.md` — UI tokens, elevation, component patterns, typography
+- `docs/app/COMPONENTS.md` — React component architecture (`modules/` + `components/`)
+- `docs/app/import-collections/` — import parser pipeline + per-format mapping (Postman/Insomnia/OpenAPI)
 - `docs/engine/api-reference.md` — engine HTTP API
 - `CONTRIBUTING.md` — PR process and code style

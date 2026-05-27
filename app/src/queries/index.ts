@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -22,6 +21,7 @@ export {
 	useRequestsQuery,
 	useMultipleCollectionRequests,
 	useRequestQuery,
+	useCollectionAncestors,
 	useCreateCollectionMutation,
 	useUpdateCollectionMutation,
 	useDeleteCollectionMutation,

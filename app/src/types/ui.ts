@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -16,6 +15,7 @@ export type SidebarTab = "collections" | "history" | "variables" | "settings";
 // Main Screen Views
 export type MainScreen =
 	| "request-builder"
+	| "collection-detail"
 	| "dashboard"
 	| "history"
 	| "variables"

@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -50,17 +49,15 @@ export function formatPercent(value: number, total: number): string {
 /**
  * Get HTTP method color class
  */
+/**
+ * Returns the CSS variable reference for an HTTP method's color token.
+ * Use as: `hsl(${getMethodColor(method)})` for a solid color,
+ *      or `hsl(${getMethodColor(method)} / 0.1)` for a tinted background.
+ */
 export function getMethodColor(method: string): string {
-	const colors: Record<string, string> = {
-		GET: "text-blue-600 bg-blue-50",
-		POST: "text-green-600 bg-green-50",
-		PUT: "text-yellow-600 bg-yellow-50",
-		PATCH: "text-purple-600 bg-purple-50",
-		DELETE: "text-red-600 bg-red-50",
-		HEAD: "text-gray-600 bg-gray-50",
-		OPTIONS: "text-gray-600 bg-gray-50",
-	};
-	return colors[method.toUpperCase()] || "text-gray-600 bg-gray-50";
+	const m = method.toLowerCase();
+	const known = ["get", "post", "put", "patch", "delete", "head", "options"];
+	return known.includes(m) ? `var(--method-${m})` : "var(--method-options)";
 }
 
 export function loadTestTypeToLabel(type: LoadTestConfig["mode"] | string): string {

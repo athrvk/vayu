@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -76,12 +75,7 @@ export default function SampleRequestCard({
 					{formatTimestamp(sample.timestamp)}
 				</span>
 
-				<div
-					className={cn(
-						"w-2 h-2 transition-transform",
-						isExpanded && "rotate-180"
-					)}
-				>
+				<div className={cn("w-2 h-2 transition-transform", isExpanded && "rotate-180")}>
 					<div className="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[6px] border-l-transparent border-r-transparent border-t-muted-foreground" />
 				</div>
 			</button>

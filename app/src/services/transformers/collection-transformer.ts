@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -9,40 +8,39 @@
 /**
  * Collection Transformer
  *
- * Transforms backend collection format to frontend format.
- * Handles date conversion (number to ISO string) for createdAt/updatedAt fields.
+ * Transforms backend collection format to frontend domain Collection type.
+ * Handles timestamp conversion and provides safe defaults for new fields.
  */
 
-import type { Collection } from "@/types";
+import type { Collection, RequestAuth } from "@/types";
 
-/**
- * Backend collection format (camelCase with number timestamps)
- */
-export type BackendCollection = Omit<Collection, "createdAt" | "updatedAt"> & {
-	createdAt: number | string;
-	updatedAt: number | string;
-};
-
-/**
- * Collection Transformer
- *
- * Converts backend collection (with number timestamps) to frontend format (with ISO string timestamps).
- */
 export class CollectionTransformer {
-	/**
-	 * Transform backend collection to frontend collection
-	 * Converts createdAt/updatedAt from number (Unix timestamp ms) to ISO string
-	 */
-	static toFrontend(backendCollection: BackendCollection): Collection {
-		if (!backendCollection.id) {
-			throw new Error("Collection must have an id");
+	static toFrontend(raw: Record<string, any>): Collection {
+		if (!raw.id) throw new Error("Collection must have an id");
+
+		// Auth: defaults to {mode: "none"} if missing or malformed
+		let auth: Exclude<RequestAuth, { mode: "inherit" }> = { mode: "none" };
+		if (
+			raw.auth &&
+			typeof raw.auth === "object" &&
+			raw.auth.mode &&
+			raw.auth.mode !== "inherit"
+		) {
+			auth = raw.auth as Exclude<RequestAuth, { mode: "inherit" }>;
 		}
 
-		// Handle createdAt/updatedAt conversion from number to string if needed
 		return {
-			...backendCollection,
-			createdAt: new Date(backendCollection.createdAt).toISOString(),
-			updatedAt: new Date(backendCollection.updatedAt).toISOString(),
+			id: raw.id,
+			name: raw.name ?? "",
+			description: raw.description ?? "",
+			parentId: raw.parentId ?? undefined,
+			order: raw.order ?? 0,
+			variables: raw.variables ?? {},
+			auth,
+			preRequestScript: raw.preRequestScript ?? "",
+			postRequestScript: raw.postRequestScript ?? "",
+			createdAt: new Date(raw.createdAt).toISOString(),
+			updatedAt: new Date(raw.updatedAt).toISOString(),
 		};
 	}
 }

@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -9,7 +8,7 @@
 /**
  * Error codes matching backend ErrorCode enum
  * Keep in sync with engine/include/vayu/types.hpp
- * 
+ *
  * Note: The engine sends errorCode and errorMessage directly in responses.
  * The UI should use errorMessage as-is without re-mapping.
  */

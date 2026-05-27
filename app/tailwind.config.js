@@ -31,14 +31,22 @@ export default {
 				accent: {
 					DEFAULT: "hsl(var(--accent))",
 					foreground: "hsl(var(--accent-foreground))",
+					active: "hsl(var(--accent-active))",
 				},
 				destructive: {
 					DEFAULT: "hsl(var(--destructive))",
 					foreground: "hsl(var(--destructive-foreground))",
 				},
 				border: "hsl(var(--border))",
+				"border-strong": "hsl(var(--border-strong))",
 				input: "hsl(var(--input))",
 				ring: "hsl(var(--ring))",
+
+				// Panel — sidebar / panel bg (between background and card)
+				panel: "hsl(var(--panel))",
+
+				// Subtle foreground for truly de-emphasized text
+				"subtle-foreground": "hsl(var(--subtle-foreground))",
 
 				// Status colors
 				success: {
@@ -67,8 +75,8 @@ export default {
 				variable: "hsl(var(--variable))",
 			},
 			fontFamily: {
-				sans: ["Inter", "system-ui", "Avenir", "Helvetica", "Arial", "sans-serif"],
-				mono: ["Consolas", "Monaco", "Courier New", "monospace"],
+				sans: ["Space Grotesk", "system-ui", "sans-serif"],
+				mono: ["JetBrains Mono", "Consolas", "Monaco", "monospace"],
 			},
 			borderRadius: {
 				lg: "var(--radius)",
@@ -92,12 +100,26 @@ export default {
 					from: { transform: "translateY(-10px)", opacity: "0" },
 					to: { transform: "translateY(0)", opacity: "1" },
 				},
+				"vayu-spin": {
+					to: { transform: "rotate(360deg)" },
+				},
+				"vayu-pulse": {
+					"0%, 100%": { opacity: "1" },
+					"50%": { opacity: "0.35" },
+				},
+				"vayu-fadepulse": {
+					"0%, 100%": { opacity: "0.9" },
+					"50%": { opacity: "0.5" },
+				},
 			},
 			animation: {
 				"accordion-down": "accordion-down 0.2s ease-out",
 				"accordion-up": "accordion-up 0.2s ease-out",
 				"fade-in": "fade-in 0.2s ease-out",
 				"slide-in": "slide-in 0.2s ease-out",
+				"vayu-spin": "vayu-spin 0.7s linear infinite",
+				"vayu-pulse": "vayu-pulse 1.6s ease-in-out infinite",
+				"vayu-fadepulse": "vayu-fadepulse 2s ease-in-out infinite",
 			},
 		},
 	},

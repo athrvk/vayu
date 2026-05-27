@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -6,29 +5,53 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useState, useRef, useEffect } from "react";
+import { useEffect } from "react";
 import { useNavigationStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
+import { useResizable } from "@/hooks";
+import { cn } from "@/lib/utils";
 import Sidebar from "./Sidebar";
-// Main content modules (displayed in main content area)
 import RequestBuilder from "@/modules/request-builder";
+import CollectionDetail from "@/modules/collections/CollectionDetail";
 import LoadTestDashboard from "@/modules/dashboard";
 import { HistoryDetail } from "@/modules/history/main";
 import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
 import { SettingsMain } from "@/modules/settings";
 import VariablesMain from "@/modules/variables/main/VariablesMain";
-import { cn } from "@/lib/utils";
+import { ImportModal } from "@/modules/collections/ImportModal";
 
+/**
+ * Sidebar width bounds.
+ *
+ * `History` runs need more breathing room than the Collections tree —
+ * each RunItem renders a method badge, status text, relative timestamp,
+ * URL, and (for load tests) duration / workers / mode chips. Bump the
+ * floor when that tab is active so URLs don't truncate into single
+ * characters.
+ */
 const MIN_SIDEBAR_WIDTH = 280;
+const MIN_SIDEBAR_WIDTH_HISTORY = 420;
 const MAX_SIDEBAR_WIDTH = 600;
+// Width of the collapsed sidebar — matches the activity bar's `w-11` (44px) in Sidebar.
+const ACTIVITY_BAR_WIDTH = 44;
 
 export default function Shell() {
-	const { resolveActiveScreen } = useNavigationStore();
+	const { resolveActiveScreen, activeSidebarTab, sidebarPanelOpen } = useNavigationStore();
 	const activeScreen = resolveActiveScreen();
 	const { triggerSave } = useSaveStore();
-	const [sidebarWidth, setSidebarWidth] = useState(320);
-	const [isResizing, setIsResizing] = useState(false);
-	const sidebarRef = useRef<HTMLDivElement>(null);
+
+	const minSidebarWidth =
+		activeSidebarTab === "history" ? MIN_SIDEBAR_WIDTH_HISTORY : MIN_SIDEBAR_WIDTH;
+
+	const {
+		size: sidebarWidth,
+		isResizing,
+		startResizing,
+	} = useResizable({
+		defaultSize: 320,
+		min: minSidebarWidth,
+		max: MAX_SIDEBAR_WIDTH,
+	});
 
 	// App-wide Ctrl/Cmd+S keyboard handler
 	useEffect(() => {
@@ -43,44 +66,12 @@ export default function Shell() {
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [triggerSave]);
 
-	// Global mouse event handlers for resizing
-	useEffect(() => {
-		const handleMouseMove = (e: MouseEvent) => {
-			if (!isResizing) return;
-
-			const newWidth = e.clientX;
-			if (newWidth >= MIN_SIDEBAR_WIDTH && newWidth <= MAX_SIDEBAR_WIDTH) {
-				setSidebarWidth(newWidth);
-			}
-		};
-
-		const handleMouseUp = () => {
-			setIsResizing(false);
-		};
-
-		if (isResizing) {
-			document.addEventListener("mousemove", handleMouseMove);
-			document.addEventListener("mouseup", handleMouseUp);
-			document.body.style.cursor = "col-resize";
-			document.body.style.userSelect = "none";
-		}
-
-		return () => {
-			document.removeEventListener("mousemove", handleMouseMove);
-			document.removeEventListener("mouseup", handleMouseUp);
-			document.body.style.cursor = "";
-			document.body.style.userSelect = "";
-		};
-	}, [isResizing]);
-
-	const handleMouseDown = () => {
-		setIsResizing(true);
-	};
-
 	const renderMainContent = () => {
 		switch (activeScreen) {
 			case "request-builder":
 				return <RequestBuilder />;
+			case "collection-detail":
+				return <CollectionDetail />;
 			case "dashboard":
 				return <LoadTestDashboard />;
 			case "history":
@@ -97,30 +88,35 @@ export default function Shell() {
 
 	return (
 		<div className="flex h-full bg-background overflow-hidden">
-			{/* Sidebar Container - Handles width constraints */}
+			<ImportModal />
+			{/* Sidebar container — controlled width; collapses to the activity bar */}
 			<div
-				ref={sidebarRef}
-				style={{
-					width: `${sidebarWidth}px`,
-					minWidth: `${MIN_SIDEBAR_WIDTH}px`,
-					maxWidth: `${MAX_SIDEBAR_WIDTH}px`,
-				}}
+				style={
+					sidebarPanelOpen
+						? {
+								width: `${sidebarWidth}px`,
+								minWidth: `${minSidebarWidth}px`,
+								maxWidth: `${MAX_SIDEBAR_WIDTH}px`,
+							}
+						: { width: `${ACTIVITY_BAR_WIDTH}px` }
+				}
 				className="flex-shrink-0 flex flex-col overflow-hidden"
 			>
 				<Sidebar />
 			</div>
 
-			{/* Resize Handle */}
-			<div
-				onMouseDown={handleMouseDown}
-				className={cn(
-					"w-1 bg-border hover:bg-primary cursor-col-resize transition-colors shrink-0",
-					isResizing && "bg-primary"
-				)}
-				title="Drag to resize sidebar"
-			/>
+			{/* Resize handle — only when the panel is expanded */}
+			{sidebarPanelOpen && (
+				<div
+					onMouseDown={startResizing}
+					className={cn(
+						"w-1 bg-border hover:bg-primary cursor-col-resize transition-colors shrink-0",
+						isResizing && "bg-primary"
+					)}
+				/>
+			)}
 
-			{/* Main Content Container - Handles overflow */}
+			{/* Main content */}
 			<main className="flex-1 flex flex-col overflow-hidden min-w-0">
 				{renderMainContent()}
 			</main>

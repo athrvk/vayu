@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -13,8 +12,7 @@
  */
 
 import { useState } from "react";
-import Editor from "@monaco-editor/react";
-import { Button, Badge } from "@/components/ui";
+import { Button, Badge, CodeEditor } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 
 export default function PreScriptPanel() {
@@ -35,8 +33,8 @@ export default function PreScriptPanel() {
 	const allVariables = getAllVariables();
 	const hasReferencedVars = usedVars.length > 0;
 
-	const handleChange = (value: string | undefined) => {
-		updateField("preRequestScript", value || "");
+	const handleChange = (value: string) => {
+		updateField("preRequestScript", value);
 	};
 
 	return (
@@ -84,7 +82,7 @@ export default function PreScriptPanel() {
 			{/* All Variables Panel */}
 			{showVariables && (
 				<div className="p-3 bg-muted/50 border border-input max-h-40 overflow-y-auto">
-					<div className="grid grid-cols-2 gap-2 text-xs font-mono">	
+					<div className="grid grid-cols-2 gap-2 text-xs font-mono">
 						{Object.entries(allVariables).map(([name, info]) => (
 							<div key={name} className="flex items-center gap-2">
 								<Badge variant="outline" className="text-[10px] px-1">
@@ -100,21 +98,11 @@ export default function PreScriptPanel() {
 
 			{/* Script Editor */}
 			<div className="border border-input overflow-hidden">
-				<Editor
+				<CodeEditor
 					height="350px"
 					language="javascript"
 					value={request.preRequestScript}
 					onChange={handleChange}
-					theme="vs-dark"
-					options={{
-						minimap: { enabled: false },
-						fontSize: 13,
-						lineNumbers: "on",
-						scrollBeyondLastLine: false,
-						wordWrap: "on",
-						tabSize: 2,
-						automaticLayout: true,
-					}}
 				/>
 			</div>
 

@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -62,6 +61,7 @@ export function VariablePopover({
 	const [editValue, setEditValue] = useState(varInfo?.value || "");
 	const [isSecretRevealed, setIsSecretRevealed] = useState(false);
 	const openValueRef = useRef(varInfo?.value || "");
+	const pendingCancelRef = useRef(false);
 
 	// Reset reveal state when popover closes
 	useEffect(() => {
@@ -77,24 +77,28 @@ export function VariablePopover({
 		}
 	}, [varInfo?.value, isOpen]);
 
-	// Initialize ref when opening
+	// Initialize ref when opening — varInfo intentionally excluded so external
+	// reference churn (e.g. inline object creation in parent) doesn't reset
+	// editValue while the user is typing.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
 	useEffect(() => {
 		if (isOpen && varInfo) {
 			openValueRef.current = varInfo.value;
 			setEditValue(varInfo.value);
 		}
-	}, [isOpen, varInfo]);
+	}, [isOpen]);
 
 	const handleOpenChange = (open: boolean) => {
 		if (open) {
 			setIsOpen(true);
 		} else {
-			// Closing: auto-save if in auto mode and value changed
-			if (saveMode === "auto" && onValueChange && varInfo) {
+			// Closing: auto-save if in auto mode and value changed (unless cancelled)
+			if (!pendingCancelRef.current && saveMode === "auto" && onValueChange && varInfo) {
 				if (editValue !== openValueRef.current) {
 					onValueChange(name, editValue, varInfo.scope);
 				}
 			}
+			pendingCancelRef.current = false;
 			setIsOpen(false);
 		}
 	};
@@ -121,8 +125,12 @@ export function VariablePopover({
 				handleCancel();
 			}
 		} else {
-			// Auto mode: just close on Enter/Escape
-			if (e.key === "Enter" || e.key === "Escape") {
+			// Auto mode: Enter saves, Escape cancels
+			if (e.key === "Enter") {
+				handleOpenChange(false);
+			} else if (e.key === "Escape") {
+				// Mark as cancelled before Radix fires its own onOpenChange for Escape
+				pendingCancelRef.current = true;
 				setIsOpen(false);
 			}
 		}
@@ -190,7 +198,9 @@ export function VariablePopover({
 										{varInfo.secret && (
 											<div className="flex items-center gap-1">
 												<KeyRound className="w-3 h-3 text-amber-500" />
-												<span className="text-[10px] text-amber-600 dark:text-amber-400">Secret</span>
+												<span className="text-[10px] text-amber-600 dark:text-amber-400">
+													Secret
+												</span>
 											</div>
 										)}
 									</div>
@@ -208,9 +218,13 @@ export function VariablePopover({
 											<Button
 												variant="ghost"
 												size="icon"
-												onClick={() => setIsSecretRevealed(!isSecretRevealed)}
+												onClick={() =>
+													setIsSecretRevealed(!isSecretRevealed)
+												}
 												className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 text-muted-foreground hover:text-foreground"
-												title={isSecretRevealed ? "Hide value" : "Reveal value"}
+												title={
+													isSecretRevealed ? "Hide value" : "Reveal value"
+												}
 											>
 												{isSecretRevealed ? (
 													<EyeOff className="w-3 h-3" />
@@ -231,7 +245,11 @@ export function VariablePopover({
 									</label>
 									<div className="relative">
 										<Input
-											type={varInfo.secret && !isSecretRevealed ? "password" : "text"}
+											type={
+												varInfo.secret && !isSecretRevealed
+													? "password"
+													: "text"
+											}
 											value={editValue}
 											onChange={(e) => setEditValue(e.target.value)}
 											onKeyDown={handleKeyDown}
@@ -242,9 +260,13 @@ export function VariablePopover({
 											<Button
 												variant="ghost"
 												size="icon"
-												onClick={() => setIsSecretRevealed(!isSecretRevealed)}
+												onClick={() =>
+													setIsSecretRevealed(!isSecretRevealed)
+												}
 												className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
-												title={isSecretRevealed ? "Hide value" : "Reveal value"}
+												title={
+													isSecretRevealed ? "Hide value" : "Reveal value"
+												}
 											>
 												{isSecretRevealed ? (
 													<EyeOff className="w-3.5 h-3.5" />
@@ -282,7 +304,7 @@ export function VariablePopover({
 							)}
 						</>
 					) : (
-						<div className="text-sm text-destructive">
+						<div className="text-sm text-destructive-text">
 							Variable not defined. Define it in Globals, an Environment, or
 							Collection variables.
 						</div>

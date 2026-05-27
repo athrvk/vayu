@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -12,11 +11,17 @@
 export { Button, buttonVariants } from "./button";
 export type { ButtonProps } from "./button";
 
+export { CodeEditor } from "./code-editor";
+export type { CodeEditorProps } from "./code-editor";
+
 export { Input } from "./input";
 export { Textarea } from "./textarea";
 export type { TextareaProps } from "./textarea";
 
 export { Badge, badgeVariants } from "./badge";
+
+export { Kbd } from "./kbd";
+export type { KbdProps } from "./kbd";
 
 export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from "./card";
 

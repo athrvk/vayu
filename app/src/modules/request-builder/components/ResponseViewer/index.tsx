@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -21,13 +20,14 @@
  */
 
 import { useState } from "react";
-import { FileText, Copy, Check, Download, Terminal, BarChart3 } from "lucide-react";
+import { Copy, Check, Download, Terminal, BarChart3 } from "lucide-react";
 import {
 	Tabs,
 	TabsList,
 	TabsTrigger,
 	Badge,
 	Button,
+	Kbd,
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
@@ -62,10 +62,10 @@ export default function ResponseViewer() {
 	// Loading state
 	if (isExecuting) {
 		return (
-			<div className="flex-1 flex items-center justify-center bg-card">
+			<div className="flex-1 flex items-center justify-center bg-panel">
 				<div className="text-center space-y-4">
-					<div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-					<p className="text-muted-foreground">Sending request...</p>
+					<div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-[vayu-spin_0.7s_linear_infinite] mx-auto" />
+					<p className="text-[12px] text-muted-foreground">Sending request…</p>
 				</div>
 			</div>
 		);
@@ -74,23 +74,39 @@ export default function ResponseViewer() {
 	// Empty state
 	if (!response) {
 		return (
-			<div className="flex-1 flex items-center justify-center bg-card">
-				<div className="text-center space-y-4">
-					<FileText className="w-12 h-12 mx-auto text-muted-foreground/50" />
-					<div className="space-y-2">
-						<p className="text-muted-foreground">Response will appear here</p>
-						<p className="text-xs text-muted-foreground/70">
-							Send a request to see the response
-						</p>
+			<div className="flex-1 flex items-center justify-center bg-panel">
+				<div className="flex flex-col items-center text-center">
+					<svg
+						width="64"
+						height="64"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="1.5"
+						strokeLinecap="round"
+						strokeLinejoin="round"
+						className="text-primary mb-5"
+					>
+						<line x1="22" y1="2" x2="11" y2="13" />
+						<polygon points="22 2 15 22 11 13 2 9 22 2" />
+					</svg>
+
+					<p className="text-[15px] font-medium text-foreground mb-1.5">
+						No response yet
+					</p>
+					<div className="flex items-center justify-center gap-1.5 text-[12px] text-muted-foreground">
+						<span>Press</span>
+						<Kbd>⌘</Kbd>
+						<Kbd>↵</Kbd>
+						<span>or click Send</span>
 					</div>
 
-					{/* Show button to view load test dashboard if available */}
 					{hasLoadTestDashboard && (
 						<Button
 							variant="outline"
 							size="sm"
 							onClick={handleViewLoadTest}
-							className="mt-4"
+							className="mt-6"
 						>
 							<BarChart3 className="w-4 h-4 mr-2" />
 							View Load Test Dashboard
@@ -149,17 +165,17 @@ export default function ResponseViewer() {
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				<div className="flex items-center justify-between border-b border-border px-4">
-					<TabsList className="h-auto p-0 bg-transparent">
+				<div className="flex items-center justify-between border-b border-border px-4 gap-2">
+					<TabsList className="flex h-auto p-0 bg-transparent justify-start overflow-x-auto overflow-y-hidden flex-nowrap min-w-0 scrollbar-thin">
 						<TabsTrigger
 							value="body"
-							className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 						>
 							Body
 						</TabsTrigger>
 						<TabsTrigger
 							value="headers"
-							className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 						>
 							Headers
 							<Badge variant="secondary" className="ml-1.5 text-xs">
@@ -168,14 +184,14 @@ export default function ResponseViewer() {
 						</TabsTrigger>
 						<TabsTrigger
 							value="cookies"
-							className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 						>
 							Cookies
 						</TabsTrigger>
 						{response.consoleLogs && response.consoleLogs.length > 0 && (
 							<TabsTrigger
 								value="console"
-								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 							>
 								<Terminal className="w-4 h-4 mr-1.5" />
 								Console
@@ -187,7 +203,7 @@ export default function ResponseViewer() {
 						{response.testResults && response.testResults.length > 0 && (
 							<TabsTrigger
 								value="tests"
-								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 							>
 								Tests
 								<Badge
@@ -206,7 +222,7 @@ export default function ResponseViewer() {
 						{response.rawRequest && (
 							<TabsTrigger
 								value="raw-request"
-								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
 							>
 								Raw
 							</TabsTrigger>
@@ -214,7 +230,7 @@ export default function ResponseViewer() {
 					</TabsList>
 
 					{/* Actions */}
-					<div className="flex items-center gap-1">
+					<div className="flex items-center gap-1 shrink-0">
 						{/* View Load Test Dashboard button */}
 						{hasLoadTestDashboard && (
 							<Tooltip>

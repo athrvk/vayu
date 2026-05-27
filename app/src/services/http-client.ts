@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -13,7 +12,7 @@ import { API_ENDPOINTS } from "@/config/api-endpoints";
 /**
  * ApiError represents failures in UI-to-Engine communication.
  * This is NOT for HTTP errors from the target server (those come in the response body).
- * 
+ *
  * Examples of ApiError scenarios:
  * - Engine is not running (connection refused)
  * - Engine returns HTTP 500 (internal engine error)

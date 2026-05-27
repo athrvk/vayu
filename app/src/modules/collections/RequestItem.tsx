@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -95,10 +94,12 @@ export default function RequestItem({
 			>
 				<Badge
 					variant="outline"
-					className={cn(
-						"text-xs font-mono font-semibold px-1.5 py-0.5",
-						getMethodColor(request.method)
-					)}
+					className="text-xs font-mono font-semibold px-1.5 py-0.5"
+					style={{
+						color: `hsl(${getMethodColor(request.method)})`,
+						borderColor: `hsl(${getMethodColor(request.method)} / 0.3)`,
+						background: `hsl(${getMethodColor(request.method)} / 0.1)`,
+					}}
 				>
 					{request.method}
 				</Badge>

@@ -184,7 +184,11 @@ inline auto make_storage (const std::string& path) {
     // Collections: Folder hierarchy for organizing requests
     make_table ("collections", make_column ("id", &Collection::id, primary_key ()),
     make_column ("parent_id", &Collection::parent_id), make_column ("name", &Collection::name),
-    make_column ("variables", &Collection::variables), // JSON: collection-scoped vars
+    make_column ("description", &Collection::description), // NEW: collection description
+    make_column ("variables", &Collection::variables),     // JSON: collection-scoped vars
+    make_column ("auth", &Collection::auth),               // NEW: JSON auth config
+    make_column ("pre_request_script", &Collection::pre_request_script),   // NEW: JS
+    make_column ("post_request_script", &Collection::post_request_script), // NEW: JS
     make_column ("order", &Collection::order),
     make_column ("created_at", &Collection::created_at),
     make_column ("updated_at", &Collection::updated_at)),
@@ -192,20 +196,26 @@ inline auto make_storage (const std::string& path) {
     // Requests: HTTP request definitions with pre/post scripts
     make_table ("requests", make_column ("id", &Request::id, primary_key ()),
     make_column ("collection_id", &Request::collection_id),
-    make_column ("name", &Request::name), make_column ("method", &Request::method),
-    make_column ("url", &Request::url), make_column ("params", &Request::params), // JSON
-    make_column ("headers", &Request::headers), // JSON
-    make_column ("body", &Request::body), make_column ("body_type", &Request::body_type), // Content type
+    make_column ("name", &Request::name),
+    make_column ("description", &Request::description), // NEW: request description
+    make_column ("method", &Request::method),
+    make_column ("url", &Request::url),
+    make_column ("params", &Request::params),   // JSON array of KeyValueEntry
+    make_column ("headers", &Request::headers), // JSON array of KeyValueEntry
+    make_column ("body", &Request::body),       // JSON discriminated union
+    make_column ("body_type", &Request::body_type),
     make_column ("auth", &Request::auth),                               // JSON
     make_column ("pre_request_script", &Request::pre_request_script),   // JS
     make_column ("post_request_script", &Request::post_request_script), // JS
+    make_column ("order", &Request::order),     // NEW: position within collection
     make_column ("created_at", &Request::created_at),
     make_column ("updated_at", &Request::updated_at)),
 
     // Environments: Named variable sets (dev, staging, prod)
     make_table ("environments", make_column ("id", &Environment::id, primary_key ()),
     make_column ("name", &Environment::name),
-    make_column ("variables", &Environment::variables), // JSON: {key: {value, enabled}}
+    make_column ("description", &Environment::description), // NEW: environment description
+    make_column ("variables", &Environment::variables),     // JSON: {key: {value, enabled}}
     make_column ("is_active", &Environment::is_active),
     make_column ("created_at", &Environment::created_at),
     make_column ("updated_at", &Environment::updated_at)),
@@ -231,6 +241,7 @@ inline auto make_storage (const std::string& path) {
     make_table ("results", make_column ("id", &Result::id, primary_key ().autoincrement ()),
     make_column ("run_id", &Result::run_id), make_column ("timestamp", &Result::timestamp),
     make_column ("status_code", &Result::status_code),
+    make_column ("status_text", &Result::status_text), // Wire reason phrase
     make_column ("latency_ms", &Result::latency_ms), make_column ("error", &Result::error),
     make_column ("trace_data", &Result::trace_data)), // JSON: headers/body for errors
 
@@ -510,12 +521,29 @@ std::optional<Collection> Database::get_collection (const std::string& id) {
     return cols.front ();
 }
 
-// Cascade delete: removes all requests in collection first
+// Cascade delete: recursively removes all descendant collections and their requests.
+// BFS discovers all descendant IDs, then deletes deepest-first.
 void Database::delete_collection (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Deleting collection: id=" + id);
-    impl_->storage.remove_all<Request> (where (c (&Request::collection_id) == id));
-    impl_->storage.remove_all<Collection> (where (c (&Collection::id) == id));
+    vayu::utils::log_debug ("Deleting collection (cascade): id=" + id);
+
+    // 1. Collect all descendant IDs via BFS (root first)
+    std::vector<std::string> to_delete = { id };
+    size_t idx                         = 0;
+    while (idx < to_delete.size ()) {
+        auto children = impl_->storage.get_all<Collection> (
+        where (c (&Collection::parent_id) == to_delete[idx]));
+        for (const auto& child : children) {
+            to_delete.push_back (child.id);
+        }
+        ++idx;
+    }
+
+    // 2. Delete deepest-first so foreign-key integrity holds at each step
+    for (auto it = to_delete.rbegin (); it != to_delete.rend (); ++it) {
+        impl_->storage.remove_all<Request> (where (c (&Request::collection_id) == *it));
+        impl_->storage.remove_all<Collection> (where (c (&Collection::id) == *it));
+    }
 }
 
 // ============================================================================

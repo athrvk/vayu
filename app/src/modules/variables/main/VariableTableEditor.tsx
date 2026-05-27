@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -22,7 +21,17 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Globe, Cloud, Folder, Trash2, AlertCircle, LucideIcon, Eye, EyeOff, KeyRound } from "lucide-react";
+import {
+	Globe,
+	Cloud,
+	Folder,
+	Trash2,
+	AlertCircle,
+	LucideIcon,
+	Eye,
+	EyeOff,
+	KeyRound,
+} from "lucide-react";
 import {
 	useGlobalsQuery,
 	useUpdateGlobalsMutation,
@@ -32,14 +41,34 @@ import {
 } from "@/queries";
 import { useSaveStore, useVariablesStore } from "@/stores";
 import type { VariableValue, Collection, Environment } from "@/types";
-import { Button, Input, Badge, DeleteConfirmDialog } from "@/components/ui";
+import {
+	Button,
+	Input,
+	Badge,
+	DeleteConfirmDialog,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui";
 import { cn } from "@/lib/utils";
+
+type VariableType = NonNullable<VariableValue["type"]>;
+
+const VARIABLE_TYPES: { value: VariableType; label: string }[] = [
+	{ value: "string", label: "String" },
+	{ value: "number", label: "Number" },
+	{ value: "boolean", label: "Boolean" },
+	{ value: "json", label: "JSON" },
+];
 
 interface VariableRow {
 	key: string;
 	value: string;
 	enabled: boolean;
 	secret?: boolean;
+	type?: VariableType;
 	createdAt?: number;
 	isNew?: boolean;
 }
@@ -102,9 +131,16 @@ const EDITOR_CONFIGS = {
 
 interface VariableEditorProps {
 	config: VariableEditorConfig;
+	/**
+	 * Embedded mode strips the standalone-screen chrome (title header, info
+	 * banner, count footer) so the editor can be slotted inside another
+	 * container — e.g. the Variables tab of CollectionDetail — without
+	 * duplicating headings or fighting the host layout.
+	 */
+	embedded?: boolean;
 }
 
-export default function VariableEditor({ config }: VariableEditorProps) {
+export default function VariableEditor({ config, embedded = false }: VariableEditorProps) {
 	const { type, globalsData, isLoading, error, environment, collection } = config;
 	const editorConfig = EDITOR_CONFIGS[type];
 
@@ -192,6 +228,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 						value: v.value,
 						enabled: v.enabled,
 						secret: v.secret ?? false,
+						type: v.type ?? "string",
 						createdAt: v.createdAt ?? Date.now(),
 					},
 				]);
@@ -333,12 +370,22 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 				value: val.value,
 				enabled: val.enabled,
 				secret: val.secret ?? false,
+				type: val.type ?? "string",
 				createdAt: val.createdAt,
 			}));
-			rows.push({ key: "", value: "", enabled: true, secret: false, isNew: true });
+			rows.push({
+				key: "",
+				value: "",
+				enabled: true,
+				secret: false,
+				type: "string",
+				isNew: true,
+			});
 			setVariables(rows);
 		} else {
-			setVariables([{ key: "", value: "", enabled: true, secret: false, isNew: true }]);
+			setVariables([
+				{ key: "", value: "", enabled: true, secret: false, type: "string", isNew: true },
+			]);
 		}
 	}, [
 		type === "globals"
@@ -357,7 +404,8 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 		if (newVariables[index].isNew && (newVariables[index].key || newVariables[index].value)) {
 			newVariables[index].isNew = false;
 			newVariables[index].createdAt = Date.now(); // new ones sort to bottom
-			newVariables.push({ key: "", value: "", enabled: true, isNew: true });
+			newVariables[index].type = newVariables[index].type ?? "string";
+			newVariables.push({ key: "", value: "", enabled: true, type: "string", isNew: true });
 		}
 
 		setVariables(newVariables);
@@ -368,7 +416,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 	const removeVariable = (index: number) => {
 		const newVariables = variables.filter((_, i) => i !== index);
 		if (newVariables.length === 0 || !newVariables.some((v) => v.isNew)) {
-			newVariables.push({ key: "", value: "", enabled: true, isNew: true });
+			newVariables.push({ key: "", value: "", enabled: true, type: "string", isNew: true });
 		}
 		setVariables(newVariables);
 		setHasPendingChanges(true);
@@ -404,8 +452,8 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 		type === "globals"
 			? (editorConfig.title as string)
 			: (editorConfig.title as (name: string) => string)(
-				type === "environment" ? environment?.name || "" : collection?.name || ""
-			);
+					type === "environment" ? environment?.name || "" : collection?.name || ""
+				);
 
 	if (isDataLoading) {
 		return (
@@ -439,60 +487,63 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 	return (
 		<div className="flex flex-col h-full">
 			{/* Header */}
-			<div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/50">
-				<div className="flex items-center gap-2">
-					<Icon className={cn("w-5 h-5", editorConfig.iconColor)} />
-					<div>
-						<div className="flex items-center gap-2">
-							<h2 className="text-lg font-semibold text-foreground">{title}</h2>
-
-						</div>
-						<p className="text-xs text-muted-foreground">{editorConfig.subtitle}</p>
-					</div>
-				</div>
-				{type === "environment" && environment && (
+			{!embedded && (
+				<div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/50">
 					<div className="flex items-center gap-2">
-						{!isActiveEnvironment ? (
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={handleSetActiveEnvironment}
-								className="min-w-30 border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
-							>
-								Set Active
-							</Button>
-						) : (
-							<Badge
-								variant="outline"
-								className="min-w-30 h-8 justify-center border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
-							>
-								Active
-							</Badge>
-						)}
-						<Button
-							variant="ghost"
-							size="icon"
-							onClick={() => setShowDeleteConfirm(true)}
-							className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-							title="Delete environment"
-						>
-							<Trash2 className="w-4 h-4" />
-						</Button>
+						<Icon className={cn("w-5 h-5", editorConfig.iconColor)} />
+						<div>
+							<div className="flex items-center gap-2">
+								<h2 className="text-lg font-semibold text-foreground">{title}</h2>
+							</div>
+							<p className="text-xs text-muted-foreground">{editorConfig.subtitle}</p>
+						</div>
 					</div>
-				)}
-			</div>
+					{type === "environment" && environment && (
+						<div className="flex items-center gap-2">
+							{!isActiveEnvironment ? (
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={handleSetActiveEnvironment}
+									className="min-w-30 border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
+								>
+									Set Active
+								</Button>
+							) : (
+								<Badge
+									variant="outline"
+									className="min-w-30 h-8 justify-center border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
+								>
+									Active
+								</Badge>
+							)}
+							<Button
+								variant="ghost"
+								size="icon"
+								onClick={() => setShowDeleteConfirm(true)}
+								className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+								title="Delete environment"
+							>
+								<Trash2 className="w-4 h-4" />
+							</Button>
+						</div>
+					)}
+				</div>
+			)}
 
 			{/* Info Banner */}
-			<div
-				className={cn(
-					"px-4 py-2 text-xs border-b",
-					editorConfig.infoBg,
-					editorConfig.infoTextColor,
-					editorConfig.infoBorder
-				)}
-			>
-				{editorConfig.infoText}
-			</div>
+			{!embedded && (
+				<div
+					className={cn(
+						"px-4 py-2 text-xs border-b",
+						editorConfig.infoBg,
+						editorConfig.infoTextColor,
+						editorConfig.infoBorder
+					)}
+				>
+					{editorConfig.infoText}
+				</div>
+			)}
 
 			{type === "environment" && environment && (
 				<DeleteConfirmDialog
@@ -506,14 +557,18 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 			)}
 
 			{/* Variables Table */}
-			<div className="flex-1 overflow-y-auto p-4">
+			<div className={cn("flex-1 overflow-y-auto", embedded ? "p-0" : "p-4")}>
 				<table className="w-full">
 					<thead>
 						<tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
 							<th className="pb-2 w-8"></th>
 							<th className="pb-2 px-2">Variable</th>
 							<th className="pb-2 px-2">Value</th>
-							<th className="pb-2 w-8 text-center" title="Mark as secret (masks value in UI)">
+							<th className="pb-2 px-2 w-[110px]">Type</th>
+							<th
+								className="pb-2 w-8 text-center"
+								title="Mark as secret (masks value in UI)"
+							>
 								<KeyRound className="w-3 h-3 inline-block" />
 							</th>
 							<th className="pb-2 w-10"></th>
@@ -522,7 +577,8 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 					<tbody>
 						{variables.map((variable, index) => {
 							const isSecretRevealed = revealedSecrets.has(index);
-							const shouldMask = variable.secret && !isSecretRevealed && !variable.isNew;
+							const shouldMask =
+								variable.secret && !isSecretRevealed && !variable.isNew;
 
 							return (
 								<tr key={index} className="group">
@@ -552,10 +608,10 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 											onBlur={handleBlur}
 											placeholder="variable_name"
 											className={cn(
-												"h-8",
+												"h-8 text-primary",
 												!variable.enabled &&
-												!variable.isNew &&
-												"text-muted-foreground bg-muted"
+													!variable.isNew &&
+													"text-muted-foreground bg-muted"
 											)}
 										/>
 									</td>
@@ -573,8 +629,8 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 												className={cn(
 													"h-8 pr-8",
 													!variable.enabled &&
-													!variable.isNew &&
-													"text-muted-foreground bg-muted",
+														!variable.isNew &&
+														"text-muted-foreground bg-muted",
 													variable.secret && "font-mono"
 												)}
 											/>
@@ -583,7 +639,7 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 													variant="ghost"
 													size="icon"
 													onClick={() => {
-														setRevealedSecrets(prev => {
+														setRevealedSecrets((prev) => {
 															const newSet = new Set(prev);
 															if (newSet.has(index)) {
 																newSet.delete(index);
@@ -594,7 +650,11 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 														});
 													}}
 													className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
-													title={isSecretRevealed ? "Hide value" : "Reveal value"}
+													title={
+														isSecretRevealed
+															? "Hide value"
+															: "Reveal value"
+													}
 												>
 													{isSecretRevealed ? (
 														<EyeOff className="w-3.5 h-3.5" />
@@ -605,16 +665,55 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 											)}
 										</div>
 									</td>
+									<td className="py-1 px-2">
+										<Select
+											value={variable.type ?? "string"}
+											onValueChange={(v) => {
+												updateVariable(index, "type", v as VariableType);
+												// Only fire an immediate save if the row is already persisted —
+												// otherwise let the key/value entry commit it on first edit.
+												if (!variable.isNew) {
+													performSaveRef.current();
+												}
+											}}
+										>
+											<SelectTrigger
+												className={cn(
+													"h-8 text-xs px-2",
+													!variable.enabled &&
+														!variable.isNew &&
+														"opacity-60"
+												)}
+											>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												{VARIABLE_TYPES.map((t) => (
+													<SelectItem
+														key={t.value}
+														value={t.value}
+														className="text-xs"
+													>
+														{t.label}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</td>
 									<td className="py-1 text-center">
 										{!variable.isNew && (
 											<Button
 												variant="ghost"
 												size="icon"
 												onClick={() => {
-													updateVariable(index, "secret", !variable.secret);
+													updateVariable(
+														index,
+														"secret",
+														!variable.secret
+													);
 													// Clear revealed state when toggling secret off
 													if (variable.secret) {
-														setRevealedSecrets(prev => {
+														setRevealedSecrets((prev) => {
 															const newSet = new Set(prev);
 															newSet.delete(index);
 															return newSet;
@@ -628,7 +727,11 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 														? "text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950"
 														: "text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
 												)}
-												title={variable.secret ? "Unmark as secret" : "Mark as secret (masks value in UI)"}
+												title={
+													variable.secret
+														? "Unmark as secret"
+														: "Mark as secret (masks value in UI)"
+												}
 											>
 												<KeyRound className="w-4 h-4" />
 											</Button>
@@ -654,9 +757,11 @@ export default function VariableEditor({ config }: VariableEditorProps) {
 			</div>
 
 			{/* Footer */}
-			<div className="px-4 py-2 border-t border-border bg-muted/50 text-xs text-muted-foreground">
-				{variables.filter((v) => v.key && !v.isNew).length} variable(s)
-			</div>
+			{!embedded && (
+				<div className="px-4 py-2 border-t border-border bg-muted/50 text-xs text-muted-foreground">
+					{variables.filter((v) => v.key && !v.isNew).length} variable(s)
+				</div>
+			)}
 		</div>
 	);
 }

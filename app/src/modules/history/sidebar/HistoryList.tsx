@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -46,9 +45,12 @@ export default function HistoryList() {
 	// Filter and sort runs using the helper function
 	const runs = filterRuns(allRuns, { searchQuery, filterType, filterStatus, sortBy });
 
-	const runToDelete = deleteConfirmRunId ? allRuns.find((r) => r.id === deleteConfirmRunId) : null;
+	const runToDelete = deleteConfirmRunId
+		? allRuns.find((r) => r.id === deleteConfirmRunId)
+		: null;
 	const deleteConfirmLabel =
-		runToDelete?.configSnapshot?.url ?? (deleteConfirmRunId ? `${deleteConfirmRunId.slice(0, 8)}…` : "");
+		runToDelete?.configSnapshot?.url ??
+		(deleteConfirmRunId ? `${deleteConfirmRunId.slice(0, 8)}…` : "");
 
 	const handleDeleteClick = (runId: string, event: React.MouseEvent) => {
 		event.stopPropagation();
@@ -200,7 +202,10 @@ export default function HistoryList() {
 					<>
 						This run will be permanently removed. This cannot be undone.
 						{deleteConfirmLabel && (
-							<span className="mt-2 block font-mono text-xs text-muted-foreground truncate" title={deleteConfirmLabel}>
+							<span
+								className="mt-2 block font-mono text-xs text-muted-foreground truncate"
+								title={deleteConfirmLabel}
+							>
 								{deleteConfirmLabel}
 							</span>
 						)}

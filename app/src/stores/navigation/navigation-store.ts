@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -27,6 +26,9 @@ interface NavigationState {
 	selectedRequestId: string | null;
 	selectedRunId: string | null;
 
+	// Whether the sidebar's content panel is expanded (vs. collapsed to the activity bar)
+	sidebarPanelOpen: boolean;
+
 	// Navigation history - for back navigation
 	previousContext: NavigationContext | null;
 
@@ -35,6 +37,7 @@ interface NavigationState {
 
 	// Actions
 	setActiveSidebarTab: (tab: SidebarTab) => void;
+	setSidebarPanelOpen: (open: boolean) => void;
 	setActiveScreen: (screen: MainScreen) => void;
 	setSelectedCollectionId: (id: string | null) => void;
 	setSelectedRequestId: (id: string | null) => void;
@@ -42,6 +45,7 @@ interface NavigationState {
 
 	// Navigation helpers
 	navigateToRequest: (collectionId: string, requestId: string) => void;
+	navigateToCollection: (collectionId: string) => void;
 	navigateToRunDetail: (runId: string) => void;
 	navigateToHistory: () => void;
 	navigateToVariables: () => void;
@@ -70,6 +74,7 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 	selectedCollectionId: null,
 	selectedRequestId: null,
 	selectedRunId: null,
+	sidebarPanelOpen: true,
 	previousContext: null,
 	tabMemory: { ...defaultTabMemory },
 
@@ -102,6 +107,8 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 		});
 	},
 
+	setSidebarPanelOpen: (open) => set({ sidebarPanelOpen: open }),
+
 	setActiveScreen: (screen) => set({ activeScreen: screen }),
 	setSelectedCollectionId: (id) => set({ selectedCollectionId: id }),
 	setSelectedRequestId: (id) => set({ selectedRequestId: id }),
@@ -123,6 +130,26 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 					screen: "request-builder",
 					collectionId,
 					requestId,
+					runId: null,
+				},
+			},
+		});
+	},
+
+	navigateToCollection: (collectionId) => {
+		const state = get();
+
+		set({
+			selectedCollectionId: collectionId,
+			selectedRequestId: null,
+			activeScreen: "collection-detail",
+			activeSidebarTab: "collections",
+			tabMemory: {
+				...state.tabMemory,
+				collections: {
+					screen: "collection-detail",
+					collectionId,
+					requestId: null,
 					runId: null,
 				},
 			},
@@ -273,6 +300,9 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 		// If there's a specific screen set, use it (unless it's a tab-only screen)
 		if (state.activeScreen === "request-builder" && state.selectedRequestId) {
 			return "request-builder";
+		}
+		if (state.activeScreen === "collection-detail" && state.selectedCollectionId) {
+			return "collection-detail";
 		}
 		if (state.activeScreen === "dashboard") {
 			return "dashboard";

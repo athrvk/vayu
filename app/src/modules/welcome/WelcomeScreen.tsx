@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -29,8 +28,10 @@ import {
 	ArrowRight,
 	Clock,
 	FileText,
+	Download,
 } from "lucide-react";
 import { useNavigationStore } from "@/stores";
+import { useImportModalStore } from "@/stores/import-modal-store";
 import {
 	useCollectionsQuery,
 	useRunsQuery,
@@ -42,6 +43,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { formatDistanceToNow } from "date-fns";
 
 export default function WelcomeScreen() {
+	const openImport = useImportModalStore((s) => s.open);
 	const { setActiveSidebarTab, navigateToRequest } = useNavigationStore();
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: runs = [] } = useRunsQuery();
@@ -140,7 +142,7 @@ export default function WelcomeScreen() {
 				</div>
 
 				{/* Quick Actions */}
-				<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
+				<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-12">
 					<Card
 						className="hover:border-primary/50 transition-colors cursor-pointer group"
 						onClick={handleNewRequest}
@@ -213,6 +215,25 @@ export default function WelcomeScreen() {
 						<CardContent>
 							<CardDescription className="text-sm">
 								Configure engine and appearance
+							</CardDescription>
+						</CardContent>
+					</Card>
+
+					<Card
+						className="hover:border-primary/50 transition-colors cursor-pointer group"
+						onClick={openImport}
+					>
+						<CardHeader className="pb-3">
+							<div className="flex items-center gap-3">
+								<div className="p-2  bg-primary/10 group-hover:bg-primary/20 transition-colors">
+									<Download className="w-5 h-5 text-primary" />
+								</div>
+								<CardTitle className="text-base">Import Collection</CardTitle>
+							</div>
+						</CardHeader>
+						<CardContent>
+							<CardDescription className="text-sm">
+								Import from file, URL, or paste
 							</CardDescription>
 						</CardContent>
 					</Card>
@@ -467,8 +488,6 @@ export default function WelcomeScreen() {
 						</Card>
 					</div>
 				</div>
-
-				
 			</div>
 		</div>
 	);

@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -9,40 +8,56 @@
 /**
  * Request Transformer
  *
- * Transforms backend request format to frontend format.
- * Handles date conversion (number to ISO string) for createdAt/updatedAt fields.
+ * Transforms backend request format to frontend domain Request type.
+ * Handles timestamp conversion and provides safe defaults for new fields.
  */
 
-import type { Request } from "@/types";
+import type { Request, KeyValueEntry, RequestBody, RequestAuth } from "@/types";
 
-/**
- * Backend request format (camelCase with number timestamps)
- */
 export type BackendRequest = Omit<Request, "createdAt" | "updatedAt"> & {
 	createdAt: number | string;
 	updatedAt: number | string;
 };
 
-/**
- * Request Transformer
- *
- * Converts backend request (with number timestamps) to frontend format (with ISO string timestamps).
- */
 export class RequestTransformer {
-	/**
-	 * Transform backend request to frontend request
-	 * Converts createdAt/updatedAt from number (Unix timestamp ms) to ISO string
-	 */
-	static toFrontend(backendRequest: BackendRequest): Request {
-		if (!backendRequest.id) {
-			throw new Error("Request must have an id");
+	static toFrontend(raw: Record<string, any>): Request {
+		if (!raw.id) throw new Error("Request must have an id");
+
+		// Params: array of KeyValueEntry (new) or legacy empty object {}
+		const params: KeyValueEntry[] = Array.isArray(raw.params) ? raw.params : [];
+
+		// Headers: array of KeyValueEntry (new) or legacy empty object {}
+		const headers: KeyValueEntry[] = Array.isArray(raw.headers) ? raw.headers : [];
+
+		// Body: discriminated union (new) or legacy string
+		let body: RequestBody = { mode: "none" };
+		if (raw.body && typeof raw.body === "object" && raw.body.mode) {
+			body = raw.body as RequestBody;
 		}
 
-		// Handle createdAt/updatedAt conversion from number to string if needed
+		// Auth: RequestAuth (new) or legacy object
+		let auth: RequestAuth = { mode: "inherit" };
+		if (raw.auth && typeof raw.auth === "object" && raw.auth.mode) {
+			auth = raw.auth as RequestAuth;
+		}
+
 		return {
-			...backendRequest,
-			createdAt: new Date(backendRequest.createdAt).toISOString(),
-			updatedAt: new Date(backendRequest.updatedAt).toISOString(),
+			id: raw.id,
+			collectionId: raw.collectionId ?? "",
+			name: raw.name ?? "",
+			description: raw.description ?? "",
+			method: raw.method ?? "GET",
+			url: raw.url ?? "",
+			params,
+			headers,
+			body,
+			bodyType: raw.bodyType ?? body.mode ?? "none",
+			auth,
+			preRequestScript: raw.preRequestScript ?? "",
+			postRequestScript: raw.postRequestScript ?? "",
+			order: raw.order ?? 0,
+			createdAt: new Date(raw.createdAt).toISOString(),
+			updatedAt: new Date(raw.updatedAt).toISOString(),
 		};
 	}
 }

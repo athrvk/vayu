@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -33,6 +32,7 @@ export interface CollectionItemProps {
 	getRequestsByCollection: (collectionId: string) => Request[];
 	onCollectionClick: (collection: Collection) => void;
 	onRequestClick: (collectionId: string, requestId: string) => void;
+	onCollectionToggle: (collection: Collection) => void;
 	onShowContextMenu: (e: React.MouseEvent, collectionId: string) => void;
 	onRenameChange: (value: string) => void;
 	onRenameSubmit: (collectionId: string) => void;
@@ -68,6 +68,7 @@ export default function CollectionItem({
 	getRequestsByCollection,
 	onCollectionClick,
 	onRequestClick,
+	onCollectionToggle,
 	onShowContextMenu,
 	onRenameChange,
 	onRenameSubmit,
@@ -84,6 +85,7 @@ export default function CollectionItem({
 	onStartRequestRename,
 }: CollectionItemProps) {
 	const isExpanded = expandedCollectionIds.has(collection.id);
+	const isSelected = selectedCollectionId === collection.id;
 	const requests = getRequestsByCollection(collection.id);
 	const isRenaming = renamingId === collection.id;
 	const isDeleting = deletingCollectionId === collection.id;
@@ -94,9 +96,12 @@ export default function CollectionItem({
 	const expandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const CLICK_DELAY_MS = 80;
 
-	useEffect(() => () => {
-		if (expandTimeoutRef.current) clearTimeout(expandTimeoutRef.current);
-	}, []);
+	useEffect(
+		() => () => {
+			if (expandTimeoutRef.current) clearTimeout(expandTimeoutRef.current);
+		},
+		[]
+	);
 
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
@@ -126,6 +131,13 @@ export default function CollectionItem({
 		onStartRename(collection);
 	};
 
+	const handleToggleClick = (e: React.MouseEvent) => {
+		e.preventDefault();
+		e.stopPropagation();
+		if (isDeleting || isRenaming) return;
+		onCollectionToggle(collection);
+	};
+
 	const indentPx = 2 + depth;
 
 	return (
@@ -134,25 +146,37 @@ export default function CollectionItem({
 			<div
 				className={cn(
 					"flex items-center gap-1 py-1.5 pr-2 rounded group transition-colors cursor-pointer",
-					selectedCollectionId === collection.id
+					isSelected
 						? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
 						: "hover:bg-accent"
 				)}
 				style={{ paddingLeft: indentPx }}
 			>
 				<button
+					onClick={handleToggleClick}
+					className={cn(
+						"flex items-center justify-center w-7 h-7 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+						isSelected
+							? "text-primary/90 hover:text-primary"
+							: "text-muted-foreground hover:text-foreground"
+					)}
+					disabled={isDeleting || isRenaming}
+					aria-label={isExpanded ? "Collapse collection" : "Expand collection"}
+				>
+					{isDeleting ? (
+						<Loader2 className="w-[18px] h-[18px] animate-spin" />
+					) : isExpanded ? (
+						<ChevronDown className="w-[18px] h-[18px]" />
+					) : (
+						<ChevronRight className="w-[18px] h-[18px]" />
+					)}
+				</button>
+				<button
 					onClick={handleClick}
 					onDoubleClick={handleDoubleClick}
 					className="flex items-center gap-2 flex-1 text-left cursor-pointer"
 					disabled={isDeleting || isRenaming}
 				>
-					{isDeleting ? (
-						<Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
-					) : isExpanded ? (
-						<ChevronDown className="w-4 h-4 text-muted-foreground" />
-					) : (
-						<ChevronRight className="w-4 h-4 text-muted-foreground" />
-					)}
 					<Folder
 						className={cn("w-4 h-4", depth === 0 ? "text-primary" : "text-primary/70")}
 					/>
@@ -269,6 +293,7 @@ export default function CollectionItem({
 							isCreatingSubfolder={isCreatingSubfolder}
 							getRequestsByCollection={getRequestsByCollection}
 							onCollectionClick={onCollectionClick}
+							onCollectionToggle={onCollectionToggle}
 							onRequestClick={onRequestClick}
 							onShowContextMenu={onShowContextMenu}
 							onRenameChange={onRenameChange}

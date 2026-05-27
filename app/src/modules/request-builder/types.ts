@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -9,22 +8,25 @@
 /**
  * RequestBuilder Types
  *
- * Centralized type definitions for the request builder module
+ * Centralized type definitions for the request builder module.
+ * KeyValueItem is the UI-layer extension of the domain KeyValueEntry,
+ * adding an ephemeral `id` for stable React keys and a `system` flag.
  */
 
-import type { HttpMethod, ResolvedVariable, VariableScope } from "@/types";
+import type { HttpMethod, KeyValueEntry, ResolvedVariable, VariableScope } from "@/types";
 
 // ============================================================================
 // Key-Value Types (shared across params, headers, form-data)
 // ============================================================================
 
-export interface KeyValueItem {
+/**
+ * UI-layer extension of KeyValueEntry with a stable React key (`id`).
+ * The `id` is ephemeral — it is NOT persisted to the backend.
+ * Strip it with `toKeyValueEntries()` before sending to the API.
+ */
+export interface KeyValueItem extends KeyValueEntry {
 	id: string;
-	key: string;
-	value: string;
-	enabled: boolean;
-	description?: string;
-	system?: boolean;
+	system?: boolean; // true = row is managed by the system (e.g. X-Request-ID)
 }
 
 // ============================================================================
@@ -43,7 +45,7 @@ export interface TabInfo {
 // Auth Types
 // ============================================================================
 
-export type AuthType = "none" | "bearer" | "basic" | "api-key";
+export type AuthType = "none" | "inherit" | "bearer" | "basic" | "api-key";
 
 export interface AuthConfig {
 	type: AuthType;
@@ -91,11 +93,11 @@ export interface RequestState {
 	params: KeyValueItem[];
 	headers: KeyValueItem[];
 
-	// Body (flattened for easier access)
+	// Body (flattened for editor access)
 	bodyMode: BodyMode;
-	body: string; // Raw body content (JSON, text)
-	formData: KeyValueItem[];
-	urlEncoded: KeyValueItem[];
+	body: string; // Raw body content for json/text/graphql modes
+	formData: KeyValueItem[]; // Fields for form-data mode
+	urlEncoded: KeyValueItem[]; // Fields for x-www-form-urlencoded mode
 
 	// Auth
 	authType: AuthType;
@@ -117,15 +119,13 @@ export interface ResponseState {
 	requestHeaders?: Record<string, string>;
 	rawRequest?: string;
 	body: string;
-	bodyRaw?: string;  // Raw response body from server (always available, even for non-JSON)
+	bodyRaw?: string;
 	bodyType: "json" | "html" | "xml" | "text" | "binary";
 	size: number;
 	time: number;
 	timestamp?: string;
-	// Client-side error information (when status === 0)
-	errorCode?: string;    // "TIMEOUT", "CONNECTION_FAILED", "SSL_ERROR", etc.
-	errorMessage?: string; // Human-readable error from engine
-	// Script execution results
+	errorCode?: string;
+	errorMessage?: string;
 	consoleLogs?: string[];
 	testResults?: Array<{ name: string; passed: boolean; error?: string }>;
 	preScriptError?: string;
@@ -182,8 +182,7 @@ export interface KeyValueEditorProps {
 	showResolved?: boolean;
 	allowDisable?: boolean;
 	readOnly?: boolean;
-	keySuggestions?: string[]; // Optional autocomplete suggestions for the key field
-	// Callbacks for controlling editability - allows parent to control behavior (loose coupling)
+	keySuggestions?: string[];
 	canEdit?: (item: KeyValueItem, field: keyof KeyValueItem) => boolean;
 	canRemove?: (item: KeyValueItem) => boolean;
 	canDisable?: (item: KeyValueItem) => boolean;

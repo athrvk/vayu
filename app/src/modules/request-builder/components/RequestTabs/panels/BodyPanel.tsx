@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -18,7 +17,6 @@
  */
 
 import { useState } from "react";
-import Editor from "@monaco-editor/react";
 import {
 	Select,
 	SelectContent,
@@ -26,6 +24,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 	Button,
+	CodeEditor,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "../../../shared/KeyValueEditor";
@@ -60,8 +59,8 @@ export default function BodyPanel() {
 		}
 	};
 
-	const handleRawChange = (value: string | undefined) => {
-		updateField("body", value || "");
+	const handleRawChange = (value: string) => {
+		updateField("body", value);
 	};
 
 	const handleFormDataChange = (items: KeyValueItem[]) => {
@@ -125,21 +124,11 @@ export default function BodyPanel() {
 							</label>
 						)}
 						<div className="border border-input overflow-hidden">
-							<Editor
+							<CodeEditor
 								height="320px"
 								language={request.bodyMode === "json" ? "json" : "plaintext"}
 								value={request.body || ""}
 								onChange={handleRawChange}
-								theme="vs-dark"
-								options={{
-									minimap: { enabled: false },
-									fontSize: 13,
-									lineNumbers: "on",
-									scrollBeyondLastLine: false,
-									wordWrap: "on",
-									tabSize: 2,
-									automaticLayout: true,
-								}}
 							/>
 						</div>
 					</div>

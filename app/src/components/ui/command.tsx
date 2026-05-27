@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -15,6 +14,7 @@ import { Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Kbd } from "@/components/ui/kbd";
 
 const Command = React.forwardRef<
 	React.ElementRef<typeof CommandPrimitive>,
@@ -128,15 +128,44 @@ const CommandItem = React.forwardRef<
 
 CommandItem.displayName = CommandPrimitive.Item.displayName;
 
-const CommandShortcut = ({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => {
+// CommandShortcut wraps children in an `ml-auto` span and key-caps any bare
+// children for a Linear/Raycast feel. Pass either a string ("⌘K" → two caps),
+// an array of single keys, or a fully composed <Kbd> tree.
+const CommandShortcut = ({
+	className,
+	children,
+	...props
+}: React.HTMLAttributes<HTMLSpanElement>) => {
+	const keys = renderShortcutKeys(children);
 	return (
-		<span
-			className={cn("ml-auto text-xs tracking-widest text-muted-foreground", className)}
-			{...props}
-		/>
+		<span className={cn("ml-auto flex items-center gap-1", className)} {...props}>
+			{keys}
+		</span>
 	);
 };
 CommandShortcut.displayName = "CommandShortcut";
+
+function renderShortcutKeys(children: React.ReactNode): React.ReactNode {
+	if (typeof children !== "string") return children;
+	// Split "⌘K" or "⌘ K" or "Ctrl+Enter" into individual key tokens.
+	const tokens = children
+		.replace(/\s+/g, "")
+		.split(/[+\s]+/)
+		.flatMap((tok) => (tok.length > 1 ? splitGlyphs(tok) : [tok]))
+		.filter(Boolean);
+	return tokens.map((t, i) => (
+		<Kbd key={i} size="sm">
+			{t}
+		</Kbd>
+	));
+}
+
+// Split a glyph string like "⌘K" into ["⌘", "K"]. Single Latin words like
+// "Cmd" or "Enter" stay whole.
+function splitGlyphs(s: string): string[] {
+	if (/^[A-Za-z]+$/.test(s)) return [s];
+	return Array.from(s);
+}
 
 export {
 	Command,

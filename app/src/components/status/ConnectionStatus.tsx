@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -7,7 +6,19 @@
  */
 
 import { useState, useEffect } from "react";
-import { Zap, AlertCircle, CheckCircle, Loader2, Cloud, CloudOff, ChevronDown, ChevronRight, Folder, Database, FileText } from "lucide-react";
+import {
+	Zap,
+	AlertCircle,
+	CheckCircle,
+	Loader2,
+	Cloud,
+	CloudOff,
+	ChevronDown,
+	ChevronRight,
+	Folder,
+	Database,
+	FileText,
+} from "lucide-react";
 import { useEngineConnectionStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -110,22 +121,32 @@ export default function ConnectionStatus() {
 									<div className="flex items-start gap-2">
 										<Folder className="w-3.5 h-3.5 text-primary/70 mt-0.5 shrink-0" />
 										<div className="flex-1 min-w-0">
-											<div className="text-muted-foreground">Data Directory</div>
-											<div className="font-mono text-foreground break-all">{paths.dataDir}</div>
+											<div className="text-muted-foreground">
+												Data Directory
+											</div>
+											<div className="font-mono text-foreground break-all">
+												{paths.dataDir}
+											</div>
 										</div>
 									</div>
 									<div className="flex items-start gap-2">
 										<FileText className="w-3.5 h-3.5 text-primary/70 mt-0.5 shrink-0" />
 										<div className="flex-1 min-w-0">
 											<div className="text-muted-foreground">Logs Path</div>
-											<div className="font-mono text-foreground break-all">{paths.logsPath}</div>
+											<div className="font-mono text-foreground break-all">
+												{paths.logsPath}
+											</div>
 										</div>
 									</div>
 									<div className="flex items-start gap-2">
 										<Database className="w-3.5 h-3.5 text-primary/70 mt-0.5 shrink-0" />
 										<div className="flex-1 min-w-0">
-											<div className="text-muted-foreground">Database Path</div>
-											<div className="font-mono text-foreground break-all">{paths.dbPath}</div>
+											<div className="text-muted-foreground">
+												Database Path
+											</div>
+											<div className="font-mono text-foreground break-all">
+												{paths.dbPath}
+											</div>
 										</div>
 									</div>
 								</div>
@@ -148,9 +169,7 @@ export default function ConnectionStatus() {
 				<CollapsibleTrigger className="w-full px-4 py-3 flex items-center gap-2 hover:bg-destructive/5 transition-colors">
 					<AlertCircle className="w-5 h-5 text-destructive shrink-0" />
 					<div className="flex-1 min-w-0 text-left">
-						<p className="text-xs text-destructive">
-							Cannot connect to Vayu Engine
-						</p>
+						<p className="text-xs text-destructive">Cannot connect to Vayu Engine</p>
 						<p className="text-xs text-destructive/70 dark:text-destructive/80 mt-0.5">
 							{engineError || "Make sure the engine is running on port 9876"}
 						</p>
@@ -172,21 +191,27 @@ export default function ConnectionStatus() {
 									<Folder className="w-3.5 h-3.5 text-destructive/70 mt-0.5 shrink-0" />
 									<div className="flex-1 min-w-0">
 										<div className="text-destructive/70">Data Directory</div>
-										<div className="font-mono text-destructive/90 break-all">{paths.dataDir}</div>
+										<div className="font-mono text-destructive/90 break-all">
+											{paths.dataDir}
+										</div>
 									</div>
 								</div>
 								<div className="flex items-start gap-2">
 									<FileText className="w-3.5 h-3.5 text-destructive/70 mt-0.5 shrink-0" />
 									<div className="flex-1 min-w-0">
 										<div className="text-destructive/70">Logs Path</div>
-										<div className="font-mono text-destructive/90 break-all">{paths.logsPath}</div>
+										<div className="font-mono text-destructive/90 break-all">
+											{paths.logsPath}
+										</div>
 									</div>
 								</div>
 								<div className="flex items-start gap-2">
 									<Database className="w-3.5 h-3.5 text-destructive/70 mt-0.5 shrink-0" />
 									<div className="flex-1 min-w-0">
 										<div className="text-destructive/70">Database Path</div>
-										<div className="font-mono text-destructive/90 break-all">{paths.dbPath}</div>
+										<div className="font-mono text-destructive/90 break-all">
+											{paths.dbPath}
+										</div>
 									</div>
 								</div>
 							</div>

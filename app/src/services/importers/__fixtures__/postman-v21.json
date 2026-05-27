@@ -1,0 +1,44 @@
+{
+	"info": {
+		"name": "Acme API",
+		"description": "Demo",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [{ "key": "baseUrl", "value": "https://api.acme.com" }],
+	"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+	"event": [{ "listen": "prerequest", "script": { "exec": ["console.log('pre')"] } }],
+	"item": [
+		{
+			"name": "Users",
+			"item": [
+				{
+					"name": "List users",
+					"request": {
+						"method": "GET",
+						"header": [{ "key": "Accept", "value": "application/json" }],
+						"url": {
+							"raw": "{{baseUrl}}/users?page=1",
+							"query": [
+								{ "key": "page", "value": "1" },
+								{ "key": "trace", "value": "1", "disabled": true }
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Create user",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/users",
+				"body": {
+					"mode": "raw",
+					"raw": "{\"name\":\"x\"}",
+					"options": { "raw": { "language": "json" } }
+				},
+				"auth": { "type": "inherit" }
+			}
+		}
+	]
+}

@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -21,11 +20,10 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BarChart3, Eye } from "lucide-react";
 import { useDashboardStore } from "@/stores";
 import { apiService, loadTestService } from "@/services";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui";
-import { DashboardHeader, RunMetadata, MetricsView, RequestResponseView } from "./components";
+import { cn } from "@/lib/utils";
+import { DashboardHeader, MetricsView, RequestResponseView } from "./components";
 import type { DashboardView, DisplayMetrics } from "./types";
 
 export default function LoadTestDashboard() {
@@ -259,7 +257,7 @@ export default function LoadTestDashboard() {
 
 	const startTime =
 		runMetadata?.startTime &&
-			(!historicalStartTime || runMetadata.startTime <= historicalStartTime)
+		(!historicalStartTime || runMetadata.startTime <= historicalStartTime)
 			? runMetadata.startTime
 			: historicalStartTime;
 
@@ -280,50 +278,52 @@ export default function LoadTestDashboard() {
 
 	return (
 		<div className="flex-1 flex flex-col overflow-hidden">
-			{/* Header */}
-			<div className="p-4 border-b bg-card">
-				<DashboardHeader
-					runId={currentRunId}
-					mode={mode}
-					isStreaming={isStreaming}
-					isStopping={isStopping}
-					onStop={handleStop}
-				/>
+			{/* Compact single-row header */}
+			<DashboardHeader
+				runId={currentRunId}
+				mode={mode}
+				isStreaming={isStreaming}
+				isStopping={isStopping}
+				onStop={handleStop}
+				requestUrl={displayRequestUrl}
+				requestMethod={displayRequestMethod}
+				elapsedDuration={elapsedDuration}
+				configuration={displayConfiguration}
+			/>
 
-				{/* Run Metadata */}
-				<RunMetadata
-					requestUrl={displayRequestUrl}
-					requestMethod={displayRequestMethod}
-					startTime={startTime ?? undefined}
-					endTime={endTime ?? undefined}
-					mode={mode}
-					elapsedDuration={elapsedDuration}
-					setupOverhead={finalReport?.summary?.setupOverhead}
-					configuration={displayConfiguration}
-				/>
-
-				{/* View Toggle */}
-				<Tabs value={activeView} onValueChange={(v) => setActiveView(v as DashboardView)}>
-					<TabsList>
-						<TabsTrigger value="metrics" className="gap-2">
-							<BarChart3 className="w-4 h-4" />
-							Metrics Dashboard
-						</TabsTrigger>
-						<TabsTrigger value="request-response" className="gap-2">
-							<Eye className="w-4 h-4" />
-							Request/Response
-						</TabsTrigger>
-					</TabsList>
-				</Tabs>
+			{/* Tab bar */}
+			<div className="flex border-b border-border bg-panel px-5 shrink-0">
+				{[
+					{ id: "metrics" as DashboardView, label: "Metrics" },
+					{ id: "request-response" as DashboardView, label: "Request / Response" },
+				].map((tab) => (
+					<button
+						key={tab.id}
+						onClick={() => setActiveView(tab.id)}
+						className={cn(
+							"px-3.5 py-2.5 text-[13px] border-b-2 -mb-px transition-colors font-[inherit]",
+							activeView === tab.id
+								? "border-primary text-foreground font-semibold"
+								: "border-transparent text-muted-foreground hover:text-foreground"
+						)}
+					>
+						{tab.label}
+					</button>
+				))}
 			</div>
 
 			{/* Content */}
-			<div className="flex-1 overflow-auto p-6 bg-muted/30">
+			<div className="flex-1 overflow-auto bg-background">
 				{activeView === "metrics" ? (
 					<MetricsView
 						metrics={displayMetrics}
 						historicalMetrics={historicalMetrics}
 						isCompleted={mode === "completed"}
+						finalReport={finalReport}
+						targetRps={
+							displayConfiguration?.targetRps ??
+							finalReport?.metadata?.configuration?.targetRps
+						}
 					/>
 				) : (
 					<RequestResponseView report={finalReport} />

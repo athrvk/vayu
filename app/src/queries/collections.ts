@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -13,6 +12,7 @@
  */
 
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import type {
@@ -95,13 +95,14 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 		})),
 	});
 
-	// Build a map of collectionId -> requests (sorted by createdAt for stable order)
+	// Build a map of collectionId -> requests, sorted by order then createdAt
 	const requestsByCollection = new Map<string, Request[]>();
 	queries.forEach((query, index) => {
 		const collectionId = collectionIds[index];
 		const requests = query.data ?? [];
-		// Sort by createdAt to maintain stable order after renames
 		const sortedRequests = [...requests].sort((a, b) => {
+			const orderDiff = (a.order ?? 0) - (b.order ?? 0);
+			if (orderDiff !== 0) return orderDiff;
 			const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
 			const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
 			return aTime - bTime;
@@ -159,6 +160,27 @@ export function useRequestQuery(requestId: string | null) {
 	});
 }
 
+/**
+ * Return the ancestor chain for a collection, root-first (inclusive of the collection itself).
+ * Used for hierarchical auth/script composition before execution.
+ */
+export function useCollectionAncestors(collectionId: string | null | undefined): Collection[] {
+	const { data: collections = [] } = useCollectionsQuery();
+
+	return useMemo(() => {
+		if (!collectionId) return [];
+		const chain: Collection[] = [];
+		let currentId: string | undefined = collectionId;
+		while (currentId) {
+			const col = collections.find((c) => c.id === currentId);
+			if (!col) break;
+			chain.unshift(col); // root first
+			currentId = col.parentId;
+		}
+		return chain;
+	}, [collections, collectionId]);
+}
+
 // ============ Collection Mutations ============
 
 /**
@@ -187,14 +209,11 @@ export function useUpdateCollectionMutation() {
 	return useMutation({
 		mutationFn: (data: UpdateCollectionRequest) => apiService.updateCollection(data),
 		onSuccess: (updatedCollection) => {
-			queryClient.setQueryData<Collection[]>(
-				queryKeys.collections.list(),
-				(old) => {
-					const next =
-						old?.map((c) => (c.id === updatedCollection.id ? updatedCollection : c)) ?? [];
-					return next.sort(compareCollectionOrder);
-				}
-			);
+			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) => {
+				const next =
+					old?.map((c) => (c.id === updatedCollection.id ? updatedCollection : c)) ?? [];
+				return next.sort(compareCollectionOrder);
+			});
 		},
 	});
 }

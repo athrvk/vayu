@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -13,6 +12,7 @@ import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { Check, ChevronRight, Circle } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { Kbd } from "@/components/ui/kbd";
 
 const DropdownMenu = DropdownMenuPrimitive.Root;
 
@@ -170,12 +170,40 @@ const DropdownMenuSeparator = React.forwardRef<
 ));
 DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
 
-const DropdownMenuShortcut = ({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => {
+// Key-caps any bare string children (e.g. "⌘K" → two small Kbd chips). Pass a
+// fully composed <Kbd> tree if you need control.
+const DropdownMenuShortcut = ({
+	className,
+	children,
+	...props
+}: React.HTMLAttributes<HTMLSpanElement>) => {
+	const content = renderShortcutKeys(children);
 	return (
-		<span className={cn("ml-auto text-xs tracking-widest opacity-60", className)} {...props} />
+		<span className={cn("ml-auto flex items-center gap-1", className)} {...props}>
+			{content}
+		</span>
 	);
 };
 DropdownMenuShortcut.displayName = "DropdownMenuShortcut";
+
+function renderShortcutKeys(children: React.ReactNode): React.ReactNode {
+	if (typeof children !== "string") return children;
+	const tokens = children
+		.replace(/\s+/g, "")
+		.split(/[+\s]+/)
+		.flatMap((tok) => (tok.length > 1 ? splitGlyphs(tok) : [tok]))
+		.filter(Boolean);
+	return tokens.map((t, i) => (
+		<Kbd key={i} size="sm">
+			{t}
+		</Kbd>
+	));
+}
+
+function splitGlyphs(s: string): string[] {
+	if (/^[A-Za-z]+$/.test(s)) return [s];
+	return Array.from(s);
+}
 
 export {
 	DropdownMenu,

@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -357,10 +356,17 @@ export default function VariableInput({
 	return (
 		<div
 			ref={containerRef}
-			className={cn("relative", className)}
+			className={cn(
+				// Default chrome — overridable via className. Wrapper owns border/bg/size
+				// so the inner input can be borderless and fill it.
+				"relative flex items-center h-9 w-full bg-background border border-input px-3 text-sm font-mono shadow-sm transition-colors",
+				"focus-within:outline-none focus-within:ring-1 focus-within:ring-ring",
+				disabled && "opacity-50 cursor-not-allowed",
+				className
+			)}
 			onClick={handleContainerClick}
 		>
-			{/* Input layer - receives text input */}
+			{/* Input layer - receives text input. Borderless, fills the wrapper. */}
 			<input
 				ref={inputRef}
 				type="text"
@@ -372,43 +378,25 @@ export default function VariableInput({
 				placeholder={!hasVariables ? placeholder : undefined}
 				disabled={disabled}
 				className={cn(
-					// Match shadcn Input styling
-					"flex h-9 w-full border border-input px-3 py-1 text-sm shadow-sm transition-colors",
-					"placeholder:text-muted-foreground",
-					"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-					"disabled:cursor-not-allowed disabled:opacity-50",
-					// When we have variables, make text and background transparent so overlay shows through
-					hasVariables
-						? "text-transparent caret-foreground selection:bg-primary/30 bg-transparent"
-						: "bg-background"
+					"absolute inset-0 w-full h-full bg-transparent border-0 outline-none px-[inherit] font-[inherit] text-[inherit]",
+					"placeholder:text-muted-foreground disabled:cursor-not-allowed",
+					// When we have variables, hide real text so the overlay shows through
+					hasVariables && "text-transparent caret-foreground selection:bg-primary/30"
 				)}
-				style={{
-					position: "relative",
-					zIndex: 1,
-					// Use monospace font for consistent character widths with overlay
-					fontFamily:
-						"ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
-				}}
+				style={{ zIndex: 1 }}
 			/>
 
 			{/* Visual overlay layer for variable tokens - ON TOP of input for clickable tokens */}
 			{hasVariables && (
 				<div
-					className="absolute inset-0 flex items-center px-3 overflow-hidden"
+					className="absolute inset-0 flex items-center px-[inherit] overflow-hidden"
 					style={{
 						zIndex: 2,
 						pointerEvents: "none", // Pass clicks through to input
 					}}
 					aria-hidden="true"
 				>
-					<span
-						className="text-sm whitespace-pre"
-						style={{
-							// Use same monospace font as input for consistent character widths
-							fontFamily:
-								"ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
-						}}
-					>
+					<span className="whitespace-pre font-[inherit] text-[inherit]">
 						{renderOverlayContent()}
 					</span>
 				</div>

@@ -408,6 +408,7 @@ void register_run_routes (RouteContext& ctx) {
                 nlohmann::json result_obj;
                 result_obj["timestamp"]  = result.timestamp;
                 result_obj["statusCode"] = result.status_code;
+                result_obj["statusText"] = result.status_text;
                 result_obj["latencyMs"]  = result.latency_ms;
                 if (!result.error.empty ())
                     result_obj["error"] = result.error;

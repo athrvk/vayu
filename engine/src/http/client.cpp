@@ -20,6 +20,7 @@
 #endif
 
 #include "vayu/http/client.hpp"
+#include "vayu/http/status.hpp"
 
 #include <curl/curl.h>
 
@@ -66,10 +67,23 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
 }
 
 /**
- * @brief Callback for writing response headers
+ * @brief Callback for writing response headers.
+ *
+ * Captures BOTH:
+ *  - the reason phrase from the status line ("HTTP/1.1 404 Not Found"
+ *    → "Not Found"), preserving server-custom phrases like Cloudflare's
+ *    "404 Object Not Found" or GitHub's "422 Unprocessable Entity";
+ *  - subsequent "Key: Value" header lines.
+ *
+ * HTTP/2 and HTTP/3 don't carry reason phrases on the wire — the status
+ * line is just "HTTP/2 200". In that case status_text is cleared and the
+ * caller falls back to its code→phrase lookup.
+ *
+ * On followed redirects, curl emits one status block per hop in order,
+ * so overwriting each time leaves status_text reflecting the final hop.
  */
 size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata) {
-    auto* headers     = static_cast<Headers*> (userdata);
+    auto* response    = static_cast<Response*> (userdata);
     size_t total_size = size * nitems;
 
     std::string line (buffer, total_size);
@@ -79,8 +93,24 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
         line.pop_back ();
     }
 
-    // Skip empty lines and status line
-    if (line.empty () || line.starts_with ("HTTP/")) {
+    if (line.empty ()) {
+        return total_size;
+    }
+
+    // Status line: "HTTP/<version> <code> [<reason phrase>]"
+    if (line.starts_with ("HTTP/")) {
+        auto first_space = line.find (' ');
+        if (first_space != std::string::npos) {
+            auto second_space = line.find (' ', first_space + 1);
+            if (second_space != std::string::npos && second_space + 1 < line.size ()) {
+                response->status_text = line.substr (second_space + 1);
+            } else {
+                // No reason phrase (HTTP/2+) — let the caller fall back to a lookup.
+                response->status_text.clear ();
+            }
+        }
+        // Also clear headers between redirect hops so we don't accumulate them.
+        response->headers.clear ();
         return total_size;
     }
 
@@ -100,7 +130,7 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
             c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
         }
 
-        (*headers)[key] = value;
+        response->headers[key] = value;
     }
 
     return total_size;
@@ -132,32 +162,6 @@ Error curl_to_error (CURLcode code, const char* error_buffer) {
     }
 
     return error;
-}
-
-/**
- * @brief Get HTTP status text from code
- */
-const char* status_text (int code) {
-    switch (code) {
-    case 200: return "OK";
-    case 201: return "Created";
-    case 204: return "No Content";
-    case 301: return "Moved Permanently";
-    case 302: return "Found";
-    case 304: return "Not Modified";
-    case 400: return "Bad Request";
-    case 401: return "Unauthorized";
-    case 403: return "Forbidden";
-    case 404: return "Not Found";
-    case 405: return "Method Not Allowed";
-    case 408: return "Request Timeout";
-    case 429: return "Too Many Requests";
-    case 500: return "Internal Server Error";
-    case 502: return "Bad Gateway";
-    case 503: return "Service Unavailable";
-    case 504: return "Gateway Timeout";
-    default: return "Unknown";
-    }
 }
 
 } // namespace
@@ -323,7 +327,7 @@ Result<Response> Client::send (const Request& request) {
     curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt (curl, CURLOPT_WRITEDATA, &response_body);
     curl_easy_setopt (curl, CURLOPT_HEADERFUNCTION, header_callback);
-    curl_easy_setopt (curl, CURLOPT_HEADERDATA, &response.headers);
+    curl_easy_setopt (curl, CURLOPT_HEADERDATA, &response);
 
     // Set timeout
     curl_easy_setopt (curl, CURLOPT_TIMEOUT_MS, static_cast<long> (request.timeout_ms));
@@ -381,7 +385,7 @@ Result<Response> Client::send (const Request& request) {
 
         // Return Response object with error details (Postman-compatible approach)
         response.status_code = 0; // 0 indicates client-side error (no server response)
-        response.status_text   = "Error";
+        response.status_text = vayu::http::status_text (0);
         response.error_code    = error.code;
         response.error_message = error.message;
         // raw_request is already populated above
@@ -395,7 +399,12 @@ Result<Response> Client::send (const Request& request) {
     long http_code = 0;
     curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &http_code);
     response.status_code = static_cast<int> (http_code);
-    response.status_text = status_text (response.status_code);
+    // Prefer the wire reason phrase captured by header_callback. Only fall
+    // back to the code→phrase lookup when the server (or HTTP/2+ stack)
+    // didn't supply one.
+    if (response.status_text.empty ()) {
+        response.status_text = vayu::http::status_text (response.status_code);
+    }
     response.error_code = ErrorCode::None; // Explicitly set to None for successful requests
 
     // Set body

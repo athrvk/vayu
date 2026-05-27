@@ -17,8 +17,11 @@
 #include "vayu/runtime/script_engine.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <limits>
 #include <mutex>
 #include <sstream>
+#include <string>
 #include <vector>
 
 #include "vayu/utils/json.hpp"
@@ -92,6 +95,71 @@ std::string js_to_string (JSContext* ctx, JSValue val) {
 }
 
 // ============================================================================
+// Variable Type Casting
+// ============================================================================
+
+// Convert a stored Variable into a JSValue of its declared type. The on-disk
+// value is always a string — type drives the conversion (mirrors the frontend
+// castByType in app/src/lib/variable-cast.ts so reads are consistent across
+// both runtimes).
+JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
+    const std::string& type = var.type.empty () ? std::string{ "string" } : var.type;
+
+    if (type == "number") {
+        if (var.value.empty ())
+            return JS_NewFloat64 (ctx, std::numeric_limits<double>::quiet_NaN ());
+        try {
+            size_t idx = 0;
+            double num = std::stod (var.value, &idx);
+            // If the whole string didn't parse, surface NaN to match the
+            // frontend's Number(value) behavior on partial garbage.
+            if (idx != var.value.size ())
+                return JS_NewFloat64 (ctx, std::numeric_limits<double>::quiet_NaN ());
+            return JS_NewFloat64 (ctx, num);
+        } catch (...) {
+            return JS_NewFloat64 (ctx, std::numeric_limits<double>::quiet_NaN ());
+        }
+    }
+
+    if (type == "boolean") {
+        std::string lowered = var.value;
+        std::transform (lowered.begin (), lowered.end (), lowered.begin (),
+        [] (unsigned char c) { return std::tolower (c); });
+        // Trim whitespace
+        auto isspace_pred = [] (unsigned char c) { return std::isspace (c); };
+        while (!lowered.empty () && isspace_pred (lowered.front ()))
+            lowered.erase (lowered.begin ());
+        while (!lowered.empty () && isspace_pred (lowered.back ()))
+            lowered.pop_back ();
+
+        if (lowered == "true" || lowered == "1" || lowered == "yes")
+            return JS_NewBool (ctx, 1);
+        if (lowered == "false" || lowered == "0" || lowered == "no" || lowered.empty ())
+            return JS_NewBool (ctx, 0);
+        // Non-canonical truthy string: matches Boolean("foo") → true
+        return JS_NewBool (ctx, 1);
+    }
+
+    if (type == "json") {
+        // JS_ParseJSON returns an exception JSValue on parse failure; fall
+        // back to the raw string so the script author can debug.
+        JSValue parsed =
+        JS_ParseJSON (ctx, var.value.c_str (), var.value.size (), "<variable>");
+        if (JS_IsException (parsed)) {
+            JS_FreeValue (ctx, parsed);
+            // Clear the pending exception so it doesn't leak into the script
+            JSValue err = JS_GetException (ctx);
+            JS_FreeValue (ctx, err);
+            return JS_NewString (ctx, var.value.c_str ());
+        }
+        return parsed;
+    }
+
+    // Default / "string"
+    return JS_NewString (ctx, var.value.c_str ());
+}
+
+// ============================================================================
 // Console Implementation
 // ============================================================================
 
@@ -102,6 +170,36 @@ JSValue js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     for (int i = 0; i < argc; i++) {
         if (i > 0)
             ss << " ";
+
+        // JS_ToCString on an object invokes Object.prototype.toString() →
+        // "[object Object]". Pretty-print objects (and arrays) via
+        // JSON.stringify instead, matching standard console.log behavior.
+        // Functions are left to JS_ToCString (which yields their source).
+        if (JS_IsObject (argv[i]) && !JS_IsFunction (ctx, argv[i])) {
+            JSValue indent = JS_NewInt32 (ctx, 2);
+            JSValue json   = JS_JSONStringify (ctx, argv[i], JS_UNDEFINED, indent);
+            JS_FreeValue (ctx, indent);
+
+            if (!JS_IsException (json) && !JS_IsUndefined (json)) {
+                const char* str = JS_ToCString (ctx, json);
+                if (str) {
+                    ss << str;
+                    JS_FreeCString (ctx, str);
+                }
+                JS_FreeValue (ctx, json);
+                continue;
+            }
+            // Stringify threw (e.g. circular reference) or returned undefined.
+            // Clear any pending exception and emit a readable placeholder.
+            JS_FreeValue (ctx, json);
+            JSValue exc = JS_GetException (ctx);
+            if (!JS_IsNull (exc) && !JS_IsUndefined (exc)) {
+                JS_FreeValue (ctx, exc);
+            }
+            ss << "[Object: unserializable]";
+            continue;
+        }
+
         const char* str = JS_ToCString (ctx, argv[i]);
         if (str) {
             ss << str;
@@ -827,7 +925,7 @@ JSValue js_pm_environment_get (JSContext* ctx, JSValueConst this_val, int argc, 
     std::string key = js_to_string (ctx, argv[0]);
     auto it         = data->environment->find (key);
     if (it != data->environment->end () && it->second.enabled) {
-        return JS_NewString (ctx, it->second.value.c_str ());
+        return cast_variable_to_jsvalue (ctx, it->second);
     }
 
     return JS_UNDEFINED;
@@ -875,7 +973,7 @@ JSValue js_pm_globals_get (JSContext* ctx, JSValueConst this_val, int argc, JSVa
     std::string key = js_to_string (ctx, argv[0]);
     auto it         = data->globals->find (key);
     if (it != data->globals->end () && it->second.enabled) {
-        return JS_NewString (ctx, it->second.value.c_str ());
+        return cast_variable_to_jsvalue (ctx, it->second);
     }
 
     return JS_UNDEFINED;
@@ -923,7 +1021,7 @@ JSValue js_pm_collectionVariables_get (JSContext* ctx, JSValueConst this_val, in
     std::string key = js_to_string (ctx, argv[0]);
     auto it         = data->collectionVariables->find (key);
     if (it != data->collectionVariables->end () && it->second.enabled) {
-        return JS_NewString (ctx, it->second.value.c_str ());
+        return cast_variable_to_jsvalue (ctx, it->second);
     }
 
     return JS_UNDEFINED;

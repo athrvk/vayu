@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -53,7 +52,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 	if (!report) {
 		return (
-			<div className="text-center py-12 text-gray-500">
+			<div className="p-5 text-center py-12 text-muted-foreground">
 				<p>Request/Response view available after test completion</p>
 			</div>
 		);
@@ -73,7 +72,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 	const hasStatusCodes = Object.keys(statusCodes).length > 0;
 
 	return (
-		<div className="space-y-6">
+		<div className="p-5 space-y-4">
 			{/* Status Code Distribution */}
 			<Card>
 				<CardHeader>
@@ -81,9 +80,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 				</CardHeader>
 				<CardContent>
 					{hasStatusCodes ? (
-						<div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+						<div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
 							{Object.entries(statusCodes).map(([code, count]) => (
-								<div key={code} className="p-3 bg-muted rounded">
+								<div
+									key={code}
+									className="p-3 bg-card border border-border rounded-md"
+								>
 									<span
 										className={cn(
 											"font-mono font-bold text-lg",
@@ -145,7 +147,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<CardTitle className="text-lg">Timing Breakdown</CardTitle>
 					</CardHeader>
 					<CardContent>
-						<div className="grid grid-cols-5 gap-4">
+						<div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
 							<div>
 								<p className="text-sm text-muted-foreground">DNS</p>
 								<p className="font-bold">
@@ -188,7 +190,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<CardTitle className="text-lg">Slow Requests</CardTitle>
 					</CardHeader>
 					<CardContent>
-						<div className="grid grid-cols-3 gap-4">
+						<div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
 							<div>
 								<p className="text-sm text-muted-foreground">Slow Requests</p>
 								<p className="font-bold text-orange-600 dark:text-orange-400">
@@ -221,7 +223,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<CardTitle className="text-lg">Test Validation</CardTitle>
 					</CardHeader>
 					<CardContent>
-						<div className="grid grid-cols-4 gap-4">
+						<div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
 							<div>
 								<p className="text-sm text-muted-foreground">Samples Tested</p>
 								<p className="font-bold">{report.testValidation.samplesTested}</p>
@@ -276,7 +278,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 												className="w-full justify-start px-4 py-3 h-auto hover:bg-muted/50"
 												onClick={() => toggleResult(index)}
 											>
-												<div className="flex items-center gap-3 w-full">
+												<div className="flex flex-wrap items-center gap-x-3 gap-y-2 w-full">
 													{isExpanded ? (
 														<ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
 													) : (
@@ -293,7 +295,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 													)}
 
 													{/* Request Number */}
-													<span className="text-xs text-muted-foreground font-mono w-8">
+													<span className="text-xs text-muted-foreground font-mono min-w-8">
 														#{result.trace?.request_number ?? index}
 													</span>
 
@@ -321,13 +323,13 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 													</span>
 
 													{/* Timestamp */}
-													<span className="text-xs text-muted-foreground ml-auto">
+													<span className="text-xs text-muted-foreground sm:ml-auto">
 														{formatTime(result.timestamp)}
 													</span>
 
 													{/* Error preview */}
 													{isError && result.error && (
-														<span className="text-xs text-destructive truncate max-w-[200px]">
+														<span className="text-xs text-destructive truncate basis-full sm:basis-auto sm:max-w-[200px]">
 															{result.error.split(":")[0]}
 														</span>
 													)}
@@ -343,7 +345,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 															<p className="text-xs font-medium text-muted-foreground">
 																Error
 															</p>
-															<p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 p-2 rounded font-mono text-xs break-all">
+															<p className="text-sm bg-destructive/10 text-destructive p-2 rounded font-mono text-xs break-all">
 																{result.error}
 															</p>
 														</div>
@@ -376,10 +378,10 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																	<p className="text-xs font-medium text-muted-foreground">
 																		Timing Breakdown
 																	</p>
-																	<div className="grid grid-cols-5 gap-2 text-xs">
+																	<div className="grid grid-cols-[repeat(auto-fit,minmax(90px,1fr))] gap-2 text-xs">
 																		{result.trace.dnsMs !==
 																			undefined && (
-																			<div className="bg-muted p-2 rounded text-center">
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
 																					DNS
 																				</p>
@@ -393,7 +395,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																		)}
 																		{result.trace.connectMs !==
 																			undefined && (
-																			<div className="bg-muted p-2 rounded text-center">
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
 																					Connect
 																				</p>
@@ -407,7 +409,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																		)}
 																		{result.trace.tlsMs !==
 																			undefined && (
-																			<div className="bg-muted p-2 rounded text-center">
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
 																					TLS
 																				</p>
@@ -422,7 +424,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																		{result.trace
 																			.firstByteMs !==
 																			undefined && (
-																			<div className="bg-muted p-2 rounded text-center">
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
 																					TTFB
 																				</p>
@@ -436,7 +438,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																		)}
 																		{result.trace.downloadMs !==
 																			undefined && (
-																			<div className="bg-muted p-2 rounded text-center">
+																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
 																					Download
 																				</p>
@@ -454,7 +456,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 															{/* Slow Request Warning */}
 															{result.trace.isSlow && (
-																<div className="flex items-center gap-2 text-xs bg-orange-50 dark:bg-orange-950/30 text-orange-700 dark:text-orange-400 p-2 rounded">
+																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive p-2 rounded">
 																	<Clock className="w-3 h-3" />
 																	<span>
 																		Slow request:{" "}

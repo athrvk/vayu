@@ -1,0 +1,32 @@
+# Vayu
+
+> Open source desktop app for REST API testing and load testing. Local-first, no account required, no cloud sync.
+
+Vayu is a free Postman alternative that runs entirely on your machine. It combines a familiar request-builder UI (Electron + React) with a high-performance C++ execution engine that can sustain tens of thousands of HTTP requests per second for load testing.
+
+## Key facts
+
+- **Platforms**: Windows (x64), macOS (universal), Linux (AppImage)
+- **License**: Engine — AGPL-3.0 / UI — Apache-2.0
+- **No account, no telemetry, 100% offline**
+- **Import formats**: Postman v2.0/v2.1, Insomnia v4, OpenAPI 3.0, Swagger 2.0
+- **Scripting**: QuickJS with `pm.*` API — compatible with Postman test scripts
+- **Load testing**: built-in, real-time metrics streaming via SSE
+- **Variable resolution**: layered — globals → collection chain → active environment
+
+## Architecture
+
+Sidecar pattern: Electron UI (Manager) communicates with a C++20 daemon (Engine) over HTTP on localhost:9876. The separation keeps the UI responsive during high-throughput load tests.
+
+## Documentation
+
+- [README](https://github.com/athrvk/vayu/blob/master/README.md)
+- [Architecture](https://github.com/athrvk/vayu/blob/master/docs/architecture.md)
+- [Engine API Reference](https://github.com/athrvk/vayu/blob/master/docs/engine/api-reference.md)
+- [Variable Resolution](https://github.com/athrvk/vayu/blob/master/docs/app/variable-resolution.md)
+- [DB Schema](https://github.com/athrvk/vayu/blob/master/docs/engine/db-schema.md)
+- [Building](https://github.com/athrvk/vayu/blob/master/docs/building.md)
+
+## Download
+
+https://github.com/athrvk/vayu/releases/latest

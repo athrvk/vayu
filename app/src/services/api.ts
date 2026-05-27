@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -43,6 +42,7 @@ import type {
 	GetConfigResponse,
 	UpdateConfigRequest,
 	GlobalsResponse,
+	ImportFetchResponse,
 } from "@/types";
 import type { TimeSeriesResponse } from "@/modules/history/types";
 
@@ -147,7 +147,9 @@ export const apiService = {
 	},
 
 	async updateGlobals(variables: Record<string, VariableValue>): Promise<GlobalVariables> {
-		const response = await httpClient.post<GlobalsResponse>(API_ENDPOINTS.GLOBALS, { variables });
+		const response = await httpClient.post<GlobalsResponse>(API_ENDPOINTS.GLOBALS, {
+			variables,
+		});
 		return GlobalsTransformer.toFrontend(response);
 	},
 
@@ -201,5 +203,10 @@ export const apiService = {
 	// Scripting
 	async getScriptCompletions(): Promise<ScriptCompletionsResponse> {
 		return await httpClient.get<ScriptCompletionsResponse>(API_ENDPOINTS.SCRIPT_COMPLETIONS);
+	},
+
+	// Import
+	async importFetch(url: string): Promise<ImportFetchResponse> {
+		return await httpClient.post<ImportFetchResponse>(API_ENDPOINTS.IMPORT_FETCH, { url });
 	},
 };

@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -30,6 +29,15 @@ export interface LoadTestRequestInfo {
 	url: string;
 }
 
+/**
+ * Cap historical metrics at ~3000 points. With the engine at 10 Hz and the UI
+ * commit throttle at 2 Hz buffering every tick (load-test-service.ts), this is
+ * ~5 minutes of full-fidelity history before the oldest points roll off — long
+ * enough for a typical load-test session, short enough to keep chart slicing
+ * cheap.
+ */
+const HISTORICAL_METRICS_CAP = 3000;
+
 interface DashboardState {
 	currentRunId: string | null;
 	mode: DashboardMode;
@@ -52,7 +60,7 @@ interface DashboardState {
 	) => void;
 	stopRun: () => void;
 	setStreaming: (streaming: boolean) => void;
-	addMetrics: (metrics: LoadTestMetrics) => void;
+	addMetricsBatch: (batch: LoadTestMetrics[]) => void;
 	setFinalReport: (report: RunReport) => void;
 	setError: (error: string | null) => void;
 	setActiveView: (view: DashboardView) => void;
@@ -100,12 +108,14 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
 	setStreaming: (streaming) => set({ isStreaming: streaming }),
 
-	addMetrics: (metrics) =>
+	addMetricsBatch: (batch) =>
 		set((state) => {
-			// Cap at 600 points (~60s at 2 updates/sec) to keep UI responsive and reduce re-renders
-			const newHistory = [...state.historicalMetrics, metrics].slice(-600);
+			if (batch.length === 0) return state;
+			const newHistory = [...state.historicalMetrics, ...batch].slice(
+				-HISTORICAL_METRICS_CAP
+			);
 			return {
-				currentMetrics: metrics,
+				currentMetrics: batch[batch.length - 1],
 				historicalMetrics: newHistory,
 			};
 		}),

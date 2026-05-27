@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -30,8 +29,10 @@ import {
 import { useRequestBuilderContext } from "../../../context";
 import VariableInput from "../../../shared/VariableInput";
 import type { AuthType } from "../../../types";
+import AuthInheritBanner from "./AuthInheritBanner";
 
 const AUTH_TYPES: { value: AuthType; label: string; icon: typeof Key }[] = [
+	{ value: "inherit", label: "Inherit from Collection", icon: Lock },
 	{ value: "none", label: "No Auth", icon: Lock },
 	{ value: "bearer", label: "Bearer Token", icon: Key },
 	{ value: "basic", label: "Basic Auth", icon: User },
@@ -75,7 +76,7 @@ export default function AuthPanel() {
 			<div className="space-y-2">
 				<Label>Authentication Type</Label>
 				<Select value={authType} onValueChange={handleTypeChange}>
-					<SelectTrigger className="w-48">
+					<SelectTrigger className="w-auto">
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>
@@ -93,6 +94,9 @@ export default function AuthPanel() {
 					</SelectContent>
 				</Select>
 			</div>
+
+			{/* Inherit resolution */}
+			{authType === "inherit" && <AuthInheritBanner collectionId={request.collectionId} />}
 
 			{/* Auth Configuration */}
 			{authType === "none" && (

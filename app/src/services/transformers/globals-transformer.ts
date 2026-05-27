@@ -1,4 +1,3 @@
-
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -20,7 +19,7 @@ import type { GlobalVariables } from "@/types";
  */
 export type BackendGlobals = Omit<GlobalVariables, "updatedAt"> & {
 	updatedAt: number | string;
-}
+};
 
 /**
  * Globals Transformer
