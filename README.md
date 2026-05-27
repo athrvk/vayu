@@ -13,7 +13,7 @@ Vayu is a free, open source desktop app for REST API testing and load testing on
 ![C++](https://img.shields.io/badge/C++-20-blue?logo=cplusplus)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
-![Electron](https://img.shields.io/badge/Electron-28-47848F?logo=electron)
+![Electron](https://img.shields.io/badge/Electron-39-47848F?logo=electron)
 
 ---
 
