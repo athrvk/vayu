@@ -136,17 +136,17 @@ No installation wizard or root access required. The AppImage is self-contained.
 
 ## Architecture
 
-Vayu uses a **sidecar architecture**: the Electron UI (Manager) and the C++ daemon (Engine) are separate processes that communicate over HTTP on `localhost:9876`. That separation is what keeps the UI fully responsive even when the engine is saturating the network under a load test — the renderer never blocks on request work.
+Vayu runs as two cooperating processes: a lightweight Electron UI (the Manager) and a native C++ daemon (the Engine) sitting next to it as a local sidecar. The Manager owns the workspace — collections, environments, the request builder, the dashboard — and the Engine owns the wire: connection pooling, the event loop, script execution, and metrics. Keeping them split is what lets the UI stay smooth while the engine is hammering an endpoint at full tilt; the renderer never has to share a thread with the request load.
 
 ```
-┌────────────────────┐        ┌────────────────────┐
-│   THE MANAGER      │  HTTP  │    THE ENGINE      │
-│  (Electron/React)  │◄──────►│      (C++)         │
-│                    │ :9876  │                    │
-│  • Request Builder │        │  • Event Loop      │
-│  • Collections     │        │  • QuickJS Runtime │
-│  • Load Dashboard  │        │  • Multi-Worker    │
-└────────────────────┘        └────────────────────┘
+┌────────────────────┐         ┌────────────────────┐
+│   THE MANAGER      │  local  │    THE ENGINE      │
+│  (Electron/React)  │◄───────►│      (C++)         │
+│                    │ sidecar │                    │
+│  • Request Builder │         │  • Event Loop      │
+│  • Collections     │         │  • QuickJS Runtime │
+│  • Load Dashboard  │         │  • Multi-Worker    │
+└────────────────────┘         └────────────────────┘
 ```
 
 See [Architecture Documentation](docs/architecture.md) for the full process model and IPC details.
