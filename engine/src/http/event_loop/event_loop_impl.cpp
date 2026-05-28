@@ -82,11 +82,12 @@ EventLoopStats EventLoopImpl::stats () const {
 }
 
 size_t EventLoopImpl::submit (const Request& request, RequestCallback callback, ProgressCallback progress) {
-    auto data        = std::make_unique<TransferData> ();
-    data->request_id = next_request_id.fetch_add (1, std::memory_order_relaxed);
-    data->request    = request;
-    data->callback   = std::move (callback);
-    data->progress   = std::move (progress);
+    auto data          = std::make_unique<TransferData> ();
+    data->request_id   = next_request_id.fetch_add (1, std::memory_order_relaxed);
+    data->submitted_at = std::chrono::steady_clock::now ();
+    data->request      = request;
+    data->callback     = std::move (callback);
+    data->progress     = std::move (progress);
 
     size_t id = data->request_id;
     submit (std::move (data));
@@ -94,10 +95,11 @@ size_t EventLoopImpl::submit (const Request& request, RequestCallback callback, 
 }
 
 RequestHandle EventLoopImpl::submit_async (const Request& request) {
-    auto data        = std::make_unique<TransferData> ();
-    data->request_id = next_request_id.fetch_add (1, std::memory_order_relaxed);
-    data->request    = request;
-    data->has_promise = true;
+    auto data          = std::make_unique<TransferData> ();
+    data->request_id   = next_request_id.fetch_add (1, std::memory_order_relaxed);
+    data->submitted_at = std::chrono::steady_clock::now ();
+    data->request      = request;
+    data->has_promise  = true;
 
     RequestHandle handle;
     handle.id     = data->request_id;
