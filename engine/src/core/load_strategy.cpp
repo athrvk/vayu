@@ -197,8 +197,8 @@ class ConstantLoadStrategy : public LoadStrategy {
                     // Before breaking: submit all batches that were due within duration.
                     // Use strict < so we don't submit the first batch after the window
                     // (e.g. 5s @ 1000 RPS = batches at 0..4999ms only, not 5000ms).
-                    size_t max_pending =
-                    std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000));
+                    size_t max_pending = config.value ("maxInFlight",
+                        std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
                     while (next_batch_time < duration_end && now >= next_batch_time &&
                     context->event_loop->pending_count () < max_pending &&
                     !context->should_stop) {
@@ -216,8 +216,8 @@ class ConstantLoadStrategy : public LoadStrategy {
                 }
 
                 // Check if it's time to submit (possibly multiple batches if we fell behind)
-                size_t max_pending =
-                std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000));
+                size_t max_pending = config.value ("maxInFlight",
+                    std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
 
                 if (now >= next_batch_time) {
                     // How many batches are we due? (catch up after preemption/slow iterations)
@@ -311,7 +311,8 @@ class ConstantLoadStrategy : public LoadStrategy {
                 }
 
                 // Backpressure
-                size_t max_pending = std::max (concurrency * 5U, size_t (1000));
+                size_t max_pending = config.value ("maxInFlight",
+                    std::max (concurrency * 5U, size_t (1000)));
                 if (context->event_loop->pending_count () > max_pending) {
                     std::this_thread::sleep_for (std::chrono::milliseconds (50));
                     continue;
@@ -357,7 +358,8 @@ class IterationsLoadStrategy : public LoadStrategy {
         size_t submitted = 0;
         while (submitted < iterations && !context->should_stop) {
             // Backpressure - don't submit too many at once
-            size_t max_pending = std::max (concurrency * 5U, size_t (100));
+            size_t max_pending = config.value ("maxInFlight",
+                std::max (concurrency * 5U, size_t (100)));
             if (context->event_loop->pending_count () > max_pending) {
                 std::this_thread::sleep_for (std::chrono::milliseconds (10));
                 continue;
@@ -454,7 +456,8 @@ class RampUpLoadStrategy : public LoadStrategy {
             }
 
             // Backpressure
-            size_t max_pending = std::max (target_concurrency * 5U, size_t (1000));
+            size_t max_pending = config.value ("maxInFlight",
+                std::max (target_concurrency * 5U, size_t (1000)));
             if (context->event_loop->pending_count () > max_pending) {
                 std::this_thread::sleep_for (std::chrono::milliseconds (50));
                 continue;
