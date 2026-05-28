@@ -124,18 +124,14 @@ stats["droppedRequests"] = dropped_requests_.load (std::memory_order_relaxed);
 ```cpp
 if (context->event_loop->pending_count () >= max_pending) {
     context->metrics_collector->record_drop_batch (batch_size);
-
-    // Warn once on first drop in this run
-    if (context->metrics_collector->dropped_requests () == batch_size) {
-        LOG_WARN("[run:" + context->run_id + "] Backpressure: max_pending reached. "
-                 "Requests are being dropped. Reduce target_rps or the server "
-                 "cannot sustain the load.");
-    }
-
     next_batch_time = now + std::chrono::microseconds (batch_interval_us);
     break;
 }
 ```
+
+The counter + UI banner (below) are the user-visible signal; no engine-side log is
+needed. A warning log per drop would be either noisy (every batch) or stateful for no
+gain (the counter already encodes "first drop seen").
 
 Why `record_drop_batch` instead of `record_drop` called N times: avoids N atomic
 fetch_add calls in the hot path; one call for the whole batch.
@@ -167,6 +163,15 @@ dropped_requests: metrics.droppedRequests || 0,
   > ⚠ **N requests dropped due to backpressure.** The server received less load than
   > configured. Reduce target RPS or increase server capacity.
 - The warning must be prominent — a silent drop invalidates the meaning of the RPS number.
+
+**Note on coordinated omission:** dropped requests are intentionally **not** synthesised
+into the latency histogram. A request that was never sent has no meaningful end time, and
+fabricating one would corrupt the percentile distribution. The counter + banner are the
+honest signal: "the histogram below describes N requests; M others were dropped."
+
+**SSE field naming:** the engine emits camelCase (`droppedRequests`); the app remaps to
+snake_case (`dropped_requests`). This matches the existing `avgLatencyMs` →
+`avg_latency_ms` convention in `sse-client.ts` — not a bug.
 
 ---
 
@@ -252,14 +257,20 @@ response.timing.download_ms   = (wire_seconds - starttransfer) * 1000.0;
 ```
 
 The `std::max(0.0, ...)` clamp on `queue_wait_ms` guards against sub-microsecond clock
-jitter where `perceived_ms` could appear slightly smaller than `wire_ms`.
+jitter where `perceived_ms` could appear slightly smaller than `wire_ms`. In debug builds,
+also assert `perceived_ms - wire_ms > -1.0` to catch real bugs (wrong clock, `submitted_at`
+stamped after `submit()`, etc.) — sub-ms jitter passes, ms-scale negatives trip the assert.
+Production behaviour is unchanged.
 
 **`engine/include/vayu/core/metrics_collector.hpp`** — `ResponseSample` constructor
 (line 53) reads `resp.timing.total_ms`. After this change it will automatically capture
 perceived latency. No code change needed.
 
 **`engine/src/core/load_strategy.cpp`** — `latency = response.timing.total_ms` (line 84)
-automatically becomes perceived. No code change needed.
+automatically becomes perceived. The inline trace JSON builder at lines 90–96 also needs
+`wireMs` and `queueWaitMs` added alongside `totalMs`/`dnsMs`/…, otherwise per-request
+traces silently keep the old fields. Prefer extracting both this site and `utils/json.cpp`
+into a single shared serializer rather than maintaining two parallel builders.
 
 **`engine/src/http/routes/execution.cpp:202`** — `db_result.latency_ms =
 response.timing.total_ms` automatically becomes perceived. No code change needed.
@@ -324,6 +335,16 @@ Add inside `record_success`:
 atomic_add_double (total_queue_wait_sum_, queue_wait_ms);
 ```
 
+Reuses the existing private `MetricsCollector::atomic_add_double` helper
+(`metrics_collector.cpp:71`) already used for `total_latency_sum_` — no new infrastructure.
+
+**Breaking signature change — all `record_success` callers must be updated:**
+- `engine/src/core/load_strategy.cpp:107` (production call site)
+- `engine/tests/metrics_collector_test.cpp` lines 40–42, 65, 85, 114, 131–136, 161, 229
+- `engine/tests/metrics_helper_test.cpp:23`
+
+Test call sites can pass `0.0` for `queue_wait_ms` since they don't exercise queueing.
+
 Add to `get_current_stats()`:
 ```cpp
 stats["avgQueueWaitMs"] = average_queue_wait ();
@@ -348,6 +369,9 @@ avg_queue_wait_ms?: number;
 ```typescript
 avg_queue_wait_ms: metrics.avgQueueWaitMs || 0,
 ```
+
+(camelCase→snake_case remap matches the existing `avgLatencyMs` → `avg_latency_ms`
+convention in the same file.)
 
 **App (`app/src/modules/dashboard/components/MetricsView.tsx`):**
 
@@ -407,22 +431,49 @@ in the same PR or sequentially, but 2 must land before 3.
 | `app/src/types/domain.ts` | Add `dropped_requests`, `avg_queue_wait_ms` |
 | `app/src/services/sse-client.ts` | Map new SSE fields |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Drop warning banner; live latency stacked chart |
+| `engine/tests/metrics_collector_test.cpp` | Update existing `record_success` calls; add tests for `record_drop_batch`, queue-wait accumulator, new SSE keys |
+| `engine/tests/metrics_helper_test.cpp` | Update `record_success` call to pass `queue_wait_ms` |
+| `engine/tests/event_loop_test.cpp` (or new) | Assert `total_ms ≈ wire_ms + queue_wait_ms` end-to-end through `submit()` |
 
 ---
 
 ## Verification
 
-**Regression (low RPS, healthy server):**
+### Manual scenarios (against `scripts/test/` mock server)
+
+**Regression (low RPS, healthy server):** `target_rps=100`, mock server with no
+artificial delay.
 - `dropped_requests = 0` throughout
 - `avg_queue_wait_ms < 1ms` throughout
 - `avg_latency_ms` ≈ same as before (queue wait negligible)
 
-**Backpressure scenario (high RPS, slow server):**
-- `dropped_requests > 0` — counter increments, warning banner appears
-- `avg_queue_wait_ms` grows visibly in live chart top band
+**Backpressure scenario:** `target_rps=10000` against the mock server with
+`--delay 50ms` and `max_pending=1000`.
+- `dropped_requests > 0` within 5s — counter increments, banner appears
+- `avg_queue_wait_ms` lands in the 5–50ms range and is visible as the top band of the
+  stacked chart
 - `avg_latency_ms` (perceived) is higher than pre-change `avgLatencyMs` (wire-only)
   — this is correct, not a regression
 
 **Idle queue (server fast, low RPS):**
 - `queue_wait_ms ≈ 0` for individual requests
-- `avg_latency_ms ≈ wire_ms` — identical within clock jitter (~1-5µs)
+- `avg_latency_ms ≈ wire_ms` — identical within clock jitter (~1–5µs)
+
+### Unit tests (Google Test, `engine/tests/`)
+
+- `metrics_collector_test.cpp` — add:
+  - `record_drop_batch(N)` increments `dropped_requests()` by exactly N; multiple calls
+    accumulate.
+  - `record_success(status, latency, queue_wait, …)` accumulates `total_queue_wait_sum_`
+    such that `average_queue_wait()` returns the mean across N calls.
+  - `get_current_stats()` includes `droppedRequests` and `avgQueueWaitMs` keys.
+- New test (or extend `event_loop_test.cpp` if present) — assert the invariant
+  `Timing::total_ms ≈ Timing::wire_ms + Timing::queue_wait_ms` within the jitter clamp
+  for a request driven end-to-end through `submit()`.
+
+### Local DB note
+
+No prod migration is needed (no users), but local dev DBs will contain pre-change rows
+where `latency_ms` = wire-time and post-change rows where it = perceived. The two are
+not directly comparable across the cutover. Wipe local DBs after upgrading or treat the
+discontinuity knowingly when comparing historical runs.
