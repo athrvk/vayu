@@ -276,3 +276,29 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesDroppedRequests) {
     ASSERT_TRUE (stats.contains ("droppedRequests"));
     EXPECT_EQ (stats["droppedRequests"].get<size_t> (), 42U);
 }
+
+// ============================================================================
+// Queue Wait Time Tests
+// ============================================================================
+
+TEST_F (MetricsCollectorTest, RecordSuccessAccumulatesQueueWait) {
+    collector->record_success (200, 50.0, 5.0, "");
+    collector->record_success (200, 50.0, 15.0, "");
+    collector->record_success (200, 50.0, 10.0, "");
+
+    // Mean of 5 + 15 + 10 = 30 / 3 = 10
+    EXPECT_DOUBLE_EQ (collector->average_queue_wait (), 10.0);
+}
+
+TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesAvgQueueWaitMs) {
+    collector->record_success (200, 50.0, 8.0, "");
+    collector->record_success (200, 60.0, 12.0, "");
+
+    nlohmann::json stats = collector->get_current_stats (0, 1.0, 0);
+    ASSERT_TRUE (stats.contains ("avgQueueWaitMs"));
+    EXPECT_DOUBLE_EQ (stats["avgQueueWaitMs"].get<double> (), 10.0);
+}
+
+TEST_F (MetricsCollectorTest, AverageQueueWaitIsZeroWhenNoSuccesses) {
+    EXPECT_DOUBLE_EQ (collector->average_queue_wait (), 0.0);
+}

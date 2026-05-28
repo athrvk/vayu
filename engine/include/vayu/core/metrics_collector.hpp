@@ -191,6 +191,13 @@ class MetricsCollector {
         return count > 0 ? total_latency_sum () / static_cast<double> (count) : 0.0;
     }
 
+    [[nodiscard]] double average_queue_wait () const {
+        size_t count = success_count ();
+        return count > 0 ? total_queue_wait_sum_.load (std::memory_order_relaxed) /
+                            static_cast<double> (count)
+                         : 0.0;
+    }
+
     [[nodiscard]] double error_rate () const {
         size_t total = total_requests ();
         return total > 0 ?
@@ -287,6 +294,7 @@ class MetricsCollector {
     std::atomic<size_t> total_errors_{ 0 };
     std::atomic<double> total_latency_sum_{ 0.0 };
     std::atomic<size_t> dropped_requests_{ 0 };
+    std::atomic<double> total_queue_wait_sum_{ 0.0 };
 
     // Status code counts (lock-free for common codes)
     std::atomic<size_t> status_2xx_{ 0 };

@@ -78,11 +78,12 @@ void MetricsCollector::atomic_add_double (std::atomic<double>& target, double va
 
 void MetricsCollector::record_success (int status_code,
 double latency_ms,
-double /*queue_wait_ms*/,
+double queue_wait_ms,
 const std::string& trace_data) {
     // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);
     atomic_add_double (total_latency_sum_, latency_ms);
+    atomic_add_double (total_queue_wait_sum_, queue_wait_ms);
 
     // Update status code category counters (lock-free)
     if (status_code >= 200 && status_code < 300) {
@@ -315,6 +316,7 @@ size_t requests_sent) const {
     stats["status4xx"] = status_4xx_.load (std::memory_order_relaxed);
     stats["status5xx"] = status_5xx_.load (std::memory_order_relaxed);
     stats["droppedRequests"] = dropped_requests_.load (std::memory_order_relaxed);
+    stats["avgQueueWaitMs"] = average_queue_wait ();
 
     return stats;
 }
