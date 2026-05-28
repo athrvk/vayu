@@ -492,6 +492,7 @@ export default function RequestBuilder() {
 					rampUpDuration: config.ramp_duration_seconds
 						? `${config.ramp_duration_seconds}s`
 						: undefined,
+					maxInFlight: config.max_in_flight,
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,
 					comment: config.comment,

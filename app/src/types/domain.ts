@@ -188,6 +188,7 @@ export interface LoadTestConfig {
 	save_timing_breakdown?: boolean;
 	comment?: string;
 	latency_percentiles?: number[];
+	max_in_flight?: number;
 }
 
 export interface HttpResponse {
