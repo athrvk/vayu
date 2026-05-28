@@ -320,3 +320,11 @@ TEST_F (MetricsCollectorTest, RecordRampLagStoresLatestValue) {
     collector->record_ramp_lag (0.0);
     EXPECT_DOUBLE_EQ (collector->ramp_lag (), 0.0);
 }
+
+TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesRampLag) {
+    collector->record_ramp_lag (18.7);
+    nlohmann::json stats = collector->get_current_stats (0, 1.0, 0);
+
+    ASSERT_TRUE (stats.contains ("rampLag"));
+    EXPECT_DOUBLE_EQ (stats["rampLag"].get<double> (), 18.7);
+}
