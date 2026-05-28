@@ -78,6 +78,7 @@ void MetricsCollector::atomic_add_double (std::atomic<double>& target, double va
 
 void MetricsCollector::record_success (int status_code,
 double latency_ms,
+double /*queue_wait_ms*/,
 const std::string& trace_data) {
     // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);

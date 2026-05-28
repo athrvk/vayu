@@ -108,7 +108,10 @@ vayu::Result<vayu::Response> result) {
         }
 
         // Record to in-memory collector (high-performance, no DB writes)
-        context->metrics_collector->record_success (response.status_code, latency, trace_data);
+        context->metrics_collector->record_success (response.status_code,
+                                                     latency,
+                                                     response.timing.queue_wait_ms,
+                                                     trace_data);
 
         // Sample response for deferred script validation if test script is present
         if (!context->test_script.empty ()) {

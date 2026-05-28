@@ -37,9 +37,9 @@ TEST_F (MetricsCollectorTest, InitialStateIsEmpty) {
 }
 
 TEST_F (MetricsCollectorTest, RecordsSuccessCorrectly) {
-    collector->record_success (200, 50.0);
-    collector->record_success (201, 75.0);
-    collector->record_success (200, 100.0);
+    collector->record_success (200, 50.0, 0.0);
+    collector->record_success (201, 75.0, 0.0);
+    collector->record_success (200, 100.0, 0.0);
 
     EXPECT_EQ (collector->total_requests (), 3);
     EXPECT_EQ (collector->total_errors (), 0);
@@ -62,7 +62,7 @@ TEST_F (MetricsCollectorTest, RecordsErrorsCorrectly) {
 TEST_F (MetricsCollectorTest, CalculatesMixedStatsCorrectly) {
     // 8 successes, 2 errors
     for (int i = 0; i < 8; ++i) {
-        collector->record_success (200, 100.0);
+        collector->record_success (200, 100.0, 0.0);
     }
     collector->record_error (vayu::ErrorCode::Timeout, "Timeout 1");
     collector->record_error (vayu::ErrorCode::Timeout, "Timeout 2");
@@ -82,7 +82,7 @@ TEST_F (MetricsCollectorTest, CalculatesMixedStatsCorrectly) {
 TEST_F (MetricsCollectorTest, CalculatesPercentilesCorrectly) {
     // Add 100 latencies from 1 to 100
     for (int i = 1; i <= 100; ++i) {
-        collector->record_success (200, static_cast<double> (i));
+        collector->record_success (200, static_cast<double> (i), 0.0);
     }
 
     auto percentiles = collector->calculate_percentiles ();
@@ -111,7 +111,7 @@ TEST_F (MetricsCollectorTest, PercentilesHandleEmptyData) {
 }
 
 TEST_F (MetricsCollectorTest, PercentilesHandleSingleValue) {
-    collector->record_success (200, 42.0);
+    collector->record_success (200, 42.0, 0.0);
 
     auto percentiles = collector->calculate_percentiles ();
 
@@ -128,12 +128,12 @@ TEST_F (MetricsCollectorTest, PercentilesHandleSingleValue) {
 // ============================================================================
 
 TEST_F (MetricsCollectorTest, TracksStatusCodeDistribution) {
-    collector->record_success (200, 10.0);
-    collector->record_success (200, 10.0);
-    collector->record_success (201, 10.0);
-    collector->record_success (404, 10.0);
-    collector->record_success (500, 10.0);
-    collector->record_success (500, 10.0);
+    collector->record_success (200, 10.0, 0.0);
+    collector->record_success (200, 10.0, 0.0);
+    collector->record_success (201, 10.0, 0.0);
+    collector->record_success (404, 10.0, 0.0);
+    collector->record_success (500, 10.0, 0.0);
+    collector->record_success (500, 10.0, 0.0);
 
     auto distribution = collector->status_code_distribution ();
 
@@ -158,7 +158,7 @@ TEST_F (MetricsCollectorTest, ThreadSafeRecording) {
                 if (i % 10 == 0) {
                     collector->record_error (vayu::ErrorCode::Timeout, "Test error");
                 } else {
-                    collector->record_success (200, 50.0);
+                    collector->record_success (200, 50.0, 0.0);
                 }
             }
         });
@@ -226,7 +226,7 @@ TEST (MetricsCollectorConfigTest, HistogramRecordsAllLatencies) {
 
     // Record many latencies
     for (int i = 0; i < 100; ++i) {
-        collector.record_success (200, static_cast<double> (i + 1));
+        collector.record_success (200, static_cast<double> (i + 1), 0.0);
     }
 
     // All requests should be counted

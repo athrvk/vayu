@@ -130,7 +130,10 @@ class MetricsCollector {
      * @brief Record a successful request
      * Thread-safe, optimized for high-throughput
      */
-    void record_success (int status_code, double latency_ms, const std::string& trace_data = "");
+    void record_success (int status_code,
+                         double latency_ms,
+                         double queue_wait_ms,
+                         const std::string& trace_data = "");
 
     /**
      * @brief Record a response sample for deferred script validation
