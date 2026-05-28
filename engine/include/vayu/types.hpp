@@ -545,8 +545,9 @@ enum class MetricName {
     // Status code distribution
     StatusCodes,
     // Duration metrics
-    TestDuration, // Actual test execution time in seconds
-    SetupOverhead // Time spent on setup/teardown in seconds
+    TestDuration,    // Actual test execution time in seconds
+    SetupOverhead,   // Time spent on setup/teardown in seconds
+    DroppedRequests  // Requests discarded due to generator backpressure (never reached server)
 };
 
 inline const char* to_string (MetricName name) {
@@ -575,6 +576,7 @@ inline const char* to_string (MetricName name) {
     case MetricName::StatusCodes: return "status_codes";
     case MetricName::TestDuration: return "test_duration";
     case MetricName::SetupOverhead: return "setup_overhead";
+    case MetricName::DroppedRequests: return "dropped_requests";
     }
     return "unknown";
 }
@@ -628,6 +630,8 @@ inline std::optional<MetricName> parse_metric_name (const std::string& str) {
         return MetricName::TestDuration;
     if (str == "setup_overhead")
         return MetricName::SetupOverhead;
+    if (str == "dropped_requests")
+        return MetricName::DroppedRequests;
     return std::nullopt;
 }
 
