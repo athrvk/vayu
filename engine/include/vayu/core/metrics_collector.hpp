@@ -147,6 +147,17 @@ class MetricsCollector {
     const std::string& trace_data = "");
 
     /**
+     * @brief Record N requests dropped due to generator backpressure
+     * Thread-safe. Dropped requests never reached the server.
+     * @param count Number of requests in the dropped batch
+     */
+    void record_drop_batch (size_t count);
+
+    [[nodiscard]] size_t dropped_requests () const {
+        return dropped_requests_.load (std::memory_order_relaxed);
+    }
+
+    /**
      * @brief Record a latency value (for percentile calculation)
      * Thread-safe
      */
@@ -272,6 +283,7 @@ class MetricsCollector {
     std::atomic<size_t> total_requests_{ 0 };
     std::atomic<size_t> total_errors_{ 0 };
     std::atomic<double> total_latency_sum_{ 0.0 };
+    std::atomic<size_t> dropped_requests_{ 0 };
 
     // Status code counts (lock-free for common codes)
     std::atomic<size_t> status_2xx_{ 0 };

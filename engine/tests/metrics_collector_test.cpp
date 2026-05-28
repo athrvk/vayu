@@ -251,3 +251,20 @@ TEST (MetricsCollectorConfigTest, RespectsMaxErrorsLimit) {
     EXPECT_EQ (collector.errors ().size (), 5);
     EXPECT_EQ (collector.total_errors (), 20); // But all errors counted
 }
+
+// ============================================================================
+// Dropped Requests Tests
+// ============================================================================
+
+TEST_F (MetricsCollectorTest, RecordDropBatchIncrementsCounter) {
+    EXPECT_EQ (collector->dropped_requests (), 0U);
+
+    collector->record_drop_batch (10);
+    EXPECT_EQ (collector->dropped_requests (), 10U);
+
+    collector->record_drop_batch (25);
+    EXPECT_EQ (collector->dropped_requests (), 35U);
+
+    collector->record_drop_batch (0);
+    EXPECT_EQ (collector->dropped_requests (), 35U);
+}
