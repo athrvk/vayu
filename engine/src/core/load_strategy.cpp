@@ -239,6 +239,7 @@ class ConstantLoadStrategy : public LoadStrategy {
                     size_t batches_submitted = 0U;
                     while (batches_submitted < batches_due && !context->should_stop) {
                         if (context->event_loop->pending_count () >= max_pending) {
+                            context->metrics_collector->record_drop_batch (batch_size);
                             next_batch_time =
                             now + std::chrono::microseconds (batch_interval_us);
                             break;
