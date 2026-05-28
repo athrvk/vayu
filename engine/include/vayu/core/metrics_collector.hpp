@@ -198,6 +198,18 @@ class MetricsCollector {
                          : 0.0;
     }
 
+    /**
+     * @brief Record the current ramp lag percentage.
+     * Thread-safe snapshot setter — overwrites the previous value.
+     * @param pct Percentage in [0, 100], how far achieved concurrency lags
+     *            the configured ramp curve.
+     */
+    void record_ramp_lag (double pct);
+
+    [[nodiscard]] double ramp_lag () const {
+        return ramp_lag_pct_.load (std::memory_order_relaxed);
+    }
+
     [[nodiscard]] double error_rate () const {
         size_t total = total_requests ();
         return total > 0 ?
@@ -295,6 +307,7 @@ class MetricsCollector {
     std::atomic<double> total_latency_sum_{ 0.0 };
     std::atomic<size_t> dropped_requests_{ 0 };
     std::atomic<double> total_queue_wait_sum_{ 0.0 };
+    std::atomic<double> ramp_lag_pct_{ 0.0 };
 
     // Status code counts (lock-free for common codes)
     std::atomic<size_t> status_2xx_{ 0 };

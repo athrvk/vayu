@@ -158,6 +158,10 @@ void MetricsCollector::record_drop_batch (size_t count) {
     dropped_requests_.fetch_add (count, std::memory_order_relaxed);
 }
 
+void MetricsCollector::record_ramp_lag (double pct) {
+    ramp_lag_pct_.store (pct, std::memory_order_relaxed);
+}
+
 void MetricsCollector::record_latency (double latency_ms) {
     atomic_add_double (total_latency_sum_, latency_ms);
 

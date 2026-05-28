@@ -302,3 +302,21 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesAvgQueueWaitMs) {
 TEST_F (MetricsCollectorTest, AverageQueueWaitIsZeroWhenNoSuccesses) {
     EXPECT_DOUBLE_EQ (collector->average_queue_wait (), 0.0);
 }
+
+// ============================================================================
+// Ramp Lag Tests
+// ============================================================================
+
+TEST_F (MetricsCollectorTest, RecordRampLagStoresLatestValue) {
+    EXPECT_DOUBLE_EQ (collector->ramp_lag (), 0.0);
+
+    collector->record_ramp_lag (12.5);
+    EXPECT_DOUBLE_EQ (collector->ramp_lag (), 12.5);
+
+    collector->record_ramp_lag (27.3);
+    EXPECT_DOUBLE_EQ (collector->ramp_lag (), 27.3);
+
+    // Overwrites, doesn't accumulate
+    collector->record_ramp_lag (0.0);
+    EXPECT_DOUBLE_EQ (collector->ramp_lag (), 0.0);
+}
