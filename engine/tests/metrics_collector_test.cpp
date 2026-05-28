@@ -268,3 +268,11 @@ TEST_F (MetricsCollectorTest, RecordDropBatchIncrementsCounter) {
     collector->record_drop_batch (0);
     EXPECT_EQ (collector->dropped_requests (), 35U);
 }
+
+TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesDroppedRequests) {
+    collector->record_drop_batch (42);
+    nlohmann::json stats = collector->get_current_stats (0, 1.0, 0);
+
+    ASSERT_TRUE (stats.contains ("droppedRequests"));
+    EXPECT_EQ (stats["droppedRequests"].get<size_t> (), 42U);
+}

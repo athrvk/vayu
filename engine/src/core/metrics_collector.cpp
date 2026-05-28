@@ -313,6 +313,7 @@ size_t requests_sent) const {
     stats["status3xx"] = status_3xx_.load (std::memory_order_relaxed);
     stats["status4xx"] = status_4xx_.load (std::memory_order_relaxed);
     stats["status5xx"] = status_5xx_.load (std::memory_order_relaxed);
+    stats["droppedRequests"] = dropped_requests_.load (std::memory_order_relaxed);
 
     return stats;
 }
