@@ -390,13 +390,15 @@ Json serialize (const Response& response) {
 
     // Timing
     Json timing;
-    timing["total"]     = response.timing.total_ms;
-    timing["dns"]       = response.timing.dns_ms;
-    timing["connect"]   = response.timing.connect_ms;
-    timing["tls"]       = response.timing.tls_ms;
-    timing["firstByte"] = response.timing.first_byte_ms;
-    timing["download"]  = response.timing.download_ms;
-    json["timing"]      = timing;
+    timing["total"]      = response.timing.total_ms;
+    timing["wire"]       = response.timing.wire_ms;
+    timing["queueWait"]  = response.timing.queue_wait_ms;
+    timing["dns"]        = response.timing.dns_ms;
+    timing["connect"]    = response.timing.connect_ms;
+    timing["tls"]        = response.timing.tls_ms;
+    timing["firstByte"]  = response.timing.first_byte_ms;
+    timing["download"]   = response.timing.download_ms;
+    json["timing"]       = timing;
 
     return json;
 }

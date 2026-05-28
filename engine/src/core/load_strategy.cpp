@@ -70,6 +70,8 @@ vayu::Result<vayu::Response> result) {
         // Include timing info if available
         if (response.timing.total_ms > 0) {
             error_json["timing"] = { { "totalMs", response.timing.total_ms },
+                { "wireMs", response.timing.wire_ms },
+                { "queueWaitMs", response.timing.queue_wait_ms },
                 { "dnsMs", response.timing.dns_ms },
                 { "connectMs", response.timing.connect_ms },
                 { "tlsMs", response.timing.tls_ms },
@@ -89,6 +91,8 @@ vayu::Result<vayu::Response> result) {
 
         if (save_timing_breakdown || is_slow) {
             nlohmann::json timing_json = { { "totalMs", response.timing.total_ms },
+                { "wireMs", response.timing.wire_ms },
+                { "queueWaitMs", response.timing.queue_wait_ms },
                 { "dnsMs", response.timing.dns_ms },
                 { "connectMs", response.timing.connect_ms },
                 { "tlsMs", response.timing.tls_ms },
