@@ -475,3 +475,31 @@ TEST_F (EventLoopTest, ProgressCallback) {
     EXPECT_TRUE (completed);
     // Progress may or may not be called depending on response size
 }
+
+// ============================================================================
+// Timing Identity Test (Task 7)
+// ============================================================================
+
+TEST_F (EventLoopTest, TimingIdentity) {
+    // Identity check: total_ms is perceived (submit→completion) and equals
+    // wire_ms + queue_wait_ms within sub-ms jitter. wire_ms must be non-zero
+    // for any real HTTP request.
+    vayu::http::EventLoop loop;
+    loop.start ();
+
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = test_url;
+
+    auto handle = loop.submit_async (request);
+    auto result = handle.future.get ();
+    loop.stop ();
+
+    ASSERT_TRUE (result.is_ok ()) << "request failed";
+
+    const auto& t = result.value ().timing;
+    EXPECT_GE (t.total_ms, 0.0);
+    EXPECT_GE (t.queue_wait_ms, 0.0);
+    EXPECT_GT (t.wire_ms, 0.0) << "wire_ms must be populated (CURLINFO_TOTAL_TIME)";
+    EXPECT_NEAR (t.total_ms, t.wire_ms + t.queue_wait_ms, 1.0);
+}
