@@ -43,6 +43,8 @@ export class SSEClient {
 			send_rate: 0,
 			throughput: 0,
 			backpressure: 0,
+			dropped_requests: 0,
+			avg_queue_wait_ms: 0,
 		};
 	}
 
@@ -103,6 +105,8 @@ export class SSEClient {
 						send_rate: metrics.sendRate || 0,
 						throughput: metrics.throughput || 0,
 						backpressure: metrics.backpressure || 0,
+						dropped_requests: metrics.droppedRequests || 0,
+						avg_queue_wait_ms: metrics.avgQueueWaitMs || 0,
 					};
 
 					onMessage({ ...this.currentMetrics });
