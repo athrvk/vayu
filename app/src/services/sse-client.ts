@@ -96,9 +96,9 @@ export class SSEClient {
 						requests_failed: metrics.totalErrors || 0,
 						current_rps: metrics.currentRps || 0,
 						current_concurrency: metrics.activeConnections || 0,
-						latency_p50_ms: 0, // Not included in real-time metrics
-						latency_p95_ms: 0,
-						latency_p99_ms: 0,
+						latency_p50_ms: metrics.latencyP50Ms || 0,
+						latency_p95_ms: metrics.latencyP95Ms || 0,
+						latency_p99_ms: metrics.latencyP99Ms || 0,
 						avg_latency_ms: metrics.avgLatencyMs || 0,
 						bytes_sent: 0,
 						bytes_received: 0,
