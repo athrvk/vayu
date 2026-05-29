@@ -951,6 +951,12 @@ function MetricsView({
 	const droppedRequests = metrics.dropped_requests ?? 0;
 	const showDropped = isRateLimitedRun(mode, targetRps) && droppedRequests > 0;
 
+	const p99Latency = isCompleted
+		? (finalReport?.latency?.p99 ?? metrics.latency_p99_ms ?? 0)
+		: (metrics.latency_p99_ms ?? 0);
+	const meanLatency = metrics.avg_latency_ms ?? 0;
+	const medianLatency = finalReport?.latency?.p50 ?? metrics.latency_p50_ms ?? 0;
+
 	return (
 		<div className="p-5 flex flex-col gap-3.5">
 			{/* Row 1 — Hero */}
@@ -1230,22 +1236,26 @@ function MetricsView({
 					infoTip="Maximum simultaneously in-flight HTTP connections during the run. Backpressure = requests dispatched but not yet responded — a growing value indicates the server is slower than the dispatch rate."
 				/>
 				<StatCard
-					label="Avg latency"
-					value={(metrics.avg_latency_ms ?? 0).toFixed(0)}
+					label="p99 latency"
+					value={p99Latency.toFixed(0)}
 					unit="ms"
 					sub={
-						isCompleted && finalReport?.latency ? (
-							<>
-								median{" "}
-								<span className="text-muted-foreground">
-									{(finalReport.latency.p50 ?? 0).toFixed(0)} ms
-								</span>
-							</>
-						) : (
-							<span className="text-subtle-foreground italic">live mean</span>
-						)
+						<>
+							mean{" "}
+							<span className="text-muted-foreground">
+								{meanLatency.toFixed(0)} ms
+							</span>
+							{medianLatency > 0 && (
+								<>
+									{" · "}median{" "}
+									<span className="text-muted-foreground">
+										{medianLatency.toFixed(0)} ms
+									</span>
+								</>
+							)}
+						</>
 					}
-					infoTip="Arithmetic mean of all request latencies. Less robust than median for skewed distributions — use the HDR plot for the real story."
+					infoTip="Tail latency — 99 of every 100 requests completed in this time or less. Real user-impact lives at p99, not the mean; mean (sub-text) is misleading on heavy-tailed distributions."
 				/>
 			</div>
 		</div>
