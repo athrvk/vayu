@@ -13,6 +13,7 @@
 #include <thread>
 
 #include "vayu/core/ramp_curve.hpp"
+#include "vayu/core/ramp_lag_tracker.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -429,11 +430,12 @@ class RampUpLoadStrategy : public LoadStrategy {
 
         auto test_start = std::chrono::steady_clock::now ();
 
-        // Ramp-lag tracking: integral of achieved concurrency × elapsed time.
-        // Updated only on iterations where we actually submit (backpressure
-        // skips don't contribute, so the gap against the expected curve grows).
-        double achieved_integral_ms = 0.0;
-        auto last_tick              = test_start;
+        // Ramp-lag tracking: see vayu::core::RampLagTracker. Backpressured
+        // iterations are excluded from the achieved area but still advance
+        // elapsed time, so the lag against the configured curve grows.
+        vayu::core::RampLagTracker lag_tracker (
+            ramp_duration_ms, start_concurrency, target_concurrency);
+        auto last_tick = test_start;
 
         while (!context->should_stop) {
             auto now = std::chrono::steady_clock::now ();
@@ -458,24 +460,21 @@ class RampUpLoadStrategy : public LoadStrategy {
             // Backpressure
             size_t max_pending = config.value ("maxInFlight",
                 std::max (target_concurrency * 5U, size_t (1000)));
-            if (context->event_loop->pending_count () > max_pending) {
+            bool backpressured = context->event_loop->pending_count () > max_pending;
+
+            // Advance the lag tracker every iteration. dt spans the time since
+            // the previous iteration; backpressured intervals don't count toward
+            // achieved load.
+            double dt_ms = std::chrono::duration<double, std::milli> (now - last_tick).count ();
+            last_tick    = now;
+            double ramp_lag_pct =
+            lag_tracker.update (elapsed, dt_ms, current_concurrency, backpressured);
+            context->metrics_collector->record_ramp_lag (ramp_lag_pct);
+
+            if (backpressured) {
                 std::this_thread::sleep_for (std::chrono::milliseconds (50));
                 continue;
             }
-
-            // Accumulate achieved (only on actual-submit iterations). Then
-            // compare against the expected integral and record the lag %.
-            double dt_ms = std::chrono::duration<double, std::milli> (now - last_tick).count ();
-            achieved_integral_ms += static_cast<double> (current_concurrency) * dt_ms;
-            last_tick = now;
-
-            double expected_integral_ms = vayu::core::ramp_curve_integral (
-                elapsed, ramp_duration_ms, start_concurrency, target_concurrency);
-            double ramp_lag_pct = expected_integral_ms > 0.0
-                ? std::max (0.0, (expected_integral_ms - achieved_integral_ms) /
-                                  expected_integral_ms * 100.0)
-                : 0.0;
-            context->metrics_collector->record_ramp_lag (ramp_lag_pct);
 
             // Submit batch based on current concurrency
             for (size_t i = 0; i < current_concurrency && !context->should_stop; ++i) {
