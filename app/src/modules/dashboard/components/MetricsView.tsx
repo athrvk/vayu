@@ -19,47 +19,14 @@
  */
 
 import { memo, useMemo, type ReactNode } from "react";
-import { Activity, Info } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
 import type { RunReport } from "@/types";
 import type { MetricsViewProps } from "../types";
-
-// ============================================================================
-// InfoChip — tiny "i" affordance with tooltip
-// ============================================================================
-
-function InfoChip({ tip }: { tip: ReactNode }) {
-	return (
-		<TooltipProvider delayDuration={150}>
-			<Tooltip>
-				<TooltipTrigger asChild>
-					<button
-						type="button"
-						className="ml-1.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle"
-						aria-label="More information"
-					>
-						<Info className="h-2.5 w-2.5" />
-					</button>
-				</TooltipTrigger>
-				<TooltipContent className="max-w-[260px] text-[11.5px] leading-relaxed">
-					{tip}
-				</TooltipContent>
-			</Tooltip>
-		</TooltipProvider>
-	);
-}
-
-// ============================================================================
-// Section eyebrow label
-// ============================================================================
-
-const EYEBROW_CLASS = "text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
-
-function Eyebrow({ children }: { children: ReactNode }) {
-	return <p className={EYEBROW_CLASS}>{children}</p>;
-}
+import { InfoChip, Eyebrow, EYEBROW_CLASS } from "./shared";
+import { DroppedRequestsCard } from "./DroppedRequestsCard";
+import { isRateLimitedRun } from "../utils/metricsTransforms";
 
 // ============================================================================
 // Formatting helpers
@@ -850,6 +817,7 @@ function MetricsView({
 	isCompleted,
 	finalReport,
 	targetRps,
+	mode,
 }: MetricsViewProps) {
 	// Bucket per-tick history by 0.5s for the chart
 	const chartData = useMemo<ThroughputPoint[]>(() => {
@@ -900,11 +868,18 @@ function MetricsView({
 	const setupOverhead = finalReport?.summary?.setupOverhead;
 	const testDuration = finalReport?.summary?.testDuration;
 
+	const droppedRequests = metrics.dropped_requests ?? 0;
+	const showDropped = isRateLimitedRun(mode, targetRps) && droppedRequests > 0;
+
 	return (
 		<div className="p-5 flex flex-col gap-3.5">
 			{/* Row 1 — Hero */}
 			<div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3">
-				<RateFidelityCard targetRps={targetRps} actualRps={actualRps} />
+				{showDropped ? (
+					<DroppedRequestsCard dropped={droppedRequests} completed={totalRequests} />
+				) : (
+					<RateFidelityCard targetRps={targetRps} actualRps={actualRps} />
+				)}
 				<ThroughputTwinCard sendRate={sendRate} throughput={throughput} />
 				<ErrorRateCard
 					totalRequests={totalRequests}
