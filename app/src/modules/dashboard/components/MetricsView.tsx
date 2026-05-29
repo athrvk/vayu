@@ -881,9 +881,15 @@ function MetricsView({
 	mode,
 	rampConfig,
 }: MetricsViewProps) {
+	// Single capped window shared by all time-series charts so their x-axes
+	// cover identical time spans (the throughput chart and the RampUp overlay
+	// share one x-axis — they must be built from the same window or the
+	// configured/achieved lines misalign with throughput on long runs).
+	const chartWindow = useMemo(() => historicalMetrics.slice(-2400), [historicalMetrics]);
+
 	// Bucket per-tick history by 0.5s for the chart
 	const chartData = useMemo<ThroughputPoint[]>(() => {
-		const window = historicalMetrics.slice(-2400); // up to 4 min @ 10Hz
+		const window = chartWindow;
 		const byBucket = new Map<number, ThroughputPoint>();
 		for (const m of window) {
 			const t = Math.round(m.elapsed_seconds * 2) / 2;
@@ -894,16 +900,16 @@ function MetricsView({
 			});
 		}
 		return Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
-	}, [historicalMetrics]);
+	}, [chartWindow]);
 
 	const latencyChartData = useMemo(
-		() => buildLatencyChartData(historicalMetrics),
-		[historicalMetrics]
+		() => buildLatencyChartData(chartWindow),
+		[chartWindow]
 	);
 
 	const rampOverlay = useMemo(
-		() => (mode === "ramp_up" ? buildRampOverlay(historicalMetrics, rampConfig ?? {}) : null),
-		[mode, historicalMetrics, rampConfig]
+		() => (mode === "ramp_up" ? buildRampOverlay(chartWindow, rampConfig ?? {}) : null),
+		[mode, chartWindow, rampConfig]
 	);
 
 	const peakConcurrency = useMemo(() => {

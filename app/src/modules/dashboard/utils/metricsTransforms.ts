@@ -35,6 +35,8 @@ export function buildLatencyChartData(history: LoadTestMetrics[]): LatencyPoint[
 		const t = Math.round(m.elapsed_seconds * 2) / 2;
 		const latency = m.avg_latency_ms ?? 0;
 		const queue = m.avg_queue_wait_ms ?? 0;
+		// Clamp wire >= 0 so wire <= latency always holds; this keeps the
+		// amber gap path (latency over wire) non-self-intersecting downstream.
 		const wire = Math.max(0, latency - queue);
 		byBucket.set(t, { time: t, latencyMs: latency, wireMs: wire, queueWaitMs: queue });
 	}
