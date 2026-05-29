@@ -19,6 +19,15 @@
  * generator failed to deliver load during them) while elapsed time still
  * advances, so the gap against the expected integral grows — that gap,
  * divided by the expected integral, is the ramp lag.
+ *
+ * Note on a `start_concurrency` of 0: the caller feeds integer (truncated)
+ * concurrency, so the first few steps of a 0→target ramp contribute 0 to the
+ * achieved area while the real-valued expected integral has already grown.
+ * This leaves a small structural baseline lag (~0.8% for a 0→100/10s ramp)
+ * even on a perfectly healthy run. It is far below the magnitudes a real
+ * stall produces (>5%), so it does not impair the signal — but a clean run
+ * with start=0 will read slightly non-zero. Ramps with start>=1 do not
+ * exhibit this.
  */
 
 #include <algorithm>
