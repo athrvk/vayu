@@ -26,7 +26,12 @@ import type { RunReport } from "@/types";
 import type { MetricsViewProps } from "../types";
 import { InfoChip, Eyebrow, EYEBROW_CLASS } from "./shared";
 import { DroppedRequestsCard } from "./DroppedRequestsCard";
-import { isRateLimitedRun, buildLatencyChartData } from "../utils/metricsTransforms";
+import {
+	isRateLimitedRun,
+	buildLatencyChartData,
+	buildRampOverlay,
+	type RampOverlay,
+} from "../utils/metricsTransforms";
 import { LatencyOverTimeChart } from "./LatencyOverTimeChart";
 
 // ============================================================================
@@ -328,10 +333,12 @@ function ThroughputOverTimeChart({
 	data,
 	targetRps,
 	isCompleted,
+	rampOverlay,
 }: {
 	data: ThroughputPoint[];
 	targetRps?: number;
 	isCompleted: boolean;
+	rampOverlay?: RampOverlay | null;
 }) {
 	if (data.length < 2) return null;
 
@@ -484,6 +491,59 @@ function ThroughputOverTimeChart({
 					/>
 				</circle>
 			)}
+
+			{/* ramp_up concurrency overlay — right Y-axis */}
+			{rampOverlay &&
+				rampOverlay.points.length > 1 &&
+				(() => {
+					const cMax = Math.max(rampOverlay.target * 1.15, 1);
+					const n = rampOverlay.points.length;
+					const cx = (i: number) => PL + (i / (n - 1)) * IW;
+					const cy = (v: number) => PT + (1 - v / cMax) * IH;
+					const conf = rampOverlay.points.map(
+						(p, i) => `${cx(i).toFixed(1)},${cy(p.configured).toFixed(1)}`
+					);
+					const ach = rampOverlay.points.map(
+						(p, i) => `${cx(i).toFixed(1)},${cy(p.achieved).toFixed(1)}`
+					);
+					const lagPath = `M${conf.join(" L")} L${[...ach].reverse().join(" L")} Z`;
+					const rTicks = [0, 0.5, 1.0].map((f) => ({
+						y: cy(cMax * f),
+						label: `${Math.round(cMax * f)}`,
+					}));
+					return (
+						<g>
+							<g
+								fill="hsl(var(--subtle-foreground))"
+								fontSize="10"
+								fontFamily="JetBrains Mono"
+								textAnchor="start"
+							>
+								{rTicks.map((t, i) => (
+									<text key={i} x={VW - PR + 4} y={t.y + 3.5}>
+										{t.label}
+									</text>
+								))}
+							</g>
+							<path d={lagPath} fill="hsl(var(--warning) / 0.25)" />
+							<polyline
+								fill="none"
+								stroke="hsl(var(--subtle-foreground))"
+								strokeWidth="1.5"
+								strokeDasharray="4 4"
+								points={conf.join(" ")}
+							/>
+							<polyline
+								fill="none"
+								stroke="hsl(var(--success))"
+								strokeWidth="1.8"
+								strokeLinejoin="round"
+								strokeLinecap="round"
+								points={ach.join(" ")}
+							/>
+						</g>
+					);
+				})()}
 		</svg>
 	);
 }
@@ -819,6 +879,7 @@ function MetricsView({
 	finalReport,
 	targetRps,
 	mode,
+	rampConfig,
 }: MetricsViewProps) {
 	// Bucket per-tick history by 0.5s for the chart
 	const chartData = useMemo<ThroughputPoint[]>(() => {
@@ -838,6 +899,11 @@ function MetricsView({
 	const latencyChartData = useMemo(
 		() => buildLatencyChartData(historicalMetrics),
 		[historicalMetrics]
+	);
+
+	const rampOverlay = useMemo(
+		() => (mode === "ramp_up" ? buildRampOverlay(historicalMetrics, rampConfig ?? {}) : null),
+		[mode, historicalMetrics, rampConfig]
 	);
 
 	const peakConcurrency = useMemo(() => {
@@ -926,13 +992,57 @@ function MetricsView({
 									target {targetRps}
 								</span>
 							)}
+							{rampOverlay && (
+								<>
+									<span className="text-subtle-foreground">
+										<span
+											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
+											style={{ background: "hsl(var(--subtle-foreground))" }}
+										/>
+										configured
+									</span>
+									<span>
+										<span
+											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
+											style={{ background: "hsl(var(--success))" }}
+										/>
+										achieved
+									</span>
+								</>
+							)}
 						</div>
 					</div>
 					<ThroughputOverTimeChart
 						data={chartData}
 						targetRps={targetRps}
 						isCompleted={isCompleted}
+						rampOverlay={rampOverlay}
 					/>
+					{rampOverlay && (
+						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-[11px] font-mono text-muted-foreground">
+							<span>
+								<span className="text-subtle-foreground">ramp lag </span>
+								<span className="text-foreground font-semibold">
+									{rampOverlay.rampLagPct.toFixed(1)}%
+								</span>
+							</span>
+							<span>
+								<span className="text-subtle-foreground">peak achieved </span>
+								<span className="text-foreground font-semibold">
+									{formatNumber(rampOverlay.peakAchieved)}
+								</span>
+								<span className="text-subtle-foreground"> / target </span>
+								<span className="text-foreground font-semibold">
+									{formatNumber(rampOverlay.target)}
+								</span>
+							</span>
+							{rampOverlay.rampLagPct > 5 && (
+								<span style={{ color: "hsl(var(--warning))" }}>
+									⚠ ramp degraded
+								</span>
+							)}
+						</div>
+					)}
 				</div>
 			)}
 
