@@ -14,10 +14,7 @@
 import type { LoadTestMetrics } from "@/types";
 
 /** A run is "rate limited" (can drop requests) only in constant_rps with a target. */
-export function isRateLimitedRun(
-	mode: string | undefined,
-	targetRps: number | undefined
-): boolean {
+export function isRateLimitedRun(mode: string | undefined, targetRps: number | undefined): boolean {
 	return mode === "constant_rps" && (targetRps ?? 0) > 0;
 }
 

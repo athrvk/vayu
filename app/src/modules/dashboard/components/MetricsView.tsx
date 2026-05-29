@@ -902,10 +902,7 @@ function MetricsView({
 		return Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
 	}, [chartWindow]);
 
-	const latencyChartData = useMemo(
-		() => buildLatencyChartData(chartWindow),
-		[chartWindow]
-	);
+	const latencyChartData = useMemo(() => buildLatencyChartData(chartWindow), [chartWindow]);
 
 	const rampOverlay = useMemo(
 		() => (mode === "ramp_up" ? buildRampOverlay(chartWindow, rampConfig ?? {}) : null),

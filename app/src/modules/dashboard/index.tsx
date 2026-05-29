@@ -334,8 +334,7 @@ export default function LoadTestDashboard() {
 						mode={displayConfiguration?.mode}
 						rampConfig={{
 							rampUpDurationSeconds:
-								parseInt(String(rampCfg?.rampUpDuration ?? ""), 10) ||
-								undefined,
+								parseInt(String(rampCfg?.rampUpDuration ?? ""), 10) || undefined,
 							startConcurrency: rampCfg?.startConcurrency,
 							targetConcurrency: rampCfg?.concurrency,
 						}}

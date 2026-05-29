@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { LoadTestMetrics } from "@/types";
-import {
-	isRateLimitedRun,
-	buildLatencyChartData,
-	buildRampOverlay,
-} from "./metricsTransforms";
+import { isRateLimitedRun, buildLatencyChartData, buildRampOverlay } from "./metricsTransforms";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	return {
@@ -47,9 +43,7 @@ describe("buildLatencyChartData", () => {
 	});
 
 	it("treats missing queue_wait as 0 (older runs) so wire == latency", () => {
-		const data = buildLatencyChartData([
-			tick({ elapsed_seconds: 1, avg_latency_ms: 42 }),
-		]);
+		const data = buildLatencyChartData([tick({ elapsed_seconds: 1, avg_latency_ms: 42 })]);
 		expect(data[0]).toMatchObject({ latencyMs: 42, wireMs: 42, queueWaitMs: 0 });
 	});
 
@@ -66,9 +60,7 @@ describe("buildLatencyChartData", () => {
 
 describe("buildRampOverlay", () => {
 	it("returns null when targetConcurrency is missing", () => {
-		expect(
-			buildRampOverlay([], { rampUpDurationSeconds: 10, startConcurrency: 1 })
-		).toBeNull();
+		expect(buildRampOverlay([], { rampUpDurationSeconds: 10, startConcurrency: 1 })).toBeNull();
 	});
 
 	it("builds a linear configured curve during ramp, flat at target after", () => {
