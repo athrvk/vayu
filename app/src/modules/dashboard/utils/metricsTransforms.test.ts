@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { LoadTestMetrics } from "@/types";
-import { isRateLimitedRun, buildLatencyChartData, buildRampOverlay, buildPercentileChartData } from "./metricsTransforms";
+import {
+	isRateLimitedRun,
+	buildLatencyChartData,
+	buildRampOverlay,
+	buildPercentileChartData,
+} from "./metricsTransforms";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	return {
@@ -87,8 +92,18 @@ describe("buildRampOverlay", () => {
 describe("buildPercentileChartData", () => {
 	it("buckets p50/p95/p99 per tick, sorted by time", () => {
 		const data = buildPercentileChartData([
-			tick({ elapsed_seconds: 1, latency_p50_ms: 10, latency_p95_ms: 40, latency_p99_ms: 80 }),
-			tick({ elapsed_seconds: 2, latency_p50_ms: 12, latency_p95_ms: 60, latency_p99_ms: 150 }),
+			tick({
+				elapsed_seconds: 1,
+				latency_p50_ms: 10,
+				latency_p95_ms: 40,
+				latency_p99_ms: 80,
+			}),
+			tick({
+				elapsed_seconds: 2,
+				latency_p50_ms: 12,
+				latency_p95_ms: 60,
+				latency_p99_ms: 150,
+			}),
 		]);
 		expect(data).toHaveLength(2);
 		expect(data[0]).toMatchObject({ time: 1, p50: 10, p95: 40, p99: 80 });

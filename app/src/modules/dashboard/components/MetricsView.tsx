@@ -1240,20 +1240,24 @@ function MetricsView({
 					value={p99Latency.toFixed(0)}
 					unit="ms"
 					sub={
-						<>
-							mean{" "}
-							<span className="text-muted-foreground">
-								{meanLatency.toFixed(0)} ms
-							</span>
-							{medianLatency > 0 && (
-								<>
-									{" · "}median{" "}
-									<span className="text-muted-foreground">
-										{medianLatency.toFixed(0)} ms
-									</span>
-								</>
-							)}
-						</>
+						p99Latency > 0 ? (
+							<>
+								mean{" "}
+								<span className="text-muted-foreground">
+									{meanLatency.toFixed(0)} ms
+								</span>
+								{medianLatency > 0 && (
+									<>
+										{" · "}median{" "}
+										<span className="text-muted-foreground">
+											{medianLatency.toFixed(0)} ms
+										</span>
+									</>
+								)}
+							</>
+						) : (
+							<span className="text-subtle-foreground italic">awaiting samples</span>
+						)
 					}
 					infoTip="Tail latency — 99 of every 100 requests completed in this time or less. Real user-impact lives at p99, not the mean; mean (sub-text) is misleading on heavy-tailed distributions."
 				/>
