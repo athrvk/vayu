@@ -26,7 +26,8 @@ import type { RunReport } from "@/types";
 import type { MetricsViewProps } from "../types";
 import { InfoChip, Eyebrow, EYEBROW_CLASS } from "./shared";
 import { DroppedRequestsCard } from "./DroppedRequestsCard";
-import { isRateLimitedRun } from "../utils/metricsTransforms";
+import { isRateLimitedRun, buildLatencyChartData } from "../utils/metricsTransforms";
+import { LatencyOverTimeChart } from "./LatencyOverTimeChart";
 
 // ============================================================================
 // Formatting helpers
@@ -834,6 +835,11 @@ function MetricsView({
 		return Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
 	}, [historicalMetrics]);
 
+	const latencyChartData = useMemo(
+		() => buildLatencyChartData(historicalMetrics),
+		[historicalMetrics]
+	);
+
 	const peakConcurrency = useMemo(() => {
 		let max = 0;
 		for (const m of historicalMetrics) {
@@ -927,6 +933,42 @@ function MetricsView({
 						targetRps={targetRps}
 						isCompleted={isCompleted}
 					/>
+				</div>
+			)}
+
+			{/* Row 2.5 — Latency over time (perceived vs wire, queue-wait gap) */}
+			{latencyChartData.length > 1 && (
+				<div className="bg-card border border-border rounded-md p-3.5">
+					<div className="flex items-baseline justify-between mb-3">
+						<h3 className="text-[12px] font-semibold text-foreground">
+							Latency over time
+							<InfoChip tip="Per-tick latency over the run. The amber gap between Latency and Wire shows generator-side queue wait. When the gap grows, your generator is the bottleneck. Identity: latency = wire + queue wait." />
+						</h3>
+						<div className="flex gap-3.5 text-[11px] font-mono text-muted-foreground">
+							<span>
+								<span
+									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
+									style={{ background: "hsl(var(--primary))" }}
+								/>
+								latency
+							</span>
+							<span>
+								<span
+									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
+									style={{ background: "hsl(var(--info))" }}
+								/>
+								wire
+							</span>
+							<span>
+								<span
+									className="inline-block w-2.5 h-2 mr-1.5 align-middle rounded-sm"
+									style={{ background: "hsl(var(--warning) / 0.5)" }}
+								/>
+								queue wait
+							</span>
+						</div>
+					</div>
+					<LatencyOverTimeChart data={latencyChartData} isCompleted={isCompleted} />
 				</div>
 			)}
 
