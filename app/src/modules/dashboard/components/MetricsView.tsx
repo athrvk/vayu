@@ -30,9 +30,11 @@ import {
 	isRateLimitedRun,
 	buildLatencyChartData,
 	buildRampOverlay,
+	buildPercentileChartData,
 	type RampOverlay,
 } from "../utils/metricsTransforms";
 import { LatencyOverTimeChart } from "./LatencyOverTimeChart";
+import { PercentilesOverTimeChart } from "./PercentilesOverTimeChart";
 
 // ============================================================================
 // Formatting helpers
@@ -904,6 +906,9 @@ function MetricsView({
 
 	const latencyChartData = useMemo(() => buildLatencyChartData(chartWindow), [chartWindow]);
 
+	const percentileChartData = useMemo(() => buildPercentileChartData(chartWindow), [chartWindow]);
+	const hasPercentileData = percentileChartData.some((d) => d.p99 > 0);
+
 	const rampOverlay = useMemo(
 		() => (mode === "ramp_up" ? buildRampOverlay(chartWindow, rampConfig ?? {}) : null),
 		[mode, chartWindow, rampConfig]
@@ -1082,6 +1087,45 @@ function MetricsView({
 						</div>
 					</div>
 					<LatencyOverTimeChart data={latencyChartData} isCompleted={isCompleted} />
+				</div>
+			)}
+
+			{/* Row 2.7 — Response time percentiles over time */}
+			{percentileChartData.length > 1 && hasPercentileData && (
+				<div className="bg-card border border-border rounded-md p-3.5">
+					<div className="flex items-baseline justify-between mb-3">
+						<h3 className="text-[12px] font-semibold text-foreground">
+							Response time percentiles over time
+							<InfoChip tip="Per-tick p50 / p95 / p99 latency over the run. p50 is what most users felt; p99 is the tail — heavy-tail divergence shows up as p99 climbing while p50 stays flat. Sourced from per-tick HdrHistogram snapshots." />
+						</h3>
+						<div className="flex gap-3.5 text-[11px] font-mono text-muted-foreground">
+							<span>
+								<span
+									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
+									style={{ background: "hsl(var(--success))" }}
+								/>
+								p50
+							</span>
+							<span>
+								<span
+									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
+									style={{ background: "hsl(var(--warning))" }}
+								/>
+								p95
+							</span>
+							<span>
+								<span
+									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
+									style={{ background: "hsl(var(--destructive))" }}
+								/>
+								p99
+							</span>
+						</div>
+					</div>
+					<PercentilesOverTimeChart
+						data={percentileChartData}
+						isCompleted={isCompleted}
+					/>
 				</div>
 			)}
 
