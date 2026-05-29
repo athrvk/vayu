@@ -328,3 +328,25 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesRampLag) {
     ASSERT_TRUE (stats.contains ("rampLag"));
     EXPECT_DOUBLE_EQ (stats["rampLag"].get<double> (), 18.7);
 }
+
+TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesLatencyPercentiles) {
+    collector->record_success (200, 10.0, 0.0, "");
+    collector->record_success (200, 20.0, 0.0, "");
+    collector->record_success (200, 50.0, 0.0, "");
+    collector->record_success (200, 100.0, 0.0, "");
+
+    nlohmann::json stats = collector->get_current_stats (0, 1.0, 0);
+
+    ASSERT_TRUE (stats.contains ("latencyP50Ms"));
+    ASSERT_TRUE (stats.contains ("latencyP95Ms"));
+    ASSERT_TRUE (stats.contains ("latencyP99Ms"));
+    EXPECT_GT (stats["latencyP99Ms"].get<double> (), 0.0);
+    EXPECT_GE (stats["latencyP99Ms"].get<double> (), stats["latencyP50Ms"].get<double> ());
+    EXPECT_GE (stats["latencyP95Ms"].get<double> (), stats["latencyP50Ms"].get<double> ());
+}
+
+TEST_F (MetricsCollectorTest, GetCurrentStatsPercentilesZeroWhenNoSamples) {
+    nlohmann::json stats = collector->get_current_stats (0, 1.0, 0);
+    EXPECT_DOUBLE_EQ (stats["latencyP50Ms"].get<double> (), 0.0);
+    EXPECT_DOUBLE_EQ (stats["latencyP99Ms"].get<double> (), 0.0);
+}

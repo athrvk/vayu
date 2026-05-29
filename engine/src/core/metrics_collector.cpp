@@ -323,6 +323,22 @@ size_t requests_sent) const {
     stats["avgQueueWaitMs"] = average_queue_wait ();
     stats["rampLag"]        = ramp_lag ();
 
+    // Per-tick latency percentiles — live snapshot from the lock-free
+    // histogram (same source as the post-run final report). Microsecond
+    // storage converted back to ms. Zero when no samples recorded yet.
+    if (latency_histogram_ != nullptr && latency_histogram_->total_count > 0) {
+        stats["latencyP50Ms"] =
+        static_cast<double> (hdr_value_at_percentile (latency_histogram_, 50.0)) / 1000.0;
+        stats["latencyP95Ms"] =
+        static_cast<double> (hdr_value_at_percentile (latency_histogram_, 95.0)) / 1000.0;
+        stats["latencyP99Ms"] =
+        static_cast<double> (hdr_value_at_percentile (latency_histogram_, 99.0)) / 1000.0;
+    } else {
+        stats["latencyP50Ms"] = 0.0;
+        stats["latencyP95Ms"] = 0.0;
+        stats["latencyP99Ms"] = 0.0;
+    }
+
     return stats;
 }
 
