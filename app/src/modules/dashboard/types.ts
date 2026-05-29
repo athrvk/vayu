@@ -65,6 +65,12 @@ export interface MetricsViewProps {
 	isCompleted: boolean;
 	finalReport: RunReport | null;
 	targetRps?: number;
+	mode?: string;
+	rampConfig?: {
+		rampUpDurationSeconds?: number;
+		startConcurrency?: number;
+		targetConcurrency?: number;
+	};
 }
 
 export interface MetricCardProps {
@@ -109,6 +115,9 @@ export interface DisplayMetrics {
 	// Connection metrics
 	backpressure?: number; // Queue depth: requests sent but not yet responded
 	current_concurrency?: number; // Number of concurrent HTTP connections
+	dropped_requests?: number;
+	avg_queue_wait_ms?: number;
+	ramp_lag?: number;
 }
 
 // ============================================================================

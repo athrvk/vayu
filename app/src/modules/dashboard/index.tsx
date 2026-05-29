@@ -238,10 +238,17 @@ export default function LoadTestDashboard() {
 				targetRps: loadTestConfig.targetRps,
 				concurrency: loadTestConfig.concurrency,
 				comment: loadTestConfig.comment,
+				rampUpDuration: loadTestConfig.rampUpDuration,
+				startConcurrency: loadTestConfig.startConcurrency,
 			};
 		}
 		return undefined;
 	}, [runMetadata?.configuration, loadTestConfig]);
+
+	// Typed intermediate for ramp-specific fields that only exist on the loadTestConfig branch
+	const rampCfg = displayConfiguration as
+		| { rampUpDuration?: string; startConcurrency?: number; concurrency?: number }
+		| undefined;
 
 	// Build request info from stored info or final report
 	const displayRequestUrl = runMetadata?.requestUrl ?? requestInfo?.url;
@@ -324,6 +331,14 @@ export default function LoadTestDashboard() {
 							displayConfiguration?.targetRps ??
 							finalReport?.metadata?.configuration?.targetRps
 						}
+						mode={displayConfiguration?.mode}
+						rampConfig={{
+							rampUpDurationSeconds:
+								parseInt(String(rampCfg?.rampUpDuration ?? ""), 10) ||
+								undefined,
+							startConcurrency: rampCfg?.startConcurrency,
+							targetConcurrency: rampCfg?.concurrency,
+						}}
 					/>
 				) : (
 					<RequestResponseView report={finalReport} />

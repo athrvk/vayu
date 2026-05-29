@@ -515,6 +515,8 @@ export default function RequestBuilder() {
 						concurrency: apiRequest.concurrency,
 						iterations: apiRequest.iterations,
 						comment: apiRequest.comment,
+						rampUpDuration: apiRequest.rampUpDuration,
+						startConcurrency: apiRequest.startConcurrency,
 					},
 					{
 						method: apiRequest.method,
