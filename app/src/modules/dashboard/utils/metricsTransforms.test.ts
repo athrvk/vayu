@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { LoadTestMetrics } from "@/types";
-import { isRateLimitedRun, buildLatencyChartData, buildRampOverlay } from "./metricsTransforms";
+import { isRateLimitedRun, buildLatencyChartData, buildRampOverlay, buildPercentileChartData } from "./metricsTransforms";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	return {
@@ -81,5 +81,35 @@ describe("buildRampOverlay", () => {
 		expect(overlay.rampLagPct).toBeCloseTo(18.5);
 		expect(overlay.peakAchieved).toBe(90);
 		expect(overlay.target).toBe(100);
+	});
+});
+
+describe("buildPercentileChartData", () => {
+	it("buckets p50/p95/p99 per tick, sorted by time", () => {
+		const data = buildPercentileChartData([
+			tick({ elapsed_seconds: 1, latency_p50_ms: 10, latency_p95_ms: 40, latency_p99_ms: 80 }),
+			tick({ elapsed_seconds: 2, latency_p50_ms: 12, latency_p95_ms: 60, latency_p99_ms: 150 }),
+		]);
+		expect(data).toHaveLength(2);
+		expect(data[0]).toMatchObject({ time: 1, p50: 10, p95: 40, p99: 80 });
+		expect(data[1]).toMatchObject({ time: 2, p50: 12, p95: 60, p99: 150 });
+	});
+
+	it("zeroes percentiles for older runs that lack them", () => {
+		const all = buildPercentileChartData([
+			tick({ elapsed_seconds: 1 }),
+			tick({ elapsed_seconds: 2 }),
+		]);
+		expect(all.every((d) => d.p50 === 0 && d.p95 === 0 && d.p99 === 0)).toBe(true);
+	});
+
+	it("buckets to 0.5s, last-write-wins, sorted", () => {
+		const data = buildPercentileChartData([
+			tick({ elapsed_seconds: 1.1, latency_p99_ms: 80 }),
+			tick({ elapsed_seconds: 1.2, latency_p99_ms: 90 }),
+			tick({ elapsed_seconds: 0.6, latency_p99_ms: 30 }),
+		]);
+		expect(data.map((d) => d.time)).toEqual([0.5, 1.0]);
+		expect(data[1].p99).toBe(90);
 	});
 });

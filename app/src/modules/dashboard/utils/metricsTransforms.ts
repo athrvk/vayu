@@ -59,6 +59,28 @@ export interface RampParams {
 	targetConcurrency?: number;
 }
 
+export interface PercentilePoint {
+	time: number;
+	p50: number;
+	p95: number;
+	p99: number;
+}
+
+/** Bucket per-tick latency percentiles to 0.5s. */
+export function buildPercentileChartData(history: LoadTestMetrics[]): PercentilePoint[] {
+	const byBucket = new Map<number, PercentilePoint>();
+	for (const m of history) {
+		const t = Math.round(m.elapsed_seconds * 2) / 2;
+		byBucket.set(t, {
+			time: t,
+			p50: m.latency_p50_ms ?? 0,
+			p95: m.latency_p95_ms ?? 0,
+			p99: m.latency_p99_ms ?? 0,
+		});
+	}
+	return Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
+}
+
 /**
  * Build the configured-vs-achieved concurrency overlay for ramp_up runs.
  * Returns null when there's no target concurrency to ramp toward.
