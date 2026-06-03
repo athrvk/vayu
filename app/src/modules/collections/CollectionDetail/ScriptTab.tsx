@@ -48,7 +48,14 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 	const [showRef, setShowRef] = useState(false);
 	const updateCollection = useUpdateCollectionMutation();
 
+	// Resync the editable script draft when the collection or script kind
+	// (pre/post) changes (component renders inline, not remounted per-collection).
+	// Can't be derived: `script` is a user-editable Monaco draft that
+	// intentionally diverges from props between edits and save. A value-keyed
+	// render-phase reset would miss switches to a different collection whose
+	// script happens to equal the current draft.
 	useEffect(() => {
+		// eslint-disable-next-line react-hooks/set-state-in-effect
 		setScript(collection[fieldKey] ?? "");
 	}, [collection.id, collection, fieldKey]);
 

@@ -185,10 +185,15 @@ export default function VariableInput({
 		);
 	}, [suggestions, value]);
 
-	// Reset selected index when filtered suggestions change
-	useEffect(() => {
+	// Reset selected index when the filtered suggestion set changes. Done as a
+	// render-phase adjustment (not an effect) so the index is corrected before
+	// paint without a cascading re-render. The index is ephemeral UI state, so
+	// there's no divergence risk from resetting it during render.
+	const [prevSuggestionCount, setPrevSuggestionCount] = useState(filteredSuggestions.length);
+	if (prevSuggestionCount !== filteredSuggestions.length) {
+		setPrevSuggestionCount(filteredSuggestions.length);
 		setSelectedSuggestionIndex(0);
-	}, [filteredSuggestions.length]);
+	}
 
 	// Handle Escape key globally
 	useEffect(() => {

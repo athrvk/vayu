@@ -41,8 +41,14 @@ export default function DashboardHeader({
 	// Live counter for running tests — reset to 0 each time a new run starts
 	const [liveTick, setLiveTick] = useState(0);
 
+	// Drive a 1s live tick while a run streams. The synchronous setLiveTick(0)
+	// resets the counter at the start of each run so the elapsed display doesn't
+	// carry over from a previous run; it fires only on run start/stop, not every
+	// render. This is a legitimate interval-setup effect — deriving it isn't
+	// possible (it's wall-clock time, not a function of props).
 	useEffect(() => {
 		if (mode === "running" && isStreaming) {
+			// eslint-disable-next-line react-hooks/set-state-in-effect
 			setLiveTick(0);
 			const interval = setInterval(() => setLiveTick((t) => t + 1), 1000);
 			return () => clearInterval(interval);
