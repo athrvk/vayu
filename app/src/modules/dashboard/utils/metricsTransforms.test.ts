@@ -74,7 +74,7 @@ describe("buildRampOverlay", () => {
 				tick({ elapsed_seconds: 0, current_concurrency: 1 }),
 				tick({ elapsed_seconds: 5, current_concurrency: 40 }),
 				tick({ elapsed_seconds: 10, current_concurrency: 80 }),
-				tick({ elapsed_seconds: 15, current_concurrency: 90, ramp_lag: 18.5 }),
+				tick({ elapsed_seconds: 15, current_concurrency: 90 }),
 			],
 			{ rampUpDurationSeconds: 10, startConcurrency: 0, targetConcurrency: 100 }
 		)!;
@@ -83,9 +83,45 @@ describe("buildRampOverlay", () => {
 		expect(at5.achieved).toBe(40);
 		const at15 = overlay.points.find((p) => p.time === 15)!;
 		expect(at15.configured).toBe(100);
-		expect(overlay.rampLagPct).toBeCloseTo(18.5);
 		expect(overlay.peakAchieved).toBe(90);
 		expect(overlay.target).toBe(100);
+	});
+
+	it("near-perfect ramp yields a tiny two-sided deviation", () => {
+		// achieved tracks the configured curve closely; deviation ~0.
+		const overlay = buildRampOverlay(
+			[
+				tick({ elapsed_seconds: 5, current_concurrency: 50 }),
+				tick({ elapsed_seconds: 10, current_concurrency: 100 }),
+				tick({ elapsed_seconds: 15, current_concurrency: 100 }),
+			],
+			{ rampUpDurationSeconds: 10, startConcurrency: 0, targetConcurrency: 100 }
+		)!;
+		expect(overlay.rampDeviationPct).toBeCloseTo(0, 1);
+	});
+
+	it("counts overshoot, not just deficit (A3 regression)", () => {
+		// At t=15 the configured curve is 50 (still ramping) but achieved is
+		// 450 — a 9x overshoot. A deficit-only formula clamps this to 0%; the
+		// two-sided deviation must surface it as a large number.
+		const overlay = buildRampOverlay(
+			[tick({ elapsed_seconds: 15, current_concurrency: 450 })],
+			{ rampUpDurationSeconds: 30, startConcurrency: 0, targetConcurrency: 50 }
+		)!;
+		// |450 - 25| / 50 = 850%  (configured at t=15 over a 30s ramp to 50 = 25)
+		expect(overlay.rampDeviationPct).toBeGreaterThan(100);
+		expect(overlay.rampDeviationPct).toBeCloseTo(850, 0);
+	});
+
+	it("does not produce NaN/Inf when configured is 0 at t=0 (start=0)", () => {
+		const overlay = buildRampOverlay(
+			[
+				tick({ elapsed_seconds: 0, current_concurrency: 0 }),
+				tick({ elapsed_seconds: 5, current_concurrency: 50 }),
+			],
+			{ rampUpDurationSeconds: 10, startConcurrency: 0, targetConcurrency: 100 }
+		)!;
+		expect(Number.isFinite(overlay.rampDeviationPct)).toBe(true);
 	});
 });
 

@@ -245,7 +245,6 @@ export interface LoadTestMetrics {
 	backpressure?: number;
 	dropped_requests?: number;
 	avg_queue_wait_ms?: number;
-	ramp_lag?: number;
 }
 
 export interface RunReport {

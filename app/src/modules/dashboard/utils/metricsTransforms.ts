@@ -48,7 +48,14 @@ export interface RampPoint {
 
 export interface RampOverlay {
 	points: RampPoint[];
-	rampLagPct: number; // latest ramp_lag from the engine
+	// Two-sided ramp deviation: mean of |achieved - configured| / target across
+	// buckets, as a percentage. Computed app-side directly from the plotted
+	// `configured` and `achieved` (= measured current_concurrency) series, so it
+	// is consistent with the curves by construction. Unlike the retired
+	// deficit-only "ramp lag", overshoot (achieved >> configured) is counted —
+	// a 9x overshoot reads as a large deviation, not 0%. Denominator is `target`
+	// (always > 0 here), so it never divides by zero even when configured == 0.
+	rampDeviationPct: number;
 	peakAchieved: number;
 	target: number;
 }
@@ -97,19 +104,29 @@ export function buildRampOverlay(
 
 	const byBucket = new Map<number, RampPoint>();
 	let peak = 0;
-	let lastLag = 0;
 	for (const m of history) {
 		const t = Math.round(m.elapsed_seconds * 2) / 2;
 		const achieved = m.current_concurrency ?? 0;
 		if (achieved > peak) peak = achieved;
-		if (m.ramp_lag != null) lastLag = m.ramp_lag;
 		const configured =
 			rampSec > 0 && t < rampSec ? start + (target - start) * (t / rampSec) : target;
 		byBucket.set(t, { time: t, configured, achieved });
 	}
+	const points = Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
+
+	// Two-sided deviation: mean of |achieved - configured| / target over buckets.
+	// `target > 0` is guaranteed by the early return, so this is always finite.
+	const rampDeviationPct =
+		points.length > 0
+			? (points.reduce((sum, p) => sum + Math.abs(p.achieved - p.configured), 0) /
+					points.length /
+					target) *
+				100
+			: 0;
+
 	return {
-		points: Array.from(byBucket.values()).sort((a, b) => a.time - b.time),
-		rampLagPct: lastLag,
+		points,
+		rampDeviationPct,
 		peakAchieved: peak,
 		target,
 	};

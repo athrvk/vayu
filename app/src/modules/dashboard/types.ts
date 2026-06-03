@@ -117,7 +117,6 @@ export interface DisplayMetrics {
 	current_concurrency?: number; // Number of concurrent HTTP connections
 	dropped_requests?: number;
 	avg_queue_wait_ms?: number;
-	ramp_lag?: number;
 }
 
 // ============================================================================

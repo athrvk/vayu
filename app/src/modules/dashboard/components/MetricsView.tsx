@@ -1038,10 +1038,11 @@ function MetricsView({
 					{rampOverlay && (
 						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-[11px] font-mono text-muted-foreground">
 							<span>
-								<span className="text-subtle-foreground">ramp lag </span>
+								<span className="text-subtle-foreground">ramp deviation </span>
 								<span className="text-foreground font-semibold">
-									{rampOverlay.rampLagPct.toFixed(1)}%
+									{rampOverlay.rampDeviationPct.toFixed(1)}%
 								</span>
+								<InfoChip tip="Mean absolute gap between achieved (measured) and configured concurrency, as a percent of target. Counts both undershoot and overshoot, so a ramp that runs over target reads high." />
 							</span>
 							<span>
 								<span className="text-subtle-foreground">peak achieved </span>
@@ -1053,9 +1054,9 @@ function MetricsView({
 									{formatNumber(rampOverlay.target)}
 								</span>
 							</span>
-							{rampOverlay.rampLagPct > 5 && (
+							{rampOverlay.rampDeviationPct > 5 && (
 								<span style={{ color: "hsl(var(--warning))" }}>
-									⚠ ramp degraded
+									⚠ ramp off target
 								</span>
 							)}
 						</div>
