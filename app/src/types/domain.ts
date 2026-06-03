@@ -245,6 +245,10 @@ export interface LoadTestMetrics {
 	backpressure?: number;
 	dropped_requests?: number;
 	avg_queue_wait_ms?: number;
+	// Run progress — feeds the iterations-mode ETA stat. requests_expected is 0
+	// for open-ended modes (constant_rps), in which case ETA is not shown.
+	requests_sent?: number;
+	requests_expected?: number;
 }
 
 export interface RunReport {

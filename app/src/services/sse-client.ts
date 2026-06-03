@@ -45,6 +45,8 @@ export class SSEClient {
 			backpressure: 0,
 			dropped_requests: 0,
 			avg_queue_wait_ms: 0,
+			requests_sent: 0,
+			requests_expected: 0,
 		};
 	}
 
@@ -107,6 +109,8 @@ export class SSEClient {
 						backpressure: metrics.backpressure || 0,
 						dropped_requests: metrics.droppedRequests || 0,
 						avg_queue_wait_ms: metrics.avgQueueWaitMs || 0,
+						requests_sent: metrics.requestsSent || 0,
+						requests_expected: metrics.requestsExpected || 0,
 					};
 
 					onMessage({ ...this.currentMetrics });
