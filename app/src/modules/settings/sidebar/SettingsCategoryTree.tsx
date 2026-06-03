@@ -18,7 +18,7 @@
 import { useSettingsStore } from "@/stores";
 import { useConfigQuery } from "@/queries";
 import type { SettingsCategory } from "@/types";
-import { Server, Code, Settings, Palette, Network, Activity, Database } from "lucide-react";
+import { Server, Code, Settings, Palette, Network, Activity, Database, Gauge } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, Skeleton } from "@/components/ui";
 
@@ -30,6 +30,11 @@ const CATEGORY_CONFIG: Record<
 		label: "Appearance",
 		icon: Palette,
 		color: "pink",
+	},
+	load_defaults: {
+		label: "Load Test Defaults",
+		icon: Gauge,
+		color: "cyan",
 	},
 	general_engine: {
 		label: "General & Engine",
@@ -70,7 +75,7 @@ export default function SettingsCategoryTree() {
 		}
 	}
 
-	const appCategories: SettingsCategory[] = ["ui"];
+	const appCategories: SettingsCategory[] = ["ui", "load_defaults"];
 	const engineCategories: SettingsCategory[] = [
 		"general_engine",
 		"database_performance",

@@ -42,6 +42,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import UISettingsPanel from "./UISettingsPanel";
+import LoadDefaultsPanel from "./LoadDefaultsPanel";
 import { isSizeConfig, formatBytes, formatSizeRange } from "../utils/format-size";
 
 /**
@@ -56,6 +57,10 @@ const CATEGORY_TITLES: Record<SettingsCategory, { title: string; description: st
 	ui: {
 		title: "Appearance",
 		description: "Customize the look and feel of the application",
+	},
+	load_defaults: {
+		title: "Load Test Defaults",
+		description: "App-level defaults applied to new load-test runs",
 	},
 	general_engine: {
 		title: "General & Engine",
@@ -200,8 +205,14 @@ export default function SettingsMain() {
 	// Register save context when settings are ready (not loading, no error, category selected)
 	const contextId = "settings";
 	useEffect(() => {
-		// Only register when we have a valid settings view (not loading, no error, category selected, not UI category)
-		if (isLoading || error || !selectedCategory || selectedCategory === "ui") {
+		// Only register when we have a valid settings view (not loading, no error, category selected, not a client-side category)
+		if (
+			isLoading ||
+			error ||
+			!selectedCategory ||
+			selectedCategory === "ui" ||
+			selectedCategory === "load_defaults"
+		) {
 			return;
 		}
 
@@ -229,7 +240,13 @@ export default function SettingsMain() {
 
 	// Update context when hasChanges changes
 	useEffect(() => {
-		if (isLoading || error || !selectedCategory || selectedCategory === "ui") {
+		if (
+			isLoading ||
+			error ||
+			!selectedCategory ||
+			selectedCategory === "ui" ||
+			selectedCategory === "load_defaults"
+		) {
 			return;
 		}
 		updateContext(contextId, {
@@ -255,6 +272,11 @@ export default function SettingsMain() {
 	// UI settings are handled by a separate panel (client-side only)
 	if (selectedCategory === "ui") {
 		return <UISettingsPanel />;
+	}
+
+	// Load-test defaults are client-side only (not engine configs)
+	if (selectedCategory === "load_defaults") {
+		return <LoadDefaultsPanel />;
 	}
 
 	if (isLoading) {

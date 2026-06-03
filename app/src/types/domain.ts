@@ -387,7 +387,8 @@ export type SettingsCategory =
 	| "network_performance"
 	| "scripting_sandbox"
 	| "observability"
-	| "ui";
+	| "ui"
+	| "load_defaults";
 
 export interface ScriptCompletion {
 	label: string;
