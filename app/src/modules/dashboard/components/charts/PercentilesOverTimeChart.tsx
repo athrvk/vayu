@@ -5,8 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { PercentilePoint } from "../utils/metricsTransforms";
-import { niceYMax, projectY } from "../utils/chartGeometry";
+import type { PercentilePoint } from "../../utils/metricsTransforms";
+import { niceYMax, projectY } from "../../utils/chartGeometry";
 
 /**
  * Per-tick p50 / p95 / p99 latency over the run. p50 is what most users felt;

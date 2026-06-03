@@ -18,7 +18,11 @@ export interface EtaInputs {
 	currentRps: number;
 }
 
-export function computeEta({ requestsExpected, requestsSent, currentRps }: EtaInputs): number | null {
+export function computeEta({
+	requestsExpected,
+	requestsSent,
+	currentRps,
+}: EtaInputs): number | null {
 	if (requestsExpected <= 0) return null;
 	if (currentRps <= 0) return null;
 	const remaining = Math.max(0, requestsExpected - requestsSent);

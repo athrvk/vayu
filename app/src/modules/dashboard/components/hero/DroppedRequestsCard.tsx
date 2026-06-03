@@ -6,7 +6,7 @@
  */
 
 import { formatNumber } from "@/utils";
-import { Eyebrow, InfoChip } from "./shared";
+import { Eyebrow, InfoChip } from "../shared";
 
 /**
  * Replaces the Rate Fidelity hero card when a constant_rps run has dropped

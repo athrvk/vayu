@@ -5,8 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { LatencyPoint } from "../utils/metricsTransforms";
-import { niceYMax, projectY } from "../utils/chartGeometry";
+import type { LatencyPoint } from "../../utils/metricsTransforms";
+import { niceYMax, projectY } from "../../utils/chartGeometry";
 
 /**
  * Per-tick latency over the run, split into wire time (what curl saw) and the

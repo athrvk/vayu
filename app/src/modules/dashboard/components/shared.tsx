@@ -37,3 +37,8 @@ export function InfoChip({ tip }: { tip: ReactNode }) {
 export function Eyebrow({ children }: { children: ReactNode }) {
 	return <p className={EYEBROW_CLASS}>{children}</p>;
 }
+
+/** Format a possibly-undefined number, falling back to an em-dash. */
+export function fmt(v: number | undefined, digits = 1): string {
+	return v !== undefined ? v.toFixed(digits) : "—";
+}

@@ -36,15 +36,15 @@ export const TOOLTIPS = {
 	// ---- Hero card #2 (mode-adaptive) ----
 	sendThroughput: (
 		<>
-			Twin rates from the open-model load generator. <b>Send</b> = requests dispatched onto the
-			wire; <b>Throughput</b> = responses received. A persistent gap means server-side
+			Twin rates from the open-model load generator. <b>Send</b> = requests dispatched onto
+			the wire; <b>Throughput</b> = responses received. A persistent gap means server-side
 			saturation — the request queue (backpressure) grows.
 		</>
 	),
 	sendThroughputDispatched: (
 		<>
-			Rate at which Vayu pushed requests onto the wire. Independent of how fast they come back —
-			that&apos;s throughput.
+			Rate at which Vayu pushed requests onto the wire. Independent of how fast they come back
+			— that&apos;s throughput.
 		</>
 	),
 	sendThroughputReceived:

@@ -332,6 +332,7 @@ export default function LoadTestDashboard() {
 							displayConfiguration?.targetRps ??
 							finalReport?.metadata?.configuration?.targetRps
 						}
+						concurrency={rampCfg?.concurrency}
 						mode={displayConfiguration?.mode}
 						rampConfig={{
 							rampUpDurationSeconds:

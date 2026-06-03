@@ -12,6 +12,8 @@
  */
 
 import type { LoadTestMetrics, RunReport } from "@/types";
+import type { LoadMode } from "./hooks/useMode";
+import type { Breakpoint } from "./utils/computeBreakpoint";
 
 // ============================================================================
 // Dashboard State Types
@@ -65,12 +67,61 @@ export interface MetricsViewProps {
 	isCompleted: boolean;
 	finalReport: RunReport | null;
 	targetRps?: number;
+	/** Configured concurrency for closed-loop modes (constant_concurrency). */
+	concurrency?: number;
 	mode?: string;
 	rampConfig?: {
 		rampUpDurationSeconds?: number;
 		startConcurrency?: number;
 		targetConcurrency?: number;
 	};
+}
+
+/**
+ * Single derived-metrics bundle the orchestrator computes once (memoized) and
+ * passes to the mode-adaptive HeroRow and ModeStatsRow. Centralizing derivation
+ * here keeps the hero/stat card variants pure presentational components that
+ * read what they need — no card re-derives from raw metrics (Plan 4 gate #9).
+ */
+export interface DashboardDerived {
+	mode: LoadMode;
+	isCompleted: boolean;
+	// Rates
+	targetRps?: number;
+	actualRps?: number;
+	sendRate?: number;
+	throughput?: number;
+	currentRps: number;
+	avgQueueWaitMs: number;
+	// Counts
+	totalRequests: number;
+	failedRequests: number;
+	statusCodes: Record<string, number>;
+	requestsExpected: number;
+	requestsSent: number;
+	// Concurrency
+	peakConcurrency: number;
+	currentConcurrency: number;
+	configuredConcurrency?: number;
+	backpressure: number;
+	// Latency
+	p99Latency: number;
+	meanLatency: number;
+	medianLatency: number;
+	p95Latency: number;
+	// Timing
+	testDuration?: number;
+	elapsedSeconds: number;
+	setupOverhead?: number;
+	// Drops
+	droppedRequests: number;
+	showDropped: boolean;
+	// Ramp / breakpoint
+	rampDeviationPct?: number;
+	rampUpDurationSeconds?: number;
+	startConcurrency?: number;
+	targetConcurrency?: number;
+	breakpoint: Breakpoint;
 }
 
 export interface MetricCardProps {
@@ -117,6 +168,9 @@ export interface DisplayMetrics {
 	current_concurrency?: number; // Number of concurrent HTTP connections
 	dropped_requests?: number;
 	avg_queue_wait_ms?: number;
+	// Run progress — feeds the iterations-mode ETA stat (live only).
+	requests_sent?: number;
+	requests_expected?: number;
 }
 
 // ============================================================================

@@ -58,9 +58,7 @@ describe("computeBreakpoint", () => {
 
 	it("defaults the SLO threshold to 200ms", () => {
 		expect(DEFAULT_SLO_MS).toBe(200);
-		const bp = computeBreakpoint([
-			tick({ current_concurrency: 25, latency_p99_ms: 201 }),
-		]);
+		const bp = computeBreakpoint([tick({ current_concurrency: 25, latency_p99_ms: 201 })]);
 		expect(bp.crossed).toBe(true);
 		expect(bp.concurrency).toBe(25);
 	});
