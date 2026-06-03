@@ -181,15 +181,6 @@ export default function LoadTestDashboard() {
 		}
 	};
 
-	// Empty state
-	if (!currentRunId) {
-		return (
-			<div className="flex-1 flex items-center justify-center text-muted-foreground">
-				<p>No active load test</p>
-			</div>
-		);
-	}
-
 	// Compute derived state
 	const lastHistoricalMetrics = useMemo(() => {
 		return historicalMetrics.length > 0
@@ -282,6 +273,16 @@ export default function LoadTestDashboard() {
 		}
 		return startTime && endTime ? endTime - startTime : 0;
 	}, [mode, finalReport?.summary?.testDuration, historicalMetrics, startTime, endTime]);
+
+	// Empty state — placed after all hooks so the hook call order stays stable
+	// across renders (Rules of Hooks); the memos above are null-safe with no run.
+	if (!currentRunId) {
+		return (
+			<div className="flex-1 flex items-center justify-center text-muted-foreground">
+				<p>No active load test</p>
+			</div>
+		);
+	}
 
 	return (
 		<div className="flex-1 flex flex-col overflow-hidden">
