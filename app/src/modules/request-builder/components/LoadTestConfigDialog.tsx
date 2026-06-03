@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { Loader2, AlertTriangle } from "lucide-react";
 import type { LoadTestConfig } from "@/types";
+import { validateRampDuration } from "../utils/loadTestValidation";
 import {
 	Button,
 	Input,
@@ -91,7 +92,11 @@ export default function LoadTestConfigDialog({
 	);
 	const [comment, setComment] = useState(""); // Don't persist comment
 
+	const rampDurationError = validateRampDuration(mode, duration, rampDuration);
+
 	const handleStart = () => {
+		if (rampDurationError) return;
+
 		// Save current config for next time (excluding comment which is per-run)
 		saveConfig({
 			mode,
@@ -313,6 +318,14 @@ export default function LoadTestConfigDialog({
 						</div>
 					</div>
 
+					{/* Ramp duration validation — total duration must include the ramp. */}
+					{rampDurationError && (
+						<div className="flex gap-2.5 rounded-md border border-warning/30 bg-warning/10 px-3 py-2.5 text-[12px] text-warning">
+							<AlertTriangle className="h-4 w-4 shrink-0 mt-px" />
+							<p className="leading-relaxed">{rampDurationError}</p>
+						</div>
+					)}
+
 					{/* Info Box */}
 					<div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-200">
 						<p className="font-medium mb-1">What will happen:</p>
@@ -335,7 +348,8 @@ export default function LoadTestConfigDialog({
 						{mode === "ramp_up" && (
 							<p>
 								Gradually increase to {concurrency} concurrent connections over{" "}
-								{rampDuration}s, then maintain for {duration}s
+								{rampDuration}s, within a total run of {duration}s (the ramp is
+								included in the total).
 							</p>
 						)}
 					</div>
@@ -347,7 +361,7 @@ export default function LoadTestConfigDialog({
 					</Button>
 					<Button
 						onClick={handleStart}
-						disabled={isStarting}
+						disabled={isStarting || rampDurationError !== null}
 						className="bg-purple-600 hover:bg-purple-700"
 					>
 						{isStarting ? (
