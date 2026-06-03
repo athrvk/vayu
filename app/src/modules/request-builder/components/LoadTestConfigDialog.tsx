@@ -22,6 +22,7 @@ import {
 	DialogContent,
 	DialogHeader,
 	DialogTitle,
+	DialogDescription,
 	DialogFooter,
 } from "@/components/ui";
 
@@ -140,6 +141,9 @@ export default function LoadTestConfigDialog({
 			<DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
 				<DialogHeader>
 					<DialogTitle>Load Test Configuration</DialogTitle>
+					<DialogDescription>
+						Choose a load profile and set its parameters before starting the run.
+					</DialogDescription>
 				</DialogHeader>
 
 				{/* Content */}
