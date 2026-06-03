@@ -6,9 +6,9 @@
  */
 
 import { formatNumber } from "@/utils";
-import { InfoChip, Eyebrow } from "../shared";
 import { TOOLTIPS } from "../tooltips";
 import { computeEta } from "../../utils/computeEta";
+import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
 /**
  * iterations hero card #1 — progress through the configured iteration count.
@@ -28,17 +28,8 @@ export function ProgressCard({
 	const eta = computeEta({ requestsExpected, requestsSent, currentRps });
 
 	return (
-		<div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1.5">
-			<Eyebrow>
-				Progress
-				<InfoChip tip={TOOLTIPS.progress} />
-			</Eyebrow>
-			<div className="flex items-baseline gap-1 mt-0.5">
-				<span className="text-[34px] font-bold leading-none font-mono tabular-nums text-foreground">
-					{pct !== undefined ? pct.toFixed(0) : "—"}
-				</span>
-				<span className="text-xs text-muted-foreground">%</span>
-			</div>
+		<HeroCardShell label="Progress" tip={TOOLTIPS.progress}>
+			<HeroValue value={pct !== undefined ? pct.toFixed(0) : "—"} unit="%" />
 			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
 				<span className="text-foreground font-semibold">{formatNumber(requestsSent)}</span>{" "}
 				/{" "}
@@ -51,14 +42,7 @@ export function ProgressCard({
 				</span>
 				s
 			</p>
-			{pct !== undefined && (
-				<div className="relative mt-2 h-1 rounded-sm border border-border bg-accent overflow-hidden">
-					<div
-						className="absolute inset-y-0 left-0"
-						style={{ width: `${pct}%`, background: "hsl(var(--primary))" }}
-					/>
-				</div>
-			)}
-		</div>
+			{pct !== undefined && <MiniBar pct={pct} color="hsl(var(--primary))" />}
+		</HeroCardShell>
 	);
 }

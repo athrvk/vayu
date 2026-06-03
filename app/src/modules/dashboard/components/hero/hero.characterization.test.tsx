@@ -19,7 +19,12 @@ import { SaturationCard } from "./SaturationCard";
 import type { Breakpoint } from "../../utils/computeBreakpoint";
 
 const crossed: Breakpoint = { crossed: true, concurrency: 45, timeSeconds: 6, p99Ms: 227 };
-const notCrossed: Breakpoint = { crossed: false, concurrency: null, timeSeconds: null, p99Ms: null };
+const notCrossed: Breakpoint = {
+	crossed: false,
+	concurrency: null,
+	timeSeconds: null,
+	p99Ms: null,
+};
 
 const snap = (ui: React.ReactElement) => {
 	const { container } = render(ui);

@@ -5,8 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { InfoChip, Eyebrow, fmt } from "../shared";
+import { fmt } from "../shared";
 import { TOOLTIPS } from "../tooltips";
+import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
 /** Utilisation tier coloring: ≥95% success, ≥80% warning, else destructive. */
 function utilColor(util: number | undefined): string {
@@ -34,41 +35,24 @@ export function ConcurrencyUtilCard({
 	const color = utilColor(util);
 
 	return (
-		<div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1.5">
-			<Eyebrow>
-				Concurrency Utilisation
-				<InfoChip tip={TOOLTIPS.concurrencyUtil} />
-			</Eyebrow>
-			<div className="flex items-baseline gap-1 mt-0.5">
-				<span
-					className="text-[34px] font-bold leading-none font-mono tabular-nums"
-					style={{ color }}
-				>
-					{currentConcurrency}
-				</span>
-				<span className="text-xs text-muted-foreground">
-					of{" "}
-					<span className="text-foreground font-semibold">
-						{fmt(configuredConcurrency, 0)}
-					</span>{" "}
-					active
-				</span>
-			</div>
+		<HeroCardShell label="Concurrency Utilisation" tip={TOOLTIPS.concurrencyUtil}>
+			<HeroValue
+				value={currentConcurrency}
+				color={color}
+				unit={
+					<>
+						of{" "}
+						<span className="text-foreground font-semibold">
+							{fmt(configuredConcurrency, 0)}
+						</span>{" "}
+						active
+					</>
+				}
+			/>
 			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
 				<span className="text-foreground font-semibold">{fmt(util, 0)}</span>% utilisation
 			</p>
-			{util !== undefined && (
-				<div className="relative mt-2 h-1 rounded-sm border border-border bg-accent overflow-hidden">
-					<div
-						className="absolute inset-y-0 left-0"
-						style={{ width: `${Math.min(100, util)}%`, background: color }}
-					/>
-					<span
-						className="absolute top-[-3px] bottom-[-3px] w-px bg-primary"
-						style={{ left: "100%" }}
-					/>
-				</div>
-			)}
-		</div>
+			{util !== undefined && <MiniBar pct={Math.min(100, util)} color={color} showTarget />}
+		</HeroCardShell>
 	);
 }

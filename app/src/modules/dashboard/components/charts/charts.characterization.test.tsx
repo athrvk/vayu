@@ -21,9 +21,9 @@ const throughput = [
 ];
 
 const latency = [
-	{ time: 0.5, latencyMs: 50, wireMs: 40 },
-	{ time: 1.0, latencyMs: 80, wireMs: 55 },
-	{ time: 1.5, latencyMs: 120, wireMs: 70 },
+	{ time: 0.5, latencyMs: 50, wireMs: 40, queueWaitMs: 10 },
+	{ time: 1.0, latencyMs: 80, wireMs: 55, queueWaitMs: 25 },
+	{ time: 1.5, latencyMs: 120, wireMs: 70, queueWaitMs: 50 },
 ];
 
 const percentiles = [
@@ -34,9 +34,9 @@ const percentiles = [
 
 const rampOverlay: RampOverlay = {
 	points: [
-		{ configured: 10, achieved: 8 },
-		{ configured: 30, achieved: 22 },
-		{ configured: 50, achieved: 35 },
+		{ time: 0.5, configured: 10, achieved: 8 },
+		{ time: 1.0, configured: 30, achieved: 22 },
+		{ time: 1.5, configured: 50, achieved: 35 },
 	],
 	target: 50,
 	peakAchieved: 35,
@@ -58,7 +58,11 @@ describe("ThroughputOverTimeChart", () => {
 	});
 	it("with ramp overlay (z-order: overlay after live dot)", () => {
 		const { container } = render(
-			<ThroughputOverTimeChart data={throughput} isCompleted={false} rampOverlay={rampOverlay} />
+			<ThroughputOverTimeChart
+				data={throughput}
+				isCompleted={false}
+				rampOverlay={rampOverlay}
+			/>
 		);
 		expect(container.innerHTML).toMatchSnapshot();
 	});

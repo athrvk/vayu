@@ -6,7 +6,7 @@
  */
 
 import { formatNumber } from "@/utils";
-import { Eyebrow, InfoChip } from "../shared";
+import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
 /**
  * Replaces the Rate Fidelity hero card when a constant_rps run has dropped
@@ -24,29 +24,18 @@ export function DroppedRequestsCard({
 	const pct = scheduled > 0 ? (dropped / scheduled) * 100 : 0;
 
 	return (
-		<div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1.5">
-			<Eyebrow>
-				Dropped Requests
-				<InfoChip
-					tip={
-						<>
-							Requests the generator could not submit because its in-flight pool
-							filled up. Root cause is usually slow server responses tying up curl
-							handles. Lowering <code>targetRps</code> or raising{" "}
-							<code>maxInFlight</code> defers drops in exchange for higher queue wait
-							— but the server is still the bottleneck.
-						</>
-					}
-				/>
-			</Eyebrow>
-			<div className="flex items-baseline gap-1 mt-0.5">
-				<span
-					className="text-[34px] font-bold leading-none font-mono tabular-nums"
-					style={{ color: "hsl(var(--destructive))" }}
-				>
-					{formatNumber(dropped)}
-				</span>
-			</div>
+		<HeroCardShell
+			label="Dropped Requests"
+			tip={
+				<>
+					Requests the generator could not submit because its in-flight pool filled up.
+					Root cause is usually slow server responses tying up curl handles. Lowering{" "}
+					<code>targetRps</code> or raising <code>maxInFlight</code> defers drops in
+					exchange for higher queue wait — but the server is still the bottleneck.
+				</>
+			}
+		>
+			<HeroValue value={formatNumber(dropped)} color="hsl(var(--destructive))" />
 			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
 				of <span className="text-foreground font-semibold">{formatNumber(scheduled)}</span>{" "}
 				scheduled · <span className="text-foreground font-semibold">{pct.toFixed(1)}</span>%
@@ -54,6 +43,6 @@ export function DroppedRequestsCard({
 			<p className="text-[11px] mt-2" style={{ color: "hsl(var(--warning))" }}>
 				Server saturating — try lowering target RPS
 			</p>
-		</div>
+		</HeroCardShell>
 	);
 }

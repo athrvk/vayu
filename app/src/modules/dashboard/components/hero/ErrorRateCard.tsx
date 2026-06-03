@@ -8,8 +8,9 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
-import { InfoChip, Eyebrow } from "../shared";
+import { InfoChip } from "../shared";
 import { TOOLTIPS } from "../tooltips";
+import { HeroCardShell } from "./HeroCardShell";
 
 /** Status-code buckets: stack-bar fill + legend entry share one definition. */
 interface StatusSegment {
@@ -32,7 +33,10 @@ const STATUS_SEGMENTS: readonly StatusSegment[] = [
 	},
 ];
 
-/** Universal hero card #3 — transport-layer error rate + status-code stack. */
+/**
+ * Universal hero card #3 — transport-layer error rate + status-code stack.
+ * Bespoke body (gap-2 value row with a right-aligned count + stack + legend).
+ */
 export function ErrorRateCard({
 	totalRequests,
 	failedRequests,
@@ -62,11 +66,7 @@ export function ErrorRateCard({
 	const widthFor = (n: number) => (buckets.total > 0 ? `${(n / buckets.total) * 100}%` : "0%");
 
 	return (
-		<div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1.5">
-			<Eyebrow>
-				Error Rate
-				<InfoChip tip={TOOLTIPS.errorRate} />
-			</Eyebrow>
+		<HeroCardShell label="Error Rate" tip={TOOLTIPS.errorRate}>
 			<div className="flex items-baseline gap-2 mt-0.5">
 				<span
 					className="text-[34px] font-bold leading-none font-mono tabular-nums"
@@ -102,7 +102,7 @@ export function ErrorRateCard({
 					/>
 				))}
 			</div>
-		</div>
+		</HeroCardShell>
 	);
 }
 

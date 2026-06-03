@@ -5,8 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { InfoChip, Eyebrow, fmt } from "../shared";
+import { fmt } from "../shared";
 import { TOOLTIPS } from "../tooltips";
+import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
 /**
  * constant_concurrency hero card #1 — the achieved req/s emerging from a fixed
@@ -26,17 +27,8 @@ export function AchievedThroughputCard({
 			: undefined;
 
 	return (
-		<div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1.5">
-			<Eyebrow>
-				Achieved Throughput
-				<InfoChip tip={TOOLTIPS.achievedThroughput} />
-			</Eyebrow>
-			<div className="flex items-baseline gap-1 mt-0.5">
-				<span className="text-[34px] font-bold leading-none font-mono tabular-nums text-foreground">
-					{fmt(throughput, 1)}
-				</span>
-				<span className="text-xs text-muted-foreground">req/s</span>
-			</div>
+		<HeroCardShell label="Achieved Throughput" tip={TOOLTIPS.achievedThroughput}>
+			<HeroValue value={fmt(throughput, 1)} unit="req/s" />
 			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
 				from{" "}
 				<span className="text-foreground font-semibold">
@@ -46,6 +38,6 @@ export function AchievedThroughputCard({
 				<span className="text-foreground font-semibold">{fmt(perUser, 2)}</span>{" "}
 				req/user/sec
 			</p>
-		</div>
+		</HeroCardShell>
 	);
 }

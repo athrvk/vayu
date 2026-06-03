@@ -5,8 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { InfoChip, Eyebrow, fmt } from "../shared";
+import { fmt } from "../shared";
 import { TOOLTIPS } from "../tooltips";
+import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
 /**
  * iterations hero card #2 — average req/s across the run. In iterations mode
@@ -20,21 +21,12 @@ export function ThroughputCard({
 	meanLatency: number;
 }) {
 	return (
-		<div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1.5">
-			<Eyebrow>
-				Throughput
-				<InfoChip tip={TOOLTIPS.throughput} />
-			</Eyebrow>
-			<div className="flex items-baseline gap-1 mt-0.5">
-				<span className="text-[34px] font-bold leading-none font-mono tabular-nums text-foreground">
-					{fmt(throughput, 1)}
-				</span>
-				<span className="text-xs text-muted-foreground">req/s</span>
-			</div>
+		<HeroCardShell label="Throughput" tip={TOOLTIPS.throughput}>
+			<HeroValue value={fmt(throughput, 1)} unit="req/s" />
 			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
 				mean iter{" "}
 				<span className="text-foreground font-semibold">{meanLatency.toFixed(0)}</span>ms
 			</p>
-		</div>
+		</HeroCardShell>
 	);
 }

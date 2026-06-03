@@ -5,8 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { InfoChip, Eyebrow, fmt } from "../shared";
+import { fmt } from "../shared";
 import { TOOLTIPS } from "../tooltips";
+import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
 /**
  * ramp_up hero card #1 — in-flight concurrency at this instant. The configured
@@ -25,17 +26,8 @@ export function CurrentConcurrencyCard({
 	rampDeviationPct?: number;
 }) {
 	return (
-		<div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1.5">
-			<Eyebrow>
-				Current Concurrency
-				<InfoChip tip={TOOLTIPS.currentConcurrency} />
-			</Eyebrow>
-			<div className="flex items-baseline gap-1 mt-0.5">
-				<span className="text-[34px] font-bold leading-none font-mono tabular-nums text-foreground">
-					{currentConcurrency}
-				</span>
-				<span className="text-xs text-muted-foreground">active</span>
-			</div>
+		<HeroCardShell label="Current Concurrency" tip={TOOLTIPS.currentConcurrency}>
+			<HeroValue value={currentConcurrency} unit="active" />
 			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
 				targeting{" "}
 				<span className="text-foreground font-semibold">{fmt(targetConcurrency, 0)}</span>{" "}
@@ -46,6 +38,6 @@ export function CurrentConcurrencyCard({
 				s ramp · lag{" "}
 				<span className="text-foreground font-semibold">{fmt(rampDeviationPct, 0)}</span>%
 			</p>
-		</div>
+		</HeroCardShell>
 	);
 }
