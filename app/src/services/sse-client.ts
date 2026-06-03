@@ -82,7 +82,6 @@ export class SSEClient {
 				try {
 					// Both endpoints now send complete metrics object in same format
 					const metrics = JSON.parse(event.data);
-					console.log("Metrics received:", metrics);
 
 					// Initialize start time on first metrics
 					if (this.startTime === 0 && metrics.timestamp) {
