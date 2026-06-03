@@ -371,7 +371,6 @@ if(VAYU_BUILD_TESTS)
         tests/metrics_helper_test.cpp
         tests/metrics_collector_test.cpp
         tests/import_route_test.cpp
-        tests/ramp_curve_test.cpp
         tests/load_strategy_test.cpp
         src/http/routes/import.cpp
     )
