@@ -158,10 +158,6 @@ void MetricsCollector::record_drop_batch (size_t count) {
     dropped_requests_.fetch_add (count, std::memory_order_relaxed);
 }
 
-void MetricsCollector::record_ramp_lag (double pct) {
-    ramp_lag_pct_.store (pct, std::memory_order_relaxed);
-}
-
 void MetricsCollector::record_latency (double latency_ms) {
     atomic_add_double (total_latency_sum_, latency_ms);
 
@@ -321,7 +317,6 @@ size_t requests_sent) const {
     stats["status5xx"] = status_5xx_.load (std::memory_order_relaxed);
     stats["droppedRequests"] = dropped_requests_.load (std::memory_order_relaxed);
     stats["avgQueueWaitMs"] = average_queue_wait ();
-    stats["rampLag"]        = ramp_lag ();
 
     // Per-tick latency percentiles — live snapshot from the lock-free
     // histogram (same source as the post-run final report). Microsecond

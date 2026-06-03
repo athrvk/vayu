@@ -12,8 +12,6 @@
 #include <nlohmann/json.hpp>
 #include <thread>
 
-#include "vayu/core/ramp_curve.hpp"
-#include "vayu/core/ramp_lag_tracker.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -429,13 +427,6 @@ class RampUpLoadStrategy : public LoadStrategy {
 
         auto test_start = std::chrono::steady_clock::now ();
 
-        // Ramp-lag tracking: see vayu::core::RampLagTracker. Backpressured
-        // iterations are excluded from the achieved area but still advance
-        // elapsed time, so the lag against the configured curve grows.
-        vayu::core::RampLagTracker lag_tracker (
-        ramp_duration_ms, start_concurrency, target_concurrency);
-        auto last_tick = test_start;
-
         while (!context->should_stop) {
             auto now = std::chrono::steady_clock::now ();
             auto elapsed =
@@ -460,16 +451,6 @@ class RampUpLoadStrategy : public LoadStrategy {
             size_t max_pending = config.value (
             "maxInFlight", std::max (target_concurrency * 5U, size_t (1000)));
             bool backpressured = context->in_flight () > max_pending;
-
-            // Advance the lag tracker every iteration. dt spans the time since
-            // the previous iteration; backpressured intervals don't count
-            // toward achieved load.
-            double dt_ms =
-            std::chrono::duration<double, std::milli> (now - last_tick).count ();
-            last_tick = now;
-            double ramp_lag_pct =
-            lag_tracker.update (elapsed, dt_ms, current_concurrency, backpressured);
-            context->metrics_collector->record_ramp_lag (ramp_lag_pct);
 
             if (backpressured) {
                 std::this_thread::sleep_for (std::chrono::milliseconds (50));

@@ -550,8 +550,7 @@ enum class MetricName {
     TestDuration,    // Actual test execution time in seconds
     SetupOverhead,   // Time spent on setup/teardown in seconds
     DroppedRequests, // Requests discarded due to generator backpressure (never reached server)
-    QueueWaitAvg,    // Average time requests spent queued inside the generator
-    RampLag          // Percentage of configured RampUp curve not delivered (0-100)
+    QueueWaitAvg     // Average time requests spent queued inside the generator
 };
 
 inline const char* to_string (MetricName name) {
@@ -582,7 +581,6 @@ inline const char* to_string (MetricName name) {
     case MetricName::SetupOverhead: return "setup_overhead";
     case MetricName::DroppedRequests: return "dropped_requests";
     case MetricName::QueueWaitAvg: return "queue_wait_avg";
-    case MetricName::RampLag: return "ramp_lag";
     }
     return "unknown";
 }
@@ -640,8 +638,6 @@ inline std::optional<MetricName> parse_metric_name (const std::string& str) {
         return MetricName::DroppedRequests;
     if (str == "queue_wait_avg")
         return MetricName::QueueWaitAvg;
-    if (str == "ramp_lag")
-        return MetricName::RampLag;
     return std::nullopt;
 }
 

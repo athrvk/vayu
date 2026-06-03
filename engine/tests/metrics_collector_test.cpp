@@ -303,32 +303,6 @@ TEST_F (MetricsCollectorTest, AverageQueueWaitIsZeroWhenNoSuccesses) {
     EXPECT_DOUBLE_EQ (collector->average_queue_wait (), 0.0);
 }
 
-// ============================================================================
-// Ramp Lag Tests
-// ============================================================================
-
-TEST_F (MetricsCollectorTest, RecordRampLagStoresLatestValue) {
-    EXPECT_DOUBLE_EQ (collector->ramp_lag (), 0.0);
-
-    collector->record_ramp_lag (12.5);
-    EXPECT_DOUBLE_EQ (collector->ramp_lag (), 12.5);
-
-    collector->record_ramp_lag (27.3);
-    EXPECT_DOUBLE_EQ (collector->ramp_lag (), 27.3);
-
-    // Overwrites, doesn't accumulate
-    collector->record_ramp_lag (0.0);
-    EXPECT_DOUBLE_EQ (collector->ramp_lag (), 0.0);
-}
-
-TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesRampLag) {
-    collector->record_ramp_lag (18.7);
-    nlohmann::json stats = collector->get_current_stats (0, 1.0, 0);
-
-    ASSERT_TRUE (stats.contains ("rampLag"));
-    EXPECT_DOUBLE_EQ (stats["rampLag"].get<double> (), 18.7);
-}
-
 TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesLatencyPercentiles) {
     collector->record_success (200, 10.0, 0.0, "");
     collector->record_success (200, 20.0, 0.0, "");
