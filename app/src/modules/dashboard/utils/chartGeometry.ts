@@ -6,6 +6,21 @@
  * `1 - v/yMax` projection formula.
  */
 
+/**
+ * Shared SVG geometry for the full-width time-series charts (Throughput,
+ * Latency, Percentiles, and the ramp_up Response-time-vs-concurrency scatter).
+ * All of these MUST stay dimensionally identical so the dashboard rows line up
+ * (Plan 4 code-quality gate #4: no chart geometry constants in component files).
+ */
+export const TIME_SERIES_DIMS = { VW: 1080, VH: 240, PL: 56, PR: 12, PT: 16, PB: 28 } as const;
+
+/**
+ * Shared SVG geometry for the HDR percentile plot and its live skeleton — they
+ * must stay dimensionally identical so the card doesn't shift height when the
+ * final report arrives.
+ */
+export const HDR_DIMS = { VW: 600, VH: 200, PL: 48, PR: 8, PT: 22, PB: 22 } as const;
+
 export interface NiceYMaxOpts {
 	/** Minimum allowed yMax before headroom is applied. Defaults to 1. */
 	floor?: number;
