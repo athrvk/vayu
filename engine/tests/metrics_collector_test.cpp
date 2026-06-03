@@ -324,3 +324,24 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsPercentilesZeroWhenNoSamples) {
     EXPECT_DOUBLE_EQ (stats["latencyP50Ms"].get<double> (), 0.0);
     EXPECT_DOUBLE_EQ (stats["latencyP99Ms"].get<double> (), 0.0);
 }
+
+// ============================================================================
+// Run-progress fields (requestsSent / requestsExpected) — feed the dashboard
+// ETA stat: (requestsExpected - requestsSent) / currentRps.
+// ============================================================================
+
+TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesRequestProgress) {
+    nlohmann::json stats = collector->get_current_stats (0, 1.0, 7, 100);
+    ASSERT_TRUE (stats.contains ("requestsSent"));
+    ASSERT_TRUE (stats.contains ("requestsExpected"));
+    EXPECT_EQ (stats["requestsSent"].get<size_t> (), 7U);
+    EXPECT_EQ (stats["requestsExpected"].get<size_t> (), 100U);
+}
+
+TEST_F (MetricsCollectorTest, GetCurrentStatsRequestExpectedDefaultsZero) {
+    // Older 3-arg call sites still compile; requestsExpected defaults to 0
+    // (open-ended runs like constant_rps have no fixed expected count).
+    nlohmann::json stats = collector->get_current_stats (0, 1.0, 5);
+    EXPECT_EQ (stats["requestsSent"].get<size_t> (), 5U);
+    EXPECT_EQ (stats["requestsExpected"].get<size_t> (), 0U);
+}

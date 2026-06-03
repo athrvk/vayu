@@ -282,7 +282,8 @@ size_t MetricsCollector::memory_usage_bytes () const {
 
 nlohmann::json MetricsCollector::get_current_stats (size_t current_active,
 double elapsed_seconds,
-size_t requests_sent) const {
+size_t requests_sent,
+size_t requests_expected) const {
     // Lock-free reads from atomic counters
     size_t total    = total_requests ();
     size_t errors   = total_errors ();
@@ -309,6 +310,11 @@ size_t requests_sent) const {
     stats["throughput"]        = throughput;
     stats["activeConnections"] = current_active;
     stats["elapsedSeconds"]    = elapsed_seconds;
+
+    // Run progress — feeds the dashboard ETA stat for closed-ended modes
+    // (iterations). requests_expected is 0 for open-ended modes (constant_rps).
+    stats["requestsSent"]     = requests_sent;
+    stats["requestsExpected"] = requests_expected;
 
     // Status code distribution (lock-free)
     stats["status2xx"] = status_2xx_.load (std::memory_order_relaxed);

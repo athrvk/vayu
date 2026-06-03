@@ -280,10 +280,13 @@ class MetricsCollector {
      * @param current_active Active connection count from event loop
      * @param elapsed_seconds Elapsed time since test start
      * @param requests_sent Total requests submitted to event loop (for send rate)
+     * @param requests_expected Total expected requests for the run (0 for open-ended
+     *        modes like constant_rps; feeds the dashboard ETA stat)
      * @return JSON object with current metrics
      */
     [[nodiscard]] nlohmann::json
-    get_current_stats (size_t current_active, double elapsed_seconds, size_t requests_sent) const;
+    get_current_stats (size_t current_active, double elapsed_seconds, size_t requests_sent,
+    size_t requests_expected = 0) const;
 
     private:
     std::string run_id_;

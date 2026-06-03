@@ -350,9 +350,10 @@ void register_metrics_routes (RouteContext& ctx) {
                     auto now = std::chrono::steady_clock::now ();
                     size_t active_count =
                     context->event_loop ? context->event_loop->active_count () : 0;
-                    size_t requests_sent = context->requests_sent.load ();
+                    size_t requests_sent     = context->requests_sent.load ();
+                    size_t requests_expected = context->requests_expected.load ();
                     auto stats = context->metrics_collector->get_current_stats (
-                    active_count, elapsed_seconds, requests_sent);
+                    active_count, elapsed_seconds, requests_sent, requests_expected);
 
                     // Calculate instantaneous RPS (delta-based, per-interval).
                     size_t current_total = stats["totalRequests"].get<size_t> ();
