@@ -71,21 +71,22 @@ export function VariablePopover({
 	}, [isOpen]);
 
 	// Keep editValue in sync with varInfo when popover is closed
+	const varInfoValue = varInfo?.value;
 	useEffect(() => {
-		if (!isOpen && varInfo) {
-			setEditValue(varInfo.value);
+		if (!isOpen && varInfoValue !== undefined) {
+			setEditValue(varInfoValue);
 		}
-	}, [varInfo?.value, isOpen]);
+	}, [varInfoValue, isOpen]);
 
 	// Initialize ref when opening — varInfo intentionally excluded so external
 	// reference churn (e.g. inline object creation in parent) doesn't reset
 	// editValue while the user is typing.
-	// eslint-disable-next-line react-hooks/exhaustive-deps
 	useEffect(() => {
 		if (isOpen && varInfo) {
 			openValueRef.current = varInfo.value;
 			setEditValue(varInfo.value);
 		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [isOpen]);
 
 	const handleOpenChange = (open: boolean) => {
