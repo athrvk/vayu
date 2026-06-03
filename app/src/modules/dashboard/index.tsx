@@ -226,7 +226,14 @@ export default function LoadTestDashboard() {
 	// This ensures config is shown during live streaming, not just after report loads
 	const displayConfiguration = useMemo(() => {
 		if (runMetadata?.configuration) {
-			return runMetadata.configuration;
+			// The final report's config omits the ramp fields, so the ramp_up
+			// Current Concurrency card would read "—s ramp" once complete. Backfill
+			// them from the run's own loadTestConfig (the config we started with).
+			return {
+				...runMetadata.configuration,
+				rampUpDuration: loadTestConfig?.rampUpDuration,
+				startConcurrency: loadTestConfig?.startConcurrency,
+			};
 		}
 		if (loadTestConfig) {
 			return {

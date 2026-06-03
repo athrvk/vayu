@@ -38,6 +38,10 @@ export function HeroRow({ d }: { d: DashboardDerived }) {
 
 /** The two mode-sensitive hero cards (card #1 and card #2). */
 function renderModeCards(d: DashboardDerived) {
+	// "Current concurrency" is an instantaneous metric — it's 0 once the run
+	// ends. On completed runs show the peak reached instead, so the live-only
+	// concurrency cards stay meaningful in the historical view.
+	const activeConcurrency = d.isCompleted ? d.peakConcurrency : d.currentConcurrency;
 	switch (d.mode) {
 		case "constant_concurrency":
 			return (
@@ -47,7 +51,7 @@ function renderModeCards(d: DashboardDerived) {
 						configuredConcurrency={d.configuredConcurrency}
 					/>
 					<ConcurrencyUtilCard
-						currentConcurrency={d.currentConcurrency}
+						currentConcurrency={activeConcurrency}
 						configuredConcurrency={d.configuredConcurrency}
 					/>
 				</>
@@ -67,7 +71,7 @@ function renderModeCards(d: DashboardDerived) {
 			return (
 				<>
 					<CurrentConcurrencyCard
-						currentConcurrency={d.currentConcurrency}
+						currentConcurrency={activeConcurrency}
 						targetConcurrency={d.targetConcurrency}
 						rampUpDurationSeconds={d.rampUpDurationSeconds}
 						rampDeviationPct={d.rampDeviationPct}
