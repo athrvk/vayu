@@ -13,10 +13,13 @@ import { TOOLTIPS } from "../tooltips";
 export function ThroughputTwinCard({
 	sendRate,
 	throughput,
+	avgQueueWaitMs,
 }: {
 	sendRate?: number;
 	throughput?: number;
+	avgQueueWaitMs?: number;
 }) {
+	const showQueueChip = avgQueueWaitMs !== undefined && avgQueueWaitMs > 5;
 	const delta =
 		sendRate !== undefined && throughput !== undefined
 			? Math.max(0, sendRate - throughput)
@@ -28,6 +31,12 @@ export function ThroughputTwinCard({
 			<Eyebrow>
 				Send · Throughput
 				<InfoChip tip={TOOLTIPS.sendThroughput} />
+				{showQueueChip && (
+					<span className="ml-2 inline-flex items-center normal-case tracking-normal font-mono text-[10px] font-bold px-1.5 py-px rounded-sm bg-warning/10 text-warning">
+						queue {avgQueueWaitMs.toFixed(0)}ms
+						<InfoChip tip={TOOLTIPS.queueChip} />
+					</span>
+				)}
 			</Eyebrow>
 			<div className="grid grid-cols-2 gap-4 items-end mt-1">
 				<div>

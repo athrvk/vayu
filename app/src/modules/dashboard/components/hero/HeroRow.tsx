@@ -9,10 +9,6 @@
  * HeroRow — the mode-adaptive Row 1. Two cards swap per mode; the Error Rate
  * card is universal. This is the single place that maps mode → hero cards
  * (consume {@link DashboardDerived}; never re-derive from raw metrics).
- *
- * NOTE (Plan 4 fan-out): the per-mode branches for constant_concurrency,
- * iterations, and ramp_up are filled in by task A1. Until then every mode
- * renders the constant_rps layout, preserving today's behaviour exactly.
  */
 
 import type { DashboardDerived } from "../../types";
@@ -20,6 +16,12 @@ import { RateFidelityCard } from "./RateFidelityCard";
 import { ThroughputTwinCard } from "./ThroughputTwinCard";
 import { ErrorRateCard } from "./ErrorRateCard";
 import { DroppedRequestsCard } from "./DroppedRequestsCard";
+import { AchievedThroughputCard } from "./AchievedThroughputCard";
+import { ConcurrencyUtilCard } from "./ConcurrencyUtilCard";
+import { ProgressCard } from "./ProgressCard";
+import { ThroughputCard } from "./ThroughputCard";
+import { CurrentConcurrencyCard } from "./CurrentConcurrencyCard";
+import { SaturationCard } from "./SaturationCard";
 
 export function HeroRow({ d }: { d: DashboardDerived }) {
 	return (
@@ -36,18 +38,61 @@ export function HeroRow({ d }: { d: DashboardDerived }) {
 
 /** The two mode-sensitive hero cards (card #1 and card #2). */
 function renderModeCards(d: DashboardDerived) {
-	// A1 adds: constant_concurrency → Achieved Throughput + Concurrency Util;
-	//          iterations → Progress + Throughput;
-	//          ramp_up → Current Concurrency + Saturation.
-	// constant_rps (and the fallback for all modes until A1 lands):
-	return (
-		<>
-			{d.showDropped ? (
-				<DroppedRequestsCard dropped={d.droppedRequests} completed={d.totalRequests} />
-			) : (
-				<RateFidelityCard targetRps={d.targetRps} actualRps={d.actualRps} />
-			)}
-			<ThroughputTwinCard sendRate={d.sendRate} throughput={d.throughput} />
-		</>
-	);
+	switch (d.mode) {
+		case "constant_concurrency":
+			return (
+				<>
+					<AchievedThroughputCard
+						throughput={d.throughput}
+						configuredConcurrency={d.configuredConcurrency}
+					/>
+					<ConcurrencyUtilCard
+						currentConcurrency={d.currentConcurrency}
+						configuredConcurrency={d.configuredConcurrency}
+					/>
+				</>
+			);
+		case "iterations":
+			return (
+				<>
+					<ProgressCard
+						requestsSent={d.requestsSent}
+						requestsExpected={d.requestsExpected}
+						currentRps={d.currentRps}
+					/>
+					<ThroughputCard throughput={d.throughput} meanLatency={d.meanLatency} />
+				</>
+			);
+		case "ramp_up":
+			return (
+				<>
+					<CurrentConcurrencyCard
+						currentConcurrency={d.currentConcurrency}
+						targetConcurrency={d.targetConcurrency}
+						rampUpDurationSeconds={d.rampUpDurationSeconds}
+						rampDeviationPct={d.rampDeviationPct}
+					/>
+					<SaturationCard breakpoint={d.breakpoint} failedRequests={d.failedRequests} />
+				</>
+			);
+		case "constant_rps":
+		default:
+			return (
+				<>
+					{d.showDropped ? (
+						<DroppedRequestsCard
+							dropped={d.droppedRequests}
+							completed={d.totalRequests}
+						/>
+					) : (
+						<RateFidelityCard targetRps={d.targetRps} actualRps={d.actualRps} />
+					)}
+					<ThroughputTwinCard
+						sendRate={d.sendRate}
+						throughput={d.throughput}
+						avgQueueWaitMs={d.avgQueueWaitMs}
+					/>
+				</>
+			);
+	}
 }
