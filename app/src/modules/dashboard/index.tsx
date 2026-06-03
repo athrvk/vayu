@@ -209,6 +209,12 @@ export default function LoadTestDashboard() {
 				// Rate metrics from report
 				send_rate: finalReport.summary.sendRate,
 				throughput: finalReport.summary.throughput,
+				// Carry run-progress so the iterations Progress card reads 100%
+				// (not 0/0) once complete; requests_expected falls back to the
+				// last live tick, then to the completed total.
+				requests_sent: finalReport.summary.totalRequests,
+				requests_expected:
+					lastHistoricalMetrics?.requests_expected ?? finalReport.summary.totalRequests,
 			};
 		}
 		return (currentMetrics || lastHistoricalMetrics) as DisplayMetrics | null;
