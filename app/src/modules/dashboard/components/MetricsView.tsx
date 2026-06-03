@@ -354,10 +354,10 @@ function ThroughputOverTimeChart({
 	const IW = VW - PL - PR;
 	const IH = VH - PT - PB;
 
-	const yMax = niceYMax(
-		[...data.map((d) => Math.max(d.rps, d.sendRate)), targetRps ?? 0],
-		{ floor: 1, headroom: 1.15 },
-	);
+	const yMax = niceYMax([...data.map((d) => Math.max(d.rps, d.sendRate)), targetRps ?? 0], {
+		floor: 1,
+		headroom: 1.15,
+	});
 
 	const toX = (i: number) => PL + (i / (data.length - 1)) * IW;
 	const toY = (v: number) => projectY(v, yMax, PT, IH);
@@ -595,7 +595,10 @@ function HdrPercentilePlot({ report }: { report: RunReport | null }) {
 	const IW = VW - PL - PR;
 	const IH = VH - PT - PB;
 
-	const maxV = niceYMax(points.map((p) => p.value), { floor: 1, headroom: 1.08 });
+	const maxV = niceYMax(
+		points.map((p) => p.value),
+		{ floor: 1, headroom: 1.08 }
+	);
 	const toX = (pct: number) => PL + pctToX(pct) * IW;
 	const toY = (v: number) => projectY(v, maxV, PT, IH);
 

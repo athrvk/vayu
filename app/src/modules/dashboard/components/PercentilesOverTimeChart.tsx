@@ -31,7 +31,10 @@ export function PercentilesOverTimeChart({
 	const IW = VW - PL - PR;
 	const IH = VH - PT - PB;
 
-	const yMax = niceYMax(data.map((d) => d.p99), { floor: 1, headroom: 1.15 });
+	const yMax = niceYMax(
+		data.map((d) => d.p99),
+		{ floor: 1, headroom: 1.15 }
+	);
 
 	const toX = (i: number) => PL + (i / (data.length - 1)) * IW;
 	const toY = (v: number) => projectY(v, yMax, PT, IH);
