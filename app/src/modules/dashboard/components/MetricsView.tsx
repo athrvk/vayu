@@ -42,6 +42,7 @@ import { LatencyOverTimeChart } from "./charts/LatencyOverTimeChart";
 import { PercentilesOverTimeChart } from "./charts/PercentilesOverTimeChart";
 import { HdrPercentilePlot, SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
+import { ResponseTimeVsConcurrencyScatter } from "./charts/ResponseTimeVsConcurrencyScatter";
 
 function MetricsView({
 	metrics,
@@ -298,45 +299,77 @@ function MetricsView({
 				</div>
 			)}
 
-			{/* Row 2.7 — Response time percentiles over time.
-			    ramp_up swaps this for the Response-time-vs-concurrency scatter (A3). */}
-			{percentileChartData.length > 1 && hasPercentileData && (
-				<div className="bg-card border border-border rounded-md p-3.5">
-					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-[12px] font-semibold text-foreground">
-							Response time percentiles over time
-							<InfoChip tip={TOOLTIPS.percentilesOverTime} />
-						</h3>
-						<div className="flex gap-3.5 text-[11px] font-mono text-muted-foreground">
-							<span>
-								<span
-									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-									style={{ background: "hsl(var(--success))" }}
-								/>
-								p50
-							</span>
-							<span>
-								<span
-									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-									style={{ background: "hsl(var(--warning))" }}
-								/>
-								p95
-							</span>
-							<span>
-								<span
-									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-									style={{ background: "hsl(var(--destructive))" }}
-								/>
-								p99
-							</span>
+			{/* Row 2.7 — ramp_up shows Response-time-vs-concurrency scatter (A3);
+			    every other mode shows Response-time percentiles over time. */}
+			{derived.mode === "ramp_up"
+				? historicalMetrics.length > 1 && (
+						<div className="bg-card border border-border rounded-md p-3.5">
+							<div className="flex items-baseline justify-between mb-3">
+								<h3 className="text-[12px] font-semibold text-foreground">
+									Response time vs concurrency
+									<InfoChip tip={TOOLTIPS.responseTimeVsConcurrency} />
+								</h3>
+								<div className="flex gap-3.5 text-[11px] font-mono text-muted-foreground">
+									<span>
+										<span
+											className="inline-block w-2 h-2 mr-1.5 rounded-full align-middle"
+											style={{ background: "hsl(var(--primary))" }}
+										/>
+										p99
+									</span>
+									<span>
+										<span
+											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
+											style={{ background: "hsl(var(--warning))" }}
+										/>
+										SLO
+									</span>
+								</div>
+							</div>
+							<ResponseTimeVsConcurrencyScatter
+								data={historicalMetrics}
+								isCompleted={isCompleted}
+							/>
 						</div>
-					</div>
-					<PercentilesOverTimeChart
-						data={percentileChartData}
-						isCompleted={isCompleted}
-					/>
-				</div>
-			)}
+					)
+				: percentileChartData.length > 1 &&
+					hasPercentileData && (
+						<div className="bg-card border border-border rounded-md p-3.5">
+							<div className="flex items-baseline justify-between mb-3">
+								<h3 className="text-[12px] font-semibold text-foreground">
+									Response time percentiles over time
+									<InfoChip tip={TOOLTIPS.percentilesOverTime} />
+								</h3>
+								<div className="flex gap-3.5 text-[11px] font-mono text-muted-foreground">
+									<span>
+										<span
+											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
+											style={{ background: "hsl(var(--success))" }}
+										/>
+										p50
+									</span>
+									<span>
+										<span
+											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
+											style={{ background: "hsl(var(--warning))" }}
+										/>
+										p95
+									</span>
+									<span>
+										<span
+											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
+											style={{ background: "hsl(var(--destructive))" }}
+										/>
+										p99
+									</span>
+								</div>
+							</div>
+							<PercentilesOverTimeChart
+								data={percentileChartData}
+								isCompleted={isCompleted}
+							/>
+						</div>
+					)}
 
 			{/* Row 3 — HDR plot + Timing waterfall */}
 			<div className="grid grid-cols-[repeat(auto-fit,minmax(380px,1fr))] gap-3">
