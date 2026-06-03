@@ -47,6 +47,18 @@ struct RunContext {
     [[nodiscard]] size_t total_requests () const {
         return metrics_collector ? metrics_collector->total_requests () : 0;
     }
+    // True in-flight requests: submitted but not yet completed (success or
+    // error). This is the correct quantity for the maxInFlight cap and ramp
+    // backpressure, unlike EventLoop::pending_count() which only measures the
+    // submission-queue depth that workers drain to ~0. The subtraction is
+    // guarded against size_t underflow because requests_sent (written by the
+    // strategy thread) and total_requests (written by worker callbacks) are
+    // read with relaxed ordering and may momentarily disagree.
+    [[nodiscard]] size_t in_flight () const {
+        size_t sent = requests_sent.load ();
+        size_t done = total_requests ();
+        return sent > done ? sent - done : 0;
+    }
     [[nodiscard]] size_t total_errors () const {
         return metrics_collector ? metrics_collector->total_errors () : 0;
     }

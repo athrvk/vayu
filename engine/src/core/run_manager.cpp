@@ -528,12 +528,17 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
             // Calculate send rate (requests dispatched per second) and throughput (responses per second)
             size_t requests_sent = context->requests_sent.load ();
-            double run_elapsed_s = (static_cast<double> (now_ms () - context->start_time_ms)) / 1000.0;
-            double send_rate = run_elapsed_s > 0 ? static_cast<double> (requests_sent) / run_elapsed_s : 0.0;
-            double throughput = run_elapsed_s > 0 ? static_cast<double> (current_total) / run_elapsed_s : 0.0;
+            double run_elapsed_s =
+            (static_cast<double> (now_ms () - context->start_time_ms)) / 1000.0;
+            double send_rate  = run_elapsed_s > 0 ?
+            static_cast<double> (requests_sent) / run_elapsed_s :
+            0.0;
+            double throughput = run_elapsed_s > 0 ?
+            static_cast<double> (current_total) / run_elapsed_s :
+            0.0;
 
-            // Calculate backpressure (queue depth: requests sent but not yet responded)
-            size_t backpressure = requests_sent > current_total ? requests_sent - current_total : 0;
+            // Calculate backpressure (true in-flight: requests sent but not yet responded)
+            size_t backpressure = context->in_flight ();
 
             vayu::utils::log_debug ("Metrics: rps=" + std::to_string (current_rps) +
             ", send_rate=" + std::to_string (send_rate) +
@@ -555,8 +560,8 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                 vayu::MetricName::ErrorRate, error_rate, "" });
                 metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::ConnectionsActive,
                 static_cast<double> (context->event_loop->active_count ()), "" });
-                metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::RequestsSent,
-                static_cast<double> (requests_sent), "" });
+                metrics.push_back ({ 0, context->run_id, timestamp,
+                vayu::MetricName::RequestsSent, static_cast<double> (requests_sent), "" });
                 metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::RequestsExpected,
                 static_cast<double> (context->requests_expected.load ()), "" });
                 metrics.push_back ({ 0, context->run_id, timestamp,

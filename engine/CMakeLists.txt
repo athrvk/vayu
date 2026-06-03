@@ -373,6 +373,7 @@ if(VAYU_BUILD_TESTS)
         tests/import_route_test.cpp
         tests/ramp_curve_test.cpp
         tests/ramp_lag_tracker_test.cpp
+        tests/load_strategy_test.cpp
         src/http/routes/import.cpp
     )
     

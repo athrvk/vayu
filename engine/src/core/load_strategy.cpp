@@ -111,9 +111,7 @@ vayu::Result<vayu::Response> result) {
 
         // Record to in-memory collector (high-performance, no DB writes)
         context->metrics_collector->record_success (response.status_code,
-                                                     latency,
-                                                     response.timing.queue_wait_ms,
-                                                     trace_data);
+        latency, response.timing.queue_wait_ms, trace_data);
 
         // Sample response for deferred script validation if test script is present
         if (!context->test_script.empty ()) {
@@ -199,10 +197,9 @@ class ConstantLoadStrategy : public LoadStrategy {
                     // Use strict < so we don't submit the first batch after the window
                     // (e.g. 5s @ 1000 RPS = batches at 0..4999ms only, not 5000ms).
                     size_t max_pending = config.value ("maxInFlight",
-                        std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
+                    std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
                     while (next_batch_time < duration_end && now >= next_batch_time &&
-                    context->event_loop->pending_count () < max_pending &&
-                    !context->should_stop) {
+                    context->in_flight () < max_pending && !context->should_stop) {
                         for (size_t i = 0; i < batch_size && !context->should_stop; ++i) {
                             context->event_loop->submit (request,
                             [context, &db] (size_t, vayu::Result<vayu::Response> result) {
@@ -218,7 +215,7 @@ class ConstantLoadStrategy : public LoadStrategy {
 
                 // Check if it's time to submit (possibly multiple batches if we fell behind)
                 size_t max_pending = config.value ("maxInFlight",
-                    std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
+                std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
 
                 if (now >= next_batch_time) {
                     // How many batches are we due? (catch up after preemption/slow iterations)
@@ -236,9 +233,9 @@ class ConstantLoadStrategy : public LoadStrategy {
                         duration_end - next_batch_time)
                         .count ();
                         size_t max_batches_in_window =
-                        (remaining_us > 0 && batch_interval_us > 0)
-                        ? static_cast<size_t> (remaining_us / batch_interval_us)
-                        : 0U;
+                        (remaining_us > 0 && batch_interval_us > 0) ?
+                        static_cast<size_t> (remaining_us / batch_interval_us) :
+                        0U;
                         if (max_batches_in_window < batches_due)
                             batches_due = max_batches_in_window;
                     } else {
@@ -247,10 +244,10 @@ class ConstantLoadStrategy : public LoadStrategy {
 
                     size_t batches_submitted = 0U;
                     while (batches_submitted < batches_due && !context->should_stop) {
-                        if (context->event_loop->pending_count () >= max_pending) {
+                        if (context->in_flight () >= max_pending) {
                             size_t abandoned_batches = batches_due - batches_submitted;
                             context->metrics_collector->record_drop_batch (
-                                abandoned_batches * batch_size);
+                            abandoned_batches * batch_size);
                             next_batch_time =
                             now + std::chrono::microseconds (batch_interval_us);
                             break;
@@ -314,9 +311,9 @@ class ConstantLoadStrategy : public LoadStrategy {
                 }
 
                 // Backpressure
-                size_t max_pending = config.value ("maxInFlight",
-                    std::max (concurrency * 5U, size_t (1000)));
-                if (context->event_loop->pending_count () > max_pending) {
+                size_t max_pending = config.value (
+                "maxInFlight", std::max (concurrency * 5U, size_t (1000)));
+                if (context->in_flight () > max_pending) {
                     std::this_thread::sleep_for (std::chrono::milliseconds (50));
                     continue;
                 }
@@ -361,9 +358,9 @@ class IterationsLoadStrategy : public LoadStrategy {
         size_t submitted = 0;
         while (submitted < iterations && !context->should_stop) {
             // Backpressure - don't submit too many at once
-            size_t max_pending = config.value ("maxInFlight",
-                std::max (concurrency * 5U, size_t (100)));
-            if (context->event_loop->pending_count () > max_pending) {
+            size_t max_pending =
+            config.value ("maxInFlight", std::max (concurrency * 5U, size_t (100)));
+            if (context->in_flight () > max_pending) {
                 std::this_thread::sleep_for (std::chrono::milliseconds (10));
                 continue;
             }
@@ -436,7 +433,7 @@ class RampUpLoadStrategy : public LoadStrategy {
         // iterations are excluded from the achieved area but still advance
         // elapsed time, so the lag against the configured curve grows.
         vayu::core::RampLagTracker lag_tracker (
-            ramp_duration_ms, start_concurrency, target_concurrency);
+        ramp_duration_ms, start_concurrency, target_concurrency);
         auto last_tick = test_start;
 
         while (!context->should_stop) {
@@ -460,15 +457,16 @@ class RampUpLoadStrategy : public LoadStrategy {
             }
 
             // Backpressure
-            size_t max_pending = config.value ("maxInFlight",
-                std::max (target_concurrency * 5U, size_t (1000)));
-            bool backpressured = context->event_loop->pending_count () > max_pending;
+            size_t max_pending = config.value (
+            "maxInFlight", std::max (target_concurrency * 5U, size_t (1000)));
+            bool backpressured = context->in_flight () > max_pending;
 
             // Advance the lag tracker every iteration. dt spans the time since
-            // the previous iteration; backpressured intervals don't count toward
-            // achieved load.
-            double dt_ms = std::chrono::duration<double, std::milli> (now - last_tick).count ();
-            last_tick    = now;
+            // the previous iteration; backpressured intervals don't count
+            // toward achieved load.
+            double dt_ms =
+            std::chrono::duration<double, std::milli> (now - last_tick).count ();
+            last_tick = now;
             double ramp_lag_pct =
             lag_tracker.update (elapsed, dt_ms, current_concurrency, backpressured);
             context->metrics_collector->record_ramp_lag (ramp_lag_pct);
@@ -513,8 +511,7 @@ std::unique_ptr<LoadStrategy> LoadStrategy::create (const nlohmann::json& config
         return std::make_unique<ConstantLoadStrategy> ();
     case LoadTestType::Iterations:
         return std::make_unique<IterationsLoadStrategy> ();
-    case LoadTestType::RampUp:
-        return std::make_unique<RampUpLoadStrategy> ();
+    case LoadTestType::RampUp: return std::make_unique<RampUpLoadStrategy> ();
     }
 
     return std::make_unique<ConstantLoadStrategy> ();
