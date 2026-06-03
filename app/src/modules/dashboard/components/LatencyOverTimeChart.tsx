@@ -6,6 +6,7 @@
  */
 
 import type { LatencyPoint } from "../utils/metricsTransforms";
+import { niceYMax, projectY } from "../utils/chartGeometry";
 
 /**
  * Per-tick latency over the run, split into wire time (what curl saw) and the
@@ -31,11 +32,10 @@ export function LatencyOverTimeChart({
 	const IW = VW - PL - PR;
 	const IH = VH - PT - PB;
 
-	const maxVal = Math.max(...data.map((d) => d.latencyMs), 1);
-	const yMax = maxVal * 1.15;
+	const yMax = niceYMax(data.map((d) => d.latencyMs), { floor: 1, headroom: 1.15 });
 
 	const toX = (i: number) => PL + (i / (data.length - 1)) * IW;
-	const toY = (v: number) => PT + (1 - v / yMax) * IH;
+	const toY = (v: number) => projectY(v, yMax, PT, IH);
 
 	const ptsLatency = data.map((d, i) => `${toX(i).toFixed(1)},${toY(d.latencyMs).toFixed(1)}`);
 	const ptsWire = data.map((d, i) => `${toX(i).toFixed(1)},${toY(d.wireMs).toFixed(1)}`);

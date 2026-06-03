@@ -6,6 +6,7 @@
  */
 
 import type { PercentilePoint } from "../utils/metricsTransforms";
+import { niceYMax, projectY } from "../utils/chartGeometry";
 
 /**
  * Per-tick p50 / p95 / p99 latency over the run. p50 is what most users felt;
@@ -30,11 +31,10 @@ export function PercentilesOverTimeChart({
 	const IW = VW - PL - PR;
 	const IH = VH - PT - PB;
 
-	const maxVal = Math.max(...data.map((d) => d.p99), 1);
-	const yMax = maxVal * 1.15;
+	const yMax = niceYMax(data.map((d) => d.p99), { floor: 1, headroom: 1.15 });
 
 	const toX = (i: number) => PL + (i / (data.length - 1)) * IW;
-	const toY = (v: number) => PT + (1 - v / yMax) * IH;
+	const toY = (v: number) => projectY(v, yMax, PT, IH);
 
 	const line = (sel: (d: PercentilePoint) => number) =>
 		data.map((d, i) => `${toX(i).toFixed(1)},${toY(sel(d)).toFixed(1)}`).join(" ");

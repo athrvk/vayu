@@ -33,6 +33,7 @@ import {
 	buildPercentileChartData,
 	type RampOverlay,
 } from "../utils/metricsTransforms";
+import { niceYMax, projectY } from "../utils/chartGeometry";
 import { LatencyOverTimeChart } from "./LatencyOverTimeChart";
 import { PercentilesOverTimeChart } from "./PercentilesOverTimeChart";
 
@@ -353,11 +354,13 @@ function ThroughputOverTimeChart({
 	const IW = VW - PL - PR;
 	const IH = VH - PT - PB;
 
-	const maxVal = Math.max(...data.map((d) => Math.max(d.rps, d.sendRate)), targetRps ?? 0, 1);
-	const yMax = maxVal * 1.15;
+	const yMax = niceYMax(
+		[...data.map((d) => Math.max(d.rps, d.sendRate)), targetRps ?? 0],
+		{ floor: 1, headroom: 1.15 },
+	);
 
 	const toX = (i: number) => PL + (i / (data.length - 1)) * IW;
-	const toY = (v: number) => PT + (1 - v / yMax) * IH;
+	const toY = (v: number) => projectY(v, yMax, PT, IH);
 
 	const ptsRps = data.map((d, i) => `${toX(i).toFixed(1)},${toY(d.rps).toFixed(1)}`).join(" ");
 	const ptsSend = data
@@ -498,10 +501,10 @@ function ThroughputOverTimeChart({
 			{rampOverlay &&
 				rampOverlay.points.length > 1 &&
 				(() => {
-					const cMax = Math.max(rampOverlay.target * 1.15, 1);
+					const cMax = niceYMax([rampOverlay.target], { floor: 1, headroom: 1.15 });
 					const n = rampOverlay.points.length;
 					const cx = (i: number) => PL + (i / (n - 1)) * IW;
-					const cy = (v: number) => PT + (1 - v / cMax) * IH;
+					const cy = (v: number) => projectY(v, cMax, PT, IH);
 					const conf = rampOverlay.points.map(
 						(p, i) => `${cx(i).toFixed(1)},${cy(p.configured).toFixed(1)}`
 					);
@@ -592,9 +595,9 @@ function HdrPercentilePlot({ report }: { report: RunReport | null }) {
 	const IW = VW - PL - PR;
 	const IH = VH - PT - PB;
 
-	const maxV = Math.max(...points.map((p) => p.value)) * 1.08;
+	const maxV = niceYMax(points.map((p) => p.value), { floor: 1, headroom: 1.08 });
 	const toX = (pct: number) => PL + pctToX(pct) * IW;
-	const toY = (v: number) => PT + (1 - v / maxV) * IH;
+	const toY = (v: number) => projectY(v, maxV, PT, IH);
 
 	const path = points
 		.map((p, i) => `${i === 0 ? "M" : "L"}${toX(p.pct).toFixed(1)},${toY(p.value).toFixed(1)}`)
