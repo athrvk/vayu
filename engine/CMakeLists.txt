@@ -384,9 +384,11 @@ if(VAYU_BUILD_TESTS)
         vayu_sanitizers
     )
 
-    # Discover tests for CTest
+    # Discover tests for CTest. A per-test TIMEOUT acts as a safety net so a
+    # deadlock (e.g. a thread-pool teardown hang) is reported as a failure
+    # instead of blocking the suite indefinitely; healthy tests finish in <10s.
     include(GoogleTest)
-    gtest_discover_tests(vayu_tests)
+    gtest_discover_tests(vayu_tests PROPERTIES TIMEOUT 60)
 endif()
 
 # ============================================================================

@@ -390,6 +390,22 @@ TEST_F (ThreadPoolTest, MixedSuccessAndFailure) {
     }
 }
 
+// Regression guard for a lost-wakeup race in ThreadPool::Impl's destructor.
+// Previously ~Impl () set `stop` and called notify_all () WITHOUT holding
+// queue_mutex_, so a worker that had evaluated its wait predicate as false but
+// not yet atomically released the lock and registered as a condition-variable
+// waiter could miss the notify and block forever — hanging the destructor's
+// join (). This rapidly constructs and destroys default-sized pools (no tasks
+// submitted) to maximize the window where the destructor races worker startup.
+// If the bug is present this hangs; the ctest TIMEOUT property converts that
+// into a reported failure. Post-fix it completes in well under a second.
+TEST_F (ThreadPoolTest, RapidCreateDestroyDoesNotDeadlock) {
+    for (int i = 0; i < 500; ++i) {
+        vayu::http::ThreadPool pool;
+        EXPECT_GT (pool.thread_count (), 0u);
+    }
+}
+
 // ============================================================================
 // Performance Comparison Test
 // ============================================================================

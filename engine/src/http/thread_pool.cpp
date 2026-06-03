@@ -39,7 +39,15 @@ struct ThreadPool::Impl {
     }
 
     ~Impl () {
-        stop = true;
+        // `stop` must be set while holding queue_mutex_ so the change cannot
+        // land between a worker evaluating its wait predicate (under the lock)
+        // and atomically releasing the lock to block on the condition variable.
+        // Without the lock, notify_all () can reach zero registered waiters and
+        // the worker then blocks forever, hanging this destructor's join ().
+        {
+            std::lock_guard<std::mutex> lock (queue_mutex_);
+            stop = true;
+        }
         condition.notify_all ();
 
         for (auto& worker : workers) {
