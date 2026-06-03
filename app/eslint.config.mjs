@@ -46,6 +46,11 @@ export default [
 		rules: {
 			...typescript.configs.recommended.rules,
 			...reactHooks.configs.recommended.rules,
+			// TypeScript's compiler already reports use of undefined variables, and
+			// `no-undef` cannot see TS lib / DOM / Node global types, so on .ts/.tsx
+			// it only produces false positives. Disabling it is the typescript-eslint
+			// recommendation. (Enabled globally via js.configs.recommended above.)
+			"no-undef": "off",
 			"react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
 			"@typescript-eslint/no-unused-vars": [
 				"error",
@@ -55,6 +60,20 @@ export default [
 				},
 			],
 			"prettier/prettier": "error",
+		},
+	},
+
+	// Node build/dev scripts: plain ESM run by Node (not type-checked by tsc),
+	// so they legitimately use Node globals (process, __dirname, setImmediate…).
+	// `no-undef` has no global table for them here, so scope it off rather than
+	// enumerate Node globals (the sole file is scripts/electron-dev.mjs).
+	{
+		files: ["scripts/**/*.{mjs,cjs,js}"],
+		languageOptions: {
+			sourceType: "module",
+		},
+		rules: {
+			"no-undef": "off",
 		},
 	},
 
