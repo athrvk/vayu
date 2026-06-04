@@ -529,6 +529,8 @@ enum class MetricName {
     LatencyP95,
     LatencyP99,
     LatencyP999,
+    LatencyMax,
+    LatencyMin,
     ErrorRate,
     TotalRequests,
     Completed,
@@ -563,6 +565,8 @@ inline const char* to_string (MetricName name) {
     case MetricName::LatencyP95: return "latency_p95";
     case MetricName::LatencyP99: return "latency_p99";
     case MetricName::LatencyP999: return "latency_p999";
+    case MetricName::LatencyMax: return "latency_max";
+    case MetricName::LatencyMin: return "latency_min";
     case MetricName::ErrorRate: return "error_rate";
     case MetricName::TotalRequests: return "total_requests";
     case MetricName::Completed: return "completed";
@@ -602,6 +606,10 @@ inline std::optional<MetricName> parse_metric_name (const std::string& str) {
         return MetricName::LatencyP99;
     if (str == "latency_p999")
         return MetricName::LatencyP999;
+    if (str == "latency_max")
+        return MetricName::LatencyMax;
+    if (str == "latency_min")
+        return MetricName::LatencyMin;
     if (str == "error_rate")
         return MetricName::ErrorRate;
     if (str == "total_requests")

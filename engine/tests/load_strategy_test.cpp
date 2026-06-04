@@ -367,3 +367,10 @@ TEST_F (LoadStrategyTest, StopWakesControllerPromptly) {
 
     EXPECT_LT (elapsed_ms, 2000) << "controller did not observe should_stop promptly";
 }
+
+TEST (MetricNameLatencyMinMax, RoundTrips) {
+    EXPECT_STREQ (vayu::to_string (vayu::MetricName::LatencyMax), "latency_max");
+    EXPECT_STREQ (vayu::to_string (vayu::MetricName::LatencyMin), "latency_min");
+    EXPECT_EQ (vayu::parse_metric_name ("latency_max"), vayu::MetricName::LatencyMax);
+    EXPECT_EQ (vayu::parse_metric_name ("latency_min"), vayu::MetricName::LatencyMin);
+}
