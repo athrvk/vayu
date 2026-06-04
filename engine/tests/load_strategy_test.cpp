@@ -282,3 +282,47 @@ TEST_F (LoadStrategyTest, IterationsSubmitsExactlyMAndHoldsN) {
     EXPECT_EQ (context->requests_sent.load (), M) << "did not submit exactly M";
     EXPECT_LE (context->peak_in_flight.load (), N + 10) << "exceeded concurrency N";
 }
+
+// Fast endpoint: a fixed-interval poll would let in-flight collapse between
+// polls (Option-B undershoot). The cv-wake refill must keep MEAN in-flight near
+// N. Measure mean via Little's Law: mean = throughput * avg_latency_s.
+TEST_F (LoadStrategyTest, FastEndpointHoldsMeanInFlight) {
+    const size_t N        = 20;
+    const double DUR_S    = 2.0;
+    nlohmann::json config = {
+        { "mode", "constant_concurrency" },
+        { "duration", "2s" },
+        { "concurrency", N },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-fast", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    size_t completed     = context->metrics_collector->total_requests ();
+    double avg_latency_s = context->metrics_collector->average_latency () / 1000.0;
+    double throughput    = static_cast<double> (completed) / DUR_S;
+    double mean_inflight = throughput * avg_latency_s; // Little's Law
+
+    std::cerr << "[fast-hold] completed=" << completed
+              << " avg_latency_ms=" << context->metrics_collector->average_latency ()
+              << " throughput=" << throughput << " mean_inflight=" << mean_inflight
+              << " peak=" << context->peak_in_flight.load () << "\n";
+
+    // A fixed-poll refill collapses mean toward single digits; cv-wake holds it
+    // near N. Generous lower bound for CI jitter (do NOT delete this assertion).
+    EXPECT_GE (mean_inflight, 0.5 * static_cast<double> (N))
+    << "mean in-flight collapsed (" << mean_inflight << "); cv-wake not refilling";
+}
