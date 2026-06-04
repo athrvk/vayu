@@ -34,3 +34,8 @@ TEST (RunContextTopic, ClosedAndCompletedDefaults) {
     EXPECT_FALSE (ctx.closed.load ());
     EXPECT_EQ (ctx.completed_at_ms.load (), 0);
 }
+
+TEST (RunContextTopic, NullConfigDoesNotThrow) {
+    nlohmann::json null_cfg; // default-constructed == JSON null
+    EXPECT_NO_THROW ({ RunContext ctx ("r", null_cfg); });
+}

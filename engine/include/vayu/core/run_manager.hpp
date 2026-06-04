@@ -75,8 +75,8 @@ struct RunContext {
     [[nodiscard]] std::vector<std::string> ticks_since (size_t from) const {
         std::lock_guard<std::mutex> lock (tick_mtx);
         if (from >= tick_buffer.size ()) return {};
-        return std::vector<std::string> (tick_buffer.begin () +
-        static_cast<std::ptrdiff_t> (from), tick_buffer.end ());
+        return { tick_buffer.begin () + static_cast<std::ptrdiff_t> (from),
+        tick_buffer.end () };
     }
     [[nodiscard]] size_t tick_count () const {
         std::lock_guard<std::mutex> lock (tick_mtx);
