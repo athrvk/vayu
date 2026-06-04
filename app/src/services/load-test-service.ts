@@ -14,6 +14,7 @@
  */
 
 import { sseClient } from "./sse-client";
+import { apiService } from "./api";
 import { useDashboardStore } from "@/stores";
 import type { LoadTestMetrics } from "@/types";
 
@@ -53,6 +54,8 @@ class LoadTestService {
 		this.isConnected = true;
 
 		const store = useDashboardStore.getState();
+		// Reset stale historical series so a replay-from-0 renders clean
+		store.reset();
 		store.setStreaming(true);
 		store.setError(null);
 
@@ -136,22 +139,29 @@ class LoadTestService {
 		store.setError(error.message);
 	}
 
-	private handleClose(): void {
-		console.log("[LoadTestService] SSE connection closed (test completed)");
+	private async handleClose(): Promise<void> {
+		console.log("[LoadTestService] SSE closed — converging on stored report");
+		const runId = this.activeRunId;
 		if (this.throttleTimer) {
 			clearTimeout(this.throttleTimer);
 			this.throttleTimer = null;
 		}
 		this.flushMetrics();
+		this.isConnected = false;
 		const store = useDashboardStore.getState();
 		store.setStreaming(false);
 
-		// Clean up internal state
-		// Don't call stopRun() here - that's for manual stops only
-		// The dashboard will fetch the final report which sets the correct mode
-		if (this.activeRunId) {
+		// Fetch the canonical final report from the engine and store it so the
+		// dashboard shows definitive completed-view data (final percentiles, reconciled
+		// error rate, setup overhead) — one terminal truth, same as the 404-path.
+		if (runId) {
+			try {
+				const report = await apiService.getRunReport(runId);
+				store.setFinalReport(report);
+			} catch (e) {
+				console.warn("[LoadTestService] report fetch failed", e);
+			}
 			this.activeRunId = null;
-			this.isConnected = false;
 		}
 	}
 }
