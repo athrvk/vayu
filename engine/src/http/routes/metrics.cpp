@@ -96,6 +96,10 @@ void register_metrics_routes (RouteContext& ctx) {
                         bucket["throughput"] = 0.0;
                         bucket["backpressure"] = 0;
                         bucket["error_rate"] = 0.0;
+                        bucket["dropped_requests"] = 0;
+                        bucket["bytes_sent"] = 0;
+                        bucket["bytes_received"] = 0;
+                        bucket["status_codes"] = nlohmann::json::object ();
                     }
 
                     // Map metric values to LoadTestMetrics fields
@@ -117,6 +121,21 @@ void register_metrics_routes (RouteContext& ctx) {
                         bucket["throughput"] = metric.value;
                     } else if (metric.name == vayu::MetricName::Backpressure) {
                         bucket["backpressure"] = static_cast<int> (metric.value);
+                    } else if (metric.name == vayu::MetricName::DroppedRequests) {
+                        bucket["dropped_requests"] = static_cast<int> (metric.value);
+                    } else if (metric.name == vayu::MetricName::BytesSent) {
+                        bucket["bytes_sent"] = static_cast<size_t> (metric.value);
+                    } else if (metric.name == vayu::MetricName::BytesReceived) {
+                        bucket["bytes_received"] = static_cast<size_t> (metric.value);
+                    } else if (metric.name == vayu::MetricName::StatusCodes &&
+                    !metric.labels.empty ()) {
+                        // Last-write-wins per timestamp (the final StatusCodes row
+                        // shares this name and lands in the last bucket).
+                        try {
+                            bucket["status_codes"] = nlohmann::json::parse (metric.labels);
+                        } catch (...) {
+                            // leave default {}
+                        }
                     }
                 }
 
