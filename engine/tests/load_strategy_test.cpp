@@ -122,3 +122,16 @@ TEST_F (LoadStrategyTest, MaxInFlightCapDropsWhenTrueInFlightExceedsCap) {
        "EventLoop::pending_count() (submission-queue depth) instead of true "
        "in-flight (requests_sent - completed)";
 }
+
+// RunContext exposes the closed-loop refill primitives and a peak gauge.
+TEST_F (LoadStrategyTest, RunContextHasRefillPrimitives) {
+    nlohmann::json config = { { "mode", "constant_concurrency" } };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-ctx", config);
+
+    EXPECT_EQ (context->peak_in_flight.load (), 0u);
+    EXPECT_FALSE (context->closed_loop.load ());
+
+    // notify_refill must be safe to call with no waiter (near-free no-op).
+    context->notify_refill ();
+    SUCCEED ();
+}

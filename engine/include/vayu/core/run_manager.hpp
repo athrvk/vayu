@@ -8,6 +8,7 @@
  */
 
 #include <atomic>
+#include <condition_variable>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -42,6 +43,22 @@ struct RunContext {
     // Real-time counters (also tracked by MetricsCollector, but kept for backward compat)
     std::atomic<size_t> requests_sent{ 0 }; // Number of requests submitted to event loop
     std::atomic<size_t> requests_expected{ 0 }; // Total expected requests for this run
+
+    // Closed-loop concurrency control. The strategy thread is the SOLE producer
+    // (each worker queue is SPSC); it waits on refill_cv and is woken per
+    // completion by handle_result. Timeout-backed: correctness never depends on
+    // a wakeup (total_requests only increases, so a missed notify can only
+    // briefly undershoot the target, never overshoot).
+    std::mutex refill_mtx;
+    std::condition_variable refill_cv;
+    std::atomic<bool> closed_loop{ false };
+    std::atomic<size_t> peak_in_flight{ 0 }; // high-water mark of in_flight()
+
+    // notify_refill deliberately does NOT lock refill_mtx — locking on every
+    // completion would put a contended mutex on the 60k-RPS hot path.
+    void notify_refill () {
+        refill_cv.notify_one ();
+    }
 
     // Legacy accessors for backward compatibility (delegate to metrics_collector)
     [[nodiscard]] size_t total_requests () const {
