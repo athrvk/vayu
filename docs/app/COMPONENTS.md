@@ -135,15 +135,30 @@ Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows n
 
 Live load-test metrics. Entry: `modules/dashboard/index.tsx`.
 
-Connects to the engine SSE metrics stream (via the load-test service / dashboard store), shows live metrics while running, and loads the final report on completion. Stop action supported.
+Connects to the engine SSE metrics stream (`/metrics/live/:runId`, via the load-test service / dashboard store), shows live metrics while running, and converges on the final report on completion. Stop action supported.
+
+The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run config to one of `constant_rps` / `constant_concurrency` / `iterations` / `ramp_up`, and the hero row + stat row + charts render the surfaces appropriate to that mode. `MetricsView` is a thin orchestrator over a modular tree:
+
+**Top-level (`components/`)**
 
 | Component | Role |
 |---|---|
-| `components/DashboardHeader.tsx` | Title, run status, stop button |
-| `components/RunMetadata.tsx` | Endpoint, config (mode/duration/RPS/concurrency), timing |
-| `components/MetricsView.tsx` | Live metrics + charts (RPS, latency percentiles, error rate, concurrency) |
-| `components/RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests |
-| `components/MetricCard.tsx` | Single metric stat card |
+| `DashboardHeader.tsx` | Title, run status, stop button |
+| `RunMetadata.tsx` | Endpoint, config (mode/duration/RPS/concurrency), timing |
+| `MetricsView.tsx` | Orchestrator — composes the hero row, stat row, and charts per mode |
+| `RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests |
+| `MetricCard.tsx` | Single metric stat card |
+| `shared.tsx`, `tooltips.tsx` | Shared bits (Eyebrow/InfoChip) + centralized InfoChip wording |
+
+**`hero/` — mode-adaptive hero cards** (`HeroRow.tsx` selects per mode, all built on `HeroCardShell.tsx`): `RateFidelityCard`, `DroppedRequestsCard`, `AchievedThroughputCard`, `ThroughputCard`, `ThroughputTwinCard`, `CurrentConcurrencyCard`, `ConcurrencyUtilCard`, `SaturationCard`, `ProgressCard`, `ErrorRateCard`.
+
+**`charts/`** (all built on the shared `TimeSeriesChart.tsx` + `utils/chartGeometry.ts`): `ThroughputOverTimeChart` (configured-vs-achieved for ramp_up), `LatencyOverTimeChart` (wire/queue-wait split), `PercentilesOverTimeChart` (p50/p95/p99), `StatusCodesOverTimeChart` (stacked), `ResponseTimeVsConcurrencyScatter` (ramp_up capacity discovery w/ breakpoint marker), `HdrPercentilePlot`, `TimingWaterfall`.
+
+**`stats/`** — `ModeStatsRow.tsx` routes to the per-mode Row 4 stat set; `ModeStatCards.tsx`, `StatCard.tsx`.
+
+**`hooks/`** — `useMode.ts` (run-config → mode discriminator).
+
+**`utils/`** — `metricsTransforms.ts` (SSE history → chart series), `reportToDerived.ts` (stored `RunReport` → the same `DashboardDerived` shape, so history reuses the live components), `computeBreakpoint.ts`, `computeEta.ts`, `chartGeometry.ts`. `types.ts` holds the shared dashboard types (`DashboardDerived`, etc.).
 
 ## History (`modules/history/`)
 
@@ -151,15 +166,17 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 
 **Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row — method badge, status, relative time, URL, load-test chips).
 
-**Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunDetail.tsx` (single request execution — reuses the shared response viewer) or `LoadTestDetail.tsx` (load-test report). `LoadTestDetail` composes the tabbed report under `main/components/`:
+**Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunDetail.tsx` (single request execution — reuses the shared response viewer) or `LoadTestDetail.tsx` (load-test report). `LoadTestDetail` is **mode-aware** (header strip + tabs adapt to the run's mode, derived via `reportToDerived` → the same `DashboardDerived` shape the live dashboard uses) and composes the tabbed report under `main/components/`:
 
 | Component | Role |
 |---|---|
-| `OverviewTab.tsx` | Summary metrics |
+| `OverviewTab.tsx` | Summary — renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps` |
 | `PerformanceTab.tsx` | Latency/throughput detail |
 | `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs |
 | `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
 | `LatencyMetric.tsx`, `MetricCard.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts |
+
+> History detail reuses the live dashboard's `hero/`, `charts/`, and `stats/` components by feeding them a `DashboardDerived` built from the stored report (`reportToDerived`), so live and historical views stay visually consistent.
 
 ## Variables (`modules/variables/`)
 

@@ -145,8 +145,8 @@ The app uses a dual-state management approach:
   - Handles error transformation and user-friendly messages
 
 - **`sse-client.ts`**: Server-Sent Events client for real-time metrics
-  - Connects to `/metrics/live/:runId` or `/stats/:runId`
-  - Handles reconnection with exponential backoff
+  - Connects to `/metrics/live/:runId` (replayable tick topic — no attach race)
+  - No custom reconnect loop: the engine sends an explicit `complete` event, so `CLOSED` is terminal and transient errors are left to the browser's `EventSource` retry
   - Parses and forwards metrics to dashboard store
 
 - **`http-client.ts`**: Low-level fetch wrapper
