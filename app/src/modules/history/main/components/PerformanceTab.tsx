@@ -16,11 +16,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
 import { useRunTimeSeriesQuery } from "@/queries/runs";
+import { isRateLimitedRun } from "@/modules/dashboard/utils/metricsTransforms";
 import LatencyMetric from "./LatencyMetric";
 import HistoricalChartsSection from "./HistoricalChartsSection";
 import type { TabProps, TimeSeriesResponse } from "../../types";
 
-export default function PerformanceTab({ report, runId }: TabProps) {
+export default function PerformanceTab({ report, runId, derived }: TabProps) {
 	// Fetch time-series data for charts
 	const {
 		data: timeSeriesData,
@@ -96,7 +97,7 @@ export default function PerformanceTab({ report, runId }: TabProps) {
 			</Card>
 
 			{/* Rate Control */}
-			{report.rateControl && (
+			{report.rateControl && isRateLimitedRun(derived.mode, derived.targetRps) && (
 				<Card>
 					<CardHeader>
 						<CardTitle className="text-base">Rate Control Performance</CardTitle>
