@@ -549,7 +549,7 @@ RunManager& manager) {
     }
 
     context->is_running = false;
-    manager.unregister_run (context->run_id);
+    manager.retain_run (context->run_id);
 }
 
 std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
