@@ -54,8 +54,16 @@ describe("reportToDerived", () => {
 		expect(d.actualRps).toBe(195);
 		expect(d.avgQueueWaitMs).toBe(1.0);
 		expect(d.statusCodes).toEqual({ "200": 600 });
-		expect(d.showDropped).toBe(true); // rate-limited
+		expect(d.showDropped).toBe(false); // rate-limited but zero drops → Rate Fidelity card
 		expect(d.breakpoint.crossed).toBe(false);
+	});
+
+	it("shows the dropped card only when a rate-limited run actually dropped requests", () => {
+		expect(reportToDerived(baseReport()).showDropped).toBe(false); // 0 drops
+		const withDrops = baseReport({
+			summary: { ...baseReport().summary, droppedRequests: 12 },
+		});
+		expect(reportToDerived(withDrops).showDropped).toBe(true);
 	});
 
 	it("parses ramp config + does not mark dropped for ramp_up", () => {

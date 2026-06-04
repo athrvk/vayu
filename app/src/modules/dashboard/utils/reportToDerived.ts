@@ -59,7 +59,11 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		elapsedSeconds: duration,
 		setupOverhead: s.setupOverhead,
 		droppedRequests: s.droppedRequests ?? 0,
-		showDropped: isRateLimitedRun(mode, targetRps),
+		// Swap in the Dropped Requests card only when drops actually occurred —
+		// matches the live MetricsView gate. A clean rate-limited run keeps the
+		// Rate Fidelity card (otherwise it shows "0 dropped" with a false
+		// "Server saturating" warning).
+		showDropped: isRateLimitedRun(mode, targetRps) && (s.droppedRequests ?? 0) > 0,
 		rampDeviationPct: undefined, // needs per-tick concurrency (deferred to W1)
 		rampUpDurationSeconds: parseSeconds(cfg.rampUpDuration),
 		startConcurrency: cfg.startConcurrency,
