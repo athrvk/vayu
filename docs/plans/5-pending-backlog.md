@@ -5,8 +5,18 @@ Consolidated list of everything deferred or surfaced while implementing Plans 1�
 Status of the four prior plans:
 - **Plan 1 (latency accuracy)** — ✅ shipped (drops counter, perceived `total_ms`, `queue_wait_ms`).
 - **Plan 2 (backpressure)** — ✅ shipped (`maxInFlight` per-run knob, `ramp_lag`).
-- **Plan 3 (UI surfaces)** — ✅ shipped §1–§3 (Dropped card, Latency-over-time chart, RampUp overlay); §4 deferred → item C7 below.
+- **Plan 3 (UI surfaces)** — ✅ shipped §1–§4 (Dropped card, Latency-over-time chart, RampUp overlay, `maxInFlight` global Settings panel).
 - **Plan 4 (dashboard redesign)** — ✅ shipped *core* (per-tick percentiles, percentiles-over-time chart, p99 headline); the rest deferred → items A1–A4, B5–B6 below.
+
+Post-D10 fixes and Plan 4 remainder also shipped:
+- **D10/A1 (maxInFlight/drops gated on wrong counter)** — ✅ fixed (`0c92cec`): all five `pending_count()` gates in `load_strategy.cpp` switched to `RunContext::in_flight()` (`requests_sent − completed`); `load_strategy_test.cpp` added to assert drops fire under real in-flight load.
+- **C7 (maxInFlight global setting)** — ✅ shipped (`9bd9c90`): `LoadDefaultsPanel` in Settings, `maxInFlight` persisted in `settings-store`, `applyMaxInFlightDefault` utility injects global default when per-run value is absent.
+- **A1 (mode-adaptive hero cards)** — ✅ shipped (`91860df`).
+- **A2 (mode-adaptive Row 4 stat sets)** — ✅ shipped (`f54c7fa`).
+- **A3 (RTvsConcurrency scatter for ramp_up)** — ✅ shipped (`b932dea`, `3f754a3`).
+- **A4 (centralized tooltips + useMode + chart geometry)** — ✅ shipped (`66b730d`).
+- **B5 (MetricsView modular refactor)** — ✅ shipped (`53e56a3`).
+- **B6 (simplify pass — HeroCardShell + TimeSeriesChart primitives)** — ✅ shipped (`6934fde`).
 
 ---
 
