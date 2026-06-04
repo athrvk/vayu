@@ -385,22 +385,41 @@ data: {"totalRequests":6000,"totalErrors":30,"totalSuccess":5970,"errorRate":0.5
 
 ### GET /metrics/live/:runId
 
-Get current live metrics snapshot (non-streaming).
+Stream live metrics for a run via Server-Sent Events, replayed from a retained
+in-memory tick topic. The engine produces one wire-ready `metrics` tick per
+`liveTickIntervalMs` (default 100ms) into a per-run buffer; this endpoint
+replays that buffer **from offset 0** and then tails new ticks until the run
+finishes, ending with a `complete` event. Because the topic is retained for
+`liveRetentionMs` (default 60000ms) after completion, a client that connects
+late — even after a sub-second run has already finished — still receives the
+full series. There is no attach race.
 
-**Response:**
-```json
-{
-  "runId": "run_1234567890",
-  "status": "running",
-  "totalRequests": 1500,
-  "totalErrors": 5,
-  "errorRate": 0.33,
-  "avgLatencyMs": 45.2,
-  "currentRps": 150.5,
-  "activeConnections": 100,
-  "elapsedSeconds": 10.5
-}
+**Events:**
 ```
+event: metrics
+id: 0
+data: {"runId":"...","totalRequests":1500,"totalErrors":5,"errorRate":0.33,
+       "avgLatencyMs":45.2,"currentRps":150.5,"backpressure":0,
+       "activeConnections":100,"elapsedSeconds":10.5,"timestamp":...,
+       "requestsSent":1500,"requestsExpected":0, ...}
+
+event: complete
+data: {"event":"complete","runId":"run_1234567890"}
+```
+
+Each `metrics` event carries an `id:` equal to its zero-based offset. On
+reconnect the client may send a `Last-Event-ID` header; the stream resumes from
+`Last-Event-ID + 1` (omit it to replay from the beginning).
+
+**Responses:**
+- `200` — SSE stream (active run, or finished run still within the retention window).
+- `404` — run not found or evicted past `liveRetentionMs`; the body hints
+  `Use /run/:runId/report for the stored report`. Clients should fall back to
+  the stored report in this case.
+
+Tuning: `liveTickIntervalMs` (live tick cadence, 10–1000ms) and
+`liveRetentionMs` (post-completion retention, 0–600000ms; 0 disables retention)
+are configurable via `POST /config`.
 
 ## Runs
 
