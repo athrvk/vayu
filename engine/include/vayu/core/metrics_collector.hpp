@@ -160,6 +160,20 @@ class MetricsCollector {
         return dropped_requests_.load (std::memory_order_relaxed);
     }
 
+    /** Accumulate wire bytes for a completed transfer (lock-free). */
+    void record_bytes (size_t sent, size_t received) {
+        total_bytes_sent_.fetch_add (sent, std::memory_order_relaxed);
+        total_bytes_recv_.fetch_add (received, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] size_t total_bytes_sent () const {
+        return total_bytes_sent_.load (std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] size_t total_bytes_received () const {
+        return total_bytes_recv_.load (std::memory_order_relaxed);
+    }
+
     /**
      * @brief Record a latency value (for percentile calculation)
      * Thread-safe
@@ -298,6 +312,8 @@ class MetricsCollector {
     std::atomic<double> total_latency_sum_{ 0.0 };
     std::atomic<size_t> dropped_requests_{ 0 };
     std::atomic<double> total_queue_wait_sum_{ 0.0 };
+    std::atomic<size_t> total_bytes_sent_{ 0 };
+    std::atomic<size_t> total_bytes_recv_{ 0 };
 
     // Status code counts (lock-free for common codes)
     std::atomic<size_t> status_2xx_{ 0 };

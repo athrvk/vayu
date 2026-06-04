@@ -345,3 +345,10 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsRequestExpectedDefaultsZero) {
     EXPECT_EQ (stats["requestsSent"].get<size_t> (), 5U);
     EXPECT_EQ (stats["requestsExpected"].get<size_t> (), 0U);
 }
+
+TEST_F (MetricsCollectorTest, RecordBytesAccumulates) {
+    collector->record_bytes (100, 2048);
+    collector->record_bytes (50, 1024);
+    EXPECT_EQ (collector->total_bytes_sent (), 150u);
+    EXPECT_EQ (collector->total_bytes_received (), 3072u);
+}
