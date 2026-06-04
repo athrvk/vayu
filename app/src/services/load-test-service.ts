@@ -54,8 +54,11 @@ class LoadTestService {
 		this.isConnected = true;
 
 		const store = useDashboardStore.getState();
-		// Reset stale historical series so a replay-from-0 renders clean
-		store.reset();
+		// NOTE: do NOT call store.reset() here — the caller invokes store.startRun()
+		// first to register the run (currentRunId, config, "running" mode) and that
+		// already clears the historical series / currentMetrics / finalReport.
+		// reset() would null out currentRunId and the dashboard would show no active
+		// test (replay-from-0 renders clean off startRun's wipe already).
 		store.setStreaming(true);
 		store.setError(null);
 

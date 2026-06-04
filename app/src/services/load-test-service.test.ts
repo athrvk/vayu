@@ -53,4 +53,12 @@ describe("LoadTestService", () => {
 		expect(apiService.getRunReport).toHaveBeenCalledWith("run_2");
 		expect(mockSetFinalReport).toHaveBeenCalled();
 	});
+
+	// Regression guard: the caller invokes store.startRun() first (which registers
+	// currentRunId + clears the series). startMonitoring must NOT call store.reset()
+	// — doing so nulls currentRunId and the dashboard shows "no active tests".
+	it("does not reset the store on start (would wipe the active run registered by startRun)", () => {
+		loadTestService.startMonitoring("run_3");
+		expect(mockReset).not.toHaveBeenCalled();
+	});
 });
