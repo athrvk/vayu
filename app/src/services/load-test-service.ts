@@ -56,17 +56,15 @@ class LoadTestService {
 		store.setStreaming(true);
 		store.setError(null);
 
-		// Connect to SSE with a small delay to let backend set up
-		setTimeout(() => {
-			if (this.activeRunId === runId) {
-				sseClient.connect(
-					runId,
-					this.handleMetrics.bind(this),
-					this.handleError.bind(this),
-					this.handleClose.bind(this)
-				);
-			}
-		}, 500);
+		// Connect immediately. The engine retains a replayable tick topic per run
+		// (N1), so even a sub-second run that finishes before we attach is fully
+		// replayed from offset 0 — no need to delay and risk missing it.
+		sseClient.connect(
+			runId,
+			this.handleMetrics.bind(this),
+			this.handleError.bind(this),
+			this.handleClose.bind(this)
+		);
 	}
 
 	/**
