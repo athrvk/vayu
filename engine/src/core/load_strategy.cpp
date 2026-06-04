@@ -86,6 +86,8 @@ vayu::Result<vayu::Response> result) {
 
         context->metrics_collector->record_error (
         response.error_code, response.error_message, error_json.dump ());
+        context->metrics_collector->record_bytes (
+        response.timing.bytes_up, response.timing.bytes_down);
     } else {
         // Successful response
         double latency = response.timing.total_ms;
@@ -115,6 +117,8 @@ vayu::Result<vayu::Response> result) {
         // Record to in-memory collector (high-performance, no DB writes)
         context->metrics_collector->record_success (response.status_code,
         latency, response.timing.queue_wait_ms, trace_data);
+        context->metrics_collector->record_bytes (
+        response.timing.bytes_up, response.timing.bytes_down);
 
         // Sample response for deferred script validation if test script is present
         if (!context->test_script.empty ()) {

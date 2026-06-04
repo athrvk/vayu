@@ -396,3 +396,29 @@ TEST (MetricNameBytes, RoundTrips) {
     EXPECT_EQ (vayu::parse_metric_name ("bytes_sent"), vayu::MetricName::BytesSent);
     EXPECT_EQ (vayu::parse_metric_name ("bytes_received"), vayu::MetricName::BytesReceived);
 }
+
+// Wire bytes are captured from curl and accumulated. The mock returns a fixed
+// "{}" body; assert received bytes scale with request count (exact totals vary
+// with headers, so assert a lower bound, not equality).
+TEST_F (LoadStrategyTest, CapturesReceivedBytes) {
+    nlohmann::json config = {
+        { "mode", "iterations" }, { "iterations", 20 }, { "concurrency", 5 },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-bytes", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url ();
+    request.timeout_ms = 30000;
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    // 20 responses, each with headers + a 2-byte body → comfortably > 20 bytes.
+    EXPECT_GT (context->metrics_collector->total_bytes_received (), 20u);
+}

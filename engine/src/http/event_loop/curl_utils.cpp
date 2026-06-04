@@ -290,6 +290,20 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     response.timing.first_byte_ms = (starttransfer_time - appconnect_time) * 1000.0;
     response.timing.download_ms   = (wire_seconds - starttransfer_time) * 1000.0;
 
+    // Wire byte counts (body + headers), for throughput-in-bytes metrics.
+    curl_off_t dl_bytes = 0, ul_bytes = 0;
+    long header_bytes = 0, request_bytes = 0;
+    curl_easy_getinfo (curl, CURLINFO_SIZE_DOWNLOAD_T, &dl_bytes);
+    curl_easy_getinfo (curl, CURLINFO_SIZE_UPLOAD_T, &ul_bytes);
+    curl_easy_getinfo (curl, CURLINFO_HEADER_SIZE, &header_bytes);
+    curl_easy_getinfo (curl, CURLINFO_REQUEST_SIZE, &request_bytes);
+    response.timing.bytes_down =
+        static_cast<size_t> (std::max<curl_off_t> (0, dl_bytes)) +
+        static_cast<size_t> (std::max<long> (0, header_bytes));
+    response.timing.bytes_up =
+        static_cast<size_t> (std::max<curl_off_t> (0, ul_bytes)) +
+        static_cast<size_t> (std::max<long> (0, request_bytes));
+
     // Set body
     response.body      = std::move (data->response_body);
     response.body_size = response.body.size ();
