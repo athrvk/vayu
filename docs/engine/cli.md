@@ -77,10 +77,9 @@ vayu-cli run request.json --daemon http://localhost:9999
       "content": ""
     }
   },
-  "mode": "constant",
-  "virtualUsers": 100,
-  "duration": 60,
+  "mode": "constant_rps",
   "targetRps": 1000,
+  "duration": "60s",
   "environmentId": "env_1234567890",
   "testScript": ""
 }
@@ -88,9 +87,10 @@ vayu-cli run request.json --daemon http://localhost:9999
 
 **Load Test Modes:**
 
-- **constant**: Maintain constant virtual users for duration
-- **ramp_up**: Gradually increase users over ramp-up period
-- **iterations**: Execute fixed number of requests per user
+- **constant_rps**: Open-loop — dispatch at `targetRps` for `duration` (use `maxInFlight` to cap outstanding requests)
+- **constant_concurrency**: Closed-loop — hold `concurrency` in-flight requests for `duration`
+- **ramp_up**: Closed-loop — ramp concurrency `startConcurrency` → `concurrency` over `rampUpDuration`, then hold to `duration` (total)
+- **iterations**: Closed-loop, bounded — issue `iterations` total requests at `concurrency`
 
 ## Output
 

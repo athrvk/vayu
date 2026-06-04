@@ -1,7 +1,7 @@
 # Vayu Engine Architecture
 
-**Version:** 0.1.1  
-**Last Updated:** January 2026
+**Version:** 0.2.1  
+**Last Updated:** June 2026
 
 ## Overview
 
@@ -81,16 +81,27 @@ The event loop manages concurrent HTTP request execution using libcurl's multi i
 Manages the lifecycle of load test runs:
 
 - **Run registration**: Tracks active runs by ID
-- **Run context**: Stores configuration, event loop, and metrics collector per run
-- **Graceful shutdown**: Stops active runs on daemon shutdown (5s timeout)
+- **Run context**: Stores configuration, event loop, metrics collector, and an in-memory
+  **tick topic** (ring of wire-ready metric snapshots) per run
+- **Retained finished runs**: Completed/failed/stopped runs are moved to a separate retained
+  map rather than unregistered immediately, so a late SSE client still receives the full metric
+  series. A TTL sweep evicts them after `liveRetentionMs` (default 60s).
+- **Graceful shutdown**: Stops active runs on daemon shutdown
 
 ### Metrics Collector
 
 High-performance in-memory metrics collection optimized for 60k+ RPS:
 
 - **Pre-allocated storage**: Avoids reallocation during tests
-- **Thread-local accumulators**: Zero-contention writes
-- **Batch DB writes**: Results written after test completion
+- **Lock-free atomics + HdrHistogram**: Zero-contention counter updates; latency recorded in a
+  lock-free HdrHistogram (µs resolution)
+- **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a
+  request spent inside the engine), not just libcurl's wire time. Wire time and the
+  generator-internal `queue_wait` are tracked separately.
+- **Rich counters**: bytes sent/received, dropped requests (backpressure), queue-wait average,
+  peak in-flight, and a full per-status-code distribution
+- **Batch DB writes**: Per-request results written after test completion; per-tick time-series
+  metrics persisted by the metrics thread during the run
 - **Error preservation**: All errors stored, success results sampled
 - **Response sampling**: Stores samples for deferred script validation
 
@@ -117,8 +128,11 @@ Persistent storage using sqlite_orm:
 - `environments`: Variable sets for different environments
 - `globals`: Singleton global variables
 - `runs`: Test execution records (design mode or load test)
-- `metrics`: Time-series metrics (RPS, latency, error rate)
+- `metrics`: Time-series metrics (RPS, latency percentiles, bytes, dropped, status codes, …)
 - `results`: Individual request results (errors + sampled successes)
+- `config_entries`: Engine configuration registry (read/written via `/config`)
+
+See [Database Schema](db-schema.md) for the full column list.
 
 ## Request Flow
 
@@ -157,59 +171,67 @@ Persistent storage using sqlite_orm:
    ↓
 6. Start metrics thread (collect_metrics)
    ↓
-7. Event loop submits requests via SPSC queue
+7. Strategy submits requests via SPSC queue → event loop
    ↓
-8. Metrics collector aggregates results in-memory
+8. Metrics collector aggregates results in-memory; metrics thread
+   writes per-tick snapshots into the retained tick topic + DB
    ↓
-9. Metrics thread streams stats via SSE (/stats/:runId)
+9. Client streams ticks via SSE (/metrics/live/:runId), replayed
+   from offset 0 then tailed to the `complete` event
    ↓
-10. On completion: batch-write results to database
+10. On completion: batch-write results to DB; run retained (TTL) so
+    late clients still get the full series
 ```
 
 ## Load Test Strategies
 
-Three load test strategies are supported:
+Four load test modes are supported (`LoadTestType` in `types.hpp`). Three are **closed-loop** —
+the engine holds in-flight requests at a target and issues a new request as each completes, so
+throughput is a *result* (`concurrency ÷ latency`), not an input. One is **open-loop**.
 
-### 1. Constant (Duration-based)
+### 1. `constant_rps` (open-loop)
 
-Maintains a constant number of virtual users for a specified duration.
+Dispatches at a fixed `targetRps` regardless of how fast responses return. `maxInFlight` caps how
+many requests may be outstanding before new ones are dropped (and counted as `dropped_requests`).
 
-**Config:**
 ```json
-{
-  "mode": "constant",
-  "virtualUsers": 100,
-  "duration": 60,
-  "targetRps": 1000
-}
+{ "mode": "constant_rps", "targetRps": 1000, "duration": "60s", "maxInFlight": 10000 }
 ```
 
-### 2. Ramp Up
+### 2. `constant_concurrency` (closed-loop)
 
-Gradually increases virtual users over time.
+Holds a constant number of in-flight requests for the duration via the shared
+`maintain_concurrency` controller.
 
-**Config:**
 ```json
-{
-  "mode": "ramp_up",
-  "virtualUsers": 100,
-  "duration": 60,
-  "rampUp": 10
-}
+{ "mode": "constant_concurrency", "concurrency": 100, "duration": "60s" }
 ```
 
-### 3. Iterations
+### 3. `ramp_up` (closed-loop)
 
-Executes a fixed number of requests per virtual user.
+Interpolates the concurrency target from `startConcurrency` to `concurrency` over
+`rampUpDuration`, then holds for the remainder of `duration` (which is **total** test time).
 
-**Config:**
 ```json
-{
-  "mode": "iterations",
-  "virtualUsers": 10,
-  "iterations": 100
-}
+{ "mode": "ramp_up", "startConcurrency": 1, "concurrency": 100,
+  "rampUpDuration": "10s", "duration": "60s" }
 ```
+
+### 4. `iterations` (closed-loop, bounded)
+
+Issues a fixed total number of requests at the target concurrency, then stops — exact count at
+run end.
+
+```json
+{ "mode": "iterations", "concurrency": 10, "iterations": 1000 }
+```
+
+### Closed-loop controller
+
+`constant_concurrency`, `ramp_up`, and `iterations` share a `maintain_concurrency` loop driven by
+a pure `compute_refill_deficit` primitive: each tick, refill exactly `target − in_flight` new
+requests (where `in_flight = requests_sent − completed`). On stop the controller is notified for
+prompt cancellation rather than waiting for in-flight requests to drain.
 
 ## Thread Model
 

@@ -20,25 +20,29 @@ Check engine status and version.
 ```json
 {
   "status": "ok",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "workers": 8
 }
 ```
 
 ### GET /config
 
-Get global configuration settings.
+Get global configuration settings. Backed by the `config_entries` table; each entry carries UI
+metadata (label, description, category, default, min/max). Keys include:
 
-**Response:**
 ```json
 {
   "workers": 8,
   "maxConnections": 10000,
   "defaultTimeout": 30000,
   "statsInterval": 100,
-  "contextPoolSize": 64
+  "contextPoolSize": 64,
+  "liveTickIntervalMs": 100,
+  "liveRetentionMs": 60000
 }
 ```
+
+`POST /config` validates each key against its registered type and min/max range.
 
 ## Collections
 
@@ -292,6 +296,8 @@ Execute a single HTTP request (Design Mode). Returns immediate response with tes
   "bodySize": 20,
   "timing": {
     "totalMs": 245.5,
+    "wireMs": 245.1,
+    "queueWaitMs": 0.4,
     "dnsMs": 5.2,
     "connectMs": 12.3,
     "tlsMs": 45.1,
@@ -361,6 +367,11 @@ target *is* the in-flight bound, so `maxInFlight` is ignored there.
 
 ### GET /stats/:runId
 
+> **Prefer `GET /metrics/live/:runId`** (below) for live dashboards — it replays a retained
+> in-memory tick topic with no attach race. `/stats/:runId` is the legacy DB-polling path; it
+> remains useful for **historical** retrieval via `?format=json&limit=&offset=` (paginated
+> time-series read), which the app uses to hydrate the history view.
+
 Stream real-time metrics for a load test using Server-Sent Events (SSE).
 
 **Response:** SSE stream with events:
@@ -398,14 +409,40 @@ full series. There is no attach race.
 ```
 event: metrics
 id: 0
-data: {"runId":"...","totalRequests":1500,"totalErrors":5,"errorRate":0.33,
-       "avgLatencyMs":45.2,"currentRps":150.5,"backpressure":0,
-       "activeConnections":100,"elapsedSeconds":10.5,"timestamp":...,
-       "requestsSent":1500,"requestsExpected":0, ...}
+data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
+       "totalRequests":1500,"totalSuccess":1495,"totalErrors":5,"errorRate":0.33,
+       "currentRps":150.5,"sendRate":150.0,"throughput":149.5,
+       "activeConnections":100,"backpressure":0,"droppedRequests":0,
+       "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
+       "latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
+       "bytesSent":48000,"bytesReceived":1920000,
+       "requestsSent":1500,"requestsExpected":0,
+       "status2xx":1495,"status3xx":0,"status4xx":3,"status5xx":2,
+       "statusCodes":{"200":1495,"404":3,"500":2}}
 
 event: complete
 data: {"event":"complete","runId":"run_1234567890"}
 ```
+
+**Field reference** (all keys emitted by `MetricsCollector::get_current_stats()`):
+
+| Field | Meaning |
+|-------|---------|
+| `totalRequests` / `totalSuccess` / `totalErrors` | Completed counts |
+| `errorRate` | Error percentage |
+| `currentRps` | Instantaneous RPS (delta over the tick window) |
+| `sendRate` | Rate requests are dispatched (open model) |
+| `throughput` | Rate responses are received |
+| `activeConnections` | Current in-flight requests |
+| `backpressure` | Queue depth (`requestsSent − totalRequests`) |
+| `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
+| `avgLatencyMs` | Mean **perceived** latency |
+| `avgQueueWaitMs` | Mean time queued inside the generator before the wire |
+| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live percentiles (cumulative HdrHistogram) |
+| `bytesSent` / `bytesReceived` | Cumulative wire bytes |
+| `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA) |
+| `status2xx`–`status5xx` | Per-class counts |
+| `statusCodes` | Full per-code distribution map |
 
 Each `metrics` event carries an `id:` equal to its zero-based offset. On
 reconnect the client may send a `Last-Event-ID` header; the stream resumes from
@@ -463,37 +500,68 @@ Stop a running load test.
 
 ### GET /run/:runId/report
 
-Get final report for a completed run.
+Get the final report for a completed run. Reconstructed from the `runs`, `metrics`, and `results`
+tables (there is no stored `summary` blob). The response is a **nested** object; conditional
+sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, `testValidation`
+only when a test script ran).
 
 **Response:**
 ```json
 {
-  "runId": "run_1234567890",
-  "totalRequests": 6000,
-  "successfulRequests": 5970,
-  "failedRequests": 30,
-  "errorRate": 0.5,
-  "totalDurationS": 60.0,
-  "avgRps": 100.0,
-  "latencyMin": 12.3,
-  "latencyMax": 1250.5,
-  "latencyAvg": 42.1,
-  "latencyP50": 38.5,
-  "latencyP75": 45.2,
-  "latencyP90": 78.3,
-  "latencyP95": 95.1,
-  "latencyP99": 156.7,
-  "latencyP999": 450.2,
-  "statusCodes": {
-    "200": 5970,
-    "500": 30
+  "metadata": {
+    "runId": "run_1234567890",
+    "runType": "load",
+    "status": "completed",
+    "startTime": 1234567890,
+    "endTime": 1234567950,
+    "requestUrl": "https://api.example.com/users",
+    "requestMethod": "GET",
+    "configuration": { "...": "config snapshot" }
   },
-  "errorTypes": {
-    "timeout": 20,
-    "connection_failed": 10
-  }
+  "summary": {
+    "totalRequests": 6000,
+    "successfulRequests": 5970,
+    "failedRequests": 30,
+    "errorRate": 0.5,
+    "totalDurationSeconds": 60.0,
+    "avgRps": 100.0,
+    "testDuration": 60.0,
+    "sendRate": 100.0,
+    "throughput": 99.5,
+    "setupOverhead": 0.12,
+    "peakConcurrency": 100,
+    "droppedRequests": 0,
+    "avgQueueWaitMs": 0.4,
+    "bytesSent": 192000,
+    "bytesReceived": 7680000,
+    "throughputBytesPerSec": 128000
+  },
+  "latency": {
+    "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
+    "p50": 38.5, "p75": 45.2, "p90": 78.3, "p95": 95.1, "p99": 156.7, "p999": 450.2
+  },
+  "statusCodes": { "200": 5970, "500": 30 },
+  "rateControl": { "targetRps": 100, "actualRps": 99.5, "achievement": 99.5 },
+  "errors": {
+    "total": 30,
+    "withDetails": 30,
+    "types": { "timeout": 20, "connection_failed": 10 },
+    "byStatusCode": { "500": 30 }
+  },
+  "timingBreakdown": {
+    "avgDnsMs": 5.2, "avgConnectMs": 12.3, "avgTlsMs": 45.1,
+    "avgFirstByteMs": 180.2, "avgDownloadMs": 2.7
+  },
+  "slowRequests": { "count": 12, "thresholdMs": 1000, "percentage": 0.2 },
+  "testValidation": { "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6 },
+  "results": [ { "...": "sampled request/response outcomes" } ]
 }
 ```
+
+`latency.*` and the enriched `summary` fields (`peakConcurrency`, `droppedRequests`,
+`avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the persisted
+per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percentiles) is
+**perceived** latency.
 
 ### DELETE /run/:runId
 

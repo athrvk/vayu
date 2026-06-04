@@ -168,10 +168,16 @@ Server-Sent Events client for real-time load test metrics streaming.
 
 ### Features
 
-- **Dual Endpoint Support**: Tries `/metrics/live/:runId` first, falls back to `/stats/:runId`
-- **Automatic Reconnection**: Exponential backoff (max 5 attempts)
+- **Single endpoint**: Connects to `/metrics/live/:runId`. The engine retains a replayable tick
+  topic, so the client connects immediately after `POST /run` with no attach race — it replays
+  from offset 0 and tails to the `complete` event (even for sub-second runs).
+- **No custom reconnect loop**: The engine sends an explicit `complete` event at normal run end,
+  so a `CLOSED` readyState is treated as terminal. Transient `CONNECTING` errors are left to the
+  browser's built-in `EventSource` retry. At run end the app converges on the stored report
+  (`GET /run/:id/report`) rather than reconnecting to the stream.
 - **Event Handling**: `metrics` events, `complete` event, `error` handling
-- **Metrics Parsing**: Transforms backend format to frontend `LoadTestMetrics`
+- **Metrics Parsing**: `mapSseMetrics()` transforms the engine's camelCase blob to the frontend
+  `LoadTestMetrics` shape (includes drops, queue-wait, percentiles, bytes, status-code map)
 
 ### Usage
 
@@ -224,11 +230,17 @@ export const API_ENDPOINTS = {
   RUN_REPORT: (id: string) => `/run/${id}/report`,
   RUN_STOP: (id: string) => `/run/${id}/stop`,
   
-  // SSE
-  STATS_STREAM: (runId: string) => `/stats/${runId}`,
+  // Real-time stats (SSE)
   METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`,
+
+  // Time-series metrics (JSON, paginated) — used to hydrate history
+  STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0) =>
+    `/stats/${runId}?format=json&limit=${limit}&offset=${offset}`,
 };
 ```
+
+> Note: the old `STATS_STREAM` SSE constant was removed — live metrics go through
+> `METRICS_LIVE` only; `/stats` is now used solely for paginated historical reads.
 
 ## Request Execution Flow
 
@@ -290,7 +302,7 @@ await apiService.startLoadTest({
     headers: { "Content-Type": "application/json" },
     body: { mode: "json", content: '{"key": "value"}' }
   },
-  mode: "constant",
+  mode: "constant_rps",
   duration: "30s",
   targetRps: 100,
   concurrency: 50,
@@ -350,7 +362,7 @@ useHealthQuery() // Polls every 5 seconds
 ```typescript
 {
   status: "ok",
-  version: "0.1.1",
+  version: "0.2.1",
   workers: 8
 }
 ```
