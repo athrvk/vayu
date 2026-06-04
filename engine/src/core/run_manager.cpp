@@ -582,6 +582,19 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             // Calculate backpressure (true in-flight: requests sent but not yet responded)
             size_t backpressure = context->in_flight ();
 
+            // Sample the in-flight high-water mark. The closed-loop controller
+            // also updates this at submit granularity; open-loop modes
+            // (constant_rps) rely solely on this 1 Hz sample. CAS-max so the two
+            // writers don't clobber each other.
+            {
+                size_t pk = context->peak_in_flight.load (std::memory_order_relaxed);
+                while (backpressure > pk &&
+                !context->peak_in_flight.compare_exchange_weak (pk, backpressure,
+                std::memory_order_relaxed)) {
+                    // pk reloaded on failure
+                }
+            }
+
             vayu::utils::log_debug ("Metrics: rps=" + std::to_string (current_rps) +
             ", send_rate=" + std::to_string (send_rate) +
             ", throughput=" + std::to_string (throughput) +
