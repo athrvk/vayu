@@ -25,13 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RequestBuilderProvider } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
-import {
-	useNavigationStore,
-	useVariablesStore,
-	useDashboardStore,
-	useSettingsStore,
-} from "@/stores";
-import { applyMaxInFlightDefault } from "./utils/applyMaxInFlightDefault";
+import { useNavigationStore, useVariablesStore, useDashboardStore } from "@/stores";
 import {
 	useRequestQuery,
 	useUpdateRequestMutation,
@@ -508,14 +502,7 @@ export default function RequestBuilder() {
 					tests: pendingLoadTestRequest.testScript || undefined,
 				};
 
-				// Inject the global max-in-flight default when the per-run config
-				// didn't specify one. Per-run value always wins.
-				const requestWithDefaults = applyMaxInFlightDefault(
-					apiRequest,
-					useSettingsStore.getState().maxInFlight
-				);
-
-				const result = await apiService.startLoadTest(requestWithDefaults);
+				const result = await apiService.startLoadTest(apiRequest);
 
 				// Set the active run ID and switch to dashboard
 				// Pass config and request info so dashboard can show them during live streaming

@@ -35,6 +35,7 @@ interface SavedLoadTestConfig {
 	concurrency: number;
 	iterations: number;
 	rampDuration: number;
+	maxInFlight: number | null;
 	sampleRate: number;
 	slowThreshold: number;
 	saveTimingBreakdown: boolean;
@@ -85,6 +86,11 @@ export default function LoadTestConfigDialog({
 	const [concurrency, setConcurrency] = useState(saved.concurrency ?? 10);
 	const [iterations, setIterations] = useState(saved.iterations ?? 1000);
 	const [rampDuration, setRampDuration] = useState(saved.rampDuration ?? 30);
+	// Max in-flight cap (constant_rps only). Empty string = auto (engine derives
+	// a per-strategy default). Kept as a string so the field can be left blank.
+	const [maxInFlight, setMaxInFlight] = useState<string>(
+		saved.maxInFlight != null ? String(saved.maxInFlight) : ""
+	);
 	// Data capture options
 	const [sampleRate, setSampleRate] = useState(saved.sampleRate ?? 10);
 	const [slowThreshold, setSlowThreshold] = useState(saved.slowThreshold ?? 1000);
@@ -98,6 +104,8 @@ export default function LoadTestConfigDialog({
 	const handleStart = () => {
 		if (rampDurationError) return;
 
+		const maxInFlightValue = maxInFlight.trim() !== "" ? Number(maxInFlight) : null;
+
 		// Save current config for next time (excluding comment which is per-run)
 		saveConfig({
 			mode,
@@ -106,6 +114,7 @@ export default function LoadTestConfigDialog({
 			concurrency,
 			iterations,
 			rampDuration,
+			maxInFlight: maxInFlightValue,
 			sampleRate,
 			slowThreshold,
 			saveTimingBreakdown,
@@ -123,6 +132,9 @@ export default function LoadTestConfigDialog({
 
 		if (mode === "constant_rps") {
 			config.rps = rps;
+			if (maxInFlightValue != null && maxInFlightValue > 0) {
+				config.max_in_flight = maxInFlightValue;
+			}
 		} else if (mode === "constant_concurrency") {
 			config.concurrency = concurrency;
 		} else if (mode === "iterations") {
@@ -202,16 +214,39 @@ export default function LoadTestConfigDialog({
 
 					{/* Mode-specific fields */}
 					{mode === "constant_rps" && (
-						<div className="space-y-2">
-							<Label>Target RPS (Requests per second)</Label>
-							<Input
-								type="number"
-								value={rps}
-								onChange={(e) => setRps(Number(e.target.value))}
-								min={1}
-								max={50000}
-							/>
-						</div>
+						<>
+							<div className="space-y-2">
+								<Label>Target RPS (Requests per second)</Label>
+								<Input
+									type="number"
+									value={rps}
+									onChange={(e) => setRps(Number(e.target.value))}
+									min={1}
+									max={50000}
+								/>
+							</div>
+							<div className="space-y-2">
+								<Label>
+									Max in-flight requests{" "}
+									<span className="text-muted-foreground font-normal">
+										(optional)
+									</span>
+								</Label>
+								<Input
+									type="number"
+									value={maxInFlight}
+									onChange={(e) => setMaxInFlight(e.target.value)}
+									min={1}
+									max={1000000}
+									placeholder="Auto (derived from target RPS)"
+								/>
+								<p className="text-[11.5px] text-muted-foreground leading-relaxed">
+									Hard cap on concurrent in-flight requests. Leave blank to
+									auto-derive. Lowering it makes the engine drop requests sooner
+									under backpressure; raising it queues instead.
+								</p>
+							</div>
+						</>
 					)}
 
 					{(mode === "constant_concurrency" ||
