@@ -12,7 +12,7 @@
  */
 
 import { AlertCircle } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, Badge } from "@/components/ui";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
@@ -22,97 +22,11 @@ import type { TabProps } from "../../types";
 export default function OverviewTab({ report, derived }: TabProps) {
 	return (
 		<>
-			{/* Mode-adaptive summary — same hero cards + stat row the live dashboard shows */}
+			{/* Mode-adaptive summary — same hero cards + stat row the live dashboard shows.
+			    Config (mode/duration/concurrency/comment) + request URL/method live in the
+			    always-visible header strip, so no separate "Test Configuration" card here. */}
 			<HeroRow d={derived} />
 			<ModeStatsRow d={derived} />
-
-			{/* Test Configuration */}
-			{report.metadata && (
-				<Card>
-					<CardHeader>
-						<CardTitle className="text-base">Test Configuration</CardTitle>
-					</CardHeader>
-					<CardContent>
-						{report.metadata.configuration?.comment && (
-							<div className="mb-4 p-3 bg-primary/5 border border-primary/20">
-								<p className="text-xs text-primary font-medium mb-1">Comment</p>
-								<p className="text-sm text-foreground">
-									{report.metadata.configuration.comment}
-								</p>
-							</div>
-						)}
-						<div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-							<div>
-								<p className="text-xs text-muted-foreground mb-1">Request URL</p>
-								<p className="text-sm font-medium text-foreground break-all">
-									{report.metadata.requestUrl}
-								</p>
-							</div>
-							<div>
-								<p className="text-xs text-muted-foreground mb-1">Method</p>
-								<Badge variant="outline" className="text-xs">
-									{report.metadata.requestMethod}
-								</Badge>
-							</div>
-							{report.metadata.configuration && (
-								<>
-									{report.metadata.configuration.mode && (
-										<div>
-											<p className="text-xs text-muted-foreground mb-1">
-												Mode
-											</p>
-											<p className="text-sm font-medium text-foreground capitalize">
-												{report.metadata.configuration.mode}
-											</p>
-										</div>
-									)}
-									{report.metadata.configuration.duration && (
-										<div>
-											<p className="text-xs text-muted-foreground mb-1">
-												Configured Duration
-											</p>
-											<p className="text-sm font-medium text-foreground">
-												{report.metadata.configuration.duration}
-											</p>
-										</div>
-									)}
-									{report.metadata.configuration.concurrency && (
-										<div>
-											<p className="text-xs text-muted-foreground mb-1">
-												Concurrency
-											</p>
-											<p className="text-sm font-medium text-foreground">
-												{report.metadata.configuration.concurrency} workers
-											</p>
-										</div>
-									)}
-								</>
-							)}
-							{report.summary.testDuration !== undefined &&
-								report.summary.testDuration > 0 && (
-									<div>
-										<p className="text-xs text-muted-foreground mb-1">
-											Actual Duration
-										</p>
-										<p className="text-sm font-medium text-foreground">
-											{report.summary.testDuration.toFixed(2)}s
-											{report.summary.setupOverhead !== undefined &&
-												report.summary.setupOverhead > 0 && (
-													<span className="text-xs text-muted-foreground ml-1">
-														(+
-														{(
-															report.summary.setupOverhead * 1000
-														).toFixed(0)}
-														ms setup)
-													</span>
-												)}
-										</p>
-									</div>
-								)}
-						</div>
-					</CardContent>
-				</Card>
-			)}
 
 			{/* Status Codes */}
 			{report.statusCodes && Object.keys(report.statusCodes).length > 0 && (
