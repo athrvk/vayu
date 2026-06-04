@@ -11,16 +11,21 @@
  * Displays test configuration, summary statistics, status codes, and errors.
  */
 
-import { Activity, CheckCircle, XCircle, Zap, AlertCircle } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
-import MetricCard from "./MetricCard";
+import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
+import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import type { TabProps } from "../../types";
 
-export default function OverviewTab({ report }: TabProps) {
+export default function OverviewTab({ report, derived }: TabProps) {
 	return (
 		<>
+			{/* Mode-adaptive summary — same hero cards + stat row the live dashboard shows */}
+			<HeroRow d={derived} />
+			<ModeStatsRow d={derived} />
+
 			{/* Test Configuration */}
 			{report.metadata && (
 				<Card>
@@ -108,37 +113,6 @@ export default function OverviewTab({ report }: TabProps) {
 					</CardContent>
 				</Card>
 			)}
-
-			{/* Summary Statistics */}
-			<div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-				<MetricCard
-					icon={<Activity className="w-5 h-5 text-primary" />}
-					label="Total Requests"
-					value={formatNumber(report.summary.totalRequests)}
-				/>
-				<MetricCard
-					icon={<CheckCircle className="w-5 h-5 text-green-500" />}
-					label="Successful"
-					value={formatNumber(
-						report.summary.totalRequests - report.summary.failedRequests
-					)}
-				/>
-				<MetricCard
-					icon={<XCircle className="w-5 h-5 text-destructive" />}
-					label="Failed"
-					value={formatNumber(report.summary.failedRequests)}
-					className={
-						report.summary.failedRequests > 0
-							? "bg-destructive/5 border-destructive/20"
-							: ""
-					}
-				/>
-				<MetricCard
-					icon={<Zap className="w-5 h-5 text-blue-500" />}
-					label="Avg RPS"
-					value={formatNumber(report.summary.avgRps)}
-				/>
-			</div>
 
 			{/* Status Codes */}
 			{report.statusCodes && Object.keys(report.statusCodes).length > 0 && (
