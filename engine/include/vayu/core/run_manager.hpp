@@ -128,6 +128,7 @@ class RunManager {
     private:
     mutable std::mutex mutex_;
     std::map<std::string, std::shared_ptr<RunContext>> active_runs_;
+    std::map<std::string, std::shared_ptr<RunContext>> retained_runs_;
 
     public:
     void register_run (const std::string& run_id, std::shared_ptr<RunContext> context);
@@ -135,6 +136,16 @@ class RunManager {
     void unregister_run (const std::string& run_id);
     size_t active_count () const;
     std::vector<std::shared_ptr<RunContext>> get_all_active_runs () const;
+
+    // ---- Live topic retention (N1) ---------------------------------------
+    // On completion a run is MOVED from active_runs_ to retained_runs_ so its
+    // in-memory tick topic survives for late/instant consumers. active_count()
+    // and get_all_active_runs() keep their exact meaning (active only).
+    void retain_run (const std::string& run_id);
+    // Active OR retained-within-window. Used only by /metrics/live.
+    std::shared_ptr<RunContext> get_run_or_retained (const std::string& run_id);
+    // Evict retained runs whose completed_at_ms is older than ttl_ms.
+    void sweep_retained (int64_t ttl_ms);
 
     // Helper to start a run
     void start_run (const std::string& run_id,

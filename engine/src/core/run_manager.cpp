@@ -227,6 +227,36 @@ void RunManager::unregister_run (const std::string& run_id) {
     active_runs_.erase (run_id);
 }
 
+void RunManager::retain_run (const std::string& run_id) {
+    std::lock_guard<std::mutex> lock (mutex_);
+    auto it = active_runs_.find (run_id);
+    if (it == active_runs_.end ()) return;
+    it->second->completed_at_ms.store (now_ms ());
+    retained_runs_[run_id] = it->second;
+    active_runs_.erase (it);
+}
+
+std::shared_ptr<RunContext> RunManager::get_run_or_retained (const std::string& run_id) {
+    std::lock_guard<std::mutex> lock (mutex_);
+    auto a = active_runs_.find (run_id);
+    if (a != active_runs_.end ()) return a->second;
+    auto r = retained_runs_.find (run_id);
+    if (r != retained_runs_.end ()) return r->second;
+    return nullptr;
+}
+
+void RunManager::sweep_retained (int64_t ttl_ms) {
+    std::lock_guard<std::mutex> lock (mutex_);
+    int64_t cutoff = now_ms () - ttl_ms;
+    for (auto it = retained_runs_.begin (); it != retained_runs_.end ();) {
+        if (it->second->completed_at_ms.load () < cutoff) {
+            it = retained_runs_.erase (it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 size_t RunManager::active_count () const {
     std::lock_guard<std::mutex> lock (mutex_);
     return active_runs_.size ();
