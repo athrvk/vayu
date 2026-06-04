@@ -362,7 +362,7 @@ useHealthQuery() // Polls every 5 seconds
 ```typescript
 {
   status: "ok",
-  version: "0.2.1",
+  version: "0.3.0",
   workers: 8
 }
 ```

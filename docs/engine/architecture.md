@@ -1,6 +1,6 @@
 # Vayu Engine Architecture
 
-**Version:** 0.2.1  
+**Version:** 0.3.0  
 **Last Updated:** June 2026
 
 ## Overview
