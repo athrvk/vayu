@@ -265,6 +265,8 @@ export interface RunReport {
 			duration?: string;
 			targetRps?: number;
 			concurrency?: number;
+			startConcurrency?: number;
+			rampUpDuration?: string;
 			timeout?: number;
 			comment?: string;
 		};
@@ -281,6 +283,12 @@ export interface RunReport {
 		backpressure?: number;
 		testDuration?: number;
 		setupOverhead?: number;
+		peakConcurrency?: number;
+		droppedRequests?: number;
+		avgQueueWaitMs?: number;
+		bytesSent?: number;
+		bytesReceived?: number;
+		throughputBytesPerSec?: number;
 	};
 	latency: {
 		min: number;

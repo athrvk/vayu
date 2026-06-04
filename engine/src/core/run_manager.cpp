@@ -412,6 +412,21 @@ RunManager& manager) {
             final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::LatencyMin, percentiles.min, R"({"percentile":"min"})" });
             final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::PeakConcurrency,
+            static_cast<double> (context->peak_in_flight.load ()), "" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::DroppedRequests,
+            static_cast<double> (context->metrics_collector->dropped_requests ()), "" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::QueueWaitAvg,
+            context->metrics_collector->average_queue_wait (), "" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::BytesSent,
+            static_cast<double> (context->metrics_collector->total_bytes_sent ()), "" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::BytesReceived,
+            static_cast<double> (context->metrics_collector->total_bytes_received ()), "" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::ErrorRate, error_rate, "" });
             final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::TotalRequests, static_cast<double> (completed), "" });

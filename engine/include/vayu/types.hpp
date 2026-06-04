@@ -555,8 +555,9 @@ enum class MetricName {
     SetupOverhead,   // Time spent on setup/teardown in seconds
     DroppedRequests, // Requests discarded due to generator backpressure (never reached server)
     QueueWaitAvg,    // Average time requests spent queued inside the generator
-    BytesSent,       // Cumulative wire bytes uploaded (request headers + body)
-    BytesReceived    // Cumulative wire bytes downloaded (response headers + body)
+    BytesSent,        // Cumulative wire bytes uploaded (request headers + body)
+    BytesReceived,    // Cumulative wire bytes downloaded (response headers + body)
+    PeakConcurrency   // High-water mark of in-flight requests over the run
 };
 
 inline const char* to_string (MetricName name) {
@@ -591,6 +592,7 @@ inline const char* to_string (MetricName name) {
     case MetricName::QueueWaitAvg: return "queue_wait_avg";
     case MetricName::BytesSent: return "bytes_sent";
     case MetricName::BytesReceived: return "bytes_received";
+    case MetricName::PeakConcurrency: return "peak_concurrency";
     }
     return "unknown";
 }
@@ -656,6 +658,8 @@ inline std::optional<MetricName> parse_metric_name (const std::string& str) {
         return MetricName::BytesSent;
     if (str == "bytes_received")
         return MetricName::BytesReceived;
+    if (str == "peak_concurrency")
+        return MetricName::PeakConcurrency;
     return std::nullopt;
 }
 

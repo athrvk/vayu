@@ -395,6 +395,8 @@ TEST (MetricNameBytes, RoundTrips) {
     EXPECT_STREQ (vayu::to_string (vayu::MetricName::BytesReceived), "bytes_received");
     EXPECT_EQ (vayu::parse_metric_name ("bytes_sent"), vayu::MetricName::BytesSent);
     EXPECT_EQ (vayu::parse_metric_name ("bytes_received"), vayu::MetricName::BytesReceived);
+    EXPECT_STREQ (vayu::to_string (vayu::MetricName::PeakConcurrency), "peak_concurrency");
+    EXPECT_EQ (vayu::parse_metric_name ("peak_concurrency"), vayu::MetricName::PeakConcurrency);
 }
 
 // Wire bytes are captured from curl and accumulated. The mock returns a fixed
