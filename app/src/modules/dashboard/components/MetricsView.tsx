@@ -33,6 +33,8 @@ import {
 	buildLatencyChartData,
 	buildRampOverlay,
 	buildPercentileChartData,
+	buildStatusOverTime,
+	latestThroughputMbps,
 } from "../utils/metricsTransforms";
 import { computeBreakpoint } from "../utils/computeBreakpoint";
 import { HeroRow } from "./hero/HeroRow";
@@ -40,6 +42,7 @@ import { ModeStatsRow } from "./stats/ModeStatsRow";
 import { ThroughputOverTimeChart, type ThroughputPoint } from "./charts/ThroughputOverTimeChart";
 import { LatencyOverTimeChart } from "./charts/LatencyOverTimeChart";
 import { PercentilesOverTimeChart } from "./charts/PercentilesOverTimeChart";
+import { StatusCodesOverTimeChart } from "./charts/StatusCodesOverTimeChart";
 import { HdrPercentilePlot, SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
 import { ResponseTimeVsConcurrencyScatter } from "./charts/ResponseTimeVsConcurrencyScatter";
@@ -81,6 +84,10 @@ function MetricsView({
 
 	const percentileChartData = useMemo(() => buildPercentileChartData(chartWindow), [chartWindow]);
 	const hasPercentileData = percentileChartData.some((d) => d.p99 > 0);
+
+	const statusChartData = useMemo(() => buildStatusOverTime(chartWindow), [chartWindow]);
+	const hasStatusData = statusChartData.length > 1;
+	const liveMbps = useMemo(() => latestThroughputMbps(chartWindow), [chartWindow]);
 
 	const rampOverlay = useMemo(
 		() => (loadMode === "ramp_up" ? buildRampOverlay(chartWindow, rampConfig ?? {}) : null),
@@ -370,6 +377,44 @@ function MetricsView({
 							/>
 						</div>
 					)}
+
+			{/* Status codes over time — stacked per-interval class composition */}
+			{hasStatusData && (
+				<div className="bg-card border border-border rounded-md p-3.5">
+					<div className="flex items-baseline justify-between mb-3">
+						<h3 className="text-[12px] font-semibold text-foreground">
+							Status codes over time
+							<InfoChip tip={TOOLTIPS.statusCodesOverTime} />
+						</h3>
+						<div className="flex items-center gap-3.5 text-[11px] font-mono text-muted-foreground">
+							{(
+								[
+									["2xx", "hsl(var(--success))"],
+									["3xx", "hsl(var(--primary))"],
+									["4xx", "hsl(var(--warning))"],
+									["5xx", "hsl(var(--destructive))"],
+									["err", "hsl(var(--destructive) / 0.5)"],
+								] as const
+							).map(([label, color]) => (
+								<span key={label}>
+									<span
+										className="inline-block w-2.5 h-2.5 mr-1.5 align-middle rounded-[2px]"
+										style={{ background: color }}
+									/>
+									{label}
+								</span>
+							))}
+							{liveMbps > 0 && (
+								<span className="text-foreground">
+									{fmt(liveMbps, 2)}
+									<span className="text-muted-foreground"> MB/s in</span>
+								</span>
+							)}
+						</div>
+					</div>
+					<StatusCodesOverTimeChart data={statusChartData} />
+				</div>
+			)}
 
 			{/* Row 3 — HDR plot + Timing waterfall */}
 			<div className="grid grid-cols-[repeat(auto-fit,minmax(380px,1fr))] gap-3">

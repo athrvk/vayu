@@ -5,6 +5,8 @@ import {
 	buildLatencyChartData,
 	buildRampOverlay,
 	buildPercentileChartData,
+	buildStatusOverTime,
+	latestThroughputMbps,
 } from "./metricsTransforms";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
@@ -162,5 +164,45 @@ describe("buildPercentileChartData", () => {
 		]);
 		expect(data.map((d) => d.time)).toEqual([0.5, 1.0]);
 		expect(data[1].p99).toBe(90);
+	});
+});
+
+describe("buildStatusOverTime", () => {
+	it("classifies and diffs cumulative status maps into per-interval counts", () => {
+		const out = buildStatusOverTime([
+			tick({ elapsed_seconds: 0.5, status_codes: { "200": 100, "404": 5 } }),
+			tick({ elapsed_seconds: 1.0, status_codes: { "200": 180, "404": 7, "500": 3 } }),
+		]);
+		expect(out).toHaveLength(2);
+		// First interval = cumulative-so-far; second = diff from first.
+		expect(out[0]).toMatchObject({ time: 0.5, c2xx: 100, c4xx: 5, c5xx: 0 });
+		expect(out[1]).toMatchObject({ time: 1.0, c2xx: 80, c4xx: 2, c5xx: 3 });
+	});
+
+	it("treats status code 0 as connection error and clamps diffs >= 0", () => {
+		const out = buildStatusOverTime([
+			tick({ elapsed_seconds: 0.5, status_codes: { "0": 4 } }),
+			tick({ elapsed_seconds: 1.0, status_codes: { "0": 4 } }),
+		]);
+		expect(out[0].cErr).toBe(4);
+		expect(out[1].cErr).toBe(0);
+	});
+
+	it("returns [] when no tick carries a status map", () => {
+		expect(buildStatusOverTime([tick({ elapsed_seconds: 1 })])).toEqual([]);
+	});
+});
+
+describe("latestThroughputMbps", () => {
+	it("diffs the last two cumulative byte samples into MB/s", () => {
+		const mbps = latestThroughputMbps([
+			tick({ elapsed_seconds: 1, bytes_received: 1_000_000 }),
+			tick({ elapsed_seconds: 2, bytes_received: 3_000_000 }),
+		]);
+		expect(mbps).toBeCloseTo(2.0); // 2 MB over 1s
+	});
+
+	it("returns 0 with fewer than two samples", () => {
+		expect(latestThroughputMbps([tick({ bytes_received: 5 })])).toBe(0);
 	});
 });

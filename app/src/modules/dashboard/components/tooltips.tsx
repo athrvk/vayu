@@ -93,6 +93,8 @@ export const TOOLTIPS = {
 		"Per-tick p50 / p95 / p99 latency over the run. p50 is what most users felt; p99 is the tail — heavy-tail divergence shows up as p99 climbing while p50 stays flat. Sourced from per-tick HdrHistogram snapshots.",
 	responseTimeVsConcurrency:
 		"Scatter plot — each dot is one tick. X axis is the concurrency at that moment; Y is p99 latency at that moment. A flat left region means the server has headroom; the elbow (knee) is the breakpoint; the steep right region means the server is saturated. The amber vertical line marks where p99 first crossed the SLO threshold.",
+	statusCodesOverTime:
+		"Per-interval count of responses by status class, stacked. A healthy run is a solid 2xx field; 4xx/5xx or connection-error bands rising out of it pinpoint when failures happened. Derived by diffing the cumulative status-code map between ticks.",
 
 	// ---- Other existing cards ----
 	rampDeviation:

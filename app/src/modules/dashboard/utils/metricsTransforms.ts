@@ -18,6 +18,83 @@ export function isRateLimitedRun(mode: string | undefined, targetRps: number | u
 	return mode === "constant_rps" && (targetRps ?? 0) > 0;
 }
 
+/** Per-interval status-class counts at a point in time. */
+export interface StatusPoint {
+	time: number;
+	c2xx: number;
+	c3xx: number;
+	c4xx: number;
+	c5xx: number;
+	cErr: number; // network/connection failures (status code 0)
+}
+
+interface ClassSums {
+	c2: number;
+	c3: number;
+	c4: number;
+	c5: number;
+	cErr: number;
+}
+
+function classifyCumulative(codes: Record<string, number> | undefined): ClassSums {
+	const s: ClassSums = { c2: 0, c3: 0, c4: 0, c5: 0, cErr: 0 };
+	for (const [code, count] of Object.entries(codes ?? {})) {
+		const n = Number(code);
+		if (n >= 200 && n < 300) s.c2 += count;
+		else if (n >= 300 && n < 400) s.c3 += count;
+		else if (n >= 400 && n < 500) s.c4 += count;
+		else if (n >= 500 && n < 600) s.c5 += count;
+		else s.cErr += count; // 0 = connection/network error
+	}
+	return s;
+}
+
+/**
+ * Build per-interval status-class counts from the cumulative `status_codes`
+ * map each tick carries. Buckets to 0.5s, then diffs consecutive buckets so the
+ * stacked chart shows how many of each class arrived in each interval — a 5xx
+ * burst shows up as a band, not a slope change. Diffs are clamped >= 0 (the
+ * source is monotonic). Returns [] when no tick carries a status map.
+ */
+export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
+	const byBucket = new Map<number, ClassSums & { time: number }>();
+	for (const m of history) {
+		if (!m.status_codes) continue;
+		const t = Math.round(m.elapsed_seconds * 2) / 2;
+		byBucket.set(t, { time: t, ...classifyCumulative(m.status_codes) });
+	}
+	const cum = Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
+	const out: StatusPoint[] = [];
+	let prev: ClassSums = { c2: 0, c3: 0, c4: 0, c5: 0, cErr: 0 };
+	for (const c of cum) {
+		out.push({
+			time: c.time,
+			c2xx: Math.max(0, c.c2 - prev.c2),
+			c3xx: Math.max(0, c.c3 - prev.c3),
+			c4xx: Math.max(0, c.c4 - prev.c4),
+			c5xx: Math.max(0, c.c5 - prev.c5),
+			cErr: Math.max(0, c.cErr - prev.cErr),
+		});
+		prev = c;
+	}
+	return out;
+}
+
+/**
+ * Latest instantaneous receive throughput in MB/s, derived by diffing the last
+ * two cumulative `bytes_received` samples (mirrors how currentRps is derived).
+ * Returns 0 when there aren't two samples or no byte data.
+ */
+export function latestThroughputMbps(history: LoadTestMetrics[]): number {
+	if (history.length < 2) return 0;
+	const a = history[history.length - 2];
+	const b = history[history.length - 1];
+	const dBytes = (b.bytes_received ?? 0) - (a.bytes_received ?? 0);
+	const dt = b.elapsed_seconds - a.elapsed_seconds;
+	if (dt <= 0 || dBytes <= 0) return 0;
+	return dBytes / dt / 1e6;
+}
+
 export interface LatencyPoint {
 	time: number; // elapsed seconds, bucketed to 0.5s
 	latencyMs: number; // perceived (avg_latency_ms)

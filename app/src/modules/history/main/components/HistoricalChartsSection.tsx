@@ -25,6 +25,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { Loader2 } from "lucide-react";
 import type { LoadTestMetrics } from "@/types";
+import { buildStatusOverTime } from "@/modules/dashboard/utils/metricsTransforms";
+import { StatusCodesOverTimeChart } from "@/modules/dashboard/components/charts/StatusCodesOverTimeChart";
 
 interface HistoricalChartsSectionProps {
 	data: LoadTestMetrics[];
@@ -99,6 +101,7 @@ export default function HistoricalChartsSection({
 	progress,
 }: HistoricalChartsSectionProps) {
 	const chartData = useMemo(() => prepareChartData(data), [data]);
+	const statusData = useMemo(() => buildStatusOverTime(data), [data]);
 
 	if (isLoading && data.length === 0) {
 		return (
@@ -283,6 +286,18 @@ export default function HistoricalChartsSection({
 					</ResponsiveContainer>
 				</CardContent>
 			</Card>
+
+			{/* Status Codes Over Time — stacked per-interval class composition */}
+			{statusData.length > 1 && (
+				<Card>
+					<CardHeader className="pb-2">
+						<CardTitle className="text-base">Status Codes Over Time</CardTitle>
+					</CardHeader>
+					<CardContent>
+						<StatusCodesOverTimeChart data={statusData} />
+					</CardContent>
+				</Card>
+			)}
 		</div>
 	);
 }

@@ -11,7 +11,8 @@ import { render } from "@testing-library/react";
 import { ThroughputOverTimeChart } from "./ThroughputOverTimeChart";
 import { LatencyOverTimeChart } from "./LatencyOverTimeChart";
 import { PercentilesOverTimeChart } from "./PercentilesOverTimeChart";
-import type { RampOverlay } from "../../utils/metricsTransforms";
+import { StatusCodesOverTimeChart } from "./StatusCodesOverTimeChart";
+import type { RampOverlay, StatusPoint } from "../../utils/metricsTransforms";
 
 const throughput = [
 	{ time: 0.5, rps: 100, sendRate: 110 },
@@ -90,6 +91,19 @@ describe("PercentilesOverTimeChart", () => {
 		const { container } = render(
 			<PercentilesOverTimeChart data={percentiles} isCompleted={false} />
 		);
+		expect(container.innerHTML).toMatchSnapshot();
+	});
+});
+
+const statusOverTime: StatusPoint[] = [
+	{ time: 0.5, c2xx: 90, c3xx: 0, c4xx: 5, c5xx: 0, cErr: 0 },
+	{ time: 1.0, c2xx: 80, c3xx: 2, c4xx: 10, c5xx: 6, cErr: 2 },
+	{ time: 1.5, c2xx: 95, c3xx: 0, c4xx: 3, c5xx: 1, cErr: 0 },
+];
+
+describe("StatusCodesOverTimeChart", () => {
+	it("stacked class composition", () => {
+		const { container } = render(<StatusCodesOverTimeChart data={statusOverTime} />);
 		expect(container.innerHTML).toMatchSnapshot();
 	});
 });
