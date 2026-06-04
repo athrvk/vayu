@@ -10,10 +10,12 @@
  */
 
 import type { RunReport, LoadTestMetrics } from "@/types";
+import type { DashboardDerived } from "@/modules/dashboard/types";
 
 export interface TabProps {
 	report: RunReport;
 	runId?: string;
+	derived: DashboardDerived;
 }
 
 export interface DesignRunDetailProps {
