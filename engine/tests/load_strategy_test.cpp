@@ -389,3 +389,10 @@ TEST_F (LoadStrategyTest, PercentilesExposeNonZeroMax) {
     EXPECT_GE (p.max, p.p99);
     EXPECT_GT (p.min, 0.0);
 }
+
+TEST (MetricNameBytes, RoundTrips) {
+    EXPECT_STREQ (vayu::to_string (vayu::MetricName::BytesSent), "bytes_sent");
+    EXPECT_STREQ (vayu::to_string (vayu::MetricName::BytesReceived), "bytes_received");
+    EXPECT_EQ (vayu::parse_metric_name ("bytes_sent"), vayu::MetricName::BytesSent);
+    EXPECT_EQ (vayu::parse_metric_name ("bytes_received"), vayu::MetricName::BytesReceived);
+}
