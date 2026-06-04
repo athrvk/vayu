@@ -180,3 +180,67 @@ TEST_F (LoadStrategyTest, ConstantConcurrencyHoldsTargetInFlight) {
     EXPECT_GE (context->peak_in_flight.load (), N - 5)
     << "never reached target; seeding/refill under-submitting";
 }
+
+// Closed-loop ramp: in-flight tracks the ramp line and never overshoots target.
+TEST_F (LoadStrategyTest, RampUpTracksTargetWithoutOvershoot) {
+    const size_t TARGET = 50;
+    nlohmann::json config = {
+        { "mode", "ramp_up" },
+        { "duration", "3s" },
+        { "rampUpDuration", "2s" },
+        { "startConcurrency", 1 },
+        { "concurrency", TARGET },
+    };
+
+    auto context = std::make_shared<vayu::core::RunContext> ("test-ramp", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->slow_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (true);
+
+    // After a full ramp to TARGET, peak settles at ~TARGET, never far above.
+    EXPECT_LE (context->peak_in_flight.load (), TARGET + 10);
+    EXPECT_GE (context->peak_in_flight.load (), TARGET - 5);
+}
+
+// Behavior-change check: duration < ramp runs a partial ramp for the full
+// duration and submits requests (old open-loop code finished instantly with 0).
+TEST_F (LoadStrategyTest, RampUpDurationShorterThanRampStillRuns) {
+    nlohmann::json config = {
+        { "mode", "ramp_up" },
+        { "duration", "1s" },
+        { "rampUpDuration", "10s" },
+        { "startConcurrency", 1 },
+        { "concurrency", 50 },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-ramp-short", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (true);
+
+    EXPECT_GT (context->requests_sent.load (), 0u)
+    << "duration<ramp submitted nothing; partial-ramp behavior not implemented";
+}

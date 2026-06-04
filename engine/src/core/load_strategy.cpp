@@ -483,49 +483,30 @@ class RampUpLoadStrategy : public LoadStrategy {
         vayu::utils::log_info ("  Start Concurrency: " + std::to_string (start_concurrency));
         vayu::utils::log_info ("  Target Concurrency: " + std::to_string (target_concurrency));
 
-        auto test_start = std::chrono::steady_clock::now ();
+        auto submit_one = [&context, &db, &request] () {
+            context->event_loop->submit (request,
+            [context, &db] (size_t, vayu::Result<vayu::Response> result) {
+                handle_result (context, db, std::move (result));
+            });
+            context->requests_sent++;
+        };
 
-        while (!context->should_stop) {
-            auto now = std::chrono::steady_clock::now ();
-            auto elapsed =
-            std::chrono::duration_cast<std::chrono::milliseconds> (now - test_start)
-            .count ();
-
-            if (elapsed >= duration_ms) {
-                break;
+        // target(t): linear from start_concurrency to target_concurrency over
+        // ramp_duration_ms, then flat at target_concurrency.
+        auto target_fn = [start_concurrency, target_concurrency, ramp_duration_ms] (
+                         int64_t el) -> size_t {
+            if (ramp_duration_ms <= 0 || el >= ramp_duration_ms) {
+                return target_concurrency;
             }
+            double progress = static_cast<double> (el) / static_cast<double> (ramp_duration_ms);
+            return static_cast<size_t> (static_cast<double> (start_concurrency) +
+            static_cast<double> (target_concurrency - start_concurrency) * progress);
+        };
 
-            // Calculate current concurrency
-            size_t current_concurrency = target_concurrency;
-            if (elapsed < ramp_duration_ms) {
-                double progress = static_cast<double> (elapsed) /
-                static_cast<double> (ramp_duration_ms);
-                current_concurrency =
-                static_cast<size_t> (static_cast<double> (start_concurrency) +
-                (static_cast<double> (target_concurrency - start_concurrency) * progress));
-            }
-
-            // Backpressure
-            size_t max_pending = config.value (
-            "maxInFlight", std::max (target_concurrency * 5U, size_t (1000)));
-            bool backpressured = context->in_flight () > max_pending;
-
-            if (backpressured) {
-                std::this_thread::sleep_for (std::chrono::milliseconds (50));
-                continue;
-            }
-
-            // Submit batch based on current concurrency
-            for (size_t i = 0; i < current_concurrency && !context->should_stop; ++i) {
-                context->event_loop->submit (request,
-                [context, &db] (size_t, vayu::Result<vayu::Response> result) {
-                    handle_result (context, db, std::move (result));
-                });
-                context->requests_sent++;
-            }
-
-            std::this_thread::sleep_for (std::chrono::milliseconds (10));
-        }
+        maintain_concurrency (
+        context, submit_one, target_fn,
+        [] () { return std::numeric_limits<size_t>::max (); },
+        [duration_ms] (int64_t el) { return el < duration_ms; });
     }
 };
 
