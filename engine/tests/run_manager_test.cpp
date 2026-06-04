@@ -58,6 +58,16 @@ TEST (RunManagerRetention, RetainMovesOutOfActiveButKeepsLookup) {
     EXPECT_GT (found->completed_at_ms.load (), 0);
 }
 
+TEST (BuildTickPayload, WrapsStatsAsSseEventWithOffsetId) {
+    nlohmann::json stats;
+    stats["totalRequests"] = 42;
+    std::string p = vayu::core::build_tick_payload (stats, 7);
+    EXPECT_NE (p.find ("event: metrics\n"), std::string::npos);
+    EXPECT_NE (p.find ("id: 7\n"), std::string::npos);
+    EXPECT_NE (p.find ("\"totalRequests\":42"), std::string::npos);
+    EXPECT_EQ (p.substr (p.size () - 2), "\n\n");
+}
+
 TEST (RunManagerRetention, SweepEvictsExpiredOnly) {
     RunManager mgr;
     nlohmann::json cfg;

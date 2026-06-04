@@ -552,6 +552,11 @@ RunManager& manager) {
     manager.retain_run (context->run_id);
 }
 
+std::string build_tick_payload (const nlohmann::json& stats, size_t offset) {
+    return "event: metrics\nid: " + std::to_string (offset) + "\ndata: " +
+    stats.dump () + "\n\n";
+}
+
 std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
 const std::shared_ptr<RunContext>& context, int64_t timestamp) {
     auto& mc = *context->metrics_collector;
@@ -577,12 +582,69 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     auto last_update  = std::chrono::steady_clock::now ();
     size_t last_total = 0;
 
-    // Get stats collection interval from config
-    int stats_interval_ms = db_ptr->get_config_int (
-    "statsInterval", vayu::core::constants::server::STATS_INTERVAL_MS);
+    // Live tick cadence (default 100 ms); DB batch still gated at 1 Hz.
+    int tick_interval_ms = db_ptr->get_config_int (
+    "liveTickIntervalMs", vayu::core::constants::server::STATS_INTERVAL_MS);
+
+    // Producer-side delta-RPS state (mirrors the SSE handler calculation).
+    auto rps_last_time      = std::chrono::steady_clock::now ();
+    size_t rps_last_total   = 0;
+    double live_current_rps = 0.0;
+    bool   rps_first        = true;
+
+    // Build and append one SSE "metrics" event to the in-memory tick topic.
+    // Fields match the SSE handler (metrics.cpp) field-for-field.
+    auto emit_live_tick = [&] () {
+        size_t active_count =
+        context->event_loop ? context->event_loop->active_count () : 0;
+        size_t requests_sent     = context->requests_sent.load ();
+        size_t requests_expected = context->requests_expected.load ();
+        int64_t now_wall_ms      = now_ms ();
+        double elapsed_seconds =
+        context->start_time_ms > 0 ?
+        static_cast<double> (now_wall_ms - context->start_time_ms) / 1000.0 : 0.0;
+        auto stats = context->metrics_collector->get_current_stats (
+        active_count, elapsed_seconds, requests_sent, requests_expected);
+
+        // Instantaneous RPS: delta-based, updated every ≥100 ms.
+        auto now_steady     = std::chrono::steady_clock::now ();
+        size_t current_total = stats["totalRequests"].get<size_t> ();
+        if (rps_first) {
+            rps_last_total = current_total;
+            rps_last_time  = now_steady;
+            rps_first      = false;
+        } else {
+            double iv = std::chrono::duration<double> (now_steady - rps_last_time).count ();
+            if (iv >= 0.1) {
+                live_current_rps =
+                static_cast<double> (current_total - rps_last_total) / iv;
+                rps_last_total = current_total;
+                rps_last_time  = now_steady;
+            }
+        }
+        stats["currentRps"] = live_current_rps;
+
+        // Backpressure: sent but not yet responded (mirrors SSE handler).
+        size_t backpressure =
+        requests_sent > current_total ? requests_sent - current_total : 0;
+        stats["backpressure"]     = backpressure;
+        stats["runId"]            = context->run_id;
+        stats["timestamp"]        = now_wall_ms;
+        stats["requestsSent"]     = requests_sent;
+        stats["requestsExpected"] = requests_expected;
+
+        size_t offset = context->published_count.load ();
+        context->append_tick (build_tick_payload (stats, offset));
+    };
+
+    // Tick 0: emit immediately so consumers see data before the first sleep.
+    emit_live_tick ();
 
     while (context->is_running && !context->should_stop) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (stats_interval_ms));
+        std::this_thread::sleep_for (std::chrono::milliseconds (tick_interval_ms));
+
+        // Emit a live tick every iteration regardless of the 1 Hz DB gate.
+        emit_live_tick ();
 
         auto now = std::chrono::steady_clock::now ();
         auto elapsed = std::chrono::duration<double> (now - last_update).count ();
@@ -637,7 +699,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             try {
                 auto timestamp = now_ms ();
                 std::vector<vayu::db::Metric> metrics;
-                metrics.reserve (8);
+                metrics.reserve (10);
 
                 metrics.push_back ({ 0, context->run_id, timestamp,
                 vayu::MetricName::Rps, current_rps, "" });
@@ -660,6 +722,14 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                 auto enrichment = build_tick_enrichment_metrics (context, timestamp);
                 metrics.insert (metrics.end (), enrichment.begin (), enrichment.end ());
 
+                // Avg latency and queue-wait enrichment for the DB batch.
+                metrics.push_back ({ 0, context->run_id, timestamp,
+                vayu::MetricName::LatencyAvg,
+                context->metrics_collector->average_latency (), "" });
+                metrics.push_back ({ 0, context->run_id, timestamp,
+                vayu::MetricName::QueueWaitAvg,
+                context->metrics_collector->average_queue_wait (), "" });
+
                 // Single transaction instead of 5 separate lock acquisitions
                 db.add_metrics_batch (metrics);
             } catch (const std::exception& e) {
@@ -670,6 +740,11 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             last_total  = current_total;
         }
     }
+
+    // Final settled tick before signalling closed — consumers use this ordering
+    // as the termination contract (last data before closed==true).
+    emit_live_tick ();
+    context->closed.store (true, std::memory_order_release);
 }
 
 } // namespace vayu::core

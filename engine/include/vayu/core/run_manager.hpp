@@ -124,6 +124,12 @@ struct RunContext {
 [[nodiscard]] std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
 const std::shared_ptr<RunContext>& context, int64_t timestamp);
 
+/**
+ * @brief Wrap a per-tick stats object as a wire-ready SSE "metrics" event,
+ * tagged with `id: <offset>` for Last-Event-ID resume. Extracted for testing.
+ */
+[[nodiscard]] std::string build_tick_payload (const nlohmann::json& stats, size_t offset);
+
 class RunManager {
     private:
     mutable std::mutex mutex_;
