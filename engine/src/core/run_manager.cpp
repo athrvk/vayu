@@ -197,6 +197,9 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg)
 
 RunContext::~RunContext () {
     should_stop = true;
+    // Wake the closed-loop controller so it observes should_stop without
+    // waiting for its 50ms safety-net timeout before the join below.
+    notify_refill ();
     if (worker_thread.joinable ()) {
         worker_thread.join ();
     }

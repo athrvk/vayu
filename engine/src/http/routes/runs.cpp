@@ -133,6 +133,9 @@ void register_run_routes (RouteContext& ctx) {
                 "POST /run/:id/stop - Signaling stop for active run: " + run_id);
                 // Signal the running thread to stop
                 context->should_stop = true;
+                // Wake the closed-loop controller for immediate cancellation
+                // (otherwise it waits up to its 50ms safety-net timeout).
+                context->notify_refill ();
 
                 // Wait for graceful shutdown
                 vayu::utils::MetricsHelper::wait_for_graceful_stop (*context, 5);

@@ -326,3 +326,44 @@ TEST_F (LoadStrategyTest, FastEndpointHoldsMeanInFlight) {
     EXPECT_GE (mean_inflight, 0.5 * static_cast<double> (N))
     << "mean in-flight collapsed (" << mean_inflight << "); cv-wake not refilling";
 }
+
+// Setting should_stop must end the run promptly. The controller breaks on
+// should_stop (caught by its 50ms timeout even without a notify); the
+// production stop paths additionally notify_refill so cancellation is immediate.
+TEST_F (LoadStrategyTest, StopWakesControllerPromptly) {
+    nlohmann::json config = {
+        { "mode", "constant_concurrency" },
+        { "duration", "60s" }, // long; we stop it early
+        { "concurrency", 20 },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-stop", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+
+    std::thread stopper ([context] () {
+        std::this_thread::sleep_for (std::chrono::milliseconds (200));
+        context->should_stop = true;
+        context->notify_refill (); // mirrors the production stop path
+    });
+
+    auto t0 = std::chrono::steady_clock::now ();
+    strategy->execute (context, db, request);
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - t0)
+                      .count ();
+    stopper.join ();
+    context->event_loop->stop (false);
+
+    EXPECT_LT (elapsed_ms, 2000) << "controller did not observe should_stop promptly";
+}
