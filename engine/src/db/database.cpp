@@ -1270,20 +1270,22 @@ void Database::seed_default_config () {
 
     upsert_config (ConfigEntry{ "liveTickIntervalMs",
     std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
-    "integer", "Live Metrics Tick Interval",
+    "integer", "Live Metrics Tick Interval (ms)",
     "How often the engine produces a live-metrics tick into the in-memory "
     "replay topic during a run. Lower = smoother live charts, slightly more "
-    "CPU. Does not affect the 1Hz historical DB sampling.",
+    "CPU. Capped at 1s since slower ticks defeat live smoothness. Does not "
+    "affect the 1Hz historical DB sampling.",
     "observability", std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
     "10", "1000", now });
 
     upsert_config (ConfigEntry{ "liveRetentionMs",
     "60000",
-    "integer", "Live Metrics Retention",
+    "integer", "Live Metrics Retention (ms)",
     "How long a finished run's in-memory live-metrics topic is retained so the "
     "dashboard can still attach and replay it after completion. After this "
     "window the run is evicted and the dashboard falls back to the stored "
-    "report.",
+    "report. Set to 0 to disable retention (the dashboard falls back to the "
+    "stored report immediately).",
     "observability", "60000",
     "0", "600000", now });
 
