@@ -143,6 +143,39 @@ TEST_F (MetricsCollectorTest, TracksStatusCodeDistribution) {
     EXPECT_EQ (distribution[500], 2);
 }
 
+// Transport errors (timeout, connection, DNS) have no HTTP status. They are
+// recorded under status code 0 so the distribution sums to total_requests and
+// the dashboard breakdown reconciles with the "Total Requests" headline.
+TEST_F (MetricsCollectorTest, RecordsTransportErrorsAsStatusZero) {
+    collector->record_success (200, 10.0, 0.0);
+    collector->record_success (200, 10.0, 0.0);
+    collector->record_error (vayu::ErrorCode::Timeout, "timed out");
+    collector->record_error (vayu::ErrorCode::ConnectionFailed, "refused");
+
+    auto distribution = collector->status_code_distribution ();
+
+    EXPECT_EQ (distribution[200], 2);
+    EXPECT_EQ (distribution[0], 2); // both transport errors bucketed under 0
+}
+
+// The core invariant the report relies on: total_requests equals the sum of the
+// status-code distribution (successes carry their HTTP code, errors carry 0).
+TEST_F (MetricsCollectorTest, StatusDistributionSumsToTotalRequests) {
+    for (int i = 0; i < 8; ++i)
+        collector->record_success (200, 100.0, 0.0);
+    collector->record_success (500, 100.0, 0.0);
+    collector->record_error (vayu::ErrorCode::Timeout, "t");
+    collector->record_error (vayu::ErrorCode::DnsError, "d");
+
+    auto distribution = collector->status_code_distribution ();
+    size_t sum = 0;
+    for (const auto& [code, count] : distribution)
+        sum += count;
+
+    EXPECT_EQ (sum, collector->total_requests ());
+    EXPECT_EQ (distribution[0], 2);
+}
+
 // ============================================================================
 // Thread Safety Tests
 // ============================================================================

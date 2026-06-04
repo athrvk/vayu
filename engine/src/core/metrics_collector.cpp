@@ -143,6 +143,16 @@ const std::string& trace_data) {
     total_requests_.fetch_add (1, std::memory_order_relaxed);
     total_errors_.fetch_add (1, std::memory_order_relaxed);
 
+    // Transport errors (timeout, connection, DNS, …) carry no HTTP status, so
+    // bucket them under code 0. This keeps the status-code distribution summing
+    // to total_requests — the dashboard breakdown reconciles with the headline
+    // count, and the report's failed/errorRate tallies (recomputed from the
+    // distribution) account for them instead of silently dropping to zero.
+    {
+        std::lock_guard<std::mutex> lock (status_codes_mutex_);
+        status_code_counts_[0]++;
+    }
+
     // Store error record (always store all errors)
     {
         std::lock_guard<std::mutex> lock (errors_mutex_);

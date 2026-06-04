@@ -278,6 +278,15 @@ void register_run_routes (RouteContext& ctx) {
                 }
             }
 
+            // Recompute the error rate from the reconciled successful/failed
+            // split so transport errors (status code 0) are counted — the
+            // sampled-results error_rate from calculate_detailed_report omits them.
+            report.error_rate =
+            report.total_requests > 0 ?
+            static_cast<double> (report.failed_requests) * 100.0 /
+            static_cast<double> (report.total_requests) :
+            0.0;
+
             // Extract target RPS from config
             double target_rps = 0.0;
             try {
