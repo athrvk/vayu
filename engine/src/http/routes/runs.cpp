@@ -210,6 +210,10 @@ void register_run_routes (RouteContext& ctx) {
                     report.latency_p99 = m.value;
                 } else if (m.name == vayu::MetricName::LatencyP999) {
                     report.latency_p999 = m.value;
+                } else if (m.name == vayu::MetricName::LatencyMax) {
+                    report.latency_max = m.value;
+                } else if (m.name == vayu::MetricName::LatencyMin) {
+                    report.latency_min = m.value;
                 } else if (m.name == vayu::MetricName::LatencyAvg) {
                     report.latency_avg = m.value;
                 } else if (m.name == vayu::MetricName::TotalRequests) {

@@ -374,3 +374,18 @@ TEST (MetricNameLatencyMinMax, RoundTrips) {
     EXPECT_EQ (vayu::parse_metric_name ("latency_max"), vayu::MetricName::LatencyMax);
     EXPECT_EQ (vayu::parse_metric_name ("latency_min"), vayu::MetricName::LatencyMin);
 }
+
+// The collector's percentiles expose non-zero max/min; run_manager persists
+// them (LatencyMax/Min) so /report can surface them instead of 0.
+TEST_F (LoadStrategyTest, PercentilesExposeNonZeroMax) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-max", nlohmann::json{ { "mode", "constant_concurrency" } });
+    context->metrics_collector->record_success (200, 10.0, 0.0);
+    context->metrics_collector->record_success (200, 250.0, 0.0);
+    context->metrics_collector->record_success (200, 75.0, 0.0);
+
+    auto p = context->metrics_collector->calculate_percentiles ();
+    EXPECT_GT (p.max, 0.0);
+    EXPECT_GE (p.max, p.p99);
+    EXPECT_GT (p.min, 0.0);
+}

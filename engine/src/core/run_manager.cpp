@@ -408,6 +408,10 @@ RunManager& manager) {
             final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::LatencyP999, p999, R"({"percentile":"p999"})" });
             final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::LatencyMax, percentiles.max, R"({"percentile":"max"})" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::LatencyMin, percentiles.min, R"({"percentile":"min"})" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::ErrorRate, error_rate, "" });
             final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::TotalRequests, static_cast<double> (completed), "" });
