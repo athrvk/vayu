@@ -322,12 +322,14 @@ Start a load test run (Vayu Mode).
     "type": "none",
     "content": ""
   },
-  "mode": "constant",        // "constant", "ramp_up", or "iterations"
-  "concurrency": 100,        // Number of concurrent workers
-  "duration": "60s",         // Duration (for constant/ramp_up modes)
-  "rampUpDuration": "10s",   // Ramp-up time (for ramp_up mode)
-  "iterations": 0,           // Number of iterations (for iterations mode)
-  "targetRps": 1000,         // Optional, target requests per second
+  "mode": "constant_rps",    // "constant_rps", "constant_concurrency", "ramp_up", or "iterations"
+  "concurrency": 100,        // Target in-flight requests (constant_concurrency / ramp_up target / iterations)
+  "startConcurrency": 1,     // Ramp start concurrency (ramp_up mode)
+  "duration": "60s",         // Duration (constant_rps / constant_concurrency / ramp_up)
+  "rampUpDuration": "10s",   // Ramp-up time (ramp_up mode)
+  "iterations": 0,           // Number of iterations (iterations mode)
+  "targetRps": 1000,         // Target requests per second (constant_rps mode)
+  "maxInFlight": 10000,      // Optional; see "maxInFlight" note below — constant_rps only
   "requestId": "req_1234567890",      // Optional, links to saved request
   "environmentId": "env_1234567890",  // Optional
   "tests": ""                // Optional, deferred validation script
@@ -341,6 +343,19 @@ Start a load test run (Vayu Mode).
   "status": "running"
 }
 ```
+
+**Concurrency model.** `constant_concurrency`, `ramp_up`, and `iterations` are
+**closed-loop**: the engine holds in-flight requests at a target (`concurrency`,
+or the ramp curve from `startConcurrency` to `concurrency`) — when a request
+completes, another is issued. Throughput is a *result* (`concurrency ÷ latency`),
+not an input. `constant_rps` is **open-loop**: it dispatches at `targetRps`
+regardless of how fast responses return.
+
+**`maxInFlight`.** A hard cap on concurrent in-flight requests. It applies
+**only to `constant_rps`** (the open-loop rate mode), where it bounds how many
+requests may be outstanding before the engine drops or queues new ones; default
+≈ `max(targetRps × 10, 1000)`. For the closed-loop modes the `concurrency`
+target *is* the in-flight bound, so `maxInFlight` is ignored there.
 
 ## Metrics & Statistics
 
