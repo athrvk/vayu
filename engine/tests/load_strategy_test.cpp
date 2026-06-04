@@ -33,6 +33,12 @@ namespace {
 class SlowMockServer {
     public:
     SlowMockServer () {
+        // Generous server-side thread pool: the closed-loop tests hold tens of
+        // concurrent /slow requests, and the worker drains active transfers on
+        // stop(). A thread-starved mock would serialize them and make teardown
+        // take tens of seconds (a harness artifact, not engine behavior).
+        svr.new_task_queue = [] { return new httplib::ThreadPool (128); };
+
         svr.Get ("/slow", [] (const httplib::Request&, httplib::Response& res) {
             std::this_thread::sleep_for (std::chrono::milliseconds (500));
             res.set_content ("{}", "application/json");
@@ -171,7 +177,7 @@ TEST_F (LoadStrategyTest, ConstantConcurrencyHoldsTargetInFlight) {
     ASSERT_NE (strategy, nullptr);
 
     strategy->execute (context, db, request);
-    context->event_loop->stop (true);
+    context->event_loop->stop (false);
 
     // Peak must stay near N (allow a small epsilon for worker scheduling slop),
     // NOT the ~900 the old open-loop batch submitter produced.
@@ -207,7 +213,7 @@ TEST_F (LoadStrategyTest, RampUpTracksTargetWithoutOvershoot) {
     vayu::db::Database db (TEST_DB_PATH);
     auto strategy = vayu::core::LoadStrategy::create (config);
     strategy->execute (context, db, request);
-    context->event_loop->stop (true);
+    context->event_loop->stop (false);
 
     // After a full ramp to TARGET, peak settles at ~TARGET, never far above.
     EXPECT_LE (context->peak_in_flight.load (), TARGET + 10);
@@ -239,8 +245,40 @@ TEST_F (LoadStrategyTest, RampUpDurationShorterThanRampStillRuns) {
     vayu::db::Database db (TEST_DB_PATH);
     auto strategy = vayu::core::LoadStrategy::create (config);
     strategy->execute (context, db, request);
-    context->event_loop->stop (true);
+    context->event_loop->stop (false);
 
     EXPECT_GT (context->requests_sent.load (), 0u)
     << "duration<ramp submitted nothing; partial-ramp behavior not implemented";
+}
+
+// Closed-loop iterations: submit exactly M, never exceed N in flight.
+// N kept within the httplib test-mock thread pool so /fast completes promptly;
+// stop(false) skips the drain (peak is already captured during execute).
+TEST_F (LoadStrategyTest, IterationsSubmitsExactlyMAndHoldsN) {
+    const size_t M = 50;
+    const size_t N = 10;
+    nlohmann::json config = {
+        { "mode", "iterations" },
+        { "iterations", M },
+        { "concurrency", N },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-iter", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    EXPECT_EQ (context->requests_sent.load (), M) << "did not submit exactly M";
+    EXPECT_LE (context->peak_in_flight.load (), N + 10) << "exceeded concurrency N";
 }

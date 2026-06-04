@@ -411,32 +411,27 @@ class IterationsLoadStrategy : public LoadStrategy {
 
         context->requests_expected = iterations;
 
-        size_t submitted = 0;
-        while (submitted < iterations && !context->should_stop) {
-            // Backpressure - don't submit too many at once
-            size_t max_pending =
-            config.value ("maxInFlight", std::max (concurrency * 5U, size_t (100)));
-            if (context->in_flight () > max_pending) {
-                std::this_thread::sleep_for (std::chrono::milliseconds (10));
-                continue;
-            }
+        auto submit_one = [&context, &db, &request] () {
+            context->event_loop->submit (request,
+            [context, &db] (size_t, vayu::Result<vayu::Response> result) {
+                handle_result (context, db, std::move (result));
+            });
+            context->requests_sent++;
+        };
 
-            // Submit batch
-            size_t batch_size = std::min (concurrency, iterations - submitted);
-            for (size_t i = 0; i < batch_size && !context->should_stop; ++i) {
-                context->event_loop->submit (request,
-                [context, &db] (size_t, vayu::Result<vayu::Response> result) {
-                    handle_result (context, db, std::move (result));
-                });
-                submitted++;
-                context->requests_sent++;
-            }
+        maintain_concurrency (
+        context, submit_one,
+        [concurrency] (int64_t) { return concurrency; },     // target = N
+        [context, iterations] () -> size_t {                 // budget = M - sent
+            size_t sent = context->requests_sent.load ();
+            return sent < iterations ? iterations - sent : 0;
+        },
+        [context, iterations] (int64_t) {                    // stop at M
+            return context->requests_sent.load () < iterations;
+        });
 
-            // Small sleep to pace submissions
-            std::this_thread::sleep_for (std::chrono::milliseconds (10));
-        }
-
-        vayu::utils::log_info ("Submitted " + std::to_string (submitted) + " requests");
+        vayu::utils::log_info (
+        "Submitted " + std::to_string (context->requests_sent.load ()) + " requests");
     }
 };
 
