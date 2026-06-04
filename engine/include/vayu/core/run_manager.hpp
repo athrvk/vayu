@@ -54,6 +54,35 @@ struct RunContext {
     std::atomic<bool> closed_loop{ false };
     std::atomic<size_t> peak_in_flight{ 0 }; // high-water mark of in_flight()
 
+    // ---- Live metrics "topic" (N1) ---------------------------------------
+    // Append-only buffer of wire-ready SSE payload strings (each is a full
+    // "event: metrics\nid: <n>\ndata: {...}\n\n"). Produced by the metrics
+    // thread, replayed+tailed by /metrics/live. MUST be mutex-guarded — a
+    // vector realloc would move/free the backing array under a concurrent
+    // reader (UAF) even for already-published indices, so the atomic offset
+    // alone is not enough. Readers copy out under the lock.
+    mutable std::mutex tick_mtx;
+    std::vector<std::string> tick_buffer;
+    std::atomic<size_t> published_count{ 0 }; // == tick_buffer.size() (hint)
+    std::atomic<bool> closed{ false };         // set true AFTER final tick appended
+    std::atomic<int64_t> completed_at_ms{ 0 }; // 0 while running; stamped at completion
+
+    void append_tick (std::string payload) {
+        std::lock_guard<std::mutex> lock (tick_mtx);
+        tick_buffer.push_back (std::move (payload));
+        published_count.store (tick_buffer.size (), std::memory_order_release);
+    }
+    [[nodiscard]] std::vector<std::string> ticks_since (size_t from) const {
+        std::lock_guard<std::mutex> lock (tick_mtx);
+        if (from >= tick_buffer.size ()) return {};
+        return std::vector<std::string> (tick_buffer.begin () +
+        static_cast<std::ptrdiff_t> (from), tick_buffer.end ());
+    }
+    [[nodiscard]] size_t tick_count () const {
+        std::lock_guard<std::mutex> lock (tick_mtx);
+        return tick_buffer.size ();
+    }
+
     // notify_refill deliberately does NOT lock refill_mtx — locking on every
     // completion would put a contended mutex on the 60k-RPS hot path.
     void notify_refill () {

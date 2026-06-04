@@ -152,7 +152,7 @@ void validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& 
 } // namespace
 
 RunContext::RunContext (const std::string& id, nlohmann::json cfg)
-: run_id (id), config (std::move (cfg)), start_time_ms (0) {
+: run_id (id), config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()), start_time_ms (0) {
     // Initialize MetricsCollector with configuration from test config
     MetricsCollectorConfig mc_config;
 
