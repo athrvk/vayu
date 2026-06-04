@@ -87,6 +87,14 @@ struct RunContext {
     ~RunContext ();
 };
 
+/**
+ * @brief Build the per-tick enrichment metric rows (dropped / bytes / status
+ * codes) from the collector's current cumulative state. Extracted from
+ * collect_metrics so it can be unit-tested deterministically.
+ */
+[[nodiscard]] std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
+const std::shared_ptr<RunContext>& context, int64_t timestamp);
+
 class RunManager {
     private:
     mutable std::mutex mutex_;

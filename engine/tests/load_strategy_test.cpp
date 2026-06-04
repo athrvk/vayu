@@ -422,3 +422,31 @@ TEST_F (LoadStrategyTest, CapturesReceivedBytes) {
     // 20 responses, each with headers + a 2-byte body → comfortably > 20 bytes.
     EXPECT_GT (context->metrics_collector->total_bytes_received (), 20u);
 }
+
+// The per-tick enrichment rows (dropped / bytes / status-codes JSON) carry the
+// collector's current cumulative values. This is what collect_metrics persists
+// each second; tested via the extracted helper for determinism.
+TEST_F (LoadStrategyTest, TickEnrichmentMetricsCarryBytesDroppedStatus) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-tick", nlohmann::json{ { "mode", "constant_rps" } });
+    context->metrics_collector->record_success (200, 5.0, 0.0, "");
+    context->metrics_collector->record_success (404, 5.0, 0.0, "");
+    context->metrics_collector->record_bytes (10, 1000);
+    context->metrics_collector->record_drop_batch (3);
+
+    auto rows = vayu::core::build_tick_enrichment_metrics (context, 12345);
+    bool dropped = false, bsent = false, brecv = false, status = false;
+    for (const auto& m : rows) {
+        if (m.name == vayu::MetricName::DroppedRequests && m.value == 3.0) dropped = true;
+        if (m.name == vayu::MetricName::BytesSent && m.value == 10.0) bsent = true;
+        if (m.name == vayu::MetricName::BytesReceived && m.value == 1000.0) brecv = true;
+        if (m.name == vayu::MetricName::StatusCodes &&
+        m.labels.find ("\"200\"") != std::string::npos &&
+        m.labels.find ("\"404\"") != std::string::npos)
+            status = true;
+    }
+    EXPECT_TRUE (dropped);
+    EXPECT_TRUE (bsent);
+    EXPECT_TRUE (brecv);
+    EXPECT_TRUE (status);
+}

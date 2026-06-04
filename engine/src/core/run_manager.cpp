@@ -507,6 +507,26 @@ RunManager& manager) {
     manager.unregister_run (context->run_id);
 }
 
+std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
+const std::shared_ptr<RunContext>& context, int64_t timestamp) {
+    auto& mc = *context->metrics_collector;
+    std::vector<vayu::db::Metric> rows;
+    rows.reserve (4);
+    rows.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::DroppedRequests,
+    static_cast<double> (mc.dropped_requests ()), "" });
+    rows.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::BytesSent,
+    static_cast<double> (mc.total_bytes_sent ()), "" });
+    rows.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::BytesReceived,
+    static_cast<double> (mc.total_bytes_received ()), "" });
+    nlohmann::json codes = nlohmann::json::object ();
+    for (const auto& [code, count] : mc.status_code_distribution ()) {
+        codes[std::to_string (code)] = count;
+    }
+    rows.push_back (
+    { 0, context->run_id, timestamp, vayu::MetricName::StatusCodes, 0.0, codes.dump () });
+    return rows;
+}
+
 void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* db_ptr) {
     auto& db          = *db_ptr;
     auto last_update  = std::chrono::steady_clock::now ();
@@ -577,6 +597,10 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                 vayu::MetricName::Throughput, throughput, "" });
                 metrics.push_back ({ 0, context->run_id, timestamp,
                 vayu::MetricName::Backpressure, static_cast<double> (backpressure), "" });
+
+                // Per-tick enrichment: dropped / bytes / status-code map.
+                auto enrichment = build_tick_enrichment_metrics (context, timestamp);
+                metrics.insert (metrics.end (), enrichment.begin (), enrichment.end ());
 
                 // Single transaction instead of 5 separate lock acquisitions
                 db.add_metrics_batch (metrics);
