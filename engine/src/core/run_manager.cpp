@@ -699,7 +699,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             try {
                 auto timestamp = now_ms ();
                 std::vector<vayu::db::Metric> metrics;
-                metrics.reserve (10);
+                metrics.reserve (14);
 
                 metrics.push_back ({ 0, context->run_id, timestamp,
                 vayu::MetricName::Rps, current_rps, "" });
