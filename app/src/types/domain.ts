@@ -249,6 +249,9 @@ export interface LoadTestMetrics {
 	// for open-ended modes (constant_rps), in which case ETA is not shown.
 	requests_sent?: number;
 	requests_expected?: number;
+	// Per-tick full status-code map (e.g. { "200": 1450, "404": 5 }). Same shape
+	// the live SSE and the stored time-series both carry.
+	status_codes?: Record<string, number>;
 }
 
 export interface RunReport {

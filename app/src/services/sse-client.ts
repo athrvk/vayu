@@ -10,6 +10,57 @@
 import { API_ENDPOINTS } from "@/config/api-endpoints";
 import type { LoadTestMetrics } from "@/types";
 
+/** Raw camelCase metrics blob as emitted by the engine SSE stream. */
+interface RawSseMetrics {
+	timestamp?: number;
+	elapsedSeconds?: number;
+	totalRequests?: number;
+	totalErrors?: number;
+	currentRps?: number;
+	activeConnections?: number;
+	latencyP50Ms?: number;
+	latencyP95Ms?: number;
+	latencyP99Ms?: number;
+	avgLatencyMs?: number;
+	sendRate?: number;
+	throughput?: number;
+	backpressure?: number;
+	droppedRequests?: number;
+	avgQueueWaitMs?: number;
+	requestsSent?: number;
+	requestsExpected?: number;
+	bytesSent?: number;
+	bytesReceived?: number;
+	statusCodes?: Record<string, number>;
+}
+
+/** Map the engine's camelCase SSE blob to the frontend LoadTestMetrics shape. */
+export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
+	return {
+		timestamp: m.timestamp || Date.now(),
+		elapsed_seconds: m.elapsedSeconds || 0,
+		requests_completed: m.totalRequests || 0,
+		requests_failed: m.totalErrors || 0,
+		current_rps: m.currentRps || 0,
+		current_concurrency: m.activeConnections || 0,
+		latency_p50_ms: m.latencyP50Ms || 0,
+		latency_p95_ms: m.latencyP95Ms || 0,
+		latency_p99_ms: m.latencyP99Ms || 0,
+		avg_latency_ms: m.avgLatencyMs || 0,
+		bytes_sent: m.bytesSent || 0,
+		bytes_received: m.bytesReceived || 0,
+		// Rate metrics (Open Model)
+		send_rate: m.sendRate || 0,
+		throughput: m.throughput || 0,
+		backpressure: m.backpressure || 0,
+		dropped_requests: m.droppedRequests || 0,
+		avg_queue_wait_ms: m.avgQueueWaitMs || 0,
+		requests_sent: m.requestsSent || 0,
+		requests_expected: m.requestsExpected || 0,
+		status_codes: m.statusCodes,
+	};
+}
+
 export type SSEMessageHandler = (metrics: LoadTestMetrics) => void;
 export type SSEErrorHandler = (error: Error) => void;
 export type SSECloseHandler = () => void;
@@ -89,28 +140,7 @@ export class SSEClient {
 					}
 
 					// Map from backend camelCase format to frontend LoadTestMetrics
-					this.currentMetrics = {
-						timestamp: metrics.timestamp || Date.now(),
-						elapsed_seconds: metrics.elapsedSeconds || 0,
-						requests_completed: metrics.totalRequests || 0,
-						requests_failed: metrics.totalErrors || 0,
-						current_rps: metrics.currentRps || 0,
-						current_concurrency: metrics.activeConnections || 0,
-						latency_p50_ms: metrics.latencyP50Ms || 0,
-						latency_p95_ms: metrics.latencyP95Ms || 0,
-						latency_p99_ms: metrics.latencyP99Ms || 0,
-						avg_latency_ms: metrics.avgLatencyMs || 0,
-						bytes_sent: 0,
-						bytes_received: 0,
-						// Rate metrics (Open Model)
-						send_rate: metrics.sendRate || 0,
-						throughput: metrics.throughput || 0,
-						backpressure: metrics.backpressure || 0,
-						dropped_requests: metrics.droppedRequests || 0,
-						avg_queue_wait_ms: metrics.avgQueueWaitMs || 0,
-						requests_sent: metrics.requestsSent || 0,
-						requests_expected: metrics.requestsExpected || 0,
-					};
+					this.currentMetrics = mapSseMetrics(metrics);
 
 					onMessage({ ...this.currentMetrics });
 					this.reconnectAttempts = 0;
