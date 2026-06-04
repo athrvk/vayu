@@ -35,7 +35,7 @@ jobs:
             preset: macos-prod
     timeout-minutes: 60
     env:
-      VCPKG_COMMIT: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
+      VCPKG_COMMIT: 'cea592f4772491abdb7c483387a59ea89889f4be'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       SCCACHE_GHA_ENABLED: 'true'
 
