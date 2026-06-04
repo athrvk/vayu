@@ -325,111 +325,58 @@ void register_metrics_routes (RouteContext& ctx) {
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string run_id = req.matches[1];
 
-        auto context = ctx.run_manager.get_run (run_id);
+        // Evict expired retained topics, then resolve active OR within-retention.
+        int retention_ms = ctx.db.get_config_int ("liveRetentionMs", 60000);
+        ctx.run_manager.sweep_retained (retention_ms);
+
+        auto context = ctx.run_manager.get_run_or_retained (run_id);
         if (!context) {
             res.status = 404;
             nlohmann::json error;
-            error["error"] = "Run not found or not active";
-            error["hint"]  = "Use /stats/" + run_id + " for historical data";
+            error["error"] = "Run not found or expired";
+            error["hint"]  = "Use /run/" + run_id + "/report for the stored report";
             res.set_content (error.dump (), "application/json");
             return;
         }
 
+        // Honor Last-Event-ID for reconnect resume (offset = last seen + 1).
+        size_t start_offset = 0;
+        if (req.has_header ("Last-Event-ID")) {
+            try {
+                start_offset = std::stoull (req.get_header_value ("Last-Event-ID")) + 1;
+            } catch (...) { start_offset = 0; }
+        }
+
         res.set_content_provider ("text/event-stream",
-        [&ctx, run_id, context] (size_t offset, httplib::DataSink& sink) {
-            // State for instantaneous RPS calculation (delta-based).
-            // last_total_count is locked-in on the first tick so it spans the
-            // gap between run start and SSE attach (~500ms client delay),
-            // avoiding a one-tick currentRps spike.
-            auto last_rps_time      = std::chrono::steady_clock::now ();
-            size_t last_total_count = 0;
-            double current_rps      = 0.0;
-            bool first_tick         = true;
+        [run_id, context, start_offset] (size_t, httplib::DataSink& sink) {
+            size_t offset = start_offset;
+            while (true) {
+                if (!sink.is_writable ()) return false;
 
-            while (context->is_running) {
-                if (!sink.is_writable ()) {
+                auto batch = context->ticks_since (offset);
+                for (const auto& payload : batch) {
+                    if (!sink.write (payload.data (), payload.size ())) return false;
+                }
+                offset += batch.size ();
+
+                // Terminate only once the producer has appended its final tick
+                // (closed) AND we have drained the buffer — never gate on
+                // is_running, which can flip before the final tick lands.
+                if (context->closed.load (std::memory_order_acquire) &&
+                offset >= context->published_count.load (std::memory_order_acquire)) {
                     break;
                 }
-
-                try {
-                    // Compute elapsed_seconds from the run's actual start time
-                    // (context->start_time_ms, set in run_manager.cpp:start_run).
-                    // Using the SSE handler's local clock would give a tiny
-                    // denominator on the first tick and spike send_rate /
-                    // throughput to thousands of req/s.
-                    int64_t now_wall_ms =
-                    std::chrono::duration_cast<std::chrono::milliseconds> (
-                    std::chrono::system_clock::now ().time_since_epoch ())
-                    .count ();
-                    double elapsed_seconds =
-                    context->start_time_ms > 0 ?
-                    static_cast<double> (now_wall_ms - context->start_time_ms) / 1000.0 :
-                    0.0;
-
-                    auto now = std::chrono::steady_clock::now ();
-                    size_t active_count =
-                    context->event_loop ? context->event_loop->active_count () : 0;
-                    size_t requests_sent     = context->requests_sent.load ();
-                    size_t requests_expected = context->requests_expected.load ();
-                    auto stats = context->metrics_collector->get_current_stats (
-                    active_count, elapsed_seconds, requests_sent, requests_expected);
-
-                    // Calculate instantaneous RPS (delta-based, per-interval).
-                    size_t current_total = stats["totalRequests"].get<size_t> ();
-                    if (first_tick) {
-                        last_total_count = current_total;
-                        last_rps_time    = now;
-                        first_tick       = false;
-                    } else {
-                        double rps_interval =
-                        std::chrono::duration<double> (now - last_rps_time).count ();
-                        if (rps_interval >= 0.1) { // Update RPS every 100ms minimum
-                            size_t delta = current_total - last_total_count;
-                            current_rps =
-                            static_cast<double> (delta) / rps_interval;
-                            last_total_count = current_total;
-                            last_rps_time    = now;
-                        }
-                    }
-                    stats["currentRps"] = current_rps;
-
-                    // Calculate backpressure (queue depth: sent but not yet responded)
-                    size_t total_responses = current_total;
-                    size_t backpressure =
-                    requests_sent > total_responses ? requests_sent - total_responses : 0;
-                    stats["backpressure"] = backpressure;
-
-                    stats["runId"]            = run_id;
-                    stats["timestamp"]        = now_wall_ms;
-                    stats["requestsSent"]     = requests_sent;
-                    stats["requestsExpected"] = context->requests_expected.load ();
-
-                    std::string payload = "event: metrics\ndata: " + stats.dump () + "\n\n";
-                    if (!sink.write (payload.data (), payload.size ())) {
-                        return false;
-                    }
-
-                } catch (const std::exception& e) {
-                    nlohmann::json error_event;
-                    error_event["error"] = e.what ();
-                    std::string payload =
-                    "event: error\ndata: " + error_event.dump () + "\n\n";
-                    sink.write (payload.data (), payload.size ());
-                    break;
+                if (batch.empty ()) {
+                    std::this_thread::sleep_for (std::chrono::milliseconds (50));
                 }
-
-                std::this_thread::sleep_for (std::chrono::milliseconds (100));
             }
 
             nlohmann::json completion_event;
             completion_event["event"] = "complete";
             completion_event["runId"] = run_id;
-            completion_event["message"] =
-            "Test completed, use /stats/" + run_id + " for full report";
             std::string payload =
             "event: complete\ndata: " + completion_event.dump () + "\n\n";
             sink.write (payload.data (), payload.size ());
-
             return false;
         });
     });
