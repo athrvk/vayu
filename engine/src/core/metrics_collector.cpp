@@ -340,6 +340,18 @@ size_t requests_expected) const {
         stats["latencyP99Ms"] = 0.0;
     }
 
+    // Wire byte counts (cumulative) — client diffs consecutive ticks for MB/s.
+    stats["bytesSent"]     = total_bytes_sent ();
+    stats["bytesReceived"] = total_bytes_received ();
+
+    // Full status-code map (same shape the stored time-series carries), so the
+    // app maps one shape for both live and history.
+    nlohmann::json codes = nlohmann::json::object ();
+    for (const auto& [code, count] : status_code_distribution ()) {
+        codes[std::to_string (code)] = count;
+    }
+    stats["statusCodes"] = codes;
+
     return stats;
 }
 

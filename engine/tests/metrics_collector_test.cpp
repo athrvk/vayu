@@ -352,3 +352,15 @@ TEST_F (MetricsCollectorTest, RecordBytesAccumulates) {
     EXPECT_EQ (collector->total_bytes_sent (), 150u);
     EXPECT_EQ (collector->total_bytes_received (), 3072u);
 }
+
+TEST_F (MetricsCollectorTest, CurrentStatsIncludesBytesAndStatusMap) {
+    collector->record_success (200, 10.0, 0.0, "");
+    collector->record_success (404, 12.0, 0.0, "");
+    collector->record_bytes (50, 500);
+    auto stats = collector->get_current_stats (0, 1.0, 2, 0);
+    EXPECT_EQ (stats["bytesSent"].get<size_t> (), 50u);
+    EXPECT_EQ (stats["bytesReceived"].get<size_t> (), 500u);
+    ASSERT_TRUE (stats.contains ("statusCodes"));
+    EXPECT_EQ (stats["statusCodes"]["200"].get<size_t> (), 1u);
+    EXPECT_EQ (stats["statusCodes"]["404"].get<size_t> (), 1u);
+}
