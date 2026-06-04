@@ -8,10 +8,15 @@
 #include "vayu/core/load_strategy.hpp"
 
 #include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <iostream>
+#include <limits>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <thread>
 
+#include "vayu/core/refill_deficit.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -115,6 +120,76 @@ vayu::Result<vayu::Response> result) {
         if (!context->test_script.empty ()) {
             context->metrics_collector->record_response_sample (response);
         }
+    }
+
+    // Wake the closed-loop controller (no-op/near-free for open-loop modes).
+    if (context->closed_loop.load (std::memory_order_relaxed)) {
+        context->notify_refill ();
+    }
+}
+
+// Update the in-flight high-water mark (single writer: the strategy thread).
+inline void update_peak (const std::shared_ptr<RunContext>& context) {
+    size_t f    = context->in_flight ();
+    size_t prev = context->peak_in_flight.load (std::memory_order_relaxed);
+    while (f > prev &&
+    !context->peak_in_flight.compare_exchange_weak (prev, f, std::memory_order_relaxed)) {
+        // prev reloaded on failure
+    }
+}
+
+/**
+ * @brief Closed-loop concurrency controller. Seeds target(0), then refills the
+ * in-flight deficit toward target(t) — woken per completion via refill_cv with
+ * a 50ms safety-net timeout (drives ramp growth + bounds stop latency).
+ *
+ * @param submit_one   submits exactly one request and increments requests_sent
+ * @param target_fn    desired in-flight at elapsed_ms
+ * @param budget_fn    remaining submission budget (SIZE_MAX for time-bounded)
+ * @param should_continue  whether to keep refilling at elapsed_ms
+ */
+void maintain_concurrency (std::shared_ptr<RunContext> context,
+const std::function<void ()>& submit_one,
+const std::function<size_t (int64_t)>& target_fn,
+const std::function<size_t ()>& budget_fn,
+const std::function<bool (int64_t)>& should_continue) {
+    using clock = std::chrono::steady_clock;
+    auto start  = clock::now ();
+    auto elapsed_ms = [&start] () {
+        return std::chrono::duration_cast<std::chrono::milliseconds> (clock::now () - start)
+        .count ();
+    };
+
+    // closed_loop must be true BEFORE seeding so no early completion's notify
+    // is dropped.
+    context->closed_loop.store (true, std::memory_order_relaxed);
+
+    size_t seed = compute_refill_deficit (target_fn (0), 0, budget_fn ());
+    for (size_t i = 0; i < seed && !context->should_stop; ++i) {
+        submit_one ();
+    }
+    update_peak (context);
+
+    while (!context->should_stop) {
+        {
+            std::unique_lock<std::mutex> lk (context->refill_mtx);
+            context->refill_cv.wait_for (lk, std::chrono::milliseconds (50), [&] () {
+                return context->should_stop.load () ||
+                context->in_flight () < target_fn (elapsed_ms ());
+            });
+        }
+
+        int64_t el = elapsed_ms ();
+        if (context->should_stop || !should_continue (el)) {
+            break;
+        }
+
+        size_t deficit =
+        compute_refill_deficit (target_fn (el), context->in_flight (), budget_fn ());
+        for (size_t i = 0; i < deficit && !context->should_stop; ++i) {
+            submit_one ();
+        }
+        update_peak (context);
     }
 }
 } // namespace
@@ -288,7 +363,7 @@ class ConstantLoadStrategy : public LoadStrategy {
             vayu::utils::log_info ("Submitted " + std::to_string (submitted) + " requests");
 
         } else {
-            // Concurrency-based mode (legacy behavior)
+            // Concurrency-based mode: closed-loop, hold ~N in flight.
             size_t concurrency =
             static_cast<size_t> (config.value ("concurrency", 100));
 
@@ -297,36 +372,19 @@ class ConstantLoadStrategy : public LoadStrategy {
             vayu::utils::log_info ("  Duration: " + std::to_string (duration_ms) + " ms");
             vayu::utils::log_info ("  Concurrency: " + std::to_string (concurrency));
 
-            auto test_start = std::chrono::steady_clock::now ();
+            auto submit_one = [&context, &db, &request] () {
+                context->event_loop->submit (request,
+                [context, &db] (size_t, vayu::Result<vayu::Response> result) {
+                    handle_result (context, db, std::move (result));
+                });
+                context->requests_sent++;
+            };
 
-            while (!context->should_stop) {
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
-                std::chrono::steady_clock::now () - test_start)
-                               .count ();
-
-                if (elapsed >= duration_ms) {
-                    break;
-                }
-
-                // Backpressure
-                size_t max_pending = config.value (
-                "maxInFlight", std::max (concurrency * 5U, size_t (1000)));
-                if (context->in_flight () > max_pending) {
-                    std::this_thread::sleep_for (std::chrono::milliseconds (50));
-                    continue;
-                }
-
-                // Submit batch
-                for (size_t i = 0; i < concurrency && !context->should_stop; ++i) {
-                    context->event_loop->submit (request,
-                    [context, &db] (size_t, vayu::Result<vayu::Response> result) {
-                        handle_result (context, db, std::move (result));
-                    });
-                    context->requests_sent++;
-                }
-
-                std::this_thread::sleep_for (std::chrono::milliseconds (10));
-            }
+            maintain_concurrency (
+            context, submit_one,
+            [concurrency] (int64_t) { return concurrency; },      // target(t) = N
+            [] () { return std::numeric_limits<size_t>::max (); }, // unbounded budget
+            [duration_ms] (int64_t el) { return el < duration_ms; }); // stop at duration
         }
     }
 };

@@ -37,6 +37,9 @@ class SlowMockServer {
             std::this_thread::sleep_for (std::chrono::milliseconds (500));
             res.set_content ("{}", "application/json");
         });
+        svr.Get ("/fast", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content ("{}", "application/json");
+        });
 
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
@@ -50,6 +53,10 @@ class SlowMockServer {
 
     std::string slow_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/slow";
+    }
+
+    std::string fast_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/fast";
     }
 
     httplib::Server svr;
@@ -134,4 +141,42 @@ TEST_F (LoadStrategyTest, RunContextHasRefillPrimitives) {
     // notify_refill must be safe to call with no waiter (near-free no-op).
     context->notify_refill ();
     SUCCEED ();
+}
+
+// Closed-loop: constant_concurrency N=50 against a 500ms endpoint must hold
+// ~50 in flight, NOT climb to the old ~900. peak_in_flight is the ground truth.
+TEST_F (LoadStrategyTest, ConstantConcurrencyHoldsTargetInFlight) {
+    const size_t N = 50;
+    nlohmann::json config = {
+        { "mode", "constant_concurrency" },
+        { "duration", "2s" },
+        { "concurrency", N },
+    };
+
+    auto context = std::make_shared<vayu::core::RunContext> ("test-cc", config);
+
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000; // ample, so only the controller bounds N
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->slow_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    ASSERT_NE (strategy, nullptr);
+
+    strategy->execute (context, db, request);
+    context->event_loop->stop (true);
+
+    // Peak must stay near N (allow a small epsilon for worker scheduling slop),
+    // NOT the ~900 the old open-loop batch submitter produced.
+    EXPECT_LE (context->peak_in_flight.load (), N + 10)
+    << "in-flight exceeded target+epsilon; closed-loop refill not holding N";
+    EXPECT_GE (context->peak_in_flight.load (), N - 5)
+    << "never reached target; seeding/refill under-submitting";
 }
