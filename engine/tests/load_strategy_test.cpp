@@ -49,6 +49,13 @@ class SlowMockServer {
 
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
+
+        // Block until the listener thread has entered accept(); otherwise a
+        // test that tears the fixture down before issuing any request can race
+        // svr.stop() against listen_after_bind() startup. On Windows the stop
+        // signal can be missed in that race, leaving thread.join() to block
+        // forever. wait_until_ready() makes the start synchronous.
+        svr.wait_until_ready ();
     }
 
     ~SlowMockServer () {
