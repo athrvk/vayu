@@ -19,11 +19,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-2022, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         include:
           - os: ubuntu-latest
             preset: linux-prod
-          - os: windows-2022
+          - os: windows-latest
             preset: windows-prod
           - os: macos-latest
             preset: macos-prod-arm64
@@ -79,8 +79,20 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
+      # sccache is skipped on Windows: mozilla-actions/sccache-action@v0.0.10
+      # (latest available, Apr 2022) fails its install step on the Windows Server
+      # 2025 + Visual Studio 2026 image GitHub is rolling out across windows-latest
+      # in June 2026. Builds on Windows are slower without sccache but reliable.
       - name: Setup sccache
+        if: runner.os != 'Windows'
         uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Configure sccache compiler launcher (non-Windows)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
 
       - name: Build and run engine tests (arm64)
         if: runner.os == 'macOS'
@@ -91,9 +103,6 @@ jobs:
           buildPreset: macos-prod-arm64
           testPreset: macos-prod-arm64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-        env:
-          CMAKE_CXX_COMPILER_LAUNCHER: sccache
-          CMAKE_C_COMPILER_LAUNCHER: sccache
 
       - name: Build and run engine tests (x64)
         if: runner.os == 'macOS'
@@ -104,9 +113,6 @@ jobs:
           buildPreset: macos-prod-x64
           testPreset: macos-prod-x64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-        env:
-          CMAKE_CXX_COMPILER_LAUNCHER: sccache
-          CMAKE_C_COMPILER_LAUNCHER: sccache
 
       - name: Create universal binary (macOS)
         if: runner.os == 'macOS'
@@ -130,9 +136,6 @@ jobs:
           buildPreset: ${{ matrix.preset }}
           testPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-        env:
-          CMAKE_CXX_COMPILER_LAUNCHER: sccache
-          CMAKE_C_COMPILER_LAUNCHER: sccache
 
       - name: Install frontend dependencies
         working-directory: app
