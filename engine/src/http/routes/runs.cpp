@@ -133,6 +133,9 @@ void register_run_routes (RouteContext& ctx) {
                 "POST /run/:id/stop - Signaling stop for active run: " + run_id);
                 // Signal the running thread to stop
                 context->should_stop = true;
+                // Wake the closed-loop controller for immediate cancellation
+                // (otherwise it waits up to its 50ms safety-net timeout).
+                context->notify_refill ();
 
                 // Wait for graceful shutdown
                 vayu::utils::MetricsHelper::wait_for_graceful_stop (*context, 5);
@@ -192,10 +195,25 @@ void register_run_routes (RouteContext& ctx) {
             auto report = vayu::utils::MetricsHelper::calculate_detailed_report (
             results, duration_s);
 
+            // Enrichment fields not carried on the report struct — collected
+            // from the metrics table into locals, injected into the summary JSON.
+            double peak_concurrency = 0.0, dropped_total = 0.0, queue_wait_avg = 0.0;
+            double bytes_sent = 0.0, bytes_received = 0.0;
+
             // Override calculated percentiles with HdrHistogram values from Metrics table
             auto metrics = ctx.db.get_metrics (run_id);
             for (const auto& m : metrics) {
-                if (m.name == vayu::MetricName::LatencyP50) {
+                if (m.name == vayu::MetricName::PeakConcurrency) {
+                    peak_concurrency = m.value;
+                } else if (m.name == vayu::MetricName::DroppedRequests) {
+                    dropped_total = m.value;
+                } else if (m.name == vayu::MetricName::QueueWaitAvg) {
+                    queue_wait_avg = m.value;
+                } else if (m.name == vayu::MetricName::BytesSent) {
+                    bytes_sent = m.value;
+                } else if (m.name == vayu::MetricName::BytesReceived) {
+                    bytes_received = m.value;
+                } else if (m.name == vayu::MetricName::LatencyP50) {
                     report.latency_p50 = m.value;
                 } else if (m.name == vayu::MetricName::LatencyP75) {
                     report.latency_p75 = m.value;
@@ -207,6 +225,10 @@ void register_run_routes (RouteContext& ctx) {
                     report.latency_p99 = m.value;
                 } else if (m.name == vayu::MetricName::LatencyP999) {
                     report.latency_p999 = m.value;
+                } else if (m.name == vayu::MetricName::LatencyMax) {
+                    report.latency_max = m.value;
+                } else if (m.name == vayu::MetricName::LatencyMin) {
+                    report.latency_min = m.value;
                 } else if (m.name == vayu::MetricName::LatencyAvg) {
                     report.latency_avg = m.value;
                 } else if (m.name == vayu::MetricName::TotalRequests) {
@@ -255,6 +277,15 @@ void register_run_routes (RouteContext& ctx) {
                     }
                 }
             }
+
+            // Recompute the error rate from the reconciled successful/failed
+            // split so transport errors (status code 0) are counted — the
+            // sampled-results error_rate from calculate_detailed_report omits them.
+            report.error_rate =
+            report.total_requests > 0 ?
+            static_cast<double> (report.failed_requests) * 100.0 /
+            static_cast<double> (report.total_requests) :
+            0.0;
 
             // Extract target RPS from config
             double target_rps = 0.0;
@@ -312,6 +343,10 @@ void register_run_routes (RouteContext& ctx) {
                     config_obj["targetRps"] = config["targetRps"];
                 if (config.contains ("concurrency"))
                     config_obj["concurrency"] = config["concurrency"];
+                if (config.contains ("startConcurrency"))
+                    config_obj["startConcurrency"] = config["startConcurrency"];
+                if (config.contains ("rampUpDuration"))
+                    config_obj["rampUpDuration"] = config["rampUpDuration"];
                 if (config.contains ("timeout"))
                     config_obj["timeout"] = config["timeout"];
                 if (config.contains ("comment") && !config["comment"].is_null ())
@@ -333,7 +368,14 @@ void register_run_routes (RouteContext& ctx) {
                 { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
                 { "sendRate", report.send_rate },
                 { "throughput", report.throughput },
-                { "setupOverhead", report.setup_overhead_s } };
+                { "setupOverhead", report.setup_overhead_s },
+                { "peakConcurrency", static_cast<size_t> (peak_concurrency) },
+                { "droppedRequests", static_cast<size_t> (dropped_total) },
+                { "avgQueueWaitMs", queue_wait_avg },
+                { "bytesSent", static_cast<size_t> (bytes_sent) },
+                { "bytesReceived", static_cast<size_t> (bytes_received) },
+                { "throughputBytesPerSec",
+                report.total_duration_s > 0 ? bytes_received / report.total_duration_s : 0.0 } };
             json_report["latency"]     = { { "min", report.latency_min },
                     { "max", report.latency_max }, { "avg", report.latency_avg },
                     { "median", report.latency_p50 }, { "p50", report.latency_p50 },

@@ -20,7 +20,7 @@ class MetricsHelperTest : public ::testing::Test {
         // Setup test values via MetricsCollector
         // Record 100 requests: 95 successes, 5 errors
         for (int i = 0; i < 95; ++i) {
-            test_context->metrics_collector->record_success (200, 150.0); // 150ms each
+            test_context->metrics_collector->record_success (200, 150.0, 0.0); // 150ms each, no queue wait
         }
         for (int i = 0; i < 5; ++i) {
             test_context->metrics_collector->record_error (

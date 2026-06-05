@@ -320,7 +320,7 @@ useSSE({
 
 **Features:**
 - Automatic connection/disconnection
-- Reconnection with exponential backoff
+- Connects immediately to `/metrics/live/:runId`; the engine's tick topic is replayable (no attach race) and ends with an explicit `complete` event, so there is no custom reconnect loop — transient `CONNECTING` errors are left to the browser's built-in `EventSource` retry, and a `CLOSED` state is terminal
 - Metrics forwarding to dashboard store
 
 ### `useVariableResolver()` - Variable Resolution

@@ -11,7 +11,6 @@
  * Compact 52px single-row header with status, method, URL, config info, and stop button
  */
 
-import { useEffect, useState } from "react";
 import { ArrowLeft, StopCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { useNavigationStore } from "@/stores";
@@ -38,19 +37,13 @@ export default function DashboardHeader({
 	const navigateBack = useNavigationStore((s) => s.navigateBack);
 	const canNavigateBack = useNavigationStore((s) => s.canNavigateBack());
 
-	// Live counter for running tests — reset to 0 each time a new run starts
-	const [liveTick, setLiveTick] = useState(0);
-
-	useEffect(() => {
-		if (mode === "running" && isStreaming) {
-			setLiveTick(0);
-			const interval = setInterval(() => setLiveTick((t) => t + 1), 1000);
-			return () => clearInterval(interval);
-		}
-	}, [mode, isStreaming]);
-
-	const displayMs =
-		mode === "running" && isStreaming ? elapsedDuration + liveTick * 1000 : elapsedDuration;
+	// Elapsed time is driven entirely by `elapsedDuration`, which is the engine's
+	// authoritative elapsed while running (last SSE tick's elapsed_seconds) and
+	// the final report's testDuration once completed. Both are monotonic, so the
+	// timer never double-counts or jumps backward. (A previous client-side 1s
+	// liveTick was ADDED on top of elapsedDuration — since both advanced on
+	// different clocks, the timer ran ~2x fast and flickered/regressed on desync.)
+	const displayMs = elapsedDuration;
 
 	// Config summary line
 	const configParts: string[] = [];

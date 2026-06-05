@@ -117,20 +117,88 @@ Singleton table; always has exactly one row with `id = "globals"`.
 
 ### `runs`
 
-Stores load-test and sanity-check run records.
+Stores design-mode and load-test run records. Defined in `database.cpp` (`make_table("runs", …)`);
+struct is `db::Run` in `engine/include/vayu/types.hpp`.
 
-See `engine/include/vayu/types.hpp` (`db::Run`) for the full column list. Key fields:
+| Column            | Type    | Notes                                                       |
+|-------------------|---------|-------------------------------------------------------------|
+| `id`              | TEXT PK | UUID                                                        |
+| `request_id`      | TEXT    | FK → `requests.id` (optional; set in design mode)           |
+| `environment_id`  | TEXT    | FK → `environments.id` (optional)                           |
+| `type`            | TEXT    | `"design"` or `"load"`                                      |
+| `status`          | TEXT    | `"pending"` / `"running"` / `"completed"` / `"failed"` / `"stopped"` |
+| `config_snapshot` | TEXT    | JSON snapshot of the request/env at run time                |
+| `start_time`      | INTEGER | Unix ms                                                     |
+| `end_time`        | INTEGER | Unix ms                                                     |
 
-| Column       | Type    | Notes                                    |
-|--------------|---------|------------------------------------------|
-| `id`         | TEXT PK | UUID                                     |
-| `request_id` | TEXT    | FK → `requests.id` (optional)            |
-| `type`       | TEXT    | `"load"` or `"sanity"`                   |
-| `status`     | TEXT    | `"running"` / `"completed"` / `"failed"` |
-| `config`     | TEXT    | JSON snapshot of the run config          |
-| `summary`    | TEXT    | JSON aggregate metrics                   |
-| `created_at` | INTEGER | Unix ms                                  |
-| `updated_at` | INTEGER | Unix ms                                  |
+There is **no** `summary` column — aggregate metrics for a finished run are reconstructed at
+read time from the `metrics` and `results` tables (see `GET /run/:runId/report`).
+
+---
+
+### `metrics`
+
+Time-series metrics for a load test. One row per (`run_id`, `name`, `timestamp`) sample; the
+metrics producer thread writes a batch each tick. Struct is `db::Metric`.
+
+| Column      | Type            | Notes                                              |
+|-------------|-----------------|----------------------------------------------------|
+| `id`        | INTEGER PK      | Autoincrement                                      |
+| `run_id`    | TEXT            | FK → `runs.id`                                     |
+| `timestamp` | INTEGER         | Unix ms                                            |
+| `name`      | TEXT            | `MetricName` (see below)                           |
+| `value`     | REAL            | Numeric sample                                     |
+| `labels`    | TEXT            | JSON for extra dimensions (e.g. the per-status map for `status_codes`) |
+
+`name` is one of the `MetricName` enum values (`engine/include/vayu/types.hpp`), serialized via
+`to_string`. Current set includes: `rps`, `latency_avg`, `latency_min`, `latency_max`,
+`latency_p50/p75/p90/p95/p99/p999`, `error_rate`, `total_requests`, `completed`,
+`connections_active`, `requests_sent`, `requests_expected`, `send_rate`, `throughput`,
+`backpressure`, `dropped_requests`, `queue_wait_avg`, `bytes_sent`, `bytes_received`,
+`peak_concurrency`, `status_codes`, `test_duration`, `setup_overhead`, and the
+`tests_validating/passed/failed/sampled` script-validation metrics.
+
+---
+
+### `results`
+
+Individual request outcomes — all errors plus sampled successes (sampling is configurable in
+`MetricsCollector`). Struct is `db::Result`.
+
+| Column        | Type       | Notes                                                        |
+|---------------|------------|--------------------------------------------------------------|
+| `id`          | INTEGER PK | Autoincrement                                                |
+| `run_id`      | TEXT       | FK → `runs.id`                                               |
+| `timestamp`   | INTEGER    | Unix ms                                                      |
+| `status_code` | INTEGER    | HTTP status, or **0 for transport errors** (so totals reconcile) |
+| `status_text` | TEXT       | Wire reason phrase or canonical IANA text                    |
+| `latency_ms`  | REAL       | **Perceived** latency (`completion − submitted_at`), not wire time |
+| `error`       | TEXT       | Error message for failures; empty on success                 |
+| `trace_data`  | TEXT       | JSON (headers/body/timing breakdown) — design mode + errors + slow samples |
+
+`trace_data` timing breakdown includes `total`, `wire`, `queueWait`, `dns`, `connect`, `tls`,
+`firstByte`, `download` (all ms). `total` is perceived latency; `wire` is libcurl's
+`CURLINFO_TOTAL_TIME`; `queueWait = total − wire` is time spent queued inside the generator.
+
+---
+
+### `config_entries`
+
+Engine configuration registry — each tunable setting with UI metadata. Read by `GET /config`,
+written by `POST /config`. Struct is `db::ConfigEntry`.
+
+| Column          | Type    | Notes                                                  |
+|-----------------|---------|--------------------------------------------------------|
+| `key`           | TEXT PK | e.g. `workers`, `maxConnections`, `liveTickIntervalMs` |
+| `value`         | TEXT    | Current value (parsed per `type`)                      |
+| `type`          | TEXT    | `"integer"` / `"string"` / `"boolean"` / `"number"`    |
+| `label`         | TEXT    | Display label                                          |
+| `description`   | TEXT    | Help text                                              |
+| `category`      | TEXT    | Grouping (e.g. `server`, `network_performance`)        |
+| `default_value` | TEXT    | Default as string                                      |
+| `min_value`     | TEXT    | Optional minimum (numbers)                             |
+| `max_value`     | TEXT    | Optional maximum (numbers)                             |
+| `updated_at`    | INTEGER | Unix ms                                                |
 
 ---
 
@@ -142,8 +210,11 @@ Used in `collections.variables`, `environments.variables`, and `globals.variable
 {
   "value": "https://api.example.com",
   "enabled": true,
-  "secret": false
+  "secret": false,
+  "type": "string"
 }
 ```
 
-`secret` is a UI masking hint only — values are not encrypted at rest.
+`secret` is a UI masking hint only — values are not encrypted at rest. `type` is a UI/script
+conversion hint, one of `"string"` (default), `"number"`, `"boolean"`, `"json"` — it controls
+how scripts read the variable via `pm.*.get(...)`.

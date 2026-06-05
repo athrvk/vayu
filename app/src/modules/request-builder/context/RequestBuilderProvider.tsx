@@ -202,6 +202,10 @@ export default function RequestBuilderProvider({
 				setLocalResponse(null);
 			}
 		}
+		// initialRequest intentionally keyed by .id only: depending on the full
+		// object would reset local state (discarding unsaved edits) on every
+		// parent re-render that passes a new object reference.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [initialRequest?.id, collectionId, getResponse]);
 
 	// Centralized save manager - handles auto-save, keyboard shortcut, and status
@@ -336,7 +340,7 @@ export default function RequestBuilderProvider({
 		} finally {
 			setIsExecuting(false);
 		}
-	}, [request, onExecute]);
+	}, [request, onExecute, setResponse]);
 
 	// Start load test
 	const startLoadTest = useCallback(() => {
@@ -373,6 +377,7 @@ export default function RequestBuilderProvider({
 			setRequest,
 			updateField,
 			response,
+			setResponse,
 			activeTab,
 			isExecuting,
 			isSaving,

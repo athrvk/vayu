@@ -21,7 +21,15 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 	const [description, setDescription] = useState(collection.description ?? "");
 	const updateCollection = useUpdateCollectionMutation();
 
+	// Resync the editable name/description drafts when the collection changes
+	// (component renders inline, not remounted per-collection). Can't be derived:
+	// these are user-editable drafts that diverge from props between edits and
+	// save. The effect also re-runs after save (name/description props update),
+	// which clears the post-trim divergence — `handleSave` persists `name.trim()`
+	// so the local draft would otherwise stay dirty against the trimmed saved
+	// value. A value-keyed render-phase reset would not preserve that resync.
 	useEffect(() => {
+		// eslint-disable-next-line react-hooks/set-state-in-effect
 		setName(collection.name);
 		setDescription(collection.description ?? "");
 	}, [collection.id, collection.name, collection.description]);

@@ -32,7 +32,7 @@ interface SettingsState {
 	clearRestartRequired: () => void;
 }
 
-export const useSettingsStore = create<SettingsState>((set) => ({
+export const useSettingsStore = create<SettingsState>()((set) => ({
 	selectedCategory: null,
 	pendingRestart: false,
 	restartRequiredKeys: [],

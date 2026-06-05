@@ -257,31 +257,37 @@ export default function CollectionTree() {
 		});
 	};
 
-	const handleDeleteCollection = async (collectionId: string) => {
-		setDeletingCollectionId(collectionId);
-		setDeleteConfirm(null);
-		try {
-			await deleteCollectionMutation.mutateAsync(collectionId);
-			if (selectedCollectionId === collectionId) {
-				navigateToWelcome();
+	const handleDeleteCollection = useCallback(
+		async (collectionId: string) => {
+			setDeletingCollectionId(collectionId);
+			setDeleteConfirm(null);
+			try {
+				await deleteCollectionMutation.mutateAsync(collectionId);
+				if (selectedCollectionId === collectionId) {
+					navigateToWelcome();
+				}
+			} finally {
+				setDeletingCollectionId(null);
 			}
-		} finally {
-			setDeletingCollectionId(null);
-		}
-	};
+		},
+		[deleteCollectionMutation, selectedCollectionId, navigateToWelcome]
+	);
 
-	const handleDeleteRequest = async (requestId: string) => {
-		setDeletingRequestId(requestId);
-		setDeleteConfirm(null);
-		try {
-			await deleteRequestMutation.mutateAsync(requestId);
-			if (selectedRequestId === requestId) {
-				navigateToWelcome();
+	const handleDeleteRequest = useCallback(
+		async (requestId: string) => {
+			setDeletingRequestId(requestId);
+			setDeleteConfirm(null);
+			try {
+				await deleteRequestMutation.mutateAsync(requestId);
+				if (selectedRequestId === requestId) {
+					navigateToWelcome();
+				}
+			} finally {
+				setDeletingRequestId(null);
 			}
-		} finally {
-			setDeletingRequestId(null);
-		}
-	};
+		},
+		[deleteRequestMutation, selectedRequestId, navigateToWelcome]
+	);
 
 	const handleRequestDeleteClick = useCallback((requestId: string, requestName: string) => {
 		setDeleteConfirm({ type: "request", id: requestId, name: requestName });

@@ -130,7 +130,10 @@ class MetricsCollector {
      * @brief Record a successful request
      * Thread-safe, optimized for high-throughput
      */
-    void record_success (int status_code, double latency_ms, const std::string& trace_data = "");
+    void record_success (int status_code,
+                         double latency_ms,
+                         double queue_wait_ms,
+                         const std::string& trace_data = "");
 
     /**
      * @brief Record a response sample for deferred script validation
@@ -145,6 +148,31 @@ class MetricsCollector {
     void record_error (ErrorCode code,
     const std::string& message,
     const std::string& trace_data = "");
+
+    /**
+     * @brief Record N requests dropped due to generator backpressure
+     * Thread-safe. Dropped requests never reached the server.
+     * @param count Number of requests in the dropped batch
+     */
+    void record_drop_batch (size_t count);
+
+    [[nodiscard]] size_t dropped_requests () const {
+        return dropped_requests_.load (std::memory_order_relaxed);
+    }
+
+    /** Accumulate wire bytes for a completed transfer (lock-free). */
+    void record_bytes (size_t sent, size_t received) {
+        total_bytes_sent_.fetch_add (sent, std::memory_order_relaxed);
+        total_bytes_recv_.fetch_add (received, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] size_t total_bytes_sent () const {
+        return total_bytes_sent_.load (std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] size_t total_bytes_received () const {
+        return total_bytes_recv_.load (std::memory_order_relaxed);
+    }
 
     /**
      * @brief Record a latency value (for percentile calculation)
@@ -175,6 +203,13 @@ class MetricsCollector {
     [[nodiscard]] double average_latency () const {
         size_t count = success_count ();
         return count > 0 ? total_latency_sum () / static_cast<double> (count) : 0.0;
+    }
+
+    [[nodiscard]] double average_queue_wait () const {
+        size_t count = success_count ();
+        return count > 0 ? total_queue_wait_sum_.load (std::memory_order_relaxed) /
+                            static_cast<double> (count)
+                         : 0.0;
     }
 
     [[nodiscard]] double error_rate () const {
@@ -259,10 +294,13 @@ class MetricsCollector {
      * @param current_active Active connection count from event loop
      * @param elapsed_seconds Elapsed time since test start
      * @param requests_sent Total requests submitted to event loop (for send rate)
+     * @param requests_expected Total expected requests for the run (0 for open-ended
+     *        modes like constant_rps; feeds the dashboard ETA stat)
      * @return JSON object with current metrics
      */
     [[nodiscard]] nlohmann::json
-    get_current_stats (size_t current_active, double elapsed_seconds, size_t requests_sent) const;
+    get_current_stats (size_t current_active, double elapsed_seconds, size_t requests_sent,
+    size_t requests_expected = 0) const;
 
     private:
     std::string run_id_;
@@ -272,6 +310,10 @@ class MetricsCollector {
     std::atomic<size_t> total_requests_{ 0 };
     std::atomic<size_t> total_errors_{ 0 };
     std::atomic<double> total_latency_sum_{ 0.0 };
+    std::atomic<size_t> dropped_requests_{ 0 };
+    std::atomic<double> total_queue_wait_sum_{ 0.0 };
+    std::atomic<size_t> total_bytes_sent_{ 0 };
+    std::atomic<size_t> total_bytes_recv_{ 0 };
 
     // Status code counts (lock-free for common codes)
     std::atomic<size_t> status_2xx_{ 0 };

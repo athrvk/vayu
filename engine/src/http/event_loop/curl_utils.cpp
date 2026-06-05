@@ -9,6 +9,9 @@
 
 #include <curl/curl.h>
 
+#include <algorithm>
+#include <cassert>
+#include <chrono>
 #include <regex>
 
 #include "vayu/core/constants.hpp"
@@ -254,22 +257,52 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
         response.status_text = vayu::http::status_text (response.status_code);
     }
 
-    // Get timing info
-    double total_time = 0, namelookup_time = 0, connect_time = 0;
+    // Get curl timing info — these are wire-only (libcurl's view)
+    double wire_seconds = 0, namelookup_time = 0, connect_time = 0;
     double appconnect_time = 0, starttransfer_time = 0;
 
-    curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &total_time);
+    curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &wire_seconds);
     curl_easy_getinfo (curl, CURLINFO_NAMELOOKUP_TIME, &namelookup_time);
     curl_easy_getinfo (curl, CURLINFO_CONNECT_TIME, &connect_time);
     curl_easy_getinfo (curl, CURLINFO_APPCONNECT_TIME, &appconnect_time);
     curl_easy_getinfo (curl, CURLINFO_STARTTRANSFER_TIME, &starttransfer_time);
 
-    response.timing.total_ms   = total_time * 1000.0;
-    response.timing.dns_ms     = namelookup_time * 1000.0;
-    response.timing.connect_ms = (connect_time - namelookup_time) * 1000.0;
-    response.timing.tls_ms     = (appconnect_time - connect_time) * 1000.0;
+    // Perceived latency: wall-clock from submit() to now. steady_clock is
+    // monotonic so it's not affected by NTP jumps.
+    auto completion = std::chrono::steady_clock::now ();
+    double perceived_ms = std::chrono::duration<double, std::milli> (
+        completion - data->submitted_at).count ();
+
+    double wire_ms = wire_seconds * 1000.0;
+    // Clamp queue_wait to >= 0 to absorb sub-microsecond clock jitter where
+    // perceived_ms can appear marginally smaller than wire_ms. In debug builds,
+    // assert that the discrepancy is sub-millisecond (a larger negative would
+    // indicate a real bug — wrong clock, stamp-after-submit, etc.).
+    assert (perceived_ms - wire_ms > -1.0 && "perceived_ms - wire_ms below -1ms — clock issue?");
+    double queue_wait_ms = std::max (0.0, perceived_ms - wire_ms);
+
+    response.timing.total_ms      = perceived_ms;        // redefined as perceived
+    response.timing.wire_ms       = wire_ms;             // new
+    response.timing.queue_wait_ms = queue_wait_ms;       // new
+    response.timing.dns_ms        = namelookup_time * 1000.0;
+    response.timing.connect_ms    = (connect_time - namelookup_time) * 1000.0;
+    response.timing.tls_ms        = (appconnect_time - connect_time) * 1000.0;
     response.timing.first_byte_ms = (starttransfer_time - appconnect_time) * 1000.0;
-    response.timing.download_ms = (total_time - starttransfer_time) * 1000.0;
+    response.timing.download_ms   = (wire_seconds - starttransfer_time) * 1000.0;
+
+    // Wire byte counts (body + headers), for throughput-in-bytes metrics.
+    curl_off_t dl_bytes = 0, ul_bytes = 0;
+    long header_bytes = 0, request_bytes = 0;
+    curl_easy_getinfo (curl, CURLINFO_SIZE_DOWNLOAD_T, &dl_bytes);
+    curl_easy_getinfo (curl, CURLINFO_SIZE_UPLOAD_T, &ul_bytes);
+    curl_easy_getinfo (curl, CURLINFO_HEADER_SIZE, &header_bytes);
+    curl_easy_getinfo (curl, CURLINFO_REQUEST_SIZE, &request_bytes);
+    response.timing.bytes_down =
+        static_cast<size_t> (std::max<curl_off_t> (0, dl_bytes)) +
+        static_cast<size_t> (std::max<long> (0, header_bytes));
+    response.timing.bytes_up =
+        static_cast<size_t> (std::max<curl_off_t> (0, ul_bytes)) +
+        static_cast<size_t> (std::max<long> (0, request_bytes));
 
     // Set body
     response.body      = std::move (data->response_body);

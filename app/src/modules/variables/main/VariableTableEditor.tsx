@@ -20,7 +20,7 @@
  * - Additional actions (e.g., delete for environments)
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
 	Globe,
 	Cloud,
@@ -187,13 +187,17 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				? `Environment: ${environment?.name}`
 				: `Collection: ${collection?.name}`;
 
-	// Get data based on type
-	const dataVariables =
-		type === "globals"
-			? globalsData?.variables || {}
-			: type === "environment"
-				? environment?.variables || {}
-				: collection?.variables || {};
+	// Get data based on type (memoized so the fallback empty object is stable
+	// across renders and doesn't re-fire the init effect at L390)
+	const dataVariables = useMemo(
+		() =>
+			type === "globals"
+				? globalsData?.variables || {}
+				: type === "environment"
+					? environment?.variables || {}
+					: collection?.variables || {},
+		[type, globalsData?.variables, environment?.variables, collection?.variables]
+	);
 
 	// Determine loading and error states
 	const isDataLoading = type === "globals" ? (isLoading ?? globalsQuery.isLoading) : false;
@@ -331,10 +335,14 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		});
 		setActiveContext(contextId);
 
+		// Alias the ref object (not .current) so cleanup still reads the live
+		// .current — the timeout handle is scheduled after mount during debounced
+		// save, so cleanup must clear whatever is actually pending, not a stale copy.
+		const timeoutRef = saveTimeoutRef;
 		return () => {
 			unregisterContext(contextId);
-			if (saveTimeoutRef.current) {
-				clearTimeout(saveTimeoutRef.current);
+			if (timeoutRef.current) {
+				clearTimeout(timeoutRef.current);
 			}
 		};
 	}, [contextId, contextName, registerContext, unregisterContext, setActiveContext]);
@@ -362,6 +370,14 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	}, []);
 
 	// Initialize variables from data (sorted by createdAt: oldest first, newest at bottom)
+	// Key the init effect on the identity of the active data source so it re-runs
+	// when the user switches between globals / a specific environment / collection.
+	const dataSourceKey =
+		type === "globals"
+			? globalsData
+			: type === "environment"
+				? environment?.id
+				: collection?.id;
 	useEffect(() => {
 		if (dataVariables && Object.keys(dataVariables).length > 0) {
 			const entries = sortByCreatedAt(Object.entries(dataVariables));
@@ -387,15 +403,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				{ key: "", value: "", enabled: true, secret: false, type: "string", isNew: true },
 			]);
 		}
-	}, [
-		type === "globals"
-			? globalsData
-			: type === "environment"
-				? environment?.id
-				: collection?.id,
-		dataVariables,
-		sortByCreatedAt,
-	]);
+	}, [dataSourceKey, dataVariables, sortByCreatedAt]);
 
 	const updateVariable = (index: number, field: keyof VariableRow, value: string | boolean) => {
 		const newVariables = [...variables];

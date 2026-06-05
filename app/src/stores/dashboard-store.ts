@@ -21,6 +21,8 @@ export interface LoadTestRunConfig {
 	concurrency?: number;
 	iterations?: number;
 	comment?: string;
+	rampUpDuration?: string;
+	startConcurrency?: number;
 }
 
 // Request info passed when starting a load test

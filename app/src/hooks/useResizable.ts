@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 interface UseResizableOptions {
 	defaultSize: number;
@@ -36,16 +36,14 @@ export function useResizable({
 	max,
 	direction = "horizontal",
 }: UseResizableOptions): UseResizableReturn {
-	const [size, setSize] = useState(defaultSize);
+	const [rawSize, setRawSize] = useState(defaultSize);
 	const [isResizing, setIsResizing] = useState(false);
 	const dragStart = useRef<{ mousePos: number; size: number } | null>(null);
 
-	// Re-clamp size whenever the bounds change (e.g. a per-context min that
-	// rises when the active tab demands more room). Without this, an
-	// already-narrow size would silently violate the new floor.
-	useEffect(() => {
-		setSize((s) => Math.min(max, Math.max(min, s)));
-	}, [min, max]);
+	// Clamp during render so size never violates the active bounds (e.g. a
+	// per-context min that rises when the active tab demands more room). Derived
+	// rather than synced via an effect to avoid a cascading re-render.
+	const size = useMemo(() => Math.min(max, Math.max(min, rawSize)), [min, max, rawSize]);
 
 	const startResizing = useCallback(
 		(e: React.MouseEvent) => {
@@ -68,7 +66,7 @@ export function useResizable({
 				max,
 				Math.max(min, dragStart.current.size + (current - dragStart.current.mousePos))
 			);
-			setSize(next);
+			setRawSize(next);
 		};
 
 		const handleMouseUp = () => {

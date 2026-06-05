@@ -181,15 +181,6 @@ export default function LoadTestDashboard() {
 		}
 	};
 
-	// Empty state
-	if (!currentRunId) {
-		return (
-			<div className="flex-1 flex items-center justify-center text-muted-foreground">
-				<p>No active load test</p>
-			</div>
-		);
-	}
-
 	// Compute derived state
 	const lastHistoricalMetrics = useMemo(() => {
 		return historicalMetrics.length > 0
@@ -218,6 +209,12 @@ export default function LoadTestDashboard() {
 				// Rate metrics from report
 				send_rate: finalReport.summary.sendRate,
 				throughput: finalReport.summary.throughput,
+				// Carry run-progress so the iterations Progress card reads 100%
+				// (not 0/0) once complete; requests_expected falls back to the
+				// last live tick, then to the completed total.
+				requests_sent: finalReport.summary.totalRequests,
+				requests_expected:
+					lastHistoricalMetrics?.requests_expected ?? finalReport.summary.totalRequests,
 			};
 		}
 		return (currentMetrics || lastHistoricalMetrics) as DisplayMetrics | null;
@@ -229,7 +226,14 @@ export default function LoadTestDashboard() {
 	// This ensures config is shown during live streaming, not just after report loads
 	const displayConfiguration = useMemo(() => {
 		if (runMetadata?.configuration) {
-			return runMetadata.configuration;
+			// The final report's config omits the ramp fields, so the ramp_up
+			// Current Concurrency card would read "—s ramp" once complete. Backfill
+			// them from the run's own loadTestConfig (the config we started with).
+			return {
+				...runMetadata.configuration,
+				rampUpDuration: loadTestConfig?.rampUpDuration,
+				startConcurrency: loadTestConfig?.startConcurrency,
+			};
 		}
 		if (loadTestConfig) {
 			return {
@@ -238,10 +242,17 @@ export default function LoadTestDashboard() {
 				targetRps: loadTestConfig.targetRps,
 				concurrency: loadTestConfig.concurrency,
 				comment: loadTestConfig.comment,
+				rampUpDuration: loadTestConfig.rampUpDuration,
+				startConcurrency: loadTestConfig.startConcurrency,
 			};
 		}
 		return undefined;
 	}, [runMetadata?.configuration, loadTestConfig]);
+
+	// Typed intermediate for ramp-specific fields that only exist on the loadTestConfig branch
+	const rampCfg = displayConfiguration as
+		| { rampUpDuration?: string; startConcurrency?: number; concurrency?: number }
+		| undefined;
 
 	// Build request info from stored info or final report
 	const displayRequestUrl = runMetadata?.requestUrl ?? requestInfo?.url;
@@ -275,6 +286,16 @@ export default function LoadTestDashboard() {
 		}
 		return startTime && endTime ? endTime - startTime : 0;
 	}, [mode, finalReport?.summary?.testDuration, historicalMetrics, startTime, endTime]);
+
+	// Empty state — placed after all hooks so the hook call order stays stable
+	// across renders (Rules of Hooks); the memos above are null-safe with no run.
+	if (!currentRunId) {
+		return (
+			<div className="flex-1 flex items-center justify-center text-muted-foreground">
+				<p>No active load test</p>
+			</div>
+		);
+	}
 
 	return (
 		<div className="flex-1 flex flex-col overflow-hidden">
@@ -324,6 +345,14 @@ export default function LoadTestDashboard() {
 							displayConfiguration?.targetRps ??
 							finalReport?.metadata?.configuration?.targetRps
 						}
+						concurrency={rampCfg?.concurrency}
+						mode={displayConfiguration?.mode}
+						rampConfig={{
+							rampUpDurationSeconds:
+								parseInt(String(rampCfg?.rampUpDuration ?? ""), 10) || undefined,
+							startConcurrency: rampCfg?.startConcurrency,
+							targetConcurrency: rampCfg?.concurrency,
+						}}
 					/>
 				) : (
 					<RequestResponseView report={finalReport} />

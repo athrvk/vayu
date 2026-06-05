@@ -72,15 +72,15 @@ electron/
 
 ## Key Stores
 
-| Store                 | Purpose                              |
-| --------------------- | ------------------------------------ |
-| `useAppStore`         | Navigation, screen state             |
-| `useDashboardStore`   | Load test metrics                    |
-| `useVariablesStore`   | Variable scope context               |
-| `useHistoryStore`     | History filtering                    |
-| `useCollectionsStore` | Collection tree expansion state      |
-| `useSaveStore`        | Auto-save state                      |
-| `useSchemaCache`      | GraphQL schema introspection cache   |
+| Store                 | Purpose                            |
+| --------------------- | ---------------------------------- |
+| `useAppStore`         | Navigation, screen state           |
+| `useDashboardStore`   | Load test metrics                  |
+| `useVariablesStore`   | Variable scope context             |
+| `useHistoryStore`     | History filtering                  |
+| `useCollectionsStore` | Collection tree expansion state    |
+| `useSaveStore`        | Auto-save state                    |
+| `useSchemaCache`      | GraphQL schema introspection cache |
 
 ## Key Hooks
 

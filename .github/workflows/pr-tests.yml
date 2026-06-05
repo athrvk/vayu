@@ -35,7 +35,7 @@ jobs:
             preset: macos-prod
     timeout-minutes: 60
     env:
-      VCPKG_COMMIT: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
+      VCPKG_COMMIT: 'cea592f4772491abdb7c483387a59ea89889f4be'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       SCCACHE_GHA_ENABLED: 'true'
 
@@ -97,8 +97,22 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
+      # sccache is skipped on Windows: mozilla-actions/sccache-action@v0.0.10
+      # (latest available, Apr 2022) fails its install step on the Windows Server
+      # 2025 + Visual Studio 2026 image GitHub is rolling out across windows-latest
+      # in June 2026. The install error surfaces as "Unable to locate executable
+      # file: undefined" in the post-step and skips all downstream build/test
+      # steps. Builds on Windows are slower without sccache but reliable.
       - name: Setup sccache
+        if: runner.os != 'Windows'
         uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Configure sccache compiler launcher (non-Windows)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
 
       - name: Build engine
         uses: lukka/run-cmake@v10
@@ -107,9 +121,6 @@ jobs:
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-        env:
-          CMAKE_CXX_COMPILER_LAUNCHER: sccache
-          CMAKE_C_COMPILER_LAUNCHER: sccache
 
       - name: Run engine tests
         working-directory: engine

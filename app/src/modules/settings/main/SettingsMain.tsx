@@ -200,7 +200,7 @@ export default function SettingsMain() {
 	// Register save context when settings are ready (not loading, no error, category selected)
 	const contextId = "settings";
 	useEffect(() => {
-		// Only register when we have a valid settings view (not loading, no error, category selected, not UI category)
+		// Only register when we have a valid settings view (not loading, no error, category selected, not a client-side category)
 		if (isLoading || error || !selectedCategory || selectedCategory === "ui") {
 			return;
 		}
