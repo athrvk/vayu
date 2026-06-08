@@ -176,9 +176,71 @@ TEST_F (MetricsCollectorTest, StatusDistributionSumsToTotalRequests) {
     EXPECT_EQ (distribution[0], 2);
 }
 
+// Out-of-range / non-standard codes (nginx 499 is in-range; 999 from misbehaving
+// proxies, or any code >= 600) must still be preserved exactly, not dropped. The
+// lock-free array covers [0,600); everything else falls back to an overflow map.
+TEST_F (MetricsCollectorTest, PreservesOutOfRangeStatusCodes) {
+    collector->record_success (200, 10.0, 0.0);
+    collector->record_success (999, 10.0, 0.0); // out of array range
+    collector->record_success (999, 10.0, 0.0);
+    collector->record_success (1000, 10.0, 0.0); // out of array range
+
+    auto distribution = collector->status_code_distribution ();
+
+    EXPECT_EQ (distribution[200], 1);
+    EXPECT_EQ (distribution[999], 2);
+    EXPECT_EQ (distribution[1000], 1);
+
+    // Sum invariant must hold even with out-of-range codes.
+    size_t sum = 0;
+    for (const auto& [code, count] : distribution)
+        sum += count;
+    EXPECT_EQ (sum, collector->total_requests ());
+}
+
 // ============================================================================
 // Thread Safety Tests
 // ============================================================================
+
+// Per-code counts must be exact under concurrency: the lock-free hot path
+// (#20) replaced the mutex-guarded map, so verify N threads hammering a spread
+// of distinct codes — including an out-of-range code on the overflow path —
+// produce exact per-code totals with no lost increments.
+TEST_F (MetricsCollectorTest, ThreadSafePerCodeCounts) {
+    const int num_threads         = 8;
+    const int requests_per_thread = 5000;
+    // Codes spanning every class plus one out-of-range overflow code.
+    const std::vector<int> codes = { 200, 201, 301, 404, 500, 503, 999 };
+    std::vector<std::thread> threads;
+
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back ([this, &codes] () {
+            for (int i = 0; i < requests_per_thread; ++i) {
+                collector->record_success (codes[i % codes.size ()], 5.0, 0.0);
+            }
+        });
+    }
+    for (auto& t : threads)
+        t.join ();
+
+    auto distribution = collector->status_code_distribution ();
+
+    // Each code is hit floor/ceil of (total / codes.size()) times. With
+    // requests_per_thread a multiple of codes.size()? 5000 % 7 != 0, so compute
+    // exact expected per code from the deterministic round-robin.
+    std::map<int, size_t> expected;
+    for (int t = 0; t < num_threads; ++t)
+        for (int i = 0; i < requests_per_thread; ++i)
+            expected[codes[i % codes.size ()]]++;
+
+    for (const auto& [code, count] : expected) {
+        EXPECT_EQ (distribution[code], count) << "code " << code;
+    }
+    size_t sum = 0;
+    for (const auto& [code, count] : distribution)
+        sum += count;
+    EXPECT_EQ (sum, collector->total_requests ());
+}
 
 TEST_F (MetricsCollectorTest, ThreadSafeRecording) {
     const int num_threads         = 8;
@@ -396,4 +458,25 @@ TEST_F (MetricsCollectorTest, CurrentStatsIncludesBytesAndStatusMap) {
     ASSERT_TRUE (stats.contains ("statusCodes"));
     EXPECT_EQ (stats["statusCodes"]["200"].get<size_t> (), 1u);
     EXPECT_EQ (stats["statusCodes"]["404"].get<size_t> (), 1u);
+}
+
+// The status2xx..5xx SSE fields are now derived at read time from the per-code
+// array (the dedicated class atomics were removed in #20). Verify the derived
+// class breakdown still matches the recorded codes, and that an out-of-range
+// code contributes to no class bucket (same as the old class-counter behavior).
+TEST_F (MetricsCollectorTest, GetCurrentStatsDerivesStatusClasses) {
+    collector->record_success (200, 1.0, 0.0);
+    collector->record_success (204, 1.0, 0.0);
+    collector->record_success (301, 1.0, 0.0);
+    collector->record_success (404, 1.0, 0.0);
+    collector->record_success (404, 1.0, 0.0);
+    collector->record_success (500, 1.0, 0.0);
+    collector->record_success (999, 1.0, 0.0); // out of range: no class bucket
+    collector->record_error (vayu::ErrorCode::Timeout, "t"); // code 0: no class bucket
+
+    auto stats = collector->get_current_stats (0, 1.0, 0, 0);
+    EXPECT_EQ (stats["status2xx"].get<size_t> (), 2u);
+    EXPECT_EQ (stats["status3xx"].get<size_t> (), 1u);
+    EXPECT_EQ (stats["status4xx"].get<size_t> (), 2u);
+    EXPECT_EQ (stats["status5xx"].get<size_t> (), 1u);
 }

@@ -122,7 +122,9 @@ struct RunContext {
  * collect_metrics so it can be unit-tested deterministically.
  */
 [[nodiscard]] std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
-const std::shared_ptr<RunContext>& context, int64_t timestamp);
+const std::shared_ptr<RunContext>& context,
+int64_t timestamp,
+const std::map<int, size_t>* status_snapshot = nullptr);
 
 /**
  * @brief Wrap a per-tick stats object as a wire-ready SSE "metrics" event,
