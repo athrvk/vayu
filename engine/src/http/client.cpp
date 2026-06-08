@@ -24,6 +24,9 @@
 
 #include <curl/curl.h>
 
+#include <algorithm>
+#include <cassert>
+#include <chrono>
 #include <cstring>
 #include <stdexcept>
 
@@ -353,6 +356,12 @@ Result<Response> Client::send (const Request& request) {
         curl_easy_setopt (curl, CURLOPT_PROXY, impl_->config.proxy_url.c_str ());
     }
 
+    // Stamp submit time before handing off to curl so we can compute perceived
+    // latency the same way the event-loop path does (see curl_utils.cpp). For
+    // single-shot calls queue_wait will be near zero — that's correct and
+    // keeps Timing's contract consistent across endpoints.
+    auto submitted_at = std::chrono::steady_clock::now ();
+
     // Perform the request
     CURLcode res = curl_easy_perform (curl);
 
@@ -362,21 +371,32 @@ Result<Response> Client::send (const Request& request) {
     }
 
     // Get timing info (try to get even on errors, as curl may have partial timing)
-    double total_time = 0, namelookup_time = 0, connect_time = 0;
+    double wire_seconds = 0, namelookup_time = 0, connect_time = 0;
     double appconnect_time = 0, starttransfer_time = 0;
 
-    curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &total_time);
+    curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &wire_seconds);
     curl_easy_getinfo (curl, CURLINFO_NAMELOOKUP_TIME, &namelookup_time);
     curl_easy_getinfo (curl, CURLINFO_CONNECT_TIME, &connect_time);
     curl_easy_getinfo (curl, CURLINFO_APPCONNECT_TIME, &appconnect_time);
     curl_easy_getinfo (curl, CURLINFO_STARTTRANSFER_TIME, &starttransfer_time);
 
-    response.timing.total_ms   = total_time * 1000.0;
-    response.timing.dns_ms     = namelookup_time * 1000.0;
-    response.timing.connect_ms = (connect_time - namelookup_time) * 1000.0;
-    response.timing.tls_ms     = (appconnect_time - connect_time) * 1000.0;
+    // Match the event-loop semantics: total_ms is perceived (submit→completion),
+    // wire_ms is libcurl's view, queue_wait_ms is the delta. See curl_utils.cpp.
+    auto completion = std::chrono::steady_clock::now ();
+    double perceived_ms = std::chrono::duration<double, std::milli> (
+        completion - submitted_at).count ();
+    double wire_ms = wire_seconds * 1000.0;
+    assert (perceived_ms - wire_ms > -1.0 && "perceived_ms - wire_ms below -1ms — clock issue?");
+    double queue_wait_ms = std::max (0.0, perceived_ms - wire_ms);
+
+    response.timing.total_ms      = perceived_ms;
+    response.timing.wire_ms       = wire_ms;
+    response.timing.queue_wait_ms = queue_wait_ms;
+    response.timing.dns_ms        = namelookup_time * 1000.0;
+    response.timing.connect_ms    = (connect_time - namelookup_time) * 1000.0;
+    response.timing.tls_ms        = (appconnect_time - connect_time) * 1000.0;
     response.timing.first_byte_ms = (starttransfer_time - appconnect_time) * 1000.0;
-    response.timing.download_ms = (total_time - starttransfer_time) * 1000.0;
+    response.timing.download_ms   = (wire_seconds - starttransfer_time) * 1000.0;
 
     // Check for errors
     if (res != CURLE_OK) {
