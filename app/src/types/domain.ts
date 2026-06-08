@@ -202,6 +202,8 @@ export interface HttpResponse {
 	bodySize: number;
 	timing: {
 		total: number;
+		wire?: number;
+		queueWait?: number;
 		dns: number;
 		connect: number;
 		tls: number;
