@@ -262,6 +262,62 @@ size_t RunManager::active_count () const {
     return active_runs_.size ();
 }
 
+size_t RunManager::retained_count () const {
+    std::lock_guard<std::mutex> lock (mutex_);
+    return retained_runs_.size ();
+}
+
+void RunManager::start_sweeper (std::function<int64_t ()> ttl_provider) {
+    {
+        std::lock_guard<std::mutex> lock (sweeper_mtx_);
+        if (sweeper_thread_.joinable ()) return; // already running
+        sweeper_stop_         = false;
+        sweeper_ttl_provider_ = std::move (ttl_provider);
+    }
+    sweeper_thread_ = std::thread ([this] () {
+        std::unique_lock<std::mutex> lock (sweeper_mtx_);
+        while (!sweeper_stop_) {
+            // Re-read the TTL each tick so a runtime change to liveRetentionMs
+            // (Settings → Observability) takes effect without a daemon restart.
+            // Sweep at half the TTL so a retained run is evicted within
+            // ttl..1.5*ttl of completion; the 500ms cadence floor keeps a tiny
+            // or zero TTL (retention disabled) from busy-looping. ttl==0 means
+            // "evict immediately", which sweep_retained already handles.
+            int64_t ttl = std::max<int64_t> (sweeper_ttl_provider_ (), 0);
+            auto interval = std::chrono::milliseconds (std::max<int64_t> (ttl / 2, 500));
+            if (sweeper_cv_.wait_for (lock, interval, [this] { return sweeper_stop_; })) {
+                break;
+            }
+            lock.unlock ();
+            try {
+                sweep_retained (ttl);
+            } catch (...) {
+                // Defensive: never let an exception escape the sweeper thread.
+            }
+            lock.lock ();
+        }
+    });
+}
+
+void RunManager::start_sweeper (int64_t ttl_ms) {
+    start_sweeper ([ttl_ms] () { return ttl_ms; });
+}
+
+void RunManager::stop_sweeper () {
+    {
+        std::lock_guard<std::mutex> lock (sweeper_mtx_);
+        sweeper_stop_ = true;
+    }
+    sweeper_cv_.notify_all ();
+    if (sweeper_thread_.joinable ()) {
+        sweeper_thread_.join ();
+    }
+}
+
+RunManager::~RunManager () {
+    stop_sweeper ();
+}
+
 std::vector<std::shared_ptr<RunContext>> RunManager::get_all_active_runs () const {
     std::lock_guard<std::mutex> lock (mutex_);
     std::vector<std::shared_ptr<RunContext>> runs;
