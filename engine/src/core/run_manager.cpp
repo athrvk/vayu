@@ -610,13 +610,17 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     int tick_interval_ms = 0;
 
     // Build and append one SSE "metrics" event to the in-memory tick topic.
-    // Fields match the SSE handler (metrics.cpp) field-for-field.
-    auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot) {
+    // Fields match the SSE handler (metrics.cpp) field-for-field. The wall-clock
+    // timestamp is passed in by the caller so that the SSE tick and any
+    // persisted enrichment for the same logical tick share one timestamp —
+    // re-sampling now_ms() inside drifts them into adjacent ms buckets and the
+    // dashboard sees status-codes shift left vs throughput on the same x-axis.
+    auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot,
+        int64_t now_wall_ms) {
         size_t active_count =
         context->event_loop ? context->event_loop->active_count () : 0;
         size_t requests_sent     = context->requests_sent.load ();
         size_t requests_expected = context->requests_expected.load ();
-        int64_t now_wall_ms      = now_ms ();
         double elapsed_seconds =
         context->start_time_ms > 0 ?
         static_cast<double> (now_wall_ms - context->start_time_ms) / 1000.0 : 0.0;
@@ -663,10 +667,15 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         "liveTickIntervalMs", vayu::core::constants::server::STATS_INTERVAL_MS);
 
         // Tick 0: emit immediately so consumers see data before the first sleep.
-        emit_live_tick (nullptr);
+        emit_live_tick (nullptr, now_ms ());
 
         while (context->is_running && !context->should_stop) {
             std::this_thread::sleep_for (std::chrono::milliseconds (tick_interval_ms));
+
+            // Single wall-clock sample per tick — shared by the SSE payload
+            // timestamp, the run-elapsed calc, and (on DB-gated ticks) every
+            // persisted metric row below. See #27.
+            int64_t tick_wall_ms = now_ms ();
 
             // Snapshot the status-code distribution once per tick and share it
             // with both the SSE builder and (on DB-gated ticks) the persisted
@@ -674,7 +683,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             auto status_snapshot = context->metrics_collector->status_code_distribution ();
 
             // Emit a live tick every iteration regardless of the 1 Hz DB gate.
-            emit_live_tick (&status_snapshot);
+            emit_live_tick (&status_snapshot, tick_wall_ms);
 
             auto now = std::chrono::steady_clock::now ();
             auto elapsed = std::chrono::duration<double> (now - last_update).count ();
@@ -693,7 +702,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                 // Calculate send rate (requests dispatched per second) and throughput (responses per second)
                 size_t requests_sent = context->requests_sent.load ();
                 double run_elapsed_s =
-                (static_cast<double> (now_ms () - context->start_time_ms)) / 1000.0;
+                (static_cast<double> (tick_wall_ms - context->start_time_ms)) / 1000.0;
                 double send_rate  = run_elapsed_s > 0 ?
                 static_cast<double> (requests_sent) / run_elapsed_s :
                 0.0;
@@ -727,7 +736,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
                 // Store metrics (batched to reduce lock contention)
                 try {
-                    auto timestamp = now_ms ();
+                    auto timestamp = tick_wall_ms;
                     std::vector<vayu::db::Metric> metrics;
                     metrics.reserve (14);
 
@@ -775,7 +784,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
         // Final settled tick before signalling closed — consumers use this ordering
         // as the termination contract (last data before closed==true).
-        emit_live_tick (nullptr);
+        emit_live_tick (nullptr, now_ms ());
     } catch (const std::exception& e) {
         vayu::utils::log_error ("collect_metrics: " + std::string (e.what ()));
     } catch (...) {

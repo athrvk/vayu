@@ -24,6 +24,7 @@
 import { memo, useMemo } from "react";
 import { Activity } from "lucide-react";
 import { formatNumber } from "@/utils";
+import { useDashboardStore } from "@/stores";
 import type { MetricsViewProps, DashboardDerived } from "../types";
 import { InfoChip, fmt } from "./shared";
 import { TOOLTIPS } from "./tooltips";
@@ -36,7 +37,6 @@ import {
 	buildStatusOverTime,
 	latestThroughputMbps,
 } from "../utils/metricsTransforms";
-import { computeBreakpoint } from "../utils/computeBreakpoint";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
 import { ThroughputOverTimeChart, type ThroughputPoint } from "./charts/ThroughputOverTimeChart";
@@ -94,15 +94,19 @@ function MetricsView({
 		[loadMode, chartWindow, rampConfig]
 	);
 
-	const peakConcurrency = useMemo(() => {
-		let max = 0;
-		for (const m of historicalMetrics) {
-			if (m.current_concurrency > max) max = m.current_concurrency;
-		}
-		return max;
-	}, [historicalMetrics]);
+	// Read the monotonic aggregates from the store — they are folded into running
+	// values on each tick in addMetricsBatch, so this is O(1) per render instead
+	// of an O(n) scan over the full historicalMetrics buffer.
+	const peakConcurrency = useDashboardStore((s) => s.peakConcurrency);
+	const breakpoint = useDashboardStore((s) => s.breakpoint);
 
-	const breakpoint = useMemo(() => computeBreakpoint(historicalMetrics), [historicalMetrics]);
+	// Only the latest tick's elapsed_seconds is consumed below — depending on the
+	// whole historicalMetrics array would rebuild `derived` every tick (10 Hz) and
+	// defeat the React.memo on HeroRow / ModeStatsRow.
+	const lastElapsedSeconds =
+		historicalMetrics.length > 0
+			? historicalMetrics[historicalMetrics.length - 1].elapsed_seconds
+			: 0;
 
 	// Derived bundle — computed once, consumed by HeroRow + ModeStatsRow.
 	const derived = useMemo<DashboardDerived | null>(() => {
@@ -117,7 +121,6 @@ function MetricsView({
 			metrics.throughput ??
 			metrics.current_rps;
 		const droppedRequests = metrics.dropped_requests ?? 0;
-		const lastTick = historicalMetrics[historicalMetrics.length - 1];
 
 		return {
 			mode: loadMode,
@@ -144,7 +147,7 @@ function MetricsView({
 			medianLatency: finalReport?.latency?.p50 ?? metrics.latency_p50_ms ?? 0,
 			p95Latency: finalReport?.latency?.p95 ?? metrics.latency_p95_ms ?? 0,
 			testDuration: finalReport?.summary?.testDuration,
-			elapsedSeconds: lastTick?.elapsed_seconds ?? 0,
+			elapsedSeconds: lastElapsedSeconds,
 			setupOverhead: finalReport?.summary?.setupOverhead,
 			droppedRequests,
 			showDropped: isRateLimitedRun(mode, targetRps) && droppedRequests > 0,
@@ -157,7 +160,7 @@ function MetricsView({
 	}, [
 		metrics,
 		finalReport,
-		historicalMetrics,
+		lastElapsedSeconds,
 		loadMode,
 		isCompleted,
 		targetRps,
