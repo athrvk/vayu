@@ -567,7 +567,9 @@ std::string build_tick_payload (const nlohmann::json& stats, size_t offset) {
 }
 
 std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
-const std::shared_ptr<RunContext>& context, int64_t timestamp) {
+const std::shared_ptr<RunContext>& context,
+int64_t timestamp,
+const std::map<int, size_t>* status_snapshot) {
     auto& mc = *context->metrics_collector;
     std::vector<vayu::db::Metric> rows;
     rows.reserve (4);
@@ -577,8 +579,14 @@ const std::shared_ptr<RunContext>& context, int64_t timestamp) {
     static_cast<double> (mc.total_bytes_sent ()), "" });
     rows.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::BytesReceived,
     static_cast<double> (mc.total_bytes_received ()), "" });
+    // Reuse the tick's snapshot when provided to avoid a second scan/copy of the
+    // distribution; otherwise compute it (e.g. unit tests calling directly).
+    std::map<int, size_t> local_dist;
+    const std::map<int, size_t>& dist = status_snapshot != nullptr ?
+    *status_snapshot :
+    (local_dist = mc.status_code_distribution ());
     nlohmann::json codes = nlohmann::json::object ();
-    for (const auto& [code, count] : mc.status_code_distribution ()) {
+    for (const auto& [code, count] : dist) {
         codes[std::to_string (code)] = count;
     }
     rows.push_back (
@@ -603,7 +611,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
     // Build and append one SSE "metrics" event to the in-memory tick topic.
     // Fields match the SSE handler (metrics.cpp) field-for-field.
-    auto emit_live_tick = [&] () {
+    auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot) {
         size_t active_count =
         context->event_loop ? context->event_loop->active_count () : 0;
         size_t requests_sent     = context->requests_sent.load ();
@@ -612,8 +620,8 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         double elapsed_seconds =
         context->start_time_ms > 0 ?
         static_cast<double> (now_wall_ms - context->start_time_ms) / 1000.0 : 0.0;
-        auto stats = context->metrics_collector->get_current_stats (
-        active_count, elapsed_seconds, requests_sent, requests_expected);
+        auto stats = context->metrics_collector->get_current_stats (active_count,
+        elapsed_seconds, requests_sent, requests_expected, status_snapshot);
 
         // Instantaneous RPS: delta-based, updated every ≥100 ms.
         auto now_steady     = std::chrono::steady_clock::now ();
@@ -655,13 +663,18 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         "liveTickIntervalMs", vayu::core::constants::server::STATS_INTERVAL_MS);
 
         // Tick 0: emit immediately so consumers see data before the first sleep.
-        emit_live_tick ();
+        emit_live_tick (nullptr);
 
         while (context->is_running && !context->should_stop) {
             std::this_thread::sleep_for (std::chrono::milliseconds (tick_interval_ms));
 
+            // Snapshot the status-code distribution once per tick and share it
+            // with both the SSE builder and (on DB-gated ticks) the persisted
+            // enrichment builder — avoids scanning/copying the map twice.
+            auto status_snapshot = context->metrics_collector->status_code_distribution ();
+
             // Emit a live tick every iteration regardless of the 1 Hz DB gate.
-            emit_live_tick ();
+            emit_live_tick (&status_snapshot);
 
             auto now = std::chrono::steady_clock::now ();
             auto elapsed = std::chrono::duration<double> (now - last_update).count ();
@@ -736,7 +749,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                     vayu::MetricName::Backpressure, static_cast<double> (backpressure), "" });
 
                     // Per-tick enrichment: dropped / bytes / status-code map.
-                    auto enrichment = build_tick_enrichment_metrics (context, timestamp);
+                    // Reuse the snapshot already taken for the live tick above.
+                    auto enrichment = build_tick_enrichment_metrics (
+                    context, timestamp, &status_snapshot);
                     metrics.insert (metrics.end (), enrichment.begin (), enrichment.end ());
 
                     // Avg latency and queue-wait enrichment for the DB batch.
@@ -760,7 +775,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
         // Final settled tick before signalling closed — consumers use this ordering
         // as the termination contract (last data before closed==true).
-        emit_live_tick ();
+        emit_live_tick (nullptr);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("collect_metrics: " + std::string (e.what ()));
     } catch (...) {

@@ -22,7 +22,9 @@
  * - All errors preserved, success results sampled if memory constrained
  */
 
+#include <array>
 #include <atomic>
+#include <map>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -296,11 +298,18 @@ class MetricsCollector {
      * @param requests_sent Total requests submitted to event loop (for send rate)
      * @param requests_expected Total expected requests for the run (0 for open-ended
      *        modes like constant_rps; feeds the dashboard ETA stat)
+     * @param status_snapshot Optional precomputed status-code distribution. When
+     *        non-null it is used verbatim for the `statusCodes` field and the
+     *        derived class breakdown, avoiding a redundant scan when the caller
+     *        already snapshotted the distribution this tick. When null the
+     *        distribution is computed internally.
      * @return JSON object with current metrics
      */
-    [[nodiscard]] nlohmann::json
-    get_current_stats (size_t current_active, double elapsed_seconds, size_t requests_sent,
-    size_t requests_expected = 0) const;
+    [[nodiscard]] nlohmann::json get_current_stats (size_t current_active,
+    double elapsed_seconds,
+    size_t requests_sent,
+    size_t requests_expected                     = 0,
+    const std::map<int, size_t>* status_snapshot = nullptr) const;
 
     private:
     std::string run_id_;
@@ -315,11 +324,15 @@ class MetricsCollector {
     std::atomic<size_t> total_bytes_sent_{ 0 };
     std::atomic<size_t> total_bytes_recv_{ 0 };
 
-    // Status code counts (lock-free for common codes)
-    std::atomic<size_t> status_2xx_{ 0 };
-    std::atomic<size_t> status_3xx_{ 0 };
-    std::atomic<size_t> status_4xx_{ 0 };
-    std::atomic<size_t> status_5xx_{ 0 };
+    // Per-code counts, lock-free on the hot path. HTTP status codes (and the
+    // synthetic code 0 used for transport errors) live in [0, STATUS_CODE_SLOTS).
+    // record_success/record_error do a single relaxed atomic increment here —
+    // no mutex — so the recorder path scales to the 60k+ RPS target. Class
+    // breakdowns (2xx..5xx) are derived at read time, not maintained on the hot
+    // path. Out-of-range codes (>= STATUS_CODE_SLOTS or < 0) fall back to the
+    // rarely-hit overflow map below; real HTTP traffic never takes that lock.
+    static constexpr int STATUS_CODE_SLOTS = 600;
+    std::array<std::atomic<size_t>, STATUS_CODE_SLOTS> status_code_counts_{};
 
     // Lock-free HdrHistogram for latency recording (thread-safe)
     struct hdr_histogram* latency_histogram_{ nullptr };
@@ -336,12 +349,18 @@ class MetricsCollector {
     std::vector<ResponseSample> response_samples_;
     std::atomic<size_t> response_sample_counter_{ 0 };
 
-    // Detailed status code tracking
-    mutable std::mutex status_codes_mutex_;
-    std::map<int, size_t> status_code_counts_;
+    // Overflow for non-standard / out-of-range codes (e.g. 999 from misbehaving
+    // proxies). Dead path for real traffic; guarded by a mutex it almost never
+    // takes, so it adds no contention to the hot path.
+    mutable std::mutex status_overflow_mutex_;
+    std::map<int, size_t> status_overflow_;
 
     // Helper for atomic double addition
     void atomic_add_double (std::atomic<double>& target, double value);
+
+    // Increment the count for a status code. Lock-free for codes in
+    // [0, STATUS_CODE_SLOTS); falls back to the overflow map otherwise.
+    void record_status_code (int status_code);
 };
 
 } // namespace vayu::core
