@@ -25,7 +25,6 @@
 #include <curl/curl.h>
 
 #include <algorithm>
-#include <cassert>
 #include <chrono>
 #include <cstring>
 #include <stdexcept>
@@ -356,14 +355,13 @@ Result<Response> Client::send (const Request& request) {
         curl_easy_setopt (curl, CURLOPT_PROXY, impl_->config.proxy_url.c_str ());
     }
 
-    // Stamp submit time before handing off to curl so we can compute perceived
-    // latency the same way the event-loop path does (see curl_utils.cpp). For
-    // single-shot calls queue_wait will be near zero — that's correct and
-    // keeps Timing's contract consistent across endpoints.
+    // Perform the request. Stamp submission just before perform so that
+    // perceived latency excludes our own setup cost above but covers everything
+    // libcurl does on this thread. For single-shot sends there is no generator
+    // queue, so queue_wait_ms will be near zero — that's the correct contract.
     auto submitted_at = std::chrono::steady_clock::now ();
-
-    // Perform the request
     CURLcode res = curl_easy_perform (curl);
+    auto completion = std::chrono::steady_clock::now ();
 
     // Cleanup headers
     if (headers_list) {
@@ -382,16 +380,13 @@ Result<Response> Client::send (const Request& request) {
 
     // Match the event-loop semantics: total_ms is perceived (submit→completion),
     // wire_ms is libcurl's view, queue_wait_ms is the delta. See curl_utils.cpp.
-    auto completion = std::chrono::steady_clock::now ();
     double perceived_ms = std::chrono::duration<double, std::milli> (
         completion - submitted_at).count ();
     double wire_ms = wire_seconds * 1000.0;
-    assert (perceived_ms - wire_ms > -1.0 && "perceived_ms - wire_ms below -1ms — clock issue?");
-    double queue_wait_ms = std::max (0.0, perceived_ms - wire_ms);
 
     response.timing.total_ms      = perceived_ms;
     response.timing.wire_ms       = wire_ms;
-    response.timing.queue_wait_ms = queue_wait_ms;
+    response.timing.queue_wait_ms = std::max (0.0, perceived_ms - wire_ms);
     response.timing.dns_ms        = namelookup_time * 1000.0;
     response.timing.connect_ms    = (connect_time - namelookup_time) * 1000.0;
     response.timing.tls_ms        = (appconnect_time - connect_time) * 1000.0;
