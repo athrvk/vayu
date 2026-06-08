@@ -57,7 +57,17 @@ Access HTTP response data:
 ```javascript
 pm.response.code              // Status code (number, e.g., 200)
 pm.response.status            // Alias for code
-pm.response.responseTime      // Response time in milliseconds
+pm.response.responseTime      // Perceived latency in ms (submit → completion).
+                              // In load tests this includes generator-side
+                              // queue wait. For pure server wire time, use
+                              // responseTimeWire.
+pm.response.responseTimeWire  // CURLINFO_TOTAL_TIME in ms — DNS + TCP + TLS +
+                              // send + recv. Matches the pre-v0.3 meaning of
+                              // responseTime; use this to assert on server SLAs
+                              // independent of generator load.
+pm.response.responseTimeQueueWait // Generator-side queue overhead in ms,
+                              // i.e. responseTime − responseTimeWire (clamped
+                              // to >= 0). For single-shot sends this is ~0.
 pm.response.headers           // Headers object (lowercase keys)
 pm.response.body              // Raw body string
 pm.response.text()            // Body as string
