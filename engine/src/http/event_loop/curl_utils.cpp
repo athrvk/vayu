@@ -19,6 +19,7 @@
 #include "vayu/http/event_loop/event_loop_worker.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/utils/logger.hpp"
 
 namespace vayu::http::detail {
 
@@ -275,11 +276,23 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
 
     double wire_ms = wire_seconds * 1000.0;
     // Clamp queue_wait to >= 0 to absorb sub-microsecond clock jitter where
-    // perceived_ms can appear marginally smaller than wire_ms. In debug builds,
-    // assert that the discrepancy is sub-millisecond (a larger negative would
-    // indicate a real bug — wrong clock, stamp-after-submit, etc.).
-    assert (perceived_ms - wire_ms > -1.0 && "perceived_ms - wire_ms below -1ms — clock issue?");
-    double queue_wait_ms = std::max (0.0, perceived_ms - wire_ms);
+    // perceived_ms can appear marginally smaller than wire_ms. A discrepancy
+    // larger than 1ms indicates a real problem (wrong stamp point, clock
+    // skew between steady_clock and curl's TOTAL_TIME, etc.) — debug builds
+    // trip an assert; release builds log a warning so the signal isn't lost
+    // silently in the clamp. Without this, a future regression that moves
+    // `submitted_at` later in the pipeline would zero out queue_wait_ms in
+    // production while CI stays green.
+    double delta = perceived_ms - wire_ms;
+    assert (delta > -1.0 && "perceived_ms - wire_ms below -1ms — clock issue?");
+    if (delta < -1.0) {
+        vayu::utils::log_warning (
+        "queue_wait clock skew: perceived_ms=" + std::to_string (perceived_ms) +
+        " wire_ms=" + std::to_string (wire_ms) +
+        " delta_ms=" + std::to_string (delta) +
+        " — submitted_at stamp may be set after curl wire start");
+    }
+    double queue_wait_ms = std::max (0.0, delta);
 
     response.timing.total_ms      = perceived_ms;        // redefined as perceived
     response.timing.wire_ms       = wire_ms;             // new
