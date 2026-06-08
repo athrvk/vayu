@@ -301,6 +301,7 @@ export default function RequestBuilder() {
 					bodyRaw, // Always include raw body for raw view mode
 					bodyType,
 					time: result.timing?.total || 0,
+					timing: result.timing,
 					size: result.bodySize || 0,
 					// Client-side error info (from engine/curl)
 					errorCode: result.errorCode,

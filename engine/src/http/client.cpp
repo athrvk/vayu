@@ -378,6 +378,8 @@ Result<Response> Client::send (const Request& request) {
     curl_easy_getinfo (curl, CURLINFO_APPCONNECT_TIME, &appconnect_time);
     curl_easy_getinfo (curl, CURLINFO_STARTTRANSFER_TIME, &starttransfer_time);
 
+    // Match the event-loop semantics: total_ms is perceived (submit→completion),
+    // wire_ms is libcurl's view, queue_wait_ms is the delta. See curl_utils.cpp.
     double perceived_ms = std::chrono::duration<double, std::milli> (
         completion - submitted_at).count ();
     double wire_ms = wire_seconds * 1000.0;

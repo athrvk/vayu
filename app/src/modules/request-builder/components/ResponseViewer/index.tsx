@@ -38,12 +38,13 @@ import { ResponseBody as SharedResponseBody } from "@/components/shared/response
 import ResponseHeader from "./ResponseHeader";
 import ResponseHeadersTab from "./ResponseHeadersTab";
 import ResponseCookies from "./ResponseCookies";
+import ResponseTimingTab from "./ResponseTimingTab";
 import ConsoleOutput from "./ConsoleOutput";
 import TestResults from "./TestResults";
 import RawRequestResponse from "./RawRequestResponse";
 import ClientErrorView from "./ClientErrorView";
 
-type ResponseTab = "body" | "headers" | "cookies" | "console" | "tests" | "raw-request";
+type ResponseTab = "body" | "headers" | "cookies" | "timing" | "console" | "tests" | "raw-request";
 
 export default function ResponseViewer() {
 	const { response, isExecuting } = useRequestBuilderContext();
@@ -188,6 +189,14 @@ export default function ResponseViewer() {
 						>
 							Cookies
 						</TabsTrigger>
+						{response.timing && (
+							<TabsTrigger
+								value="timing"
+								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							>
+								Timing
+							</TabsTrigger>
+						)}
 						{response.consoleLogs && response.consoleLogs.length > 0 && (
 							<TabsTrigger
 								value="console"
@@ -286,6 +295,9 @@ export default function ResponseViewer() {
 					)}
 					{activeTab === "headers" && <ResponseHeadersTab response={response} />}
 					{activeTab === "cookies" && <ResponseCookies headers={response.headers} />}
+					{activeTab === "timing" && response.timing && (
+						<ResponseTimingTab timing={response.timing} />
+					)}
 					{activeTab === "console" && (
 						<ConsoleOutput
 							logs={response.consoleLogs || []}
