@@ -262,6 +262,54 @@ size_t RunManager::active_count () const {
     return active_runs_.size ();
 }
 
+size_t RunManager::retained_count () const {
+    std::lock_guard<std::mutex> lock (mutex_);
+    return retained_runs_.size ();
+}
+
+void RunManager::start_sweeper (int64_t ttl_ms) {
+    {
+        std::lock_guard<std::mutex> lock (sweeper_mtx_);
+        if (sweeper_thread_.joinable ()) return; // already running
+        sweeper_stop_   = false;
+        sweeper_ttl_ms_ = std::max<int64_t> (ttl_ms, 1000);
+    }
+    sweeper_thread_ = std::thread ([this] () {
+        int64_t ttl = sweeper_ttl_ms_;
+        // Sweep at half the TTL so a retained run is evicted within ttl..1.5*ttl
+        // of completion. Use a cv with timed_wait so daemon shutdown wakes us.
+        auto interval = std::chrono::milliseconds (std::max<int64_t> (ttl / 2, 500));
+        std::unique_lock<std::mutex> lock (sweeper_mtx_);
+        while (!sweeper_stop_) {
+            if (sweeper_cv_.wait_for (lock, interval, [this] { return sweeper_stop_; })) {
+                break;
+            }
+            lock.unlock ();
+            try {
+                sweep_retained (ttl);
+            } catch (...) {
+                // Defensive: never let an exception escape the sweeper thread.
+            }
+            lock.lock ();
+        }
+    });
+}
+
+void RunManager::stop_sweeper () {
+    {
+        std::lock_guard<std::mutex> lock (sweeper_mtx_);
+        sweeper_stop_ = true;
+    }
+    sweeper_cv_.notify_all ();
+    if (sweeper_thread_.joinable ()) {
+        sweeper_thread_.join ();
+    }
+}
+
+RunManager::~RunManager () {
+    stop_sweeper ();
+}
+
 std::vector<std::shared_ptr<RunContext>> RunManager::get_all_active_runs () const {
     std::lock_guard<std::mutex> lock (mutex_);
     std::vector<std::shared_ptr<RunContext>> runs;

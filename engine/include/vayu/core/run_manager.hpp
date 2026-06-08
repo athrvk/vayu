@@ -138,7 +138,19 @@ class RunManager {
     std::map<std::string, std::shared_ptr<RunContext>> active_runs_;
     std::map<std::string, std::shared_ptr<RunContext>> retained_runs_;
 
+    // Background TTL sweeper. Without this, retained runs only get evicted when
+    // /metrics/live or start_run fires — headless API users (POST /run +
+    // GET /run/:id/report) never trigger either, and retained RunContexts
+    // (full tick_buffer, HdrHistogram, counters) accumulate indefinitely.
+    std::thread sweeper_thread_;
+    std::mutex sweeper_mtx_;
+    std::condition_variable sweeper_cv_;
+    bool sweeper_stop_{ false };
+    int64_t sweeper_ttl_ms_{ 0 };
+
     public:
+    ~RunManager ();
+
     void register_run (const std::string& run_id, std::shared_ptr<RunContext> context);
     std::shared_ptr<RunContext> get_run (const std::string& run_id);
     void unregister_run (const std::string& run_id);
@@ -154,6 +166,14 @@ class RunManager {
     std::shared_ptr<RunContext> get_run_or_retained (const std::string& run_id);
     // Evict retained runs whose completed_at_ms is older than ttl_ms.
     void sweep_retained (int64_t ttl_ms);
+    // Number of retained (completed but not yet swept) runs. Test-only hook.
+    size_t retained_count () const;
+
+    // Start a background thread that calls sweep_retained(ttl_ms) every
+    // ttl_ms/2. Idempotent — second calls are no-ops. Stopped in the
+    // destructor (or via stop_sweeper) so daemon shutdown is clean.
+    void start_sweeper (int64_t ttl_ms);
+    void stop_sweeper ();
 
     // Helper to start a run
     void start_run (const std::string& run_id,

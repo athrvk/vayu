@@ -444,9 +444,18 @@ data: {"event":"complete","runId":"run_1234567890"}
 | `status2xx`–`status5xx` | Per-class counts |
 | `statusCodes` | Full per-code distribution map |
 
-Each `metrics` event carries an `id:` equal to its zero-based offset. On
-reconnect the client may send a `Last-Event-ID` header; the stream resumes from
-`Last-Event-ID + 1` (omit it to replay from the beginning).
+Each `metrics` event carries an `id:` equal to its zero-based offset. The
+browser's built-in `EventSource` retry automatically replays this id as
+`Last-Event-ID` on its **own** intra-connection retries (no application code
+needed), and the stream resumes from `Last-Event-ID + 1`.
+
+**Application-level reconnect**: clients that close the EventSource themselves
+(e.g. after observing `readyState === CLOSED`) should NOT open a new connection
+and rely on `Last-Event-ID` — `EventSource` does not expose a header-setting
+API, so a fresh connect would request `from=0` and replay the entire retained
+topic, duplicating ticks already shown. The canonical recovery is to converge
+on the stored report via `GET /run/:runId/report` (the same path used at normal
+run end). This is the pattern the bundled app uses.
 
 **Responses:**
 - `200` — SSE stream (active run, or finished run still within the retention window).

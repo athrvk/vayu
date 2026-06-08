@@ -162,8 +162,16 @@ int main (int argc, char* argv[]) {
     // Initialize curl
     vayu::http::global_init ();
 
-    // Create RunManager
+    // Create RunManager and start its background TTL sweeper so retained
+    // runs (completed but kept for /metrics/live replay) get evicted even in
+    // headless flows that never hit /metrics/live or /run.
     vayu::core::RunManager run_manager;
+    {
+        int retention_ms = db.get_config_int ("liveRetentionMs", 60000);
+        if (retention_ms > 0) {
+            run_manager.start_sweeper (retention_ms);
+        }
+    }
 
     // Create and start HTTP server
     // verbose parameter is kept for backward compatibility with server internals

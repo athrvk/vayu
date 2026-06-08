@@ -68,6 +68,25 @@ TEST (BuildTickPayload, WrapsStatsAsSseEventWithOffsetId) {
     EXPECT_EQ (p.substr (p.size () - 2), "\n\n");
 }
 
+TEST (RunManagerRetention, BackgroundSweeperEvictsWithoutExternalTriggers) {
+    RunManager mgr;
+    nlohmann::json cfg;
+    auto a = std::make_shared<RunContext> ("a", cfg);
+    mgr.register_run ("a", a);
+    mgr.retain_run ("a");
+    a->completed_at_ms.store (1); // backdate "a" so it's immediately expired
+
+    EXPECT_EQ (mgr.retained_count (), 1u);
+
+    // ttl is clamped to >= 1s; sweep cadence is ttl/2 (clamped >= 500ms).
+    // After ~750ms the sweeper has had at least one tick.
+    mgr.start_sweeper (1000);
+    std::this_thread::sleep_for (std::chrono::milliseconds (750));
+    EXPECT_EQ (mgr.retained_count (), 0u);
+
+    mgr.stop_sweeper (); // also exercised by destructor
+}
+
 TEST (RunManagerRetention, SweepEvictsExpiredOnly) {
     RunManager mgr;
     nlohmann::json cfg;
