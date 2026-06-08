@@ -132,6 +132,22 @@ TEST_F (HttpClientTest, SendsGetRequest) {
     EXPECT_GT (response.timing.total_ms, 0);
 }
 
+// The mock is plain HTTP (no TLS), so APPCONNECT_TIME is 0 — the case that used
+// to render the TLS phase as a negative "-0ms". Every phase delta must be
+// non-negative, and TLS specifically must be 0 when no handshake occurred.
+TEST_F (HttpClientTest, TimingPhasesAreNonNegative) {
+    auto result = client_->get (mock_->url ("/get"));
+    ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
+
+    const auto& t = result.value ().timing;
+    EXPECT_GE (t.dns_ms, 0.0);
+    EXPECT_GE (t.connect_ms, 0.0);
+    EXPECT_GE (t.tls_ms, 0.0);
+    EXPECT_GE (t.first_byte_ms, 0.0);
+    EXPECT_GE (t.download_ms, 0.0);
+    EXPECT_DOUBLE_EQ (t.tls_ms, 0.0); // plain HTTP — no TLS phase
+}
+
 TEST_F (HttpClientTest, SendsPostRequest) {
     Headers headers = { { "Content-Type", "application/json" } };
 
