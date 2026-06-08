@@ -78,13 +78,28 @@ TEST (RunManagerRetention, BackgroundSweeperEvictsWithoutExternalTriggers) {
 
     EXPECT_EQ (mgr.retained_count (), 1u);
 
-    // ttl is clamped to >= 1s; sweep cadence is ttl/2 (clamped >= 500ms).
-    // After ~750ms the sweeper has had at least one tick.
+    // Sweep cadence is ttl/2, floored at 500ms. With ttl=1000 → 500ms cadence,
+    // so after ~750ms the sweeper has had at least one tick.
     mgr.start_sweeper (1000);
     std::this_thread::sleep_for (std::chrono::milliseconds (750));
     EXPECT_EQ (mgr.retained_count (), 0u);
 
     mgr.stop_sweeper (); // also exercised by destructor
+}
+
+// The TTL provider must be invoked every tick (not captured once at start), so
+// a runtime change to liveRetentionMs is honored without a daemon restart.
+TEST (RunManagerRetention, BackgroundSweeperRereadsTtlProviderEachTick) {
+    RunManager mgr;
+    std::atomic<int> calls{ 0 };
+    // ttl=1000 → 500ms cadence; over ~1300ms expect at least two invocations.
+    mgr.start_sweeper ([&calls] () -> int64_t {
+        calls.fetch_add (1);
+        return 1000;
+    });
+    std::this_thread::sleep_for (std::chrono::milliseconds (1300));
+    mgr.stop_sweeper ();
+    EXPECT_GE (calls.load (), 2);
 }
 
 TEST (RunManagerRetention, SweepEvictsExpiredOnly) {

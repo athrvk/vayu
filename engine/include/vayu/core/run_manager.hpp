@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -146,7 +147,9 @@ class RunManager {
     std::mutex sweeper_mtx_;
     std::condition_variable sweeper_cv_;
     bool sweeper_stop_{ false };
-    int64_t sweeper_ttl_ms_{ 0 };
+    // Re-read each tick (not captured once) so a runtime change to
+    // liveRetentionMs from the UI takes effect without a daemon restart.
+    std::function<int64_t ()> sweeper_ttl_provider_;
 
     public:
     ~RunManager ();
@@ -169,9 +172,13 @@ class RunManager {
     // Number of retained (completed but not yet swept) runs. Test-only hook.
     size_t retained_count () const;
 
-    // Start a background thread that calls sweep_retained(ttl_ms) every
-    // ttl_ms/2. Idempotent — second calls are no-ops. Stopped in the
+    // Start a background thread that periodically calls sweep_retained. The
+    // provider is invoked each tick to obtain the current TTL (ms), so a config
+    // change to liveRetentionMs is honored live; sweep cadence is TTL/2
+    // (floored at 500ms). Idempotent — second calls are no-ops. Stopped in the
     // destructor (or via stop_sweeper) so daemon shutdown is clean.
+    void start_sweeper (std::function<int64_t ()> ttl_provider);
+    // Convenience overload for a fixed TTL (used by tests).
     void start_sweeper (int64_t ttl_ms);
     void stop_sweeper ();
 

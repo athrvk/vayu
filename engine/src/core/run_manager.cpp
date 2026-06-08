@@ -267,20 +267,24 @@ size_t RunManager::retained_count () const {
     return retained_runs_.size ();
 }
 
-void RunManager::start_sweeper (int64_t ttl_ms) {
+void RunManager::start_sweeper (std::function<int64_t ()> ttl_provider) {
     {
         std::lock_guard<std::mutex> lock (sweeper_mtx_);
         if (sweeper_thread_.joinable ()) return; // already running
-        sweeper_stop_   = false;
-        sweeper_ttl_ms_ = std::max<int64_t> (ttl_ms, 1000);
+        sweeper_stop_         = false;
+        sweeper_ttl_provider_ = std::move (ttl_provider);
     }
     sweeper_thread_ = std::thread ([this] () {
-        int64_t ttl = sweeper_ttl_ms_;
-        // Sweep at half the TTL so a retained run is evicted within ttl..1.5*ttl
-        // of completion. Use a cv with timed_wait so daemon shutdown wakes us.
-        auto interval = std::chrono::milliseconds (std::max<int64_t> (ttl / 2, 500));
         std::unique_lock<std::mutex> lock (sweeper_mtx_);
         while (!sweeper_stop_) {
+            // Re-read the TTL each tick so a runtime change to liveRetentionMs
+            // (Settings → Observability) takes effect without a daemon restart.
+            // Sweep at half the TTL so a retained run is evicted within
+            // ttl..1.5*ttl of completion; the 500ms cadence floor keeps a tiny
+            // or zero TTL (retention disabled) from busy-looping. ttl==0 means
+            // "evict immediately", which sweep_retained already handles.
+            int64_t ttl = std::max<int64_t> (sweeper_ttl_provider_ (), 0);
+            auto interval = std::chrono::milliseconds (std::max<int64_t> (ttl / 2, 500));
             if (sweeper_cv_.wait_for (lock, interval, [this] { return sweeper_stop_; })) {
                 break;
             }
@@ -293,6 +297,10 @@ void RunManager::start_sweeper (int64_t ttl_ms) {
             lock.lock ();
         }
     });
+}
+
+void RunManager::start_sweeper (int64_t ttl_ms) {
+    start_sweeper ([ttl_ms] () { return ttl_ms; });
 }
 
 void RunManager::stop_sweeper () {
