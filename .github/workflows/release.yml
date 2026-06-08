@@ -104,18 +104,18 @@ jobs:
           testPreset: macos-prod-arm64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
 
-      - name: Build engine (x64, no tests)
-        # Tests are run on arm64 only. x64 is built solely as input to the
-        # `lipo` universal-binary step; running ctest under Rosetta on
-        # M-series CI runners causes timing-sensitive tests (e.g.
-        # RateLimiterTest.EnforcesTargetRPS) to flake without representing a
-        # real engine bug. See follow-up issue.
+      - name: Build and run engine tests (x64)
+        # Both architectures run ctest now that RateLimiterTest hits an
+        # in-process mock instead of httpbin.org (issue #30). x64 still goes
+        # through Rosetta on M-series runners, but the remaining tests don't
+        # assert on tight wall-clock windows tied to a remote endpoint.
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-x64
           buildPreset: macos-prod-x64
+          testPreset: macos-prod-x64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
 
       - name: Create universal binary (macOS)
