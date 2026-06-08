@@ -387,11 +387,20 @@ Result<Response> Client::send (const Request& request) {
     response.timing.total_ms      = perceived_ms;
     response.timing.wire_ms       = wire_ms;
     response.timing.queue_wait_ms = std::max (0.0, perceived_ms - wire_ms);
-    response.timing.dns_ms        = namelookup_time * 1000.0;
-    response.timing.connect_ms    = (connect_time - namelookup_time) * 1000.0;
-    response.timing.tls_ms        = (appconnect_time - connect_time) * 1000.0;
-    response.timing.first_byte_ms = (starttransfer_time - appconnect_time) * 1000.0;
-    response.timing.download_ms   = (wire_seconds - starttransfer_time) * 1000.0;
+    // curl phase timers are cumulative from request start; a skipped phase
+    // reports 0. APPCONNECT_TIME is 0 for plain HTTP and for reused keep-alive
+    // connections, which made the naive successive differences render TLS as a
+    // negative "-0ms" and over-count TTFB (it absorbed the connect time). Treat
+    // a zero appconnect as "no TLS phase" by collapsing it onto connect_time,
+    // and clamp every delta at 0 (mirrors the queue_wait_ms guard above).
+    double appconnect = appconnect_time > 0.0 ? appconnect_time : connect_time;
+    response.timing.dns_ms = std::max (0.0, namelookup_time * 1000.0);
+    response.timing.connect_ms = std::max (0.0, (connect_time - namelookup_time) * 1000.0);
+    response.timing.tls_ms = std::max (0.0, (appconnect - connect_time) * 1000.0);
+    response.timing.first_byte_ms =
+    std::max (0.0, (starttransfer_time - appconnect) * 1000.0);
+    response.timing.download_ms =
+    std::max (0.0, (wire_seconds - starttransfer_time) * 1000.0);
 
     // Check for errors
     if (res != CURLE_OK) {
