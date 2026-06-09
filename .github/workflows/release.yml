@@ -231,7 +231,10 @@ jobs:
           # sees new releases.
           cp app/release/latest-linux.yml artifacts/ 2>/dev/null || true
           # Count installers only (the .yml metadata doesn't count as a build).
-          artifact_count=$(ls artifacts/*.AppImage artifacts/*.deb artifacts/*.rpm 2>/dev/null | wc -l | tr -d ' ')
+          # Use find, not `ls <glob>`: under `set -eo pipefail` a non-matching
+          # glob (e.g. no .rpm — Linux only builds AppImage+deb) makes ls exit
+          # non-zero and aborts the step before the count is ever checked.
+          artifact_count=$(find artifacts -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) | wc -l | tr -d ' ')
           if [ "$artifact_count" -eq 0 ]; then
             echo "::error::No Linux artifacts built — AppImage/deb/rpm all missing." >&2
             exit 1
@@ -259,7 +262,8 @@ jobs:
         run: |
           mkdir -p artifacts
           cp app/release/*.dmg artifacts/ 2>/dev/null || true
-          zip_count=$(ls app/release/*.zip 2>/dev/null | wc -l | tr -d ' ')
+          # find avoids `ls <glob>` aborting the step under `set -eo pipefail`.
+          zip_count=$(find app/release -maxdepth 1 -type f -name '*.zip' | wc -l | tr -d ' ')
           if [ "$zip_count" -eq 0 ]; then
             echo "::error::No macOS .zip artifact built - the curl installer would 404. Failing the release." >&2
             exit 1
