@@ -59,7 +59,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: app/pnpm-lock.yaml
 
@@ -219,7 +219,11 @@ jobs:
           cp app/release/*.AppImage artifacts/ 2>/dev/null || true
           cp app/release/*.deb artifacts/ 2>/dev/null || true
           cp app/release/*.rpm artifacts/ 2>/dev/null || true
-          artifact_count=$(ls artifacts/ 2>/dev/null | wc -l | tr -d ' ')
+          # electron-updater feed metadata — without this the updater never
+          # sees new releases.
+          cp app/release/latest-linux.yml artifacts/ 2>/dev/null || true
+          # Count installers only (the .yml metadata doesn't count as a build).
+          artifact_count=$(ls artifacts/*.AppImage artifacts/*.deb artifacts/*.rpm 2>/dev/null | wc -l | tr -d ' ')
           if [ "$artifact_count" -eq 0 ]; then
             echo "::error::No Linux artifacts built — AppImage/deb/rpm all missing." >&2
             exit 1
@@ -237,6 +241,8 @@ jobs:
             exit 1
           }
           $exeFiles | ForEach-Object { Copy-Item $_.FullName -Destination artifacts/ }
+          # electron-updater feed metadata for the NSIS auto-updater.
+          Copy-Item app/release/latest.yml -Destination artifacts/ -ErrorAction SilentlyContinue
           Get-ChildItem artifacts
 
       - name: Collect artifacts (macOS)
@@ -251,6 +257,8 @@ jobs:
             exit 1
           fi
           cp app/release/*.zip artifacts/
+          # electron-updater reads the .zip feed (not the .dmg) on macOS.
+          cp app/release/latest-mac.yml artifacts/ 2>/dev/null || true
           for f in artifacts/*.zip; do
             [ -e "$f" ] || continue
             shasum -a 256 "$f" | awk '{print $1}' > "$f.sha256"

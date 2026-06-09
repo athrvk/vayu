@@ -2,6 +2,10 @@
 .vs
 
 
-# OS 
+# OS
 .DS_Store
 Thumbs.db
+
+# Python (build.py bytecode)
+__pycache__/
+*.py[cod]

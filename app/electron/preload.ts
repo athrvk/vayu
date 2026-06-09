@@ -49,6 +49,36 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("window:maximized", handler);
 	},
 
+	// Auto-update
+	onUpdateAvailable: (
+		callback: (info: {
+			version: string;
+			strategy: "silent" | "notify" | "disabled";
+			releaseUrl: string;
+			installCommand?: string;
+		}) => void
+	) => {
+		const handler = (_event: unknown, info: unknown) =>
+			callback(info as Parameters<typeof callback>[0]);
+		ipcRenderer.on("update:available", handler);
+		return () => ipcRenderer.removeListener("update:available", handler);
+	},
+	onUpdateDownloaded: (callback: (info: { version: string }) => void) => {
+		const handler = (_event: unknown, info: { version: string }) => callback(info);
+		ipcRenderer.on("update:downloaded", handler);
+		return () => ipcRenderer.removeListener("update:downloaded", handler);
+	},
+	restartToInstallUpdate: (): Promise<void> => ipcRenderer.invoke("update:restartToInstall"),
+	openReleasePage: (url: string): Promise<void> =>
+		ipcRenderer.invoke("update:openReleasePage", url),
+
+	// Menu-driven navigation
+	onOpenSettings: (callback: () => void) => {
+		const handler = () => callback();
+		ipcRenderer.on("menu:open-settings", handler);
+		return () => ipcRenderer.removeListener("menu:open-settings", handler);
+	},
+
 	// Platform info
 	platform: process.platform,
 

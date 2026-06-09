@@ -39,7 +39,7 @@ vayu/
 
 - CMake ≥ 3.25, Ninja, C++20 compiler (g++ or clang++)
 - vcpkg with `$VCPKG_ROOT` set
-- Node.js ≥ 20 LTS, pnpm ≥ 10
+- Node.js ≥ 20.19 (22 LTS recommended — see `.nvmrc`), pnpm ≥ 10
 
 Run `python build.py --setup` to install all prerequisites automatically (Linux/macOS only).
 

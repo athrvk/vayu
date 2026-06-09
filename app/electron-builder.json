@@ -6,11 +6,22 @@
 		"buildResources": "build"
 	},
 	"files": ["dist/**/*", "dist-electron/**/*", "package.json"],
+	"publish": [
+		{
+			"provider": "github",
+			"owner": "athrvk",
+			"repo": "vayu"
+		}
+	],
 	"extraResources": [
 		{
 			"from": "build/resources/bin/",
 			"to": "bin",
 			"filter": ["**/*"]
+		},
+		{
+			"from": "../shared/icon_png/vayu_icon_256x256.png",
+			"to": "icon.png"
 		}
 	],
 	"asar": true,

@@ -5,17 +5,23 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { app, BrowserWindow, ipcMain, nativeTheme, Menu } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme, Menu, shell } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
 import { EngineSidecar } from "./sidecar.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
+import { initAutoUpdater, checkForUpdatesNow } from "./updater.js";
 
 const isDev = process.env.NODE_ENV === "development";
 
 // __dirname is not defined in ES modules. Derive it from import.meta.url
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Documentation links opened from the Help menu.
+const DOCS_URL = "https://github.com/athrvk/vayu#readme";
+const SCRIPTING_DOCS_URL = "https://github.com/athrvk/vayu/blob/master/docs/engine/scripting.md";
+const ISSUES_URL = "https://github.com/athrvk/vayu/issues";
 
 // Global sidecar instance
 let engineSidecar: EngineSidecar | null = null;
@@ -103,6 +109,11 @@ function createWindow() {
 	});
 }
 
+/** Ask the renderer to open the Settings view (from the menu / ⌘,). */
+function openSettings() {
+	mainWindow?.webContents.send("menu:open-settings");
+}
+
 function createMenu() {
 	const isMac = process.platform === "darwin";
 
@@ -114,6 +125,17 @@ function createMenu() {
 						label: app.name,
 						submenu: [
 							{ role: "about" as const },
+							{ type: "separator" as const },
+							{
+								label: "Check for Updates…",
+								click: () => checkForUpdatesNow(),
+							},
+							{ type: "separator" as const },
+							{
+								label: "Preferences…",
+								accelerator: "Cmd+,",
+								click: () => openSettings(),
+							},
 							{ type: "separator" as const },
 							{ role: "services" as const },
 							{ type: "separator" as const },
@@ -129,7 +151,17 @@ function createMenu() {
 		// File menu
 		{
 			label: "File",
-			submenu: [isMac ? { role: "close" as const } : { role: "quit" as const }],
+			submenu: isMac
+				? [{ role: "close" as const }]
+				: [
+						{
+							label: "Settings",
+							accelerator: "Ctrl+,",
+							click: () => openSettings(),
+						},
+						{ type: "separator" as const },
+						{ role: "quit" as const },
+					],
 		},
 		// Edit menu
 		{
@@ -158,10 +190,16 @@ function createMenu() {
 		{
 			label: "View",
 			submenu: [
-				{ role: "reload" as const },
-				{ role: "forceReload" as const },
-				{ role: "toggleDevTools" as const },
-				{ type: "separator" as const },
+				// Reload / force-reload / DevTools are developer affordances —
+				// only surfaced in development builds, not in shipped releases.
+				...(isDev
+					? [
+							{ role: "reload" as const },
+							{ role: "forceReload" as const },
+							{ role: "toggleDevTools" as const },
+							{ type: "separator" as const },
+						]
+					: []),
 				{ role: "resetZoom" as const },
 				{ role: "zoomIn" as const },
 				{ role: "zoomOut" as const },
@@ -183,6 +221,40 @@ function createMenu() {
 							{ role: "window" as const },
 						]
 					: [{ role: "close" as const }]),
+			],
+		},
+		// Help menu — documentation links on all platforms, plus
+		// "Check for Updates…" on Windows/Linux (macOS keeps that in the app
+		// menu above).
+		{
+			label: "Help",
+			role: "help" as const,
+			submenu: [
+				{
+					label: "Documentation",
+					click: () => shell.openExternal(DOCS_URL),
+				},
+				{
+					label: "Scripting Guide",
+					click: () => shell.openExternal(SCRIPTING_DOCS_URL),
+				},
+				{
+					label: "Report an Issue",
+					click: () => shell.openExternal(ISSUES_URL),
+				},
+				...(isMac
+					? []
+					: [
+							{ type: "separator" as const },
+							{
+								label: "Check for Updates…",
+								click: () => checkForUpdatesNow(),
+							},
+							{
+								label: "About Vayu",
+								click: () => app.showAboutPanel(),
+							},
+						]),
 			],
 		},
 	];
@@ -326,6 +398,21 @@ app.whenReady().then(async () => {
 	// Setup IPC handlers first
 	setupIpcHandlers();
 
+	// Populate the native About panel (used by Help → About Vayu on
+	// Windows/Linux, and the macOS app menu's About item).
+	// iconPath is bundled as a loose resource (extraResources) so it resolves
+	// at runtime; in dev it lives in the repo's shared assets.
+	const aboutIconPath = isDev
+		? path.join(app.getAppPath(), "..", "shared", "icon_png", "vayu_icon_256x256.png")
+		: path.join(process.resourcesPath, "icon.png");
+	app.setAboutPanelOptions({
+		applicationName: "Vayu",
+		applicationVersion: app.getVersion(),
+		copyright: "© 2026 Atharva Kusumbia",
+		website: "https://github.com/athrvk/vayu",
+		iconPath: aboutIconPath,
+	});
+
 	// Create application menu
 	createMenu();
 
@@ -334,6 +421,11 @@ app.whenReady().then(async () => {
 
 	// Then create the window
 	createWindow();
+
+	// Start checking for updates once the window exists to receive events
+	if (mainWindow) {
+		initAutoUpdater(mainWindow);
+	}
 
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {

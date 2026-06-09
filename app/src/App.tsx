@@ -7,10 +7,12 @@
 
 import Shell from "./components/layout/Shell";
 import TitleBar from "./components/layout/TitleBar";
+import UpdateBanner from "./components/shared/UpdateBanner";
 import { useEngineConnectionStore } from "./stores";
 import { useHealthQuery, usePrefetchCollectionsAndRequests, useRunsQuery } from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
+import { useMenuActions } from "./hooks/useMenuActions";
 
 function App() {
 	const { isEngineConnected } = useEngineConnectionStore();
@@ -28,6 +30,9 @@ function App() {
 	// Fetch pm.* completions and register them with Monaco's JavaScript language
 	useScriptCompletionProvider();
 
+	// Bridge native menu items (Preferences…/Settings) to in-app navigation
+	useMenuActions();
+
 	// Log connection status for debugging
 	if (isEngineConnected) {
 		console.log("App: Engine connected, data queries active");
@@ -36,6 +41,7 @@ function App() {
 	return (
 		<div className="flex flex-col h-full">
 			<TitleBar />
+			<UpdateBanner />
 			<div className="flex-1 overflow-hidden">
 				<Shell />
 			</div>

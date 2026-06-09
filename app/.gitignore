@@ -9,6 +9,11 @@ out/
 .vite/
 .webpack/
 
+# Compiled config artifacts (sources are the .ts; the emitted .js/.d.ts
+# would shadow vite.config.ts since Vite resolves .js before .ts)
+vite.config.js
+vite.config.d.ts
+
 # Electron packaging
 release/
 package/

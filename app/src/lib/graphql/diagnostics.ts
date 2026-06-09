@@ -50,7 +50,9 @@ export function computeGraphqlDiagnostics(text: string, schema: GraphQLSchema | 
 	}
 	const diagnostics = getDiagnostics(text, schema);
 	return diagnostics.map((d) => ({
-		message: d.message,
+		// LSP diagnostics now type `message` as string | MarkupContent;
+		// graphql-language-service emits plain strings, but coerce defensively.
+		message: typeof d.message === "string" ? d.message : d.message.value,
 		severity: d.severity === 2 ? "warning" : "error",
 		startLineNumber: d.range.start.line + 1,
 		startColumn: d.range.start.character + 1,

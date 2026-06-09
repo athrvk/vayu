@@ -14,6 +14,16 @@ interface ThemeInfo {
 	themeSource: "system" | "light" | "dark";
 }
 
+type UpdateStrategy = "silent" | "notify" | "disabled";
+
+interface UpdateAvailableInfo {
+	version: string;
+	strategy: UpdateStrategy;
+	releaseUrl: string;
+	/** Present only on the macOS notify path. */
+	installCommand?: string;
+}
+
 interface ElectronAPI {
 	// Engine management
 	restartEngine: () => Promise<{ success: boolean; error?: string }>;
@@ -30,6 +40,15 @@ interface ElectronAPI {
 	windowClose: () => void;
 	windowIsMaximized: () => Promise<boolean>;
 	onWindowMaximized: (callback: (isMaximized: boolean) => void) => () => void;
+
+	// Auto-update
+	onUpdateAvailable: (callback: (info: UpdateAvailableInfo) => void) => () => void;
+	onUpdateDownloaded: (callback: (info: { version: string }) => void) => () => void;
+	restartToInstallUpdate: () => Promise<void>;
+	openReleasePage: (url: string) => Promise<void>;
+
+	// Menu-driven navigation
+	onOpenSettings: (callback: () => void) => () => void;
 
 	// Platform info
 	platform: NodeJS.Platform;
