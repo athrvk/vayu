@@ -167,9 +167,17 @@ jobs:
             file app/build/icon.png
             sips -g pixelWidth -g pixelHeight app/build/icon.png
           else
-            # Linux: Use icons directory with all sizes
+            # Linux: electron-builder's icon-set resolver only recognizes files
+            # named "<size>x<size>.png" (e.g. 512x512.png); the shared icons are
+            # prefixed (vayu_icon_512x512.png), so strip the prefix when copying.
+            rm -rf app/build/icons
             mkdir -p app/build/icons
-            cp -r shared/icon_png/* app/build/icons/
+            for f in shared/icon_png/vayu_icon_*.png; do
+              size=$(basename "$f" | sed -E 's/^vayu_icon_([0-9]+x[0-9]+)\.png$/\1/')
+              cp "$f" "app/build/icons/${size}.png"
+            done
+            echo "Icon setup for Linux - contents of app/build/icons:"
+            ls -1 app/build/icons
           fi
 
       - name: Copy engine binary to resources (Windows)
