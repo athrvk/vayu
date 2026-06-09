@@ -38,7 +38,7 @@
 		"createDesktopShortcut": "always",
 		"createStartMenuShortcut": true,
 		"shortcutName": "Vayu",
-		"license": "../LICENSE"
+		"license": "build/license.txt"
 	},
 	"mac": {
 		"category": "public.app-category.developer-tools",
@@ -81,13 +81,14 @@
 		"target": ["AppImage", "deb"],
 		"category": "Development",
 		"icon": "build/icons",
+		"syncDesktopName": true,
 		"maintainer": "Atharva Kusumbia <atharvakusumbia@gmail.com>"
 	},
 	"appImage": {
 		"artifactName": "${productName}-${version}-${arch}.${ext}",
 		"category": "Development",
 		"description": "Vayu - High-Performance API Testing Platform",
-		"license": "../LICENSE"
+		"license": "build/license.txt"
 	},
 	"deb": {
 		"afterInstall": "installer/linux-postinst.sh",
