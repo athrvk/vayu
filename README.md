@@ -39,7 +39,17 @@ Vayu collapses that workflow into one app. Build a request once, point the load 
 
 The HTTP core is a multi-worker libcurl event loop in C++20, isolated from the Electron UI by a local HTTP sidecar so rendering never blocks on the request load. In practice that lets a single laptop saturate a gigabit link while the dashboard keeps streaming metrics frame-by-frame — well past what Node.js-backed Electron tools manage on the same hardware.
 
-A reproducible benchmark suite comparing Vayu against k6, JMeter, and the Postman collection runner (identical target, payload, and machine) is in progress. The methodology and raw numbers will be published in the repo so anyone can re-run them — follow [the issues board](https://github.com/athrvk/vayu/issues) to track progress.
+**Proof — head-to-head vs `wrk` and `vegeta`.** Same mock server, same machine (MacBook Pro M3 Pro), matched concurrency, measured from the CLI:
+
+| Client | req/s @ 128 conns |
+|---|---:|
+| wrk | 56,802 |
+| vegeta | 53,811 |
+| **Vayu** | **52,825** |
+
+Vayu lands at **~93% of wrk and on par with vegeta** (and edges past vegeta at 256 connections) — all three converge on the same system throughput ceiling. Full methodology, the concurrency sweep, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](docs/engine/benchmarks.md)**.
+
+A broader comparison against k6, JMeter, and the Postman collection runner is in progress — follow [the issues board](https://github.com/athrvk/vayu/issues) to track it.
 
 ---
 
@@ -174,6 +184,7 @@ See [Architecture Documentation](docs/architecture.md) for the full process mode
 |---|---|
 | [Architecture](docs/architecture.md) | Sidecar pattern, process model, IPC |
 | [Engine API Reference](docs/engine/api-reference.md) | Full HTTP API for the C++ engine |
+| [Engine Benchmarks](docs/engine/benchmarks.md) | RPS head-to-head vs wrk and vegeta — methodology, results, and tuning |
 | [DB Schema](docs/engine/db-schema.md) | SQLite table definitions and JSON shapes |
 | [Variable Resolution](docs/app/variable-resolution.md) | How `{{variables}}` resolve at runtime |
 | [Building from Source](docs/building.md) | Prerequisites, CMake presets, all build commands |
