@@ -155,6 +155,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p app/build
+          # electron-builder's EULA license must be plain text (.txt/.rtf/.html
+          # for NSIS, plain text for AppImage). The repo-root AGPL-3.0 LICENSE
+          # has no extension, so stage a .txt copy referenced by the config.
+          cp LICENSE app/build/license.txt
           if [ "${{ runner.os }}" = "Windows" ]; then
             # Windows: Use .ico file
             cp shared/icon_ico/vayu_icon_256x256.ico app/build/icon.ico
