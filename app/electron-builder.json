@@ -81,6 +81,7 @@
 		"target": ["AppImage", "deb"],
 		"category": "Development",
 		"icon": "build/icons",
+		"syncDesktopName": true,
 		"maintainer": "Atharva Kusumbia <atharvakusumbia@gmail.com>"
 	},
 	"appImage": {

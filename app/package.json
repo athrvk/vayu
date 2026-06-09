@@ -2,6 +2,7 @@
 	"name": "vayu-client",
 	"version": "0.4.0",
 	"description": "Vayu - High-Performance API Testing Platform",
+	"desktopName": "vayu.desktop",
 	"author": {
 		"name": "Atharva Kusumbia",
 		"email": "atharvakusumbia@gmail.com"
