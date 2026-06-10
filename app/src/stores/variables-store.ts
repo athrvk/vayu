@@ -16,6 +16,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { STORAGE_KEYS } from "@/constants/storage-keys";
 
 export type VariableCategory =
 	| { type: "globals" }
@@ -74,7 +75,7 @@ export const useVariablesStore = create<VariablesUIState>()(
 				}),
 		}),
 		{
-			name: "variables-ui-store",
+			name: STORAGE_KEYS.VARIABLES_UI_STORE,
 			partialize: (state) => ({
 				// Persist active selections
 				activeEnvironmentId: state.activeEnvironmentId,

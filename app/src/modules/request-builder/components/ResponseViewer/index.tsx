@@ -35,6 +35,7 @@ import {
 import { useRequestBuilderContext } from "../../context";
 import { useNavigationStore, useDashboardStore } from "@/stores";
 import { ResponseBody as SharedResponseBody } from "@/components/shared/response-viewer";
+import { TIMING } from "@/config/timing";
 import ResponseHeader from "./ResponseHeader";
 import ResponseHeadersTab from "./ResponseHeadersTab";
 import ResponseCookies from "./ResponseCookies";
@@ -129,7 +130,7 @@ export default function ResponseViewer() {
 	const handleCopy = async () => {
 		await navigator.clipboard.writeText(response.body);
 		setCopied(true);
-		setTimeout(() => setCopied(false), 2000);
+		setTimeout(() => setCopied(false), TIMING.STATUS_RESET_MS);
 	};
 
 	const handleDownload = () => {

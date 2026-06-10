@@ -10,6 +10,11 @@
 import { create } from "zustand";
 import type { LoadTestMetrics, RunReport } from "@/types";
 import { DEFAULT_SLO_MS, type Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+// With the engine at 10 Hz and the UI commit throttle buffering every tick
+// (load-test-service.ts), the cap is ~5 minutes of full-fidelity history
+// before the oldest points roll off — long enough for a typical load-test
+// session, short enough to keep chart slicing cheap.
+import { HISTORICAL_METRICS_CAP } from "@/config/metrics";
 
 type DashboardMode = "running" | "completed" | "stopped";
 type DashboardView = "metrics" | "request-response";
@@ -31,15 +36,6 @@ export interface LoadTestRequestInfo {
 	method: string;
 	url: string;
 }
-
-/**
- * Cap historical metrics at ~3000 points. With the engine at 10 Hz and the UI
- * commit throttle at 2 Hz buffering every tick (load-test-service.ts), this is
- * ~5 minutes of full-fidelity history before the oldest points roll off — long
- * enough for a typical load-test session, short enough to keep chart slicing
- * cheap.
- */
-const HISTORICAL_METRICS_CAP = 3000;
 
 const INITIAL_BREAKPOINT: Breakpoint = {
 	crossed: false,

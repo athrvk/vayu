@@ -9,7 +9,12 @@ import Shell from "./components/layout/Shell";
 import TitleBar from "./components/layout/TitleBar";
 import UpdateBanner from "./components/shared/UpdateBanner";
 import { useEngineConnectionStore } from "./stores";
-import { useHealthQuery, usePrefetchCollectionsAndRequests, useRunsQuery } from "./queries";
+import {
+	useConfigQuery,
+	useHealthQuery,
+	usePrefetchCollectionsAndRequests,
+	useRunsQuery,
+} from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
 import { useMenuActions } from "./hooks/useMenuActions";
@@ -26,6 +31,10 @@ function App() {
 	// Prefetch collections and all their requests (TanStack handles caching automatically)
 	usePrefetchCollectionsAndRequests();
 	useRunsQuery();
+
+	// Keep engine config warm — proxied call timeouts derive from its
+	// defaultTimeout setting (see services/api.ts proxiedRequestTimeoutMs)
+	useConfigQuery();
 
 	// Fetch pm.* completions and register them with Monaco's JavaScript language
 	useScriptCompletionProvider();

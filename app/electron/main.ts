@@ -11,17 +11,23 @@ import { fileURLToPath } from "url";
 import { EngineSidecar } from "./sidecar.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow } from "./updater.js";
+import {
+	DOCS_URL,
+	SCRIPTING_DOCS_URL,
+	ISSUES_URL,
+	DEV_SERVER_URL,
+	WINDOW_DEFAULT_WIDTH,
+	WINDOW_DEFAULT_HEIGHT,
+	WINDOW_MIN_WIDTH,
+	WINDOW_MIN_HEIGHT,
+	TITLEBAR_HEIGHT,
+} from "./constants.js";
 
 const isDev = process.env.NODE_ENV === "development";
 
 // __dirname is not defined in ES modules. Derive it from import.meta.url
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Documentation links opened from the Help menu.
-const DOCS_URL = "https://github.com/athrvk/vayu#readme";
-const SCRIPTING_DOCS_URL = "https://github.com/athrvk/vayu/blob/master/docs/engine/scripting.md";
-const ISSUES_URL = "https://github.com/athrvk/vayu/issues";
 
 // Global sidecar instance
 let engineSidecar: EngineSidecar | null = null;
@@ -30,8 +36,8 @@ let mainWindow: BrowserWindow | null = null;
 function createWindow() {
 	// Load persisted window state
 	const windowState = loadWindowState({
-		defaultWidth: 1400,
-		defaultHeight: 900,
+		defaultWidth: WINDOW_DEFAULT_WIDTH,
+		defaultHeight: WINDOW_DEFAULT_HEIGHT,
 	});
 
 	mainWindow = new BrowserWindow({
@@ -39,8 +45,8 @@ function createWindow() {
 		height: windowState.height,
 		x: windowState.x,
 		y: windowState.y,
-		minWidth: 1024,
-		minHeight: 768,
+		minWidth: WINDOW_MIN_WIDTH,
+		minHeight: WINDOW_MIN_HEIGHT,
 		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
@@ -52,7 +58,7 @@ function createWindow() {
 				: {
 						color: nativeTheme.shouldUseDarkColors ? "#1a1a1a" : "#ffffff",
 						symbolColor: nativeTheme.shouldUseDarkColors ? "#ffffff" : "#1a1a1a",
-						height: 40,
+						height: TITLEBAR_HEIGHT,
 					},
 		webPreferences: {
 			nodeIntegration: false,
@@ -78,7 +84,7 @@ function createWindow() {
 	});
 
 	if (isDev) {
-		mainWindow.loadURL("http://localhost:5173");
+		mainWindow.loadURL(DEV_SERVER_URL);
 		// mainWindow.webContents.openDevTools();
 	} else {
 		mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));

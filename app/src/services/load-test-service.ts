@@ -17,13 +17,10 @@ import { sseClient } from "./sse-client";
 import { apiService } from "./api";
 import { useDashboardStore } from "@/stores";
 import type { LoadTestMetrics } from "@/types";
-
-/**
- * Engine emits at 10 Hz (100ms cadence — see engine/src/http/routes/metrics.cpp).
- * We throttle UI commits to 2 Hz to keep render cost bounded, but BUFFER every
- * tick the engine sends so historicalMetrics keeps the full 10 Hz signal.
- */
-const METRICS_UI_THROTTLE_MS = 500;
+// Engine emits at 10 Hz (100ms cadence — see engine/src/http/routes/metrics.cpp).
+// We throttle UI commits to keep render cost bounded, but BUFFER every tick the
+// engine sends so historicalMetrics keeps the full 10 Hz signal.
+import { METRICS_UI_THROTTLE_MS } from "@/config/metrics";
 
 class LoadTestService {
 	private activeRunId: string | null = null;

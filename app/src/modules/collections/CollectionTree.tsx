@@ -34,6 +34,7 @@ import {
 import CollectionItem from "./CollectionItem";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
+import { TIMING } from "@/config/timing";
 
 export default function CollectionTree() {
 	const openImport = useImportModalStore((s) => s.open);
@@ -223,7 +224,7 @@ export default function CollectionTree() {
 			});
 			completeSave();
 			// Reset to idle after showing "saved" status
-			setTimeout(() => setStatus("idle"), 2000);
+			setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
 		} catch (error) {
 			failSave(error instanceof Error ? error.message : "Failed to rename collection");
 		}
@@ -343,7 +344,7 @@ export default function CollectionTree() {
 			});
 			completeSave();
 			// Reset to idle after showing "saved" status
-			setTimeout(() => setStatus("idle"), 2000);
+			setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
 		} catch (error) {
 			failSave(error instanceof Error ? error.message : "Failed to rename request");
 		}

@@ -8,6 +8,7 @@
 import { type ReactNode } from "react";
 import { Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { TIMING } from "@/config/timing";
 
 export const EYEBROW_CLASS =
 	"text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
@@ -15,7 +16,7 @@ export const EYEBROW_CLASS =
 /** Tiny "i" affordance with a Radix tooltip. */
 export function InfoChip({ tip }: { tip: ReactNode }) {
 	return (
-		<TooltipProvider delayDuration={150}>
+		<TooltipProvider delayDuration={TIMING.TOOLTIP_DELAY_MS}>
 			<Tooltip>
 				<TooltipTrigger asChild>
 					<button

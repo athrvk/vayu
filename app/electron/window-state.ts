@@ -12,6 +12,7 @@
 
 import Store from "electron-store";
 import { BrowserWindow, screen } from "electron";
+import { WINDOW_STATE_SAVE_DEBOUNCE_MS } from "./constants.js";
 
 interface WindowState {
 	x?: number;
@@ -103,7 +104,7 @@ export function trackWindowState(window: BrowserWindow): void {
 	let saveTimeout: NodeJS.Timeout | null = null;
 	const debouncedSave = () => {
 		if (saveTimeout) clearTimeout(saveTimeout);
-		saveTimeout = setTimeout(() => saveWindowState(window), 500);
+		saveTimeout = setTimeout(() => saveWindowState(window), WINDOW_STATE_SAVE_DEBOUNCE_MS);
 	};
 
 	window.on("resize", debouncedSave);

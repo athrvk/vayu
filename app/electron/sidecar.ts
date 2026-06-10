@@ -15,6 +15,18 @@ import { app } from "electron";
 import path from "path";
 import fs from "fs";
 import net from "net";
+import {
+	ENGINE_PORT,
+	ENGINE_LOCK_FILE,
+	ENGINE_HEALTH_MAX_ATTEMPTS,
+	ENGINE_HEALTH_POLL_INTERVAL_MS,
+	ENGINE_HEALTH_REQUEST_TIMEOUT_MS,
+	ENGINE_SHUTDOWN_REQUEST_TIMEOUT_MS,
+	ENGINE_GRACEFUL_EXIT_TIMEOUT_MS,
+	ENGINE_RESTART_MAX_RETRIES,
+	ENGINE_RESTART_BASE_DELAY_MS,
+	ENGINE_PORT_RELEASE_DELAY_MS,
+} from "./constants.js";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -156,7 +168,7 @@ export class EngineSidecar {
 	private dataDir: string;
 	private binaryPath: string;
 
-	constructor(port: number = 9876) {
+	constructor(port: number = ENGINE_PORT) {
 		this.port = port;
 		this.dataDir = this.getDataDirectory();
 		this.binaryPath = this.getEngineBinaryPath();
@@ -187,7 +199,7 @@ export class EngineSidecar {
 	 * This should match the path used by the engine: {dataDir}/vayu.lock
 	 */
 	private getLockFilePath(): string {
-		return path.join(this.dataDir, "vayu.lock");
+		return path.join(this.dataDir, ENGINE_LOCK_FILE);
 	}
 
 	/**
@@ -403,13 +415,19 @@ export class EngineSidecar {
 	/**
 	 * Wait for the engine to be ready by polling the health endpoint
 	 */
-	private async waitForEngine(maxAttempts: number = 90, delay: number = 500): Promise<void> {
+	private async waitForEngine(
+		maxAttempts: number = ENGINE_HEALTH_MAX_ATTEMPTS,
+		delay: number = ENGINE_HEALTH_POLL_INTERVAL_MS
+	): Promise<void> {
 		const healthUrl = `http://127.0.0.1:${this.port}/health`;
 
 		for (let i = 0; i < maxAttempts; i++) {
 			try {
 				const controller = new AbortController();
-				const timeout = setTimeout(() => controller.abort(), 2000);
+				const timeout = setTimeout(
+					() => controller.abort(),
+					ENGINE_HEALTH_REQUEST_TIMEOUT_MS
+				);
 
 				const response = await fetch(healthUrl, {
 					signal: controller.signal,
@@ -447,7 +465,7 @@ export class EngineSidecar {
 			console.log("[Sidecar] Requesting graceful shutdown via HTTP...");
 			const response = await fetch(`http://127.0.0.1:${this.port}/shutdown`, {
 				method: "POST",
-				signal: AbortSignal.timeout(2000),
+				signal: AbortSignal.timeout(ENGINE_SHUTDOWN_REQUEST_TIMEOUT_MS),
 			});
 			if (response.ok) {
 				console.log("[Sidecar] Shutdown request accepted");
@@ -462,13 +480,13 @@ export class EngineSidecar {
 				return;
 			}
 
-			// Give the process 5 seconds to exit gracefully
+			// Give the process a grace period to exit before force-killing
 			const timeout = setTimeout(() => {
 				if (this.process) {
 					console.log("[Sidecar] Engine did not exit gracefully, killing...");
 					this.process.kill("SIGKILL");
 				}
-			}, 5000);
+			}, ENGINE_GRACEFUL_EXIT_TIMEOUT_MS);
 
 			this.process.on("exit", () => {
 				clearTimeout(timeout);
@@ -502,11 +520,11 @@ export class EngineSidecar {
 	/**
 	 * Restart the engine process with retry logic and exponential backoff
 	 */
-	async restart(maxRetries: number = 3): Promise<void> {
+	async restart(maxRetries: number = ENGINE_RESTART_MAX_RETRIES): Promise<void> {
 		console.log("[Sidecar] Restarting engine...");
 
 		let lastError: Error | null = null;
-		const baseDelay = 1000; // Initial delay in milliseconds
+		const baseDelay = ENGINE_RESTART_BASE_DELAY_MS;
 
 		for (let attempt = 0; attempt <= maxRetries; attempt++) {
 			try {
@@ -521,7 +539,7 @@ export class EngineSidecar {
 
 				await this.stop();
 				// Small delay to ensure port is released
-				await new Promise((resolve) => setTimeout(resolve, 500));
+				await new Promise((resolve) => setTimeout(resolve, ENGINE_PORT_RELEASE_DELAY_MS));
 				await this.start();
 				console.log("[Sidecar] Engine restarted successfully");
 				return;

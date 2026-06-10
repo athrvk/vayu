@@ -53,6 +53,7 @@ import {
 	SelectValue,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { TIMING } from "@/config/timing";
 
 type VariableType = NonNullable<VariableValue["type"]>;
 
@@ -254,7 +255,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 						onSuccess: () => {
 							setHasPendingChanges(false);
 							completeSave();
-							setTimeout(() => setStatus("idle"), 2000);
+							setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
 							resolve();
 						},
 						onError: (error) => {
@@ -275,7 +276,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 						onSuccess: () => {
 							setHasPendingChanges(false);
 							completeSave();
-							setTimeout(() => setStatus("idle"), 2000);
+							setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
 							resolve();
 						},
 						onError: (error) => {
@@ -295,7 +296,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 						onSuccess: () => {
 							setHasPendingChanges(false);
 							completeSave();
-							setTimeout(() => setStatus("idle"), 2000);
+							setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
 							resolve();
 						},
 						onError: (error) => {

@@ -24,6 +24,7 @@ import { useDashboardStore } from "@/stores";
 import { apiService, loadTestService } from "@/services";
 import { cn } from "@/lib/utils";
 import { DashboardHeader, MetricsView, RequestResponseView } from "./components";
+import { TIMING } from "@/config/timing";
 import type { DashboardView, DisplayMetrics } from "./types";
 
 export default function LoadTestDashboard() {
@@ -123,7 +124,10 @@ export default function LoadTestDashboard() {
 		) {
 			// Longer initial delay to allow database writes to complete
 			// This helps avoid "database is locked" issues
-			const delay = loadAttemptRef.current === 0 ? 3000 : 1000;
+			const delay =
+				loadAttemptRef.current === 0
+					? TIMING.REPORT_INITIAL_DELAY_MS
+					: TIMING.REPORT_RETRY_DELAY_MS;
 
 			const timeoutId = setTimeout(async () => {
 				setIsLoadingReport(true);
@@ -136,7 +140,7 @@ export default function LoadTestDashboard() {
 						if (isValidReport) {
 							setFinalReport(report);
 							loadAttemptRef.current = 0;
-						} else if (loadAttemptRef.current < 5) {
+						} else if (loadAttemptRef.current < TIMING.REPORT_MAX_ATTEMPTS) {
 							console.log(
 								`Report has zero data, retrying... (attempt ${loadAttemptRef.current + 1})`
 							);

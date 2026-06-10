@@ -41,6 +41,7 @@ import { useSchemaCache } from "@/lib/graphql/schema-cache";
 import { applyVariablesSchema } from "@/lib/graphql/variables-schema";
 import { useResizable } from "@/hooks/useResizable";
 import { cn } from "@/lib/utils";
+import { TIMING } from "@/config/timing";
 
 const BODY_MODES: { value: BodyMode; label: string; description: string }[] = [
 	{ value: "none", label: "None", description: "No request body" },
@@ -190,7 +191,7 @@ export default function BodyPanel() {
 		const headers = buildResolvedHeaders();
 		const id = setTimeout(() => {
 			void useSchemaCache.getState().ensureSchema(resolvedGqlUrl, headers);
-		}, 400);
+		}, TIMING.GRAPHQL_INTROSPECTION_DEBOUNCE_MS);
 		return () => clearTimeout(id);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [request.bodyMode, request.url, request.headers, resolveString]);

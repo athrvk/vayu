@@ -11,12 +11,9 @@ import { app, dialog, ipcMain, shell } from "electron";
 // be pulled off the default import.
 import electronUpdater from "electron-updater";
 import { resolveUpdateStrategy, type UpdateStrategy } from "./updater-strategy.js";
+import { REPO, UPDATE_CHECK_INTERVAL_MS as CHECK_INTERVAL_MS } from "./constants.js";
 
 const { autoUpdater } = electronUpdater;
-
-const REPO = "athrvk/vayu";
-/** Re-check for updates every 6 hours while the app stays open. */
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 function releaseUrl(version: string): string {
 	return `https://github.com/${REPO}/releases/tag/v${version}`;

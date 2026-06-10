@@ -21,6 +21,7 @@ import { type ReactNode } from "react";
 import { Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ResponseTiming } from "../../types";
+import { TIMING } from "@/config/timing";
 
 interface Phase {
 	key: string;
@@ -33,7 +34,7 @@ interface Phase {
 /** Tiny "i" affordance with a Radix tooltip (local to keep this tab self-contained). */
 function InfoTip({ tip }: { tip: ReactNode }) {
 	return (
-		<TooltipProvider delayDuration={150}>
+		<TooltipProvider delayDuration={TIMING.TOOLTIP_DELAY_MS}>
 			<Tooltip>
 				<TooltipTrigger asChild>
 					<button

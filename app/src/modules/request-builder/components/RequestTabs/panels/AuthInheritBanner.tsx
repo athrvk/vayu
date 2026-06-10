@@ -22,12 +22,11 @@ import { Folder, Info, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCollectionAncestors } from "@/queries/collections";
 import type { Collection } from "@/types";
+import { VARIABLE_SPLIT_PATTERN, isVariableToken } from "@/constants/variables";
 
 interface AuthInheritBannerProps {
 	collectionId: string | null | undefined;
 }
-
-const VARIABLE_PATTERN = /(\{\{[^{}]+\}\})/g;
 
 function describeAuth(c: Collection): { label: string; secret: string | null } {
 	const auth = c.auth;
@@ -51,8 +50,8 @@ function describeAuth(c: Collection): { label: string; secret: string | null } {
 }
 
 function renderWithVariables(text: string) {
-	return text.split(VARIABLE_PATTERN).map((part, i) =>
-		VARIABLE_PATTERN.test(part) ? (
+	return text.split(VARIABLE_SPLIT_PATTERN).map((part, i) =>
+		isVariableToken(part) ? (
 			<span key={i} className="text-variable font-mono">
 				{part}
 			</span>
