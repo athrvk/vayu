@@ -45,6 +45,32 @@ import type {
 	ImportFetchResponse,
 } from "@/types";
 import type { TimeSeriesResponse } from "@/modules/history/types";
+import { queryClient } from "@/lib/query-client";
+import { queryKeys } from "@/queries/keys";
+import {
+	PROXIED_TIMEOUT_GRACE_MS,
+	ENGINE_MAX_DEFAULT_TIMEOUT_MS,
+	STATS_PAGE_LIMIT,
+} from "@/config/network";
+
+/**
+ * Timeout for engine calls that proxy a remote server (/request,
+ * /import/fetch). These block for as long as the target takes, bounded by the
+ * engine's user-configurable `defaultTimeout` setting — so derive the UI
+ * timeout from it instead of the flat default, with enough grace that the
+ * engine's own TIMEOUT error (proper error code) arrives before the UI aborts.
+ * Falls back to the engine's max when the config cache is cold. If per-request
+ * timeout overrides are ever added, this must become max(default, override).
+ */
+function proxiedRequestTimeoutMs(): number {
+	const config = queryClient.getQueryData<GetConfigResponse>(queryKeys.config.all);
+	const engineTimeout = Number(config?.entries.find((e) => e.key === "defaultTimeout")?.value);
+	const base =
+		Number.isFinite(engineTimeout) && engineTimeout > 0
+			? engineTimeout
+			: ENGINE_MAX_DEFAULT_TIMEOUT_MS;
+	return base + PROXIED_TIMEOUT_GRACE_MS;
+}
 
 export const apiService = {
 	// Health & Configuration
@@ -155,7 +181,9 @@ export const apiService = {
 
 	// Execution
 	async executeRequest(data: ExecuteRequestRequest): Promise<SanityResult> {
-		return await httpClient.post<SanityResult>(API_ENDPOINTS.EXECUTE_REQUEST, data);
+		return await httpClient.post<SanityResult>(API_ENDPOINTS.EXECUTE_REQUEST, data, {
+			timeout: proxiedRequestTimeoutMs(),
+		});
 	},
 
 	async startLoadTest(data: StartLoadTestRequest): Promise<StartLoadTestResponse> {
@@ -194,7 +222,7 @@ export const apiService = {
 		id: string,
 		options: { limit?: number; offset?: number } = {}
 	): Promise<TimeSeriesResponse> {
-		const { limit = 5000, offset = 0 } = options;
+		const { limit = STATS_PAGE_LIMIT, offset = 0 } = options;
 		return await httpClient.get<TimeSeriesResponse>(
 			API_ENDPOINTS.STATS_TIME_SERIES(id, limit, offset)
 		);
@@ -207,6 +235,10 @@ export const apiService = {
 
 	// Import
 	async importFetch(url: string): Promise<ImportFetchResponse> {
-		return await httpClient.post<ImportFetchResponse>(API_ENDPOINTS.IMPORT_FETCH, { url });
+		return await httpClient.post<ImportFetchResponse>(
+			API_ENDPOINTS.IMPORT_FETCH,
+			{ url },
+			{ timeout: proxiedRequestTimeoutMs() }
+		);
 	},
 };

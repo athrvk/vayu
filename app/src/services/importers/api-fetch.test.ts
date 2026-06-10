@@ -15,9 +15,13 @@ describe("apiService.importFetch", () => {
 			contentType: "application/json",
 		});
 		const res = await apiService.importFetch("https://x/spec.json");
-		expect(httpClient.post).toHaveBeenCalledWith("/import/fetch", {
-			url: "https://x/spec.json",
-		});
+		expect(httpClient.post).toHaveBeenCalledWith(
+			"/import/fetch",
+			{ url: "https://x/spec.json" },
+			// Proxied call: timeout derives from the engine's defaultTimeout
+			// setting (engine max + grace when the config cache is cold)
+			{ timeout: expect.any(Number) }
+		);
 		expect(res).toEqual({ content: "{}", contentType: "application/json" });
 	});
 });

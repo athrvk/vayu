@@ -113,8 +113,8 @@ class HttpClient {
 		return this.request<T>("GET", path, undefined, { params });
 	}
 
-	async post<T>(path: string, body?: unknown): Promise<T> {
-		return this.request<T>("POST", path, body);
+	async post<T>(path: string, body?: unknown, options?: { timeout?: number }): Promise<T> {
+		return this.request<T>("POST", path, body, options);
 	}
 
 	async put<T>(path: string, body?: unknown): Promise<T> {
