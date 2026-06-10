@@ -14,6 +14,8 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
+import { QUERY_CACHE } from "@/config/cache";
+import { STATS_PAGE_LIMIT } from "@/config/network";
 import type { Run } from "@/types";
 import type { TimeSeriesResponse } from "@/modules/history/types";
 
@@ -39,7 +41,7 @@ export function useRunReportQuery(runId: string | null) {
 		queryFn: () => apiService.getRunReport(runId!),
 		enabled: !!runId,
 		// Reports don't change, cache longer
-		staleTime: 5 * 60 * 1000,
+		staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
 	});
 }
 
@@ -51,11 +53,14 @@ export function useRunTimeSeriesQuery(runId: string | null) {
 	return useInfiniteQuery<TimeSeriesResponse, Error>({
 		queryKey: queryKeys.runs.timeSeries(runId ?? ""),
 		queryFn: ({ pageParam = 0 }) =>
-			apiService.getRunTimeSeries(runId!, { limit: 5000, offset: pageParam as number }),
+			apiService.getRunTimeSeries(runId!, {
+				limit: STATS_PAGE_LIMIT,
+				offset: pageParam as number,
+			}),
 		enabled: !!runId,
 		// Historical data never changes
 		staleTime: Infinity,
-		gcTime: 30 * 60 * 1000, // Keep in cache for 30 minutes
+		gcTime: QUERY_CACHE.RUNS_GC_TIME_MS,
 		initialPageParam: 0,
 		getNextPageParam: (lastPage) =>
 			lastPage.pagination.hasMore

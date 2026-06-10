@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useCallback, useState } from "react";
+import { STORAGE_KEYS } from "@/constants/storage-keys";
 
 export type ThemeSource = "system" | "light" | "dark";
 export type ColorScheme = "sky" | "ocean" | "forest" | "sunset" | "aurora" | "coral";
@@ -54,8 +55,12 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 			let scheme: ColorScheme = "sunset";
 
 			// Load from localStorage
-			const savedSource = localStorage.getItem("vayu-theme-source") as ThemeSource | null;
-			const savedScheme = localStorage.getItem("vayu-color-scheme") as ColorScheme | null;
+			const savedSource = localStorage.getItem(
+				STORAGE_KEYS.THEME_SOURCE
+			) as ThemeSource | null;
+			const savedScheme = localStorage.getItem(
+				STORAGE_KEYS.COLOR_SCHEME
+			) as ColorScheme | null;
 
 			if (window.electronAPI) {
 				// Get theme from Electron
@@ -130,7 +135,7 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 				}
 			}
 			// Persist preference
-			localStorage.setItem("vayu-theme-source", source);
+			localStorage.setItem(STORAGE_KEYS.THEME_SOURCE, source);
 		},
 		[applyTheme, colorScheme]
 	);
@@ -141,7 +146,7 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 			setColorScheme(scheme);
 			const isDark = document.documentElement.classList.contains("dark");
 			applyTheme(isDark, scheme);
-			localStorage.setItem("vayu-color-scheme", scheme);
+			localStorage.setItem(STORAGE_KEYS.COLOR_SCHEME, scheme);
 		},
 		[applyTheme]
 	);

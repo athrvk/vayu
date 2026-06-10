@@ -20,42 +20,7 @@ import type { KeyValueItem } from "../../../types";
 import { useHeadersManager } from "../../../hooks/useHeadersManager";
 import { Button, Label } from "@/components/ui";
 import { Textarea } from "@/components/ui/textarea";
-
-// Standard HTTP headers for autocomplete
-const STANDARD_HEADERS = [
-	"Accept",
-	"Accept-Charset",
-	"Accept-Encoding",
-	"Accept-Language",
-	"Authorization",
-	"Cache-Control",
-	"Content-Disposition",
-	"Content-Encoding",
-	"Content-Language",
-	"Content-Length",
-	"Content-Type",
-	"Cookie",
-	"Date",
-	"ETag",
-	"Expires",
-	"Host",
-	"If-Match",
-	"If-Modified-Since",
-	"If-None-Match",
-	"If-Unmodified-Since",
-	"Origin",
-	"Pragma",
-	"Range",
-	"Referer",
-	"User-Agent",
-	"X-Api-Key",
-	"X-Correlation-Id",
-	"X-Forwarded-For",
-	"X-Forwarded-Host",
-	"X-Forwarded-Proto",
-	"X-Request-Id",
-	"X-Requested-With",
-];
+import { STANDARD_HEADERS } from "@/constants/http";
 
 export default function HeadersPanel() {
 	const { request, updateField } = useRequestBuilderContext();

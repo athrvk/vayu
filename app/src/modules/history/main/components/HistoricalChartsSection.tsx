@@ -27,6 +27,7 @@ import { Loader2 } from "lucide-react";
 import type { LoadTestMetrics } from "@/types";
 import { buildStatusOverTime } from "@/modules/dashboard/utils/metricsTransforms";
 import { StatusCodesOverTimeChart } from "@/modules/dashboard/components/charts/StatusCodesOverTimeChart";
+import { CHART_DOWNSAMPLE_MAX_POINTS } from "@/config/metrics";
 
 interface HistoricalChartsSectionProps {
 	data: LoadTestMetrics[];
@@ -39,7 +40,7 @@ interface HistoricalChartsSectionProps {
  * Downsample data for chart rendering performance.
  * Keeps every Nth point to cap at maxPoints while preserving first and last points.
  */
-function downsample<T>(data: T[], maxPoints: number = 2000): T[] {
+function downsample<T>(data: T[], maxPoints: number = CHART_DOWNSAMPLE_MAX_POINTS): T[] {
 	if (data.length <= maxPoints) return data;
 
 	const step = Math.ceil(data.length / maxPoints);
@@ -91,7 +92,7 @@ function prepareChartData(metrics: LoadTestMetrics[]) {
 
 	// Convert to sorted array and downsample
 	const sorted = Array.from(dataBySecond.values()).sort((a, b) => a.time - b.time);
-	return downsample(sorted, 2000);
+	return downsample(sorted);
 }
 
 export default function HistoricalChartsSection({

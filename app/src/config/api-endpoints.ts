@@ -12,8 +12,9 @@
  * Change these if the backend API routes change.
  */
 
-// Local development
-const BASE_URL = "http://127.0.0.1:9876";
+import { ENGINE_BASE_URL, STATS_PAGE_LIMIT } from "./network";
+
+const BASE_URL = ENGINE_BASE_URL;
 
 export const API_ENDPOINTS = {
 	// Base
@@ -55,7 +56,7 @@ export const API_ENDPOINTS = {
 	METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`, // New endpoint (memory-based, faster)
 
 	// Time-series metrics (JSON, paginated)
-	STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0) =>
+	STATS_TIME_SERIES: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0) =>
 		`/stats/${runId}?format=json&limit=${limit}&offset=${offset}`,
 
 	// Import

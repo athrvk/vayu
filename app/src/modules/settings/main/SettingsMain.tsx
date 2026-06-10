@@ -43,6 +43,7 @@ import {
 import { cn } from "@/lib/utils";
 import UISettingsPanel from "./UISettingsPanel";
 import { isSizeConfig, formatBytes, formatSizeRange } from "../utils/format-size";
+import { TIMING } from "@/config/timing";
 
 /**
  * Check if a config entry requires a restart when changed
@@ -174,7 +175,7 @@ export default function SettingsMain() {
 			}
 
 			// Reset to idle after showing "saved" status
-			setTimeout(() => setStatus("idle"), 2000);
+			setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
 		} catch (err) {
 			console.error("Failed to save settings:", err);
 			failSave(err instanceof Error ? err.message : "Failed to save settings");
@@ -427,7 +428,10 @@ export default function SettingsMain() {
 											if (result.success) {
 												// Wait a moment for engine to fully initialize
 												await new Promise((resolve) =>
-													setTimeout(resolve, 1500)
+													setTimeout(
+														resolve,
+														TIMING.ENGINE_RESTART_WAIT_MS
+													)
 												);
 												// Invalidate all queries to refresh data from the new engine instance
 												await queryClient.invalidateQueries();

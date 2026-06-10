@@ -12,6 +12,7 @@ import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { TIMING } from "@/config/timing";
 
 export interface CollectionItemProps {
 	collection: Collection;
@@ -94,7 +95,7 @@ export default function CollectionItem({
 		.sort(compareCollectionOrder);
 
 	const expandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const CLICK_DELAY_MS = 80;
+	const CLICK_DELAY_MS = TIMING.TREE_CLICK_DELAY_MS;
 
 	useEffect(
 		() => () => {

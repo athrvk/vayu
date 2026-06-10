@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
 import type { VariableScope } from "../../types";
 import EditableVariable from "./EditableVariable";
+import { VARIABLE_PATTERN } from "@/constants/variables";
 
 interface VariableInputProps {
 	value: string;
@@ -39,8 +40,6 @@ interface VariableInputProps {
 	suggestions?: string[]; // Optional list of plain text suggestions (e.g., standard headers)
 	onPaste?: (e: React.ClipboardEvent<HTMLInputElement>) => void; // Raw paste passthrough
 }
-
-const VARIABLE_PATTERN = /\{\{([^{}]+)\}\}/g;
 
 // Parse text into segments (text and variables)
 function parseSegments(

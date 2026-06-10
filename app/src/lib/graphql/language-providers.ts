@@ -20,9 +20,10 @@ import {
 } from "graphql-language-service";
 import { computeGraphqlDiagnostics } from "./diagnostics";
 import { useSchemaCache } from "./schema-cache";
+import { TIMING } from "@/config/timing";
 
 const MARKER_OWNER = "graphql";
-const DEBOUNCE_MS = 250;
+const DEBOUNCE_MS = TIMING.GRAPHQL_DIAGNOSTICS_DEBOUNCE_MS;
 
 export function registerGraphqlProviders(monaco: typeof Monaco): void {
 	const toSeverity = (s: "error" | "warning") =>

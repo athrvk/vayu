@@ -8,6 +8,7 @@
 // HTTP Client - Fetch wrapper for UI-to-Engine communication
 
 import { API_ENDPOINTS } from "@/config/api-endpoints";
+import { DEFAULT_REQUEST_TIMEOUT_MS } from "@/config/network";
 
 /**
  * ApiError represents failures in UI-to-Engine communication.
@@ -48,7 +49,7 @@ class HttpClient {
 		}
 	): Promise<T> {
 		const controller = new AbortController();
-		const timeout = options?.timeout || 30000;
+		const timeout = options?.timeout || DEFAULT_REQUEST_TIMEOUT_MS;
 
 		const timeoutId = setTimeout(() => controller.abort(), timeout);
 
