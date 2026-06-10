@@ -8,47 +8,22 @@
 /**
  * UrlInput Component
  *
- * URL input field with variable support and query param syncing
+ * URL input field with variable support and query param syncing.
+ * Pasting a curl/wget command auto-populates the whole request.
  */
 
 import { useCallback } from "react";
+import { detectCommand, parseCommand } from "@/services/curl/parseCurl";
 import { useRequestBuilderContext } from "../../context";
 import VariableInput from "../../shared/VariableInput";
-import { generateId } from "../../utils/id";
-import type { KeyValueItem } from "../../types";
-
-// Parse URL to extract query params
-function parseQueryParams(url: string): KeyValueItem[] {
-	try {
-		const queryStart = url.indexOf("?");
-		if (queryStart === -1) return [];
-
-		const queryString = url.slice(queryStart + 1);
-		if (!queryString) return [];
-
-		const pairs = queryString.split("&").filter(Boolean);
-
-		return pairs.map((pair) => {
-			const [key, ...valueParts] = pair.split("=");
-			const value = valueParts.join("=");
-			return {
-				id: generateId(),
-				key: decodeURIComponent(key || ""),
-				value: decodeURIComponent(value || ""),
-				enabled: true,
-			};
-		});
-	} catch {
-		return [];
-	}
-}
+import { parseQueryParams } from "../../utils/url";
 
 interface UrlInputProps {
 	className?: string;
 }
 
 export default function UrlInput({ className }: UrlInputProps) {
-	const { request, updateField } = useRequestBuilderContext();
+	const { request, updateField, setRequest } = useRequestBuilderContext();
 
 	// Sync params from URL when URL changes directly
 	const handleUrlChange = useCallback(
@@ -66,10 +41,29 @@ export default function UrlInput({ className }: UrlInputProps) {
 		[updateField]
 	);
 
+	// Auto-import a pasted curl/wget command into the whole request.
+	const handlePaste = useCallback(
+		(e: React.ClipboardEvent<HTMLInputElement>) => {
+			const text = e.clipboardData.getData("text");
+			if (!detectCommand(text)) return; // not a command — normal paste
+
+			// A multi-line command must never land in the single-line input.
+			e.preventDefault();
+
+			const parsed = parseCommand(text);
+			if (parsed) {
+				// Request-shape replacement; identity & scripts are preserved.
+				setRequest(parsed);
+			}
+		},
+		[setRequest]
+	);
+
 	return (
 		<VariableInput
 			value={request.url}
 			onChange={handleUrlChange}
+			onPaste={handlePaste}
 			placeholder="https://api.example.com/endpoint?key={{variable}}"
 			className={className ?? "w-full"}
 		/>
