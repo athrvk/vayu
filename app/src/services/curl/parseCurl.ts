@@ -86,6 +86,7 @@ interface Builder {
 	formParts: Array<{ key: string; value: string }>; // -F (non-file)
 	forceGet: boolean; // -G
 	jsonShortcut: boolean; // curl --json
+	uploadFile: boolean; // curl -T (implies PUT)
 	basic: { username: string; password: string } | null;
 }
 
@@ -99,6 +100,7 @@ function newBuilder(): Builder {
 		formParts: [],
 		forceGet: false,
 		jsonShortcut: false,
+		uploadFile: false,
 		basic: null,
 	};
 }
@@ -153,6 +155,8 @@ function resolve(b: Builder): ParsedRequest {
 		method = b.method;
 	} else if (b.forceGet) {
 		method = "GET";
+	} else if (b.uploadFile) {
+		method = "PUT";
 	} else if (hasBody || hasForm) {
 		method = "POST";
 	} else {
@@ -276,8 +280,6 @@ const CURL_SKIP_WITH_ARG = new Set([
 	"-x",
 	"--proxy",
 	"--resolve",
-	"-T",
-	"--upload-file",
 ]);
 
 function parseCurl(args: string[]): ParsedRequest {
@@ -360,6 +362,13 @@ function parseCurl(args: string[]): ParsedRequest {
 			case "-G":
 			case "--get":
 				b.forceGet = true;
+				break;
+			case "-T":
+			case "--upload-file":
+				// File contents can't be read from a pasted command, but the flag
+				// implies a PUT — record the intent and discard the path.
+				value();
+				b.uploadFile = true;
 				break;
 			case "--url":
 				b.url = value();

@@ -134,6 +134,18 @@ describe("parseCommand — curl", () => {
 		expect(r.method).toBe("HEAD");
 	});
 
+	test("-T implies PUT (file path discarded)", () => {
+		const r = parseCommand(`curl -T upload.bin https://x.com`)!;
+		expect(r.method).toBe("PUT");
+		expect(r.url).toBe("https://x.com");
+		expect(r.bodyMode).toBe("none");
+	});
+
+	test("explicit -X overrides -T's PUT inference", () => {
+		const r = parseCommand(`curl -T upload.bin -X PATCH https://x.com`)!;
+		expect(r.method).toBe("PATCH");
+	});
+
 	test("-d @file is skipped", () => {
 		const r = parseCommand(`curl -X POST https://x.com -d @body.json`)!;
 		expect(r.method).toBe("POST");
