@@ -12,10 +12,6 @@
  * Change these if the backend API routes change.
  */
 
-// Remote URLs (for reference)
-// const BASE_URL = "https://71bb7ff8ef44.ngrok-free.app";
-// const BASE_URL = "https://vayu-engine-latest.onrender.com";
-
 // Local development
 const BASE_URL = "http://127.0.0.1:9876";
 
