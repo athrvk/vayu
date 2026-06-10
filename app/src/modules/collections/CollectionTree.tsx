@@ -194,7 +194,7 @@ export default function CollectionTree() {
 			collectionId: collectionId,
 			name: "New Request",
 			method: "GET",
-			url: "https://api.example.com",
+			url: "",
 		});
 
 		if (request) {

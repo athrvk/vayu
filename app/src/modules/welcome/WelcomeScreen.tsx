@@ -111,7 +111,7 @@ export default function WelcomeScreen() {
 				collectionId: targetCollectionId,
 				name: "New Request",
 				method: "GET",
-				url: "https://api.example.com",
+				url: "",
 			});
 
 			// Navigate to the new request
