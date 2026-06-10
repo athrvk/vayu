@@ -37,6 +37,7 @@ interface VariableInputProps {
 	className?: string;
 	disabled?: boolean;
 	suggestions?: string[]; // Optional list of plain text suggestions (e.g., standard headers)
+	onPaste?: (e: React.ClipboardEvent<HTMLInputElement>) => void; // Raw paste passthrough
 }
 
 const VARIABLE_PATTERN = /\{\{([^{}]+)\}\}/g;
@@ -81,6 +82,7 @@ export default function VariableInput({
 	className,
 	disabled = false,
 	suggestions = [],
+	onPaste,
 }: VariableInputProps) {
 	const { getAllVariables, updateVariable } = useRequestBuilderContext();
 
@@ -377,6 +379,7 @@ export default function VariableInput({
 				type="text"
 				value={value}
 				onChange={handleChange}
+				onPaste={onPaste}
 				onKeyDown={handleKeyDown}
 				onFocus={handleFocus}
 				onBlur={handleBlur}

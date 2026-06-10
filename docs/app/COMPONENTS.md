@@ -82,7 +82,7 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 |---|---|
 | `context/RequestBuilderProvider.tsx`, `context/RequestBuilderContext.tsx` | Local request-editing state + the execute/save/load-test callbacks |
 | `components/RequestBuilderLayout.tsx` | Resizable vertical layout composing UrlBar / RequestTabs / ResponseViewer |
-| `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` — method dropdown, URL input (variable highlighting), Send + Load Test buttons |
+| `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` — method dropdown, URL input (variable highlighting), Send + Load Test buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
 | `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel` |
 | `components/ResponseViewer/` | `index`, `ResponseHeader`, `ResponseHeadersTab`, `ResponseCookies`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` |
 | `components/RequestDescription.tsx` | Editable request description |
@@ -90,6 +90,8 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 | `shared/KeyValueEditor/` | `index`, `KeyValueRow` — reusable key/value table (params, headers, form fields) |
 | `shared/VariableInput/` | `index`, `EditableVariable` — input with `{{variable}}` highlighting + autocomplete |
 | `hooks/`, `utils/` | Module hooks; `utils/key-value` (flat↔entry conversions), `utils/id` |
+
+> **cURL / wget import:** pasting a `curl` or `wget` command into the URL field auto-populates the whole request (method, URL, params, headers, body, basic auth). Detection + parsing live in `services/curl/` (`tokenize.ts` shell tokenizer + `parseCurl.ts`), kept separate from the collection `importers/` pipeline since this targets the active request. The paste is a request-shape replacement — identity (`id`, `name`, `collectionId`) and scripts are preserved; file references (`-d @file`, `-F field=@file`, `--post-file`) are skipped since they can't be read from pasted text. Non-command pastes fall through to normal input.
 
 > **Body tabs** support `none` / `json` / `text` / `graphql` / `form-data` / `x-www-form-urlencoded`. The `graphql` mode renders a split resizable editor: a **Query** pane (Monaco `graphql` language with diagnostics, autocomplete, hover, and formatting) and a **Variables** pane (Monaco `json` with schema-derived validation). **Scripts** are two separate panels — pre-request and test — not a single tab.
 
