@@ -247,11 +247,14 @@ stores/                      # cross-cutting only
   live-run-store.ts          # renamed dashboard-store, contract unchanged
   import-modal-store.ts      # kept; exported from the barrel (currently isn't)
 
-modules/collections/store.ts # expandedCollectionIds
-modules/history/store.ts     # filters/search/sort + filterRuns()
-modules/variables/store.ts   # selectedCategory
-modules/settings/store.ts    # selectedCategory
+modules/collections/collections-store.ts # expandedCollectionIds
+modules/history/history-store.ts         # filters/search/sort + filterRuns()
+modules/variables/variables-store.ts     # selectedCategory
+modules/settings/settings-store.ts       # selectedCategory
 ```
+
+Naming follows `docs/app/file-name-conventions.md` (`kebab-case-store.ts`) —
+co-location changes the directory, not the convention.
 
 Cleanups (grep-verified, no consumers):
 
@@ -297,3 +300,27 @@ Conventions to codify:
 - `ConnectionStatus` + save status indicator move from sidebar footer to
   dock.
 - `ImportModal` stays mounted at shell level (unchanged).
+
+## Documentation impact
+
+Ship doc updates with the implementation, not before (avoids double churn):
+
+- `docs/app/COMPONENTS.md` — accurate today; needs a full rewrite of the
+  hierarchy diagram, Shell, Sidebar, and "State Management in Components"
+  sections once the shell lands.
+- `docs/app/state-management.md` — **already stale against current code**
+  (references a nonexistent `app-store.ts`; describes response-store as
+  "viewer UI state" when it stores responses per requestId; says metrics
+  cap is 10,000 — code says 3,000; documents a fictional `useSaveManager`
+  API with `debounceMs`; omits settings-store and import-modal-store).
+  Rewrite against the post-refactor store layout rather than patching twice.
+- `docs/app/architecture.md` — directory tree predates the `modules/`
+  reorganization (`components/request-builder/` etc.); same `app-store.ts`
+  ghost and 10,000-point error; claims the preload script is unused (it
+  carries window controls, theme sync, and `restartEngine` IPC). Fix the
+  structure section alongside the redesign.
+- `docs/app/file-name-conventions.md` — guidelines stay authoritative for
+  all new files (stores: `kebab-case-store.ts`); add the co-located module
+  store entry to its directory template.
+- Unaffected: `api-integration.md`, `variable-resolution.md`,
+  `pm-api-compatibility.md`, `import-collections/*`.
