@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en" class="dark" data-color-scheme="sunset">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vayu — Option C "Pure" Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── Exact Vayu tokens from app/src/index.css ── */
+:root {
+  --background: 42 17% 88%;
+  --card: 0 0% 100%;
+  --panel: 42 21% 94%;
+  --foreground: 240 6% 10%;
+  --card-foreground: 240 6% 10%;
+  --muted-foreground: 240 4% 46%;
+  --subtle-foreground: 240 7% 78%;
+  --primary: 24.6 95% 53.1%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 38 20% 89%;
+  --accent-active: 40 16% 85%;
+  --border: 40 9% 80%;
+  --border-strong: 40 6% 72%;
+  --muted: 38 20% 89%;
+  --success: 142 76% 36%;
+  --warning: 38 92% 50%;
+  --destructive: 0 84.2% 60.2%;
+  --method-get: 142 76% 36%;
+  --method-post: 217 91% 60%;
+  --method-put: 38 92% 50%;
+  --method-delete: 0 84% 60%;
+  --radius: 0.375rem;
+}
+.dark {
+  --background: 240 10% 4%;
+  --card: 240 6% 11%;
+  --panel: 240 6% 7%;
+  --foreground: 240 5% 96%;
+  --card-foreground: 240 5% 96%;
+  --muted-foreground: 240 5% 65%;
+  --subtle-foreground: 240 5% 34%;
+  --primary: 24.6 95% 53.1%;
+  --accent: 240 7% 16%;
+  --accent-active: 240 6% 21%;
+  --border: 0 0% 14%;
+  --border-strong: 0 0% 18%;
+  --muted: 240 7% 16%;
+  --success: 142 70% 45%;
+}
+[data-color-scheme="sunset"] { --primary: 24.6 95% 53.1%; }
+[data-color-scheme="sky"]    { --primary: 188 94% 43%; }
+.dark[data-color-scheme="ocean"] { --primary: 217 78% 51%; }
+[data-color-scheme="ocean"]  { --primary: 217 91% 60%; }
+[data-color-scheme="forest"] { --primary: 142 76% 36%; }
+.dark[data-color-scheme="forest"] { --primary: 142 70% 45%; }
+[data-color-scheme="aurora"] { --primary: 258 87% 74%; }
+[data-color-scheme="coral"]  { --primary: 0 72% 65%; }
+.dark[data-color-scheme="coral"] { --primary: 0 72% 55%; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-size: 13px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+}
+.mono { font-family: "JetBrains Mono", monospace; }
+
+/* ── Harness ── */
+#harness {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 8px 14px;
+  background: hsl(var(--panel));
+  border-bottom: 1px solid hsl(var(--border-strong));
+  flex-shrink: 0; user-select: none;
+}
+.h-label { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: hsl(var(--muted-foreground)); }
+.seg { display: flex; background: hsl(var(--background)); border: 1px solid hsl(var(--border)); border-radius: 6px; overflow: hidden; }
+.seg button { padding: 4px 11px; border: none; background: transparent; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 500; color: hsl(var(--muted-foreground)); }
+.seg button.on { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
+.swatches { display: flex; gap: 5px; align-items: center; }
+.swatch { width: 17px; height: 17px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; flex-shrink: 0; }
+.swatch.on { border-color: hsl(var(--foreground)); }
+.hpill { padding: 4px 11px; border-radius: 6px; border: 1px solid hsl(var(--border)); cursor: pointer; background: hsl(var(--background)); font-family: inherit; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.hpill.on { background: hsl(var(--primary) / .15); border-color: hsl(var(--primary)); color: hsl(var(--primary)); font-weight: 600; }
+.h-sep { width: 1px; height: 20px; background: hsl(var(--border-strong)); }
+
+/* ── App root ── */
+#app { flex: 1; overflow: hidden; display: flex; flex-direction: column; position: relative; }
+
+/* ── Title bar ── */
+#titlebar {
+  height: 34px; display: flex; align-items: center;
+  background: hsl(var(--panel)); border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0; user-select: none; overflow: hidden;
+}
+.tb-logo {
+  display: flex; align-items: center; gap: 0; padding: 0 10px; flex-shrink: 0;
+}
+.mark {
+  width: 16px; height: 16px; border-radius: 3px; background: hsl(var(--primary));
+  clip-path: polygon(50% 4%, 96% 96%, 50% 74%, 4% 96%); display: inline-block;
+}
+.tab-strip { display: flex; align-items: stretch; flex: 1; overflow: hidden; height: 100%; }
+.tab {
+  display: flex; align-items: center; gap: 7px; padding: 0 13px;
+  border-right: 1px solid hsl(var(--border)); cursor: pointer;
+  font-size: 12px; font-weight: 500; color: hsl(var(--muted-foreground));
+  position: relative; flex-shrink: 0; white-space: nowrap;
+  background: transparent; transition: background 0.1s;
+}
+.tab:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+.tab.active {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+.tab.active::after {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: hsl(var(--primary)); border-radius: 0 0 2px 2px;
+}
+.tab-x {
+  font-size: 11px; opacity: .4; line-height: 1; padding: 2px 1px;
+  transition: opacity .1s;
+}
+.tab:hover .tab-x { opacity: .8; }
+.tab-new { display: flex; align-items: center; padding: 0 10px; font-size: 16px; color: hsl(var(--muted-foreground)); cursor: pointer; opacity: .6; }
+.tab-new:hover { opacity: 1; }
+.tb-right { display: flex; align-items: center; gap: 8px; padding: 0 10px; flex-shrink: 0; margin-left: auto; }
+.env-pill {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px;
+  border-radius: 999px; cursor: pointer; font-size: 11px; font-weight: 600;
+  background: hsl(var(--success) / .12); border: 1px solid hsl(var(--success) / .4);
+  color: hsl(var(--success));
+}
+.env-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--success)); animation: vpulse 1.6s ease-in-out infinite; }
+@keyframes vpulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+.win-btns { display: flex; gap: 12px; color: hsl(var(--muted-foreground)); font-size: 13px; }
+
+/* ── Main body: drawer + content ── */
+#main { flex: 1; overflow: hidden; display: flex; position: relative; }
+
+/* ── Collections drawer ── */
+#drawer {
+  width: 264px; flex-shrink: 0;
+  background: hsl(var(--panel)); border-right: 1px solid hsl(var(--border));
+  display: flex; flex-direction: column; overflow: hidden;
+  margin-left: -264px;
+  transition: margin-left 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 4px 0 24px rgba(0,0,0,.28);
+  z-index: 10; position: relative;
+}
+#drawer.open { margin-left: 0; }
+.drawer-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 12px 7px; border-bottom: 1px solid hsl(var(--border));
+  font-weight: 600; font-size: 12.5px; flex-shrink: 0;
+}
+.drawer-close { color: hsl(var(--muted-foreground)); cursor: pointer; font-size: 16px; line-height: 1; opacity: .7; }
+.drawer-close:hover { opacity: 1; }
+.tree { overflow-y: auto; flex: 1; padding: 4px 4px; }
+.tree-row {
+  display: flex; align-items: center; gap: 6px; padding: 4.5px 8px;
+  border-radius: 5px; cursor: pointer; font-size: 12.5px; line-height: 1.3;
+  color: hsl(var(--foreground)); white-space: nowrap;
+}
+.tree-row:hover { background: hsl(var(--accent)); }
+.tree-row.sel { background: hsl(var(--accent-active)); }
+.tree-row.l1 { padding-left: 22px; }
+.tree-row.l2 { padding-left: 36px; }
+.caret { font-size: 8.5px; color: hsl(var(--muted-foreground)); width: 10px; flex-shrink: 0; }
+.method-badge {
+  font-family: "JetBrains Mono", monospace; font-size: 9.5px; font-weight: 600;
+  padding: 1px 5px; border-radius: 3px; border: 1px solid; letter-spacing: .03em; flex-shrink: 0;
+}
+.m-get    { color: hsl(var(--method-get));    border-color: hsl(var(--method-get) / .5);    background: hsl(var(--method-get) / .1); }
+.m-post   { color: hsl(var(--method-post));   border-color: hsl(var(--method-post) / .5);   background: hsl(var(--method-post) / .1); }
+.m-put    { color: hsl(var(--method-put));    border-color: hsl(var(--method-put) / .5);    background: hsl(var(--method-put) / .1); }
+.m-delete { color: hsl(var(--method-delete)); border-color: hsl(var(--method-delete) / .5); background: hsl(var(--method-delete) / .1); }
+.req-name { color: hsl(var(--foreground)); font-size: 12px; }
+.req-name.muted { color: hsl(var(--muted-foreground)); }
+
+/* ── Request builder area ── */
+#content { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+/* URL bar */
+#urlbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px;
+  background: hsl(var(--panel)); border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.method-sel {
+  display: flex; align-items: center; gap: 5px;
+  padding: 0 10px; height: 34px;
+  background: hsl(var(--card)); border: 1px solid hsl(var(--border));
+  border-radius: 6px 0 0 6px; border-right: none;
+  font-family: "JetBrains Mono", monospace; font-size: 11.5px; font-weight: 600;
+  color: hsl(var(--method-get)); cursor: pointer; flex-shrink: 0;
+}
+.url-input {
+  flex: 1; height: 34px; padding: 0 12px;
+  background: hsl(var(--card)); border: 1px solid hsl(var(--border));
+  border-radius: 0 6px 6px 0;
+  font-family: "JetBrains Mono", monospace; font-size: 12.5px;
+  color: hsl(var(--foreground)); display: flex; align-items: center;
+  transition: border-color .15s;
+}
+.url-input:hover { border-color: hsl(var(--border-strong)); }
+.url-var { color: hsl(var(--primary)); font-weight: 500; }
+.btn-send {
+  height: 34px; padding: 0 16px; border-radius: 6px; border: none; cursor: pointer;
+  background: hsl(var(--primary)); color: hsl(var(--primary-foreground));
+  font-family: inherit; font-weight: 600; font-size: 13px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 5px;
+}
+.btn-loadtest {
+  height: 34px; padding: 0 12px; border-radius: 6px; cursor: pointer; flex-shrink: 0;
+  background: hsl(var(--primary) / .1); border: 1px solid hsl(var(--primary));
+  color: hsl(var(--primary)); font-family: inherit; font-size: 12px; font-weight: 600;
+  display: flex; align-items: center; gap: 5px;
+}
+
+/* Request tabs */
+#req-tabs {
+  display: flex; align-items: stretch; height: 38px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: transparent; flex-shrink: 0; overflow-x: auto;
+}
+#req-tabs::-webkit-scrollbar { height: 0; }
+.rtab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 16px; height: 100%; cursor: pointer;
+  font-size: 13px; font-weight: 500; color: hsl(var(--muted-foreground));
+  border-bottom: 2px solid transparent; position: relative; white-space: nowrap; flex-shrink: 0;
+  transition: color .1s;
+}
+.rtab:hover { color: hsl(var(--foreground)); }
+.rtab.active { color: hsl(var(--foreground)); border-bottom-color: hsl(var(--primary)); }
+.badge {
+  font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 600;
+  background: hsl(var(--accent-active)); color: hsl(var(--muted-foreground));
+  padding: 1px 6px; border-radius: 4px; line-height: 1.5;
+}
+
+/* Resizable split area */
+#split { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* Request body area */
+#req-body { flex: 1; min-height: 0; overflow-y: auto; background: hsl(var(--background)); }
+.kv-table { width: 100%; border-collapse: collapse; }
+.kv-table tr { border-bottom: 1px solid hsl(var(--border)); }
+.kv-table tr:hover td { background: hsl(var(--accent) / .3); }
+.kv-table td { padding: 7px 12px; font-family: "JetBrains Mono", monospace; font-size: 12px; }
+.kv-table td:first-child { width: 32px; text-align: center; border-right: 1px solid hsl(var(--border)); }
+.kv-table td:nth-child(2) { width: 38%; border-right: 1px solid hsl(var(--border)); color: hsl(var(--foreground)); }
+.kv-table td:nth-child(3) { color: hsl(var(--foreground)); }
+.kv-table td.ph { color: hsl(var(--subtle-foreground)); }
+.chk { width: 14px; height: 14px; accent-color: hsl(var(--primary)); cursor: pointer; }
+.kv-table tr.add-row td { color: hsl(var(--subtle-foreground)); font-style: italic; }
+
+/* Resize handle */
+#resize-handle {
+  height: 5px; background: hsl(var(--border)); cursor: ns-resize; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s;
+}
+#resize-handle:hover { background: hsl(var(--primary) / .5); }
+#resize-handle::after {
+  content: ""; width: 32px; height: 2px; border-radius: 2px;
+  background: hsl(var(--muted-foreground) / .4);
+}
+
+/* Response area */
+#resp-area { display: flex; flex-direction: column; overflow: hidden; min-height: 120px; }
+#resp-header {
+  display: flex; align-items: center; gap: 16px;
+  padding: 8px 16px; background: hsl(var(--muted) / .3); border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.status-badge {
+  display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px;
+  font-family: "JetBrains Mono", monospace; font-size: 11.5px; font-weight: 700;
+  background: hsl(var(--success)); color: #fff;
+}
+.resp-meta { display: flex; align-items: center; gap: 5px; font-size: 12px; color: hsl(var(--muted-foreground)); font-family: "JetBrains Mono", monospace; }
+.resp-meta svg { opacity: .6; }
+#resp-tabs {
+  display: flex; align-items: stretch; height: 36px;
+  border-bottom: 1px solid hsl(var(--border)); flex-shrink: 0;
+}
+.resp-tab {
+  display: flex; align-items: center; gap: 5px;
+  padding: 0 14px; font-size: 12.5px; font-weight: 500; cursor: pointer;
+  color: hsl(var(--muted-foreground)); border-bottom: 2px solid transparent; white-space: nowrap;
+}
+.resp-tab:hover { color: hsl(var(--foreground)); }
+.resp-tab.active { color: hsl(var(--foreground)); border-bottom-color: hsl(var(--primary)); }
+#resp-body {
+  flex: 1; overflow-y: auto; padding: 14px 16px;
+  font-family: "JetBrains Mono", monospace; font-size: 12px; line-height: 1.7;
+  background: hsl(var(--background));
+}
+.j-k { color: hsl(217 91% 65%); }
+.j-s { color: hsl(142 60% 60%); }
+.j-n { color: hsl(var(--primary)); }
+.j-p { color: hsl(var(--muted-foreground)); }
+
+/* Placeholder state */
+#placeholder {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; color: hsl(var(--muted-foreground)); font-size: 13px;
+}
+#placeholder .icon { font-size: 32px; opacity: .3; }
+#placeholder .sub { font-size: 11.5px; }
+
+/* ── Bottom dock ── */
+#dock {
+  height: 30px; display: flex; align-items: center; gap: 2px; padding: 0 10px;
+  background: hsl(var(--panel)); border-top: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.dock-btn {
+  display: flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 5px;
+  font-size: 11.5px; font-weight: 500; cursor: pointer; color: hsl(var(--muted-foreground));
+  border: none; background: transparent; font-family: inherit; transition: all .1s;
+}
+.dock-btn:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+.dock-btn.on { background: hsl(var(--primary) / .12); color: hsl(var(--primary)); }
+.dock-kbd {
+  font-family: "JetBrains Mono", monospace; font-size: 9.5px;
+  background: hsl(var(--accent-active)); color: hsl(var(--muted-foreground));
+  padding: 1px 4px; border-radius: 3px; opacity: .8;
+}
+.dock-sep { flex: 1; }
+.dock-status { display: flex; align-items: center; gap: 10px; font-size: 11px; color: hsl(var(--muted-foreground)); }
+.conn-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--success)); animation: vpulse 1.6s ease-in-out infinite; flex-shrink: 0; }
+.save-ok { color: hsl(var(--success)); font-weight: 600; }
+
+/* ── Annotations ── */
+.ann {
+  position: absolute; z-index: 50; pointer-events: none;
+  font-size: 10.5px; font-weight: 600; line-height: 1.3;
+  background: hsl(var(--primary)); color: hsl(var(--primary-foreground));
+  padding: 5px 9px; border-radius: 5px;
+  box-shadow: 0 3px 14px hsl(var(--primary) / .45);
+  opacity: 0; transition: opacity .2s; max-width: 200px;
+}
+.show-ann .ann { opacity: 1; }
+.ann::after {
+  content: ""; position: absolute; width: 7px; height: 7px;
+  background: hsl(var(--primary)); transform: rotate(45deg);
+}
+.ann.dn::after { bottom: -3px; left: 14px; }
+.ann.up::after { top: -3px; left: 14px; }
+.ann.rt::after { right: -3px; top: 10px; }
+
+/* Before/after diff */
+.diff-old { opacity: .4; text-decoration: line-through; }
+.diff-new { color: hsl(var(--primary)); }
+
+/* Overlay backdrop for drawer on narrow screens */
+#drawer-backdrop {
+  display: none; position: absolute; inset: 0; z-index: 9;
+  background: rgba(0,0,0,.4);
+}
+#drawer-backdrop.show { display: block; }
+</style>
+</head>
+<body>
+
+<!-- Harness -->
+<div id="harness">
+  <div style="display:flex;align-items:center;gap:6px">
+    <span class="h-label">Theme</span>
+    <div class="seg" id="themeSeg">
+      <button data-v="dark" class="on">Dark</button>
+      <button data-v="light">Light</button>
+    </div>
+  </div>
+  <div class="h-sep"></div>
+  <div style="display:flex;align-items:center;gap:6px">
+    <span class="h-label">Accent</span>
+    <div class="swatches" id="swatches">
+      <div class="swatch on" data-s="sunset" style="background:#f97316" title="Sunset"></div>
+      <div class="swatch" data-s="sky" style="background:#22d3ee" title="Sky"></div>
+      <div class="swatch" data-s="ocean" style="background:#3b82f6" title="Ocean"></div>
+      <div class="swatch" data-s="forest" style="background:#16a34a" title="Forest"></div>
+      <div class="swatch" data-s="aurora" style="background:#a78bfa" title="Aurora"></div>
+      <div class="swatch" data-s="coral" style="background:#e35d5d" title="Coral"></div>
+    </div>
+  </div>
+  <div class="h-sep"></div>
+  <div style="display:flex;align-items:center;gap:6px">
+    <span class="h-label">State</span>
+    <div class="seg" id="stateSeg">
+      <button data-v="empty" class="on">No request</button>
+      <button data-v="loading">Sending…</button>
+      <button data-v="resp">Response</button>
+    </div>
+  </div>
+  <div class="h-sep"></div>
+  <button class="hpill on" id="annBtn">Annotations</button>
+  <button class="hpill on" id="drawerBtn">Collections open</button>
+</div>
+
+<!-- App -->
+<div id="app" class="show-ann">
+
+  <!-- Title bar with tabs -->
+  <div id="titlebar">
+    <div class="tb-logo"><span class="mark"></span></div>
+    <div class="tab-strip">
+      <div class="tab active">
+        <span class="method-badge m-get">GET</span>
+        <span>/users</span>
+        <span class="tab-x">✕</span>
+      </div>
+      <div class="tab">
+        <span class="method-badge m-post">POST</span>
+        <span>/auth/login</span>
+        <span class="tab-x">✕</span>
+      </div>
+      <div class="tab">
+        <span class="method-badge m-put">PUT</span>
+        <span>/users/:id</span>
+        <span class="tab-x">✕</span>
+      </div>
+      <div class="tab-new">+</div>
+    </div>
+    <div class="tb-right">
+      <div class="env-pill"><span class="env-dot"></span> Production ▾</div>
+      <div class="win-btns"><span>—</span><span>□</span><span>✕</span></div>
+    </div>
+
+    <!-- Annotations on title bar -->
+    <div class="ann dn" style="top:42px; left:46px;">
+      Tabs live in the title bar — zero wasted vertical space
+    </div>
+    <div class="ann dn" style="top:42px; right:170px;">
+      Env switcher always accessible — one click to swap context
+    </div>
+  </div>
+
+  <!-- Main area -->
+  <div id="main">
+    <div id="drawer-backdrop"></div>
+
+    <!-- Collections drawer -->
+    <div id="drawer" class="open">
+      <div class="drawer-header">
+        Collections
+        <span class="drawer-close" id="drawerClose">✕</span>
+      </div>
+      <div class="tree">
+        <div class="tree-row" style="font-weight:600;">
+          <span class="caret">▾</span>My API Project
+        </div>
+        <div class="tree-row l1">
+          <span class="caret">▸</span>Auth
+        </div>
+        <div class="tree-row l1">
+          <span class="caret">▾</span>Users
+        </div>
+        <div class="tree-row l2 sel">
+          <span class="method-badge m-get">GET</span>
+          <span class="req-name">/users</span>
+        </div>
+        <div class="tree-row l2">
+          <span class="method-badge m-post">POST</span>
+          <span class="req-name">/users</span>
+        </div>
+        <div class="tree-row l2">
+          <span class="method-badge m-put">PUT</span>
+          <span class="req-name">/users/:id</span>
+        </div>
+        <div class="tree-row l2">
+          <span class="method-badge m-delete">DEL</span>
+          <span class="req-name">/users/:id</span>
+        </div>
+        <div class="tree-row l1">
+          <span class="caret">▸</span>Products
+        </div>
+        <div class="tree-row l1">
+          <span class="caret">▸</span>Orders
+        </div>
+        <div class="tree-row l1">
+          <span class="caret">▸</span>Webhooks
+        </div>
+      </div>
+      <!-- Annotation -->
+      <div class="ann rt" style="top:110px; left:272px;">
+        Drawer — called with ⌘E or dock button.<br>Gone when you don't need it.
+      </div>
+    </div>
+
+    <!-- Request builder content -->
+    <div id="content">
+
+      <!-- URL bar — exactly matching Vayu's UrlBar component -->
+      <div id="urlbar">
+        <div class="method-sel">GET ▾</div>
+        <div class="url-input mono">
+          https://api.example.com/users/<span class="url-var">{{userId}}</span>
+        </div>
+        <button class="btn-send" id="sendBtn">▶ Send</button>
+        <button class="btn-loadtest">⚡ Load Test</button>
+      </div>
+
+      <!-- Request tabs — matching RequestTabs component styling -->
+      <div id="req-tabs">
+        <div class="rtab active">Params <span class="badge">2</span></div>
+        <div class="rtab">Headers <span class="badge">3</span></div>
+        <div class="rtab">Body</div>
+        <div class="rtab">Auth <span class="badge">●</span></div>
+        <div class="rtab">Pre-request</div>
+        <div class="rtab">Tests</div>
+      </div>
+
+      <!-- Resizable split area -->
+      <div id="split">
+
+        <!-- Request body — params panel -->
+        <div id="req-body">
+          <table class="kv-table" style="width:100%">
+            <tbody>
+              <tr>
+                <td><input type="checkbox" class="chk" checked></td>
+                <td>page</td>
+                <td>1</td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" class="chk" checked></td>
+                <td>limit</td>
+                <td>50</td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" class="chk"></td>
+                <td class="ph">key</td>
+                <td class="ph">value</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Resize handle -->
+        <div id="resize-handle"></div>
+
+        <!-- Response area -->
+        <div id="resp-area">
+
+          <!-- State: no response yet -->
+          <div id="state-empty" id="placeholder">
+            <div class="icon">◎</div>
+            <div style="font-size:13px; color:hsl(var(--muted-foreground))">Send a request to see the response</div>
+            <div class="sub">Press ▶ Send or ⌘↵</div>
+          </div>
+
+          <!-- State: sending -->
+          <div id="state-loading" style="display:none; flex:1; align-items:center; justify-content:center; flex-direction:column; gap:10px;">
+            <div style="width:28px;height:28px;border:3px solid hsl(var(--primary)/0.3);border-top-color:hsl(var(--primary));border-radius:50%;animation:spin .7s linear infinite;"></div>
+            <div style="color:hsl(var(--muted-foreground));font-size:12.5px;">Sending request…</div>
+          </div>
+          @keyframes spin { to { transform: rotate(360deg); } }
+
+          <!-- State: response received -->
+          <div id="state-resp" style="display:none; flex:1; flex-direction:column; overflow:hidden;">
+            <div id="resp-header">
+              <span class="status-badge">200 OK</span>
+              <div class="resp-meta">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                142.3842 ms
+              </div>
+              <div class="resp-meta">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                1.2 KB
+              </div>
+            </div>
+            <div id="resp-tabs">
+              <div class="resp-tab active">Body</div>
+              <div class="resp-tab">Headers</div>
+              <div class="resp-tab">Cookies</div>
+              <div class="resp-tab">Console</div>
+              <div class="resp-tab">Tests <span class="badge" style="color:hsl(var(--success));background:hsl(var(--success)/0.12)">2 ✓</span></div>
+              <div class="resp-tab">Raw</div>
+            </div>
+            <div id="resp-body">
+<span class="j-p">{</span>
+  <span class="j-k">"users"</span><span class="j-p">: [</span>
+    <span class="j-p">{</span>
+      <span class="j-k">"id"</span><span class="j-p">: </span><span class="j-s">"abc-123"</span><span class="j-p">,</span>
+      <span class="j-k">"name"</span><span class="j-p">: </span><span class="j-s">"Ada Lovelace"</span><span class="j-p">,</span>
+      <span class="j-k">"role"</span><span class="j-p">: </span><span class="j-s">"admin"</span><span class="j-p">,</span>
+      <span class="j-k">"active"</span><span class="j-p">: </span><span class="j-n">true</span>
+    <span class="j-p">},</span>
+    <span class="j-p">{</span>
+      <span class="j-k">"id"</span><span class="j-p">: </span><span class="j-s">"def-456"</span><span class="j-p">,</span>
+      <span class="j-k">"name"</span><span class="j-p">: </span><span class="j-s">"Alan Turing"</span><span class="j-p">,</span>
+      <span class="j-k">"role"</span><span class="j-p">: </span><span class="j-s">"user"</span><span class="j-p">,</span>
+      <span class="j-k">"active"</span><span class="j-p">: </span><span class="j-n">true</span>
+    <span class="j-p">}</span>
+  <span class="j-p">],</span>
+  <span class="j-k">"total"</span><span class="j-p">: </span><span class="j-n">2</span><span class="j-p">,</span>
+  <span class="j-k">"page"</span><span class="j-p">: </span><span class="j-n">1</span><span class="j-p">,</span>
+  <span class="j-k">"limit"</span><span class="j-p">: </span><span class="j-n">50</span>
+<span class="j-p">}</span>
+            </div>
+          </div>
+
+          <!-- Annotation on response area -->
+          <div class="ann up" style="bottom:40px; left:60px;">
+            Full-width response — same width as the request. No awkward column cuts.
+          </div>
+        </div>
+
+      </div><!-- /split -->
+    </div><!-- /content -->
+  </div><!-- /main -->
+
+  <!-- Bottom dock -->
+  <div id="dock">
+    <button class="dock-btn on" id="dockCollections">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      Collections
+      <span class="dock-kbd">⌘E</span>
+    </button>
+    <button class="dock-btn">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      History
+      <span class="dock-kbd">⌘H</span>
+    </button>
+    <button class="dock-btn">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      Variables
+      <span class="dock-kbd">⌘U</span>
+    </button>
+    <div class="dock-sep"></div>
+    <div class="dock-status">
+      <span class="conn-dot"></span>
+      <span>Engine connected</span>
+      <span>·</span>
+      <span class="save-ok">✓ Saved</span>
+      <span>·</span>
+      <span class="mono" style="font-size:10.5px;">v0.9.1</span>
+    </div>
+
+    <!-- Dock annotation -->
+    <div class="ann up" style="bottom:38px; left:8px;">
+      Dock replaces sidebar activity bar — summonable drawers, always-visible ambient status.
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<script>
+/* ── Theme ── */
+document.getElementById('themeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#themeSeg button').forEach(x => x.classList.toggle('on', x===b));
+  document.documentElement.classList.toggle('dark', b.dataset.v === 'dark');
+});
+
+/* ── Accent ── */
+document.getElementById('swatches').addEventListener('click', e => {
+  const s = e.target.closest('.swatch'); if (!s) return;
+  document.querySelectorAll('.swatch').forEach(x => x.classList.toggle('on', x===s));
+  document.documentElement.dataset.colorScheme = s.dataset.s;
+});
+
+/* ── State (empty / loading / response) ── */
+function setState(v) {
+  document.getElementById('state-empty').style.display = v === 'empty' ? 'flex' : 'none';
+  document.getElementById('state-loading').style.display = v === 'loading' ? 'flex' : 'none';
+  document.getElementById('state-resp').style.display = v === 'resp' ? 'flex' : 'none';
+  document.getElementById('resp-area').style.minHeight = v === 'empty' ? '80px' : '120px';
+}
+setState('empty');
+document.getElementById('stateSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#stateSeg button').forEach(x => x.classList.toggle('on', x===b));
+  setState(b.dataset.v);
+});
+document.getElementById('sendBtn').addEventListener('click', () => {
+  document.querySelectorAll('#stateSeg button').forEach((b,i) => b.classList.toggle('on', i===1));
+  setState('loading');
+  setTimeout(() => {
+    document.querySelectorAll('#stateSeg button').forEach((b,i) => b.classList.toggle('on', i===2));
+    setState('resp');
+  }, 900);
+});
+
+/* ── Drawer toggle ── */
+const drawer = document.getElementById('drawer');
+const backdrop = document.getElementById('drawer-backdrop');
+const dockCollections = document.getElementById('dockCollections');
+const drawerBtn = document.getElementById('drawerBtn');
+const drawerClose = document.getElementById('drawerClose');
+
+function setDrawer(open) {
+  drawer.classList.toggle('open', open);
+  backdrop.classList.toggle('show', open);
+  dockCollections.classList.toggle('on', open);
+  drawerBtn.classList.toggle('on', open);
+  drawerBtn.textContent = open ? 'Collections open' : 'Collections closed';
+}
+
+drawerBtn.addEventListener('click', () => setDrawer(!drawer.classList.contains('open')));
+dockCollections.addEventListener('click', () => setDrawer(!drawer.classList.contains('open')));
+drawerClose.addEventListener('click', () => setDrawer(false));
+backdrop.addEventListener('click', () => setDrawer(false));
+
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
+    e.preventDefault(); setDrawer(!drawer.classList.contains('open'));
+  }
+});
+
+/* ── Annotations ── */
+const annBtn = document.getElementById('annBtn');
+const app = document.getElementById('app');
+annBtn.addEventListener('click', () => {
+  annBtn.classList.toggle('on');
+  app.classList.toggle('show-ann');
+});
+
+/* ── Resizable split ── */
+const handle = document.getElementById('resize-handle');
+const split = document.getElementById('split');
+const reqBody = document.getElementById('req-body');
+let dragging = false, startY = 0, startH = 0;
+
+handle.addEventListener('mousedown', e => {
+  dragging = true; startY = e.clientY; startH = reqBody.offsetHeight;
+  document.body.style.cursor = 'ns-resize';
+  document.body.style.userSelect = 'none';
+});
+document.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const dy = e.clientY - startY;
+  const newH = Math.max(60, Math.min(startH + dy, split.offsetHeight - 120));
+  reqBody.style.height = newH + 'px';
+  reqBody.style.flex = 'none';
+});
+document.addEventListener('mouseup', () => {
+  dragging = false;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+});
+
+/* ── Tab switching (req) ── */
+document.querySelectorAll('.rtab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.rtab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+  });
+});
+
+/* ── Tab switching (resp) ── */
+document.querySelectorAll('.resp-tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.resp-tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+  });
+});
+
+/* ── Open-tab switching (title bar) ── */
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', e => {
+    if (e.target.classList.contains('tab-x')) return;
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+  });
+});
+</script>
+</body>
+</html>
