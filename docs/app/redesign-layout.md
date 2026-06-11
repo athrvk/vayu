@@ -223,7 +223,63 @@ The request/response split needs ~680px to stay usable (two ≥30% panes,
   from the active tab — hierarchy (smaller, bottom, secondary) carries that
   distinction.
 
-## Migration notes
+## Store architecture (refactor alongside the redesign)
+
+Audit of all 10 stores (June 2026). Principle: **`stores/` holds
+cross-cutting shell state only; module-local UI state co-locates with its
+module** (matches the feature-organized `modules/` convention).
+
+Target layout:
+
+```
+stores/                      # cross-cutting only
+  tabs-store.ts              # NEW — openTabs, activeTabId (persisted)
+  layout-store.ts            # NEW — drawer view/open/per-view widths,
+                             #       context bar open, split ratios (persisted)
+  session-store.ts           # NEW — activeEnvironmentId, activeCollectionId
+                             #       (split out of variables-store; consumed by
+                             #       env pill + request execution)
+  engine-store.ts            # connection + restart-required (merges
+                             #       engine/engine-connection-store with the
+                             #       restart state from settings-store)
+  save-store.ts              # + single runSave() helper, + flushAll()
+  response-store.ts          # + LRU cap (aligned with tab cap)
+  live-run-store.ts          # renamed dashboard-store, contract unchanged
+  import-modal-store.ts      # kept; exported from the barrel (currently isn't)
+
+modules/collections/store.ts # expandedCollectionIds
+modules/history/store.ts     # filters/search/sort + filterRuns()
+modules/variables/store.ts   # selectedCategory
+modules/settings/store.ts    # selectedCategory
+```
+
+Cleanups (grep-verified, no consumers):
+
+- Delete dead state: `isSavingCollection`/`isSavingRequest`
+  (collections-store), `isDeletingRun` (history-store), `isEditing`
+  (variables-store).
+- Delete unused alias actions in variables-store: `selectCategory`,
+  `setActiveEnvironment` (only the `setSelectedCategory` /
+  `setActiveEnvironmentId` variants are used).
+- Deduplicate save orchestration: the `startSaving → save → completeSave →
+  setTimeout(idle)` sequence is currently written 4× (`triggerSave` twice,
+  `useSaveManager.performSave`, `SettingsMain.handleSave`). One internal
+  `runSave()` in save-store owns it; `flushAll()` (for before-quit and tab
+  close) reuses it.
+- `navigation-store` (327 lines) dissolves entirely into `tabs-store` +
+  `layout-store`; `tabMemory` and `resolveActiveScreen` have no successor.
+
+Conventions to codify:
+
+- Server state never lives in zustand (TanStack Query owns it — already
+  true; keep it that way).
+- Persisted stores use `persist` + `partialize`, key prefix `vayu.`, and a
+  `version` field for future migrations. (Today only variables-store
+  persists, under an unprefixed key — migrate or accept one-time reset.)
+- No alias actions; one verb-first naming convention (`setX`, `openX`).
+- Pure helpers co-locate with their store (`filterRuns` is the model).
+
+
 
 - `ActivityBar` in `Sidebar.tsx` retires; `SidebarPanel` content components
   (CollectionTree, HistoryList, VariablesCategoryTree) move into the drawer
