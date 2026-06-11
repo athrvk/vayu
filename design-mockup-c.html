@@ -95,6 +95,46 @@ body {
   flex-shrink: 0; user-select: none; overflow: hidden; position: relative;
 }
 .tb-logo { display: flex; align-items: center; padding: 0 10px; flex-shrink: 0; }
+
+/* ── macOS traffic lights ── */
+.traffic-lights {
+  display: none; align-items: center; gap: 8px;
+  padding: 0 10px 0 13px; flex-shrink: 0;
+}
+.tl { width: 12px; height: 12px; border-radius: 50%; }
+.tl-close { background: #ff5f57; border: 0.5px solid rgba(0,0,0,.15); }
+.tl-min   { background: #febc2e; border: 0.5px solid rgba(0,0,0,.15); }
+.tl-max   { background: #28c840; border: 0.5px solid rgba(0,0,0,.15); }
+.os-mac .traffic-lights { display: flex; }
+.os-mac .win-btns { display: none; }
+.os-mac .tab-strip { padding-left: 0; }
+
+/* ── Windows caption buttons: full-height 46px hit targets, hover states ── */
+.win-btns { display: none; height: 100%; align-items: stretch; }
+.cap-btn {
+  width: 46px; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; color: hsl(var(--muted-foreground)); cursor: default;
+  font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif;
+  transition: background .1s;
+}
+.cap-btn:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+.cap-btn.cap-close:hover { background: #e81123; color: #fff; }
+.os-win .win-btns, .os-linux .win-btns { display: flex; }
+.os-win .tb-right, .os-linux .tb-right { padding-right: 0; }
+
+/* ── Linux (GNOME-ish): circular buttons, normal gaps ── */
+.os-linux .cap-btn {
+  width: 24px; height: 24px; align-self: center; margin: 0 3px;
+  border-radius: 50%; background: hsl(var(--accent));
+  font-size: 9px;
+}
+.os-linux .cap-btn:hover { background: hsl(var(--accent-active)); color: hsl(var(--foreground)); }
+.os-linux .cap-btn.cap-close:hover { background: #e81123; color: #fff; }
+.os-linux .win-btns { padding-right: 8px; gap: 0; }
+
+/* drag region hint (visualize where the window can be dragged) */
+.drag-strip { flex-shrink: 0; width: 24px; height: 100%; }
+.show-drag .drag-strip, .show-drag .tb-logo, .show-drag .traffic-lights { background: repeating-linear-gradient(45deg, hsl(var(--primary)/.12), hsl(var(--primary)/.12) 4px, transparent 4px, transparent 8px); }
 .mark {
   width: 16px; height: 16px; border-radius: 3px; background: hsl(var(--primary));
   clip-path: polygon(50% 4%, 96% 96%, 50% 74%, 4% 96%); display: inline-block;
@@ -366,6 +406,15 @@ body {
 <!-- Harness -->
 <div id="harness">
   <div style="display:flex;align-items:center;gap:6px">
+    <span class="h-label">OS</span>
+    <div class="seg" id="osSeg">
+      <button data-v="mac" class="on">macOS</button>
+      <button data-v="win">Windows</button>
+      <button data-v="linux">Linux</button>
+    </div>
+  </div>
+  <div class="h-sep"></div>
+  <div style="display:flex;align-items:center;gap:6px">
     <span class="h-label">Theme</span>
     <div class="seg" id="themeSeg">
       <button data-v="dark" class="on">Dark</button>
@@ -386,14 +435,18 @@ body {
   </div>
   <div class="h-sep"></div>
   <button class="hpill on" id="annBtn">Annotations</button>
+  <button class="hpill" id="dragBtn">Show drag regions</button>
   <span class="h-label" style="margin-left:4px">Try: ⌘E collections · ⌘H history · ⌘U variables · ⌘I context · drag the divider</span>
 </div>
 
 <!-- App -->
-<div id="app" class="show-ann">
+<div id="app" class="show-ann os-mac">
 
   <!-- Title bar with tabs -->
   <div id="titlebar">
+    <div class="traffic-lights">
+      <span class="tl tl-close"></span><span class="tl tl-min"></span><span class="tl tl-max"></span>
+    </div>
     <div class="tb-logo"><span class="mark"></span></div>
     <div class="tab-strip">
       <div class="tab active">
@@ -409,9 +462,14 @@ body {
     </div>
     <div class="tb-right">
       <div class="env-pill"><span class="env-dot"></span> Production ▾</div>
-      <div class="win-btns"><span>—</span><span>□</span><span>✕</span></div>
+      <div class="drag-strip"></div>
+      <div class="win-btns">
+        <span class="cap-btn">&#x2500;</span>
+        <span class="cap-btn">&#x25A1;</span>
+        <span class="cap-btn cap-close">&#x2715;</span>
+      </div>
     </div>
-    <div class="ann dn" style="top:40px; left:46px; z-index:60;">Tabs in the title bar — zero wasted vertical space</div>
+    <div class="ann dn" style="top:40px; left:46px; z-index:60;">Tabs in the title bar — OS-aware: traffic lights inset on macOS, caption buttons on Win/Linux</div>
   </div>
 
   <!-- Main -->
@@ -598,6 +656,23 @@ body {
 </div>
 
 <script>
+const app = document.getElementById('app');
+
+/* OS switcher */
+document.getElementById('osSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#osSeg button').forEach(x => x.classList.toggle('on', x===b));
+  app.classList.remove('os-mac', 'os-win', 'os-linux');
+  app.classList.add('os-' + b.dataset.v);
+});
+
+/* Drag region visualizer */
+const dragBtn = document.getElementById('dragBtn');
+dragBtn.addEventListener('click', () => {
+  dragBtn.classList.toggle('on');
+  app.classList.toggle('show-drag');
+});
+
 /* Theme */
 document.getElementById('themeSeg').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -614,7 +689,6 @@ document.getElementById('swatches').addEventListener('click', e => {
 
 /* Annotations */
 const annBtn = document.getElementById('annBtn');
-const app = document.getElementById('app');
 annBtn.addEventListener('click', () => { annBtn.classList.toggle('on'); app.classList.toggle('show-ann'); });
 
 /* ── Drawer with switchable content ── */
