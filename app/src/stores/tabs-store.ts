@@ -7,6 +7,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { STORAGE_KEYS } from "@/constants/storage-keys";
 import { useSaveStore } from "./save-store";
 
 export type TabType =
@@ -148,7 +149,7 @@ export const useTabsStore = create<TabsState>()(
 			closeAll: () => set({ openTabs: [], activeTabId: null }),
 		}),
 		{
-			name: "vayu.tabs",
+			name: STORAGE_KEYS.TABS_STORE,
 			version: 1,
 			partialize: (state) => ({
 				openTabs: state.openTabs,

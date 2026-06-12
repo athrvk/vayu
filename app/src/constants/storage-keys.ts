@@ -19,6 +19,10 @@ export const STORAGE_KEYS = {
 	COLOR_SCHEME: "vayu-color-scheme",
 	/** Last-used load test configuration (LoadTestConfigDialog). */
 	LAST_LOAD_TEST_CONFIG: "vayu:lastLoadTestConfig",
-	/** Zustand persist name for variables UI state. */
-	VARIABLES_UI_STORE: "variables-ui-store",
+	/** Zustand persist name for session state (active environment/collection). */
+	SESSION_STORE: "vayu.session",
+	/** Zustand persist name for open tabs + active tab. */
+	TABS_STORE: "vayu.tabs",
+	/** Zustand persist name for shell layout (drawer, context bar, split ratio). */
+	LAYOUT_STORE: "vayu.layout",
 } as const;

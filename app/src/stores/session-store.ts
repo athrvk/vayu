@@ -15,6 +15,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { STORAGE_KEYS } from "@/constants/storage-keys";
 
 interface SessionState {
 	activeEnvironmentId: string | null;
@@ -33,7 +34,7 @@ export const useSessionStore = create<SessionState>()(
 			setActiveCollectionId: (id) => set({ activeCollectionId: id }),
 		}),
 		{
-			name: "vayu.session",
+			name: STORAGE_KEYS.SESSION_STORE,
 			version: 1,
 			partialize: (state) => ({
 				activeEnvironmentId: state.activeEnvironmentId,

@@ -7,6 +7,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { STORAGE_KEYS } from "@/constants/storage-keys";
 
 export type DrawerView = "collections" | "history" | "variables";
 
@@ -74,7 +75,7 @@ export const useLayoutStore = create<LayoutState>()(
 				set({ requestSplitRatio: Math.max(0.2, Math.min(0.8, ratio)) }),
 		}),
 		{
-			name: "vayu.layout",
+			name: STORAGE_KEYS.LAYOUT_STORE,
 			version: 1,
 			partialize: (state) => ({
 				drawerOpen: state.drawerOpen,
