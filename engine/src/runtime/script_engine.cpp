@@ -839,9 +839,15 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         JS_SetPropertyStr (
         ctx, response, "status", JS_NewInt32 (ctx, data->response->status_code));
 
-        // pm.response.responseTime
+        // pm.response.responseTime — perceived latency (submit → completion),
+        // includes generator-side queue wait. For pure server time, use
+        // responseTimeWire. queue_wait_ms is exposed as responseTimeQueueWait.
         JS_SetPropertyStr (ctx, response, "responseTime",
         JS_NewFloat64 (ctx, data->response->timing.total_ms));
+        JS_SetPropertyStr (ctx, response, "responseTimeWire",
+        JS_NewFloat64 (ctx, data->response->timing.wire_ms));
+        JS_SetPropertyStr (ctx, response, "responseTimeQueueWait",
+        JS_NewFloat64 (ctx, data->response->timing.queue_wait_ms));
 
         // Error information (for client-side failures)
         if (data->response->error_code != vayu::ErrorCode::None) {

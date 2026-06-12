@@ -82,7 +82,7 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 |---|---|
 | `context/RequestBuilderProvider.tsx`, `context/RequestBuilderContext.tsx` | Local request-editing state + the execute/save/load-test callbacks |
 | `components/RequestBuilderLayout.tsx` | Resizable vertical layout composing UrlBar / RequestTabs / ResponseViewer |
-| `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` — method dropdown, URL input (variable highlighting), Send + Load Test buttons |
+| `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` — method dropdown, URL input (variable highlighting), Send + Load Test buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
 | `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel` |
 | `components/ResponseViewer/` | `index`, `ResponseHeader`, `ResponseHeadersTab`, `ResponseCookies`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` |
 | `components/RequestDescription.tsx` | Editable request description |
@@ -91,7 +91,23 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 | `shared/VariableInput/` | `index`, `EditableVariable` — input with `{{variable}}` highlighting + autocomplete |
 | `hooks/`, `utils/` | Module hooks; `utils/key-value` (flat↔entry conversions), `utils/id` |
 
-> **Body tabs** support `json` / `text` / `form-data` / `x-www-form-urlencoded` (graphql collapses to text in the editor). **Scripts** are two separate panels — pre-request and test — not a single tab.
+> **cURL / wget import:** pasting a `curl` or `wget` command into the URL field auto-populates the whole request (method, URL, params, headers, body, basic auth). Detection + parsing live in `services/curl/` (`tokenize.ts` shell tokenizer + `parseCurl.ts`), kept separate from the collection `importers/` pipeline since this targets the active request. The paste is a request-shape replacement — identity (`id`, `name`, `collectionId`) and scripts are preserved; file references (`-d @file`, `-F field=@file`, `--post-file`) are skipped since they can't be read from pasted text. Non-command pastes fall through to normal input.
+
+> **Body tabs** support `none` / `json` / `text` / `graphql` / `form-data` / `x-www-form-urlencoded`. The `graphql` mode renders a split resizable editor: a **Query** pane (Monaco `graphql` language with diagnostics, autocomplete, hover, and formatting) and a **Variables** pane (Monaco `json` with schema-derived validation). **Scripts** are two separate panels — pre-request and test — not a single tab.
+
+## GraphQL Library (`lib/graphql/`)
+
+Shared, Monaco-independent modules that power the GraphQL body mode.
+
+| File | Role |
+|---|---|
+| `diagnostics.ts` | Pure (Monaco-free) diagnostic computation — syntax check via `graphql.parse` when no schema is available; full field/type validation via `graphql-language-service.getDiagnostics` when a schema is loaded. Returns 1-based `GqlMarker[]` matching Monaco's `IMarkerData` shape. |
+| `introspect.ts` | Fetches a `GraphQLSchema` by routing the standard introspection query through the engine (`apiService.executeRequest`), avoiding CORS and reusing the request's auth headers. |
+| `schema-cache.ts` | Zustand store (`useSchemaCache`) keyed by resolved endpoint URL. States: `idle → loading → ready \| error`. `ensureSchema` skips URLs already attempted; `refreshSchema` forces a re-fetch. Exposes `getActiveSchema()` and `getActiveStatus()` for Monaco providers. |
+| `language-providers.ts` | Registers Monaco language providers for the `graphql` language: completion (fields, types, directives), hover type info, debounced inline diagnostics (re-runs on content change and on schema cache updates), and document formatting (`print(parse(...))`). Call once after `loader.config`. |
+| `variables-schema.ts` | Derives a JSON Schema from the query's `$variable` definitions + the introspected schema via `getVariablesJSONSchema`, then applies it to the variables editor through `monaco.json.jsonDefaults` so variable values are validated and autocompleted. |
+
+`lib/monaco-setup.ts` (sibling of `lib/graphql/`) configures `@monaco-editor/react` to use the locally bundled `monaco-editor` instead of the jsDelivr CDN, wires language web workers via Vite `?worker` imports, and calls `registerGraphqlProviders`. It is a side-effecting module imported once at the top of `main.tsx`.
 
 ## Collections (`modules/collections/`)
 
@@ -121,15 +137,30 @@ Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows n
 
 Live load-test metrics. Entry: `modules/dashboard/index.tsx`.
 
-Connects to the engine SSE metrics stream (via the load-test service / dashboard store), shows live metrics while running, and loads the final report on completion. Stop action supported.
+Connects to the engine SSE metrics stream (`/metrics/live/:runId`, via the load-test service / dashboard store), shows live metrics while running, and converges on the final report on completion. Stop action supported.
+
+The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run config to one of `constant_rps` / `constant_concurrency` / `iterations` / `ramp_up`, and the hero row + stat row + charts render the surfaces appropriate to that mode. `MetricsView` is a thin orchestrator over a modular tree:
+
+**Top-level (`components/`)**
 
 | Component | Role |
 |---|---|
-| `components/DashboardHeader.tsx` | Title, run status, stop button |
-| `components/RunMetadata.tsx` | Endpoint, config (mode/duration/RPS/concurrency), timing |
-| `components/MetricsView.tsx` | Live metrics + charts (RPS, latency percentiles, error rate, concurrency) |
-| `components/RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests |
-| `components/MetricCard.tsx` | Single metric stat card |
+| `DashboardHeader.tsx` | Title, run status, stop button |
+| `RunMetadata.tsx` | Endpoint, config (mode/duration/RPS/concurrency), timing |
+| `MetricsView.tsx` | Orchestrator — composes the hero row, stat row, and charts per mode |
+| `RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests |
+| `MetricCard.tsx` | Single metric stat card |
+| `shared.tsx`, `tooltips.tsx` | Shared bits (Eyebrow/InfoChip) + centralized InfoChip wording |
+
+**`hero/` — mode-adaptive hero cards** (`HeroRow.tsx` selects per mode, all built on `HeroCardShell.tsx`): `RateFidelityCard`, `DroppedRequestsCard`, `AchievedThroughputCard`, `ThroughputCard`, `ThroughputTwinCard`, `CurrentConcurrencyCard`, `ConcurrencyUtilCard`, `SaturationCard`, `ProgressCard`, `ErrorRateCard`.
+
+**`charts/`** (all built on the shared `TimeSeriesChart.tsx` + `utils/chartGeometry.ts`): `ThroughputOverTimeChart` (configured-vs-achieved for ramp_up), `LatencyOverTimeChart` (wire/queue-wait split), `PercentilesOverTimeChart` (p50/p95/p99), `StatusCodesOverTimeChart` (stacked), `ResponseTimeVsConcurrencyScatter` (ramp_up capacity discovery w/ breakpoint marker), `HdrPercentilePlot`, `TimingWaterfall`.
+
+**`stats/`** — `ModeStatsRow.tsx` routes to the per-mode Row 4 stat set; `ModeStatCards.tsx`, `StatCard.tsx`.
+
+**`hooks/`** — `useMode.ts` (run-config → mode discriminator).
+
+**`utils/`** — `metricsTransforms.ts` (SSE history → chart series), `reportToDerived.ts` (stored `RunReport` → the same `DashboardDerived` shape, so history reuses the live components), `computeBreakpoint.ts`, `computeEta.ts`, `chartGeometry.ts`. `types.ts` holds the shared dashboard types (`DashboardDerived`, etc.).
 
 ## History (`modules/history/`)
 
@@ -137,15 +168,17 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 
 **Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row — method badge, status, relative time, URL, load-test chips).
 
-**Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunDetail.tsx` (single request execution — reuses the shared response viewer) or `LoadTestDetail.tsx` (load-test report). `LoadTestDetail` composes the tabbed report under `main/components/`:
+**Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunDetail.tsx` (single request execution — reuses the shared response viewer) or `LoadTestDetail.tsx` (load-test report). `LoadTestDetail` is **mode-aware** (header strip + tabs adapt to the run's mode, derived via `reportToDerived` → the same `DashboardDerived` shape the live dashboard uses) and composes the tabbed report under `main/components/`:
 
 | Component | Role |
 |---|---|
-| `OverviewTab.tsx` | Summary metrics |
+| `OverviewTab.tsx` | Summary — renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps` |
 | `PerformanceTab.tsx` | Latency/throughput detail |
 | `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs |
 | `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
 | `LatencyMetric.tsx`, `MetricCard.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts |
+
+> History detail reuses the live dashboard's `hero/`, `charts/`, and `stats/` components by feeding them a `DashboardDerived` built from the stored report (`reportToDerived`), so live and historical views stay visually consistent.
 
 ## Variables (`modules/variables/`)
 

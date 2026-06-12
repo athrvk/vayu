@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(vayu-engine
-    VERSION 0.2.0
+    VERSION 0.4.0
     DESCRIPTION "High-performance API execution engine"
     LANGUAGES C CXX
 )
@@ -371,7 +371,12 @@ if(VAYU_BUILD_TESTS)
         tests/metrics_helper_test.cpp
         tests/metrics_collector_test.cpp
         tests/import_route_test.cpp
+        tests/execution_timeout_test.cpp
+        tests/load_strategy_test.cpp
+        tests/refill_deficit_test.cpp
+        tests/run_manager_test.cpp
         src/http/routes/import.cpp
+        src/http/routes/execution.cpp
     )
     
     target_link_libraries(vayu_tests PRIVATE
@@ -383,9 +388,11 @@ if(VAYU_BUILD_TESTS)
         vayu_sanitizers
     )
 
-    # Discover tests for CTest
+    # Discover tests for CTest. A per-test TIMEOUT acts as a safety net so a
+    # deadlock (e.g. a thread-pool teardown hang) is reported as a failure
+    # instead of blocking the suite indefinitely; healthy tests finish in <10s.
     include(GoogleTest)
-    gtest_discover_tests(vayu_tests)
+    gtest_discover_tests(vayu_tests PROPERTIES TIMEOUT 60)
 endif()
 
 # ============================================================================

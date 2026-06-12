@@ -17,9 +17,9 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import { useSaveStore } from "@/stores/save-store";
+import { TIMING } from "@/config/timing";
 
-const AUTO_SAVE_DELAY_MS = 3000; // 3000ms debounce
-const SAVED_STATUS_DURATION_MS = 3000; // Show "saved" for 3 seconds
+const { AUTO_SAVE_DELAY_MS, SAVED_STATUS_DURATION_MS } = TIMING;
 
 interface UseSaveManagerOptions {
 	/** Unique identifier for this save context (e.g., request ID) */

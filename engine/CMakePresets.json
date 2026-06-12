@@ -72,11 +72,7 @@
       "displayName": "Windows Release",
       "description": "Production build for Windows (Release)",
       "inherits": ["base", "base-fallback"],
-      "generator": "Visual Studio 17 2022",
-      "architecture": {
-        "value": "x64",
-        "strategy": "set"
-      },
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -199,7 +195,6 @@
       "name": "windows-prod",
       "displayName": "Build Windows Release",
       "configurePreset": "windows-prod",
-      "configuration": "Release",
       "jobs": 0
     },
     {
@@ -253,7 +248,6 @@
       "name": "windows-prod",
       "displayName": "Test Windows Release",
       "configurePreset": "windows-prod",
-      "configuration": "Release",
       "output": {
         "outputOnFailure": true
       }

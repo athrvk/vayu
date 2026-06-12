@@ -152,7 +152,7 @@ void validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& 
 } // namespace
 
 RunContext::RunContext (const std::string& id, nlohmann::json cfg)
-: run_id (id), config (std::move (cfg)), start_time_ms (0) {
+: run_id (id), config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()), start_time_ms (0) {
     // Initialize MetricsCollector with configuration from test config
     MetricsCollectorConfig mc_config;
 
@@ -197,6 +197,9 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg)
 
 RunContext::~RunContext () {
     should_stop = true;
+    // Wake the closed-loop controller so it observes should_stop without
+    // waiting for its 50ms safety-net timeout before the join below.
+    notify_refill ();
     if (worker_thread.joinable ()) {
         worker_thread.join ();
     }
@@ -224,9 +227,95 @@ void RunManager::unregister_run (const std::string& run_id) {
     active_runs_.erase (run_id);
 }
 
+void RunManager::retain_run (const std::string& run_id) {
+    std::lock_guard<std::mutex> lock (mutex_);
+    auto it = active_runs_.find (run_id);
+    if (it == active_runs_.end ()) return;
+    it->second->completed_at_ms.store (now_ms ());
+    retained_runs_[run_id] = it->second;
+    active_runs_.erase (it);
+}
+
+std::shared_ptr<RunContext> RunManager::get_run_or_retained (const std::string& run_id) {
+    std::lock_guard<std::mutex> lock (mutex_);
+    auto a = active_runs_.find (run_id);
+    if (a != active_runs_.end ()) return a->second;
+    auto r = retained_runs_.find (run_id);
+    if (r != retained_runs_.end ()) return r->second;
+    return nullptr;
+}
+
+void RunManager::sweep_retained (int64_t ttl_ms) {
+    std::lock_guard<std::mutex> lock (mutex_);
+    int64_t cutoff = now_ms () - ttl_ms;
+    for (auto it = retained_runs_.begin (); it != retained_runs_.end ();) {
+        if (it->second->completed_at_ms.load () < cutoff) {
+            it = retained_runs_.erase (it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 size_t RunManager::active_count () const {
     std::lock_guard<std::mutex> lock (mutex_);
     return active_runs_.size ();
+}
+
+size_t RunManager::retained_count () const {
+    std::lock_guard<std::mutex> lock (mutex_);
+    return retained_runs_.size ();
+}
+
+void RunManager::start_sweeper (std::function<int64_t ()> ttl_provider) {
+    {
+        std::lock_guard<std::mutex> lock (sweeper_mtx_);
+        if (sweeper_thread_.joinable ()) return; // already running
+        sweeper_stop_         = false;
+        sweeper_ttl_provider_ = std::move (ttl_provider);
+    }
+    sweeper_thread_ = std::thread ([this] () {
+        std::unique_lock<std::mutex> lock (sweeper_mtx_);
+        while (!sweeper_stop_) {
+            // Re-read the TTL each tick so a runtime change to liveRetentionMs
+            // (Settings → Observability) takes effect without a daemon restart.
+            // Sweep at half the TTL so a retained run is evicted within
+            // ttl..1.5*ttl of completion; the 500ms cadence floor keeps a tiny
+            // or zero TTL (retention disabled) from busy-looping. ttl==0 means
+            // "evict immediately", which sweep_retained already handles.
+            int64_t ttl = std::max<int64_t> (sweeper_ttl_provider_ (), 0);
+            auto interval = std::chrono::milliseconds (std::max<int64_t> (ttl / 2, 500));
+            if (sweeper_cv_.wait_for (lock, interval, [this] { return sweeper_stop_; })) {
+                break;
+            }
+            lock.unlock ();
+            try {
+                sweep_retained (ttl);
+            } catch (...) {
+                // Defensive: never let an exception escape the sweeper thread.
+            }
+            lock.lock ();
+        }
+    });
+}
+
+void RunManager::start_sweeper (int64_t ttl_ms) {
+    start_sweeper ([ttl_ms] () { return ttl_ms; });
+}
+
+void RunManager::stop_sweeper () {
+    {
+        std::lock_guard<std::mutex> lock (sweeper_mtx_);
+        sweeper_stop_ = true;
+    }
+    sweeper_cv_.notify_all ();
+    if (sweeper_thread_.joinable ()) {
+        sweeper_thread_.join ();
+    }
+}
+
+RunManager::~RunManager () {
+    stop_sweeper ();
 }
 
 std::vector<std::shared_ptr<RunContext>> RunManager::get_all_active_runs () const {
@@ -244,6 +333,11 @@ vayu::db::Database& db,
 bool verbose) {
     auto context = std::make_shared<RunContext> (run_id, config);
     register_run (run_id, context);
+
+    // Sweep stale retained runs on each new registration so that headless /
+    // API-only usage (which never hits /metrics/live) doesn't accumulate them.
+    int retention_ms = db.get_config_int ("liveRetentionMs", 60000);
+    sweep_retained (retention_ms);
 
     // IMPORTANT: Set is_running BEFORE spawning threads to avoid race condition
     // where metrics_thread exits immediately because is_running is still false
@@ -322,6 +416,8 @@ RunManager& manager) {
         if (request_result.is_error ()) {
             db.update_run_status (context->run_id, vayu::RunStatus::Failed);
             context->is_running = false;
+            if (context->metrics_thread.joinable ()) context->metrics_thread.join ();
+            manager.retain_run (context->run_id);
             return;
         }
 
@@ -338,6 +434,8 @@ RunManager& manager) {
             vayu::utils::log_error ("Load test failed: " + std::string (e.what ()));
             db.update_run_status (context->run_id, vayu::RunStatus::Failed);
             context->is_running = false;
+            if (context->metrics_thread.joinable ()) context->metrics_thread.join ();
+            manager.retain_run (context->run_id);
             return;
         }
 
@@ -404,6 +502,25 @@ RunManager& manager) {
             vayu::MetricName::LatencyP99, p99, R"({"percentile":"p99"})" });
             final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::LatencyP999, p999, R"({"percentile":"p999"})" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::LatencyMax, percentiles.max, R"({"percentile":"max"})" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::LatencyMin, percentiles.min, R"({"percentile":"min"})" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::PeakConcurrency,
+            static_cast<double> (context->peak_in_flight.load ()), "" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::DroppedRequests,
+            static_cast<double> (context->metrics_collector->dropped_requests ()), "" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::QueueWaitAvg,
+            context->metrics_collector->average_queue_wait (), "" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::BytesSent,
+            static_cast<double> (context->metrics_collector->total_bytes_sent ()), "" });
+            final_metrics.push_back ({ 0, context->run_id, timestamp,
+            vayu::MetricName::BytesReceived,
+            static_cast<double> (context->metrics_collector->total_bytes_received ()), "" });
             final_metrics.push_back ({ 0, context->run_id, timestamp,
             vayu::MetricName::ErrorRate, error_rate, "" });
             final_metrics.push_back ({ 0, context->run_id, timestamp,
@@ -497,7 +614,40 @@ RunManager& manager) {
     }
 
     context->is_running = false;
-    manager.unregister_run (context->run_id);
+    manager.retain_run (context->run_id);
+}
+
+std::string build_tick_payload (const nlohmann::json& stats, size_t offset) {
+    return "event: metrics\nid: " + std::to_string (offset) + "\ndata: " +
+    stats.dump () + "\n\n";
+}
+
+std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
+const std::shared_ptr<RunContext>& context,
+int64_t timestamp,
+const std::map<int, size_t>* status_snapshot) {
+    auto& mc = *context->metrics_collector;
+    std::vector<vayu::db::Metric> rows;
+    rows.reserve (4);
+    rows.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::DroppedRequests,
+    static_cast<double> (mc.dropped_requests ()), "" });
+    rows.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::BytesSent,
+    static_cast<double> (mc.total_bytes_sent ()), "" });
+    rows.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::BytesReceived,
+    static_cast<double> (mc.total_bytes_received ()), "" });
+    // Reuse the tick's snapshot when provided to avoid a second scan/copy of the
+    // distribution; otherwise compute it (e.g. unit tests calling directly).
+    std::map<int, size_t> local_dist;
+    const std::map<int, size_t>& dist = status_snapshot != nullptr ?
+    *status_snapshot :
+    (local_dist = mc.status_code_distribution ());
+    nlohmann::json codes = nlohmann::json::object ();
+    for (const auto& [code, count] : dist) {
+        codes[std::to_string (code)] = count;
+    }
+    rows.push_back (
+    { 0, context->run_id, timestamp, vayu::MetricName::StatusCodes, 0.0, codes.dump () });
+    return rows;
 }
 
 void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* db_ptr) {
@@ -505,77 +655,201 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     auto last_update  = std::chrono::steady_clock::now ();
     size_t last_total = 0;
 
-    // Get stats collection interval from config
-    int stats_interval_ms = db_ptr->get_config_int (
-    "statsInterval", vayu::core::constants::server::STATS_INTERVAL_MS);
+    // Producer-side delta-RPS state (mirrors the SSE handler calculation).
+    auto rps_last_time      = std::chrono::steady_clock::now ();
+    size_t rps_last_total   = 0;
+    double live_current_rps = 0.0;
+    bool   rps_first        = true;
 
-    while (context->is_running && !context->should_stop) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (stats_interval_ms));
+    // Live tick cadence (default 100 ms); DB batch still gated at 1 Hz.
+    // Declared here so it is in scope inside the try block below.
+    int tick_interval_ms = 0;
 
-        auto now = std::chrono::steady_clock::now ();
-        auto elapsed = std::chrono::duration<double> (now - last_update).count ();
+    // Build and append one SSE "metrics" event to the in-memory tick topic.
+    // Fields match the SSE handler (metrics.cpp) field-for-field. The wall-clock
+    // timestamp is passed in by the caller so that the SSE tick and any
+    // persisted enrichment for the same logical tick share one timestamp —
+    // re-sampling now_ms() inside drifts them into adjacent ms buckets and the
+    // dashboard sees status-codes shift left vs throughput on the same x-axis.
+    auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot,
+        int64_t now_wall_ms) {
+        size_t active_count =
+        context->event_loop ? context->event_loop->active_count () : 0;
+        size_t requests_sent     = context->requests_sent.load ();
+        size_t requests_expected = context->requests_expected.load ();
+        double elapsed_seconds =
+        context->start_time_ms > 0 ?
+        static_cast<double> (now_wall_ms - context->start_time_ms) / 1000.0 : 0.0;
+        auto stats = context->metrics_collector->get_current_stats (active_count,
+        elapsed_seconds, requests_sent, requests_expected, status_snapshot);
 
-        if (elapsed >= 1.0) // Update every second
-        {
-            size_t current_total  = context->total_requests ();
-            size_t current_errors = context->total_errors ();
-            size_t delta          = current_total - last_total;
-
-            double current_rps = elapsed > 0 ? static_cast<double> (delta) / elapsed : 0.0;
-            double error_rate = current_total > 0 ?
-            (static_cast<double> (current_errors) * 100.0 / static_cast<double> (current_total)) :
-            0.0;
-
-            // Calculate send rate (requests dispatched per second) and throughput (responses per second)
-            size_t requests_sent = context->requests_sent.load ();
-            double run_elapsed_s = (static_cast<double> (now_ms () - context->start_time_ms)) / 1000.0;
-            double send_rate = run_elapsed_s > 0 ? static_cast<double> (requests_sent) / run_elapsed_s : 0.0;
-            double throughput = run_elapsed_s > 0 ? static_cast<double> (current_total) / run_elapsed_s : 0.0;
-
-            // Calculate backpressure (queue depth: requests sent but not yet responded)
-            size_t backpressure = requests_sent > current_total ? requests_sent - current_total : 0;
-
-            vayu::utils::log_debug ("Metrics: rps=" + std::to_string (current_rps) +
-            ", send_rate=" + std::to_string (send_rate) +
-            ", throughput=" + std::to_string (throughput) +
-            ", backpressure=" + std::to_string (backpressure) +
-            ", error_rate=" + std::to_string (error_rate) + "%" +
-            ", active=" + std::to_string (context->event_loop->active_count ()) +
-            ", sent=" + std::to_string (requests_sent));
-
-            // Store metrics (batched to reduce lock contention)
-            try {
-                auto timestamp = now_ms ();
-                std::vector<vayu::db::Metric> metrics;
-                metrics.reserve (8);
-
-                metrics.push_back ({ 0, context->run_id, timestamp,
-                vayu::MetricName::Rps, current_rps, "" });
-                metrics.push_back ({ 0, context->run_id, timestamp,
-                vayu::MetricName::ErrorRate, error_rate, "" });
-                metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::ConnectionsActive,
-                static_cast<double> (context->event_loop->active_count ()), "" });
-                metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::RequestsSent,
-                static_cast<double> (requests_sent), "" });
-                metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::RequestsExpected,
-                static_cast<double> (context->requests_expected.load ()), "" });
-                metrics.push_back ({ 0, context->run_id, timestamp,
-                vayu::MetricName::SendRate, send_rate, "" });
-                metrics.push_back ({ 0, context->run_id, timestamp,
-                vayu::MetricName::Throughput, throughput, "" });
-                metrics.push_back ({ 0, context->run_id, timestamp,
-                vayu::MetricName::Backpressure, static_cast<double> (backpressure), "" });
-
-                // Single transaction instead of 5 separate lock acquisitions
-                db.add_metrics_batch (metrics);
-            } catch (const std::exception& e) {
-                // Continue on error
+        // Instantaneous RPS: delta-based, updated every ≥100 ms.
+        auto now_steady     = std::chrono::steady_clock::now ();
+        size_t current_total = stats["totalRequests"].get<size_t> ();
+        if (rps_first) {
+            rps_last_total = current_total;
+            rps_last_time  = now_steady;
+            rps_first      = false;
+        } else {
+            double iv = std::chrono::duration<double> (now_steady - rps_last_time).count ();
+            if (iv >= 0.1) {
+                live_current_rps =
+                static_cast<double> (current_total - rps_last_total) / iv;
+                rps_last_total = current_total;
+                rps_last_time  = now_steady;
             }
-
-            last_update = now;
-            last_total  = current_total;
         }
+        stats["currentRps"] = live_current_rps;
+
+        // Backpressure: sent but not yet responded (mirrors SSE handler).
+        size_t backpressure =
+        requests_sent > current_total ? requests_sent - current_total : 0;
+        stats["backpressure"]     = backpressure;
+        stats["runId"]            = context->run_id;
+        stats["timestamp"]        = now_wall_ms;
+        stats["requestsSent"]     = requests_sent;
+        stats["requestsExpected"] = requests_expected;
+
+        size_t offset = context->published_count.load ();
+        context->append_tick (build_tick_payload (stats, offset));
+    };
+
+    // Guard the entire body so that any exception (std::bad_alloc, json error,
+    // etc.) is caught here rather than escaping the thread function (which would
+    // call std::terminate).  `context->closed` is set unconditionally below the
+    // try/catch so that attached /metrics/live consumers always terminate cleanly.
+    try {
+        tick_interval_ms = db_ptr->get_config_int (
+        "liveTickIntervalMs", vayu::core::constants::server::STATS_INTERVAL_MS);
+
+        // Tick 0: emit immediately so consumers see data before the first sleep.
+        emit_live_tick (nullptr, now_ms ());
+
+        while (context->is_running && !context->should_stop) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (tick_interval_ms));
+
+            // Single wall-clock sample per tick — shared by the SSE payload
+            // timestamp, the run-elapsed calc, and (on DB-gated ticks) every
+            // persisted metric row below. See #27.
+            int64_t tick_wall_ms = now_ms ();
+
+            // Snapshot the status-code distribution once per tick and share it
+            // with both the SSE builder and (on DB-gated ticks) the persisted
+            // enrichment builder — avoids scanning/copying the map twice.
+            auto status_snapshot = context->metrics_collector->status_code_distribution ();
+
+            // Emit a live tick every iteration regardless of the 1 Hz DB gate.
+            emit_live_tick (&status_snapshot, tick_wall_ms);
+
+            auto now = std::chrono::steady_clock::now ();
+            auto elapsed = std::chrono::duration<double> (now - last_update).count ();
+
+            if (elapsed >= 1.0) // Update every second
+            {
+                size_t current_total  = context->total_requests ();
+                size_t current_errors = context->total_errors ();
+                size_t delta          = current_total - last_total;
+
+                double current_rps = elapsed > 0 ? static_cast<double> (delta) / elapsed : 0.0;
+                double error_rate = current_total > 0 ?
+                (static_cast<double> (current_errors) * 100.0 / static_cast<double> (current_total)) :
+                0.0;
+
+                // Calculate send rate (requests dispatched per second) and throughput (responses per second)
+                size_t requests_sent = context->requests_sent.load ();
+                double run_elapsed_s =
+                (static_cast<double> (tick_wall_ms - context->start_time_ms)) / 1000.0;
+                double send_rate  = run_elapsed_s > 0 ?
+                static_cast<double> (requests_sent) / run_elapsed_s :
+                0.0;
+                double throughput = run_elapsed_s > 0 ?
+                static_cast<double> (current_total) / run_elapsed_s :
+                0.0;
+
+                // Calculate backpressure (true in-flight: requests sent but not yet responded)
+                size_t backpressure = context->in_flight ();
+
+                // Sample the in-flight high-water mark. The closed-loop controller
+                // also updates this at submit granularity; open-loop modes
+                // (constant_rps) rely solely on this 1 Hz sample. CAS-max so the two
+                // writers don't clobber each other.
+                {
+                    size_t pk = context->peak_in_flight.load (std::memory_order_relaxed);
+                    while (backpressure > pk &&
+                    !context->peak_in_flight.compare_exchange_weak (pk, backpressure,
+                    std::memory_order_relaxed)) {
+                        // pk reloaded on failure
+                    }
+                }
+
+                vayu::utils::log_debug ("Metrics: rps=" + std::to_string (current_rps) +
+                ", send_rate=" + std::to_string (send_rate) +
+                ", throughput=" + std::to_string (throughput) +
+                ", backpressure=" + std::to_string (backpressure) +
+                ", error_rate=" + std::to_string (error_rate) + "%" +
+                ", active=" + std::to_string (context->event_loop->active_count ()) +
+                ", sent=" + std::to_string (requests_sent));
+
+                // Store metrics (batched to reduce lock contention)
+                try {
+                    auto timestamp = tick_wall_ms;
+                    std::vector<vayu::db::Metric> metrics;
+                    metrics.reserve (14);
+
+                    metrics.push_back ({ 0, context->run_id, timestamp,
+                    vayu::MetricName::Rps, current_rps, "" });
+                    metrics.push_back ({ 0, context->run_id, timestamp,
+                    vayu::MetricName::ErrorRate, error_rate, "" });
+                    metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::ConnectionsActive,
+                    static_cast<double> (context->event_loop->active_count ()), "" });
+                    metrics.push_back ({ 0, context->run_id, timestamp,
+                    vayu::MetricName::RequestsSent, static_cast<double> (requests_sent), "" });
+                    metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::RequestsExpected,
+                    static_cast<double> (context->requests_expected.load ()), "" });
+                    metrics.push_back ({ 0, context->run_id, timestamp,
+                    vayu::MetricName::SendRate, send_rate, "" });
+                    metrics.push_back ({ 0, context->run_id, timestamp,
+                    vayu::MetricName::Throughput, throughput, "" });
+                    metrics.push_back ({ 0, context->run_id, timestamp,
+                    vayu::MetricName::Backpressure, static_cast<double> (backpressure), "" });
+
+                    // Per-tick enrichment: dropped / bytes / status-code map.
+                    // Reuse the snapshot already taken for the live tick above.
+                    auto enrichment = build_tick_enrichment_metrics (
+                    context, timestamp, &status_snapshot);
+                    metrics.insert (metrics.end (), enrichment.begin (), enrichment.end ());
+
+                    // Avg latency and queue-wait enrichment for the DB batch.
+                    metrics.push_back ({ 0, context->run_id, timestamp,
+                    vayu::MetricName::LatencyAvg,
+                    context->metrics_collector->average_latency (), "" });
+                    metrics.push_back ({ 0, context->run_id, timestamp,
+                    vayu::MetricName::QueueWaitAvg,
+                    context->metrics_collector->average_queue_wait (), "" });
+
+                    // Single transaction instead of 5 separate lock acquisitions
+                    db.add_metrics_batch (metrics);
+                } catch (const std::exception& e) {
+                    // Continue on error
+                }
+
+                last_update = now;
+                last_total  = current_total;
+            }
+        }
+
+        // Final settled tick before signalling closed — consumers use this ordering
+        // as the termination contract (last data before closed==true).
+        emit_live_tick (nullptr, now_ms ());
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("collect_metrics: " + std::string (e.what ()));
+    } catch (...) {
+        vayu::utils::log_error ("collect_metrics: unknown exception");
     }
+
+    // Unconditional: always signal consumers so they terminate cleanly,
+    // even if the producer threw.
+    context->closed.store (true, std::memory_order_release);
 }
 
 } // namespace vayu::core

@@ -67,7 +67,7 @@ export interface AuthConfig {
 // Body Types
 // ============================================================================
 
-export type BodyMode = "none" | "json" | "text" | "form-data" | "x-www-form-urlencoded";
+export type BodyMode = "none" | "json" | "text" | "graphql" | "form-data" | "x-www-form-urlencoded";
 
 export interface BodyConfig {
 	mode: BodyMode;
@@ -112,6 +112,23 @@ export interface RequestState {
 // Response Types
 // ============================================================================
 
+/**
+ * Per-request timing breakdown (milliseconds). Phase fields (dns…download) are
+ * sequential segments of the request; `wire` is libcurl's transfer time and
+ * `queueWait` is generator-side overhead (total − wire). Populated for live
+ * executes; absent for responses restored from history (latency only).
+ */
+export interface ResponseTiming {
+	total: number;
+	wire?: number;
+	queueWait?: number;
+	dns: number;
+	connect: number;
+	tls: number;
+	firstByte: number;
+	download: number;
+}
+
 export interface ResponseState {
 	status: number;
 	statusText: string;
@@ -123,6 +140,7 @@ export interface ResponseState {
 	bodyType: "json" | "html" | "xml" | "text" | "binary";
 	size: number;
 	time: number;
+	timing?: ResponseTiming;
 	timestamp?: string;
 	errorCode?: string;
 	errorMessage?: string;

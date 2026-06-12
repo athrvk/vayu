@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-publish:
     name: Build on ${{ matrix.os }}
@@ -23,29 +27,15 @@ jobs:
             preset: windows-prod
           - os: macos-latest
             preset: macos-prod-arm64
+    timeout-minutes: 120
+    env:
+      VCPKG_COMMIT: 'cea592f4772491abdb7c483387a59ea89889f4be'
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+      SCCACHE_GHA_ENABLED: 'true'
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-
-      - name: Setup pnpm
-        run: npm install -g pnpm@10
-
-      - name: Cache pnpm store
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.local/share/pnpm/store
-            ~/Library/pnpm/store
-            ~/AppData/Local/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('app/pnpm-lock.yaml') }}
-          restore-keys: |
-            pnpm-${{ runner.os }}-
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -59,42 +49,74 @@ jobs:
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: command -v ninja || brew install ninja
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-          vcpkgGitCommitId: 'bb1ad44ed8d7cfb77d180cdc1585f8b87c2c7428'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      - name: Build and test engine (arm64)
+      # sccache is skipped on Windows: mozilla-actions/sccache-action@v0.0.10
+      # (latest available, Apr 2022) fails its install step on the Windows Server
+      # 2025 + Visual Studio 2026 image GitHub is rolling out across windows-latest
+      # in June 2026. Builds on Windows are slower without sccache but reliable.
+      - name: Setup sccache
+        if: runner.os != 'Windows'
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Configure sccache compiler launcher (non-Windows)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+
+      - name: Build and run engine tests (arm64)
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-arm64
           buildPreset: macos-prod-arm64
+          testPreset: macos-prod-arm64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
 
-      - name: Run engine tests (arm64)
-        if: runner.os == 'macOS'
-        working-directory: engine
-        run: ctest --preset macos-prod-arm64
-
-      - name: Build and test engine (x64)
+      - name: Build and run engine tests (x64)
+        # Both architectures run ctest now that RateLimiterTest hits an
+        # in-process mock instead of httpbin.org (issue #30). x64 still goes
+        # through Rosetta on M-series runners, but the remaining tests don't
+        # assert on tight wall-clock windows tied to a remote endpoint.
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: macos-prod-x64
           buildPreset: macos-prod-x64
+          testPreset: macos-prod-x64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-
-      - name: Run engine tests (x64)
-        if: runner.os == 'macOS'
-        working-directory: engine
-        run: ctest --preset macos-prod-x64
 
       - name: Create universal binary (macOS)
         if: runner.os == 'macOS'
@@ -109,19 +131,15 @@ jobs:
           lipo -info engine/build-universal/vayu-engine
           chmod +x engine/build-universal/vayu-engine
 
-      - name: Build and test engine (Non-macOS)
+      - name: Build and run engine tests (Non-macOS)
         if: runner.os != 'macOS'
         uses: lukka/run-cmake@v10
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
+          testPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-
-      - name: Run engine tests (Non-macOS)
-        if: runner.os != 'macOS'
-        working-directory: engine
-        run: ctest --preset ${{ matrix.preset }}
 
       - name: Install frontend dependencies
         working-directory: app
@@ -137,6 +155,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p app/build
+          # electron-builder's EULA license must be plain text (.txt/.rtf/.html
+          # for NSIS, plain text for AppImage). The repo-root AGPL-3.0 LICENSE
+          # has no extension, so stage a .txt copy referenced by the config.
+          cp LICENSE app/build/license.txt
           if [ "${{ runner.os }}" = "Windows" ]; then
             # Windows: Use .ico file
             cp shared/icon_ico/vayu_icon_256x256.ico app/build/icon.ico
@@ -149,9 +171,17 @@ jobs:
             file app/build/icon.png
             sips -g pixelWidth -g pixelHeight app/build/icon.png
           else
-            # Linux: Use icons directory with all sizes
+            # Linux: electron-builder's icon-set resolver only recognizes files
+            # named "<size>x<size>.png" (e.g. 512x512.png); the shared icons are
+            # prefixed (vayu_icon_512x512.png), so strip the prefix when copying.
+            rm -rf app/build/icons
             mkdir -p app/build/icons
-            cp -r shared/icon_png/* app/build/icons/
+            for f in shared/icon_png/vayu_icon_*.png; do
+              size=$(basename "$f" | sed -E 's/^vayu_icon_([0-9]+x[0-9]+)\.png$/\1/')
+              cp "$f" "app/build/icons/${size}.png"
+            done
+            echo "Icon setup for Linux - contents of app/build/icons:"
+            ls -1 app/build/icons
           fi
 
       - name: Copy engine binary to resources (Windows)
@@ -160,10 +190,13 @@ jobs:
         run: |
           $resourcesDir = "app/build/resources/bin"
           New-Item -ItemType Directory -Force -Path $resourcesDir | Out-Null
-          Copy-Item "engine/build-release/Release/vayu-engine.exe" "$resourcesDir/vayu-engine.exe"
+          # windows-prod uses the Ninja generator (single-config), so the
+          # binary lands directly under build-release/ — no Release/ subdir
+          # (that's the Visual Studio multi-config layout).
+          Copy-Item "engine/build-release/vayu-engine.exe" "$resourcesDir/vayu-engine.exe"
 
           # Copy runtime DLLs
-          $dllDir = "engine/build-release/Release"
+          $dllDir = "engine/build-release"
           Get-ChildItem -Path $dllDir -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
             Copy-Item $_.FullName -Destination $resourcesDir
           }
@@ -198,6 +231,18 @@ jobs:
           cp app/release/*.AppImage artifacts/ 2>/dev/null || true
           cp app/release/*.deb artifacts/ 2>/dev/null || true
           cp app/release/*.rpm artifacts/ 2>/dev/null || true
+          # electron-updater feed metadata — without this the updater never
+          # sees new releases.
+          cp app/release/latest-linux.yml artifacts/ 2>/dev/null || true
+          # Count installers only (the .yml metadata doesn't count as a build).
+          # Use find, not `ls <glob>`: under `set -eo pipefail` a non-matching
+          # glob (e.g. no .rpm — Linux only builds AppImage+deb) makes ls exit
+          # non-zero and aborts the step before the count is ever checked.
+          artifact_count=$(find artifacts -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) | wc -l | tr -d ' ')
+          if [ "$artifact_count" -eq 0 ]; then
+            echo "::error::No Linux artifacts built — AppImage/deb/rpm all missing." >&2
+            exit 1
+          fi
           ls -lh artifacts/
 
       - name: Collect artifacts (Windows)
@@ -205,9 +250,14 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Get-ChildItem app/release/*.exe | ForEach-Object {
-            Copy-Item $_.FullName -Destination artifacts/
+          $exeFiles = Get-ChildItem app/release/*.exe -ErrorAction SilentlyContinue
+          if ($exeFiles.Count -eq 0) {
+            Write-Error "No Windows .exe artifact built."
+            exit 1
           }
+          $exeFiles | ForEach-Object { Copy-Item $_.FullName -Destination artifacts/ }
+          # electron-updater feed metadata for the NSIS auto-updater.
+          Copy-Item app/release/latest.yml -Destination artifacts/ -ErrorAction SilentlyContinue
           Get-ChildItem artifacts
 
       - name: Collect artifacts (macOS)
@@ -216,12 +266,15 @@ jobs:
         run: |
           mkdir -p artifacts
           cp app/release/*.dmg artifacts/ 2>/dev/null || true
-          zip_count=$(ls app/release/*.zip 2>/dev/null | wc -l | tr -d ' ')
+          # find avoids `ls <glob>` aborting the step under `set -eo pipefail`.
+          zip_count=$(find app/release -maxdepth 1 -type f -name '*.zip' | wc -l | tr -d ' ')
           if [ "$zip_count" -eq 0 ]; then
             echo "::error::No macOS .zip artifact built - the curl installer would 404. Failing the release." >&2
             exit 1
           fi
           cp app/release/*.zip artifacts/
+          # electron-updater reads the .zip feed (not the .dmg) on macOS.
+          cp app/release/latest-mac.yml artifacts/ 2>/dev/null || true
           for f in artifacts/*.zip; do
             [ -e "$f" ] || continue
             shasum -a 256 "$f" | awk '{print $1}' > "$f.sha256"
@@ -229,6 +282,7 @@ jobs:
           ls -lh artifacts/
 
       - name: Upload artifacts to release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           files: |

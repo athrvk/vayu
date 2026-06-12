@@ -78,33 +78,21 @@ void MetricsCollector::atomic_add_double (std::atomic<double>& target, double va
 
 void MetricsCollector::record_success (int status_code,
 double latency_ms,
+double queue_wait_ms,
 const std::string& trace_data) {
     // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);
     atomic_add_double (total_latency_sum_, latency_ms);
+    atomic_add_double (total_queue_wait_sum_, queue_wait_ms);
 
-    // Update status code category counters (lock-free)
-    if (status_code >= 200 && status_code < 300) {
-        status_2xx_.fetch_add (1, std::memory_order_relaxed);
-    } else if (status_code >= 300 && status_code < 400) {
-        status_3xx_.fetch_add (1, std::memory_order_relaxed);
-    } else if (status_code >= 400 && status_code < 500) {
-        status_4xx_.fetch_add (1, std::memory_order_relaxed);
-    } else if (status_code >= 500 && status_code < 600) {
-        status_5xx_.fetch_add (1, std::memory_order_relaxed);
-    }
+    // Track the per-code count (lock-free for in-range codes).
+    record_status_code (status_code);
 
     // Record latency in histogram (lock-free, thread-safe)
     // Convert milliseconds to microseconds for histogram precision
     int64_t latency_us = static_cast<int64_t> (latency_ms * 1000.0);
     if (latency_us < 1) latency_us = 1;  // Minimum 1 microsecond
     hdr_record_value (latency_histogram_, latency_us);
-
-    // Track detailed status codes
-    {
-        std::lock_guard<std::mutex> lock (status_codes_mutex_);
-        status_code_counts_[status_code]++;
-    }
 
     // Store success result if configured (sampled)
     if (config_.store_success_traces && !trace_data.empty ()) {
@@ -141,6 +129,13 @@ const std::string& trace_data) {
     total_requests_.fetch_add (1, std::memory_order_relaxed);
     total_errors_.fetch_add (1, std::memory_order_relaxed);
 
+    // Transport errors (timeout, connection, DNS, …) carry no HTTP status, so
+    // bucket them under code 0. This keeps the status-code distribution summing
+    // to total_requests — the dashboard breakdown reconciles with the headline
+    // count, and the report's failed/errorRate tallies (recomputed from the
+    // distribution) account for them instead of silently dropping to zero.
+    record_status_code (0);
+
     // Store error record (always store all errors)
     {
         std::lock_guard<std::mutex> lock (errors_mutex_);
@@ -150,6 +145,10 @@ const std::string& trace_data) {
             errors_.push_back (std::move (record));
         }
     }
+}
+
+void MetricsCollector::record_drop_batch (size_t count) {
+    dropped_requests_.fetch_add (count, std::memory_order_relaxed);
 }
 
 void MetricsCollector::record_latency (double latency_ms) {
@@ -186,9 +185,32 @@ MetricsCollector::Percentiles MetricsCollector::calculate_percentiles () {
     return result;
 }
 
+void MetricsCollector::record_status_code (int status_code) {
+    if (status_code >= 0 && status_code < STATUS_CODE_SLOTS) {
+        // Hot path: single relaxed atomic increment, no lock.
+        status_code_counts_[status_code].fetch_add (1, std::memory_order_relaxed);
+        return;
+    }
+    // Out-of-range (non-standard) code: dead path for real HTTP traffic.
+    std::lock_guard<std::mutex> lock (status_overflow_mutex_);
+    status_overflow_[status_code]++;
+}
+
 std::map<int, size_t> MetricsCollector::status_code_distribution () const {
-    std::lock_guard<std::mutex> lock (status_codes_mutex_);
-    return status_code_counts_;
+    std::map<int, size_t> result;
+    for (int code = 0; code < STATUS_CODE_SLOTS; ++code) {
+        size_t count = status_code_counts_[code].load (std::memory_order_relaxed);
+        if (count > 0) {
+            result[code] = count;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock (status_overflow_mutex_);
+        for (const auto& [code, count] : status_overflow_) {
+            result[code] += count;
+        }
+    }
+    return result;
 }
 
 size_t MetricsCollector::flush_to_database (db::Database& db) {
@@ -276,7 +298,9 @@ size_t MetricsCollector::memory_usage_bytes () const {
 
 nlohmann::json MetricsCollector::get_current_stats (size_t current_active,
 double elapsed_seconds,
-size_t requests_sent) const {
+size_t requests_sent,
+size_t requests_expected,
+const std::map<int, size_t>* status_snapshot) const {
     // Lock-free reads from atomic counters
     size_t total    = total_requests ();
     size_t errors   = total_errors ();
@@ -304,11 +328,70 @@ size_t requests_sent) const {
     stats["activeConnections"] = current_active;
     stats["elapsedSeconds"]    = elapsed_seconds;
 
-    // Status code distribution (lock-free)
-    stats["status2xx"] = status_2xx_.load (std::memory_order_relaxed);
-    stats["status3xx"] = status_3xx_.load (std::memory_order_relaxed);
-    stats["status4xx"] = status_4xx_.load (std::memory_order_relaxed);
-    stats["status5xx"] = status_5xx_.load (std::memory_order_relaxed);
+    // Run progress — feeds the dashboard ETA stat for closed-ended modes
+    // (iterations). requests_expected is 0 for open-ended modes (constant_rps).
+    stats["requestsSent"]     = requests_sent;
+    stats["requestsExpected"] = requests_expected;
+
+    // Snapshot the status-code distribution once: reuse the caller's snapshot
+    // when provided (the metrics tick takes one snapshot and feeds it to both
+    // the SSE builder and the persisted-rows builder), otherwise compute it.
+    // Both the class breakdown and the full map below derive from this single
+    // copy — no second scan.
+    std::map<int, size_t> local_dist;
+    const std::map<int, size_t>& dist = status_snapshot != nullptr ?
+    *status_snapshot :
+    (local_dist = status_code_distribution ());
+
+    // Status code class breakdown. The dedicated class atomics were removed to
+    // keep the hot path a single increment; classes are derived here. Code 0
+    // (transport errors) and out-of-range codes belong to no class bucket.
+    size_t s2xx = 0, s3xx = 0, s4xx = 0, s5xx = 0;
+    for (const auto& [code, count] : dist) {
+        if (code >= 200 && code < 300)
+            s2xx += count;
+        else if (code >= 300 && code < 400)
+            s3xx += count;
+        else if (code >= 400 && code < 500)
+            s4xx += count;
+        else if (code >= 500 && code < 600)
+            s5xx += count;
+    }
+    stats["status2xx"]       = s2xx;
+    stats["status3xx"]       = s3xx;
+    stats["status4xx"]       = s4xx;
+    stats["status5xx"]       = s5xx;
+    stats["droppedRequests"] = dropped_requests_.load (std::memory_order_relaxed);
+    stats["avgQueueWaitMs"] = average_queue_wait ();
+
+    // Per-tick latency percentiles — live snapshot from the lock-free
+    // histogram (same source as the post-run final report). Microsecond
+    // storage converted back to ms. Zero when no samples recorded yet.
+    if (latency_histogram_ != nullptr && latency_histogram_->total_count > 0) {
+        stats["latencyP50Ms"] =
+        static_cast<double> (hdr_value_at_percentile (latency_histogram_, 50.0)) / 1000.0;
+        stats["latencyP95Ms"] =
+        static_cast<double> (hdr_value_at_percentile (latency_histogram_, 95.0)) / 1000.0;
+        stats["latencyP99Ms"] =
+        static_cast<double> (hdr_value_at_percentile (latency_histogram_, 99.0)) / 1000.0;
+    } else {
+        stats["latencyP50Ms"] = 0.0;
+        stats["latencyP95Ms"] = 0.0;
+        stats["latencyP99Ms"] = 0.0;
+    }
+
+    // Wire byte counts (cumulative) — client diffs consecutive ticks for MB/s.
+    stats["bytesSent"]     = total_bytes_sent ();
+    stats["bytesReceived"] = total_bytes_received ();
+
+    // Full status-code map (same shape the stored time-series carries), so the
+    // app maps one shape for both live and history. Derived from the same
+    // single snapshot as the class breakdown above.
+    nlohmann::json codes = nlohmann::json::object ();
+    for (const auto& [code, count] : dist) {
+        codes[std::to_string (code)] = count;
+    }
+    stats["statusCodes"] = codes;
 
     return stats;
 }

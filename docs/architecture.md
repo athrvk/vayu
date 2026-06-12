@@ -200,9 +200,13 @@ Variables are resolved with priority: **Environment > Collection > Global**
 
 ## Performance Characteristics
 
-- **Engine**: Capable of 10,000+ requests per second (depending on target server)
+- **Engine**: Tens of thousands of requests per second (target/hardware dependent; ~45k req/s
+  tuned on loopback in internal testing)
 - **Lock-Free Design**: High-performance metrics collection with minimal contention
 - **Async I/O**: Uses `curl_multi` for concurrent request handling
+- **Load models**: `constant_rps` is open-loop (dispatch at a fixed rate); `constant_concurrency`,
+  `ramp_up`, and `iterations` are closed-loop (hold a target in-flight count). See
+  [Engine Architecture](engine/architecture.md#load-test-strategies).
 - **Efficient Caching**: TanStack Query caches server responses in Manager
 
 ## File Locations

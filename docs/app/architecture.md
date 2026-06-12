@@ -106,6 +106,11 @@ src/
 │   ├── history/        # Run history
 │   ├── variables/      # Variable editors
 │   └── ui/            # Shared UI primitives (Radix UI)
+├── lib/                # Shared libraries
+│   ├── graphql/        # GraphQL support: diagnostics, introspection, schema cache, Monaco providers, variables JSON Schema
+│   ├── monaco-setup.ts # Monaco local-bundle config + GraphQL provider registration (imported once in main.tsx)
+│   └── utils.ts        # General utilities (cn, etc.)
+├── modules/            # Feature modules (request-builder, collections, dashboard, history, variables, settings, welcome)
 ├── stores/             # Zustand stores (UI state)
 ├── queries/            # TanStack Query hooks (server state)
 ├── hooks/              # Custom React hooks
@@ -118,7 +123,7 @@ src/
 
 The app uses a dual-state management approach:
 
-1. **Zustand Stores** (`stores/`): UI state, navigation, temporary data
+1. **Zustand Stores** (`stores/` and `lib/`): UI state, navigation, temporary data
    - `app-store.ts`: Navigation, screen state, engine connection
    - `dashboard-store.ts`: Load test metrics, streaming state
    - `variables-store.ts`: Variable UI state, active environment
@@ -126,6 +131,7 @@ The app uses a dual-state management approach:
    - `history-store.ts`: History filtering
    - `response-store.ts`: Response viewer state
    - `save-store.ts`: Auto-save orchestration
+   - `lib/graphql/schema-cache.ts`: Introspected GraphQL schema cache keyed by endpoint URL
 
 2. **TanStack Query** (`queries/`): Server state, caching, synchronization
    - Collections, Requests, Environments, Globals
@@ -139,8 +145,8 @@ The app uses a dual-state management approach:
   - Handles error transformation and user-friendly messages
 
 - **`sse-client.ts`**: Server-Sent Events client for real-time metrics
-  - Connects to `/metrics/live/:runId` or `/stats/:runId`
-  - Handles reconnection with exponential backoff
+  - Connects to `/metrics/live/:runId` (replayable tick topic — no attach race)
+  - No custom reconnect loop: the engine sends an explicit `complete` event, so `CLOSED` is terminal and transient errors are left to the browser's `EventSource` retry
   - Parses and forwards metrics to dashboard store
 
 - **`http-client.ts`**: Low-level fetch wrapper
@@ -209,7 +215,7 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **TanStack Query**: Server state and caching
 - **Radix UI**: Accessible component primitives
 - **Tailwind CSS**: Utility-first styling
-- **Monaco Editor**: Code editing (scripts)
+- **Monaco Editor**: Code editing — scripts, JSON body, and GraphQL (with syntax diagnostics, autocomplete, hover, and formatting via `graphql-language-service`)
 - **Recharts**: Charts for metrics visualization
 - **Vite**: Build tool and dev server
 

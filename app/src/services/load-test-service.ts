@@ -14,15 +14,13 @@
  */
 
 import { sseClient } from "./sse-client";
+import { apiService } from "./api";
 import { useDashboardStore } from "@/stores";
 import type { LoadTestMetrics } from "@/types";
-
-/**
- * Engine emits at 10 Hz (100ms cadence — see engine/src/http/routes/metrics.cpp).
- * We throttle UI commits to 2 Hz to keep render cost bounded, but BUFFER every
- * tick the engine sends so historicalMetrics keeps the full 10 Hz signal.
- */
-const METRICS_UI_THROTTLE_MS = 500;
+// Engine emits at 10 Hz (100ms cadence — see engine/src/http/routes/metrics.cpp).
+// We throttle UI commits to keep render cost bounded, but BUFFER every tick the
+// engine sends so historicalMetrics keeps the full 10 Hz signal.
+import { METRICS_UI_THROTTLE_MS } from "@/config/metrics";
 
 class LoadTestService {
 	private activeRunId: string | null = null;
@@ -53,20 +51,23 @@ class LoadTestService {
 		this.isConnected = true;
 
 		const store = useDashboardStore.getState();
+		// NOTE: do NOT call store.reset() here — the caller invokes store.startRun()
+		// first to register the run (currentRunId, config, "running" mode) and that
+		// already clears the historical series / currentMetrics / finalReport.
+		// reset() would null out currentRunId and the dashboard would show no active
+		// test (replay-from-0 renders clean off startRun's wipe already).
 		store.setStreaming(true);
 		store.setError(null);
 
-		// Connect to SSE with a small delay to let backend set up
-		setTimeout(() => {
-			if (this.activeRunId === runId) {
-				sseClient.connect(
-					runId,
-					this.handleMetrics.bind(this),
-					this.handleError.bind(this),
-					this.handleClose.bind(this)
-				);
-			}
-		}, 500);
+		// Connect immediately. The engine retains a replayable tick topic per run
+		// (N1), so even a sub-second run that finishes before we attach is fully
+		// replayed from offset 0 — no need to delay and risk missing it.
+		sseClient.connect(
+			runId,
+			this.handleMetrics.bind(this),
+			this.handleError.bind(this),
+			this.handleClose.bind(this)
+		);
 	}
 
 	/**
@@ -138,22 +139,29 @@ class LoadTestService {
 		store.setError(error.message);
 	}
 
-	private handleClose(): void {
-		console.log("[LoadTestService] SSE connection closed (test completed)");
+	private async handleClose(): Promise<void> {
+		console.log("[LoadTestService] SSE closed — converging on stored report");
+		const runId = this.activeRunId;
 		if (this.throttleTimer) {
 			clearTimeout(this.throttleTimer);
 			this.throttleTimer = null;
 		}
 		this.flushMetrics();
+		this.isConnected = false;
 		const store = useDashboardStore.getState();
 		store.setStreaming(false);
 
-		// Clean up internal state
-		// Don't call stopRun() here - that's for manual stops only
-		// The dashboard will fetch the final report which sets the correct mode
-		if (this.activeRunId) {
+		// Fetch the canonical final report from the engine and store it so the
+		// dashboard shows definitive completed-view data (final percentiles, reconciled
+		// error rate, setup overhead) — one terminal truth, same as the 404-path.
+		if (runId) {
+			try {
+				const report = await apiService.getRunReport(runId);
+				store.setFinalReport(report);
+			} catch (e) {
+				console.warn("[LoadTestService] report fetch failed", e);
+			}
 			this.activeRunId = null;
-			this.isConnected = false;
 		}
 	}
 }

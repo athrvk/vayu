@@ -9,6 +9,7 @@
 
 #include <curl/curl.h>
 
+#include <chrono>
 #include <functional>
 #include <future>
 #include <string>
@@ -32,6 +33,7 @@ namespace detail {
  */
 struct TransferData {
     size_t request_id = 0;
+    std::chrono::steady_clock::time_point submitted_at{};
     Request request;
     Response response;
     std::string response_body;

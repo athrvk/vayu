@@ -390,6 +390,22 @@ TEST_F (ThreadPoolTest, MixedSuccessAndFailure) {
     }
 }
 
+// Regression guard for a lost-wakeup race in ThreadPool::Impl's destructor.
+// Previously ~Impl () set `stop` and called notify_all () WITHOUT holding
+// queue_mutex_, so a worker that had evaluated its wait predicate as false but
+// not yet atomically released the lock and registered as a condition-variable
+// waiter could miss the notify and block forever — hanging the destructor's
+// join (). This rapidly constructs and destroys default-sized pools (no tasks
+// submitted) to maximize the window where the destructor races worker startup.
+// If the bug is present this hangs; the ctest TIMEOUT property converts that
+// into a reported failure. Post-fix it completes in well under a second.
+TEST_F (ThreadPoolTest, RapidCreateDestroyDoesNotDeadlock) {
+    for (int i = 0; i < 500; ++i) {
+        vayu::http::ThreadPool pool;
+        EXPECT_GT (pool.thread_count (), 0u);
+    }
+}
+
 // ============================================================================
 // Performance Comparison Test
 // ============================================================================
@@ -474,4 +490,32 @@ TEST_F (EventLoopTest, ProgressCallback) {
 
     EXPECT_TRUE (completed);
     // Progress may or may not be called depending on response size
+}
+
+// ============================================================================
+// Timing Identity Test (Task 7)
+// ============================================================================
+
+TEST_F (EventLoopTest, TimingIdentity) {
+    // Identity check: total_ms is perceived (submit→completion) and equals
+    // wire_ms + queue_wait_ms within sub-ms jitter. wire_ms must be non-zero
+    // for any real HTTP request.
+    vayu::http::EventLoop loop;
+    loop.start ();
+
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = test_url;
+
+    auto handle = loop.submit_async (request);
+    auto result = handle.future.get ();
+    loop.stop ();
+
+    ASSERT_TRUE (result.is_ok ()) << "request failed";
+
+    const auto& t = result.value ().timing;
+    EXPECT_GE (t.total_ms, 0.0);
+    EXPECT_GE (t.queue_wait_ms, 0.0);
+    EXPECT_GT (t.wire_ms, 0.0) << "wire_ms must be populated (CURLINFO_TOTAL_TIME)";
+    EXPECT_NEAR (t.total_ms, t.wire_ms + t.queue_wait_ms, 1.0);
 }

@@ -8,10 +8,17 @@
 import { useEffect } from "react";
 import Shell from "./components/layout/Shell";
 import TitleBar from "./components/layout/TitleBar";
+import UpdateBanner from "./components/shared/UpdateBanner";
 import { useEngineStore } from "./stores";
-import { useHealthQuery, usePrefetchCollectionsAndRequests, useRunsQuery } from "./queries";
+import {
+	useConfigQuery,
+	useHealthQuery,
+	usePrefetchCollectionsAndRequests,
+	useRunsQuery,
+} from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
+import { useMenuActions } from "./hooks/useMenuActions";
 import { useSaveStore } from "./stores/save-store";
 
 function App() {
@@ -27,8 +34,15 @@ function App() {
 	usePrefetchCollectionsAndRequests();
 	useRunsQuery();
 
+	// Keep engine config warm — proxied call timeouts derive from its
+	// defaultTimeout setting (see services/api.ts proxiedRequestTimeoutMs)
+	useConfigQuery();
+
 	// Fetch pm.* completions and register them with Monaco's JavaScript language
 	useScriptCompletionProvider();
+
+	// Bridge native menu items (Preferences…/Settings) to in-app navigation
+	useMenuActions();
 
 	// Register Electron before-quit handler to flush pending saves
 	useEffect(() => {
@@ -46,6 +60,7 @@ function App() {
 	return (
 		<div className="flex flex-col h-full">
 			<TitleBar />
+			<UpdateBanner />
 			<div className="flex-1 overflow-hidden">
 				<Shell />
 			</div>

@@ -188,6 +188,7 @@ export interface LoadTestConfig {
 	save_timing_breakdown?: boolean;
 	comment?: string;
 	latency_percentiles?: number[];
+	max_in_flight?: number;
 }
 
 export interface HttpResponse {
@@ -201,6 +202,8 @@ export interface HttpResponse {
 	bodySize: number;
 	timing: {
 		total: number;
+		wire?: number;
+		queueWait?: number;
 		dns: number;
 		connect: number;
 		tls: number;
@@ -242,6 +245,15 @@ export interface LoadTestMetrics {
 	send_rate?: number;
 	throughput?: number;
 	backpressure?: number;
+	dropped_requests?: number;
+	avg_queue_wait_ms?: number;
+	// Run progress — feeds the iterations-mode ETA stat. requests_expected is 0
+	// for open-ended modes (constant_rps), in which case ETA is not shown.
+	requests_sent?: number;
+	requests_expected?: number;
+	// Per-tick full status-code map (e.g. { "200": 1450, "404": 5 }). Same shape
+	// the live SSE and the stored time-series both carry.
+	status_codes?: Record<string, number>;
 }
 
 export interface RunReport {
@@ -258,6 +270,8 @@ export interface RunReport {
 			duration?: string;
 			targetRps?: number;
 			concurrency?: number;
+			startConcurrency?: number;
+			rampUpDuration?: string;
 			timeout?: number;
 			comment?: string;
 		};
@@ -274,6 +288,12 @@ export interface RunReport {
 		backpressure?: number;
 		testDuration?: number;
 		setupOverhead?: number;
+		peakConcurrency?: number;
+		droppedRequests?: number;
+		avgQueueWaitMs?: number;
+		bytesSent?: number;
+		bytesReceived?: number;
+		throughputBytesPerSec?: number;
 	};
 	latency: {
 		min: number;

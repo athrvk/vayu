@@ -15,6 +15,7 @@ import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/rea
 import { useMemo } from "react";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
+import { QUERY_CACHE } from "@/config/cache";
 import type {
 	Collection,
 	Request,
@@ -57,14 +58,14 @@ export function usePrefetchCollectionsAndRequests() {
 					queryClient.prefetchQuery({
 						queryKey: queryKeys.requests.listByCollection(collection.id),
 						queryFn: () => apiService.listRequests({ collectionId: collection.id }),
-						staleTime: 30 * 1000, // Consider fresh for 30 seconds
+						staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
 					})
 				)
 			);
 			return true;
 		},
 		enabled: collections.length > 0,
-		staleTime: 30 * 1000, // Re-prefetch after 30 seconds
+		staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS, // Re-prefetch once stale
 		refetchOnWindowFocus: false,
 	});
 
@@ -153,8 +154,8 @@ export function useRequestQuery(requestId: string | null) {
 		},
 		enabled: !!requestId,
 		// Retry a few times with short delay - the cache might be updating
-		retry: 3,
-		retryDelay: 100,
+		retry: QUERY_CACHE.REQUEST_LOOKUP_RETRY,
+		retryDelay: QUERY_CACHE.REQUEST_LOOKUP_RETRY_DELAY_MS,
 		// Use stale data since we're reading from cache
 		staleTime: Infinity,
 	});

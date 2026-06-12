@@ -119,7 +119,9 @@ export default function RunMetadata({
 										elapsedDuration ||
 											(endTime && startTime ? endTime - startTime : 0)
 									)
-								: formatDuration(startTime ? Date.now() - startTime : 0)}
+								: // Live: use the tick-derived elapsed (renders are tick-driven)
+									// rather than Date.now(), which is impure during render.
+									formatDuration(elapsedDuration)}
 						</span>
 						{/* Show setup overhead if available */}
 						{mode === "completed" &&

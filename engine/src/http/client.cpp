@@ -24,6 +24,8 @@
 
 #include <curl/curl.h>
 
+#include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <stdexcept>
 
@@ -353,8 +355,13 @@ Result<Response> Client::send (const Request& request) {
         curl_easy_setopt (curl, CURLOPT_PROXY, impl_->config.proxy_url.c_str ());
     }
 
-    // Perform the request
+    // Perform the request. Stamp submission just before perform so that
+    // perceived latency excludes our own setup cost above but covers everything
+    // libcurl does on this thread. For single-shot sends there is no generator
+    // queue, so queue_wait_ms will be near zero — that's the correct contract.
+    auto submitted_at = std::chrono::steady_clock::now ();
     CURLcode res = curl_easy_perform (curl);
+    auto completion = std::chrono::steady_clock::now ();
 
     // Cleanup headers
     if (headers_list) {
@@ -362,21 +369,38 @@ Result<Response> Client::send (const Request& request) {
     }
 
     // Get timing info (try to get even on errors, as curl may have partial timing)
-    double total_time = 0, namelookup_time = 0, connect_time = 0;
+    double wire_seconds = 0, namelookup_time = 0, connect_time = 0;
     double appconnect_time = 0, starttransfer_time = 0;
 
-    curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &total_time);
+    curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &wire_seconds);
     curl_easy_getinfo (curl, CURLINFO_NAMELOOKUP_TIME, &namelookup_time);
     curl_easy_getinfo (curl, CURLINFO_CONNECT_TIME, &connect_time);
     curl_easy_getinfo (curl, CURLINFO_APPCONNECT_TIME, &appconnect_time);
     curl_easy_getinfo (curl, CURLINFO_STARTTRANSFER_TIME, &starttransfer_time);
 
-    response.timing.total_ms   = total_time * 1000.0;
-    response.timing.dns_ms     = namelookup_time * 1000.0;
-    response.timing.connect_ms = (connect_time - namelookup_time) * 1000.0;
-    response.timing.tls_ms     = (appconnect_time - connect_time) * 1000.0;
-    response.timing.first_byte_ms = (starttransfer_time - appconnect_time) * 1000.0;
-    response.timing.download_ms = (total_time - starttransfer_time) * 1000.0;
+    // Match the event-loop semantics: total_ms is perceived (submit→completion),
+    // wire_ms is libcurl's view, queue_wait_ms is the delta. See curl_utils.cpp.
+    double perceived_ms = std::chrono::duration<double, std::milli> (
+        completion - submitted_at).count ();
+    double wire_ms = wire_seconds * 1000.0;
+
+    response.timing.total_ms      = perceived_ms;
+    response.timing.wire_ms       = wire_ms;
+    response.timing.queue_wait_ms = std::max (0.0, perceived_ms - wire_ms);
+    // curl phase timers are cumulative from request start; a skipped phase
+    // reports 0. APPCONNECT_TIME is 0 for plain HTTP and for reused keep-alive
+    // connections, which made the naive successive differences render TLS as a
+    // negative "-0ms" and over-count TTFB (it absorbed the connect time). Treat
+    // a zero appconnect as "no TLS phase" by collapsing it onto connect_time,
+    // and clamp every delta at 0 (mirrors the queue_wait_ms guard above).
+    double appconnect = appconnect_time > 0.0 ? appconnect_time : connect_time;
+    response.timing.dns_ms = std::max (0.0, namelookup_time * 1000.0);
+    response.timing.connect_ms = std::max (0.0, (connect_time - namelookup_time) * 1000.0);
+    response.timing.tls_ms = std::max (0.0, (appconnect - connect_time) * 1000.0);
+    response.timing.first_byte_ms =
+    std::max (0.0, (starttransfer_time - appconnect) * 1000.0);
+    response.timing.download_ms =
+    std::max (0.0, (wire_seconds - starttransfer_time) * 1000.0);
 
     // Check for errors
     if (res != CURLE_OK) {

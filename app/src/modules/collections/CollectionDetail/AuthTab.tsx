@@ -92,7 +92,14 @@ export default function AuthTab({ collection }: AuthTabProps) {
 
 	const [auth, setAuth] = useState<CollectionAuth>(collection.auth);
 
+	// Resync the editable draft when the underlying collection changes (the
+	// component is not remounted per-collection — the parent renders it inline,
+	// so a different collection can arrive via props). Can't be derived: `auth`
+	// is a user-editable draft that intentionally diverges from props between
+	// edits and save. Render-phase reset keyed on value would miss switches to a
+	// different collection whose auth happens to equal the current draft.
 	useEffect(() => {
+		// eslint-disable-next-line react-hooks/set-state-in-effect
 		setAuth(collection.auth);
 	}, [collection.id, collection.auth]);
 

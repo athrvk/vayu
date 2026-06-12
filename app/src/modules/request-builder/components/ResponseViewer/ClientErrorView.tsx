@@ -12,7 +12,24 @@
  * Shows appropriate icon, error message, and helpful hints based on error type.
  */
 
-import { AlertCircle, WifiOff, Clock, ShieldX, Link2Off, ServerOff } from "lucide-react";
+import {
+	AlertCircle,
+	WifiOff,
+	Clock,
+	ShieldX,
+	Link2Off,
+	ServerOff,
+	type LucideIcon,
+} from "lucide-react";
+
+interface ErrorIconDisplayProps {
+	icon: LucideIcon;
+	className: string;
+}
+
+function ErrorIconDisplay({ icon: Icon, className }: ErrorIconDisplayProps) {
+	return <Icon className={className} />;
+}
 
 /**
  * Error hints for common error codes
@@ -61,7 +78,7 @@ export default function ClientErrorView({ errorCode, errorMessage }: ClientError
 		<div className="flex-1 flex items-center justify-center p-8">
 			<div className="max-w-md text-center space-y-4">
 				<div className="w-16 h-16 mx-auto rounded-full bg-destructive/10 flex items-center justify-center">
-					<ErrorIcon className="w-8 h-8 text-destructive" />
+					<ErrorIconDisplay icon={ErrorIcon} className="w-8 h-8 text-destructive" />
 				</div>
 
 				<div className="space-y-2">

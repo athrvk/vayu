@@ -5,7 +5,7 @@ API testing and load testing platform built with Electron + React + TypeScript.
 ## Prerequisites
 
 - Node.js ≥ 20 LTS
-- pnpm ≥ 8
+- pnpm ≥ 10
 - Vayu Engine running on `localhost:9876`
 
 ## Quick Start
@@ -31,18 +31,26 @@ pnpm electron:dev     # Full Electron app
 
 ```
 src/
-├── components/        # React components
-│   ├── layout/        # Shell, Sidebar
-│   ├── collections/   # Collection tree
-│   ├── request-builder/  # Request editor
-│   ├── load-test-dashboard/  # Live metrics
-│   ├── history/       # Run history
-│   ├── variables/     # Variable editors
-│   └── ui/            # Shared UI primitives
-├── stores/            # Zustand stores
-├── queries/           # TanStack Query hooks
+├── components/        # App-shell layout, status, shared response viewer, UI primitives
+│   ├── layout/        # Shell, Sidebar, TitleBar
+│   ├── shared/        # Shared response viewer
+│   ├── status/        # ConnectionStatus
+│   └── ui/            # Radix-based primitives (button, select, resizable, …)
+├── modules/           # Feature modules (each self-contained)
+│   ├── request-builder/   # Request editor, URL bar, body/auth/script panels
+│   ├── collections/       # Collection tree, import modal, collection detail
+│   ├── dashboard/         # Live load-test metrics
+│   ├── history/           # Run history list + detail
+│   ├── variables/         # Variable table editor
+│   ├── settings/          # Settings panels
+│   └── welcome/           # Welcome screen
+├── lib/               # Shared libraries
+│   ├── graphql/       # GraphQL diagnostics, introspection, schema cache, Monaco providers
+│   └── monaco-setup.ts    # Monaco local-bundle config + GraphQL provider registration
+├── stores/            # Zustand stores (UI state)
+├── queries/           # TanStack Query hooks (server state)
 ├── hooks/             # Custom hooks
-├── services/          # API client
+├── services/          # API client, SSE client, importers
 ├── types/             # TypeScript types
 └── config/            # Configuration
 
@@ -53,26 +61,26 @@ electron/
 
 ## Tech Stack
 
-- **React 18** + **TypeScript 5**
-- **Electron 28**
+- **React 19** + **TypeScript 5**
+- **Electron 39**
 - **Zustand** (UI state)
 - **TanStack Query** (server state)
-- **Tailwind CSS** + **Radix UI**
-- **Monaco Editor** (code editing)
+- **Tailwind CSS v4** + **Radix UI**
+- **Monaco Editor** (code editing — JSON, scripts, GraphQL with language service)
 - **Recharts** (charts)
 - **Vite** (build)
 
 ## Key Stores
 
-| Store                 | Purpose                  |
-| --------------------- | ------------------------ |
-| `useAppStore`         | Navigation, screen state |
-| `useDashboardStore`   | Load test metrics        |
-| `useEnvironmentStore` | Active environment       |
-| `useVariablesStore`   | Variable scope context   |
-| `useHistoryStore`     | History filtering        |
-| `useCollectionsStore` | Collections state        |
-| `useSaveStore`        | Auto-save state          |
+| Store                 | Purpose                            |
+| --------------------- | ---------------------------------- |
+| `useAppStore`         | Navigation, screen state           |
+| `useDashboardStore`   | Load test metrics                  |
+| `useVariablesStore`   | Variable scope context             |
+| `useHistoryStore`     | History filtering                  |
+| `useCollectionsStore` | Collection tree expansion state    |
+| `useSaveStore`        | Auto-save state                    |
+| `useSchemaCache`      | GraphQL schema introspection cache |
 
 ## Key Hooks
 
@@ -91,4 +99,4 @@ electron/
 
 ## License
 
-MIT
+Apache-2.0

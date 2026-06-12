@@ -5,16 +5,40 @@
 
 #include <gtest/gtest.h>
 
-#include <atomic>
 #include <chrono>
+#include <thread>
+#include <vector>
 
+#include "mock_server.hpp"
+#include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/types.hpp"
 
 using namespace vayu::http;
 using namespace vayu;
+using vayu::tests::SlowMockServer;
 
-TEST (RateLimiterTest, EnforcesTargetRPS) {
+class RateLimiterTest : public ::testing::Test {
+    protected:
+    void SetUp () override {
+        global_init ();
+        mock = std::make_unique<SlowMockServer> ();
+    }
+    void TearDown () override {
+        mock.reset ();
+        global_cleanup ();
+    }
+    std::unique_ptr<SlowMockServer> mock;
+};
+
+// Pacing assertion is made against an in-process mock (`/fast`) instead of an
+// external endpoint. The previous version pointed at httpbin.org, which made
+// the test depend on real network latency: on macOS x64 (Rosetta-emulated on
+// Apple-silicon runners) the curl_multi loop overhead shifted the measured
+// RPS outside the ±25% window even though the rate limiter itself was fine.
+// Hitting localhost removes that variance — we're checking engine behavior,
+// not someone else's web service.
+TEST_F (RateLimiterTest, EnforcesTargetRPS) {
     // Configure for 100 RPS
     EventLoopConfig config;
     config.target_rps     = 100.0;
@@ -25,10 +49,9 @@ TEST (RateLimiterTest, EnforcesTargetRPS) {
     EventLoop loop (config);
     loop.start ();
 
-    // Prepare request - use a faster endpoint
     Request req;
     req.method = HttpMethod::GET;
-    req.url    = "https://httpbin.org/get";
+    req.url    = mock->fast_url ();
 
     // Track submission timing
     auto submission_start = std::chrono::steady_clock::now ();
@@ -60,7 +83,7 @@ TEST (RateLimiterTest, EnforcesTargetRPS) {
     loop.stop ();
 
     // Check if submission rate is close to target
-    // Allow wider tolerance (±20%) due to curl_multi loop overhead:
+    // Allow wider tolerance (±25%) due to curl_multi loop overhead:
     // - Each iteration includes curl_multi_perform, curl_multi_info_read
     // - Poll timeout adds ~1ms per check when rate-limited
     // - Effective RPS is typically 80-90% of target

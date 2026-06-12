@@ -11,17 +11,19 @@
  * Displays details for a load test run with tabs for overview, performance, and samples.
  */
 
-import { useState } from "react";
-import { CheckCircle, Activity, Zap, TrendingUp, BarChart3, Settings2 } from "lucide-react";
+import { useState, useMemo } from "react";
+import { CheckCircle, Activity, TrendingUp, BarChart3, Settings2 } from "lucide-react";
 import { Badge, Tabs, TabsContent, TabsList, TabsTrigger, ScrollArea } from "@/components/ui";
 import { formatNumber, loadTestTypeToLabel } from "@/utils";
 import type { LoadTestConfig } from "@/types";
+import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { OverviewTab, PerformanceTab, SamplesTab } from "./components";
 import type { LoadTestDetailProps } from "../types";
 
 export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadTestDetailProps) {
 	const [activeTab, setActiveTab] = useState("overview");
 	const config = report.metadata?.configuration;
+	const derived = useMemo(() => reportToDerived(report), [report]);
 
 	const successRate =
 		report.summary.totalRequests > 0
@@ -100,8 +102,17 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 					</div>
 				)}
 
-				{/* Key Metrics Summary Row */}
-				<div className="grid grid-cols-4 gap-3">
+				{/* Key metrics — p99-led, compact glance (stays visible across tabs) */}
+				<div className="grid grid-cols-3 gap-3">
+					<div className="bg-muted/50 p-3">
+						<div className="flex items-center gap-2 mb-1">
+							<TrendingUp className="w-4 h-4 text-purple-500" />
+							<span className="text-xs text-muted-foreground">P99 Latency</span>
+						</div>
+						<p className="text-xl font-bold text-foreground">
+							{formatNumber(report.latency.p99)}ms
+						</p>
+					</div>
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
 							<Activity className="w-4 h-4 text-primary" />
@@ -118,24 +129,6 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 						</div>
 						<p className="text-xl font-bold text-foreground">
 							{successRate.toFixed(1)}%
-						</p>
-					</div>
-					<div className="bg-muted/50 p-3">
-						<div className="flex items-center gap-2 mb-1">
-							<Zap className="w-4 h-4 text-blue-500" />
-							<span className="text-xs text-muted-foreground">Avg RPS</span>
-						</div>
-						<p className="text-xl font-bold text-foreground">
-							{formatNumber(report.summary.avgRps)}
-						</p>
-					</div>
-					<div className="bg-muted/50 p-3">
-						<div className="flex items-center gap-2 mb-1">
-							<TrendingUp className="w-4 h-4 text-purple-500" />
-							<span className="text-xs text-muted-foreground">P50 Latency</span>
-						</div>
-						<p className="text-xl font-bold text-foreground">
-							{formatNumber(report.latency.p50)}ms
 						</p>
 					</div>
 				</div>
@@ -165,15 +158,15 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 				<ScrollArea className="flex-1">
 					<div className="p-6">
 						<TabsContent value="overview" className="mt-0 space-y-4">
-							<OverviewTab report={report} />
+							<OverviewTab report={report} derived={derived} />
 						</TabsContent>
 
 						<TabsContent value="performance" className="mt-0 space-y-4">
-							<PerformanceTab report={report} runId={runId} />
+							<PerformanceTab report={report} runId={runId} derived={derived} />
 						</TabsContent>
 
 						<TabsContent value="samples" className="mt-0 space-y-4">
-							<SamplesTab report={report} />
+							<SamplesTab report={report} derived={derived} />
 						</TabsContent>
 					</div>
 				</ScrollArea>

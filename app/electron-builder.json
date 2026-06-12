@@ -6,11 +6,22 @@
 		"buildResources": "build"
 	},
 	"files": ["dist/**/*", "dist-electron/**/*", "package.json"],
+	"publish": [
+		{
+			"provider": "github",
+			"owner": "athrvk",
+			"repo": "vayu"
+		}
+	],
 	"extraResources": [
 		{
 			"from": "build/resources/bin/",
 			"to": "bin",
 			"filter": ["**/*"]
+		},
+		{
+			"from": "../shared/icon_png/vayu_icon_256x256.png",
+			"to": "icon.png"
 		}
 	],
 	"asar": true,
@@ -27,7 +38,7 @@
 		"createDesktopShortcut": "always",
 		"createStartMenuShortcut": true,
 		"shortcutName": "Vayu",
-		"license": "../LICENSE"
+		"license": "build/license.txt"
 	},
 	"mac": {
 		"category": "public.app-category.developer-tools",
@@ -70,13 +81,14 @@
 		"target": ["AppImage", "deb"],
 		"category": "Development",
 		"icon": "build/icons",
+		"syncDesktopName": true,
 		"maintainer": "Atharva Kusumbia <atharvakusumbia@gmail.com>"
 	},
 	"appImage": {
 		"artifactName": "${productName}-${version}-${arch}.${ext}",
 		"category": "Development",
 		"description": "Vayu - High-Performance API Testing Platform",
-		"license": "../LICENSE"
+		"license": "build/license.txt"
 	},
 	"deb": {
 		"afterInstall": "installer/linux-postinst.sh",

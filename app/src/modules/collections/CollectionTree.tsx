@@ -34,6 +34,7 @@ import {
 import CollectionItem from "./CollectionItem";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
+import { TIMING } from "@/config/timing";
 
 export default function CollectionTree() {
 	const openImport = useImportModalStore((s) => s.open);
@@ -199,7 +200,7 @@ export default function CollectionTree() {
 			collectionId: collectionId,
 			name: "New Request",
 			method: "GET",
-			url: "https://api.example.com",
+			url: "",
 		});
 
 		if (request) {
@@ -228,7 +229,7 @@ export default function CollectionTree() {
 			});
 			completeSave();
 			// Reset to idle after showing "saved" status
-			setTimeout(() => setStatus("idle"), 2000);
+			setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
 		} catch (error) {
 			failSave(error instanceof Error ? error.message : "Failed to rename collection");
 		}
@@ -262,31 +263,37 @@ export default function CollectionTree() {
 		});
 	};
 
-	const handleDeleteCollection = async (collectionId: string) => {
-		setDeletingCollectionId(collectionId);
-		setDeleteConfirm(null);
-		try {
-			await deleteCollectionMutation.mutateAsync(collectionId);
-			if (selectedCollectionId === collectionId) {
-				navigateToWelcome();
+	const handleDeleteCollection = useCallback(
+		async (collectionId: string) => {
+			setDeletingCollectionId(collectionId);
+			setDeleteConfirm(null);
+			try {
+				await deleteCollectionMutation.mutateAsync(collectionId);
+				if (selectedCollectionId === collectionId) {
+					navigateToWelcome();
+				}
+			} finally {
+				setDeletingCollectionId(null);
 			}
-		} finally {
-			setDeletingCollectionId(null);
-		}
-	};
+		},
+		[deleteCollectionMutation, selectedCollectionId, navigateToWelcome]
+	);
 
-	const handleDeleteRequest = async (requestId: string) => {
-		setDeletingRequestId(requestId);
-		setDeleteConfirm(null);
-		try {
-			await deleteRequestMutation.mutateAsync(requestId);
-			if (selectedRequestId === requestId) {
-				navigateToWelcome();
+	const handleDeleteRequest = useCallback(
+		async (requestId: string) => {
+			setDeletingRequestId(requestId);
+			setDeleteConfirm(null);
+			try {
+				await deleteRequestMutation.mutateAsync(requestId);
+				if (selectedRequestId === requestId) {
+					navigateToWelcome();
+				}
+			} finally {
+				setDeletingRequestId(null);
 			}
-		} finally {
-			setDeletingRequestId(null);
-		}
-	};
+		},
+		[deleteRequestMutation, selectedRequestId, navigateToWelcome]
+	);
 
 	const handleRequestDeleteClick = useCallback((requestId: string, requestName: string) => {
 		setDeleteConfirm({ type: "request", id: requestId, name: requestName });
@@ -299,7 +306,7 @@ export default function CollectionTree() {
 		} else {
 			handleDeleteRequest(deleteConfirm.id);
 		}
-	}, [deleteConfirm]);
+	}, [deleteConfirm, handleDeleteCollection, handleDeleteRequest]);
 
 	const handleStartRequestRename = (request: Request) => {
 		setRenamingRequestId(request.id);
@@ -342,7 +349,7 @@ export default function CollectionTree() {
 			});
 			completeSave();
 			// Reset to idle after showing "saved" status
-			setTimeout(() => setStatus("idle"), 2000);
+			setTimeout(() => setStatus("idle"), TIMING.STATUS_RESET_MS);
 		} catch (error) {
 			failSave(error instanceof Error ? error.message : "Failed to rename request");
 		}

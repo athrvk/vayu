@@ -14,6 +14,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
+import { QUERY_CACHE } from "@/config/cache";
 
 /**
  * Fetch script completions for Monaco editor
@@ -23,10 +24,10 @@ export function useScriptCompletionsQuery() {
 	return useQuery({
 		queryKey: queryKeys.scriptCompletions.all,
 		queryFn: () => apiService.getScriptCompletions(),
-		// Script completions don't change, cache for 1 hour
-		staleTime: 60 * 60 * 1000,
-		gcTime: 60 * 60 * 1000,
-		// Don't retry if it fails - not critical
-		retry: 1,
+		// Script completions don't change, cache for a long time
+		staleTime: QUERY_CACHE.SCRIPT_COMPLETIONS_STALE_TIME_MS,
+		gcTime: QUERY_CACHE.SCRIPT_COMPLETIONS_GC_TIME_MS,
+		// Don't retry hard if it fails - not critical
+		retry: QUERY_CACHE.SCRIPT_COMPLETIONS_RETRY,
 	});
 }

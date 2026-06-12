@@ -25,6 +25,18 @@
 
 namespace vayu::http::routes {
 
+// Resolve the effective HTTP request timeout for design-mode POST /request.
+// An explicit per-request "timeout" wins; otherwise fall back to the engine's
+// user-configurable `defaultTimeout` setting (passed in by the caller) rather
+// than the compile-time DEFAULT_TIMEOUT_MS, so raising the setting actually
+// extends how long a slow request is allowed to run.
+int resolve_request_timeout_ms (const nlohmann::json& json, int configured_default) {
+    if (json.contains ("timeout") && json["timeout"].is_number ()) {
+        return json["timeout"].get<int> ();
+    }
+    return configured_default;
+}
+
 namespace {
 
 // Helper function to parse variables JSON string to Environment
@@ -358,6 +370,13 @@ void register_execution_routes (RouteContext& ctx) {
 
         // Get the request (may be modified by pre-request script)
         auto request = request_result.value ();
+
+        // deserialize_request defaults an omitted timeout to the compile-time
+        // constant; override with the engine's configured defaultTimeout so the
+        // user-facing setting governs how long a slow design-mode request runs.
+        request.timeout_ms = resolve_request_timeout_ms (json,
+        ctx.db.get_config_int (
+        "defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
 
         // Execute pre-request script
         vayu::runtime::ScriptContext pre_ctx;

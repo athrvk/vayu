@@ -118,7 +118,7 @@ export default function RequestBuilder() {
 						: body.mode === "text"
 							? "text"
 							: body.mode === "graphql"
-								? "text"
+								? "graphql"
 								: "none";
 
 		const rawBody = "content" in body ? body.content : "";
@@ -304,6 +304,7 @@ export default function RequestBuilder() {
 					bodyRaw, // Always include raw body for raw view mode
 					bodyType,
 					time: result.timing?.total || 0,
+					timing: result.timing,
 					size: result.bodySize || 0,
 					// Client-side error info (from engine/curl)
 					errorCode: result.errorCode,
@@ -495,6 +496,7 @@ export default function RequestBuilder() {
 					rampUpDuration: config.ramp_duration_seconds
 						? `${config.ramp_duration_seconds}s`
 						: undefined,
+					maxInFlight: config.max_in_flight,
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,
 					comment: config.comment,
@@ -517,6 +519,8 @@ export default function RequestBuilder() {
 						concurrency: apiRequest.concurrency,
 						iterations: apiRequest.iterations,
 						comment: apiRequest.comment,
+						rampUpDuration: apiRequest.rampUpDuration,
+						startConcurrency: apiRequest.startConcurrency,
 					},
 					{
 						method: apiRequest.method,

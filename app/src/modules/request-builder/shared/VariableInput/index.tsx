@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
 import type { VariableScope } from "../../types";
 import EditableVariable from "./EditableVariable";
+import { VARIABLE_PATTERN } from "@/constants/variables";
 
 interface VariableInputProps {
 	value: string;
@@ -37,9 +38,8 @@ interface VariableInputProps {
 	className?: string;
 	disabled?: boolean;
 	suggestions?: string[]; // Optional list of plain text suggestions (e.g., standard headers)
+	onPaste?: (e: React.ClipboardEvent<HTMLInputElement>) => void; // Raw paste passthrough
 }
-
-const VARIABLE_PATTERN = /\{\{([^{}]+)\}\}/g;
 
 // Parse text into segments (text and variables)
 function parseSegments(
@@ -81,6 +81,7 @@ export default function VariableInput({
 	className,
 	disabled = false,
 	suggestions = [],
+	onPaste,
 }: VariableInputProps) {
 	const { getAllVariables, updateVariable } = useRequestBuilderContext();
 
@@ -185,10 +186,15 @@ export default function VariableInput({
 		);
 	}, [suggestions, value]);
 
-	// Reset selected index when filtered suggestions change
-	useEffect(() => {
+	// Reset selected index when the filtered suggestion set changes. Done as a
+	// render-phase adjustment (not an effect) so the index is corrected before
+	// paint without a cascading re-render. The index is ephemeral UI state, so
+	// there's no divergence risk from resetting it during render.
+	const [prevSuggestionCount, setPrevSuggestionCount] = useState(filteredSuggestions.length);
+	if (prevSuggestionCount !== filteredSuggestions.length) {
+		setPrevSuggestionCount(filteredSuggestions.length);
 		setSelectedSuggestionIndex(0);
-	}, [filteredSuggestions.length]);
+	}
 
 	// Handle Escape key globally
 	useEffect(() => {
@@ -372,6 +378,7 @@ export default function VariableInput({
 				type="text"
 				value={value}
 				onChange={handleChange}
+				onPaste={onPaste}
 				onKeyDown={handleKeyDown}
 				onFocus={handleFocus}
 				onBlur={handleBlur}

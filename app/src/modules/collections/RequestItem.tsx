@@ -11,6 +11,7 @@ import { getMethodColor } from "@/utils";
 import type { Request } from "@/types";
 import { Button, Badge, Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { TIMING } from "@/config/timing";
 
 export interface RequestItemProps {
 	request: Request;
@@ -45,6 +46,8 @@ export default function RequestItem({
 }: RequestItemProps) {
 	const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+	const CLICK_DELAY_MS = TIMING.TREE_CLICK_DELAY_MS;
+
 	const handleClick = () => {
 		if (isDeleting || isRenaming) return;
 
@@ -60,7 +63,7 @@ export default function RequestItem({
 		clickTimeoutRef.current = setTimeout(() => {
 			onSelect(collectionId, request.id);
 			clickTimeoutRef.current = null;
-		}, 200); // 200ms delay to detect double-click
+		}, CLICK_DELAY_MS); // 80ms delay to detect double-click
 	};
 
 	const handleDoubleClick = (e: React.MouseEvent) => {

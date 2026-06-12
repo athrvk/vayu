@@ -16,8 +16,7 @@ import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import { useEngineStore } from "@/stores";
 import { useEffect } from "react";
-
-const HEALTH_CHECK_INTERVAL_MS = 30000; // 30 seconds
+import { TIMING } from "@/config/timing";
 
 /**
  * Engine health check with automatic polling
@@ -29,7 +28,7 @@ export function useHealthQuery() {
 	const query = useQuery({
 		queryKey: queryKeys.health.status(),
 		queryFn: () => apiService.getHealth(),
-		refetchInterval: HEALTH_CHECK_INTERVAL_MS,
+		refetchInterval: TIMING.HEALTH_CHECK_INTERVAL_MS,
 		retry: 1,
 		// Don't show stale data for health checks
 		staleTime: 0,

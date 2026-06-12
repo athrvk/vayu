@@ -38,11 +38,24 @@ export default defineConfig({
 	build: {
 		outDir: "dist",
 		emptyOutDir: true,
-		rollupOptions: {
+		// Vite 8 / Rolldown: rolldownOptions replaces rollupOptions, and
+		// manualChunks is replaced by codeSplitting.groups (test matches the
+		// module id; [\\/] keeps it cross-platform for Windows CI builds).
+		rolldownOptions: {
 			output: {
-				manualChunks: {
-					"react-vendor": ["react", "react-dom"],
-					charts: ["recharts"],
+				codeSplitting: {
+					groups: [
+						{
+							name: "react-vendor",
+							test: /node_modules[\\/](react|react-dom)[\\/]/,
+							priority: 20,
+						},
+						{
+							name: "charts",
+							test: /node_modules[\\/]recharts[\\/]/,
+							priority: 15,
+						},
+					],
 				},
 			},
 		},

@@ -91,8 +91,27 @@ nlohmann::json get_script_completions () {
 
     completions.push_back ({ { "label", "pm.response.responseTime" },
     { "kind", KIND_FIELD }, { "insertText", "pm.response.responseTime" },
-    { "detail", "number" }, { "documentation", "The total response time in milliseconds." },
+    { "detail", "number" },
+    { "documentation",
+    "Perceived response time in milliseconds (submit → completion). Use "
+    "responseTimeWire for server-only timing." },
     { "sortText", "1_pm_response_time" } });
+
+    completions.push_back ({ { "label", "pm.response.responseTimeWire" },
+    { "kind", KIND_FIELD }, { "insertText", "pm.response.responseTimeWire" },
+    { "detail", "number" },
+    { "documentation",
+    "Wire-only response time in milliseconds (CURLINFO_TOTAL_TIME). Pre-#19 "
+    "semantics — use for server-only SLA assertions." },
+    { "sortText", "1_pm_response_time_wire" } });
+
+    completions.push_back ({ { "label", "pm.response.responseTimeQueueWait" },
+    { "kind", KIND_FIELD }, { "insertText", "pm.response.responseTimeQueueWait" },
+    { "detail", "number" },
+    { "documentation",
+    "Generator-side overhead in milliseconds (responseTime − responseTimeWire). "
+    "Near-zero for single-shot sends." },
+    { "sortText", "1_pm_response_time_queue" } });
 
     completions.push_back ({ { "label", "pm.response.headers" }, { "kind", KIND_FIELD },
     { "insertText", "pm.response.headers" }, { "detail", "object" },

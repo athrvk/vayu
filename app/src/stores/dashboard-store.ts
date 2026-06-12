@@ -9,6 +9,12 @@
 
 import { create } from "zustand";
 import type { LoadTestMetrics, RunReport } from "@/types";
+import { DEFAULT_SLO_MS, type Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+// With the engine at 10 Hz and the UI commit throttle buffering every tick
+// (load-test-service.ts), the cap is ~5 minutes of full-fidelity history
+// before the oldest points roll off — long enough for a typical load-test
+// session, short enough to keep chart slicing cheap.
+import { HISTORICAL_METRICS_CAP } from "@/config/metrics";
 
 type DashboardMode = "running" | "completed" | "stopped";
 type DashboardView = "metrics" | "request-response";
@@ -21,6 +27,8 @@ export interface LoadTestRunConfig {
 	concurrency?: number;
 	iterations?: number;
 	comment?: string;
+	rampUpDuration?: string;
+	startConcurrency?: number;
 }
 
 // Request info passed when starting a load test
@@ -29,14 +37,12 @@ export interface LoadTestRequestInfo {
 	url: string;
 }
 
-/**
- * Cap historical metrics at ~3000 points. With the engine at 10 Hz and the UI
- * commit throttle at 2 Hz buffering every tick (load-test-service.ts), this is
- * ~5 minutes of full-fidelity history before the oldest points roll off — long
- * enough for a typical load-test session, short enough to keep chart slicing
- * cheap.
- */
-const HISTORICAL_METRICS_CAP = 3000;
+const INITIAL_BREAKPOINT: Breakpoint = {
+	crossed: false,
+	concurrency: null,
+	timeSeconds: null,
+	p99Ms: null,
+};
 
 interface DashboardState {
 	currentRunId: string | null;
@@ -51,6 +57,14 @@ interface DashboardState {
 	// Config and request info (available during live streaming)
 	loadTestConfig: LoadTestRunConfig | null;
 	requestInfo: LoadTestRequestInfo | null;
+	/**
+	 * Running monotonic aggregates updated on each tick in {@link addMetricsBatch}.
+	 * Stored here instead of recomputed in MetricsView so that consumers see O(1)
+	 * updates per tick rather than a full scan of {@link historicalMetrics} (which
+	 * holds up to {@link HISTORICAL_METRICS_CAP} entries). See PR #26 / #25.
+	 */
+	peakConcurrency: number;
+	breakpoint: Breakpoint;
 
 	// Actions
 	startRun: (
@@ -84,6 +98,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 	isStopping: false,
 	loadTestConfig: null,
 	requestInfo: null,
+	peakConcurrency: 0,
+	breakpoint: INITIAL_BREAKPOINT,
 
 	startRun: (runId, config, requestInfo) =>
 		set({
@@ -98,6 +114,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			isStopping: false,
 			loadTestConfig: config ?? null,
 			requestInfo: requestInfo ?? null,
+			peakConcurrency: 0,
+			breakpoint: INITIAL_BREAKPOINT,
 		}),
 
 	stopRun: () =>
@@ -114,9 +132,32 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			const newHistory = [...state.historicalMetrics, ...batch].slice(
 				-HISTORICAL_METRICS_CAP
 			);
+
+			// Fold the new ticks into the running aggregates. Both are monotone:
+			// peak only grows, breakpoint is latched on the first SLO crossing —
+			// so we walk each batch entry exactly once, never the full history.
+			let peak = state.peakConcurrency;
+			let bp = state.breakpoint;
+			for (const m of batch) {
+				if (m.current_concurrency > peak) peak = m.current_concurrency;
+				if (!bp.crossed) {
+					const p99 = m.latency_p99_ms ?? 0;
+					if (p99 > DEFAULT_SLO_MS) {
+						bp = {
+							crossed: true,
+							concurrency: m.current_concurrency,
+							timeSeconds: m.elapsed_seconds,
+							p99Ms: p99,
+						};
+					}
+				}
+			}
+
 			return {
 				currentMetrics: batch[batch.length - 1],
 				historicalMetrics: newHistory,
+				peakConcurrency: peak,
+				breakpoint: bp,
 			};
 		}),
 
@@ -150,6 +191,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			isStopping: false,
 			loadTestConfig: null,
 			requestInfo: null,
+			peakConcurrency: 0,
+			breakpoint: INITIAL_BREAKPOINT,
 		}),
 
 	// Helpers

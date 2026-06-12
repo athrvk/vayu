@@ -2,8 +2,12 @@
 .vs
 
 
-# OS 
+# OS
 .DS_Store
 Thumbs.db
 # Claude Code agent worktrees (transient)
 .claude/worktrees/
+
+# Python (build.py bytecode)
+__pycache__/
+*.py[cod]

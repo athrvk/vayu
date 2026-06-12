@@ -14,6 +14,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
+import { QUERY_CACHE } from "@/config/cache";
 import type { GetConfigResponse, UpdateConfigRequest } from "@/types";
 
 /**
@@ -23,7 +24,7 @@ export function useConfigQuery() {
 	return useQuery({
 		queryKey: queryKeys.config.all,
 		queryFn: () => apiService.getConfig(),
-		staleTime: 60 * 1000, // Config rarely changes
+		staleTime: QUERY_CACHE.CONFIG_STALE_TIME_MS, // Config rarely changes
 	});
 }
 

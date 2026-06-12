@@ -37,7 +37,7 @@ interface EngineState {
 	reset: () => void;
 }
 
-export const useEngineStore = create<EngineState>((set) => ({
+export const useEngineStore = create<EngineState>()((set) => ({
 	// Initial state
 	isEngineConnected: false,
 	engineError: null,

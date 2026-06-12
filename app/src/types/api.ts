@@ -179,6 +179,9 @@ export interface StartLoadTestRequest {
 	environmentId?: string;
 	comment?: string;
 
+	// Generator backpressure
+	maxInFlight?: number; // Max concurrent in-flight requests before drops/queue. Default per-strategy.
+
 	// Data capture options
 	success_sample_rate?: number; // 0-100
 	slow_threshold_ms?: number;

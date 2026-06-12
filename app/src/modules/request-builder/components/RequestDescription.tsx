@@ -26,8 +26,13 @@ export default function RequestDescription() {
 	const [open, setOpen] = useState(description.length > 0);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-	// Auto-open if the underlying request changes to one with content
+	// Auto-open when the request has description content, and stay open (sticky)
+	// until the user explicitly closes it or blurs an empty field. This can't be
+	// derived from `description.length` without losing stickiness — collapsing the
+	// editor the instant the field becomes empty would yank the textarea out from
+	// under an active edit. Justified setState-in-effect.
 	useEffect(() => {
+		// eslint-disable-next-line react-hooks/set-state-in-effect
 		if (description.length > 0) setOpen(true);
 	}, [description.length]);
 

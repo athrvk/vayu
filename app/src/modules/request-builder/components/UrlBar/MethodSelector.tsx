@@ -14,9 +14,8 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context";
+import { HTTP_METHODS } from "@/constants/http";
 import type { HttpMethod } from "@/types";
-
-const HTTP_METHODS: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
 const METHOD_COLORS: Record<HttpMethod, string> = {
 	GET: "method-get",

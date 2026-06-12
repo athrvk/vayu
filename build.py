@@ -567,14 +567,19 @@ def setup_environment(project_root: Path):
     if shutil.which("node"):
         try:
             ver = subprocess.check_output(["node", "--version"], text=True).strip().lstrip("v")
-            if int(ver.split(".")[0]) >= 20:
+            # Vite 8 requires Node.js >= 20.19 (or 22.12+); a bare major>=20
+            # check would let 20.0-20.18 pass and then fail the build.
+            parts = [int(p) for p in ver.split(".")[:2]]
+            if (parts[0], parts[1]) >= (20, 19):
                 log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Node.js v{ver}')
                 node_ok = True
+            else:
+                log_dim(f'Node.js v{ver} is too old — Vite 8 needs >= 20.19 (22 LTS recommended).')
         except Exception:
             pass
 
     if not node_ok:
-        log_dim("Installing Node.js 20 LTS via nvm...")
+        log_dim("Installing Node.js 22 LTS via nvm...")
         nvm_dir = Path.home() / ".nvm"
         if not nvm_dir.exists():
             subprocess.run(
@@ -582,8 +587,8 @@ def setup_environment(project_root: Path):
                 shell=True, check=True
             )
         nvm_sh = nvm_dir / "nvm.sh"
-        subprocess.run(f'source "{nvm_sh}" && nvm install 20 --lts && nvm use 20', shell=True, executable="/bin/bash", check=True)
-        log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Node.js 20 installed via nvm')
+        subprocess.run(f'source "{nvm_sh}" && nvm install 22 --lts && nvm use 22', shell=True, executable="/bin/bash", check=True)
+        log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Node.js 22 installed via nvm')
         log_dim(f'Add   source "{nvm_sh}"   to your shell profile if not already present.')
 
     print()
@@ -951,7 +956,24 @@ def build_app(dev_mode: bool, engine_binary: Optional[Path], project_root: Path)
         # Package
         spinner = Spinner("Packaging application")
         spinner.start()
-        success, _ = run_command(["pnpm", "run", "electron:pack"], cwd=app_dir, description="Electron packaging")
+        system_name, _ = detect_platform()
+        if system_name == "macOS":
+            # The shipped config targets a universal binary, which CI produces
+            # by lipo-merging arm64+x64 engines before packaging. A local build
+            # only has the host-arch engine, so @electron/universal can't merge
+            # it ("same in both" single-arch file). Build for the host arch
+            # instead — CI still ships the universal release. Invoke the binary
+            # via `pnpm exec` (not `pnpm run ... --`, which forwards the `--`
+            # literally and makes electron-builder ignore these flags).
+            host_arch = "arm64" if platform.machine() == "arm64" else "x64"
+            pack_cmd = [
+                "pnpm", "exec", "electron-builder",
+                "--config", "electron-builder.json",
+                "--mac", "dmg", "zip", f"--{host_arch}",
+            ]
+        else:
+            pack_cmd = ["pnpm", "run", "electron:pack"]
+        success, _ = run_command(pack_cmd, cwd=app_dir, description="Electron packaging")
         if success:
             spinner.stop()
         else:

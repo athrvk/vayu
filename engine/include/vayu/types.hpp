@@ -120,12 +120,16 @@ struct Request {
  * @brief Timing breakdown for a request
  */
 struct Timing {
-    double total_ms      = 0.0;
+    double total_ms      = 0.0;  // perceived latency: submit → completion (after Plan 1)
+    double wire_ms       = 0.0;  // pure CURLINFO_TOTAL_TIME (DNS + TCP + TLS + send + recv)
+    double queue_wait_ms = 0.0;  // total_ms − wire_ms (generator-side overhead, clamped >= 0)
     double dns_ms        = 0.0;
     double connect_ms    = 0.0;
     double tls_ms        = 0.0;
     double first_byte_ms = 0.0;
     double download_ms   = 0.0;
+    size_t bytes_down    = 0; // CURLINFO_SIZE_DOWNLOAD_T + response header bytes (wire)
+    size_t bytes_up      = 0; // CURLINFO_SIZE_UPLOAD_T + request header bytes (wire)
 };
 
 // ============================================================================
@@ -527,6 +531,8 @@ enum class MetricName {
     LatencyP95,
     LatencyP99,
     LatencyP999,
+    LatencyMax,
+    LatencyMin,
     ErrorRate,
     TotalRequests,
     Completed,
@@ -545,8 +551,13 @@ enum class MetricName {
     // Status code distribution
     StatusCodes,
     // Duration metrics
-    TestDuration, // Actual test execution time in seconds
-    SetupOverhead // Time spent on setup/teardown in seconds
+    TestDuration,    // Actual test execution time in seconds
+    SetupOverhead,   // Time spent on setup/teardown in seconds
+    DroppedRequests, // Requests discarded due to generator backpressure (never reached server)
+    QueueWaitAvg,    // Average time requests spent queued inside the generator
+    BytesSent,        // Cumulative wire bytes uploaded (request headers + body)
+    BytesReceived,    // Cumulative wire bytes downloaded (response headers + body)
+    PeakConcurrency   // High-water mark of in-flight requests over the run
 };
 
 inline const char* to_string (MetricName name) {
@@ -559,6 +570,8 @@ inline const char* to_string (MetricName name) {
     case MetricName::LatencyP95: return "latency_p95";
     case MetricName::LatencyP99: return "latency_p99";
     case MetricName::LatencyP999: return "latency_p999";
+    case MetricName::LatencyMax: return "latency_max";
+    case MetricName::LatencyMin: return "latency_min";
     case MetricName::ErrorRate: return "error_rate";
     case MetricName::TotalRequests: return "total_requests";
     case MetricName::Completed: return "completed";
@@ -575,6 +588,11 @@ inline const char* to_string (MetricName name) {
     case MetricName::StatusCodes: return "status_codes";
     case MetricName::TestDuration: return "test_duration";
     case MetricName::SetupOverhead: return "setup_overhead";
+    case MetricName::DroppedRequests: return "dropped_requests";
+    case MetricName::QueueWaitAvg: return "queue_wait_avg";
+    case MetricName::BytesSent: return "bytes_sent";
+    case MetricName::BytesReceived: return "bytes_received";
+    case MetricName::PeakConcurrency: return "peak_concurrency";
     }
     return "unknown";
 }
@@ -596,6 +614,10 @@ inline std::optional<MetricName> parse_metric_name (const std::string& str) {
         return MetricName::LatencyP99;
     if (str == "latency_p999")
         return MetricName::LatencyP999;
+    if (str == "latency_max")
+        return MetricName::LatencyMax;
+    if (str == "latency_min")
+        return MetricName::LatencyMin;
     if (str == "error_rate")
         return MetricName::ErrorRate;
     if (str == "total_requests")
@@ -628,6 +650,16 @@ inline std::optional<MetricName> parse_metric_name (const std::string& str) {
         return MetricName::TestDuration;
     if (str == "setup_overhead")
         return MetricName::SetupOverhead;
+    if (str == "dropped_requests")
+        return MetricName::DroppedRequests;
+    if (str == "queue_wait_avg")
+        return MetricName::QueueWaitAvg;
+    if (str == "bytes_sent")
+        return MetricName::BytesSent;
+    if (str == "bytes_received")
+        return MetricName::BytesReceived;
+    if (str == "peak_concurrency")
+        return MetricName::PeakConcurrency;
     return std::nullopt;
 }
 

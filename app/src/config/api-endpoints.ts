@@ -12,12 +12,9 @@
  * Change these if the backend API routes change.
  */
 
-// Remote URLs (for reference)
-// const BASE_URL = "https://71bb7ff8ef44.ngrok-free.app";
-// const BASE_URL = "https://vayu-engine-latest.onrender.com";
+import { ENGINE_BASE_URL, STATS_PAGE_LIMIT } from "./network";
 
-// Local development
-const BASE_URL = "http://127.0.0.1:9876";
+const BASE_URL = ENGINE_BASE_URL;
 
 export const API_ENDPOINTS = {
 	// Base
@@ -56,11 +53,10 @@ export const API_ENDPOINTS = {
 	RUN_STOP: (id: string) => `/run/${id}/stop`,
 
 	// Real-time stats (SSE)
-	STATS_STREAM: (runId: string) => `/stats/${runId}`, // Old endpoint (DB-based)
 	METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`, // New endpoint (memory-based, faster)
 
 	// Time-series metrics (JSON, paginated)
-	STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0) =>
+	STATS_TIME_SERIES: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0) =>
 		`/stats/${runId}?format=json&limit=${limit}&offset=${offset}`,
 
 	// Import

@@ -9,6 +9,9 @@
 
 #include <curl/curl.h>
 
+#include <algorithm>
+#include <cassert>
+#include <chrono>
 #include <regex>
 
 #include "vayu/core/constants.hpp"
@@ -16,6 +19,7 @@
 #include "vayu/http/event_loop/event_loop_worker.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/utils/logger.hpp"
 
 namespace vayu::http::detail {
 
@@ -254,22 +258,64 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
         response.status_text = vayu::http::status_text (response.status_code);
     }
 
-    // Get timing info
-    double total_time = 0, namelookup_time = 0, connect_time = 0;
+    // Get curl timing info — these are wire-only (libcurl's view)
+    double wire_seconds = 0, namelookup_time = 0, connect_time = 0;
     double appconnect_time = 0, starttransfer_time = 0;
 
-    curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &total_time);
+    curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &wire_seconds);
     curl_easy_getinfo (curl, CURLINFO_NAMELOOKUP_TIME, &namelookup_time);
     curl_easy_getinfo (curl, CURLINFO_CONNECT_TIME, &connect_time);
     curl_easy_getinfo (curl, CURLINFO_APPCONNECT_TIME, &appconnect_time);
     curl_easy_getinfo (curl, CURLINFO_STARTTRANSFER_TIME, &starttransfer_time);
 
-    response.timing.total_ms   = total_time * 1000.0;
-    response.timing.dns_ms     = namelookup_time * 1000.0;
-    response.timing.connect_ms = (connect_time - namelookup_time) * 1000.0;
-    response.timing.tls_ms     = (appconnect_time - connect_time) * 1000.0;
+    // Perceived latency: wall-clock from submit() to now. steady_clock is
+    // monotonic so it's not affected by NTP jumps.
+    auto completion = std::chrono::steady_clock::now ();
+    double perceived_ms = std::chrono::duration<double, std::milli> (
+        completion - data->submitted_at).count ();
+
+    double wire_ms = wire_seconds * 1000.0;
+    // Clamp queue_wait to >= 0 to absorb sub-microsecond clock jitter where
+    // perceived_ms can appear marginally smaller than wire_ms. A discrepancy
+    // larger than 1ms indicates a real problem (wrong stamp point, clock
+    // skew between steady_clock and curl's TOTAL_TIME, etc.) — debug builds
+    // trip an assert; release builds log a warning so the signal isn't lost
+    // silently in the clamp. Without this, a future regression that moves
+    // `submitted_at` later in the pipeline would zero out queue_wait_ms in
+    // production while CI stays green.
+    double delta = perceived_ms - wire_ms;
+    assert (delta > -1.0 && "perceived_ms - wire_ms below -1ms — clock issue?");
+    if (delta < -1.0) {
+        vayu::utils::log_warning (
+        "queue_wait clock skew: perceived_ms=" + std::to_string (perceived_ms) +
+        " wire_ms=" + std::to_string (wire_ms) +
+        " delta_ms=" + std::to_string (delta) +
+        " — submitted_at stamp may be set after curl wire start");
+    }
+    double queue_wait_ms = std::max (0.0, delta);
+
+    response.timing.total_ms      = perceived_ms;        // redefined as perceived
+    response.timing.wire_ms       = wire_ms;             // new
+    response.timing.queue_wait_ms = queue_wait_ms;       // new
+    response.timing.dns_ms        = namelookup_time * 1000.0;
+    response.timing.connect_ms    = (connect_time - namelookup_time) * 1000.0;
+    response.timing.tls_ms        = (appconnect_time - connect_time) * 1000.0;
     response.timing.first_byte_ms = (starttransfer_time - appconnect_time) * 1000.0;
-    response.timing.download_ms = (total_time - starttransfer_time) * 1000.0;
+    response.timing.download_ms   = (wire_seconds - starttransfer_time) * 1000.0;
+
+    // Wire byte counts (body + headers), for throughput-in-bytes metrics.
+    curl_off_t dl_bytes = 0, ul_bytes = 0;
+    long header_bytes = 0, request_bytes = 0;
+    curl_easy_getinfo (curl, CURLINFO_SIZE_DOWNLOAD_T, &dl_bytes);
+    curl_easy_getinfo (curl, CURLINFO_SIZE_UPLOAD_T, &ul_bytes);
+    curl_easy_getinfo (curl, CURLINFO_HEADER_SIZE, &header_bytes);
+    curl_easy_getinfo (curl, CURLINFO_REQUEST_SIZE, &request_bytes);
+    response.timing.bytes_down =
+        static_cast<size_t> (std::max<curl_off_t> (0, dl_bytes)) +
+        static_cast<size_t> (std::max<long> (0, header_bytes));
+    response.timing.bytes_up =
+        static_cast<size_t> (std::max<curl_off_t> (0, ul_bytes)) +
+        static_cast<size_t> (std::max<long> (0, request_bytes));
 
     // Set body
     response.body      = std::move (data->response_body);
