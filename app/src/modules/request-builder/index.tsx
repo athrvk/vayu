@@ -25,7 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RequestBuilderProvider } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
-import { useNavigationStore, useSessionStore, useDashboardStore } from "@/stores";
+import { useTabsStore, useSessionStore, useDashboardStore } from "@/stores";
 import {
 	useRequestQuery,
 	useUpdateRequestMutation,
@@ -76,13 +76,16 @@ function authToRecord(
  * Gets request ID from store, fetches data, and provides context
  */
 export default function RequestBuilder() {
-	const { selectedRequestId } = useNavigationStore();
-	const { navigateToDashboard } = useNavigationStore();
+	const { openTabs, activeTabId, openTab } = useTabsStore();
 	const { activeEnvironmentId } = useSessionStore();
 	const { startRun } = useDashboardStore();
 	const { executeRequest: engineExecuteRequest } = useEngine();
 	const updateRequestMutation = useUpdateRequestMutation();
 	const queryClient = useQueryClient();
+
+	// Get selectedRequestId from active tab
+	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	const selectedRequestId = activeTab?.type === "request" ? activeTab.entityId : null;
 
 	// Load test dialog state
 	const [showLoadTestDialog, setShowLoadTestDialog] = useState(false);
@@ -524,7 +527,7 @@ export default function RequestBuilder() {
 				// Start global metrics monitoring (stays active even if user navigates away)
 				loadTestService.startMonitoring(result.runId);
 
-				navigateToDashboard();
+				openTab({ type: "dashboard", entityId: null });
 				setShowLoadTestDialog(false);
 				setPendingLoadTestRequest(null);
 			} catch (error) {
@@ -539,7 +542,7 @@ export default function RequestBuilder() {
 			fetchedRequest,
 			activeEnvironmentId,
 			startRun,
-			navigateToDashboard,
+			openTab,
 			resolveString,
 			resolveObject,
 			collectionAncestors,

@@ -5,8 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-// Navigation and Engine stores
-export { useNavigationStore, type NavigationContext } from "./navigation";
+// Engine store
 export { useEngineStore } from "./engine-store";
 
 // Domain stores

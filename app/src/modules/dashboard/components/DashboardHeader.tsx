@@ -14,7 +14,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, StopCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui";
-import { useNavigationStore } from "@/stores";
+import { useTabsStore } from "@/stores";
 import { getMethodColor } from "@/utils";
 import type { DashboardHeaderProps } from "../types";
 
@@ -35,8 +35,12 @@ export default function DashboardHeader({
 	elapsedDuration = 0,
 	configuration,
 }: DashboardHeaderProps) {
-	const navigateBack = useNavigationStore((s) => s.navigateBack);
-	const canNavigateBack = useNavigationStore((s) => s.canNavigateBack());
+	const { openTabs, activeTabId, closeTab } = useTabsStore();
+
+	const canNavigateBack = openTabs.length > 1;
+	const navigateBack = () => {
+		if (activeTabId) closeTab(activeTabId);
+	};
 
 	// Live counter for running tests — reset to 0 each time a new run starts
 	const [liveTick, setLiveTick] = useState(0);

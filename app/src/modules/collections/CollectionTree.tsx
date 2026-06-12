@@ -7,7 +7,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Folder, Plus, Trash2, Edit2, Copy, FolderPlus, Loader2, Download } from "lucide-react";
-import { useNavigationStore, useSaveStore, useImportModalStore } from "@/stores";
+import { useTabsStore, useSaveStore, useImportModalStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
 	useCollectionsQuery,
@@ -37,15 +37,20 @@ import { compareCollectionOrder } from "@/types";
 
 export default function CollectionTree() {
 	const openImport = useImportModalStore((s) => s.open);
-	const {
-		navigateToRequest,
-		navigateToCollection,
-		navigateToWelcome,
-		selectedCollectionId,
-		selectedRequestId,
-	} = useNavigationStore();
+	const { openTab, openTabs, activeTabId } = useTabsStore();
 	const { expandedCollectionIds, toggleCollectionExpanded } = useCollectionsStore();
 	const { startSaving, completeSave, failSave, setStatus } = useSaveStore();
+
+	// Get selected collection and request IDs from active tab
+	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	const selectedCollectionId = activeTab?.type === "collection" ? activeTab.entityId : null;
+	const selectedRequestId = activeTab?.type === "request" ? activeTab.entityId : null;
+
+	const navigateToRequest = (collectionId: string, requestId: string) =>
+		openTab({ type: "request", entityId: requestId });
+	const navigateToCollection = (collectionId: string) =>
+		openTab({ type: "collection", entityId: collectionId });
+	const navigateToWelcome = () => openTab({ type: "welcome", entityId: null });
 
 	// TanStack Query hooks
 	const { data: collections = [], isLoading: isLoadingCollections } = useCollectionsQuery();
