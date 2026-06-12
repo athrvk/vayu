@@ -7,6 +7,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { useSaveStore } from "./save-store";
 
 export type TabType =
 	| "welcome"
@@ -76,11 +77,21 @@ export const useTabsStore = create<TabsState>()(
 
 				// LRU eviction when over cap
 				if (tabs.length > MAX_OPEN_TABS) {
-					// Find the oldest non-active, non-exempt tab
-					const evictIndex = tabs.findIndex(
-						(t) => t.id !== activeTabId && !LRU_EXEMPT_TYPES.includes(t.type)
-					);
+					// Find the oldest non-active, non-exempt, non-dirty tab
+					const contexts = useSaveStore.getState().contexts;
+					const evictIndex = tabs.findIndex((t) => {
+						if (t.id === activeTabId) return false;
+						if (LRU_EXEMPT_TYPES.includes(t.type)) return false;
+						const ctx = t.entityId ? contexts.get(`request-${t.entityId}`) : null;
+						return !ctx?.hasPendingChanges;
+					});
 					if (evictIndex !== -1) {
+						const evicted = tabs[evictIndex];
+						// Flush any lingering save context for the evicted tab
+						if (evicted.entityId) {
+							const ctx = contexts.get(`request-${evicted.entityId}`);
+							if (ctx?.hasPendingChanges) void ctx.save();
+						}
 						tabs.splice(evictIndex, 1);
 					}
 				}
@@ -115,6 +126,19 @@ export const useTabsStore = create<TabsState>()(
 				const { openTabs, activeTabId } = get();
 				if (!activeTabId) {
 					get().openTab(tabDef);
+					return;
+				}
+				// If a tab for this entity already exists elsewhere, focus it instead
+				const isSingleton = SINGLETON_TYPES.includes(tabDef.type);
+				const existing = openTabs.find(
+					(t) =>
+						t.id !== activeTabId &&
+						(isSingleton
+							? t.type === tabDef.type
+							: t.type === tabDef.type && t.entityId === tabDef.entityId)
+				);
+				if (existing) {
+					set({ activeTabId: existing.id });
 					return;
 				}
 				const newTab: Tab = { ...tabDef, id: activeTabId };

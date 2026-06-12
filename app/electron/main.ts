@@ -368,9 +368,13 @@ app.on("before-quit", (event) => {
 			ipcMain.removeListener("before-quit-flushed", resumeQuit);
 			app.quit();
 		};
+		if (!mainWindow) {
+			resumeQuit();
+			return;
+		}
 		ipcMain.once("before-quit-flushed", resumeQuit);
 		setTimeout(resumeQuit, 2000);
-		mainWindow?.webContents.send("before-quit");
+		mainWindow.webContents.send("before-quit");
 		return;
 	}
 

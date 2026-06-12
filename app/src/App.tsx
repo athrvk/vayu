@@ -32,16 +32,10 @@ function App() {
 
 	// Register Electron before-quit handler to flush pending saves
 	useEffect(() => {
-		const api = (
-			window as Window & { electronAPI?: { onBeforeQuit?: (cb: () => void) => () => void } }
-		).electronAPI;
-		if (!api?.onBeforeQuit) return;
-
-		const unsubscribe = api.onBeforeQuit(async () => {
+		if (!window.electronAPI?.onBeforeQuit) return;
+		return window.electronAPI.onBeforeQuit(async () => {
 			await useSaveStore.getState().flushAll();
 		});
-
-		return unsubscribe;
 	}, []);
 
 	// Log connection status for debugging
