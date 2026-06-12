@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { useTabsStore, useSaveStore, useLayoutStore, type Tab } from "@/stores";
+import { useTabsStore, useSaveStore, useLayoutStore, type Tab, type DrawerView } from "@/stores";
 import { ImportModal } from "@/modules/collections/ImportModal";
 import { Drawer } from "./Drawer";
 import { Dock } from "./Dock";
@@ -16,7 +16,7 @@ import CollectionDetail from "@/modules/collections/CollectionDetail";
 import LoadTestDashboard from "@/modules/dashboard";
 import { HistoryDetail } from "@/modules/history/main";
 import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
-import { SettingsMain } from "@/modules/settings";
+import { SettingsMain, SettingsCategoryTree } from "@/modules/settings";
 import VariablesMain from "@/modules/variables/main/VariablesMain";
 
 function renderTabContent(tab: Tab | null): React.ReactNode {
@@ -35,15 +35,22 @@ function renderTabContent(tab: Tab | null): React.ReactNode {
 		case "variables":
 			return <VariablesMain />;
 		case "settings":
-			return <SettingsMain />;
+			return (
+				<div className="flex h-full overflow-hidden">
+					<div className="w-60 shrink-0 border-r border-border bg-panel overflow-y-auto">
+						<SettingsCategoryTree />
+					</div>
+					<SettingsMain />
+				</div>
+			);
 		default:
 			return null;
 	}
 }
 
 export default function Shell() {
-	const { openTabs, activeTabId, closeTab, focusTab } = useTabsStore();
-	const { toggleDrawer } = useLayoutStore();
+	const { openTabs, activeTabId, closeTab, focusTab, openTab } = useTabsStore();
+	const { toggleDrawer, activateDrawerView, toggleContextBar } = useLayoutStore();
 	const { triggerSave } = useSaveStore();
 	const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -57,34 +64,68 @@ export default function Shell() {
 
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
-			if (e.metaKey || e.ctrlKey) {
-				switch (e.key) {
-					case "s":
-						e.preventDefault();
-						triggerSave();
-						break;
-					case "w":
-						e.preventDefault();
-						if (activeTabId) closeTab(activeTabId);
-						break;
-					case "b":
-						e.preventDefault();
-						toggleDrawer();
-						break;
-					default:
-						if (e.key >= "1" && e.key <= "9") {
-							const tab = openTabs[parseInt(e.key) - 1];
-							if (tab) {
-								e.preventDefault();
-								focusTab(tab.id);
-							}
-						}
+			if (!(e.metaKey || e.ctrlKey)) return;
+			const key = e.key.toLowerCase();
+
+			// ⇧⌘E / ⇧⌘H / ⇧⌘U — drawer view switchers (match Dock tooltips)
+			if (e.shiftKey) {
+				const views: Record<string, DrawerView> = {
+					e: "collections",
+					h: "history",
+					u: "variables",
+				};
+				const view = views[key];
+				if (view) {
+					e.preventDefault();
+					activateDrawerView(view);
 				}
+				return;
+			}
+
+			switch (key) {
+				case "s":
+					e.preventDefault();
+					triggerSave();
+					break;
+				case "w":
+					e.preventDefault();
+					if (activeTabId) closeTab(activeTabId);
+					break;
+				case "b":
+					e.preventDefault();
+					toggleDrawer();
+					break;
+				case "i":
+					e.preventDefault();
+					toggleContextBar();
+					break;
+				case ",":
+					e.preventDefault();
+					openTab({ type: "settings", entityId: null });
+					break;
+				default:
+					if (key >= "1" && key <= "9") {
+						const tab = openTabs[parseInt(key) - 1];
+						if (tab) {
+							e.preventDefault();
+							focusTab(tab.id);
+						}
+					}
 			}
 		};
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [triggerSave, closeTab, toggleDrawer, focusTab, activeTabId, openTabs]);
+	}, [
+		triggerSave,
+		closeTab,
+		toggleDrawer,
+		toggleContextBar,
+		activateDrawerView,
+		openTab,
+		focusTab,
+		activeTabId,
+		openTabs,
+	]);
 
 	return (
 		<div className="flex flex-col h-full bg-background overflow-hidden">

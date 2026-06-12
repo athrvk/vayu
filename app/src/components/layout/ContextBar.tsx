@@ -9,6 +9,7 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLayoutStore, useTabsStore } from "@/stores";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
+import { useRequestQuery } from "@/queries";
 
 interface ContextBarProps {
 	mode?: "push" | "overlay";
@@ -19,7 +20,13 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 	const { openTabs, activeTabId } = useTabsStore();
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 
-	const { getAllVariables } = useVariableResolver();
+	// Resolve the active request's collection so collection-scope variables show up
+	const { data: request } = useRequestQuery(
+		activeTab?.type === "request" ? activeTab.entityId : null
+	);
+	const { getAllVariables } = useVariableResolver({
+		collectionId: request?.collectionId || undefined,
+	});
 	const variables = getAllVariables();
 
 	if (!contextBarOpen || activeTab?.type !== "request") return null;
@@ -28,9 +35,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 		<div
 			className={cn(
 				"flex flex-col shrink-0 border-l border-border bg-panel overflow-y-auto",
-				mode === "overlay"
-					? "absolute right-0 top-0 bottom-0 shadow-lg z-10"
-					: "relative"
+				mode === "overlay" ? "absolute right-0 top-0 bottom-0 shadow-lg z-10" : "relative"
 			)}
 			style={{ width: 252 }}
 		>

@@ -46,17 +46,19 @@ function createWindow() {
 		frame: false,
 		titleBarStyle: "hidden",
 		// Center the macOS traffic lights inside the titlebar (lights are ~16px)
-		trafficLightPosition: process.platform === "darwin"
-			? { x: 12, y: Math.round((TITLEBAR_HEIGHT - 16) / 2) }
-			: undefined,
+		trafficLightPosition:
+			process.platform === "darwin"
+				? { x: 12, y: Math.round((TITLEBAR_HEIGHT - 16) / 2) }
+				: undefined,
 		// Windows-only native overlay — Linux uses custom HTML buttons
-		titleBarOverlay: process.platform === "win32"
-			? {
-					color: nativeTheme.shouldUseDarkColors ? "#111113" : "#f2f0eb",
-					symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f0eb" : "#111113",
-					height: TITLEBAR_HEIGHT,
-				}
-			: false,
+		titleBarOverlay:
+			process.platform === "win32"
+				? {
+						color: nativeTheme.shouldUseDarkColors ? "#111113" : "#f2f0eb",
+						symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f0eb" : "#111113",
+						height: TITLEBAR_HEIGHT,
+					}
+				: false,
 		webPreferences: {
 			nodeIntegration: false,
 			contextIsolation: true,
@@ -139,7 +141,13 @@ function createMenu() {
 		// File menu
 		{
 			label: "File",
-			submenu: [isMac ? { role: "close" as const } : { role: "quit" as const }],
+			submenu: [
+				// CmdOrCtrl+W belongs to the renderer (close tab) — rebind window
+				// close so the menu accelerator doesn't swallow the keydown.
+				isMac
+					? { role: "close" as const, accelerator: "Shift+CmdOrCtrl+W" }
+					: { role: "quit" as const },
+			],
 		},
 		// Edit menu
 		{
@@ -192,7 +200,7 @@ function createMenu() {
 							{ type: "separator" as const },
 							{ role: "window" as const },
 						]
-					: [{ role: "close" as const }]),
+					: [{ role: "close" as const, accelerator: "Shift+CmdOrCtrl+W" }]),
 			],
 		},
 	];

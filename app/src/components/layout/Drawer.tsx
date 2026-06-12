@@ -7,6 +7,7 @@
 
 import { useLayoutStore, type DrawerView } from "@/stores";
 import { useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
+import { ScrollArea } from "@/components/ui";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
@@ -45,11 +46,18 @@ export function Drawer() {
 	return (
 		<div className="relative flex shrink-0 bg-panel" style={{ width }}>
 			<div className="flex-1 overflow-hidden flex flex-col">
-				{drawerView === "collections" && <CollectionTree />}
-				{drawerView === "history" && <HistoryList />}
-				{drawerView === "variables" && (
-					<VariablesCategoryTree collections={collections} environments={environments} />
-				)}
+				<ScrollArea className="h-full w-full">
+					<div className="w-full min-w-0">
+						{drawerView === "collections" && <CollectionTree />}
+						{drawerView === "history" && <HistoryList />}
+						{drawerView === "variables" && (
+							<VariablesCategoryTree
+								collections={collections}
+								environments={environments}
+							/>
+						)}
+					</div>
+				</ScrollArea>
 			</div>
 
 			<div

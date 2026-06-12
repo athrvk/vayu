@@ -24,7 +24,8 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-	selectedCategory: null,
+	// Default to a real category so the settings tab opens with content
+	selectedCategory: "ui",
 
 	setSelectedCategory: (category) => set({ selectedCategory: category }),
 }));
