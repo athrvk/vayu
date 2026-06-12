@@ -13,7 +13,7 @@ vi.mock("@/queries/import", () => ({
 }));
 
 import { ImportModal } from "./ImportModal";
-import { useImportModalStore } from "@/stores/import-modal-store";
+import { useImportModalStore } from "@/stores";
 
 const postman = readFileSync(
 	join(__dirname, "../../services/importers/__fixtures__/postman-v21.json"),

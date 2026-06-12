@@ -8,7 +8,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Folder, Plus, Trash2, Edit2, Copy, FolderPlus, Loader2, Download } from "lucide-react";
 import { useNavigationStore, useCollectionsStore, useSaveStore } from "@/stores";
-import { useImportModalStore } from "@/stores/import-modal-store";
+import { useImportModalStore } from "@/stores";
 import {
 	useCollectionsQuery,
 	useMultipleCollectionRequests,

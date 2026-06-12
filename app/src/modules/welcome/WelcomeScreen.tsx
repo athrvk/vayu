@@ -31,7 +31,7 @@ import {
 	Download,
 } from "lucide-react";
 import { useNavigationStore } from "@/stores";
-import { useImportModalStore } from "@/stores/import-modal-store";
+import { useImportModalStore } from "@/stores";
 import {
 	useCollectionsQuery,
 	useRunsQuery,
