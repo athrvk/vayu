@@ -8,14 +8,14 @@
 import { useEffect } from "react";
 import Shell from "./components/layout/Shell";
 import TitleBar from "./components/layout/TitleBar";
-import { useEngineConnectionStore } from "./stores";
+import { useEngineStore } from "./stores";
 import { useHealthQuery, usePrefetchCollectionsAndRequests, useRunsQuery } from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
 import { useSaveStore } from "./stores/save-store";
 
 function App() {
-	const { isEngineConnected } = useEngineConnectionStore();
+	const { isEngineConnected } = useEngineStore();
 
 	// Sync theme with OS/Electron settings
 	useElectronTheme();

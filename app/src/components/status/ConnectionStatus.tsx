@@ -19,7 +19,7 @@ import {
 	Database,
 	FileText,
 } from "lucide-react";
-import { useEngineConnectionStore } from "@/stores";
+import { useEngineStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -73,7 +73,7 @@ function SaveStatusIndicator() {
 }
 
 export default function ConnectionStatus() {
-	const { isEngineConnected, engineError } = useEngineConnectionStore();
+	const { isEngineConnected, engineError } = useEngineStore();
 	const [isExpanded, setIsExpanded] = useState(false);
 	const [paths, setPaths] = useState<{
 		appDir: string;

@@ -14,17 +14,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
-import { useEngineConnectionStore } from "@/stores";
+import { useEngineStore } from "@/stores";
 import { useEffect } from "react";
 
 const HEALTH_CHECK_INTERVAL_MS = 30000; // 30 seconds
 
 /**
  * Engine health check with automatic polling
- * Updates engine connection store with connection status
+ * Updates engine store with connection status
  */
 export function useHealthQuery() {
-	const { setEngineConnected, setEngineError } = useEngineConnectionStore();
+	const { setEngineConnected, setEngineError } = useEngineStore();
 
 	const query = useQuery({
 		queryKey: queryKeys.health.status(),

@@ -7,7 +7,7 @@
 
 // Navigation and Engine stores
 export { useNavigationStore, type NavigationContext } from "./navigation";
-export { useEngineConnectionStore } from "./engine";
+export { useEngineStore } from "./engine-store";
 
 // Domain stores
 export { useCollectionsStore } from "./collections-store";

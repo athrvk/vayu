@@ -14,7 +14,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useSettingsStore } from "@/stores";
+import { useSettingsStore, useEngineStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
 import { useConfigQuery, useUpdateConfigMutation } from "@/queries";
 import type { ConfigEntry, SettingsCategory } from "@/types";
@@ -88,13 +88,13 @@ interface EditedValue {
 }
 
 export default function SettingsMain() {
+	const { selectedCategory } = useSettingsStore();
 	const {
-		selectedCategory,
 		pendingRestart,
 		restartRequiredKeys,
 		addRestartRequiredKey,
 		clearRestartRequired,
-	} = useSettingsStore();
+	} = useEngineStore();
 	const {
 		startSaving,
 		completeSave,
