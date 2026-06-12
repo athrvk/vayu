@@ -16,3 +16,4 @@ export { useSessionStore } from "./session-store";
 export { useSaveStore, type SaveStatus } from "./save-store";
 export { useResponseStore, type StoredResponse } from "./response-store";
 export { useTabsStore, type Tab, type TabType } from "./tabs-store";
+export { useLayoutStore, type DrawerView } from "./layout-store";
