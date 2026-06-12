@@ -39,7 +39,7 @@ import {
 	useDeleteEnvironmentMutation,
 	useUpdateCollectionMutation,
 } from "@/queries";
-import { useSaveStore, useVariablesStore } from "@/stores";
+import { useSaveStore, useVariablesStore, useSessionStore } from "@/stores";
 import type { VariableValue, Collection, Environment } from "@/types";
 import {
 	Button,
@@ -151,7 +151,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const deleteEnvironmentMutation = useDeleteEnvironmentMutation();
 	const updateCollectionMutation = useUpdateCollectionMutation();
 
-	const { setSelectedCategory, setActiveEnvironmentId } = useVariablesStore();
+	const { setSelectedCategory } = useVariablesStore();
+	const { setActiveEnvironmentId } = useSessionStore();
 	const {
 		registerContext,
 		unregisterContext,
@@ -445,7 +446,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const isActiveEnvironment =
 		type === "environment" &&
 		environment &&
-		useVariablesStore.getState().activeEnvironmentId === environment.id;
+		useSessionStore.getState().activeEnvironmentId === environment.id;
 
 	const Icon = editorConfig.icon;
 	const title =

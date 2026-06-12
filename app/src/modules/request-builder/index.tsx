@@ -25,7 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RequestBuilderProvider } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
-import { useNavigationStore, useVariablesStore, useDashboardStore } from "@/stores";
+import { useNavigationStore, useSessionStore, useDashboardStore } from "@/stores";
 import {
 	useRequestQuery,
 	useUpdateRequestMutation,
@@ -78,7 +78,7 @@ function authToRecord(
 export default function RequestBuilder() {
 	const { selectedRequestId } = useNavigationStore();
 	const { navigateToDashboard } = useNavigationStore();
-	const { activeEnvironmentId } = useVariablesStore();
+	const { activeEnvironmentId } = useSessionStore();
 	const { startRun } = useDashboardStore();
 	const { executeRequest: engineExecuteRequest } = useEngine();
 	const updateRequestMutation = useUpdateRequestMutation();

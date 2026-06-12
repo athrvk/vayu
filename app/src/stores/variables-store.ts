@@ -1,3 +1,4 @@
+
 /**
  * Copyright (c) 2026 Atharva Kusumbia
  *
@@ -15,7 +16,6 @@
  */
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 
 export type VariableCategory =
 	| { type: "globals" }
@@ -26,46 +26,18 @@ interface VariablesUIState {
 	// Currently selected category in the tree
 	selectedCategory: VariableCategory | null;
 
-	// Active environment for variable resolution (used in requests)
-	activeEnvironmentId: string | null;
-
-	// Active collection context (for collection variables in requests)
-	activeCollectionId: string | null;
-
 	// Actions
 	setSelectedCategory: (category: VariableCategory | null) => void;
-	setActiveEnvironmentId: (environmentId: string | null) => void;
-	setActiveCollection: (collectionId: string | null) => void;
 	reset: () => void;
 }
 
-export const useVariablesStore = create<VariablesUIState>()(
-	persist(
-		(set) => ({
+export const useVariablesStore = create<VariablesUIState>((set) => ({
+	selectedCategory: null,
+
+	setSelectedCategory: (category) => set({ selectedCategory: category }),
+
+	reset: () =>
+		set({
 			selectedCategory: null,
-			activeEnvironmentId: null,
-			activeCollectionId: null,
-
-			setSelectedCategory: (category) => set({ selectedCategory: category }),
-
-			setActiveEnvironmentId: (environmentId) => set({ activeEnvironmentId: environmentId }),
-
-			setActiveCollection: (collectionId) => set({ activeCollectionId: collectionId }),
-
-			reset: () =>
-				set({
-					selectedCategory: null,
-					activeEnvironmentId: null,
-					activeCollectionId: null,
-				}),
 		}),
-		{
-			name: "variables-ui-store",
-			partialize: (state) => ({
-				// Persist active selections
-				activeEnvironmentId: state.activeEnvironmentId,
-				activeCollectionId: state.activeCollectionId,
-			}),
-		}
-	)
-);
+}));

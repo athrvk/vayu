@@ -18,7 +18,7 @@
 
 import { useMemo, useCallback } from "react";
 import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
-import { useVariablesStore } from "@/stores";
+import { useSessionStore } from "@/stores";
 import type { VariableValue, ResolvedVariable, Collection } from "@/types";
 import { castByType } from "@/lib/variable-cast";
 
@@ -56,7 +56,7 @@ export function useVariableResolver(
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
 
-	const { activeEnvironmentId, activeCollectionId: storeCollectionId } = useVariablesStore();
+	const { activeEnvironmentId, activeCollectionId: storeCollectionId } = useSessionStore();
 	const activeCollectionId = options?.collectionId || storeCollectionId;
 
 	// Build variable map with hierarchical resolution:

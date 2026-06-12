@@ -28,7 +28,7 @@ import {
 	useUpdateEnvironmentMutation,
 	useLastDesignRunQuery,
 } from "@/queries";
-import { useVariablesStore, useResponseStore } from "@/stores";
+import { useSessionStore, useResponseStore } from "@/stores";
 import type { VariableValue } from "@/types";
 import type {
 	RequestState,
@@ -169,7 +169,7 @@ export default function RequestBuilderProvider({
 	} = useVariableResolver({ collectionId: collectionId || undefined });
 
 	// Variable update mutations
-	const { activeEnvironmentId } = useVariablesStore();
+	const { activeEnvironmentId } = useSessionStore();
 	const { data: globalsData } = useGlobalsQuery();
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
