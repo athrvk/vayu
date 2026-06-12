@@ -99,24 +99,36 @@ The React app follows a component-based architecture:
 
 ```
 src/
-├── components/          # React components
-│   ├── layout/         # Shell, Sidebar
-│   ├── request-builder/ # Request editor
-│   ├── load-test-dashboard/ # Live metrics display
-│   ├── history/        # Run history
-│   ├── variables/      # Variable editors
-│   └── ui/            # Shared UI primitives (Radix UI)
+├── components/          # Shared UI components
+│   ├── layout/         # Shell, TitleBar, TabStrip, Drawer, Dock, ContextBar
+│   ├── shared/         # Cross-feature shared components
+│   └── ui/             # UI primitives (Radix UI)
 ├── lib/                # Shared libraries
 │   ├── graphql/        # GraphQL support: diagnostics, introspection, schema cache, Monaco providers, variables JSON Schema
 │   ├── monaco-setup.ts # Monaco local-bundle config + GraphQL provider registration (imported once in main.tsx)
 │   └── utils.ts        # General utilities (cn, etc.)
-├── modules/            # Feature modules (request-builder, collections, dashboard, history, variables, settings, welcome)
-├── stores/             # Zustand stores (UI state)
+├── modules/            # Feature modules
+│   ├── request-builder/  # API request editor and execution
+│   ├── dashboard/        # Load test metrics and visualization
+│   ├── history/          # Run history and reports
+│   ├── collections/      # Collections and requests tree
+│   ├── variables/        # Environment and variable editors
+│   ├── settings/         # App settings
+│   └── welcome/          # Onboarding screen
+├── stores/             # Cross-cutting Zustand stores (UI state)
+│   ├── tabs-store.ts        # Active tab state (determines main content)
+│   ├── layout-store.ts      # Drawer/sidebar visibility
+│   ├── session-store.ts     # Session and user info
+│   ├── engine-store.ts      # Engine health and connectivity
+│   ├── dashboard-store.ts   # Live metrics and test state
+│   ├── response-store.ts    # Response viewer state
+│   ├── save-store.ts        # Auto-save orchestration
+│   └── import-modal-store.ts # Import dialog state
 ├── queries/            # TanStack Query hooks (server state)
 ├── hooks/              # Custom React hooks
-├── services/           # API client, SSE client
+├── services/           # API client, SSE client, HTTP client
 ├── types/              # TypeScript type definitions
-└── config/             # Configuration (API endpoints)
+└── config/             # Configuration (API endpoints, metrics thresholds)
 ```
 
 #### State Management
@@ -124,14 +136,16 @@ src/
 The app uses a dual-state management approach:
 
 1. **Zustand Stores** (`stores/` and `lib/`): UI state, navigation, temporary data
-   - `app-store.ts`: Navigation, screen state, engine connection
-   - `dashboard-store.ts`: Load test metrics, streaming state
-   - `variables-store.ts`: Variable UI state, active environment
-   - `collections-store.ts`: Collection tree expansion state
-   - `history-store.ts`: History filtering
-   - `response-store.ts`: Response viewer state
-   - `save-store.ts`: Auto-save orchestration
+   - `tabs-store.ts`: Active tab state; determines which feature module renders in the main content area
+   - `layout-store.ts`: Drawer and sidebar visibility/state
+   - `session-store.ts`: User session, theme preferences
+   - `engine-store.ts`: Engine health, connectivity status
+   - `dashboard-store.ts`: Load test metrics (limited to 3,000 historical points per run), streaming state
+   - `response-store.ts`: Response viewer state (expand/collapse, scroll position)
+   - `save-store.ts`: Auto-save orchestration and progress
+   - `import-modal-store.ts`: Import dialog visibility and state
    - `lib/graphql/schema-cache.ts`: Introspected GraphQL schema cache keyed by endpoint URL
+   - Module-local stores (e.g., `modules/collections/collections-store.ts`) co-locate with their feature
 
 2. **TanStack Query** (`queries/`): Server state, caching, synchronization
    - Collections, Requests, Environments, Globals
@@ -219,11 +233,23 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **Recharts**: Charts for metrics visualization
 - **Vite**: Build tool and dev server
 
+## Electron Preload Bridge
+
+The preload script (`electron/preload.ts`) exposes a minimal, context-isolated API bridge via `window.electronAPI`:
+
+- **Engine Management**: `restartEngine()`, `getEngineStatus()` for engine lifecycle control
+- **Theme Management**: `getTheme()`, `setTheme()`, `onThemeChanged()` for OS theme synchronization
+- **Window Controls**: `windowMinimize()`, `windowMaximize()`, `windowClose()`, `windowIsMaximized()`, `onWindowMaximized()` for custom titlebar
+- **Auto-update**: Listeners for `onUpdateAvailable()`, `onUpdateDownloaded()`, plus `restartToInstallUpdate()`, `openReleasePage()`
+- **Menu Integration**: `onOpenSettings()` to receive open-settings commands from the app menu
+- **Platform & Paths**: `platform` constant and `getAppPaths()` for OS and directory detection
+- **Graceful Shutdown**: `onBeforeQuit()` to allow the renderer to flush state (saves, pending requests) before app termination
+
 ## Security Considerations
 
 - **Context Isolation**: Enabled in Electron (renderer cannot access Node.js APIs)
 - **No Node Integration**: Renderer runs in isolated context
-- **Preload Script**: Minimal bridge for IPC if needed (currently unused)
+- **Preload Script**: Minimal IPC bridge through `contextBridge.exposeInMainWorld()`
 - **Local Communication**: Engine runs on localhost only (127.0.0.1:9876)
 
 ## Performance Optimizations
@@ -232,4 +258,5 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **Query Caching**: TanStack Query caches server responses
 - **Optimistic Updates**: UI updates immediately, syncs with server
 - **Debounced Saves**: Auto-save waits for user to stop typing
-- **Metrics Limiting**: Dashboard store limits historical metrics to 10,000 points
+- **Metrics Limiting**: Dashboard store caps historical metrics to 3,000 points per run (`HISTORICAL_METRICS_CAP` in `config/metrics.ts`)
+- **Metrics Downsampling**: Charts downsample beyond 2,000 points to avoid render thrashing

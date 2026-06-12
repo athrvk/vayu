@@ -1,6 +1,6 @@
 # State Management
 
-The Vayu Manager uses a dual-state management approach: **Zustand** for UI state and **TanStack Query** for server state.
+The Vayu app uses a dual-state management approach: **Zustand** for UI state and **TanStack Query** for server state. **Cross-cutting stores** (tabs, layout, session, engine, save, response, dashboard, import modal) live in `app/src/stores/` and are exported via the barrel `app/src/stores/index.ts`. **Module-local UI stores** co-locate in `app/src/modules/<feature>/<feature>-store.ts` (collections, history, variables, settings) to keep feature-specific UI state decoupled from global app state.
 
 ## Architecture Overview
 
@@ -9,16 +9,16 @@ The Vayu Manager uses a dual-state management approach: **Zustand** for UI state
 │           State Management Layers                │
 ├─────────────────────────────────────────────────┤
 │  UI State (Zustand)                             │
-│  - Navigation, screen state                     │
-│  - Temporary UI state                          │
-│  - User preferences                            │
+│  - Cross-cutting: tabs, layout, session         │
+│  - Domain: engine, save, response, dashboard    │
+│  - Module-local: collections, history, vars     │
 └─────────────────────────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────────────────────────────┐
 │  Server State (TanStack Query)                  │
 │  - Collections, Requests, Environments           │
-│  - Runs, Metrics                                 │
+│  - Runs, Metrics, Global Variables              │
 │  - Automatic caching & synchronization          │
 └─────────────────────────────────────────────────┘
                     │
@@ -37,278 +37,413 @@ The Vayu Manager uses a dual-state management approach: **Zustand** for UI state
 └─────────────────────────────────────────────────┘
 ```
 
-## Zustand Stores (UI State)
+## Zustand Stores
 
-Zustand stores manage client-side UI state that doesn't need to be synchronized with the server.
+### Cross-Cutting Stores (`app/src/stores/`)
 
-### `app-store.ts` - Application Navigation
+#### `tabs-store.ts` - Open Tabs & Navigation
 
-Manages navigation state, screen routing, and engine connection status.
+Manages all open tabs (welcome, request, collection, dashboard, run, variables, settings) and active tab focus. Enforces a maximum of 12 open tabs with LRU eviction for non-exempt types.
 
 **State:**
 ```typescript
 {
-  activeSidebarTab: "collections" | "history" | "variables" | "settings"
-  activeScreen: "welcome" | "request-builder" | "dashboard" | ...
-  selectedCollectionId: string | null
-  selectedRequestId: string | null
-  selectedRunId: string | null
-  isEngineConnected: boolean
-  engineError: string | null
-  tabMemory: Record<SidebarTab, NavigationContext>
-  previousContext: NavigationContext | null
+  openTabs: Tab[]          // Each tab has unique id, type, and optional entityId
+  activeTabId: string | null
 }
 ```
 
 **Key Features:**
-- Tab memory: Remembers last screen/selection per sidebar tab
-- Navigation helpers: `navigateToRequest()`, `navigateToDashboard()`, etc.
-- Back navigation: `navigateBack()` uses `previousContext`
+- Deduplication: Singleton types (welcome, variables, settings) only allow one tab at a time
+- LRU eviction: Oldest non-active, non-exempt, clean tabs are closed when over limit
+- Integration with save-store: Dirty tabs are spared from eviction; pending saves are flushed on eviction
+- Persistence: `vayu.tabs` (v1)
 
-**Usage:**
+**Key Methods:**
 ```typescript
-const { activeScreen, navigateToRequest } = useAppStore();
-navigateToRequest(collectionId, requestId);
+const { openTab, closeTab, focusTab, replaceActiveTab, closeAll } = useTabsStore();
+openTab({ type: "request", entityId: "req-123" });
+replaceActiveTab({ type: "request", entityId: "req-456" }); // Replace active in place
 ```
 
-### `dashboard-store.ts` - Load Test Dashboard
+#### `layout-store.ts` - Drawer, Context Bar, & Split Ratio
 
-Manages load test metrics, streaming state, and final reports.
+Manages the left drawer (collections/history/variables), the right context bar, and request/response split ratio.
+
+**State:**
+```typescript
+{
+  drawerOpen: boolean                    // Is the left drawer visible?
+  drawerView: "collections" | "history" | "variables"
+  drawerWidths: Record<DrawerView, number>  // Per-view width (220–480px)
+  contextBarOpen: boolean                // Is the right context bar visible?
+  requestSplitRatio: number              // 0–1; left/request pane fraction
+}
+```
+
+**Key Methods:**
+```typescript
+const {
+  drawerOpen, setDrawerOpen, toggleDrawer,
+  drawerView, setDrawerView, activateDrawerView,
+  setDrawerWidth,
+  contextBarOpen, setContextBarOpen, toggleContextBar,
+  requestSplitRatio, setRequestSplitRatio
+} = useLayoutStore();
+activateDrawerView("variables"); // Open drawer to variables, or toggle closed if already there
+setDrawerWidth("collections", 300); // Clamp to [220, 480]
+```
+
+**Persistence:** `vayu.layout` (v1)
+
+#### `session-store.ts` - Active Environment & Collection
+
+Tracks the active environment (for variable resolution) and active collection context, persisted across sessions.
+
+**State:**
+```typescript
+{
+  activeEnvironmentId: string | null
+  activeCollectionId: string | null
+}
+```
+
+**Key Methods:**
+```typescript
+const { activeEnvironmentId, setActiveEnvironmentId } = useSessionStore();
+setActiveCollectionId(collectionId);
+```
+
+**Persistence:** `vayu.session` (v1)
+
+#### `engine-store.ts` - Engine Connection & Restart State
+
+Merged store managing engine connection status and restart-required notifications (for config changes that need an engine restart).
+
+**State:**
+```typescript
+{
+  isEngineConnected: boolean
+  engineError: string | null
+  pendingRestart: boolean
+  restartRequiredKeys: string[]  // Config keys requiring restart
+}
+```
+
+**Key Methods:**
+```typescript
+const {
+  isEngineConnected, setEngineConnected,
+  engineError, setEngineError,
+  pendingRestart, setPendingRestart, addRestartRequiredKey, clearRestartRequired,
+  reset
+} = useEngineStore();
+```
+
+**Non-persisted** (reset on app restart).
+
+#### `save-store.ts` - Centralized Auto-Save
+
+Orchestrates auto-save across the app with a registry of saveable contexts (e.g., request tabs, environment editors). Provides Ctrl/Cmd+S integration and unified save status.
+
+**State:**
+```typescript
+{
+  status: "idle" | "pending" | "saving" | "saved" | "error"
+  lastSavedAt: number | null
+  errorMessage: string | null
+  pendingSaveId: string | null
+  activeContextId: string | null
+  contexts: Map<string, SaveContext>  // Saveable entities
+}
+```
+
+**SaveContext:**
+```typescript
+{
+  id: string
+  name: string
+  save: () => Promise<void>
+  hasPendingChanges: boolean
+}
+```
+
+**Key Methods:**
+```typescript
+const {
+  registerContext, unregisterContext, updateContext,
+  setActiveContext, getActiveContext,
+  triggerSave,       // Ctrl/Cmd+S — saves active or first dirty context
+  flushAll           // Save all dirty contexts (used before app quit)
+} = useSaveStore();
+```
+
+**Non-persisted**. See `useSaveManager` hook for registration details.
+
+#### `response-store.ts` - Response Cache
+
+In-memory storage of responses per request ID, persisted across view/tab switches but not to disk.
+
+**State:**
+```typescript
+{
+  responses: Map<string, StoredResponse>
+}
+```
+
+**StoredResponse:** Includes status, headers, body, execution time, script results, and console logs.
+
+**Key Methods:**
+```typescript
+const { setResponse, getResponse, clearResponse, clearAll } = useResponseStore();
+```
+
+**Non-persisted** (responses are reloadable from backend).
+
+#### `dashboard-store.ts` - Load Test Metrics & State
+
+Manages live load test run state: streaming metrics, final reports, and running aggregates (peak concurrency, SLO breakpoint). Caps historical metrics at **3,000 points** (defined in `app/src/config/metrics.ts` as `HISTORICAL_METRICS_CAP = 3000`). This provides ~5 minutes of full-fidelity data at the engine's 10 Hz tick rate, long enough for typical load test sessions but short enough to keep chart slicing efficient.
 
 **State:**
 ```typescript
 {
   currentRunId: string | null
-  mode: "running" | "completed"
+  mode: "running" | "completed" | "stopped"
   isStreaming: boolean
   currentMetrics: LoadTestMetrics | null
-  historicalMetrics: LoadTestMetrics[]
+  historicalMetrics: LoadTestMetrics[]  // Capped at 3,000
   finalReport: RunReport | null
   error: string | null
   activeView: "metrics" | "request-response"
-  loadTestConfig: LoadTestRunConfig | null
-  requestInfo: LoadTestRequestInfo | null
+  isStopping: boolean
+  loadTestConfig: LoadTestRunConfig | null     // Config snapshot during run
+  requestInfo: LoadTestRequestInfo | null      // Request snapshot during run
+  peakConcurrency: number                      // Running max (monotonic)
+  breakpoint: Breakpoint                       // SLO crossing (latched on first breach)
 }
 ```
 
-**Key Features:**
-- Real-time metrics accumulation (limited to 10,000 points)
-- Helper methods: `getLatestMetrics()`, `getMetricsWindow(seconds)`
-- Automatic state reset on new run
-
-**Usage:**
+**Key Methods:**
 ```typescript
-const { startRun, addMetrics, setFinalReport } = useDashboardStore();
-startRun(runId, config, requestInfo);
+const {
+  startRun, stopRun, setStreaming,
+  addMetricsBatch,  // Efficiently fold batch into history and update aggregates
+  setFinalReport, setError, setActiveView, setStopping,
+  reset,
+  getLatestMetrics, getMetricsWindow
+} = useDashboardStore();
 ```
 
-### `variables-store.ts` - Variables UI State
+**Non-persisted** (fresh per session).
 
-Manages variable editor UI state and active environment/collection context.
+#### `import-modal-store.ts` - Import Modal UI
+
+Simple modal state for the collection import dialog.
 
 **State:**
 ```typescript
 {
-  selectedCategory: VariableCategory | null
-  activeEnvironmentId: string | null
-  activeCollectionId: string | null
-  isEditing: boolean
+  isOpen: boolean
 }
 ```
 
-**Key Features:**
-- Persisted state (localStorage): Active environment and collection persist across sessions
-- Category selection: Tracks which variable scope is being edited
-
-**Usage:**
+**Key Methods:**
 ```typescript
-const { activeEnvironmentId, setActiveEnvironment } = useVariablesStore();
-setActiveEnvironment(envId);
+const { isOpen, open, close } = useImportModalStore();
 ```
 
-### `schema-cache.ts` (GraphQL) - Schema Introspection Cache
+### Module-Local Stores
 
-Lives in `lib/graphql/schema-cache.ts`. Caches introspected `GraphQLSchema` objects keyed by resolved endpoint URL, and tracks which URL is currently active (set by `BodyPanel` when the `graphql` body mode is active). Used by Monaco language providers to validate and autocomplete GraphQL queries.
+Module-local UI stores co-locate in `app/src/modules/<feature>/<feature>-store.ts` and manage feature-specific UI state that should not leak into the global store tree.
 
-**State:**
-```typescript
-{
-  byUrl: Record<string, { status: "idle" | "loading" | "ready" | "error"; schema: GraphQLSchema | null; error: string | null; fetchedAt: number | null }>
-  activeUrl: string | null
-}
-```
+#### `modules/collections/collections-store.ts` - Collections Tree Expansion
 
-**Key methods:**
-- `ensureSchema(url, headers)` — introspects only if the URL hasn't been attempted yet
-- `refreshSchema(url, headers)` — forces a re-introspection regardless of cached state
-- `getActiveSchema()` — returns the ready schema for `activeUrl`, or `null`
-- `getActiveStatus()` — returns the status for `activeUrl`
-
-**Usage:**
-```typescript
-const schemaStatus = useSchemaCache((s) => s.getActiveStatus());
-useSchemaCache.getState().ensureSchema(url, headers);
-```
-
-### `collections-store.ts` - Collection Tree State
-
-Manages collection tree expansion state.
+UI-only: Which collections are expanded/collapsed in the tree.
 
 **State:**
 ```typescript
 {
   expandedCollectionIds: Set<string>
-  toggleExpanded: (id: string) => void
 }
 ```
 
-**Usage:**
+**Key Methods:**
 ```typescript
-const { expandedCollectionIds, toggleExpanded } = useCollectionsStore();
+const {
+  expandedCollectionIds,
+  toggleCollectionExpanded, expandCollection, collapseCollection,
+  reset
+} = useCollectionsStore();
 ```
 
-### `history-store.ts` - History Filtering
+#### `modules/history/history-store.ts` - History Filter & Sort
 
-Manages run history filter state.
+UI-only: Search, filter (type/status), and sort (newest/oldest) for the history tab.
 
 **State:**
 ```typescript
 {
-  filterType: "all" | "design" | "load" | null
-  filterStatus: "all" | "completed" | "failed" | null
-  // ... other filters
+  searchQuery: string
+  filterType: "all" | "load" | "design"
+  filterStatus: "all" | "pending" | "running" | "completed" | "stopped" | "failed"
+  sortBy: "newest" | "oldest"
 }
 ```
 
-### `response-store.ts` - Response Viewer State
+**Helper:** `filterRuns(runs, filters)` applies filters and sorting to server data.
 
-Manages response viewer UI state (tabs, expanded sections).
+**Key Methods:**
+```typescript
+const {
+  searchQuery, setSearchQuery,
+  filterType, setFilterType,
+  filterStatus, setFilterStatus,
+  sortBy, setSortBy,
+  resetFilters
+} = useHistoryStore();
+```
 
-### `save-store.ts` - Auto-Save Orchestration
+#### `modules/variables/variables-store.ts` - Variables Category Selection
 
-Manages auto-save debouncing and save state.
+UI-only: Which category (globals/collection/environment) is selected in the variables tree.
 
 **State:**
 ```typescript
 {
-  isSaving: boolean
-  lastSaved: number | null
-  triggerSave: () => void
+  selectedCategory: VariableCategory | null
+  // VariableCategory = { type: "globals" } | { type: "collection"; collectionId }
+  //                  | { type: "environment"; environmentId }
 }
 ```
 
-**Key Features:**
-- Debounced saves: Waits for user to stop typing
-- Save state tracking: Shows "Saving..." indicator
+**Key Methods:**
+```typescript
+const { selectedCategory, setSelectedCategory, reset } = useVariablesStore();
+```
+
+#### `modules/settings/settings-store.ts` - Settings Category Selection
+
+UI-only: Which settings category (e.g., "ui") is selected in the sidebar.
+
+**State:**
+```typescript
+{
+  selectedCategory: SettingsCategory | null
+}
+```
+
+**Key Methods:**
+```typescript
+const { selectedCategory, setSelectedCategory } = useSettingsStore();
+```
 
 ## TanStack Query (Server State)
 
-TanStack Query manages server state with automatic caching, refetching, and synchronization.
+TanStack Query manages server state with automatic caching, refetching, and synchronization. It is the source of truth for collections, requests, environments, globals, and runs.
 
-### Query Hooks (`queries/`)
+### Query Hooks
+
+Located in `app/src/services/queries/` (or `hooks/`), with types and cache invalidation centralized in `app/src/services/queries/keys.ts`.
 
 #### Collections & Requests
 
-- **`useCollectionsQuery()`**: Fetch all collections
-- **`useRequestsQuery(collectionId)`**: Fetch requests for a collection
-- **`useRequestQuery(requestId)`**: Fetch single request (from cache)
-- **`usePrefetchCollectionsAndRequests()`**: Prefetch all data on app init
+- **`useCollectionsQuery()`** — Fetch all collections
+- **`useCollectionQuery(id)`** — Fetch single collection
+- **`useRequestsQuery(collectionId)`** — Fetch requests in a collection
+- **`useRequestQuery(requestId)`** — Fetch single request
 
 **Mutations:**
-- **`useCreateCollectionMutation()`**: Create collection (optimistic update)
-- **`useUpdateCollectionMutation()`**: Update collection (cache update)
-- **`useDeleteCollectionMutation()`**: Delete collection (cache removal)
-- **`useCreateRequestMutation()`**: Create request
-- **`useUpdateRequestMutation()`**: Update request
-- **`useDeleteRequestMutation()`**: Delete request
+- **`useCreateCollectionMutation()`** — Create collection
+- **`useUpdateCollectionMutation()`** — Update collection (with cache update)
+- **`useDeleteCollectionMutation()`** — Delete collection (with cache removal)
+- **`useCreateRequestMutation()`** — Create request
+- **`useUpdateRequestMutation()`** — Update request
+- **`useDeleteRequestMutation()`** — Delete request
 
-#### Environments & Globals
+#### Environments & Variables
 
-- **`useEnvironmentsQuery()`**: Fetch all environments
-- **`useEnvironmentQuery(id)`**: Fetch single environment
-- **`useGlobalsQuery()`**: Fetch global variables
-
-**Mutations:**
-- **`useCreateEnvironmentMutation()`**: Create environment
-- **`useUpdateEnvironmentMutation()`**: Update environment
-- **`useDeleteEnvironmentMutation()`**: Delete environment
-- **`useUpdateGlobalsMutation()`**: Update global variables
-
-#### Runs
-
-- **`useRunsQuery()`**: Fetch all runs
-- **`useRunQuery(runId)`**: Fetch single run
-- **`useRunReportQuery(runId)`**: Fetch run report
+- **`useEnvironmentsQuery()`** — Fetch all environments
+- **`useEnvironmentQuery(id)`** — Fetch single environment
+- **`useGlobalsQuery()`** — Fetch global variables
 
 **Mutations:**
-- **`useStopRunMutation()`**: Stop running load test
-- **`useDeleteRunMutation()`**: Delete run
+- **`useCreateEnvironmentMutation()`**
+- **`useUpdateEnvironmentMutation()`**
+- **`useDeleteEnvironmentMutation()`**
+- **`useUpdateGlobalsMutation()`**
 
-#### Health & Config
+#### Runs & History
 
-- **`useHealthQuery()`**: Health check with automatic polling
-- **`useConfigQuery()`**: Fetch engine config
-- **`useScriptCompletionsQuery()`**: Fetch script autocomplete data
+- **`useRunsQuery()`** — Fetch all runs
+- **`useRunQuery(runId)`** — Fetch single run
+- **`useRunReportQuery(runId)`** — Fetch final report for a run
 
-### Query Keys (`queries/keys.ts`)
+**Mutations:**
+- **`useStopRunMutation()`** — Stop a running load test
+- **`useDeleteRunMutation()`** — Delete a run
 
-Centralized query key factory for consistent cache invalidation:
+#### Engine Health & Config
+
+- **`useHealthQuery()`** — Health check with automatic polling (enables connection indicator)
+- **`useConfigQuery()`** — Fetch engine configuration
+- **`useScriptCompletionsQuery()`** — Fetch script autocomplete data (for request scripting)
+
+### Query Keys & Cache Invalidation
+
+Centralized in `app/src/services/queries/keys.ts`, using TanStack Query's hierarchical key factory pattern:
 
 ```typescript
 export const queryKeys = {
   collections: {
-    list: () => ['collections'],
+    all: () => ['collections'],
+    list: () => ['collections', 'list'],
     detail: (id: string) => ['collections', id],
   },
   requests: {
-    lists: () => ['requests', 'list'],
-    listByCollection: (collectionId: string) => ['requests', 'list', collectionId],
+    all: () => ['requests'],
+    listByCollection: (collectionId: string) => ['requests', { collectionId }],
     detail: (id: string) => ['requests', id],
   },
   // ... etc
 };
 ```
 
-### Cache Management
-
 **Automatic Invalidation:**
-- Mutations automatically invalidate related queries
-- Example: Updating a request invalidates its collection's request list
-
-**Optimistic Updates:**
-- UI updates immediately before server response
-- Example: Creating a collection adds it to cache instantly
+- Mutations automatically invalidate related queries (e.g., creating a request invalidates the collection's request list)
+- Some mutations use optimistic updates and cache updates for instant UI feedback
 
 **Stale Time:**
 - Collections/Requests: 30 seconds
-- Health: 5 seconds (polling)
-- Run Reports: 1 minute
+- Environments: 30 seconds
+- Health: 5 seconds (polling — drives connection status)
+- Runs: 10 seconds
+- Run Reports: 1 minute (lazily refetched if stale when opened)
 
 ## Custom Hooks
 
-### `useEngine()` - Request Execution
+### `useEngine()` - Request & Load Test Execution
 
-Provides functions to execute requests and start load tests.
+Provides functions to execute single requests and start load tests, with loading state and error handling.
 
 **API:**
 ```typescript
 const {
-  executeRequest: (request, environmentId?) => Promise<SanityResult>
-  startLoadTest: (request, config, environmentId?) => Promise<StartLoadTestResponse>
-  stopLoadTest: (runId) => Promise<boolean>
+  executeRequest: (request: Request, environmentId?: string) => Promise<ExecutionResponse>
+  startLoadTest: (request: Request, config: LoadTestConfig, environmentId?: string) => Promise<{ runId: string }>
+  stopLoadTest: (runId: string) => Promise<void>
   isExecuting: boolean
   error: string | null
 } = useEngine();
 ```
 
 **Features:**
-- Loading state management
-- Error handling with user-friendly messages
-- Request transformation (frontend → backend format)
+- Request transformation (frontend format → backend format)
+- Automatic error handling and user feedback
+- Environment variable resolution (if needed pre-flight)
 
-### `useSSE()` - Real-Time Metrics
+### `useSSE()` - Live Metrics Stream
 
-Connects to Server-Sent Events stream for load test metrics.
+Subscribes to Server-Sent Events for live load test metrics during a run.
 
 **API:**
 ```typescript
@@ -319,29 +454,31 @@ useSSE({
 ```
 
 **Features:**
-- Automatic connection/disconnection
-- Connects immediately to `/metrics/live/:runId`; the engine's tick topic is replayable (no attach race) and ends with an explicit `complete` event, so there is no custom reconnect loop — transient `CONNECTING` errors are left to the browser's built-in `EventSource` retry, and a `CLOSED` state is terminal
-- Metrics forwarding to dashboard store
+- Automatic connection/disconnection based on `runId` and `enabled`
+- Connects to `/metrics/live/:runId` (engine endpoint)
+- Replayable tick stream with explicit `complete` event (no custom reconnect logic needed)
+- Forwards metrics to `useDashboardStore().addMetricsBatch()`
+- Transient errors left to browser's built-in `EventSource` retry
 
 ### `useVariableResolver()` - Variable Resolution
 
-Resolves `{{variables}}` in strings and objects.
+Resolves `{{variableName}}` patterns in strings and objects using environment, collection, and global variables.
 
 **API:**
 ```typescript
 const {
   resolveString: (input: string) => string
   resolveObject: <T>(obj: T) => T
-  getVariable: (name: string) => VariableSource | null
-  getAllVariables: () => Record<string, VariableSource>
+  getVariable: (name: string) => VariableValue | null
+  getAllVariables: () => Record<string, VariableValue>
   hasUnresolvedVariables: (input: string) => boolean
-} = useVariableResolver({ collectionId?: string });
+} = useVariableResolver({ collectionId?: string, environmentId?: string });
 ```
 
-**Resolution Priority:**
-1. Environment variables (highest)
+**Resolution Priority (highest to lowest):**
+1. Environment variables
 2. Collection variables
-3. Global variables (lowest)
+3. Global variables
 
 **Usage:**
 ```typescript
@@ -349,56 +486,111 @@ const { resolveString } = useVariableResolver({ collectionId });
 const resolvedUrl = resolveString("https://{{baseUrl}}/api/users");
 ```
 
-### `useSaveManager()` - Auto-Save
+### `useSaveManager()` - Auto-Save Manager
 
-Orchestrates auto-save with debouncing.
+Orchestrates auto-save for a saveable entity (request, environment, etc.) with debouncing, context registration, and centralized save state tracking. Located in `app/src/hooks/useSaveManager.ts`.
 
 **API:**
 ```typescript
-useSaveManager({
-  onSave: () => Promise<void>
-  debounceMs?: number
+const {
+  forceSave: () => Promise<void>
+  status: "idle" | "pending" | "saving" | "saved" | "error"
+  isSaving: boolean
+  errorMessage: string | null
+} = useSaveManager({
+  entityId: string | null           // Unique ID for this entity
+  contextName?: string              // Display name (e.g., "Request: GET /api")
+  onSave: () => Promise<void>       // Function to persist changes
+  hasChanges: boolean               // Whether unsaved changes exist
+  enabled?: boolean                 // Disable auto-save (default: true)
 });
 ```
 
 **Features:**
-- Debounced saves (default 1000ms)
-- Save state tracking
-- Keyboard shortcut integration (`Ctrl/Cmd+S`)
+- **Debounced auto-save:** Triggers 3000ms after the last change (defined in `app/src/config/timing.ts` as `TIMING.AUTO_SAVE_DELAY_MS`)
+- **Context registration:** Automatically registers with `useSaveStore()` for app-wide Ctrl/Cmd+S integration and tab LRU coordination
+- **Save status:** Updates centralized save store so UI can show "Saving..." or "Saved" indicators
+- **Entity switching:** Flushes pending saves when entity ID changes (in cleanup, before unmounting)
+- **Fixed debounce:** Debounce is a fixed 3000ms constant; there is no `debounceMs` parameter
+
+**Usage:**
+```typescript
+const { forceSave, status, isSaving } = useSaveManager({
+  entityId: requestId,
+  contextName: `Request: ${request.method} ${request.url}`,
+  onSave: () => apiService.updateRequest(requestId, changes),
+  hasChanges: JSON.stringify(draft) !== JSON.stringify(saved),
+  enabled: true
+});
+```
 
 ## State Flow Examples
 
-### Executing a Request
+### Executing a Single Request
 
-1. User clicks "Send" in RequestBuilder
-2. `useEngine().executeRequest()` called
-3. Variables resolved via `useVariableResolver()`
-4. Request transformed and sent via `apiService.executeRequest()`
-5. Response stored in component state (not global store)
-6. Response displayed in ResponseViewer
+1. User clicks "Send" button in request builder
+2. `useEngine().executeRequest()` is called with request and (optionally) environment ID
+3. `useVariableResolver()` resolves any `{{variables}}` in the request URL, headers, body
+4. Request is transformed (frontend → backend format) and sent via HTTP
+5. Response is stored in `useResponseStore()` keyed by request ID
+6. Response viewer component reads the response and displays it
+7. On **request tab switch**, the response persists in `response-store` and is displayed if the user returns
 
-### Starting a Load Test
+### Starting a Load Test Run
 
-1. User configures and starts load test
-2. `useEngine().startLoadTest()` sends `POST /run`
-3. `useDashboardStore().startRun()` initializes dashboard state
-4. `useSSE()` connects to metrics stream
-5. Metrics stream in and update `dashboard-store`
-6. When complete, `useRunReportQuery()` fetches final report
-7. Report stored in `dashboard-store.finalReport`
+1. User configures load test in the dashboard modal (duration, concurrency, etc.)
+2. `useEngine().startLoadTest()` is called with the request, config, and optional environment ID
+3. Engine responds with `runId`
+4. `useDashboardStore().startRun(runId, config, requestInfo)` initializes dashboard state
+5. `useSSE({ runId, enabled: true })` hook connects to `/metrics/live/:runId`
+6. As metrics stream in, `addMetricsBatch()` efficiently folds them into historical metrics (capped at 3,000) and updates running aggregates (peak concurrency, SLO breakpoint)
+7. Dashboard view shows live metrics, request/response (from the SSE stream's final response), and aggregates
+8. When the run completes, the engine sends a `complete` event
+9. `useRunReportQuery(runId)` fetches the final report and is stored in `dashboard-store.finalReport`
+10. Dashboard switches to "completed" mode showing the final report
 
-### Variable Resolution
+### Saving a Request with Auto-Save
 
-1. `useVariableResolver()` fetches globals, collections, environments
-2. Builds flat map with resolution priority
-3. `resolveString()` replaces `{{variableName}}` patterns
-4. Used in RequestBuilder before sending requests
+1. User opens or creates a request tab via `useTabsStore().openTab()`
+2. Component mounts `useSaveManager()` with the request ID and save callback
+3. Hook registers the context with `useSaveStore()` for Ctrl/Cmd+S integration
+4. User edits the request (URL, headers, body, etc.)
+5. `hasChanges` is marked true, triggering a 3-second debounce timer
+6. If the user makes another change within 3 seconds, the timer resets
+7. After 3 seconds of inactivity, `performSave()` is called, which calls the `onSave` callback
+8. Save status updates in `useSaveStore()`, and UI shows "Saving..." then "Saved" for 2 seconds
+9. On **tab switch or unmount**, any pending save is flushed before the context is unregistered
+10. On **app quit** (Electron before-quit event), `useSaveStore().flushAll()` saves all dirty contexts
+
+### Variable Resolution Priority
+
+1. User activates a request in a tab with active environment and collection selected (stored in `useSessionStore()`)
+2. Component calls `useVariableResolver({ collectionId, environmentId })`
+3. Hook fetches globals, collection variables, and environment variables via TanStack Query
+4. When `resolveString("https://{{baseUrl}}/{{path}}")` is called:
+   - First, check environment variables for `baseUrl` and `path`
+   - If not found, check collection variables
+   - If still not found, check global variables
+   - Replace with the first match found, or leave `{{variableName}}` unreplaced if no match
 
 ## Best Practices
 
-1. **Use Zustand for UI state**: Navigation, temporary state, user preferences
-2. **Use TanStack Query for server state**: Collections, requests, runs
-3. **Keep stores focused**: Each store manages a specific domain
-4. **Leverage query caching**: Don't refetch unnecessarily
-5. **Use optimistic updates**: Update UI immediately, sync with server
-6. **Handle loading/error states**: Always show appropriate UI feedback
+1. **Cross-cutting vs. module-local:** Store cross-cutting UI state (tabs, layout, engine, save) in `app/src/stores/`; store feature-specific UI state (collections tree, history filters, variables category, settings category) in `app/src/modules/<feature>/<feature>-store.ts`.
+
+2. **Zustand for transient UI state:** Use Zustand for UI state that doesn't persist to disk (or is ephemeral per session). Decorate with `persist` middleware to survive page reloads if needed (e.g., open tabs, drawer state).
+
+3. **TanStack Query for server state:** Use TanStack Query for collections, requests, environments, globals, runs, and reports. It is the single source of truth and ensures consistency across the app.
+
+4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.). It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save.
+
+5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes.
+
+6. **Tab LRU and dirty state:** The tab store coordinates with save-store to avoid evicting dirty tabs. When a tab is evicted due to LRU, any pending saves are flushed first.
+
+7. **Response persistence:** Responses are stored in memory (not localStorage) so they survive tab switches but are cleared on page reload. This balances UX (quick switch back) with memory (responses can be large).
+
+8. **Metrics cap for performance:** Historical metrics are capped at **3,000 points** per run (defined in `app/src/config/metrics.ts` as `HISTORICAL_METRICS_CAP = 3000`). This provides ~5 minutes of full-fidelity data at the engine's 10 Hz tick rate, long enough for typical load test sessions but short enough to keep chart slicing efficient.
+
+9. **Variable resolution priority:** Always resolve variables in priority order: environment > collection > global. Use `useVariableResolver({ collectionId, environmentId })` to ensure correct scoping.
+
+10. **Lazy loading and prefetch:** Use `usePrefetchCollectionsAndRequests()` on app init to warm up caches. Lazily fetch environments, globals, and run reports only when needed to reduce initial bundle size and API load.

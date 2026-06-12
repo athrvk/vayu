@@ -13,24 +13,27 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 
 ```
 <App />                                  // App.tsx — mounts providers, kicks off health/prefetch queries, OS theme sync
-├── <TitleBar />                         // components/layout/TitleBar.tsx
-└── <Shell />                            // components/layout/Shell.tsx — resizable sidebar + routed main area, Ctrl/Cmd+S
+├── <TitleBar />                         // components/layout/TitleBar.tsx — h-[38px] drag region + logo + tabs + env pill
+│   ├── Logo (all platforms)
+│   ├── <TabStrip />                     // Open tabs + "+" button
+│   └── EnvPill + WindowControls (Linux only; Windows native overlay; macOS traffic lights)
+├── <UpdateBanner />
+└── <Shell />                            // components/layout/Shell.tsx — tab-centric layout with drawer + context bar
     ├── <ImportModal />                  // modules/collections/ImportModal.tsx — global overlay, open-state in a store
-    ├── <Sidebar />                      // components/layout/Sidebar.tsx — VS Code-style activity bar + collapsible panel
-    │   ├── <CollectionTree />           //   collections tab
-    │   ├── <HistoryList />              //   history tab
-    │   ├── <VariablesCategoryTree />    //   variables tab
-    │   ├── <SettingsCategoryTree />     //   settings tab (bottom)
-    │   └── <ConnectionStatus />         //   pinned to panel footer
-    │
-    └── main content (switched on navigationStore.resolveActiveScreen())
-        ├── <WelcomeScreen />            // "welcome"          modules/welcome/
-        ├── <RequestBuilder />           // "request-builder"  modules/request-builder/
-        ├── <CollectionDetail />         // "collection-detail" modules/collections/CollectionDetail/
-        ├── <LoadTestDashboard />        // "dashboard"        modules/dashboard/
-        ├── <HistoryDetail />            // "history"          modules/history/main/
-        ├── <VariablesMain />            // "variables"        modules/variables/main/
-        └── <SettingsMain />             // "settings"         modules/settings/main/
+    ├── <Drawer />                       // components/layout/Drawer.tsx — resizable 220–480px; switches between views
+    │   ├── <CollectionTree />           //   collections view (default)
+    │   ├── <HistoryList />              //   history view
+    │   └── <VariablesCategoryTree />    //   variables view
+    ├── main content (switched on active tab type)
+    │   ├── <WelcomeScreen />            // type="welcome"     modules/welcome/
+    │   ├── <RequestBuilder />           // type="request"     modules/request-builder/
+    │   ├── <CollectionDetail />         // type="collection"  modules/collections/CollectionDetail/
+    │   ├── <LoadTestDashboard />        // type="dashboard"   modules/dashboard/
+    │   ├── <HistoryDetail />            // type="run"         modules/history/main/
+    │   ├── <VariablesMain />            // type="variables"   modules/variables/main/
+    │   └── <SettingsMain />             // type="settings"    modules/settings/main/ (with SettingsCategoryTree sidebar)
+    ├── <ContextBar />                   // components/layout/ContextBar.tsx — 252px; request tabs only; push ≥1200px / overlay <1200px
+    └── <Dock />                         // components/layout/Dock.tsx — drawer view switchers + engine/save status + toggles
 ```
 
 ## App Shell
@@ -39,30 +42,63 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 
 Root component. Renders `<TitleBar />` over `<Shell />`. On mount it wires up app-wide concerns via hooks/queries: OS/Electron theme sync (`useElectronTheme`), engine health polling (`useHealthQuery`), and prefetching of server state (`usePrefetchCollectionsAndRequests`, `useRunsQuery`, `useScriptCompletionsQuery`).
 
-### `Shell` (`components/layout/Shell.tsx`)
-
-Main layout: a resizable sidebar beside a routed content area.
-
-- **Routing:** reads `resolveActiveScreen()` from `useNavigationStore()` and renders one of the seven screens (see hierarchy). Default/fallback is `WelcomeScreen`.
-- **Resizable sidebar** via `useResizable` — width 280–600px; the floor rises to 420px while the History tab is active (RunItems need room for URL + chips).
-- **`Ctrl/Cmd+S`** global handler → `useSaveStore().triggerSave()`.
-- Mounts **`<ImportModal />`** once, at the shell level, as a global overlay (visibility lives in an import-modal store).
-
 ### `TitleBar` (`components/layout/TitleBar.tsx`)
 
-Custom window title bar (Electron frameless window chrome).
+Custom window title bar (Electron frameless window, h-[38px]). Platform-specific controls:
 
-### `Sidebar` (`components/layout/Sidebar.tsx`)
+- **All platforms:** Logo (left), `<TabStrip />` (center, flexes to fill).
+- **macOS:** Native traffic light inset (~80px left); no HTML window controls.
+- **Windows:** Native window overlay; no HTML controls in the bar.
+- **Linux:** Custom HTML min/max/close buttons (right); `EnvPill` showing active environment.
 
-VS Code–style **activity bar + collapsible panel**.
+The entire bar is marked as a drag region (`WebkitAppRegion: "drag"`) except for interactive elements, which explicitly set `no-drag`.
 
-- **Activity bar:** top tabs `Collections`, `History`, `Variables`; bottom tab `Settings`. Clicking the active tab while open collapses the panel.
-- **Panel** renders per tab: `CollectionTree` / `HistoryList` / `VariablesCategoryTree` / `SettingsCategoryTree`, with `ConnectionStatus` pinned to the footer.
-- Tab state and navigation come from `useNavigationStore()` (`activeSidebarTab`, `navigateToVariables`, `navigateToSettings`, …).
+### `TabStrip` (`components/layout/TabStrip.tsx`)
 
-### `ConnectionStatus` (`components/status/ConnectionStatus.tsx`)
+Horizontal row of open tabs plus a "+" button. Reads from `useTabsStore` (open tabs, active tab, add/close/focus methods).
 
-Engine connection indicator, driven by the engine-connection store + health query.
+- **One tab per open entity**, deduplicated per type and `entityId`. Tabs show: icon (method badge for requests, folder for collections, lightning for dashboard, etc.), label (request method + URL path / collection name / screen name).
+- **Max 12 tabs** with LRU eviction when exceeding; dashboard tabs are exempt from eviction. Dirty tabs (unsaved) are skipped during eviction (autosave is the safety net).
+- **Middle-click closes** a tab (browser-like).
+- **No unsaved dot** — autosave ensures safety.
+- **Keyboard support:** ⌘1–9 jump to tab; displayed via dock shortcuts.
+
+### `Shell` (`components/layout/Shell.tsx`)
+
+Main layout: tab-centric with resizable drawer, split/overlay context bar, and docked footer.
+
+- **Keyboard handlers:** mounts global key listeners for ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U (drawer views), ⌘I (toggle context bar), ⌘, (settings).
+- **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
+- **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Renders the appropriate screen module; default is `WelcomeScreen`.
+- **ContextBar mode:** picks "push" (≥1200px width) or "overlay" based on window width. Context bar is request-tab–only.
+- **`<ImportModal />`** mounted once as a global overlay; visibility in a dedicated store.
+
+### `Drawer` (`components/layout/Drawer.tsx`)
+
+Resizable sidebar (220–480px default, per view). One of three views per `useLayoutStore.drawerView`:
+
+- **`collections`** — `CollectionTree` (hierarchical collections + requests).
+- **`history`** — `HistoryList` (past runs, filtered/sorted).
+- **`variables`** — `VariablesCategoryTree` (variable scopes: globals, collections, environments).
+
+Resize handle on the right edge (double-click resets to defaults). Visibility toggled by `toggleDrawer()` or ⌘B.
+
+### `ContextBar` (`components/layout/ContextBar.tsx`)
+
+252px panel (fixed width, request-tab–only) showing variables in scope for the active request.
+
+- **Push mode** (≥1200px): adjacent to main content, takes layout space.
+- **Overlay mode** (<1200px): floats over main content, top-right (absolute positioned, shadow, z-10).
+- **Toggle:** ⌘I or Dock button. Visibility in `useLayoutStore`.
+- **Content:** resolves the active request's variables (global + collection-scoped + environment) via `useVariableResolver`; displays `{{name}}` : `value` pairs (secrets masked).
+
+### `Dock` (`components/layout/Dock.tsx`)
+
+Footer bar (h-8, shrink-0). Horizontal layout:
+
+- **Left — drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U). Active state highlights when drawer is open and matching view.
+- **Middle — ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved / error), app version.
+- **Right — toggles:** Context bar toggle (⌘I), Settings (⌘,).
 
 ## Request Builder (`modules/request-builder/`)
 
@@ -235,8 +271,8 @@ Form inputs are controlled; values flow from module context/stores and changes f
 
 ## State Management in Components
 
-- **Local `useState`** — component-only UI state (dialog open/close, active tab, sidebar width).
-- **Zustand stores (`stores/`)** — navigation (`useNavigationStore`), dashboard metrics (`useDashboardStore`), variables (`useVariablesStore`), save (`useSaveStore`), engine connection, history filters, import-modal open-state.
+- **Local `useState`** — component-only UI state (dialog open/close, window maximized, window width).
+- **Zustand stores (`stores/`)** — tabs (`useTabsStore`: open/active/add/close/focus), layout (`useLayoutStore`: drawer open/view/width, context bar open, split mode), dashboard metrics (`useDashboardStore`), variables (`useVariablesStore`), save (`useSaveStore`), engine connection, session (active environment), history filters, import-modal open-state.
 - **TanStack Query (`queries/`)** — server state: collections, requests, runs, environments, globals, health, script completions; mutations for create/update/delete.
 
 ## Component Communication
