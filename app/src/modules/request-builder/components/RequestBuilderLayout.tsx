@@ -86,10 +86,9 @@ export default function RequestBuilderLayout() {
 			<ResizablePanelGroup
 				orientation="horizontal"
 				className="flex-1"
-				onLayout={(sizes: number[]) => {
-					if (sizes[0] !== undefined) {
-						debouncedSetRatio(sizes[0] / 100);
-					}
+				onLayoutChanged={(layout) => {
+					const first = Object.values(layout)[0];
+					if (first !== undefined) debouncedSetRatio(first / 100);
 				}}
 			>
 				{/* Request Editor Panel */}
