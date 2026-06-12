@@ -45,19 +45,17 @@ export function Drawer() {
 
 	return (
 		<div className="relative flex shrink-0 bg-panel" style={{ width }}>
-			<div className="flex-1 overflow-hidden flex flex-col">
-				<ScrollArea className="h-full w-full">
-					<div className="w-full min-w-0">
-						{drawerView === "collections" && <CollectionTree />}
-						{drawerView === "history" && <HistoryList />}
-						{drawerView === "variables" && (
-							<VariablesCategoryTree
-								collections={collections}
-								environments={environments}
-							/>
-						)}
-					</div>
-				</ScrollArea>
+			<div className="flex-1 overflow-hidden flex flex-col min-w-0">
+				{drawerView === "collections" && <CollectionTree />}
+				{drawerView === "history" && <HistoryList />}
+				{drawerView === "variables" && (
+					<ScrollArea className="h-full w-full">
+						<VariablesCategoryTree
+							collections={collections}
+							environments={environments}
+						/>
+					</ScrollArea>
+				)}
 			</div>
 
 			<div
