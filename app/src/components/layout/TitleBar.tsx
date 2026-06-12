@@ -96,7 +96,7 @@ export default function TitleBar() {
 			{/* Logo — all platforms */}
 			<div
 				className="flex items-center px-3 shrink-0"
-				style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+				style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 			>
 				<img
 					src="/icon.png"

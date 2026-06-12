@@ -171,7 +171,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 									className="text-xs font-mono text-foreground truncate px-1"
 									title={`{{${name}}} — ${resolved.scope} scope`}
 								>
-									{`{{${name}}}`}
+									{`${name}`}
 								</span>
 								{resolved.secret ? (
 									<Input
