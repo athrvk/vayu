@@ -41,6 +41,9 @@ interface ElectronAPI {
 		logsPath: string;
 		dbPath: string;
 	}>;
+
+	// Before quit flush handler
+	onBeforeQuit: (callback: () => void | Promise<void>) => () => void;
 }
 
 declare global {

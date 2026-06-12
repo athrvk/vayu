@@ -21,14 +21,12 @@ interface HistoryUIState {
 	filterType: FilterType;
 	filterStatus: FilterStatus;
 	sortBy: SortBy;
-	isDeletingRun: boolean;
 
 	// Actions
 	setSearchQuery: (query: string) => void;
 	setFilterType: (type: FilterType) => void;
 	setFilterStatus: (status: FilterStatus) => void;
 	setSortBy: (sortBy: SortBy) => void;
-	setDeletingRun: (deleting: boolean) => void;
 	resetFilters: () => void;
 }
 
@@ -37,13 +35,11 @@ export const useHistoryStore = create<HistoryUIState>((set) => ({
 	filterType: "all",
 	filterStatus: "all",
 	sortBy: "newest",
-	isDeletingRun: false,
 
 	setSearchQuery: (query) => set({ searchQuery: query }),
 	setFilterType: (type) => set({ filterType: type }),
 	setFilterStatus: (status) => set({ filterStatus: status }),
 	setSortBy: (sortBy) => set({ sortBy }),
-	setDeletingRun: (deleting) => set({ isDeletingRun: deleting }),
 	resetFilters: () =>
 		set({
 			searchQuery: "",

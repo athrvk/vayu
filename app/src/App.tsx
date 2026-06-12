@@ -5,12 +5,14 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useEffect } from "react";
 import Shell from "./components/layout/Shell";
 import TitleBar from "./components/layout/TitleBar";
 import { useEngineConnectionStore } from "./stores";
 import { useHealthQuery, usePrefetchCollectionsAndRequests, useRunsQuery } from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
+import { useSaveStore } from "./stores/save-store";
 
 function App() {
 	const { isEngineConnected } = useEngineConnectionStore();
@@ -27,6 +29,20 @@ function App() {
 
 	// Fetch pm.* completions and register them with Monaco's JavaScript language
 	useScriptCompletionProvider();
+
+	// Register Electron before-quit handler to flush pending saves
+	useEffect(() => {
+		const api = (
+			window as Window & { electronAPI?: { onBeforeQuit?: (cb: () => void) => () => void } }
+		).electronAPI;
+		if (!api?.onBeforeQuit) return;
+
+		const unsubscribe = api.onBeforeQuit(async () => {
+			await useSaveStore.getState().flushAll();
+		});
+
+		return unsubscribe;
+	}, []);
 
 	// Log connection status for debugging
 	if (isEngineConnected) {

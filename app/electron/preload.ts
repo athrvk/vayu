@@ -59,6 +59,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		logsPath: string;
 		dbPath: string;
 	}> => ipcRenderer.invoke("app:getPaths"),
+
+	// Before quit flush handler. ACKs main once the callback settles so quit
+	// can resume immediately instead of waiting out the fallback timeout.
+	onBeforeQuit: (callback: () => void | Promise<void>) => {
+		const handler = async () => {
+			try {
+				await callback();
+			} finally {
+				ipcRenderer.send("before-quit-flushed");
+			}
+		};
+		ipcRenderer.on("before-quit", handler);
+		return () => ipcRenderer.removeListener("before-quit", handler);
+	},
 });
 
 window.addEventListener("DOMContentLoaded", () => {

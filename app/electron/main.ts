@@ -21,7 +21,13 @@ const __dirname = path.dirname(__filename);
 let engineSidecar: EngineSidecar | null = null;
 let mainWindow: BrowserWindow | null = null;
 
+// Track if we've already sent the before-quit flush message
+let flushSent = false;
+
 function createWindow() {
+	// Reset flush flag when creating a new window
+	flushSent = false;
+
 	// Load persisted window state
 	const windowState = loadWindowState({
 		defaultWidth: 1400,
@@ -348,12 +354,33 @@ app.on("window-all-closed", () => {
 	}
 });
 
-// Ensure engine is stopped when the app quits
-app.on("before-quit", async (event) => {
+// Ensure saves are flushed and engine is stopped when the app quits
+app.on("before-quit", (event) => {
+	// First pass: ask the renderer to flush pending saves. Quit resumes as
+	// soon as the renderer ACKs, with a 2s ceiling in case it is stuck.
+	if (!flushSent) {
+		flushSent = true;
+		event.preventDefault();
+		let resumed = false;
+		const resumeQuit = () => {
+			if (resumed) return;
+			resumed = true;
+			ipcMain.removeListener("before-quit-flushed", resumeQuit);
+			app.quit();
+		};
+		ipcMain.once("before-quit-flushed", resumeQuit);
+		setTimeout(resumeQuit, 2000);
+		mainWindow?.webContents.send("before-quit");
+		return;
+	}
+
+	// Second pass: stop the engine before actually quitting
 	if (engineSidecar && engineSidecar.isRunning()) {
 		event.preventDefault();
-		await stopEngine();
-		// Continue with quit process
-		setImmediate(() => app.quit());
+		(async () => {
+			await stopEngine();
+			// Continue with quit process
+			setImmediate(() => app.quit());
+		})();
 	}
 });

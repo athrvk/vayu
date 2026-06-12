@@ -32,16 +32,10 @@ interface VariablesUIState {
 	// Active collection context (for collection variables in requests)
 	activeCollectionId: string | null;
 
-	// Editing state
-	isEditing: boolean;
-
 	// Actions
-	selectCategory: (category: VariableCategory | null) => void;
-	setSelectedCategory: (category: VariableCategory | null) => void; // Alias
-	setActiveEnvironment: (environmentId: string | null) => void;
-	setActiveEnvironmentId: (environmentId: string | null) => void; // Alias
+	setSelectedCategory: (category: VariableCategory | null) => void;
+	setActiveEnvironmentId: (environmentId: string | null) => void;
 	setActiveCollection: (collectionId: string | null) => void;
-	setEditing: (editing: boolean) => void;
 	reset: () => void;
 }
 
@@ -51,26 +45,18 @@ export const useVariablesStore = create<VariablesUIState>()(
 			selectedCategory: null,
 			activeEnvironmentId: null,
 			activeCollectionId: null,
-			isEditing: false,
-
-			selectCategory: (category) => set({ selectedCategory: category }),
 
 			setSelectedCategory: (category) => set({ selectedCategory: category }),
-
-			setActiveEnvironment: (environmentId) => set({ activeEnvironmentId: environmentId }),
 
 			setActiveEnvironmentId: (environmentId) => set({ activeEnvironmentId: environmentId }),
 
 			setActiveCollection: (collectionId) => set({ activeCollectionId: collectionId }),
-
-			setEditing: (editing) => set({ isEditing: editing }),
 
 			reset: () =>
 				set({
 					selectedCategory: null,
 					activeEnvironmentId: null,
 					activeCollectionId: null,
-					isEditing: false,
 				}),
 		}),
 		{
