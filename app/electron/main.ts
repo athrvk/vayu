@@ -10,6 +10,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { EngineSidecar } from "./sidecar.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
+import { TITLEBAR_HEIGHT } from "./constants.js";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -44,16 +45,18 @@ function createWindow() {
 		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
-		// Center the macOS traffic lights inside our 32px titlebar (lights are ~12px)
-		trafficLightPosition: process.platform === "darwin" ? { x: 12, y: 10 } : undefined,
-		titleBarOverlay:
-			process.platform === "darwin"
-				? false
-				: {
-						color: nativeTheme.shouldUseDarkColors ? "#1a1a1a" : "#ffffff",
-						symbolColor: nativeTheme.shouldUseDarkColors ? "#ffffff" : "#1a1a1a",
-						height: 40,
-					},
+		// Center the macOS traffic lights inside the titlebar (lights are ~16px)
+		trafficLightPosition: process.platform === "darwin"
+			? { x: 12, y: Math.round((TITLEBAR_HEIGHT - 16) / 2) }
+			: undefined,
+		// Windows-only native overlay — Linux uses custom HTML buttons
+		titleBarOverlay: process.platform === "win32"
+			? {
+					color: nativeTheme.shouldUseDarkColors ? "#111113" : "#f2f0eb",
+					symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f0eb" : "#111113",
+					height: TITLEBAR_HEIGHT,
+				}
+			: false,
 		webPreferences: {
 			nodeIntegration: false,
 			contextIsolation: true,
@@ -95,11 +98,12 @@ function createWindow() {
 			themeSource: nativeTheme.themeSource,
 		});
 
-		// Update titlebar overlay color (Windows/Linux only — unsupported on macOS)
-		if (process.platform !== "darwin" && mainWindow) {
+		// Update titlebar overlay color — Windows only
+		if (process.platform === "win32" && mainWindow) {
 			mainWindow.setTitleBarOverlay({
-				color: nativeTheme.shouldUseDarkColors ? "#1a1a1a" : "#ffffff",
-				symbolColor: nativeTheme.shouldUseDarkColors ? "#ffffff" : "#1a1a1a",
+				color: nativeTheme.shouldUseDarkColors ? "#111113" : "#f2f0eb",
+				symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f0eb" : "#111113",
+				height: TITLEBAR_HEIGHT,
 			});
 		}
 	});

@@ -6,6 +6,7 @@
  */
 
 import { useLayoutStore, type DrawerView } from "@/stores";
+import { useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
@@ -18,6 +19,8 @@ const DEFAULT_WIDTHS: Record<DrawerView, number> = {
 
 export function Drawer() {
 	const { drawerOpen, drawerView, drawerWidths, setDrawerWidth } = useLayoutStore();
+	const { data: collections = [] } = useCollectionsQuery();
+	const { data: environments = [] } = useEnvironmentsQuery();
 
 	if (!drawerOpen) return null;
 
@@ -44,7 +47,9 @@ export function Drawer() {
 			<div className="flex-1 overflow-hidden flex flex-col">
 				{drawerView === "collections" && <CollectionTree />}
 				{drawerView === "history" && <HistoryList />}
-				{drawerView === "variables" && <VariablesCategoryTree />}
+				{drawerView === "variables" && (
+					<VariablesCategoryTree collections={collections} environments={environments} />
+				)}
 			</div>
 
 			<div
