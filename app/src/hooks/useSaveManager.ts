@@ -71,17 +71,30 @@ export function useSaveManager({
 	const savedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const saveInProgressRef = useRef(false);
 	const onSaveRef = useRef(onSave);
+	const hasChangesRef = useRef(hasChanges);
+	const enabledRef = useRef(enabled);
 
 	// Keep onSave ref updated to avoid stale closures
 	useEffect(() => {
 		onSaveRef.current = onSave;
 	}, [onSave]);
 
+	// Keep hasChanges ref updated
+	useEffect(() => {
+		hasChangesRef.current = hasChanges;
+	}, [hasChanges]);
+
+	// Keep enabled ref updated
+	useEffect(() => {
+		enabledRef.current = enabled;
+	}, [enabled]);
+
 	// Clear timeouts on unmount
 	useEffect(() => {
 		return () => {
 			if (timeoutRef.current) {
 				clearTimeout(timeoutRef.current);
+				timeoutRef.current = null;
 			}
 			if (savedTimeoutRef.current) {
 				clearTimeout(savedTimeoutRef.current);
@@ -150,14 +163,22 @@ export function useSaveManager({
 		updateContext(contextId, { hasPendingChanges: hasChanges, save: performSave });
 	}, [entityId, enabled, hasChanges, performSave, updateContext]);
 
-	// Reset on entity change
+	// Reset on entity change; flush pending edits for the *previous* entity in
+	// the cleanup. Cleanups run before the new render's ref-update effects, so
+	// performSave (keyed on the old entityId via useCallback) still sees the
+	// old onSaveRef — edits made <3s before switching are saved, not dropped.
 	useEffect(() => {
 		reset();
-		if (timeoutRef.current) {
-			clearTimeout(timeoutRef.current);
-			timeoutRef.current = null;
-		}
-	}, [entityId, reset]);
+		return () => {
+			if (timeoutRef.current) {
+				clearTimeout(timeoutRef.current);
+				timeoutRef.current = null;
+			}
+			if (enabledRef.current && hasChangesRef.current) {
+				performSave();
+			}
+		};
+	}, [entityId, reset, performSave]);
 
 	// Force save (for manual triggers)
 	const forceSave = useCallback(async () => {
