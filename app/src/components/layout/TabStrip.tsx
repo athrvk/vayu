@@ -18,6 +18,7 @@ import { X, Plus, Folder, Zap, Clock, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTabsStore, type Tab } from "@/stores";
 import { useRequestQuery, useCollectionsQuery } from "@/queries";
+import { useVariableResolver } from "@/hooks/useVariableResolver";
 
 /**
  * Extract a short display path from a request URL. URLs may contain
@@ -26,11 +27,11 @@ import { useRequestQuery, useCollectionsQuery } from "@/queries";
 function pathLabel(url: string): string {
 	if (!url) return "";
 	try {
-		return new URL(url).pathname || "/";
+		return decodeURIComponent(new URL(url).pathname) || "/";
 	} catch {
 		// Strip scheme+host if present, otherwise show the raw string
 		const stripped = url.replace(/^[a-z]+:\/\/[^/]*/i, "");
-		return stripped || url;
+		return decodeURIComponent(stripped) || decodeURIComponent(url);
 	}
 }
 
@@ -55,6 +56,10 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 	// Hooks run unconditionally (React rules); they no-op for non-matching types.
 	const { data: request } = useRequestQuery(tab.type === "request" ? tab.entityId : null);
 	const { data: collections = [] } = useCollectionsQuery();
+	// Resolve {{variables}} in the URL so the tab shows the concrete path
+	const { resolveString } = useVariableResolver({
+		collectionId: request?.collectionId || undefined,
+	});
 
 	let label: React.ReactNode;
 	switch (tab.type) {
@@ -73,7 +78,9 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 					<span className="text-[10px] font-semibold uppercase shrink-0">
 						{request.method}
 					</span>
-					<span className="truncate">{pathLabel(request.url) || request.name}</span>
+					<span className="truncate">
+						{pathLabel(resolveString(request.url)) || request.name}
+					</span>
 				</span>
 			) : (
 				"Request"
