@@ -5,11 +5,12 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useTabsStore, useSaveStore, useLayoutStore, type Tab } from "@/stores";
 import { ImportModal } from "@/modules/collections/ImportModal";
 import { Drawer } from "./Drawer";
 import { Dock } from "./Dock";
+import { ContextBar } from "./ContextBar";
 import RequestBuilder from "@/modules/request-builder";
 import CollectionDetail from "@/modules/collections/CollectionDetail";
 import LoadTestDashboard from "@/modules/dashboard";
@@ -44,6 +45,13 @@ export default function Shell() {
 	const { openTabs, activeTabId, closeTab, focusTab } = useTabsStore();
 	const { toggleDrawer } = useLayoutStore();
 	const { triggerSave } = useSaveStore();
+	const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+
+	useEffect(() => {
+		const onResize = () => setWindowWidth(window.innerWidth);
+		window.addEventListener("resize", onResize);
+		return () => window.removeEventListener("resize", onResize);
+	}, []);
 
 	const activeTab = openTabs.find((t) => t.id === activeTabId) ?? null;
 
@@ -81,11 +89,12 @@ export default function Shell() {
 	return (
 		<div className="flex flex-col h-full bg-background overflow-hidden">
 			<ImportModal />
-			<div className="flex flex-1 overflow-hidden">
+			<div className="flex flex-1 overflow-hidden relative">
 				<Drawer />
 				<main className="flex-1 overflow-hidden flex flex-col min-w-0">
 					{renderTabContent(activeTab)}
 				</main>
+				<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
 			</div>
 			<Dock />
 		</div>
