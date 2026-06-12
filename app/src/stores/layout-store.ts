@@ -83,7 +83,14 @@ export const useLayoutStore = create<LayoutState>()(
 		}),
 		{
 			name: STORAGE_KEYS.LAYOUT_STORE,
-			version: 1,
+			version: 2,
+			migrate: (persisted, version) => {
+				const state = persisted as LayoutState;
+				// v1 could persist a skewed split ratio while panel sizes were
+				// misparsed as pixels — reset to an even split
+				if (version < 2) state.requestSplitRatio = 0.5;
+				return state;
+			},
 			partialize: (state) => ({
 				drawerOpen: state.drawerOpen,
 				drawerView: state.drawerView,
