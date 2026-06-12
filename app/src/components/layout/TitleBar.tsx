@@ -15,9 +15,16 @@
  */
 
 import { useEffect, useState } from "react";
-import { Minus, X, Maximize2, Square } from "lucide-react";
+import { Minus, X, Maximize2, Square, Check, ChevronDown, Cloud } from "lucide-react";
 import { useSessionStore } from "@/stores";
 import { useEnvironmentsQuery } from "@/queries";
+import {
+	DropdownMenu,
+	DropdownMenuTrigger,
+	DropdownMenuContent,
+	DropdownMenuItem,
+} from "@/components/ui";
+import { cn } from "@/lib/utils";
 import { TabStrip } from "./TabStrip";
 
 const isElectron = !!window.electronAPI;
@@ -68,17 +75,48 @@ function WindowControls() {
 	);
 }
 
-function EnvPill() {
-	const { activeEnvironmentId } = useSessionStore();
+function EnvSwitcher() {
+	const { activeEnvironmentId, setActiveEnvironmentId } = useSessionStore();
 	const { data: environments = [] } = useEnvironmentsQuery();
 	const activeEnv = environments.find((e) => e.id === activeEnvironmentId);
 
-	if (!activeEnv) return null;
-
 	return (
-		<span className="text-xs px-2 py-0.5 rounded-full bg-accent text-accent-foreground shrink-0">
-			{activeEnv.name}
-		</span>
+		<DropdownMenu>
+			<DropdownMenuTrigger asChild>
+				<button
+					className={cn(
+						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-full shrink-0 transition-colors",
+						activeEnv
+							? "bg-accent text-accent-foreground hover:bg-accent/80"
+							: "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+					)}
+					aria-label="Switch environment"
+				>
+					<Cloud className="w-3 h-3 shrink-0" />
+					<span className="truncate">{activeEnv?.name ?? "No Environment"}</span>
+					<ChevronDown className="w-3 h-3 shrink-0 opacity-60" />
+				</button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="min-w-44">
+				<DropdownMenuItem
+					onClick={() => setActiveEnvironmentId(null)}
+					className="text-xs gap-2"
+				>
+					<span className="flex-1">No Environment</span>
+					{!activeEnv && <Check className="w-3.5 h-3.5" />}
+				</DropdownMenuItem>
+				{environments.map((env) => (
+					<DropdownMenuItem
+						key={env.id}
+						onClick={() => setActiveEnvironmentId(env.id)}
+						className="text-xs gap-2"
+					>
+						<span className="flex-1 truncate">{env.name}</span>
+						{env.id === activeEnvironmentId && <Check className="w-3.5 h-3.5" />}
+					</DropdownMenuItem>
+				))}
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }
 
@@ -121,7 +159,7 @@ export default function TitleBar() {
 				className="flex items-center gap-2 px-3 shrink-0"
 				style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
 			>
-				<EnvPill />
+				<EnvSwitcher />
 				{/* Linux only — Windows uses native overlay, macOS uses traffic lights */}
 				{isLinux && <WindowControls />}
 			</div>
