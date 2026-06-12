@@ -46,7 +46,7 @@ export default function CollectionTree() {
 	const selectedCollectionId = activeTab?.type === "collection" ? activeTab.entityId : null;
 	const selectedRequestId = activeTab?.type === "request" ? activeTab.entityId : null;
 
-	const navigateToRequest = (collectionId: string, requestId: string) =>
+	const navigateToRequest = (_collectionId: string, requestId: string) =>
 		openTab({ type: "request", entityId: requestId });
 	const navigateToCollection = (collectionId: string) =>
 		openTab({ type: "collection", entityId: collectionId });
