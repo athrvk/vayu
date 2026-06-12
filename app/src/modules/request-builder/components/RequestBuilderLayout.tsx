@@ -93,9 +93,10 @@ export default function RequestBuilderLayout() {
 			>
 				{/* Request Editor Panel */}
 				<ResizablePanel
-					defaultSize={requestSplitRatio * 100}
-					minSize={20}
-					maxSize={80}
+					// react-resizable-panels v4 treats bare numbers as pixels — percentages must be strings
+					defaultSize={`${requestSplitRatio * 100}%`}
+					minSize="20%"
+					maxSize="80%"
 					className="flex flex-col"
 				>
 					<RequestTabs />
@@ -105,9 +106,9 @@ export default function RequestBuilderLayout() {
 
 				{/* Response Viewer Panel */}
 				<ResizablePanel
-					defaultSize={(1 - requestSplitRatio) * 100}
-					minSize={20}
-					maxSize={80}
+					defaultSize={`${(1 - requestSplitRatio) * 100}%`}
+					minSize="20%"
+					maxSize="80%"
 					className="flex flex-col"
 				>
 					<ResponseViewer />
