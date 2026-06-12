@@ -389,7 +389,7 @@ export default function SettingsMain() {
 			{/* Restart Required Banner */}
 			{pendingRestart && (
 				<div className="bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 px-6 py-3 shrink-0">
-					<div className="flex items-center justify-between">
+					<div className="flex items-center justify-between max-w-3xl mx-auto w-full">
 						<div className="flex items-center gap-3">
 							<div className="flex items-center justify-center w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50">
 								<AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
@@ -467,7 +467,7 @@ export default function SettingsMain() {
 
 			{/* Header */}
 			<div className="border-b border-border px-6 py-4 shrink-0">
-				<div className="flex items-center justify-between">
+				<div className="flex items-center justify-between max-w-3xl mx-auto w-full">
 					<div>
 						<h1 className="text-xl font-semibold">{categoryConfig?.title}</h1>
 						<p className="text-sm text-muted-foreground mt-1">
@@ -504,7 +504,7 @@ export default function SettingsMain() {
 
 			{/* Settings Grid */}
 			<div className="flex-1 overflow-auto p-6">
-				<div className="grid gap-4 max-w-3xl">
+				<div className="grid gap-4 max-w-3xl mx-auto">
 					{categoryEntries.map((entry) => {
 						const currentValue = getCurrentValue(entry);
 						const edited = editedValues[entry.key];

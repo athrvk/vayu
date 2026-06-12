@@ -36,7 +36,7 @@ function renderTabContent(tab: Tab | null): React.ReactNode {
 			return <VariablesMain />;
 		case "settings":
 			return (
-				<div className="flex h-full overflow-hidden">
+				<div className="flex flex-1 min-w-0 h-full overflow-hidden">
 					<div className="w-60 shrink-0 border-r border-border bg-panel overflow-y-auto">
 						<SettingsCategoryTree />
 					</div>
@@ -131,11 +131,18 @@ export default function Shell() {
 		<div className="flex flex-col h-full bg-background overflow-hidden">
 			<ImportModal />
 			<div className="flex flex-1 overflow-hidden relative">
-				<Drawer />
-				<main className="flex-1 overflow-hidden flex flex-col min-w-0">
-					{renderTabContent(activeTab)}
-				</main>
-				<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
+				{activeTab?.type === "settings" ? (
+					// Settings takes over the whole content row — no drawer or context bar
+					renderTabContent(activeTab)
+				) : (
+					<>
+						<Drawer />
+						<main className="flex-1 overflow-hidden flex flex-col min-w-0">
+							{renderTabContent(activeTab)}
+						</main>
+						<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
+					</>
+				)}
 			</div>
 			<Dock />
 		</div>

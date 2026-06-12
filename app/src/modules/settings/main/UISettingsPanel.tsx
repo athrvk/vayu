@@ -121,7 +121,7 @@ export default function UISettingsPanel() {
 		<div className="flex-1 flex flex-col overflow-hidden">
 			{/* Header */}
 			<div className="border-b border-border px-6 py-4 shrink-0">
-				<div className="flex items-center justify-between">
+				<div className="flex items-center justify-between max-w-3xl mx-auto w-full">
 					<div>
 						<h1 className="text-xl font-semibold">Appearance</h1>
 						<p className="text-sm text-muted-foreground mt-1">
@@ -133,7 +133,7 @@ export default function UISettingsPanel() {
 
 			{/* Settings Content */}
 			<div className="flex-1 overflow-auto p-6">
-				<div className="grid gap-6 max-w-3xl">
+				<div className="grid gap-6 max-w-3xl mx-auto">
 					{/* Theme Mode Selection */}
 					<Card>
 						<CardHeader className="pb-3">
