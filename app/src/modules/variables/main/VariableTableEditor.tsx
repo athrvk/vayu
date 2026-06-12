@@ -39,7 +39,8 @@ import {
 	useDeleteEnvironmentMutation,
 	useUpdateCollectionMutation,
 } from "@/queries";
-import { useSaveStore, useVariablesStore, useSessionStore } from "@/stores";
+import { useSaveStore, useSessionStore } from "@/stores";
+import { useVariablesStore } from "@/modules/variables/variables-store";
 import type { VariableValue, Collection, Environment } from "@/types";
 import {
 	Button,

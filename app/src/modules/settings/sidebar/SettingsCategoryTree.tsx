@@ -15,7 +15,7 @@
  * - Performance (Engine Settings)
  */
 
-import { useSettingsStore } from "@/stores";
+import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useConfigQuery } from "@/queries";
 import type { SettingsCategory } from "@/types";
 import { Server, Code, Settings, Palette, Network, Activity, Database } from "lucide-react";

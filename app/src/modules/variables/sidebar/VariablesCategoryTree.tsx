@@ -15,7 +15,7 @@
  */
 
 import { useState } from "react";
-import { useVariablesStore, type VariableCategory } from "@/stores";
+import { useVariablesStore, type VariableCategory } from "@/modules/variables/variables-store";
 import { useCreateEnvironmentMutation, useDeleteEnvironmentMutation } from "@/queries";
 import type { Collection, Environment } from "@/types";
 import {

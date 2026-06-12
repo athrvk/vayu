@@ -14,8 +14,9 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useSettingsStore, useEngineStore } from "@/stores";
+import { useEngineStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
+import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useConfigQuery, useUpdateConfigMutation } from "@/queries";
 import type { ConfigEntry, SettingsCategory } from "@/types";
 import {

@@ -7,8 +7,8 @@
 
 import { useState } from "react";
 import { Search, Clock, Loader2 } from "lucide-react";
-import { useNavigationStore, useHistoryStore } from "@/stores";
-import { filterRuns } from "@/stores/history-store";
+import { useNavigationStore } from "@/stores";
+import { useHistoryStore, filterRuns } from "@/modules/history/history-store";
 import { useRunsQuery, useDeleteRunMutation } from "@/queries";
 import {
 	Button,

@@ -13,7 +13,7 @@
  * Uses a unified VariableEditor component configured by category type.
  */
 
-import { useVariablesStore } from "@/stores";
+import { useVariablesStore } from "@/modules/variables/variables-store";
 import { useCollectionsQuery, useEnvironmentsQuery, useGlobalsQuery } from "@/queries";
 import VariableTableEditor from "./VariableTableEditor";
 import { Variable } from "lucide-react";
