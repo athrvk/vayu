@@ -5,18 +5,13 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useLayoutStore, type DrawerView } from "@/stores";
+import { useLayoutStore } from "@/stores";
+import { DEFAULT_DRAWER_WIDTHS } from "@/constants/layout";
 import { useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import { ScrollArea } from "@/components/ui";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
-
-const DEFAULT_WIDTHS: Record<DrawerView, number> = {
-	collections: 260,
-	history: 320,
-	variables: 260,
-};
 
 export function Drawer() {
 	const { drawerOpen, drawerView, drawerWidths, setDrawerWidth } = useLayoutStore();
@@ -61,7 +56,7 @@ export function Drawer() {
 			<div
 				className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-accent/20"
 				onPointerDown={startResize}
-				onDoubleClick={() => setDrawerWidth(drawerView, DEFAULT_WIDTHS[drawerView])}
+				onDoubleClick={() => setDrawerWidth(drawerView, DEFAULT_DRAWER_WIDTHS[drawerView])}
 			>
 				<div className="absolute right-0 top-0 bottom-0 w-px bg-border" />
 			</div>

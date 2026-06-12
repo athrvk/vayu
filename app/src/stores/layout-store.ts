@@ -8,14 +8,14 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
+import {
+	DEFAULT_CONTEXT_BAR_WIDTH,
+	DEFAULT_DRAWER_WIDTHS,
+	PANEL_MIN_WIDTH,
+	PANEL_MAX_WIDTH,
+} from "@/constants/layout";
 
 export type DrawerView = "collections" | "history" | "variables";
-
-const DEFAULT_DRAWER_WIDTHS: Record<DrawerView, number> = {
-	collections: 260,
-	history: 320,
-	variables: 260,
-};
 
 interface LayoutState {
 	// Drawer
@@ -25,6 +25,7 @@ interface LayoutState {
 
 	// Context bar (right panel for request tabs)
 	contextBarOpen: boolean;
+	contextBarWidth: number;
 
 	// Request / response split ratio (0–1, fraction for the left/request pane)
 	requestSplitRatio: number;
@@ -39,6 +40,7 @@ interface LayoutState {
 
 	setContextBarOpen: (open: boolean) => void;
 	toggleContextBar: () => void;
+	setContextBarWidth: (width: number) => void;
 
 	setRequestSplitRatio: (ratio: number) => void;
 }
@@ -50,6 +52,7 @@ export const useLayoutStore = create<LayoutState>()(
 			drawerView: "collections",
 			drawerWidths: { ...DEFAULT_DRAWER_WIDTHS },
 			contextBarOpen: false,
+			contextBarWidth: DEFAULT_CONTEXT_BAR_WIDTH,
 			requestSplitRatio: 0.5,
 
 			setDrawerOpen: (open) => set({ drawerOpen: open }),
@@ -64,12 +67,16 @@ export const useLayoutStore = create<LayoutState>()(
 				set((s) => ({
 					drawerWidths: {
 						...s.drawerWidths,
-						[view]: Math.max(220, Math.min(480, width)),
+						[view]: Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, width)),
 					},
 				})),
 
 			setContextBarOpen: (open) => set({ contextBarOpen: open }),
 			toggleContextBar: () => set((s) => ({ contextBarOpen: !s.contextBarOpen })),
+			setContextBarWidth: (width) =>
+				set({
+					contextBarWidth: Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, width)),
+				}),
 
 			setRequestSplitRatio: (ratio) =>
 				set({ requestSplitRatio: Math.max(0.2, Math.min(0.8, ratio)) }),
@@ -82,6 +89,7 @@ export const useLayoutStore = create<LayoutState>()(
 				drawerView: state.drawerView,
 				drawerWidths: state.drawerWidths,
 				contextBarOpen: state.contextBarOpen,
+				contextBarWidth: state.contextBarWidth,
 				requestSplitRatio: state.requestSplitRatio,
 			}),
 		}

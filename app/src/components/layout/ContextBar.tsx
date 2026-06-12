@@ -8,6 +8,7 @@
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLayoutStore, useTabsStore, useSessionStore } from "@/stores";
+import { DEFAULT_CONTEXT_BAR_WIDTH } from "@/constants/layout";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import {
 	useRequestQuery,
@@ -39,7 +40,8 @@ function buildLeafFirstChain(startId: string, collections: Collection[]): Collec
 }
 
 export function ContextBar({ mode = "push" }: ContextBarProps) {
-	const { contextBarOpen, setContextBarOpen } = useLayoutStore();
+	const { contextBarOpen, setContextBarOpen, contextBarWidth, setContextBarWidth } =
+		useLayoutStore();
 	const { openTabs, activeTabId } = useTabsStore();
 	const { activeEnvironmentId } = useSessionStore();
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -61,6 +63,23 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 	const updateCollectionMutation = useUpdateCollectionMutation();
 
 	if (!contextBarOpen || activeTab?.type !== "request") return null;
+
+	const startResize = (e: React.PointerEvent) => {
+		e.currentTarget.setPointerCapture(e.pointerId);
+		const startX = e.clientX;
+		const startWidth = contextBarWidth;
+
+		const onMove = (moveEvent: PointerEvent) => {
+			// Panel sits on the right — dragging left grows it
+			setContextBarWidth(startWidth + startX - moveEvent.clientX);
+		};
+		const onUp = () => {
+			window.removeEventListener("pointermove", onMove);
+			window.removeEventListener("pointerup", onUp);
+		};
+		window.addEventListener("pointermove", onMove);
+		window.addEventListener("pointerup", onUp);
+	};
 
 	// Write the edited value back to the scope the resolved variable came from
 	const commitValue = (name: string, resolved: ResolvedVariable, newValue: string) => {
@@ -111,8 +130,17 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 				"flex flex-col shrink-0 border-l border-border bg-panel overflow-y-auto",
 				mode === "overlay" ? "absolute right-0 top-0 bottom-0 shadow-lg z-10" : "relative"
 			)}
-			style={{ width: 252 }}
+			style={{ width: contextBarWidth }}
 		>
+			{/* Resize handle — mirrors the Drawer's right-edge handle */}
+			<div
+				className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-accent/20 z-10"
+				onPointerDown={startResize}
+				onDoubleClick={() => setContextBarWidth(DEFAULT_CONTEXT_BAR_WIDTH)}
+			>
+				<div className="absolute left-0 top-0 bottom-0 w-px bg-border" />
+			</div>
+
 			{/* Header */}
 			<div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
 				<span className="text-xs font-medium text-foreground">Context</span>
