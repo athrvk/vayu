@@ -15,3 +15,4 @@ export { useImportModalStore } from "./import-modal-store";
 export { useSessionStore } from "./session-store";
 export { useSaveStore, type SaveStatus } from "./save-store";
 export { useResponseStore, type StoredResponse } from "./response-store";
+export { useTabsStore, type Tab, type TabType } from "./tabs-store";
