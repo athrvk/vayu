@@ -10,8 +10,7 @@
  *
  * The horizontal row of open tabs rendered in the title bar. Reads from
  * tabs-store; one TabItem per open tab plus a "+" button that opens a
- * welcome tab. No unsaved-dot — autosave is the safety net (see
- * docs/app/redesign-layout.md).
+ * welcome tab. No unsaved-dot — autosave is the safety net.
  */
 
 import { X, Plus, Folder, Zap, Clock, Settings } from "lucide-react";
