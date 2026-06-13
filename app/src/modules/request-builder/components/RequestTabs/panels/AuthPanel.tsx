@@ -28,7 +28,7 @@ import {
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import VariableInput from "../../../shared/VariableInput";
-import type { AuthType } from "../../../types";
+import type { AuthType, AuthConfigState } from "../../../types";
 import AuthInheritBanner from "./AuthInheritBanner";
 
 const AUTH_TYPES: { value: AuthType; label: string; icon: typeof Key }[] = [
@@ -46,7 +46,7 @@ export default function AuthPanel() {
 
 	const handleTypeChange = (type: AuthType) => {
 		// Initialize defaults for each type
-		let newConfig: Record<string, any> = {};
+		let newConfig: AuthConfigState = {};
 
 		if (type === "bearer") {
 			newConfig = { token: authConfig.token || "" };
@@ -66,7 +66,7 @@ export default function AuthPanel() {
 		setRequest({ authType: type, authConfig: newConfig });
 	};
 
-	const updateConfig = (updates: Record<string, any>) => {
+	const updateConfig = (updates: Partial<AuthConfigState>) => {
 		updateField("authConfig", { ...authConfig, ...updates });
 	};
 

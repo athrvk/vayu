@@ -165,13 +165,32 @@ export interface VariableInfo extends ResolvedVariable {
 	sourceName?: string; // Collection name or Environment name
 }
 
+/**
+ * Flat snapshot of the request + load-test parameters captured when a run
+ * starts, persisted with the Run for history display. Known fields are typed;
+ * the index signature permits additional engine-provided keys.
+ */
+export interface RunConfigSnapshot {
+	url?: string;
+	method?: string;
+	mode?: string;
+	duration?: string;
+	targetRps?: number;
+	concurrency?: number;
+	iterations?: number;
+	rampUpDuration?: string;
+	startConcurrency?: number;
+	comment?: string;
+	[key: string]: unknown;
+}
+
 export interface Run {
 	id: string;
 	type: "load" | "design";
 	status: "pending" | "running" | "completed" | "stopped" | "failed";
 	startTime: number; // Unix timestamp in ms
 	endTime: number;
-	configSnapshot?: any;
+	configSnapshot?: RunConfigSnapshot;
 	requestId?: string | null;
 	environmentId?: string | null;
 }
@@ -200,7 +219,7 @@ export interface HttpResponse {
 	headers: Record<string, string>;
 	requestHeaders?: Record<string, string>;
 	rawRequest?: string;
-	body: any;
+	body: unknown;
 	bodyRaw: string;
 	bodySize: number;
 	timing: {

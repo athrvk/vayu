@@ -135,7 +135,7 @@ export interface ExecuteRequestRequest {
 	url: string;
 	// Engine execution endpoint expects flat headers (resolved, enabled-only)
 	headers?: Record<string, string>;
-	body?: any;
+	body?: unknown;
 	auth?: Record<string, unknown>;
 	preRequestScript?: string;
 	postRequestScript?: string;
@@ -157,7 +157,7 @@ export interface StartLoadTestRequest {
 	url: string;
 	// Engine load-test endpoint expects flat headers (resolved, enabled-only)
 	headers?: Record<string, string>;
-	body?: any;
+	body?: unknown;
 	auth?: Record<string, unknown>;
 
 	// Load test strategy

@@ -34,7 +34,7 @@ import {
 } from "@/queries";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
-import type { RequestState, ResponseState } from "./types";
+import type { AuthConfigState, RequestState, ResponseState } from "./types";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
 import type {
@@ -137,8 +137,10 @@ export default function RequestBuilder() {
 						: auth.mode === "inherit"
 							? "inherit"
 							: "none";
-		const authConfig: Record<string, any> =
-			auth.mode !== "none" && auth.mode !== "inherit" ? (auth as any) : {};
+		const authConfig: AuthConfigState =
+			auth.mode !== "none" && auth.mode !== "inherit"
+				? (auth as unknown as AuthConfigState)
+				: {};
 
 		return {
 			id: fetchedRequest.id,
