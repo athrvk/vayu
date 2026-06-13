@@ -12,6 +12,7 @@
  * This is separate from engine configs as it's app-level, not engine-level.
  */
 
+import { useState, useEffect } from "react";
 import {
 	Monitor,
 	Sun,
@@ -25,6 +26,7 @@ import {
 	Sunset,
 	Sparkles,
 	Heart,
+	FolderOpen,
 } from "lucide-react";
 import {
 	Card,
@@ -37,8 +39,20 @@ import {
 import { useElectronTheme, type ThemeSource, type ColorScheme } from "@/hooks/useElectronTheme";
 import { cn } from "@/lib/utils";
 
+interface AppPaths {
+	appDir: string;
+	dataDir: string;
+	logsPath: string;
+	dbPath: string;
+}
+
 export default function UISettingsPanel() {
 	const { themeSource, setTheme, colorScheme, setColorScheme, isLoading } = useElectronTheme();
+	const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
+
+	useEffect(() => {
+		window.electronAPI?.getAppPaths().then(setAppPaths).catch(() => {});
+	}, []);
 
 	const themeOptions: {
 		value: ThemeSource;
@@ -277,6 +291,45 @@ export default function UISettingsPanel() {
 							)}
 						</CardContent>
 					</Card>
+
+					{/* Storage Paths — only shown when running in Electron */}
+					{appPaths && (
+						<Card>
+							<CardHeader className="pb-3">
+								<div className="flex items-center gap-2">
+									<FolderOpen className="w-5 h-5 text-muted-foreground" />
+									<CardTitle className="text-base">Storage Paths</CardTitle>
+								</div>
+								<CardDescription>
+									File system locations used by the application.
+								</CardDescription>
+							</CardHeader>
+							<CardContent>
+								<div className="space-y-2">
+									{(
+										[
+											["App directory", appPaths.appDir],
+											["Data directory", appPaths.dataDir],
+											["Database", appPaths.dbPath],
+											["Logs", appPaths.logsPath],
+										] as const
+									).map(([label, value]) => (
+										<div
+											key={label}
+											className="flex flex-col gap-0.5"
+										>
+											<span className="text-xs font-medium text-muted-foreground">
+												{label}
+											</span>
+											<span className="text-xs font-mono text-foreground break-all">
+												{value}
+											</span>
+										</div>
+									))}
+								</div>
+							</CardContent>
+						</Card>
+					)}
 				</div>
 			</div>
 		</div>

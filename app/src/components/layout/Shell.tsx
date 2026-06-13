@@ -50,7 +50,8 @@ function renderTabContent(tab: Tab | null): React.ReactNode {
 
 export default function Shell() {
 	const { openTabs, activeTabId, closeTab, focusTab, openTab } = useTabsStore();
-	const { toggleDrawer, activateDrawerView, toggleContextBar } = useLayoutStore();
+	const { toggleDrawer, activateDrawerView, toggleContextBar, setDrawerOpen, setDrawerView } =
+		useLayoutStore();
 	const { triggerSave } = useSaveStore();
 	const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -61,6 +62,17 @@ export default function Shell() {
 	}, []);
 
 	const activeTab = openTabs.find((t) => t.id === activeTabId) ?? null;
+
+	// Auto-open the matching drawer view when navigating to a variables or collection tab
+	useEffect(() => {
+		if (activeTab?.type === "variables") {
+			setDrawerOpen(true);
+			setDrawerView("variables");
+		} else if (activeTab?.type === "collection") {
+			setDrawerOpen(true);
+			setDrawerView("collections");
+		}
+	}, [activeTab?.type, setDrawerOpen, setDrawerView]);
 
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
