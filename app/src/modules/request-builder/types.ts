@@ -13,7 +13,7 @@
  * adding an ephemeral `id` for stable React keys and a `system` flag.
  */
 
-import type { HttpMethod, KeyValueEntry, ResolvedVariable, VariableScope } from "@/types";
+import type { BodyMode, HttpMethod, KeyValueEntry, ResolvedVariable, VariableScope } from "@/types";
 
 // ============================================================================
 // Key-Value Types (shared across params, headers, form-data)
@@ -67,7 +67,9 @@ export interface AuthConfig {
 // Body Types
 // ============================================================================
 
-export type BodyMode = "none" | "json" | "text" | "graphql" | "form-data" | "x-www-form-urlencoded";
+// Re-export the canonical domain BodyMode so existing module-relative imports
+// (BodyPanel, parseCurl) keep resolving from "../types".
+export type { BodyMode };
 
 export interface BodyConfig {
 	mode: BodyMode;

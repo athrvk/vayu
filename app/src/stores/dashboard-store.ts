@@ -15,9 +15,7 @@ import { DEFAULT_SLO_MS, type Breakpoint } from "@/modules/dashboard/utils/compu
 // before the oldest points roll off — long enough for a typical load-test
 // session, short enough to keep chart slicing cheap.
 import { HISTORICAL_METRICS_CAP } from "@/config/metrics";
-
-type DashboardMode = "running" | "completed" | "stopped";
-type DashboardView = "metrics" | "request-response";
+import type { DashboardMode, DashboardView } from "@/modules/dashboard/types";
 
 // Config passed when starting a load test (for display during streaming)
 export interface LoadTestRunConfig {

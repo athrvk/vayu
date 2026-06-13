@@ -171,7 +171,7 @@ export default function VariableInput({
 				name,
 				{
 					value: info.value,
-					scope: info.scope as "global" | "collection" | "environment",
+					scope: info.scope as VariableScope,
 				},
 			])
 		);

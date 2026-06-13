@@ -176,12 +176,15 @@ export interface Run {
 	environmentId?: string | null;
 }
 
+/** Load-test execution strategy. Single source of truth for the mode union. */
+export type LoadTestMode = "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
+
 export interface LoadTestConfig {
 	duration_seconds?: number;
 	rps?: number;
 	concurrency?: number;
 	iterations?: number;
-	mode: "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
+	mode: LoadTestMode;
 	ramp_duration_seconds?: number;
 	data_sample_rate?: number;
 	slow_threshold_ms?: number;
@@ -387,11 +390,6 @@ export interface ConfigEntry {
 	max?: string;
 	updatedAt: number;
 	requiresRestart?: boolean;
-}
-
-export interface ConfigResponse {
-	entries: ConfigEntry[];
-	success?: boolean;
 }
 
 export type SettingsCategory =
