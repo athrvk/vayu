@@ -61,18 +61,31 @@ require_macos() {
 do_install() {
 	require_macos
 	(
-		local version url workdir zip expected actual staged
+		local version url workdir zip expected actual staged keepalive_pid=""
 		version="$(resolve_version)"
 		[ -n "$version" ] || { printf 'Could not determine version to install.\n' >&2; exit 1; }
 		url="$(download_url "$version")"
 		printf 'Installing Vayu %s...\n' "$version"
 
 		workdir="$(mktemp -d)"
-		trap 'rm -rf "$workdir"' EXIT
+
+		# Authorize the privileged copy into /Applications up front, so the
+		# password prompt appears immediately instead of after the download.
+		if [ "${VAYU_DRYRUN:-0}" != "1" ]; then
+			printf 'Vayu installs to %s and needs administrator access.\n' "$INSTALL_DIR"
+			sudo -v || { printf 'Authorization failed - aborting.\n' >&2; exit 1; }
+			# Refresh the sudo timestamp in the background so it does not expire
+			# during a slow download; the loop stops once sudo can no longer
+			# refresh non-interactively (i.e. after the script exits).
+			( while true; do sleep 60; sudo -n true 2>/dev/null || exit; done ) &
+			keepalive_pid=$!
+		fi
+		trap 'rm -rf "$workdir"; [ -n "$keepalive_pid" ] && kill "$keepalive_pid" 2>/dev/null' EXIT
 		zip="$workdir/vayu.zip"
 
 		printf 'Downloading %s\n' "$url"
-		run curl -fsSL "$url" -o "$zip"
+		# Default curl meter (drop -s) shows %, size, speed and ETA on stderr.
+		run curl -fL "$url" -o "$zip"
 
 		# Optional integrity check if the release publishes a .sha256
 		if [ "${VAYU_DRYRUN:-0}" != "1" ] && curl -fsSL "$url.sha256" -o "$zip.sha256" 2>/dev/null; then
@@ -93,7 +106,7 @@ do_install() {
 		run codesign --force --deep --sign - "$staged"
 		run xattr -cr "$staged"
 
-		printf 'Installing to %s (you may be prompted for your password)...\n' "$INSTALL_DIR"
+		printf 'Installing to %s...\n' "$INSTALL_DIR"
 		run sudo rm -rf "$APP_PATH"
 		run sudo ditto "$staged" "$APP_PATH"
 
