@@ -332,10 +332,7 @@ export default function CollectionItem({
 							onDelete={onDeleteRequest}
 							onBeforeDelete={onRequestDeleteClick}
 							isDeleting={deletingRequestId === request.id}
-							isSelected={
-								selectedCollectionId === collection.id &&
-								selectedRequestId === request.id
-							}
+							isSelected={selectedRequestId === request.id}
 							isRenaming={renamingRequestId === request.id}
 							renameValue={renameRequestValue}
 							onRenameChange={onRequestRenameChange}

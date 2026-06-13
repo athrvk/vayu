@@ -17,6 +17,7 @@ interface CollectionsUIState {
 	// Actions
 	toggleCollectionExpanded: (collectionId: string) => void;
 	expandCollection: (collectionId: string) => void;
+	expandCollections: (collectionIds: string[]) => void;
 	collapseCollection: (collectionId: string) => void;
 	reset: () => void;
 }
@@ -39,6 +40,17 @@ export const useCollectionsStore = create<CollectionsUIState>((set) => ({
 		set((state) => {
 			const newExpanded = new Set(state.expandedCollectionIds);
 			newExpanded.add(collectionId);
+			return { expandedCollectionIds: newExpanded };
+		}),
+
+	expandCollections: (collectionIds) =>
+		set((state) => {
+			// Skip the update (and re-render) when every id is already expanded
+			if (collectionIds.every((id) => state.expandedCollectionIds.has(id))) {
+				return state;
+			}
+			const newExpanded = new Set(state.expandedCollectionIds);
+			for (const id of collectionIds) newExpanded.add(id);
 			return { expandedCollectionIds: newExpanded };
 		}),
 

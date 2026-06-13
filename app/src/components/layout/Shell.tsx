@@ -63,16 +63,17 @@ export default function Shell() {
 
 	const activeTab = openTabs.find((t) => t.id === activeTabId) ?? null;
 
-	// Auto-open the matching drawer view when navigating to a variables or collection tab
+	// Auto-open the matching drawer view when navigating to a tab whose entity
+	// lives in a drawer (collections tree for requests/collections, variables list).
 	useEffect(() => {
 		if (activeTab?.type === "variables") {
 			setDrawerOpen(true);
 			setDrawerView("variables");
-		} else if (activeTab?.type === "collection") {
+		} else if (activeTab?.type === "collection" || activeTab?.type === "request") {
 			setDrawerOpen(true);
 			setDrawerView("collections");
 		}
-	}, [activeTab?.type, setDrawerOpen, setDrawerView]);
+	}, [activeTab?.type, activeTab?.entityId, setDrawerOpen, setDrawerView]);
 
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
