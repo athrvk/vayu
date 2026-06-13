@@ -55,8 +55,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
-
-type VariableType = NonNullable<VariableValue["type"]>;
+import type { VariableType } from "@/lib/variable-cast";
 
 const VARIABLE_TYPES: { value: VariableType; label: string }[] = [
 	{ value: "string", label: "String" },

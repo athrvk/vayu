@@ -138,10 +138,16 @@ export default function RequestBuilder() {
 						: auth.mode === "inherit"
 							? "inherit"
 							: "none";
+		// Map the domain auth (discriminated by mode) onto the flat editor state.
+		// Note the field rename: domain apikey uses `in`, the editor uses `addTo`.
 		const authConfig: AuthConfigState =
-			auth.mode !== "none" && auth.mode !== "inherit"
-				? (auth as unknown as AuthConfigState)
-				: {};
+			auth.mode === "bearer"
+				? { token: auth.token }
+				: auth.mode === "basic"
+					? { username: auth.username, password: auth.password }
+					: auth.mode === "apikey"
+						? { key: auth.key, value: auth.value, addTo: auth.in }
+						: {};
 
 		return {
 			id: fetchedRequest.id,

@@ -13,9 +13,9 @@
 
 import { Activity, Clock, Globe, Calendar, Timer } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { cn } from "@/lib/utils";
-import { formatDuration, getMethodColor, type RunMetadataProps } from "../types";
-import { loadTestTypeToLabel } from "@/utils";
+import type { RunMetadataProps } from "../types";
+import { formatDuration } from "../utils/format";
+import { getMethodColor, loadTestTypeToLabel } from "@/utils";
 import { LoadTestConfig } from "@/types";
 
 export default function RunMetadata({
@@ -43,7 +43,8 @@ export default function RunMetadata({
 						{requestMethod && (
 							<Badge
 								variant="outline"
-								className={cn("text-xs font-bold", getMethodColor(requestMethod))}
+								className="text-xs font-bold"
+								style={{ color: `hsl(${getMethodColor(requestMethod)})` }}
 							>
 								{requestMethod}
 							</Badge>
