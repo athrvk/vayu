@@ -212,13 +212,22 @@ void EventLoopWorker::stop (bool wait_for_pending) {
         return;
     }
 
+    // Tell run_loop whether to drain the pending queue before exiting.
+    // Must be stored before stop_requested so the worker reads a consistent value.
+    drain_on_stop.store (wait_for_pending, std::memory_order_release);
     stop_requested = true;
-    queue_has_items.store (true,
-    std::memory_order_release); // Wake up worker if spinning on empty queue
+    queue_has_items.store (true, std::memory_order_release);
     queue_has_items.notify_one ();
 
+    if (thread.joinable ()) {
+        thread.join ();
+    }
+
+    running = false;
+
     if (!wait_for_pending) {
-        // Drain SPSC queue
+        // Worker has exited — we are now the sole SPSC consumer. Cancel any
+        // requests that were never started (still sitting in pending_queue).
         std::unique_ptr<TransferData> data;
         while (pending_queue.pop (data)) {
             Error error;
@@ -233,20 +242,21 @@ void EventLoopWorker::stop (bool wait_for_pending) {
             }
         }
     }
-
-    if (thread.joinable ()) {
-        thread.join ();
-    }
-
-    running = false;
 }
 
 void EventLoopWorker::run_loop () {
     // Adaptive spinning parameters
     constexpr int SPIN_COUNT = core::constants::queue::SPIN_COUNT;
 
-    // Core loop optimized for latency and throughput
-    while (!stop_requested || !pending_queue.empty () || !active_transfers.empty ()) {
+    // Core loop optimized for latency and throughput.
+    // When drain_on_stop=true (stop(true)): keep running until pending queue AND
+    // active transfers are both empty.
+    // When drain_on_stop=false (stop(false)): keep running only until active
+    // transfers are empty; the pending queue is left for the caller to cancel
+    // after join(), avoiding a concurrent SPSC consumer race on Windows.
+    while (!stop_requested ||
+    (drain_on_stop.load (std::memory_order_relaxed) && !pending_queue.empty ()) ||
+    !active_transfers.empty ()) {
         bool did_work = false;
 
         // 1. Process pending queue (Lock-free Consumer)
@@ -261,7 +271,11 @@ void EventLoopWorker::run_loop () {
 
         // Fetch Phase: Get up to max_concurrent items, BUT only if tokens available.
         // We prioritize DRIVING IO over accepting new work if rate limited.
-        while (local_active < config.max_concurrent) {
+        // When stop(false) is in progress, skip new work so the queue remains
+        // untouched for the caller's post-join cancel drain.
+        const bool accept_new =
+        !stop_requested || drain_on_stop.load (std::memory_order_relaxed);
+        while (accept_new && local_active < config.max_concurrent) {
             // Check rate limiter WITHOUT blocking (single-threaded access, no lock needed)
             if (!rate_limiter.try_acquire_unlocked ()) {
                 // Rate limit reached. Stop fetching new work.

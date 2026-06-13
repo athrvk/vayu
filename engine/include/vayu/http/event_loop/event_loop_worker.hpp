@@ -139,6 +139,11 @@ class EventLoopWorker {
     std::thread thread;
     std::atomic<bool> running{ false };
     std::atomic<bool> stop_requested{ false };
+    // Set to true when stop(true) is called so the run_loop continues draining
+    // the pending queue before exiting. When false (stop(false)), the worker
+    // abandons the queue after draining active_transfers; the caller drains
+    // the queue as sole consumer after join() to avoid a concurrent SPSC pop.
+    std::atomic<bool> drain_on_stop{ true };
 
     // Lock-free queue for high performance
     vayu::core::SPSCQueue<std::unique_ptr<TransferData>> pending_queue;
