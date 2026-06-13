@@ -175,7 +175,9 @@ function resolve(b: Builder): ParsedRequest {
 	const authConfig: RequestState["authConfig"] = {};
 	if (b.basic) {
 		authType = "basic";
-		authConfig.basic = { username: b.basic.username, password: b.basic.password };
+		// Flat shape, matching what the Auth tab reads/writes.
+		authConfig.username = b.basic.username;
+		authConfig.password = b.basic.password;
 	}
 
 	// --- body ---------------------------------------------------------------

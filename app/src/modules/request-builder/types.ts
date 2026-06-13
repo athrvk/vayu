@@ -48,26 +48,17 @@ export interface TabInfo {
 export type AuthType = "none" | "inherit" | "bearer" | "basic" | "api-key";
 
 /**
- * Auth fields backing the request builder's Auth tab.
- *
- * Two conventions currently coexist (previously hidden behind `Record<string,
- * any>`): the Auth tab reads/writes the FLAT fields, while the curl importer
- * (`parseCurl`) emits the NESTED `basic` form. Both are typed here so the
- * mismatch is at least visible; consumers should be unified onto the flat
- * shape in a follow-up.
+ * Flat auth fields backing the request builder's Auth tab. Which fields are
+ * populated depends on the active {@link AuthType}. The Auth tab, request
+ * execution, and the curl importer all read/write this flat shape.
  */
 export interface AuthConfigState {
-	// Flat form — used by AuthPanel and request execution
 	token?: string;
 	username?: string;
 	password?: string;
 	key?: string;
 	value?: string;
 	addTo?: "header" | "query";
-	// Nested form — emitted by the curl importer
-	basic?: { username: string; password: string };
-	bearer?: { token: string };
-	apiKey?: { key: string; value: string; addTo: "header" | "query" };
 }
 
 export interface AuthConfig {

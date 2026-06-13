@@ -126,7 +126,8 @@ describe("parseCommand — curl", () => {
 	test("-u basic auth", () => {
 		const r = parseCommand(`curl https://x.com -u 'admin:secret'`)!;
 		expect(r.authType).toBe("basic");
-		expect(r.authConfig.basic).toEqual({ username: "admin", password: "secret" });
+		expect(r.authConfig.username).toBe("admin");
+		expect(r.authConfig.password).toBe("secret");
 	});
 
 	test("-I → HEAD", () => {
@@ -228,7 +229,8 @@ describe("parseCommand — wget", () => {
 	])("user/password order-independent: %s", (cmd) => {
 		const r = parseCommand(cmd)!;
 		expect(r.authType).toBe("basic");
-		expect(r.authConfig.basic).toEqual({ username: "admin", password: "secret" });
+		expect(r.authConfig.username).toBe("admin");
+		expect(r.authConfig.password).toBe("secret");
 	});
 
 	test("--post-file is skipped (not mapped to form-data)", () => {
