@@ -30,8 +30,7 @@ import {
 	FileText,
 	Download,
 } from "lucide-react";
-import { useNavigationStore } from "@/stores";
-import { useImportModalStore } from "@/stores/import-modal-store";
+import { useTabsStore, useLayoutStore, useImportModalStore } from "@/stores";
 import {
 	useCollectionsQuery,
 	useRunsQuery,
@@ -44,7 +43,8 @@ import { formatDistanceToNow } from "date-fns";
 
 export default function WelcomeScreen() {
 	const openImport = useImportModalStore((s) => s.open);
-	const { setActiveSidebarTab, navigateToRequest } = useNavigationStore();
+	const { openTab } = useTabsStore();
+	const { activateDrawerView } = useLayoutStore();
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: runs = [] } = useRunsQuery();
 	const createRequestMutation = useCreateRequestMutation();
@@ -115,7 +115,7 @@ export default function WelcomeScreen() {
 			});
 
 			// Navigate to the new request
-			navigateToRequest(targetCollectionId, newRequest.id);
+			openTab({ type: "request", entityId: newRequest.id });
 		} catch (error) {
 			console.error("Failed to create new request:", error);
 		}
@@ -164,7 +164,7 @@ export default function WelcomeScreen() {
 
 					<Card
 						className="hover:border-primary/50 transition-colors cursor-pointer group"
-						onClick={() => setActiveSidebarTab("history")}
+						onClick={() => activateDrawerView("history")}
 					>
 						<CardHeader className="pb-3">
 							<div className="flex items-center gap-3">
@@ -183,7 +183,7 @@ export default function WelcomeScreen() {
 
 					<Card
 						className="hover:border-primary/50 transition-colors cursor-pointer group"
-						onClick={() => setActiveSidebarTab("variables")}
+						onClick={() => openTab({ type: "variables", entityId: null })}
 					>
 						<CardHeader className="pb-3">
 							<div className="flex items-center gap-3">
@@ -202,7 +202,7 @@ export default function WelcomeScreen() {
 
 					<Card
 						className="hover:border-primary/50 transition-colors cursor-pointer group"
-						onClick={() => setActiveSidebarTab("settings")}
+						onClick={() => openTab({ type: "settings", entityId: null })}
 					>
 						<CardHeader className="pb-3">
 							<div className="flex items-center gap-3">
@@ -356,7 +356,7 @@ export default function WelcomeScreen() {
 											<button
 												key={collection.id}
 												onClick={() => {
-													setActiveSidebarTab("collections");
+													openTab({ type: "collection", entityId: collection.id });
 												}}
 												className="w-full flex items-center justify-between p-3  hover:bg-accent transition-colors text-left group"
 											>
@@ -394,7 +394,7 @@ export default function WelcomeScreen() {
 											<button
 												key={run.id}
 												onClick={() => {
-													setActiveSidebarTab("history");
+													activateDrawerView("history");
 												}}
 												className="w-full flex items-center justify-between p-3  hover:bg-accent transition-colors text-left group"
 											>

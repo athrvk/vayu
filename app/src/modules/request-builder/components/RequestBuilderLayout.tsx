@@ -14,8 +14,9 @@
  * Also handles keyboard shortcuts (Ctrl+Enter / Cmd+Enter) for sending requests.
  */
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui";
+import { useLayoutStore } from "@/stores";
 import { useRequestBuilderContext } from "../context";
 import UrlBar from "./UrlBar";
 import RequestDescription from "./RequestDescription";
@@ -24,6 +25,17 @@ import ResponseViewer from "./ResponseViewer";
 
 export default function RequestBuilderLayout() {
 	const { request, isExecuting, executeRequest } = useRequestBuilderContext();
+
+	const { requestSplitRatio, setRequestSplitRatio } = useLayoutStore();
+
+	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const debouncedSetRatio = useCallback(
+		(ratio: number) => {
+			if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+			saveTimeoutRef.current = setTimeout(() => setRequestSplitRatio(ratio), 200);
+		},
+		[setRequestSplitRatio]
+	);
 
 	// Keyboard shortcut handler: Ctrl+Enter (Windows/Linux) or Cmd+Enter (Mac)
 	useEffect(() => {
@@ -71,16 +83,34 @@ export default function RequestBuilderLayout() {
 			<RequestDescription />
 
 			{/* Main content area with resizable panels */}
-			<ResizablePanelGroup orientation="horizontal" className="flex-1">
+			<ResizablePanelGroup
+				orientation="horizontal"
+				className="flex-1"
+				onLayoutChanged={(layout) => {
+					const first = Object.values(layout)[0];
+					if (first !== undefined) debouncedSetRatio(first / 100);
+				}}
+			>
 				{/* Request Editor Panel */}
-				<ResizablePanel defaultSize={50} minSize={30} className="flex flex-col">
+				<ResizablePanel
+					// react-resizable-panels v4 treats bare numbers as pixels — percentages must be strings
+					defaultSize={`${requestSplitRatio * 100}%`}
+					minSize="20%"
+					maxSize="80%"
+					className="flex flex-col"
+				>
 					<RequestTabs />
 				</ResizablePanel>
 
 				<ResizableHandle withHandle />
 
 				{/* Response Viewer Panel */}
-				<ResizablePanel defaultSize={50} minSize={30} className="flex flex-col">
+				<ResizablePanel
+					defaultSize={`${(1 - requestSplitRatio) * 100}%`}
+					minSize="20%"
+					maxSize="80%"
+					className="flex flex-col"
+				>
 					<ResponseViewer />
 				</ResizablePanel>
 			</ResizablePanelGroup>

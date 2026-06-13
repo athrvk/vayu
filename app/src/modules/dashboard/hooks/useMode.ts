@@ -14,7 +14,10 @@
  * the mapping lives in exactly one place (Plan 4 code-quality gate #5).
  */
 
-export type LoadMode = "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
+import type { LoadTestMode } from "@/types";
+
+/** Dashboard-facing alias of the canonical {@link LoadTestMode}. */
+export type LoadMode = LoadTestMode;
 
 const KNOWN_MODES: ReadonlySet<LoadMode> = new Set<LoadMode>([
 	"constant_rps",

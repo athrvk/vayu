@@ -378,7 +378,11 @@ export default function BodyPanel() {
 						style={{ height: editorHeight }}
 					>
 						<ResizablePanelGroup orientation="vertical" className="h-full">
-							<ResizablePanel defaultSize={65} minSize={25} className="flex flex-col">
+							<ResizablePanel
+								defaultSize="65%"
+								minSize="25%"
+								className="flex flex-col"
+							>
 								<div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-panel shrink-0">
 									<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
 										Query
@@ -414,7 +418,11 @@ export default function BodyPanel() {
 								</div>
 							</ResizablePanel>
 							<ResizableHandle className="h-1.5 w-full cursor-row-resize bg-border after:hidden hover:bg-primary transition-colors" />
-							<ResizablePanel defaultSize={35} minSize={15} className="flex flex-col">
+							<ResizablePanel
+								defaultSize="35%"
+								minSize="15%"
+								className="flex flex-col"
+							>
 								<div className="px-3 py-1.5 border-b border-border bg-panel shrink-0">
 									<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
 										Variables

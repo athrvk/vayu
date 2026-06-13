@@ -6,18 +6,20 @@
  */
 
 import { useEffect } from "react";
-import { useNavigationStore } from "@/stores";
+import { useTabsStore } from "@/stores";
 
 /**
  * Bridges native menu items (Preferences… / Settings) to in-app navigation.
  * No-op outside Electron.
  */
 export function useMenuActions(): void {
-	const navigateToSettings = useNavigationStore((s) => s.navigateToSettings);
+	const openTab = useTabsStore((s) => s.openTab);
 
 	useEffect(() => {
 		// Optional-chain the call too: an older preload build may not expose
 		// onOpenSettings yet, and `?.` on electronAPI alone wouldn't guard that.
-		return window.electronAPI?.onOpenSettings?.(() => navigateToSettings());
-	}, [navigateToSettings]);
+		return window.electronAPI?.onOpenSettings?.(() =>
+			openTab({ type: "settings", entityId: null })
+		);
+	}, [openTab]);
 }

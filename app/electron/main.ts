@@ -33,7 +33,13 @@ const __dirname = path.dirname(__filename);
 let engineSidecar: EngineSidecar | null = null;
 let mainWindow: BrowserWindow | null = null;
 
+// Track if we've already sent the before-quit flush message
+let flushSent = false;
+
 function createWindow() {
+	// Reset flush flag when creating a new window
+	flushSent = false;
+
 	// Load persisted window state
 	const windowState = loadWindowState({
 		defaultWidth: WINDOW_DEFAULT_WIDTH,
@@ -50,16 +56,20 @@ function createWindow() {
 		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
-		// Center the macOS traffic lights inside our 32px titlebar (lights are ~12px)
-		trafficLightPosition: process.platform === "darwin" ? { x: 12, y: 10 } : undefined,
-		titleBarOverlay:
+		// Center the macOS traffic lights inside the titlebar (lights are ~16px)
+		trafficLightPosition:
 			process.platform === "darwin"
-				? false
-				: {
-						color: nativeTheme.shouldUseDarkColors ? "#1a1a1a" : "#ffffff",
-						symbolColor: nativeTheme.shouldUseDarkColors ? "#ffffff" : "#1a1a1a",
+				? { x: 12, y: Math.round((TITLEBAR_HEIGHT - 16) / 2) }
+				: undefined,
+		// Windows-only native overlay — Linux uses custom HTML buttons
+		titleBarOverlay:
+			process.platform === "win32"
+				? {
+						color: nativeTheme.shouldUseDarkColors ? "#111113" : "#f2f0eb",
+						symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f0eb" : "#111113",
 						height: TITLEBAR_HEIGHT,
-					},
+					}
+				: false,
 		webPreferences: {
 			nodeIntegration: false,
 			contextIsolation: true,
@@ -101,11 +111,12 @@ function createWindow() {
 			themeSource: nativeTheme.themeSource,
 		});
 
-		// Update titlebar overlay color (Windows/Linux only — unsupported on macOS)
-		if (process.platform !== "darwin" && mainWindow) {
+		// Update titlebar overlay color — Windows only
+		if (process.platform === "win32" && mainWindow) {
 			mainWindow.setTitleBarOverlay({
-				color: nativeTheme.shouldUseDarkColors ? "#1a1a1a" : "#ffffff",
-				symbolColor: nativeTheme.shouldUseDarkColors ? "#ffffff" : "#1a1a1a",
+				color: nativeTheme.shouldUseDarkColors ? "#111113" : "#f2f0eb",
+				symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f0eb" : "#111113",
+				height: TITLEBAR_HEIGHT,
 			});
 		}
 	});
@@ -157,8 +168,10 @@ function createMenu() {
 		// File menu
 		{
 			label: "File",
+			// CmdOrCtrl+W belongs to the renderer (close tab) — rebind window
+			// close so the menu accelerator doesn't swallow the keydown.
 			submenu: isMac
-				? [{ role: "close" as const }]
+				? [{ role: "close" as const, accelerator: "Shift+CmdOrCtrl+W" }]
 				: [
 						{
 							label: "Settings",
@@ -226,7 +239,7 @@ function createMenu() {
 							{ type: "separator" as const },
 							{ role: "window" as const },
 						]
-					: [{ role: "close" as const }]),
+					: [{ role: "close" as const, accelerator: "Shift+CmdOrCtrl+W" }]),
 			],
 		},
 		// Help menu — documentation links on all platforms, plus
@@ -446,12 +459,37 @@ app.on("window-all-closed", () => {
 	}
 });
 
-// Ensure engine is stopped when the app quits
-app.on("before-quit", async (event) => {
+// Ensure saves are flushed and engine is stopped when the app quits
+app.on("before-quit", (event) => {
+	// First pass: ask the renderer to flush pending saves. Quit resumes as
+	// soon as the renderer ACKs, with a 2s ceiling in case it is stuck.
+	if (!flushSent) {
+		flushSent = true;
+		event.preventDefault();
+		let resumed = false;
+		const resumeQuit = () => {
+			if (resumed) return;
+			resumed = true;
+			ipcMain.removeListener("before-quit-flushed", resumeQuit);
+			app.quit();
+		};
+		if (!mainWindow) {
+			resumeQuit();
+			return;
+		}
+		ipcMain.once("before-quit-flushed", resumeQuit);
+		setTimeout(resumeQuit, 2000);
+		mainWindow.webContents.send("before-quit");
+		return;
+	}
+
+	// Second pass: stop the engine before actually quitting
 	if (engineSidecar && engineSidecar.isRunning()) {
 		event.preventDefault();
-		await stopEngine();
-		// Continue with quit process
-		setImmediate(() => app.quit());
+		(async () => {
+			await stopEngine();
+			// Continue with quit process
+			setImmediate(() => app.quit());
+		})();
 	}
 });

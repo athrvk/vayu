@@ -13,12 +13,27 @@
  * one place. Consumers pass only what varies (language, value, height, etc.).
  */
 
+import { useState, useEffect } from "react";
 import { Editor, type EditorProps, type OnMount } from "@monaco-editor/react";
 
 type EditorOptions = NonNullable<EditorProps["options"]>;
 
-/** Monaco theme used across the app. Change here to retheme every editor. */
-const EDITOR_THEME = "vs-dark";
+function useDarkMode() {
+	const [isDark, setIsDark] = useState(
+		() => document.documentElement.classList.contains("dark")
+	);
+	useEffect(() => {
+		const observer = new MutationObserver(() => {
+			setIsDark(document.documentElement.classList.contains("dark"));
+		});
+		observer.observe(document.documentElement, {
+			attributes: true,
+			attributeFilter: ["class"],
+		});
+		return () => observer.disconnect();
+	}, []);
+	return isDark;
+}
 
 /** Options shared by every editor instance. */
 const DEFAULT_OPTIONS = {
@@ -62,13 +77,14 @@ export function CodeEditor({
 	className,
 	onMount,
 }: CodeEditorProps) {
+	const isDark = useDarkMode();
 	return (
 		<Editor
 			className={className}
 			height={height}
 			language={language}
 			value={value}
-			theme={EDITOR_THEME}
+			theme={isDark ? "vs-dark" : "vs"}
 			onChange={onChange ? (v) => onChange(v ?? "") : undefined}
 			onMount={onMount}
 			options={{ ...DEFAULT_OPTIONS, readOnly, fontSize, ...options }}

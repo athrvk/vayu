@@ -56,6 +56,8 @@ This document defines the standard file naming conventions for the Vayu applicat
 
 **Rationale:** Stores are utility modules, following kebab-case convention for consistency.
 
+**Co-location rule**: If a store's state is only consumed within a single module (e.g., `expandedCollectionIds` in `collections-store`), place the store file in `modules/<module>/`. If it is consumed by multiple modules or by shell-level components, keep it in `stores/`. The file name convention (`kebab-case-store.ts`) applies regardless of location.
+
 ---
 
 ### Services (`.ts`)
@@ -176,7 +178,8 @@ This document defines the standard file naming conventions for the Vayu applicat
 |-----------|---------|---------|
 | Components | `PascalCase.tsx` | `RequestBuilder.tsx` |
 | Hooks | `camelCase.ts` (with `use` prefix) | `useEngine.ts` |
-| Stores | `kebab-case-store.ts` | `navigation-store.ts` |
+| Stores | `kebab-case-store.ts` | `tabs-store.ts` |
+| Module Stores | `kebab-case-store.ts` | `collections-store.ts` |
 | Services | `kebab-case.ts` | `http-client.ts` |
 | Transformers | `kebab-case-transformer.ts` | `request-transformer.ts` |
 | Queries | `kebab-case.ts` | `collections.ts` |
@@ -195,11 +198,12 @@ Files are organized by feature/domain in the `modules/` directory:
 ```
 modules/
 ├── [module-name]/
-│   ├── sidebar/          # Sidebar components (PascalCase.tsx)
-│   ├── main/             # Main content components (PascalCase.tsx)
-│   ├── components/       # Sub-components (PascalCase.tsx)
-│   ├── types.ts          # Type definitions (kebab-case.ts)
-│   └── index.ts          # Barrel exports
+│   ├── sidebar/           # Sidebar components (PascalCase.tsx)
+│   ├── main/              # Main content components (PascalCase.tsx)
+│   ├── components/        # Sub-components (PascalCase.tsx)
+│   ├── [module]-store.ts  # Module-local UI store (kebab-case-store.ts)
+│   ├── types.ts           # Type definitions (kebab-case.ts)
+│   └── index.ts           # Barrel exports
 ```
 
 ## Migration Notes

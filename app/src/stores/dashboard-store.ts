@@ -15,9 +15,7 @@ import { DEFAULT_SLO_MS, type Breakpoint } from "@/modules/dashboard/utils/compu
 // before the oldest points roll off — long enough for a typical load-test
 // session, short enough to keep chart slicing cheap.
 import { HISTORICAL_METRICS_CAP } from "@/config/metrics";
-
-type DashboardMode = "running" | "completed" | "stopped";
-type DashboardView = "metrics" | "request-response";
+import type { DashboardMode, DashboardView } from "@/modules/dashboard/types";
 
 // Config passed when starting a load test (for display during streaming)
 export interface LoadTestRunConfig {
@@ -57,6 +55,8 @@ interface DashboardState {
 	// Config and request info (available during live streaming)
 	loadTestConfig: LoadTestRunConfig | null;
 	requestInfo: LoadTestRequestInfo | null;
+	/** Request that initiated the run, so the dashboard can navigate back to it. */
+	sourceRequestId: string | null;
 	/**
 	 * Running monotonic aggregates updated on each tick in {@link addMetricsBatch}.
 	 * Stored here instead of recomputed in MetricsView so that consumers see O(1)
@@ -70,7 +70,8 @@ interface DashboardState {
 	startRun: (
 		runId: string,
 		config?: LoadTestRunConfig,
-		requestInfo?: LoadTestRequestInfo
+		requestInfo?: LoadTestRequestInfo,
+		sourceRequestId?: string | null
 	) => void;
 	stopRun: () => void;
 	setStreaming: (streaming: boolean) => void;
@@ -98,10 +99,11 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 	isStopping: false,
 	loadTestConfig: null,
 	requestInfo: null,
+	sourceRequestId: null,
 	peakConcurrency: 0,
 	breakpoint: INITIAL_BREAKPOINT,
 
-	startRun: (runId, config, requestInfo) =>
+	startRun: (runId, config, requestInfo, sourceRequestId) =>
 		set({
 			currentRunId: runId,
 			mode: "running",
@@ -114,6 +116,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			isStopping: false,
 			loadTestConfig: config ?? null,
 			requestInfo: requestInfo ?? null,
+			sourceRequestId: sourceRequestId ?? null,
 			peakConcurrency: 0,
 			breakpoint: INITIAL_BREAKPOINT,
 		}),
@@ -191,6 +194,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			isStopping: false,
 			loadTestConfig: null,
 			requestInfo: null,
+			sourceRequestId: null,
 			peakConcurrency: 0,
 			breakpoint: INITIAL_BREAKPOINT,
 		}),

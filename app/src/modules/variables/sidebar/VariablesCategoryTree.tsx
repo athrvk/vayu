@@ -15,7 +15,8 @@
  */
 
 import { useState } from "react";
-import { useVariablesStore, type VariableCategory } from "@/stores";
+import { useTabsStore } from "@/stores";
+import { useVariablesStore, type VariableCategory } from "@/modules/variables/variables-store";
 import { useCreateEnvironmentMutation, useDeleteEnvironmentMutation } from "@/queries";
 import type { Collection, Environment } from "@/types";
 import {
@@ -41,7 +42,14 @@ export default function VariablesCategoryTree({
 	environments,
 }: VariablesCategoryTreeProps) {
 	const { selectedCategory, setSelectedCategory } = useVariablesStore();
+	const { openTab } = useTabsStore();
 	const [collectionsExpanded, setCollectionsExpanded] = useState(true);
+
+	// Selecting a scope must also surface the variables editor in the main view
+	const selectCategory = (category: VariableCategory) => {
+		setSelectedCategory(category);
+		openTab({ type: "variables", entityId: null });
+	};
 	const [environmentsExpanded, setEnvironmentsExpanded] = useState(true);
 
 	// Environment management state
@@ -83,7 +91,7 @@ export default function VariablesCategoryTree({
 
 		setCreatingEnvironment(false);
 		setNewEnvName("New Environment");
-		setSelectedCategory({ type: "environment", environmentId: newEnv.id });
+		selectCategory({ type: "environment", environmentId: newEnv.id });
 	};
 
 	const envToDelete = deleteConfirmEnvId
@@ -119,7 +127,7 @@ export default function VariablesCategoryTree({
 			{/* Globals Section (Lowest Priority) */}
 			<div className="mb-4">
 				<button
-					onClick={() => setSelectedCategory({ type: "globals" })}
+					onClick={() => selectCategory({ type: "globals" })}
 					className={cn(
 						"w-full flex items-center gap-2 px-8 py-2 text-left text-sm hover:bg-accent transition-colors",
 						isSelected({ type: "globals" }) &&
@@ -215,7 +223,7 @@ export default function VariablesCategoryTree({
 												"bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/70"
 										)}
 										onClick={() =>
-											setSelectedCategory({
+											selectCategory({
 												type: "environment",
 												environmentId: environment.id,
 											})
@@ -286,7 +294,7 @@ export default function VariablesCategoryTree({
 									<button
 										key={collection.id}
 										onClick={() =>
-											setSelectedCategory({
+											selectCategory({
 												type: "collection",
 												collectionId: collection.id,
 											})

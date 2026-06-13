@@ -9,9 +9,11 @@
  * Type definitions for Electron API exposed via preload
  */
 
+import type { ThemeSource } from "./ui";
+
 interface ThemeInfo {
 	shouldUseDarkColors: boolean;
-	themeSource: "system" | "light" | "dark";
+	themeSource: ThemeSource;
 }
 
 type UpdateStrategy = "silent" | "notify" | "disabled";
@@ -31,7 +33,7 @@ interface ElectronAPI {
 
 	// Theme management
 	getTheme: () => Promise<ThemeInfo>;
-	setTheme: (source: "system" | "light" | "dark") => Promise<ThemeInfo>;
+	setTheme: (source: ThemeSource) => Promise<ThemeInfo>;
 	onThemeChanged: (callback: (theme: ThemeInfo) => void) => () => void;
 
 	// Window controls for custom titlebar
@@ -60,6 +62,9 @@ interface ElectronAPI {
 		logsPath: string;
 		dbPath: string;
 	}>;
+
+	// Before quit flush handler
+	onBeforeQuit: (callback: () => void | Promise<void>) => () => void;
 }
 
 declare global {

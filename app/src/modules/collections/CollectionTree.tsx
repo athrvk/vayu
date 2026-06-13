@@ -7,8 +7,8 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Folder, Plus, Trash2, Edit2, Copy, FolderPlus, Loader2, Download } from "lucide-react";
-import { useNavigationStore, useCollectionsStore, useSaveStore } from "@/stores";
-import { useImportModalStore } from "@/stores/import-modal-store";
+import { useTabsStore, useSaveStore, useImportModalStore } from "@/stores";
+import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
 	useCollectionsQuery,
 	useMultipleCollectionRequests,
@@ -38,15 +38,23 @@ import { TIMING } from "@/config/timing";
 
 export default function CollectionTree() {
 	const openImport = useImportModalStore((s) => s.open);
-	const {
-		navigateToRequest,
-		navigateToCollection,
-		navigateToWelcome,
-		selectedCollectionId,
-		selectedRequestId,
-	} = useNavigationStore();
-	const { expandedCollectionIds, toggleCollectionExpanded } = useCollectionsStore();
+	const { openTab, openTabs, activeTabId } = useTabsStore();
+	const { expandedCollectionIds, toggleCollectionExpanded, expandCollections } =
+		useCollectionsStore();
 	const { startSaving, completeSave, failSave, setStatus } = useSaveStore();
+	const treeRef = useRef<HTMLDivElement>(null);
+	const scrolledRequestRef = useRef<string | null>(null);
+
+	// Get selected collection and request IDs from active tab
+	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	const selectedCollectionId = activeTab?.type === "collection" ? activeTab.entityId : null;
+	const selectedRequestId = activeTab?.type === "request" ? activeTab.entityId : null;
+
+	const navigateToRequest = (_collectionId: string, requestId: string) =>
+		openTab({ type: "request", entityId: requestId });
+	const navigateToCollection = (collectionId: string) =>
+		openTab({ type: "collection", entityId: collectionId });
+	const navigateToWelcome = () => openTab({ type: "welcome", entityId: null });
 
 	// TanStack Query hooks
 	const { data: collections = [], isLoading: isLoadingCollections } = useCollectionsQuery();
@@ -73,6 +81,45 @@ export default function CollectionTree() {
 		() => [...collections].filter((c) => !c.parentId).sort(compareCollectionOrder),
 		[collections]
 	);
+
+	// Reveal the active request in the tree: expand its ancestor folders so the
+	// row is rendered, then (in the effect below) scroll it into view.
+	useEffect(() => {
+		if (!selectedRequestId) {
+			scrolledRequestRef.current = null;
+			return;
+		}
+		let owningCollectionId: string | undefined;
+		for (const [collectionId, reqs] of requestsByCollection) {
+			if (reqs.some((r) => r.id === selectedRequestId)) {
+				owningCollectionId = collectionId;
+				break;
+			}
+		}
+		if (!owningCollectionId) return;
+
+		const ancestorChain: string[] = [];
+		let cursor: string | undefined = owningCollectionId;
+		while (cursor) {
+			ancestorChain.push(cursor);
+			cursor = collections.find((c) => c.id === cursor)?.parentId ?? undefined;
+		}
+		expandCollections(ancestorChain);
+	}, [selectedRequestId, requestsByCollection, collections, expandCollections]);
+
+	// Once the selected request's row exists (after ancestors expand), scroll it
+	// into view. Guarded by a ref so it only fires once per selection.
+	useEffect(() => {
+		if (!selectedRequestId || scrolledRequestRef.current === selectedRequestId) return;
+		const row = treeRef.current?.querySelector(
+			`[data-request-id="${CSS.escape(selectedRequestId)}"]`
+		);
+		if (row) {
+			row.scrollIntoView({ block: "nearest" });
+			scrolledRequestRef.current = selectedRequestId;
+		}
+	}, [selectedRequestId, expandedCollectionIds, requestsByCollection]);
+
 	const [creatingCollection, setCreatingCollection] = useState(false);
 	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID
 	const [newCollectionName, setNewCollectionName] = useState("New Collection");
@@ -359,7 +406,7 @@ export default function CollectionTree() {
 	}, []);
 
 	return (
-		<div className="flex flex-col h-full w-full p-4 space-y-2">
+		<div ref={treeRef} className="flex flex-col h-full w-full p-4 space-y-2">
 			{/* Header */}
 			<div className="flex items-center justify-between mb-4">
 				<h2 className="text-sm font-semibold text-foreground">Collections</h2>

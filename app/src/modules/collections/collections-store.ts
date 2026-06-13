@@ -13,22 +13,17 @@ import { create } from "zustand";
 interface CollectionsUIState {
 	// UI-only state
 	expandedCollectionIds: Set<string>;
-	isSavingCollection: boolean;
-	isSavingRequest: boolean;
 
 	// Actions
 	toggleCollectionExpanded: (collectionId: string) => void;
 	expandCollection: (collectionId: string) => void;
+	expandCollections: (collectionIds: string[]) => void;
 	collapseCollection: (collectionId: string) => void;
-	setSavingCollection: (saving: boolean) => void;
-	setSavingRequest: (saving: boolean) => void;
 	reset: () => void;
 }
 
 export const useCollectionsStore = create<CollectionsUIState>((set) => ({
 	expandedCollectionIds: new Set<string>(),
-	isSavingCollection: false,
-	isSavingRequest: false,
 
 	toggleCollectionExpanded: (collectionId) =>
 		set((state) => {
@@ -48,6 +43,17 @@ export const useCollectionsStore = create<CollectionsUIState>((set) => ({
 			return { expandedCollectionIds: newExpanded };
 		}),
 
+	expandCollections: (collectionIds) =>
+		set((state) => {
+			// Skip the update (and re-render) when every id is already expanded
+			if (collectionIds.every((id) => state.expandedCollectionIds.has(id))) {
+				return state;
+			}
+			const newExpanded = new Set(state.expandedCollectionIds);
+			for (const id of collectionIds) newExpanded.add(id);
+			return { expandedCollectionIds: newExpanded };
+		}),
+
 	collapseCollection: (collectionId) =>
 		set((state) => {
 			const newExpanded = new Set(state.expandedCollectionIds);
@@ -55,13 +61,8 @@ export const useCollectionsStore = create<CollectionsUIState>((set) => ({
 			return { expandedCollectionIds: newExpanded };
 		}),
 
-	setSavingCollection: (saving) => set({ isSavingCollection: saving }),
-	setSavingRequest: (saving) => set({ isSavingRequest: saving }),
-
 	reset: () =>
 		set({
 			expandedCollectionIds: new Set<string>(),
-			isSavingCollection: false,
-			isSavingRequest: false,
 		}),
 }));

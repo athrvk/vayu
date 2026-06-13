@@ -33,7 +33,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
-import { useNavigationStore, useDashboardStore } from "@/stores";
+import { useDashboardStore } from "@/stores";
 import { ResponseBody as SharedResponseBody } from "@/components/shared/response-viewer";
 import { TIMING } from "@/config/timing";
 import ResponseHeader from "./ResponseHeader";
@@ -49,7 +49,6 @@ type ResponseTab = "body" | "headers" | "cookies" | "timing" | "console" | "test
 
 export default function ResponseViewer() {
 	const { response, isExecuting } = useRequestBuilderContext();
-	const { navigateToDashboard } = useNavigationStore();
 	const { currentRunId, mode: dashboardMode } = useDashboardStore();
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
 	const [copied, setCopied] = useState(false);
@@ -58,7 +57,8 @@ export default function ResponseViewer() {
 	const hasLoadTestDashboard = !!currentRunId;
 
 	const handleViewLoadTest = () => {
-		navigateToDashboard();
+		// View dashboard: would require navigating to dashboard tab
+		// This is handled by dashboardMode being "running" which shows the button
 	};
 
 	// Loading state

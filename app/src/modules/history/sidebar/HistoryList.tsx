@@ -7,8 +7,8 @@
 
 import { useState } from "react";
 import { Search, Clock, Loader2 } from "lucide-react";
-import { useNavigationStore, useHistoryStore } from "@/stores";
-import { filterRuns } from "@/stores/history-store";
+import { useTabsStore, useLayoutStore } from "@/stores";
+import { useHistoryStore, filterRuns } from "@/modules/history/history-store";
 import { useRunsQuery, useDeleteRunMutation } from "@/queries";
 import {
 	Button,
@@ -23,7 +23,8 @@ import {
 import RunItem from "./RunItem";
 
 export default function HistoryList() {
-	const { navigateToRunDetail, navigateToHistory, selectedRunId } = useNavigationStore();
+	const { openTab, openTabs, activeTabId } = useTabsStore();
+	const { activateDrawerView } = useLayoutStore();
 	const {
 		searchQuery,
 		setSearchQuery,
@@ -34,6 +35,13 @@ export default function HistoryList() {
 		sortBy,
 		setSortBy,
 	} = useHistoryStore();
+
+	// Get selectedRunId from active tab
+	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	const selectedRunId = activeTab?.type === "run" ? activeTab.entityId : null;
+
+	const navigateToRunDetail = (runId: string) => openTab({ type: "run", entityId: runId });
+	const navigateToHistory = () => activateDrawerView("history");
 
 	// Use TanStack Query for runs data
 	const { data: allRuns = [], isLoading } = useRunsQuery();

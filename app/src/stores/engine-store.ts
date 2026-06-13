@@ -6,39 +6,49 @@
  */
 
 /**
- * Settings Store
+ * Engine Store
  *
- * Manages settings UI state:
- * - Selected category for the sidebar
- * - Category-based filtering
- * - Restart required tracking
+ * Merged store managing:
+ * - Engine connection status and errors
+ * - Restart required tracking (pending restart + required config keys)
  */
 
 import { create } from "zustand";
-import type { SettingsCategory } from "@/types";
 
-interface SettingsState {
-	// Selected category in sidebar
-	selectedCategory: SettingsCategory | null;
+interface EngineState {
+	// Engine Connection
+	isEngineConnected: boolean;
+	engineError: string | null;
 
 	// Restart required notification
 	pendingRestart: boolean;
 	restartRequiredKeys: string[]; // Keys of configs that were changed and require restart
 
-	// Actions
-	setSelectedCategory: (category: SettingsCategory | null) => void;
+	// Connection actions
+	setEngineConnected: (connected: boolean) => void;
+	setEngineError: (error: string | null) => void;
+
+	// Restart actions
 	setPendingRestart: (pending: boolean, keys?: string[]) => void;
 	addRestartRequiredKey: (key: string) => void;
 	clearRestartRequired: () => void;
+
+	// Reset
+	reset: () => void;
 }
 
-export const useSettingsStore = create<SettingsState>()((set) => ({
-	selectedCategory: null,
+export const useEngineStore = create<EngineState>()((set) => ({
+	// Initial state
+	isEngineConnected: false,
+	engineError: null,
 	pendingRestart: false,
 	restartRequiredKeys: [],
 
-	setSelectedCategory: (category) => set({ selectedCategory: category }),
+	// Connection actions
+	setEngineConnected: (connected) => set({ isEngineConnected: connected }),
+	setEngineError: (error) => set({ engineError: error }),
 
+	// Restart actions
 	setPendingRestart: (pending, keys = []) =>
 		set({ pendingRestart: pending, restartRequiredKeys: keys }),
 
@@ -51,4 +61,13 @@ export const useSettingsStore = create<SettingsState>()((set) => ({
 		})),
 
 	clearRestartRequired: () => set({ pendingRestart: false, restartRequiredKeys: [] }),
+
+	// Reset all
+	reset: () =>
+		set({
+			isEngineConnected: false,
+			engineError: null,
+			pendingRestart: false,
+			restartRequiredKeys: [],
+		}),
 }));

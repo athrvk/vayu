@@ -19,6 +19,7 @@ import type {
 	KeyValueEntry,
 	RequestBody,
 	RequestAuth,
+	LoadTestMode,
 } from "./domain";
 
 // API Response wrapper
@@ -134,7 +135,7 @@ export interface ExecuteRequestRequest {
 	url: string;
 	// Engine execution endpoint expects flat headers (resolved, enabled-only)
 	headers?: Record<string, string>;
-	body?: any;
+	body?: unknown;
 	auth?: Record<string, unknown>;
 	preRequestScript?: string;
 	postRequestScript?: string;
@@ -142,7 +143,7 @@ export interface ExecuteRequestRequest {
 	environmentId?: string;
 }
 
-export interface ExecuteRequestResponse extends SanityResult {}
+export type ExecuteRequestResponse = SanityResult;
 
 /**
  * StartLoadTestRequest - Matches POST /run backend endpoint
@@ -156,11 +157,11 @@ export interface StartLoadTestRequest {
 	url: string;
 	// Engine load-test endpoint expects flat headers (resolved, enabled-only)
 	headers?: Record<string, string>;
-	body?: any;
+	body?: unknown;
 	auth?: Record<string, unknown>;
 
 	// Load test strategy
-	mode: "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
+	mode: LoadTestMode;
 
 	// For constant_rps / constant_concurrency modes
 	duration?: string; // e.g., "10s", "2m"
@@ -213,7 +214,7 @@ export interface GetRunResponse {
 	run: Run;
 }
 
-export interface GetRunReportResponse extends RunReport {}
+export type GetRunReportResponse = RunReport;
 
 export interface StopRunResponse {
 	runId: string;
@@ -228,7 +229,7 @@ export interface StopRunResponse {
 }
 
 // Health & Config API
-export interface GetHealthResponse extends EngineHealth {}
+export type GetHealthResponse = EngineHealth;
 
 export interface GetConfigResponse {
 	entries: import("./domain").ConfigEntry[];

@@ -5,10 +5,12 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useEffect } from "react";
 import Shell from "./components/layout/Shell";
 import TitleBar from "./components/layout/TitleBar";
 import UpdateBanner from "./components/shared/UpdateBanner";
-import { useEngineConnectionStore } from "./stores";
+import Toaster from "./components/shared/Toaster";
+import { useEngineStore } from "./stores";
 import {
 	useConfigQuery,
 	useHealthQuery,
@@ -18,9 +20,10 @@ import {
 import { useElectronTheme } from "./hooks/useElectronTheme";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
 import { useMenuActions } from "./hooks/useMenuActions";
+import { useSaveStore } from "./stores/save-store";
 
 function App() {
-	const { isEngineConnected } = useEngineConnectionStore();
+	const { isEngineConnected } = useEngineStore();
 
 	// Sync theme with OS/Electron settings
 	useElectronTheme();
@@ -42,6 +45,14 @@ function App() {
 	// Bridge native menu items (Preferences…/Settings) to in-app navigation
 	useMenuActions();
 
+	// Register Electron before-quit handler to flush pending saves
+	useEffect(() => {
+		if (!window.electronAPI?.onBeforeQuit) return;
+		return window.electronAPI.onBeforeQuit(async () => {
+			await useSaveStore.getState().flushAll();
+		});
+	}, []);
+
 	// Log connection status for debugging
 	if (isEngineConnected) {
 		console.log("App: Engine connected, data queries active");
@@ -54,6 +65,7 @@ function App() {
 			<div className="flex-1 overflow-hidden">
 				<Shell />
 			</div>
+			<Toaster />
 		</div>
 	);
 }

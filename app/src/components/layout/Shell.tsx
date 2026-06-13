@@ -5,121 +5,159 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect } from "react";
-import { useNavigationStore } from "@/stores";
-import { useSaveStore } from "@/stores/save-store";
-import { useResizable } from "@/hooks";
-import { cn } from "@/lib/utils";
-import Sidebar from "./Sidebar";
+import { useEffect, useState } from "react";
+import { useTabsStore, useSaveStore, useLayoutStore, type Tab, type DrawerView } from "@/stores";
+import { ImportModal } from "@/modules/collections/ImportModal";
+import { Drawer } from "./Drawer";
+import { Dock } from "./Dock";
+import { ContextBar } from "./ContextBar";
 import RequestBuilder from "@/modules/request-builder";
 import CollectionDetail from "@/modules/collections/CollectionDetail";
 import LoadTestDashboard from "@/modules/dashboard";
 import { HistoryDetail } from "@/modules/history/main";
 import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
-import { SettingsMain } from "@/modules/settings";
+import { SettingsMain, SettingsCategoryTree } from "@/modules/settings";
 import VariablesMain from "@/modules/variables/main/VariablesMain";
-import { ImportModal } from "@/modules/collections/ImportModal";
 
-/**
- * Sidebar width bounds.
- *
- * `History` runs need more breathing room than the Collections tree —
- * each RunItem renders a method badge, status text, relative timestamp,
- * URL, and (for load tests) duration / workers / mode chips. Bump the
- * floor when that tab is active so URLs don't truncate into single
- * characters.
- */
-const MIN_SIDEBAR_WIDTH = 280;
-const MIN_SIDEBAR_WIDTH_HISTORY = 420;
-const MAX_SIDEBAR_WIDTH = 600;
-// Width of the collapsed sidebar — matches the activity bar's `w-11` (44px) in Sidebar.
-const ACTIVITY_BAR_WIDTH = 44;
+function renderTabContent(tab: Tab | null): React.ReactNode {
+	if (!tab) return <WelcomeScreen />;
+	switch (tab.type) {
+		case "welcome":
+			return <WelcomeScreen />;
+		case "request":
+			return tab.entityId ? <RequestBuilder /> : <WelcomeScreen />;
+		case "collection":
+			return tab.entityId ? <CollectionDetail /> : null;
+		case "dashboard":
+			return <LoadTestDashboard />;
+		case "run":
+			return tab.entityId ? <HistoryDetail /> : null;
+		case "variables":
+			return <VariablesMain />;
+		case "settings":
+			return (
+				<div className="flex flex-1 min-w-0 h-full overflow-hidden">
+					<div className="w-60 shrink-0 border-r border-border bg-panel overflow-y-auto">
+						<SettingsCategoryTree />
+					</div>
+					<SettingsMain />
+				</div>
+			);
+		default:
+			return null;
+	}
+}
 
 export default function Shell() {
-	const { resolveActiveScreen, activeSidebarTab, sidebarPanelOpen } = useNavigationStore();
-	const activeScreen = resolveActiveScreen();
+	const { openTabs, activeTabId, closeTab, focusTab, openTab } = useTabsStore();
+	const { toggleDrawer, activateDrawerView, toggleContextBar, setDrawerOpen, setDrawerView } =
+		useLayoutStore();
 	const { triggerSave } = useSaveStore();
+	const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
-	const minSidebarWidth =
-		activeSidebarTab === "history" ? MIN_SIDEBAR_WIDTH_HISTORY : MIN_SIDEBAR_WIDTH;
+	useEffect(() => {
+		const onResize = () => setWindowWidth(window.innerWidth);
+		window.addEventListener("resize", onResize);
+		return () => window.removeEventListener("resize", onResize);
+	}, []);
 
-	const {
-		size: sidebarWidth,
-		isResizing,
-		startResizing,
-	} = useResizable({
-		defaultSize: 320,
-		min: minSidebarWidth,
-		max: MAX_SIDEBAR_WIDTH,
-	});
+	const activeTab = openTabs.find((t) => t.id === activeTabId) ?? null;
 
-	// App-wide Ctrl/Cmd+S keyboard handler
+	// Auto-open the matching drawer view when navigating to a tab whose entity
+	// lives in a drawer (collections tree for requests/collections, variables list).
+	useEffect(() => {
+		if (activeTab?.type === "variables") {
+			setDrawerOpen(true);
+			setDrawerView("variables");
+		} else if (activeTab?.type === "collection" || activeTab?.type === "request") {
+			setDrawerOpen(true);
+			setDrawerView("collections");
+		}
+	}, [activeTab?.type, activeTab?.entityId, setDrawerOpen, setDrawerView]);
+
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
-			if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-				e.preventDefault();
-				triggerSave();
+			if (!(e.metaKey || e.ctrlKey)) return;
+			const key = e.key.toLowerCase();
+
+			// ⇧⌘E / ⇧⌘H / ⇧⌘U — drawer view switchers (match Dock tooltips)
+			if (e.shiftKey) {
+				const views: Record<string, DrawerView> = {
+					e: "collections",
+					h: "history",
+					u: "variables",
+				};
+				const view = views[key];
+				if (view) {
+					e.preventDefault();
+					activateDrawerView(view);
+				}
+				return;
+			}
+
+			switch (key) {
+				case "s":
+					e.preventDefault();
+					triggerSave();
+					break;
+				case "w":
+					e.preventDefault();
+					if (activeTabId) closeTab(activeTabId);
+					break;
+				case "b":
+					e.preventDefault();
+					toggleDrawer();
+					break;
+				case "i":
+					e.preventDefault();
+					toggleContextBar();
+					break;
+				case ",":
+					e.preventDefault();
+					openTab({ type: "settings", entityId: null });
+					break;
+				default:
+					if (key >= "1" && key <= "9") {
+						const tab = openTabs[parseInt(key) - 1];
+						if (tab) {
+							e.preventDefault();
+							focusTab(tab.id);
+						}
+					}
 			}
 		};
-
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [triggerSave]);
-
-	const renderMainContent = () => {
-		switch (activeScreen) {
-			case "request-builder":
-				return <RequestBuilder />;
-			case "collection-detail":
-				return <CollectionDetail />;
-			case "dashboard":
-				return <LoadTestDashboard />;
-			case "history":
-				return <HistoryDetail />;
-			case "settings":
-				return <SettingsMain />;
-			case "variables":
-				return <VariablesMain />;
-			case "welcome":
-			default:
-				return <WelcomeScreen />;
-		}
-	};
+	}, [
+		triggerSave,
+		closeTab,
+		toggleDrawer,
+		toggleContextBar,
+		activateDrawerView,
+		openTab,
+		focusTab,
+		activeTabId,
+		openTabs,
+	]);
 
 	return (
-		<div className="flex h-full bg-background overflow-hidden">
+		<div className="flex flex-col h-full bg-background overflow-hidden">
 			<ImportModal />
-			{/* Sidebar container — controlled width; collapses to the activity bar */}
-			<div
-				style={
-					sidebarPanelOpen
-						? {
-								width: `${sidebarWidth}px`,
-								minWidth: `${minSidebarWidth}px`,
-								maxWidth: `${MAX_SIDEBAR_WIDTH}px`,
-							}
-						: { width: `${ACTIVITY_BAR_WIDTH}px` }
-				}
-				className="flex-shrink-0 flex flex-col overflow-hidden"
-			>
-				<Sidebar />
+			<div className="flex flex-1 overflow-hidden relative">
+				{activeTab?.type === "settings" ? (
+					// Settings takes over the whole content row — no drawer or context bar
+					renderTabContent(activeTab)
+				) : (
+					<>
+						<Drawer />
+						<main className="flex-1 overflow-hidden flex flex-col min-w-0">
+							{renderTabContent(activeTab)}
+						</main>
+						<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
+					</>
+				)}
 			</div>
-
-			{/* Resize handle — only when the panel is expanded */}
-			{sidebarPanelOpen && (
-				<div
-					onMouseDown={startResizing}
-					className={cn(
-						"w-1 bg-border hover:bg-primary cursor-col-resize transition-colors shrink-0",
-						isResizing && "bg-primary"
-					)}
-				/>
-			)}
-
-			{/* Main content */}
-			<main className="flex-1 flex flex-col overflow-hidden min-w-0">
-				{renderMainContent()}
-			</main>
+			<Dock />
 		</div>
 	);
 }

@@ -6,18 +6,12 @@
  */
 
 // UI State Types
-// Only types that are actually imported by components are kept here.
-// Stores define their own state interfaces inline.
+// Cross-cutting UI types shared across components, hooks, and the Electron
+// preload contract. View/navigation state now lives with its owning store
+// (DrawerView in layout-store, TabType in tabs-store).
 
-// Sidebar Navigation
-export type SidebarTab = "collections" | "history" | "variables" | "settings";
+/** App theme preference. `system` follows the OS via Electron's nativeTheme. */
+export type ThemeSource = "system" | "light" | "dark";
 
-// Main Screen Views
-export type MainScreen =
-	| "request-builder"
-	| "collection-detail"
-	| "dashboard"
-	| "history"
-	| "variables"
-	| "settings"
-	| "welcome";
+/** Accent color scheme, applied via the `data-color-scheme` attribute. */
+export type ColorScheme = "sky" | "ocean" | "forest" | "sunset" | "aurora" | "coral";

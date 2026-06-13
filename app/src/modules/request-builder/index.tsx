@@ -25,7 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RequestBuilderProvider } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
-import { useNavigationStore, useVariablesStore, useDashboardStore } from "@/stores";
+import { useTabsStore, useSessionStore, useDashboardStore, useToastStore } from "@/stores";
 import {
 	useRequestQuery,
 	useUpdateRequestMutation,
@@ -34,7 +34,7 @@ import {
 } from "@/queries";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
-import type { RequestState, ResponseState } from "./types";
+import type { AuthConfigState, RequestState, ResponseState } from "./types";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
 import type {
@@ -76,13 +76,17 @@ function authToRecord(
  * Gets request ID from store, fetches data, and provides context
  */
 export default function RequestBuilder() {
-	const { selectedRequestId } = useNavigationStore();
-	const { navigateToDashboard } = useNavigationStore();
-	const { activeEnvironmentId } = useVariablesStore();
+	const { openTabs, activeTabId, openTab } = useTabsStore();
+	const { activeEnvironmentId } = useSessionStore();
 	const { startRun } = useDashboardStore();
+	const showToast = useToastStore((s) => s.showToast);
 	const { executeRequest: engineExecuteRequest } = useEngine();
 	const updateRequestMutation = useUpdateRequestMutation();
 	const queryClient = useQueryClient();
+
+	// Get selectedRequestId from active tab
+	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	const selectedRequestId = activeTab?.type === "request" ? activeTab.entityId : null;
 
 	// Load test dialog state
 	const [showLoadTestDialog, setShowLoadTestDialog] = useState(false);
@@ -134,8 +138,16 @@ export default function RequestBuilder() {
 						: auth.mode === "inherit"
 							? "inherit"
 							: "none";
-		const authConfig: Record<string, any> =
-			auth.mode !== "none" && auth.mode !== "inherit" ? (auth as any) : {};
+		// Map the domain auth (discriminated by mode) onto the flat editor state.
+		// Note the field rename: domain apikey uses `in`, the editor uses `addTo`.
+		const authConfig: AuthConfigState =
+			auth.mode === "bearer"
+				? { token: auth.token }
+				: auth.mode === "basic"
+					? { username: auth.username, password: auth.password }
+					: auth.mode === "apikey"
+						? { key: auth.key, value: auth.value, addTo: auth.in }
+						: {};
 
 		return {
 			id: fetchedRequest.id,
@@ -404,15 +416,33 @@ export default function RequestBuilder() {
 	);
 
 	// Start load test callback - shows the config dialog
-	const handleStartLoadTest = useCallback((request: RequestState) => {
-		setPendingLoadTestRequest(request);
-		setShowLoadTestDialog(true);
-	}, []);
+	const handleStartLoadTest = useCallback(
+		(request: RequestState) => {
+			// Single-active-run policy: if one is already streaming, point the
+			// user to it instead of starting another.
+			if (useDashboardStore.getState().isStreaming) {
+				openTab({ type: "dashboard", entityId: null });
+				showToast("A load test is already running", "info");
+				return;
+			}
+			setPendingLoadTestRequest(request);
+			setShowLoadTestDialog(true);
+		},
+		[openTab, showToast]
+	);
 
 	// Actually start the load test with config
 	const handleConfirmLoadTest = useCallback(
 		async (config: LoadTestConfig) => {
 			if (!pendingLoadTestRequest || !fetchedRequest) return;
+
+			// Defensive re-check in case a run started while the dialog was open.
+			if (useDashboardStore.getState().isStreaming) {
+				openTab({ type: "dashboard", entityId: null });
+				showToast("A load test is already running", "info");
+				setShowLoadTestDialog(false);
+				return;
+			}
 
 			setIsStartingLoadTest(true);
 			try {
@@ -522,18 +552,22 @@ export default function RequestBuilder() {
 					{
 						method: apiRequest.method,
 						url: apiRequest.url,
-					}
+					},
+					fetchedRequest.id
 				);
 
 				// Start global metrics monitoring (stays active even if user navigates away)
 				loadTestService.startMonitoring(result.runId);
 
-				navigateToDashboard();
+				openTab({ type: "dashboard", entityId: null });
 				setShowLoadTestDialog(false);
 				setPendingLoadTestRequest(null);
 			} catch (error) {
 				console.error("Failed to start load test:", error);
-				// TODO: Show error toast
+				showToast(
+					error instanceof Error ? error.message : "Failed to start load test",
+					"error"
+				);
 			} finally {
 				setIsStartingLoadTest(false);
 			}
@@ -543,7 +577,8 @@ export default function RequestBuilder() {
 			fetchedRequest,
 			activeEnvironmentId,
 			startRun,
-			navigateToDashboard,
+			openTab,
+			showToast,
 			resolveString,
 			resolveObject,
 			collectionAncestors,

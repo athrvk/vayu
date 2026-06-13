@@ -8,96 +8,161 @@
 /**
  * Custom TitleBar Component
  *
- * Provides a custom titlebar for frameless Electron window.
- * - macOS: Uses native traffic lights, this just provides drag region
- * - Windows/Linux: Shows custom window controls
+ * h-[38px] — must match TITLEBAR_HEIGHT in electron/constants.ts
+ * macOS: traffic lights inset (~80px), no HTML controls
+ * Windows: native overlay handles controls — no HTML buttons
+ * Linux: custom HTML min/max/close buttons
  */
 
 import { useEffect, useState } from "react";
-import { Minus, Square, X, Maximize2 } from "lucide-react";
+import { Minus, X, Maximize2, Square, Check, ChevronDown, Cloud } from "lucide-react";
+import { useSessionStore } from "@/stores";
+import { useEnvironmentsQuery } from "@/queries";
+import {
+	DropdownMenu,
+	DropdownMenuTrigger,
+	DropdownMenuContent,
+	DropdownMenuItem,
+} from "@/components/ui";
+import { cn } from "@/lib/utils";
+import { TabStrip } from "./TabStrip";
 
-// Check if we're in Electron
 const isElectron = !!window.electronAPI;
 const isMac = window.electronAPI?.platform === "darwin";
+const isWindows = window.electronAPI?.platform === "win32";
+const isLinux = isElectron && !isMac && !isWindows;
 
-export default function TitleBar() {
+function WindowControls() {
 	const [isMaximized, setIsMaximized] = useState(false);
 
 	useEffect(() => {
-		if (!isElectron) return;
-
-		// Get initial maximized state
 		window.electronAPI?.windowIsMaximized().then(setIsMaximized);
-
-		// Listen for maximize/unmaximize events
 		const cleanup = window.electronAPI?.onWindowMaximized(setIsMaximized);
 		return cleanup;
 	}, []);
 
-	// Don't render in browser
-	if (!isElectron) {
-		return null;
-	}
+	return (
+		<div
+			className="flex items-center h-full"
+			style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+		>
+			<button
+				onClick={() => window.electronAPI?.windowMinimize()}
+				className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
+				aria-label="Minimize"
+			>
+				<Minus className="w-4 h-4 text-foreground/70" />
+			</button>
+			<button
+				onClick={() => window.electronAPI?.windowMaximize()}
+				className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
+				aria-label={isMaximized ? "Restore" : "Maximize"}
+			>
+				{isMaximized ? (
+					<Maximize2 className="w-3.5 h-3.5 text-foreground/70" />
+				) : (
+					<Square className="w-3.5 h-3.5 text-foreground/70" />
+				)}
+			</button>
+			<button
+				onClick={() => window.electronAPI?.windowClose()}
+				className="h-full px-4 hover:bg-destructive hover:text-destructive-foreground transition-colors flex items-center justify-center group"
+				aria-label="Close"
+			>
+				<X className="w-4 h-4 text-foreground/70 group-hover:text-destructive-foreground" />
+			</button>
+		</div>
+	);
+}
 
-	const handleMinimize = () => window.electronAPI?.windowMinimize();
-	const handleMaximize = () => window.electronAPI?.windowMaximize();
-	const handleClose = () => window.electronAPI?.windowClose();
+function EnvSwitcher() {
+	const { activeEnvironmentId, setActiveEnvironmentId } = useSessionStore();
+	const { data: environments = [] } = useEnvironmentsQuery();
+	const activeEnv = environments.find((e) => e.id === activeEnvironmentId);
+
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger asChild>
+				<button
+					className={cn(
+						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-full shrink-0 transition-colors",
+						activeEnv
+							? "bg-accent text-accent-foreground hover:bg-accent/80"
+							: "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+					)}
+					aria-label="Switch environment"
+				>
+					<Cloud className="w-3 h-3 shrink-0" />
+					<span className="truncate">{activeEnv?.name ?? "No Environment"}</span>
+					<ChevronDown className="w-3 h-3 shrink-0 opacity-60" />
+				</button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="min-w-44">
+				<DropdownMenuItem
+					onClick={() => setActiveEnvironmentId(null)}
+					className="text-xs gap-2"
+				>
+					<span className="flex-1">No Environment</span>
+					{!activeEnv && <Check className="w-3.5 h-3.5" />}
+				</DropdownMenuItem>
+				{environments.map((env) => (
+					<DropdownMenuItem
+						key={env.id}
+						onClick={() => setActiveEnvironmentId(env.id)}
+						className="text-xs gap-2"
+					>
+						<span className="flex-1 truncate">{env.name}</span>
+						{env.id === activeEnvironmentId && <Check className="w-3.5 h-3.5" />}
+					</DropdownMenuItem>
+				))}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
+export default function TitleBar() {
+	if (!isElectron) return null;
 
 	return (
 		<div
-			className="titlebar h-8 flex items-center justify-between bg-background border-b select-none"
+			className="titlebar h-[38px] flex items-center bg-panel border-b border-border shrink-0 select-none"
 			style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 		>
-			{/* Left side - App branding */}
+			{/* macOS: space for native traffic lights */}
+			{isMac && <div className="w-20 shrink-0" />}
+
+			{/* Logo — all platforms */}
 			<div
-				className="flex items-center gap-2 px-3 pt-[4px]"
-				style={{ marginLeft: isMac ? 70 : 0 }}
+				className="flex items-center px-3 shrink-0"
+				style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 			>
 				<img
 					src="/icon.png"
 					alt="Vayu"
 					className="w-5 h-5"
 					onError={(e) => {
-						// Hide if icon not found
 						(e.target as HTMLImageElement).style.display = "none";
 					}}
 				/>
-				<span className="text-sm font-medium text-foreground/80">Vayu</span>
 			</div>
 
-			{/* Right side - Window controls (Windows/Linux only) */}
-			{!isMac && (
-				<div
-					className="flex items-center h-full"
-					style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-				>
-					<button
-						onClick={handleMinimize}
-						className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
-						aria-label="Minimize"
-					>
-						<Minus className="w-4 h-4 text-foreground/70" />
-					</button>
-					<button
-						onClick={handleMaximize}
-						className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
-						aria-label={isMaximized ? "Restore" : "Maximize"}
-					>
-						{isMaximized ? (
-							<Maximize2 className="w-3.5 h-3.5 text-foreground/70" />
-						) : (
-							<Square className="w-3.5 h-3.5 text-foreground/70" />
-						)}
-					</button>
-					<button
-						onClick={handleClose}
-						className="h-full px-4 hover:bg-destructive hover:text-destructive-foreground transition-colors flex items-center justify-center group"
-						aria-label="Close"
-					>
-						<X className="w-4 h-4 text-foreground/70 group-hover:text-destructive-foreground" />
-					</button>
-				</div>
-			)}
+			{/* TabStrip — fills available width */}
+			<div
+				className="flex-1 flex overflow-hidden h-full"
+				style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+			>
+				<TabStrip />
+			</div>
+
+			{/* Right controls */}
+			<div
+				className="flex items-center gap-2 px-3 shrink-0"
+				style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+			>
+				<EnvSwitcher />
+				{/* Linux only — Windows uses native overlay, macOS uses traffic lights */}
+				{isLinux && <WindowControls />}
+			</div>
 		</div>
 	);
 }

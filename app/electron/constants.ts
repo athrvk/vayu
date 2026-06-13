@@ -36,8 +36,8 @@ export const WINDOW_DEFAULT_WIDTH = 1400;
 export const WINDOW_DEFAULT_HEIGHT = 900;
 export const WINDOW_MIN_WIDTH = 1024;
 export const WINDOW_MIN_HEIGHT = 768;
-/** Custom titlebar overlay height (Windows/Linux). */
-export const TITLEBAR_HEIGHT = 40;
+/** Custom titlebar overlay height. Must match TitleBar.tsx h-[38px]. */
+export const TITLEBAR_HEIGHT = 38;
 /** Debounce for persisting window bounds to disk. */
 export const WINDOW_STATE_SAVE_DEBOUNCE_MS = 500;
 

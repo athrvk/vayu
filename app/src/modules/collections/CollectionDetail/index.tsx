@@ -16,7 +16,7 @@ import { useMemo, useState } from "react";
 import { Folder } from "lucide-react";
 import { Badge, Tabs, TabsList, TabsTrigger } from "@/components/ui";
 import { useCollectionsQuery, useRequestsQuery } from "@/queries/collections";
-import { useNavigationStore } from "@/stores";
+import { useTabsStore } from "@/stores";
 import AuthTab from "./AuthTab";
 import InfoTab from "./InfoTab";
 import ScriptTab from "./ScriptTab";
@@ -33,7 +33,12 @@ const TABS: { id: CollectionTab; label: string }[] = [
 ];
 
 export default function CollectionDetail() {
-	const selectedCollectionId = useNavigationStore((s) => s.selectedCollectionId);
+	const { openTabs, activeTabId } = useTabsStore();
+
+	// Get selected collection ID from active tab
+	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	const selectedCollectionId = activeTab?.type === "collection" ? activeTab.entityId : null;
+
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: requests = [] } = useRequestsQuery(selectedCollectionId);
 

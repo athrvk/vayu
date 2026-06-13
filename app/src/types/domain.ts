@@ -165,23 +165,45 @@ export interface VariableInfo extends ResolvedVariable {
 	sourceName?: string; // Collection name or Environment name
 }
 
+/**
+ * Flat snapshot of the request + load-test parameters captured when a run
+ * starts, persisted with the Run for history display. Known fields are typed;
+ * the index signature permits additional engine-provided keys.
+ */
+export interface RunConfigSnapshot {
+	url?: string;
+	method?: string;
+	mode?: string;
+	duration?: string;
+	targetRps?: number;
+	concurrency?: number;
+	iterations?: number;
+	rampUpDuration?: string;
+	startConcurrency?: number;
+	comment?: string;
+	[key: string]: unknown;
+}
+
 export interface Run {
 	id: string;
 	type: "load" | "design";
 	status: "pending" | "running" | "completed" | "stopped" | "failed";
 	startTime: number; // Unix timestamp in ms
 	endTime: number;
-	configSnapshot?: any;
+	configSnapshot?: RunConfigSnapshot;
 	requestId?: string | null;
 	environmentId?: string | null;
 }
+
+/** Load-test execution strategy. Single source of truth for the mode union. */
+export type LoadTestMode = "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
 
 export interface LoadTestConfig {
 	duration_seconds?: number;
 	rps?: number;
 	concurrency?: number;
 	iterations?: number;
-	mode: "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up";
+	mode: LoadTestMode;
 	ramp_duration_seconds?: number;
 	data_sample_rate?: number;
 	slow_threshold_ms?: number;
@@ -197,7 +219,7 @@ export interface HttpResponse {
 	headers: Record<string, string>;
 	requestHeaders?: Record<string, string>;
 	rawRequest?: string;
-	body: any;
+	body: unknown;
 	bodyRaw: string;
 	bodySize: number;
 	timing: {
@@ -387,11 +409,6 @@ export interface ConfigEntry {
 	max?: string;
 	updatedAt: number;
 	requiresRestart?: boolean;
-}
-
-export interface ConfigResponse {
-	entries: ConfigEntry[];
-	success?: boolean;
 }
 
 export type SettingsCategory =

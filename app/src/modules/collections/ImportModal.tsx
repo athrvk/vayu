@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Upload, CheckCircle2, X, Folder, AlertTriangle } from "lucide-react";
-import { useImportModalStore } from "@/stores/import-modal-store";
+import { useImportModalStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
 import { apiService } from "@/services/api";
 import { parseImport } from "@/services/importers/factory";

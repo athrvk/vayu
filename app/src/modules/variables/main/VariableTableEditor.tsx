@@ -39,7 +39,8 @@ import {
 	useDeleteEnvironmentMutation,
 	useUpdateCollectionMutation,
 } from "@/queries";
-import { useSaveStore, useVariablesStore } from "@/stores";
+import { useSaveStore, useSessionStore } from "@/stores";
+import { useVariablesStore } from "@/modules/variables/variables-store";
 import type { VariableValue, Collection, Environment } from "@/types";
 import {
 	Button,
@@ -54,8 +55,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
-
-type VariableType = NonNullable<VariableValue["type"]>;
+import type { VariableType } from "@/lib/variable-cast";
 
 const VARIABLE_TYPES: { value: VariableType; label: string }[] = [
 	{ value: "string", label: "String" },
@@ -152,7 +152,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const deleteEnvironmentMutation = useDeleteEnvironmentMutation();
 	const updateCollectionMutation = useUpdateCollectionMutation();
 
-	const { setSelectedCategory, setActiveEnvironmentId } = useVariablesStore();
+	const { setSelectedCategory } = useVariablesStore();
+	const { setActiveEnvironmentId } = useSessionStore();
 	const {
 		registerContext,
 		unregisterContext,
@@ -454,7 +455,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const isActiveEnvironment =
 		type === "environment" &&
 		environment &&
-		useVariablesStore.getState().activeEnvironmentId === environment.id;
+		useSessionStore.getState().activeEnvironmentId === environment.id;
 
 	const Icon = editorConfig.icon;
 	const title =

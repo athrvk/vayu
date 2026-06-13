@@ -13,7 +13,7 @@
  * adding an ephemeral `id` for stable React keys and a `system` flag.
  */
 
-import type { HttpMethod, KeyValueEntry, ResolvedVariable, VariableScope } from "@/types";
+import type { BodyMode, HttpMethod, KeyValueEntry, ResolvedVariable, VariableScope } from "@/types";
 
 // ============================================================================
 // Key-Value Types (shared across params, headers, form-data)
@@ -47,6 +47,20 @@ export interface TabInfo {
 
 export type AuthType = "none" | "inherit" | "bearer" | "basic" | "api-key";
 
+/**
+ * Flat auth fields backing the request builder's Auth tab. Which fields are
+ * populated depends on the active {@link AuthType}. The Auth tab, request
+ * execution, and the curl importer all read/write this flat shape.
+ */
+export interface AuthConfigState {
+	token?: string;
+	username?: string;
+	password?: string;
+	key?: string;
+	value?: string;
+	addTo?: "header" | "query";
+}
+
 export interface AuthConfig {
 	type: AuthType;
 	bearer?: {
@@ -67,7 +81,9 @@ export interface AuthConfig {
 // Body Types
 // ============================================================================
 
-export type BodyMode = "none" | "json" | "text" | "graphql" | "form-data" | "x-www-form-urlencoded";
+// Re-export the canonical domain BodyMode so existing module-relative imports
+// (BodyPanel, parseCurl) keep resolving from "../types".
+export type { BodyMode };
 
 export interface BodyConfig {
 	mode: BodyMode;
@@ -101,7 +117,7 @@ export interface RequestState {
 
 	// Auth
 	authType: AuthType;
-	authConfig: Record<string, any>;
+	authConfig: AuthConfigState;
 
 	// Scripts
 	preRequestScript: string;

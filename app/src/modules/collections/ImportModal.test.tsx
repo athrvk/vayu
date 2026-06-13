@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ImportModal } from "./ImportModal";
-import { useImportModalStore } from "@/stores/import-modal-store";
+import { useImportModalStore } from "@/stores";
 
 const postman = readFileSync(
 	join(__dirname, "../../services/importers/__fixtures__/postman-v21.json"),

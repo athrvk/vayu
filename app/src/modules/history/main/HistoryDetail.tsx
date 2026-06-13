@@ -13,14 +13,21 @@
  */
 
 import { AlertCircle, History, ArrowLeft } from "lucide-react";
-import { useNavigationStore } from "@/stores";
 import { useRunReportQuery } from "@/queries";
+import { useTabsStore, useLayoutStore } from "@/stores";
 import { Button, Badge } from "@/components/ui";
 import LoadTestDetail from "./LoadTestDetail";
 import DesignRunDetail from "./DesignRunDetail";
 
 export default function HistoryDetail() {
-	const { selectedRunId, navigateToHistory } = useNavigationStore();
+	const { openTabs, activeTabId } = useTabsStore();
+	const { activateDrawerView } = useLayoutStore();
+
+	// Get selectedRunId from active tab
+	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	const selectedRunId = activeTab?.type === "run" ? activeTab.entityId : null;
+
+	const navigateToHistory = () => activateDrawerView("history");
 
 	// Use TanStack Query for run report
 	const {
