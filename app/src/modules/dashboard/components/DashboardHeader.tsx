@@ -13,7 +13,7 @@
 
 import { ArrowLeft, StopCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui";
-import { useTabsStore } from "@/stores";
+import { useTabsStore, useDashboardStore } from "@/stores";
 import { getMethodColor } from "@/utils";
 import type { DashboardHeaderProps } from "../types";
 
@@ -34,11 +34,18 @@ export default function DashboardHeader({
 	elapsedDuration = 0,
 	configuration,
 }: DashboardHeaderProps) {
-	const { openTabs, activeTabId, closeTab } = useTabsStore();
+	const { openTabs, activeTabId, openTab, closeTab } = useTabsStore();
+	const sourceRequestId = useDashboardStore((s) => s.sourceRequestId);
 
-	const canNavigateBack = openTabs.length > 1;
+	const canNavigateBack = sourceRequestId != null || openTabs.length > 1;
 	const navigateBack = () => {
-		if (activeTabId) closeTab(activeTabId);
+		// Prefer returning to the request that started this run; otherwise fall
+		// back to closing the dashboard tab.
+		if (sourceRequestId) {
+			openTab({ type: "request", entityId: sourceRequestId });
+		} else if (activeTabId) {
+			closeTab(activeTabId);
+		}
 	};
 
 	// Elapsed time is driven entirely by `elapsedDuration`, which is the engine's

@@ -25,7 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RequestBuilderProvider } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
-import { useTabsStore, useSessionStore, useDashboardStore } from "@/stores";
+import { useTabsStore, useSessionStore, useDashboardStore, useToastStore } from "@/stores";
 import {
 	useRequestQuery,
 	useUpdateRequestMutation,
@@ -79,6 +79,7 @@ export default function RequestBuilder() {
 	const { openTabs, activeTabId, openTab } = useTabsStore();
 	const { activeEnvironmentId } = useSessionStore();
 	const { startRun } = useDashboardStore();
+	const showToast = useToastStore((s) => s.showToast);
 	const { executeRequest: engineExecuteRequest } = useEngine();
 	const updateRequestMutation = useUpdateRequestMutation();
 	const queryClient = useQueryClient();
@@ -409,15 +410,33 @@ export default function RequestBuilder() {
 	);
 
 	// Start load test callback - shows the config dialog
-	const handleStartLoadTest = useCallback((request: RequestState) => {
-		setPendingLoadTestRequest(request);
-		setShowLoadTestDialog(true);
-	}, []);
+	const handleStartLoadTest = useCallback(
+		(request: RequestState) => {
+			// Single-active-run policy: if one is already streaming, point the
+			// user to it instead of starting another.
+			if (useDashboardStore.getState().isStreaming) {
+				openTab({ type: "dashboard", entityId: null });
+				showToast("A load test is already running", "info");
+				return;
+			}
+			setPendingLoadTestRequest(request);
+			setShowLoadTestDialog(true);
+		},
+		[openTab, showToast]
+	);
 
 	// Actually start the load test with config
 	const handleConfirmLoadTest = useCallback(
 		async (config: LoadTestConfig) => {
 			if (!pendingLoadTestRequest || !fetchedRequest) return;
+
+			// Defensive re-check in case a run started while the dialog was open.
+			if (useDashboardStore.getState().isStreaming) {
+				openTab({ type: "dashboard", entityId: null });
+				showToast("A load test is already running", "info");
+				setShowLoadTestDialog(false);
+				return;
+			}
 
 			setIsStartingLoadTest(true);
 			try {
@@ -527,7 +546,8 @@ export default function RequestBuilder() {
 					{
 						method: apiRequest.method,
 						url: apiRequest.url,
-					}
+					},
+					fetchedRequest.id
 				);
 
 				// Start global metrics monitoring (stays active even if user navigates away)
@@ -538,7 +558,10 @@ export default function RequestBuilder() {
 				setPendingLoadTestRequest(null);
 			} catch (error) {
 				console.error("Failed to start load test:", error);
-				// TODO: Show error toast
+				showToast(
+					error instanceof Error ? error.message : "Failed to start load test",
+					"error"
+				);
 			} finally {
 				setIsStartingLoadTest(false);
 			}
@@ -549,6 +572,7 @@ export default function RequestBuilder() {
 			activeEnvironmentId,
 			startRun,
 			openTab,
+			showToast,
 			resolveString,
 			resolveObject,
 			collectionAncestors,

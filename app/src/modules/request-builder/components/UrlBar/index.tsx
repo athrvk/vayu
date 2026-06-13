@@ -14,15 +14,19 @@
  * - Action buttons (Send, Load Test)
  */
 
-import { Zap } from "lucide-react";
+import { Zap, Activity } from "lucide-react";
 import { useRequestBuilderContext } from "../../context";
+import { useDashboardStore, useTabsStore } from "@/stores";
 import MethodSelector from "./MethodSelector";
 import UrlInput from "./UrlInput";
 
 export default function UrlBar() {
 	const { request, isExecuting, executeRequest, startLoadTest } = useRequestBuilderContext();
+	const isLoadTestRunning = useDashboardStore((s) => s.isStreaming);
+	const openTab = useTabsStore((s) => s.openTab);
 
 	const canExecute = !isExecuting && request.url.trim().length > 0;
+	const viewRunningTest = () => openTab({ type: "dashboard", entityId: null });
 
 	return (
 		<div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel shrink-0">
@@ -43,15 +47,26 @@ export default function UrlBar() {
 					<>▶ Send</>
 				)}
 			</button>
-			{/* Load Test button — token-based, not hardcoded purple */}
-			<button
-				onClick={startLoadTest}
-				disabled={!canExecute}
-				className="h-[34px] px-3.5 rounded-md text-[12px] font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-opacity shrink-0 font-[inherit] text-primary border border-primary bg-primary/10"
-			>
-				<Zap className="w-3.5 h-3.5" />
-				Load Test
-			</button>
+			{/* Load Test button — while a run is live it becomes a shortcut to the
+			    running dashboard (single-active-run policy). */}
+			{isLoadTestRunning ? (
+				<button
+					onClick={viewRunningTest}
+					className="h-[34px] px-3.5 rounded-md text-[12px] font-semibold flex items-center gap-1.5 transition-opacity shrink-0 font-[inherit] text-green-500 border border-green-500/40 bg-green-500/10"
+				>
+					<Activity className="w-3.5 h-3.5" />
+					View running test
+				</button>
+			) : (
+				<button
+					onClick={startLoadTest}
+					disabled={!canExecute}
+					className="h-[34px] px-3.5 rounded-md text-[12px] font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-opacity shrink-0 font-[inherit] text-primary border border-primary bg-primary/10"
+				>
+					<Zap className="w-3.5 h-3.5" />
+					Load Test
+				</button>
+			)}
 		</div>
 	);
 }

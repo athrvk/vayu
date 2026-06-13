@@ -9,6 +9,7 @@ import { useEffect } from "react";
 import Shell from "./components/layout/Shell";
 import TitleBar from "./components/layout/TitleBar";
 import UpdateBanner from "./components/shared/UpdateBanner";
+import Toaster from "./components/shared/Toaster";
 import { useEngineStore } from "./stores";
 import {
 	useConfigQuery,
@@ -64,6 +65,7 @@ function App() {
 			<div className="flex-1 overflow-hidden">
 				<Shell />
 			</div>
+			<Toaster />
 		</div>
 	);
 }
