@@ -25,6 +25,17 @@ import {
 
 const isDev = process.env.NODE_ENV === "development";
 
+// Use an in-memory mock keychain for Chromium's OSCrypt instead of the real
+// macOS Keychain. Without this, Chromium stores its cookie/safeStorage
+// encryption key under a "Vayu Safe Storage" Keychain item, which re-prompts
+// for the user's password on every launch because the app is ad-hoc signed
+// (see install.sh) and has no stable code signature to anchor the Keychain
+// ACL to. Vayu keeps all secrets in plaintext SQLite and does not rely on
+// persistent cookies, so the static mock key costs no real protection here.
+// Must be set before app is ready. Revisit if the app ever ships with a
+// Developer ID signature (then "Always Allow" would persist on its own).
+app.commandLine.appendSwitch("use-mock-keychain");
+
 // __dirname is not defined in ES modules. Derive it from import.meta.url
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
