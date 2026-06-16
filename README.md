@@ -39,7 +39,7 @@ Vayu collapses that workflow into one app. Build a request once, point the load 
 
 The HTTP core is a multi-worker libcurl event loop in C++20, isolated from the Electron UI by a local HTTP sidecar so rendering never blocks on the request load. In practice that lets a single laptop saturate a gigabit link while the dashboard keeps streaming metrics frame-by-frame — well past what Node.js-backed Electron tools manage on the same hardware.
 
-**Proof — head-to-head vs `wrk` and `vegeta`.** Same mock server, same machine (MacBook Pro M3 Pro), matched concurrency, measured from the CLI:
+**Proof — head-to-head vs `wrk` and `vegeta`.** Same mock server, same machine, matched concurrency, measured from the CLI:
 
 | Client | req/s @ 128 conns |
 |---|---:|
