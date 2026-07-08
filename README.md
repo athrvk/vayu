@@ -5,6 +5,7 @@
 Vayu is a free, open source desktop app for Windows, macOS, and Linux that merges two tools API teams normally split: a full REST + GraphQL request builder with collections, environments, and scripting, and a high-throughput load tester powered by a C++20 engine. The request UI will feel familiar coming from Postman or Insomnia — but underneath, a native event loop pushes load-test throughput that Electron + Node.js clients cannot reach, with every byte staying on your machine.
 
 [![Latest Release](https://img.shields.io/github/v/release/athrvk/vayu)](https://github.com/athrvk/vayu/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/athrvk/vayu/total)](https://github.com/athrvk/vayu/releases)
 [![License](https://img.shields.io/badge/license-AGPL--3.0%20%26%20Apache--2.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/athrvk/vayu/releases)
 [![GitHub stars](https://img.shields.io/github/stars/athrvk/vayu?style=social&label=Star)](https://github.com/athrvk/vayu)
