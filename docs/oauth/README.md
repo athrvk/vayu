@@ -7,6 +7,7 @@ This directory contains the research and design work for adding OAuth 2.0 suppor
 | [01-current-state.md](./01-current-state.md) | How Vayu works today: engine execution paths, DB layer, scripting runtime, app auth scaffold, variables, send flow, importers, Electron main capabilities — with file/line references |
 | [02-postman-bruno.md](./02-postman-bruno.md) | How Postman and Bruno implement OAuth 2.0: grant types, config fields, storage formats (Postman collection v2.1 `auth.oauth2`, Bruno `.bru` `auth:oauth2`), Electron flow mechanics, token caching/refresh, and RFC-level best practices |
 | [03-design.md](./03-design.md) | The proposed Vayu design: typed `OAuth2Config` schema, token acquisition/caching/injection architecture, UI plan, importer mapping tables, security considerations, and a phased implementation roadmap |
+| [04-implementation-plan.md](./04-implementation-plan.md) | The in-depth engine + UI implementation plan: exact files, signatures, JSON contracts, call-site placement, test matrix, PR slicing, and corrections to 03-design found by reading the real code |
 
 ## TL;DR
 
