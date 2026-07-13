@@ -4,6 +4,31 @@ Companion to [03-design.md](./03-design.md). Where 03 decided the architecture, 
 
 ---
 
+## 0. Implementation status
+
+> **PR 1 (engine static auth) + a structural refactor have landed** on `claude/vayu-oauth-2-support-hsqpau`. The sections below are the original plan; where the shipped code deviates, this section is authoritative.
+
+**What exists now (engine):**
+
+- `engine/include/vayu/utils/encoding.hpp` — `base64_encode`, `url_encode`, `form_encode` (as planned in §2.1).
+- `engine/include/vayu/http/auth_resolver.{hpp,cpp}` — **typed auth**, not raw-JSON string matching. `parse_auth(json) → Auth` where `Auth = std::variant<NoAuth, BearerAuth, BasicAuth, ApiKeyAuth, OAuth2Auth, UnsupportedAuth>`; `apply_auth(Request&, const Auth&, Database*)` is an exhaustive `std::visit` with a `static_assert` (a new mode is a compile error until handled). A `apply_auth(Request&, const nlohmann::json&, Database*)` convenience overload parses then applies. Bearer/basic/apikey (header + query) are live; `OAuth2Auth` is the branch PR 2 fills in (it already receives `db`); digest/aws/ntlm are `UnsupportedAuth` no-ops.
+- `engine/include/vayu/http/request_builder.{hpp,cpp}` — **single construction pipeline** `build_request(config, db, timeout_ms) → RequestBuild{ok, request, parse_failed, error_code, error_message, detail_code}` (deserialize + timeout + auth). Both `POST /request` and the load-test worker call it; the deserialize→timeout→auth triple is no longer duplicated. This is the seam PR 2's oauth2 resolution flows through.
+- `vayu::ErrorCode::AuthRequired` / `AuthFailed` added (§ improvement 4).
+- **Case-insensitive `Headers`** — `types.hpp` now defines `Headers = std::map<std::string, std::string, CaseInsensitiveLess>`, so a user-typed `authorization` and an injected `Authorization` can't both reach the wire. Auth injection skips when the target header already exists (`headers.count(name)`); the ad-hoc `has_header_ci` helper is gone.
+- `vayu::json::sanitize_config_snapshot(body)` (**replaces the planned `redact_auth_snapshot`**) — an **allowlist**: it reduces the `auth` subtree to `{mode}` and keeps everything else, so no future credential field can leak (stronger than the blocklist §2.5 originally described). Used for `run.config_snapshot` in both handlers.
+- Tests: `encoding_test`, `auth_resolver_test` (+ `parse_auth` variant mapping, ci-header precedence), `request_builder_test` (build + snapshot allowlist). Full suite green.
+
+**Deviations from the plan below, and why:**
+
+1. **Typed `Auth` variant** instead of `apply_auth` string-matching raw JSON (plan §2.4). Makes oauth2 impossible to forget — the `static_assert` forces the `OAuth2Auth` branch. PR 2 implements token acquisition inside that branch.
+2. **`build_request` pipeline** — the plan wired `apply_auth` at each call site individually; a single builder removes the duplication and is the one place PR 2 touches.
+3. **`sanitize_config_snapshot` (allowlist)** instead of `redact_auth_snapshot` (blocklist of known secret keys).
+4. **Case-insensitive `Headers`** was promoted from an implicit assumption to a real comparator on the type.
+
+Everything else below — the `oauth_tokens` table, `oauth_client`/`acquire_token`, the `POST /oauth2/token` route, the `POST /run` 409 pre-flight, and the entire app/Electron plan — is **unbuilt and still current**. Read §2.4/§2.5 signatures through the lens of the four deviations above.
+
+---
+
 ## 1. Improvements over 03-design (found by reading the real code)
 
 These are corrections/refinements discovered while grounding 03-design in the actual source. The architecture — engine-side auth resolution, engine token route + cache, Electron loopback + PKCE — is unchanged.
@@ -12,7 +37,7 @@ These are corrections/refinements discovered while grounding 03-design in the ac
 2. **No hash for `cache_key`.** The engine has no hash/base64 utility anywhere in `engine/src` (the only base64 lives in vendored quickjs/hdrhistogram and cpp-httplib's `detail::` namespace). The app must compute the same key for the GET/DELETE status endpoints, so use a plain delimiter-joined key (`"\x1f"` unit separator) instead of a hash — trivially reproducible in TypeScript, debuggable, and tokens are plaintext in SQLite anyway so an opaque key buys nothing.
 3. **Base64 must be added, and cannot come from httplib.** `httplib::detail::base64_encode` exists in the vendored header but `vayu_core` does not link httplib (only the executables do). Add a small header-only `engine/include/vayu/utils/encoding.hpp` (base64 + RFC 3986 percent-encode + form-encode), unit-tested.
 4. **Interactive-required rides the existing `errorCode` channel for `POST /request`.** The engine's status philosophy (`execution.cpp:12–17`) is "200 = engine handled it; errors live in the body", and curl failures already flow as `Response{status_code: 0, error_code, error_message}` → `SanityResult.errorCode` → `ResponseState.errorCode`. Add `ErrorCode::AuthRequired` / `ErrorCode::AuthFailed` to the enum (`engine/include/vayu/types.hpp:139–166`) instead of inventing a parallel error shape for the execute path. The dedicated `/oauth2/*` routes use HTTP statuses with a **nested** error object `{"error":{"code","message"}}` — `app/src/services/http-client.ts:88–92` already parses exactly that shape into `ApiError.errorCode` (the current flat `{"error":"msg"}` from `send_error` degrades to `UNKNOWN_ERROR`, so the nested shape is required for structured handling).
-5. **`config_snapshot` will leak secrets — redact it.** Both `POST /request` (`execution.cpp:307`) and `POST /run` (`:462`) persist `req.body` verbatim into `runs.config_snapshot`, including the app-resolved `auth` object (soon containing `clientSecret`/`password`). `RunManager.start_run` receives the in-memory JSON directly (`execution.cpp:503`), never re-reading the snapshot, so the stored snapshot can be redacted safely.
+5. **`config_snapshot` will leak secrets — sanitize it.** Both `POST /request` and `POST /run` persist `req.body` verbatim into `runs.config_snapshot`, including the app-resolved `auth` object (soon containing `clientSecret`/`password`). `RunManager.start_run` receives the in-memory JSON directly, never re-reading the snapshot, so the stored snapshot can be sanitized safely. **Shipped as `sanitize_config_snapshot` (allowlist — auth reduced to `{mode}`), not the blocklist originally sketched in §2.5** — see §0.
 6. **Postman minimal exports** (only `accessToken`/`tokenType`/`addTokenTo`) should import as `{mode:"bearer", token}` — immediately executable — rather than "optionally seed the cache" as 03 suggested.
 7. **The shared `OAuth2Form` cannot use `VariableInput` directly.** `VariableInput` calls `useRequestBuilderContext()` (`app/src/modules/request-builder/shared/VariableInput/index.tsx`); the collection `AuthTab` (which uses plain `Input` + `text-variable` styling today) has no such provider. The shared form takes an injected `TextInput` component.
 8. **Engine `POST /run` should pre-flight auth in the route handler** (before `create_run`, `execution.cpp:493`) and return `409` — the worker thread runs after the `202` has been sent, so a worker-only check would surface as a silently failed run.
@@ -133,6 +158,8 @@ nlohmann::json serialize_token (const vayu::db::OAuthToken& t);       // §2.6 r
 
 ### 2.4 Auth resolver — `engine/include/vayu/http/auth_resolver.hpp` + `engine/src/http/auth_resolver.cpp` (in `vayu_core`)
 
+> **Shipped shape differs — see §0.** `apply_auth` takes the typed `const Auth&` variant (with a `nlohmann::json` convenience overload) and dispatches via an exhaustive `std::visit`; oauth2 is the `OAuth2Auth` branch, which already receives `db`. `AuthApplyResult` exists as below. The `preflight_auth` free function shown here is **not yet built** — PR 2 adds it for the `POST /run` 409 (§2.5). The mode-behavior table and rules below remain the spec for the oauth2 branch and the pre-flight.
+
 ```cpp
 namespace vayu::http {
 
@@ -143,12 +170,13 @@ struct AuthApplyResult {
     std::string detail_code;                        // "oauth2_interactive_required" etc.
 };
 
-// Mutates req.headers and/or req.url. `db` may be null (static modes only; oauth2
-// then returns AuthFailed) — keeps bearer/basic/apikey unit-testable without a DB.
+// SHIPPED: typed dispatch (see §0). oauth2 branch receives db (may be null →
+// AuthFailed). The json overload parses then applies; used by build_request/tests.
+AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db);
 AuthApplyResult apply_auth (vayu::Request& req, const nlohmann::json& auth, vayu::db::Database* db);
 
-// Route-level pre-flight for POST /run: for oauth2 runs acquire_token (cache-aware,
-// warming the cache for the worker); no-op ok for every other mode.
+// TODO (PR 2): route-level pre-flight for POST /run — for oauth2 runs
+// acquire_token (cache-aware, warming the cache for the worker); no-op ok otherwise.
 AuthApplyResult preflight_auth (const nlohmann::json& auth, vayu::db::Database& db);
 }
 ```
@@ -167,7 +195,7 @@ Per-mode behavior of `apply_auth`:
 
 Rules:
 
-- **User-typed header wins**: skip Authorization injection if `req.headers` already contains `"Authorization"` or `"authorization"` (same dual-case check pattern as `client.cpp:259–260`). Document in the UI hint text.
+- **User-typed header wins**: skip injection if the target header already exists. Since `Headers` is now case-insensitive (§0), this is a plain `req.headers.count(name) == 0` check — no dual-case scan. Document in the UI hint text.
 - `append_query_param(url, k, v)` (file-local helper, unit-tested): split off `#fragment` if present; append `(url.contains('?') ? '&' : '?') + url_encode(k) + "=" + url_encode(v)`; re-attach fragment. Existing params with the same key are left in place.
 - If `autoFetchToken == false` and there is no valid cached token → `AuthRequired` (no silent fetch).
 
@@ -227,16 +255,15 @@ if (!pf.ok) {
 
 This both rejects early (good UX; `ApiError.errorCode` carries the code) and warms the token cache so the worker's `apply_auth` is a cache hit.
 
-**Snapshot redaction** — add to `engine/src/utils/json.cpp`:
+**Snapshot sanitization** — **SHIPPED** in `engine/src/utils/json.cpp` as an allowlist (not the blocklist sketched here):
 
 ```cpp
-// Deep-copies `body` and replaces auth secret values before persistence.
-// Redacted keys inside the top-level "auth" object (recursively):
-//   token, password, clientSecret, value, refreshToken, accessToken
-std::string redact_auth_snapshot (const nlohmann::json& body);
+// Reduces the top-level "auth" object to just {mode}, keeping all other fields.
+// Allowlist, so no future credential field can leak. Non-JSON passes through.
+std::string sanitize_config_snapshot (const std::string& body);
 ```
 
-Use it for `run.config_snapshot` at `execution.cpp:307` and `:462`. `RunManager` keeps using the un-redacted in-memory `json` (`start_run` at `:503`), and the history UI reads only url/method/mode/duration (`RunConfigSnapshot`, `domain.ts:173–185`) — no behavior change.
+Used for `run.config_snapshot` in both `POST /request` and `POST /run`. `RunManager` keeps using the un-sanitized in-memory `json`, and the history UI reads only url/method/mode/duration (`RunConfigSnapshot`, `domain.ts:173–185`) — no behavior change.
 
 `deserialize_request` (`json.cpp:272–353`) stays auth-agnostic, exactly as [03 §2](./03-design.md) specified.
 
@@ -549,7 +576,7 @@ oauthCancel: (): Promise<void> => ipcRenderer.invoke("oauth:cancel"),
 
 | PR | Contents | Depends on | Independently shippable? |
 |---|---|---|---|
-| **PR 1 — engine: apply static auth** | `encoding.hpp`; `auth_resolver` (bearer/basic/apikey only; oauth2/digest/aws/ntlm are logged no-ops); `ErrorCode::AuthRequired/AuthFailed`; call sites in `execution.cpp` + `run_manager.cpp`; snapshot redaction; CMake; `encoding_test`, `auth_resolver_test` | — | **Yes** — closes the pre-existing "auth never reaches the wire" gap on its own |
+| ~~**PR 1 — engine: apply static auth**~~ **✅ DONE** (+ refactor) | `encoding.hpp`; typed `auth_resolver` (bearer/basic/apikey live; oauth2/digest/aws/ntlm no-ops); `request_builder` single pipeline; ci `Headers`; `ErrorCode::AuthRequired/AuthFailed`; call sites in `execution.cpp` + `run_manager.cpp`; `sanitize_config_snapshot` allowlist; CMake; `encoding_test`, `auth_resolver_test`, `request_builder_test` | — | Shipped — closed the pre-existing "auth never reaches the wire" gap. See §0 for deviations |
 | **PR 2 — engine: OAuth core** | `db::OAuthToken` + accessors; `oauth_client`; `routes/oauth.cpp` + registration; oauth2 branch in `apply_auth`; `preflight_auth` + POST /run 409; `oauth_client_test`, `oauth_route_test`, db_test additions | PR 1 | Yes (API-only; UI still shows Coming Soon) |
 | **PR 3 — app: types + non-interactive UI** | domain/api types; `services/oauth/{defaults,cache-key}.ts`; editor types + `auth-mapping.ts` extraction; `OAuth2Form` (client_credentials + password) + `AuthPanel`/`AuthTab`/`AuthInheritBanner` wiring; `api-endpoints`/`api.ts`/`queries/oauth.ts`; token status row; `AUTH_REQUIRED` toast in `handleExecute`; load-test pre-flight (non-interactive); app tests | PR 2 contract (can develop against mocks in parallel) | Yes — Phase 1 complete |
 | **PR 4 — interactive flow** | `electron/oauth.ts` + `oauth-helpers.ts`; `preload.ts` + `electron.d.ts`; `authorize.ts`; Authorization Code in the grant picker; authorize-and-retry in `handleExecute`; interactive load-test pre-flight; embedded fallback; helper tests | PR 3 | Yes — Phase 2 complete |

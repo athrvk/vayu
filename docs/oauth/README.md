@@ -1,6 +1,8 @@
 # OAuth 2.0 for Vayu — Research & Design
 
-This directory contains the research and design work for adding OAuth 2.0 support to Vayu. No code has been written yet — these documents are the shared understanding that the implementation will follow.
+This directory contains the research and design work for adding OAuth 2.0 support to Vayu — the shared understanding the implementation follows.
+
+**Status:** Engine PR 1 (static bearer/basic/apikey auth resolution) plus a structural refactor have landed on `claude/vayu-oauth-2-support-hsqpau`. See [04-implementation-plan.md §0](./04-implementation-plan.md#0-implementation-status) for what exists and how it deviates from the plan. The oauth2 token machinery, routes, and all app/UI work are still to come.
 
 | Doc | Contents |
 |-----|----------|
