@@ -12,6 +12,8 @@
  * @brief Common types used throughout Vayu Engine
  */
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <map>
 #include <optional>
@@ -83,9 +85,26 @@ inline std::optional<HttpMethod> parse_method (const std::string& str) {
 }
 
 /**
- * @brief HTTP Headers (case-insensitive keys recommended)
+ * @brief Case-insensitive ordering for HTTP header names.
+ *
+ * HTTP header field names are case-insensitive (RFC 9110 §5.1), so the Headers
+ * map treats `Authorization` and `authorization` as the same key. This removes
+ * a whole class of duplicate-header / missed-lookup bugs.
  */
-using Headers = std::map<std::string, std::string>;
+struct CaseInsensitiveLess {
+    bool operator() (const std::string& a, const std::string& b) const {
+        return std::lexicographical_compare (
+        a.begin (), a.end (), b.begin (), b.end (),
+        [] (unsigned char c1, unsigned char c2) {
+            return std::tolower (c1) < std::tolower (c2);
+        });
+    }
+};
+
+/**
+ * @brief HTTP Headers (case-insensitive keys)
+ */
+using Headers = std::map<std::string, std::string, CaseInsensitiveLess>;
 
 /**
  * @brief Request body content types

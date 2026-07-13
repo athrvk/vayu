@@ -5,6 +5,8 @@
 
 #include <gtest/gtest.h>
 
+#include <variant>
+
 #include <nlohmann/json.hpp>
 
 #include "vayu/http/auth_resolver.hpp"
@@ -93,8 +95,10 @@ TEST (AuthResolver, UserSuppliedAuthorizationHeaderWins) {
     auto result = vayu::http::apply_auth (
     req, json{ { "mode", "bearer" }, { "token", "should-not-apply" } }, nullptr);
     EXPECT_TRUE (result.ok);
-    EXPECT_EQ (req.headers.at ("authorization"), "Bearer user-typed");
-    EXPECT_EQ (req.headers.count ("Authorization"), 0u);
+    // Case-insensitive: the user's lowercase header is found and preserved, and
+    // no second (differently-cased) Authorization header is added.
+    EXPECT_EQ (req.headers.size (), 1u);
+    EXPECT_EQ (req.headers.at ("Authorization"), "Bearer user-typed");
 }
 
 TEST (AuthResolver, Oauth2IsNoOpForNow) {
@@ -103,6 +107,37 @@ TEST (AuthResolver, Oauth2IsNoOpForNow) {
     req, json{ { "mode", "oauth2" }, { "config", json::object () } }, nullptr);
     EXPECT_TRUE (result.ok);
     EXPECT_TRUE (req.headers.empty ());
+}
+
+TEST (AuthResolver, HeadersAreCaseInsensitive) {
+    // A user-typed lowercase "authorization" blocks bearer injection.
+    auto req                     = make_request ();
+    req.headers["authorization"] = "Bearer typed";
+    vayu::http::apply_auth (
+    req, json{ { "mode", "bearer" }, { "token", "auto" } }, nullptr);
+    EXPECT_EQ (req.headers.size (), 1u);
+    EXPECT_EQ (req.headers.at ("Authorization"), "Bearer typed");
+}
+
+TEST (ParseAuth, MapsModesToVariantAlternatives) {
+    using namespace vayu::http;
+    EXPECT_TRUE (std::holds_alternative<NoAuth> (parse_auth (json (nullptr))));
+    EXPECT_TRUE (std::holds_alternative<NoAuth> (parse_auth (json{ { "mode", "none" } })));
+    EXPECT_TRUE (std::holds_alternative<NoAuth> (parse_auth (json{ { "mode", "inherit" } })));
+    EXPECT_TRUE (std::holds_alternative<BearerAuth> (
+    parse_auth (json{ { "mode", "bearer" }, { "token", "t" } })));
+    EXPECT_TRUE (std::holds_alternative<BasicAuth> (parse_auth (json{ { "mode", "basic" } })));
+    EXPECT_TRUE (std::holds_alternative<OAuth2Auth> (
+    parse_auth (json{ { "mode", "oauth2" }, { "config", json::object () } })));
+
+    auto ak = parse_auth (
+    json{ { "mode", "apikey" }, { "key", "k" }, { "value", "v" }, { "in", "query" } });
+    ASSERT_TRUE (std::holds_alternative<ApiKeyAuth> (ak));
+    EXPECT_TRUE (std::get<ApiKeyAuth> (ak).in_query);
+
+    auto un = parse_auth (json{ { "mode", "ntlm" } });
+    ASSERT_TRUE (std::holds_alternative<UnsupportedAuth> (un));
+    EXPECT_EQ (std::get<UnsupportedAuth> (un).mode, "ntlm");
 }
 
 } // namespace

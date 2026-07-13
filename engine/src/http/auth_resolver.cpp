@@ -3,29 +3,12 @@
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/logger.hpp"
 
-#include <algorithm>
-#include <cctype>
 #include <string>
+#include <type_traits>
 
 namespace vayu::http {
 
 namespace {
-
-// Case-insensitive check for an existing header key.
-bool has_header_ci (const vayu::Headers& headers, const std::string& name) {
-    return std::any_of (
-    headers.begin (), headers.end (), [&name] (const auto& kv) {
-        if (kv.first.size () != name.size ()) {
-            return false;
-        }
-        return std::equal (
-        kv.first.begin (), kv.first.end (), name.begin (),
-        [] (char a, char b) {
-            return std::tolower (static_cast<unsigned char> (a)) ==
-            std::tolower (static_cast<unsigned char> (b));
-        });
-    });
-}
 
 // Fetch a string field, tolerating a missing key or non-string value.
 std::string field (const nlohmann::json& obj, const char* key) {
@@ -52,67 +35,89 @@ const std::string& value) {
 
 } // namespace
 
-AuthApplyResult
-apply_auth (vayu::Request& req, const nlohmann::json& auth, vayu::db::Database* db) {
-    (void) db; // reserved for oauth2 token lookup (see auth_resolver PR2)
-
+Auth parse_auth (const nlohmann::json& auth) {
     if (!auth.is_object ()) {
-        return {};
+        return NoAuth{};
     }
 
     const std::string mode = field (auth, "mode");
-    if (mode.empty () || mode == "none" || mode == "inherit") {
-        // `inherit` is expected to be resolved app-side before it reaches here.
-        if (mode == "inherit") {
-            vayu::utils::log_debug (
-            "apply_auth: received unresolved 'inherit' auth; skipping");
-        }
-        return {};
+    if (mode.empty () || mode == "none") {
+        return NoAuth{};
     }
-
+    if (mode == "inherit") {
+        // Expected to be resolved app-side before reaching the engine.
+        vayu::utils::log_debug (
+        "parse_auth: received unresolved 'inherit' auth; treating as none");
+        return NoAuth{};
+    }
     if (mode == "bearer") {
-        if (has_header_ci (req.headers, "Authorization")) {
-            return {};
-        }
-        req.headers["Authorization"] = "Bearer " + field (auth, "token");
-        return {};
+        return BearerAuth{ field (auth, "token") };
     }
-
     if (mode == "basic") {
-        if (has_header_ci (req.headers, "Authorization")) {
-            return {};
-        }
-        const std::string creds =
-        field (auth, "username") + ":" + field (auth, "password");
-        req.headers["Authorization"] =
-        "Basic " + vayu::utils::base64_encode (creds);
-        return {};
+        return BasicAuth{ field (auth, "username"), field (auth, "password") };
     }
-
     if (mode == "apikey") {
-        const std::string key   = field (auth, "key");
-        const std::string value = field (auth, "value");
-        if (key.empty ()) {
+        return ApiKeyAuth{ field (auth, "key"), field (auth, "value"),
+            field (auth, "in") == "query" };
+    }
+    if (mode == "oauth2") {
+        return OAuth2Auth{ auth.value ("config", nlohmann::json::object ()) };
+    }
+    return UnsupportedAuth{ mode };
+}
+
+AuthApplyResult
+apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db) {
+    (void) db; // reserved for oauth2 token lookup (next iteration)
+
+    return std::visit (
+    [&] (const auto& a) -> AuthApplyResult {
+        using T = std::decay_t<decltype (a)>;
+
+        if constexpr (std::is_same_v<T, NoAuth>) {
             return {};
-        }
-        const std::string in = field (auth, "in");
-        if (in == "query") {
-            append_query_param (req.url, key, value);
-        } else { // default: header
-            if (has_header_ci (req.headers, key)) {
+        } else if constexpr (std::is_same_v<T, BearerAuth>) {
+            // Headers is case-insensitive, so this covers "authorization" too.
+            if (req.headers.count ("Authorization") == 0) {
+                req.headers["Authorization"] = "Bearer " + a.token;
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, BasicAuth>) {
+            if (req.headers.count ("Authorization") == 0) {
+                req.headers["Authorization"] =
+                "Basic " + vayu::utils::base64_encode (a.username + ":" + a.password);
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, ApiKeyAuth>) {
+            if (a.key.empty ()) {
                 return {};
             }
-            req.headers[key] = value;
+            if (a.in_query) {
+                append_query_param (req.url, a.key, a.value);
+            } else if (req.headers.count (a.key) == 0) {
+                req.headers[a.key] = a.value;
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, OAuth2Auth>) {
+            // Token acquisition + injection lands with the oauth2 path; until
+            // then this is a no-op (preserves today's behavior).
+            vayu::utils::log_debug (
+            "apply_auth: oauth2 not yet applied; sending request without auth");
+            return {};
+        } else {
+            static_assert (std::is_same_v<T, UnsupportedAuth>,
+            "unhandled Auth variant");
+            vayu::utils::log_debug ("apply_auth: mode '" + a.mode +
+            "' is not executable; sending request without auth");
+            return {};
         }
-        return {};
-    }
+    },
+    auth);
+}
 
-    // oauth2 token resolution and digest/aws/ntlm are not yet executable; they
-    // are stored but not applied. Leaving them as no-ops preserves today's
-    // behavior until the oauth2 path lands.
-    vayu::utils::log_debug ("apply_auth: mode '" + mode +
-    "' is not yet applied; sending request without auth");
-    return {};
+AuthApplyResult apply_auth (vayu::Request& req, const nlohmann::json& auth,
+vayu::db::Database* db) {
+    return apply_auth (req, parse_auth (auth), db);
 }
 
 } // namespace vayu::http

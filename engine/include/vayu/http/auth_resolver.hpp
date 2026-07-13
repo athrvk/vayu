@@ -5,38 +5,75 @@
 
 #include <nlohmann/json.hpp>
 #include <string>
+#include <variant>
 
 namespace vayu::http {
 
+// ---------------------------------------------------------------------------
+// Typed auth model
+//
+// The raw `auth` JSON is parsed into a typed variant at the boundary
+// (parse_auth), so the send path never string-matches JSON and adding a new
+// mode is a compile error until it is handled (see apply_auth's static_assert).
+// ---------------------------------------------------------------------------
+
+struct NoAuth {};
+struct BearerAuth {
+    std::string token;
+};
+struct BasicAuth {
+    std::string username;
+    std::string password;
+};
+struct ApiKeyAuth {
+    std::string key;
+    std::string value;
+    bool in_query = false; // header (default) vs query param
+};
+struct OAuth2Auth {
+    nlohmann::json config; // opaque until the oauth2 token path lands
+};
+struct UnsupportedAuth {
+    std::string mode; // digest / aws / ntlm — stored but not executed
+};
+
+using Auth = std::variant<NoAuth, BearerAuth, BasicAuth, ApiKeyAuth, OAuth2Auth,
+UnsupportedAuth>;
+
 /**
- * @brief Outcome of resolving an auth object onto a request.
+ * @brief Parse a raw `auth` object into the typed Auth model.
  *
- * `ok == true` means the request may proceed (auth was applied, or there was
- * nothing to apply). `ok == false` carries an ErrorCode (AuthRequired /
- * AuthFailed) that the caller surfaces to the client.
+ * `none`/`inherit`/absent/malformed all collapse to NoAuth. `inherit` is
+ * expected to be resolved app-side; if it reaches here it is treated as no-op.
+ */
+Auth parse_auth (const nlohmann::json& auth);
+
+/**
+ * @brief Outcome of resolving auth onto a request.
+ *
+ * `ok == false` carries an ErrorCode (AuthRequired / AuthFailed) plus a
+ * machine-readable detail_code for the client.
  */
 struct AuthApplyResult {
     bool ok = true;
     vayu::ErrorCode code = vayu::ErrorCode::None;
     std::string message;
-    std::string detail_code; // machine-readable hint, e.g. "oauth2_interactive_required"
+    std::string detail_code;
 };
 
 /**
- * @brief Resolve an `auth` object into request headers (and/or URL) before the
- *        request is sent.
+ * @brief Apply typed auth to a request (mutates headers and/or url).
  *
- * Handles the static modes today: `bearer`, `basic`, `apikey` (header or
- * query). `none`/`inherit` and the not-yet-executable modes
- * (`oauth2`/`digest`/`aws`/`ntlm`) are no-ops. A user-supplied `Authorization`
- * header always wins — injection is skipped when one is already present.
- *
- * @param req  Request to mutate (headers and possibly url).
- * @param auth The resolved auth object (variables already substituted app-side).
- *             May be null/absent.
- * @param db   Database handle for token lookup (reserved for oauth2; may be null).
+ * A user-supplied header always wins (injection is skipped when the target
+ * header already exists — matched case-insensitively). `db` is reserved for
+ * oauth2 token lookup and may be null.
  */
-AuthApplyResult
-apply_auth (vayu::Request& req, const nlohmann::json& auth, vayu::db::Database* db);
+AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db);
+
+/**
+ * @brief Convenience overload: parse then apply. Used by direct callers/tests.
+ */
+AuthApplyResult apply_auth (vayu::Request& req, const nlohmann::json& auth,
+vayu::db::Database* db);
 
 } // namespace vayu::http

@@ -237,6 +237,7 @@ endif()
 add_library(vayu_core STATIC
     src/http/client.cpp
     src/http/auth_resolver.cpp
+    src/http/request_builder.cpp
     src/http/event_loop.cpp
     src/http/event_loop/curl_callbacks.cpp
     src/http/event_loop/transfer_context.cpp
@@ -378,6 +379,7 @@ if(VAYU_BUILD_TESTS)
         tests/run_manager_test.cpp
         tests/encoding_test.cpp
         tests/auth_resolver_test.cpp
+        tests/request_builder_test.cpp
         src/http/routes/import.cpp
         src/http/routes/execution.cpp
     )

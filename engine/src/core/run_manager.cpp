@@ -13,7 +13,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/load_strategy.hpp"
-#include "vayu/http/auth_resolver.hpp"
+#include "vayu/http/request_builder.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
@@ -412,27 +412,15 @@ RunManager& manager) {
         context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
         context->event_loop->start ();
 
-        // Parse request (HTTP request fields are at root level)
-        auto request_result = vayu::json::deserialize_request (config);
-        if (request_result.is_error ()) {
-            db.update_run_status (context->run_id, vayu::RunStatus::Failed);
-            context->is_running = false;
-            if (context->metrics_thread.joinable ()) context->metrics_thread.join ();
-            manager.retain_run (context->run_id);
-            return;
-        }
-
-        auto request       = request_result.value ();
-        request.timeout_ms = timeout_ms;
-
-        // Resolve auth (bearer/basic/apikey) into headers once, before the
-        // strategy starts; the event loop attaches request.headers to every
-        // transfer, so this covers the whole run.
-        auto auth_result = vayu::http::apply_auth (
-        request, config.value ("auth", nlohmann::json ()), db_ptr);
-        if (!auth_result.ok) {
-            vayu::utils::log_error ("Run auth resolution failed: " +
-            auth_result.message);
+        // Build the request once: deserialize + timeout + auth. The event loop
+        // attaches request.headers to every transfer, so resolving auth here
+        // covers the whole run.
+        auto built = vayu::http::build_request (config, db_ptr, timeout_ms);
+        if (!built.ok) {
+            vayu::utils::log_error (
+            built.parse_failed
+            ? std::string ("Load test: invalid request format")
+            : "Load test auth resolution failed: " + built.error_message);
             db.update_run_status (context->run_id, vayu::RunStatus::Failed);
             context->is_running = false;
             if (context->metrics_thread.joinable ())
@@ -440,6 +428,7 @@ RunManager& manager) {
             manager.retain_run (context->run_id);
             return;
         }
+        auto request = std::move (built.request);
 
         // Execute Load Strategy
         auto test_start = std::chrono::steady_clock::now ();

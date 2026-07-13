@@ -618,33 +618,7 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "}";
 }
 
-namespace {
-
-// Keys whose values are secrets and must not be persisted in a run snapshot.
-bool is_secret_key (const std::string& key) {
-    return key == "token" || key == "password" || key == "clientSecret" ||
-    key == "value" || key == "refreshToken" || key == "accessToken";
-}
-
-void redact_in_place (Json& node) {
-    if (node.is_object ()) {
-        for (auto& [key, value] : node.items ()) {
-            if (value.is_string () && is_secret_key (key)) {
-                value = "***redacted***";
-            } else {
-                redact_in_place (value);
-            }
-        }
-    } else if (node.is_array ()) {
-        for (auto& item : node) {
-            redact_in_place (item);
-        }
-    }
-}
-
-} // namespace
-
-std::string redact_auth_snapshot (const std::string& body) {
+std::string sanitize_config_snapshot (const std::string& body) {
     Json parsed;
     try {
         parsed = Json::parse (body);
@@ -652,10 +626,15 @@ std::string redact_auth_snapshot (const std::string& body) {
         return body; // not JSON; store as-is
     }
 
+    // Allowlist within the auth subtree: keep only the mode, drop every
+    // credential field. Because we keep a fixed key rather than blocking known
+    // secret names, no future auth field (client secrets, tokens, private keys)
+    // can leak into the persisted snapshot.
     if (parsed.is_object ()) {
         if (auto it = parsed.find ("auth");
             it != parsed.end () && it->is_object ()) {
-            redact_in_place (*it);
+            const std::string mode = it->value ("mode", std::string{ "none" });
+            *it                    = Json::object ({ { "mode", mode } });
         }
     }
     return parsed.dump ();
