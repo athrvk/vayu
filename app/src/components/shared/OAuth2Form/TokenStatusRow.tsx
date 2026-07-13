@@ -5,7 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCw, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { ApiError } from "@/services/http-client";
@@ -14,7 +15,9 @@ import {
 	useFetchOAuth2TokenMutation,
 	useClearOAuth2TokenMutation,
 } from "@/queries/oauth";
+import { queryKeys } from "@/queries/keys";
 import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
+import { runInteractiveAuthorization } from "@/services/oauth/authorize";
 import { useToastStore } from "@/stores";
 import type { OAuth2Config } from "@/types";
 
@@ -41,6 +44,8 @@ function humanizeExpiry(expiresAt: number | null): string {
 
 export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) {
 	const showToast = useToastStore((s) => s.showToast);
+	const queryClient = useQueryClient();
+	const [authorizing, setAuthorizing] = useState(false);
 
 	const cacheKey = useMemo(() => {
 		if (!resolvedConfig.accessTokenUrl || !resolvedConfig.clientId) return null;
@@ -52,12 +57,24 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 	const clearMutation = useClearOAuth2TokenMutation();
 
 	const interactive = resolvedConfig.grantType === "authorization_code";
-	const busy = fetchMutation.isPending || clearMutation.isPending;
+	const busy = fetchMutation.isPending || clearMutation.isPending || authorizing;
 
-	const handleGetToken = () => {
+	const handleGetToken = async () => {
 		if (interactive) {
-			// The engine-hosted browser flow lands in a later iteration.
-			showToast("Interactive (Authorization Code) sign-in is coming soon", "info");
+			// Engine-hosted loopback + PKCE; opens the system browser (or the
+			// embedded window when the config opts in).
+			setAuthorizing(true);
+			try {
+				await runInteractiveAuthorization(resolvedConfig);
+				if (cacheKey) {
+					queryClient.invalidateQueries({ queryKey: queryKeys.oauth.token(cacheKey) });
+				}
+				showToast("Authorized", "success");
+			} catch (err) {
+				showToast(err instanceof Error ? err.message : "Authorization failed", "error");
+			} finally {
+				setAuthorizing(false);
+			}
 			return;
 		}
 		fetchMutation.mutate(
@@ -114,7 +131,7 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 
 			<div className="flex items-center gap-1.5 shrink-0">
 				<Button size="sm" variant="outline" onClick={handleGetToken} disabled={busy}>
-					{fetchMutation.isPending ? (
+					{fetchMutation.isPending || authorizing ? (
 						<Loader2 className="w-3.5 h-3.5 animate-spin" />
 					) : token && !expired ? (
 						<RefreshCw className="w-3.5 h-3.5" />

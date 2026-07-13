@@ -60,6 +60,25 @@ export interface OAuth2TokenStatusResponse {
 	token?: OAuth2TokenResponse;
 }
 
+export type OAuth2AuthorizeMode = "loopback" | "embedded";
+
+export interface OAuth2AuthorizeStartRequest {
+	config: OAuth2Config;
+	mode?: OAuth2AuthorizeMode;
+}
+
+export interface OAuth2AuthorizeStartResponse {
+	attemptId: string;
+	authorizeUrl: string;
+	redirectUri: string;
+}
+
+export interface OAuth2AuthorizeStatusResponse {
+	state: "pending" | "completed" | "failed" | "not_found";
+	error?: string;
+	cacheKey?: string;
+}
+
 // Collections API
 export interface ListCollectionsResponse {
 	collections: Collection[];
