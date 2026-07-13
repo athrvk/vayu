@@ -2,7 +2,7 @@
 
 This directory contains the research and design work for adding OAuth 2.0 support to Vayu — the shared understanding the implementation follows.
 
-**Status:** Engine PR 1 (static bearer/basic/apikey auth resolution) plus a structural refactor have landed on `claude/vayu-oauth-2-support-hsqpau`. See [04-implementation-plan.md §0](./04-implementation-plan.md#0-implementation-status) for what exists and how it deviates from the plan. The oauth2 token machinery, routes, and all app/UI work are still to come.
+**Status:** PRs 1–4 have landed on `claude/vayu-oauth-2-support-hsqpau` — the full OAuth 2.0 feature is functional: engine-side auth resolution + token cache/refresh, the `/oauth2/token` and `/oauth2/authorize/*` routes with engine-hosted loopback + PKCE, the app's OAuth 2.0 config form with client-credentials/password/authorization-code grants, and the interactive browser flow (system browser + embedded-window fallback). Remaining: PR 5 (importer flow mapping) and PR 6 (polish: `safeStorage` encryption, mid-run refresh). See [04-implementation-plan.md §0](./04-implementation-plan.md#0-implementation-status).
 
 | Doc | Contents |
 |-----|----------|
