@@ -54,6 +54,26 @@ inline std::string base64_encode (std::string_view in) {
 }
 
 /**
+ * @brief Base64url-encode bytes (RFC 4648 §5, URL-safe alphabet, no padding).
+ *
+ * Used for PKCE (RFC 7636): the code verifier and the SHA-256 code challenge
+ * are both base64url without padding.
+ */
+inline std::string base64url_encode (std::string_view in) {
+    std::string out = base64_encode (in);
+    for (char& c : out) {
+        if (c == '+')
+            c = '-';
+        else if (c == '/')
+            c = '_';
+    }
+    while (!out.empty () && out.back () == '=') {
+        out.pop_back ();
+    }
+    return out;
+}
+
+/**
  * @brief Percent-encode a string per RFC 3986 (unreserved set left intact).
  *
  * Unreserved characters (A-Z a-z 0-9 - _ . ~) pass through; everything else is
