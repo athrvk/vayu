@@ -27,6 +27,11 @@ Companion to [03-design.md](./03-design.md). Where 03 decided the architecture, 
 
 Everything else below — the `oauth_tokens` table, `oauth_client`/`acquire_token`, the `POST /oauth2/token` route, the `POST /run` 409 pre-flight, and the entire app/Electron plan — is **unbuilt and still current**. Read §2.4/§2.5 signatures through the lens of the four deviations above.
 
+**Design decisions (post-review, agreed with maintainer):**
+
+1. **Loopback owner: the engine, not Electron.** The engine hosts the ephemeral `127.0.0.1:<port>/callback` listener, generates PKCE (S256 via a small vendored SHA-256 — no OpenSSL dependency) and `state`, and exchanges the code — the entire authorization-code flow lives in one process and is coverable by Google Test with a mock IdP. Flow: `POST /oauth2/authorize/start {config}` → engine binds the listener and returns `{attemptId, authorizeUrl}` → the app opens `authorizeUrl` in the system browser (a generic `shell:openExternal` IPC in Electron; plain `window.open` in browser dev) → the callback lands in the engine, which validates `state`, exchanges the code, and stores the token in the cache → the app observes completion by polling the token-status endpoint (fast interval during an active attempt). `DELETE /oauth2/authorize/:attemptId` cancels; attempts are single-flight per cache key with a hard 5-minute timeout. This supersedes §3.6's `electron/oauth.ts` design (kept below for reference).
+2. **Embedded-window fallback ships in the same phase as the auth-code flow** (not deferred). It is the only path Vayu will ever have for https-only IdPs (Slack, Meta, fintech) since a hosted relay is ruled out. Scope: a hardened, opt-in Electron `BrowserWindow` that watches navigation for the registered redirect URL and returns the final callback URL to the renderer, which hands it to `POST /oauth2/authorize/complete` — PKCE/state validation and the exchange still happen in the engine. Electron never sees tokens.
+
 ---
 
 ## 1. Improvements over 03-design (found by reading the real code)
@@ -517,6 +522,8 @@ Small prerequisite: `HttpClient.delete` (`http-client.ts:124`) takes no params �
 
 ### 3.6 Electron — `app/electron/oauth.ts`
 
+> **SUPERSEDED by §0 decision 1 (engine-hosted loopback).** The engine now owns PKCE, state, the loopback listener, and the exchange via `/oauth2/authorize/*`. Electron's remaining OAuth surface is (a) a generic `shell:openExternal` IPC and (b) the embedded-window fallback (§0 decision 2), which returns the raw callback URL to the engine and never touches PKCE or tokens. The section below is retained as reference for the embedded window's hardening details (partition, navigation interception, cleanup) — those still apply to the fallback.
+
 Registered via `setupOAuthIpcHandlers(() => mainWindow)` called inside `setupIpcHandlers()` (`main.ts:341–425`). Channel names follow the existing `namespace:verb` convention (`engine:restart`, `theme:get`, `window:minimize`):
 
 - `ipcMain.handle("oauth:authorize", (_e, params: OAuthAuthorizeParams) => Promise<OAuthAuthorizeResult>)`
@@ -579,7 +586,7 @@ oauthCancel: (): Promise<void> => ipcRenderer.invoke("oauth:cancel"),
 | ~~**PR 1 — engine: apply static auth**~~ **✅ DONE** (+ refactor) | `encoding.hpp`; typed `auth_resolver` (bearer/basic/apikey live; oauth2/digest/aws/ntlm no-ops); `request_builder` single pipeline; ci `Headers`; `ErrorCode::AuthRequired/AuthFailed`; call sites in `execution.cpp` + `run_manager.cpp`; `sanitize_config_snapshot` allowlist; CMake; `encoding_test`, `auth_resolver_test`, `request_builder_test` | — | Shipped — closed the pre-existing "auth never reaches the wire" gap. See §0 for deviations |
 | **PR 2 — engine: OAuth core** | `db::OAuthToken` + accessors; `oauth_client`; `routes/oauth.cpp` + registration; oauth2 branch in `apply_auth`; `preflight_auth` + POST /run 409; `oauth_client_test`, `oauth_route_test`, db_test additions | PR 1 | Yes (API-only; UI still shows Coming Soon) |
 | **PR 3 — app: types + non-interactive UI** | domain/api types; `services/oauth/{defaults,cache-key}.ts`; editor types + `auth-mapping.ts` extraction; `OAuth2Form` (client_credentials + password) + `AuthPanel`/`AuthTab`/`AuthInheritBanner` wiring; `api-endpoints`/`api.ts`/`queries/oauth.ts`; token status row; `AUTH_REQUIRED` toast in `handleExecute`; load-test pre-flight (non-interactive); app tests | PR 2 contract (can develop against mocks in parallel) | Yes — Phase 1 complete |
-| **PR 4 — interactive flow** | `electron/oauth.ts` + `oauth-helpers.ts`; `preload.ts` + `electron.d.ts`; `authorize.ts`; Authorization Code in the grant picker; authorize-and-retry in `handleExecute`; interactive load-test pre-flight; embedded fallback; helper tests | PR 3 | Yes — Phase 2 complete |
+| **PR 4 — interactive flow (engine-hosted, per §0)** | Engine: vendored SHA-256 + PKCE/state generation; `/oauth2/authorize/start\|complete\|:attemptId` routes; ephemeral loopback listener (one-shot, state-checked, 5-min timeout, single-flight); auth-code exchange via `oauth_client`; Google Test with mock IdP covering the full flow. App: `shell:openExternal` IPC; Authorization Code in grant picker; authorize-and-poll in `handleExecute`; **embedded-window fallback (same phase)** — hardened BrowserWindow returning the callback URL to `POST /oauth2/authorize/complete` | PR 3 | Yes — Phase 2 complete, all IdPs incl. https-only |
 | **PR 5 — importers** | `mapPostmanOAuth2`/`mapInsomniaOAuth2`; OpenAPI v2/v3 flows extraction; counter changes; fixtures/tests | PR 3 (types only) — parallelizable with PR 4 | Yes |
 | **PR 6 — polish** | expiry countdown refinement; verbose-log redaction audit (the engine's debug header dump in `client.cpp`'s debug callback prints `Authorization` — redact); mid-run refresh design doc; export-time secret stripping; `safeStorage` (Phase 4) | PR 3/4 | Incremental |
 
