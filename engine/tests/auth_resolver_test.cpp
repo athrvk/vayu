@@ -101,11 +101,14 @@ TEST (AuthResolver, UserSuppliedAuthorizationHeaderWins) {
     EXPECT_EQ (req.headers.at ("Authorization"), "Bearer user-typed");
 }
 
-TEST (AuthResolver, Oauth2IsNoOpForNow) {
+TEST (AuthResolver, Oauth2WithoutDatabaseFailsCleanly) {
+    // oauth2 needs the token cache; with no DB it must fail (not silently send
+    // an unauthenticated request), and must not mutate the request.
     auto req = make_request ();
     auto result = vayu::http::apply_auth (
     req, json{ { "mode", "oauth2" }, { "config", json::object () } }, nullptr);
-    EXPECT_TRUE (result.ok);
+    EXPECT_FALSE (result.ok);
+    EXPECT_EQ (result.code, vayu::ErrorCode::AuthFailed);
     EXPECT_TRUE (req.headers.empty ());
 }
 

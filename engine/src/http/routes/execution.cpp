@@ -17,6 +17,7 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/routes.hpp"
@@ -508,6 +509,23 @@ void register_execution_routes (RouteContext& ctx) {
         ", concurrency=" + std::to_string (json.value ("concurrency", 1)) +
         ", request_id=" + run.request_id.value_or ("none") +
         ", environment_id=" + run.environment_id.value_or ("none"));
+
+        // Pre-flight auth: reject an unauthorizable run before creating it, and
+        // warm the token cache so the worker's apply_auth is a cache hit.
+        auto preflight =
+        vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
+        if (!preflight.ok) {
+            vayu::utils::log_warning ("POST /run - Auth pre-flight failed: " +
+            preflight.message);
+            res.status =
+            (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
+            res.set_content (nlohmann::json{ { "error",
+                                 { { "code", preflight.detail_code },
+                                 { "message", preflight.message } } } }
+            .dump (),
+            "application/json");
+            return;
+        }
 
         try {
             ctx.db.create_run (run);

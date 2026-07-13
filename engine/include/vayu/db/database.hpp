@@ -90,6 +90,11 @@ class Database {
     void save_globals (const Globals& g);
     std::optional<Globals> get_globals ();
 
+    // OAuth token cache
+    void save_oauth_token (const OAuthToken& t);
+    std::optional<OAuthToken> get_oauth_token (const std::string& cache_key);
+    void delete_oauth_token (const std::string& cache_key);
+
     // Execution
     void create_run (const Run& run);
     std::optional<Run> get_run (const std::string& id);

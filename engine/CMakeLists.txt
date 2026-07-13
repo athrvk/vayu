@@ -238,6 +238,7 @@ add_library(vayu_core STATIC
     src/http/client.cpp
     src/http/auth_resolver.cpp
     src/http/request_builder.cpp
+    src/http/oauth_client.cpp
     src/http/event_loop.cpp
     src/http/event_loop/curl_callbacks.cpp
     src/http/event_loop/transfer_context.cpp
@@ -344,6 +345,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/metrics.cpp
         src/http/routes/scripting.cpp
         src/http/routes/import.cpp
+        src/http/routes/oauth.cpp
     )
     
     target_link_libraries(vayu-engine PRIVATE
@@ -380,7 +382,10 @@ if(VAYU_BUILD_TESTS)
         tests/encoding_test.cpp
         tests/auth_resolver_test.cpp
         tests/request_builder_test.cpp
+        tests/oauth_client_test.cpp
+        tests/oauth_route_test.cpp
         src/http/routes/import.cpp
+        src/http/routes/oauth.cpp
         src/http/routes/execution.cpp
     )
     

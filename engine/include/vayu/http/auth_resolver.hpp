@@ -76,4 +76,12 @@ AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Data
 AuthApplyResult apply_auth (vayu::Request& req, const nlohmann::json& auth,
 vayu::db::Database* db);
 
+/**
+ * @brief Route-level pre-flight for POST /run: for oauth2 configs, acquire the
+ *        token now (cache-aware, warming the cache for the run worker) so an
+ *        unauthorizable run is rejected before it is created. No-op for every
+ *        other mode.
+ */
+AuthApplyResult preflight_auth (const nlohmann::json& auth, vayu::db::Database& db);
+
 } // namespace vayu::http

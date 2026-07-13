@@ -789,6 +789,23 @@ struct Globals {
     std::string variables; // JSON - Global variables
     int64_t updated_at;
 };
+
+/**
+ * @brief Cached OAuth 2.0 token, keyed by config identity.
+ *
+ * cache_key derivation lives in vayu::http::oauth::cache_key and must stay
+ * byte-identical with the app's computeOAuth2CacheKey.
+ */
+struct OAuthToken {
+    std::string cache_key;     // PK
+    std::string access_token;
+    std::string token_type;    // "Bearer" when the provider omits it
+    std::string refresh_token; // "" = none
+    std::string scope;
+    int64_t expires_in;   // seconds; 0 = non-expiring
+    int64_t created_at;   // ms epoch
+    std::string raw_response; // provider JSON (truncated); debugging only, never logged
+};
 } // namespace db
 
 } // namespace vayu

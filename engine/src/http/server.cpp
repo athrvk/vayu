@@ -128,6 +128,7 @@ void Server::setup_routes () {
     routes::register_metrics_routes (*route_ctx_);
     routes::register_scripting_routes (*route_ctx_);
     routes::register_import_routes (*route_ctx_);
+    routes::register_oauth_routes (*route_ctx_);
 }
 
 } // namespace vayu::http
