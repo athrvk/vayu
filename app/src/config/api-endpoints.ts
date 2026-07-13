@@ -61,4 +61,7 @@ export const API_ENDPOINTS = {
 
 	// Import
 	IMPORT_FETCH: `/import/fetch`,
+
+	// OAuth 2.0
+	OAUTH2_TOKEN: `/oauth2/token`,
 } as const;

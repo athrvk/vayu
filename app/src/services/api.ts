@@ -43,6 +43,9 @@ import type {
 	UpdateConfigRequest,
 	GlobalsResponse,
 	ImportFetchResponse,
+	OAuth2TokenRequest,
+	OAuth2TokenResponse,
+	OAuth2TokenStatusResponse,
 } from "@/types";
 import type { TimeSeriesResponse } from "@/modules/history/types";
 import { queryClient } from "@/lib/query-client";
@@ -240,5 +243,25 @@ export const apiService = {
 			{ url },
 			{ timeout: proxiedRequestTimeoutMs() }
 		);
+	},
+
+	// OAuth 2.0 — the engine proxies the token endpoint, so use the longer
+	// proxied timeout (as with executeRequest / importFetch).
+	async fetchOAuth2Token(data: OAuth2TokenRequest): Promise<OAuth2TokenResponse> {
+		return await httpClient.post<OAuth2TokenResponse>(API_ENDPOINTS.OAUTH2_TOKEN, data, {
+			timeout: proxiedRequestTimeoutMs(),
+		});
+	},
+
+	async getOAuth2TokenStatus(cacheKey: string): Promise<OAuth2TokenStatusResponse> {
+		return await httpClient.get<OAuth2TokenStatusResponse>(API_ENDPOINTS.OAUTH2_TOKEN, {
+			key: cacheKey,
+		});
+	},
+
+	async clearOAuth2Token(cacheKey: string): Promise<void> {
+		await httpClient.delete<{ deleted: boolean }>(API_ENDPOINTS.OAUTH2_TOKEN, {
+			key: cacheKey,
+		});
 	},
 };

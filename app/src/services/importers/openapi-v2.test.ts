@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { OpenApiV2Parser, swaggerSchemeToAuth } from "./openapi-v2";
+import { defaultOAuth2Config } from "@/services/oauth/defaults";
 
 const raw = readFileSync(join(__dirname, "__fixtures__/swagger-v2.json"), "utf8");
 const parsed = JSON.parse(raw);
@@ -46,7 +47,12 @@ describe("OpenApiV2Parser", () => {
 			username: "",
 			password: "",
 		});
-		expect(swaggerSchemeToAuth({ type: "oauth2" })).toEqual({ mode: "oauth2", config: {} });
+		// PR5 will map OpenAPI flows; for now oauth2 is detected with a default
+		// (non-executable) config so it round-trips through the typed model.
+		expect(swaggerSchemeToAuth({ type: "oauth2" })).toEqual({
+			mode: "oauth2",
+			config: defaultOAuth2Config(),
+		});
 	});
 
 	it("resolves $ref parameters from top-level parameters", () => {

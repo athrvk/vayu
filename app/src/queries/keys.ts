@@ -72,4 +72,10 @@ export const queryKeys = {
 	scriptCompletions: {
 		all: ["scriptCompletions"] as const,
 	},
+
+	// OAuth 2.0 token cache
+	oauth: {
+		all: ["oauth2"] as const,
+		token: (cacheKey: string) => [...queryKeys.oauth.all, "token", cacheKey] as const,
+	},
 } as const;

@@ -13,7 +13,14 @@
  * adding an ephemeral `id` for stable React keys and a `system` flag.
  */
 
-import type { BodyMode, HttpMethod, KeyValueEntry, ResolvedVariable, VariableScope } from "@/types";
+import type {
+	BodyMode,
+	HttpMethod,
+	KeyValueEntry,
+	OAuth2Config,
+	ResolvedVariable,
+	VariableScope,
+} from "@/types";
 
 // ============================================================================
 // Key-Value Types (shared across params, headers, form-data)
@@ -45,12 +52,13 @@ export interface TabInfo {
 // Auth Types
 // ============================================================================
 
-export type AuthType = "none" | "inherit" | "bearer" | "basic" | "api-key";
+export type AuthType = "none" | "inherit" | "bearer" | "basic" | "api-key" | "oauth2";
 
 /**
  * Flat auth fields backing the request builder's Auth tab. Which fields are
  * populated depends on the active {@link AuthType}. The Auth tab, request
- * execution, and the curl importer all read/write this flat shape.
+ * execution, and the curl importer all read/write this flat shape. OAuth 2.0
+ * keeps its (larger) config in a nested object rather than flattening it.
  */
 export interface AuthConfigState {
 	token?: string;
@@ -59,6 +67,7 @@ export interface AuthConfigState {
 	key?: string;
 	value?: string;
 	addTo?: "header" | "query";
+	oauth2?: OAuth2Config;
 }
 
 export interface AuthConfig {

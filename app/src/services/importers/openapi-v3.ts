@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import { sampleSchema } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
+import { defaultOAuth2Config } from "@/services/oauth/defaults";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
@@ -32,7 +33,8 @@ export function schemeToAuth(scheme: any): Exclude<RequestAuth, { mode: "inherit
 			in: scheme.in === "query" ? "query" : "header",
 		};
 	}
-	if (scheme.type === "oauth2") return { mode: "oauth2", config: {} };
+	if (scheme.type === "oauth2")
+		return { mode: "oauth2", config: defaultOAuth2Config() }; // TODO(PR5): map flows
 	return { mode: "none" };
 }
 

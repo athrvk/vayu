@@ -58,3 +58,10 @@ export { useConfigQuery, useUpdateConfigMutation } from "./config";
 
 // Script Completions
 export { useScriptCompletionsQuery } from "./script-completions";
+
+// OAuth 2.0
+export {
+	useOAuth2TokenStatusQuery,
+	useFetchOAuth2TokenMutation,
+	useClearOAuth2TokenMutation,
+} from "./oauth";

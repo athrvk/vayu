@@ -121,8 +121,8 @@ class HttpClient {
 		return this.request<T>("PUT", path, body);
 	}
 
-	async delete<T>(path: string): Promise<T> {
-		return this.request<T>("DELETE", path);
+	async delete<T>(path: string, params?: Record<string, string>): Promise<T> {
+		return this.request<T>("DELETE", path, undefined, { params });
 	}
 
 	async patch<T>(path: string, body?: unknown): Promise<T> {
