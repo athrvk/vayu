@@ -145,6 +145,8 @@ enum class ErrorCode {
     InvalidUrl,
     InvalidMethod,
     ScriptError,
+    AuthRequired,
+    AuthFailed,
     InternalError
 };
 
@@ -161,6 +163,8 @@ inline const char* to_string (ErrorCode code) {
     case ErrorCode::InvalidUrl: return "INVALID_URL";
     case ErrorCode::InvalidMethod: return "INVALID_METHOD";
     case ErrorCode::ScriptError: return "SCRIPT_ERROR";
+    case ErrorCode::AuthRequired: return "AUTH_REQUIRED";
+    case ErrorCode::AuthFailed: return "AUTH_FAILED";
     case ErrorCode::InternalError: return "INTERNAL_ERROR";
     }
     return "UNKNOWN";

@@ -17,8 +17,10 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/http/status.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
@@ -304,7 +306,7 @@ void register_execution_routes (RouteContext& ctx) {
         run.type            = vayu::RunType::Design;
         run.status          = vayu::RunStatus::Running;
         run.start_time      = now_ms ();
-        run.config_snapshot = req.body;
+        run.config_snapshot = vayu::json::redact_auth_snapshot (req.body);
 
         if (json.contains ("requestId") && !json["requestId"].is_null ()) {
             run.request_id = json["requestId"].get<std::string> ();
@@ -377,6 +379,25 @@ void register_execution_routes (RouteContext& ctx) {
         request.timeout_ms = resolve_request_timeout_ms (json,
         ctx.db.get_config_int (
         "defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
+
+        // Resolve auth (bearer/basic/apikey) into headers before scripts run,
+        // so pm.request reflects the real outgoing header set. An auth failure
+        // short-circuits before the request is sent.
+        auto auth_result = vayu::http::apply_auth (
+        request, json.value ("auth", nlohmann::json ()), &ctx.db);
+        if (!auth_result.ok) {
+            vayu::Response auth_resp;
+            auth_resp.status_code   = 0;
+            auth_resp.status_text   = vayu::http::status_text (0);
+            auth_resp.error_code    = auth_result.code;
+            auth_resp.error_message = auth_result.message;
+            store_result (ctx.db, run_id, request, auth_resp);
+            nlohmann::json body    = vayu::json::serialize (auth_resp);
+            body["authErrorCode"]  = auth_result.detail_code;
+            res.status             = 200;
+            res.set_content (body.dump (2), "application/json");
+            return;
+        }
 
         // Execute pre-request script
         vayu::runtime::ScriptContext pre_ctx;
@@ -459,7 +480,7 @@ void register_execution_routes (RouteContext& ctx) {
         run.id              = run_id;
         run.type            = vayu::RunType::Load;
         run.status          = vayu::RunStatus::Pending;
-        run.config_snapshot = req.body;
+        run.config_snapshot = vayu::json::redact_auth_snapshot (req.body);
         run.start_time      = now_ms ();
         run.end_time        = run.start_time;
 
