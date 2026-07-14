@@ -262,6 +262,12 @@ target_include_directories(vayu_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# Vendored single-header SHA-256 (picosha2, MIT) used for PKCE. SYSTEM so its
+# warnings are suppressed under the engine's strict flags.
+target_include_directories(vayu_core SYSTEM PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/picosha2
+)
+
 target_link_libraries(vayu_core PUBLIC
     CURL::libcurl
     nlohmann_json::nlohmann_json
