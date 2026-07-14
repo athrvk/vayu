@@ -32,22 +32,7 @@ bool flag (const nlohmann::json& obj, const char* key, bool fallback) {
     return fallback;
 }
 
-std::string url_decode (const std::string& in) {
-    std::string out;
-    out.reserve (in.size ());
-    for (size_t i = 0; i < in.size (); ++i) {
-        if (in[i] == '+') {
-            out.push_back (' ');
-        } else if (in[i] == '%' && i + 2 < in.size ()) {
-            out.push_back (static_cast<char> (
-            std::stoi (in.substr (i + 1, 2), nullptr, 16)));
-            i += 2;
-        } else {
-            out.push_back (in[i]);
-        }
-    }
-    return out;
-}
+using vayu::utils::url_decode;
 
 // Parse a token response body: JSON preferred, x-www-form-urlencoded fallback
 // (legacy GitHub-style). Returns a null json on failure.
@@ -184,6 +169,10 @@ const std::string& url, TokenRequest& req, const std::string& key) {
 
 } // namespace
 
+// NOTE: `scope`/`audience`/`resource` are intentionally omitted (matches
+// Postman's keying). Configs differing only in scope share a cached token; set a
+// distinct credentialsId to separate them. Must stay byte-identical with the
+// app's computeOAuth2CacheKey — see cache-key.ts and the shared test vectors.
 std::string cache_key (const nlohmann::json& config) {
     const std::string grant = field (config, "grantType");
     std::string creds_id    = field (config, "credentialsId");

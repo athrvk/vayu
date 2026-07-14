@@ -138,8 +138,6 @@ Auth parse_auth (const nlohmann::json& auth) {
 
 AuthApplyResult
 apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db) {
-    (void) db; // reserved for oauth2 token lookup (next iteration)
-
     return std::visit (
     [&] (const auto& a) -> AuthApplyResult {
         using T = std::decay_t<decltype (a)>;

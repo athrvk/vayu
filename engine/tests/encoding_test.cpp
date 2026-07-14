@@ -9,6 +9,7 @@
 
 using vayu::utils::base64_encode;
 using vayu::utils::form_encode;
+using vayu::utils::url_decode;
 using vayu::utils::url_encode;
 
 // RFC 4648 §10 test vectors.
@@ -47,6 +48,31 @@ TEST (Encoding, UrlEncodeEscapesReserved) {
 TEST (Encoding, UrlEncodeUppercaseHex) {
     // 0x7F -> %7F (uppercase), not %7f.
     EXPECT_EQ (url_encode (std::string ("\x7f", 1)), "%7F");
+}
+
+TEST (Encoding, UrlDecodeBasicAndPlus) {
+    EXPECT_EQ (url_decode ("a%20b"), "a b");
+    EXPECT_EQ (url_decode ("a+b"), "a b");
+    EXPECT_EQ (url_decode ("%2Fpath%3Fx"), "/path?x");
+    EXPECT_EQ (url_decode ("token%23frag"), "token#frag");
+    // Lower- and upper-case hex both decode.
+    EXPECT_EQ (url_decode ("%7f%7F"), std::string ("\x7f\x7f", 2));
+}
+
+// A malformed percent-escape must pass through literally, never throw — the
+// decoder runs on attacker-influenced callback query strings and token bodies.
+TEST (Encoding, UrlDecodeToleratesMalformedEscapes) {
+    EXPECT_EQ (url_decode ("%zz"), "%zz");     // non-hex digits
+    EXPECT_EQ (url_decode ("%1"), "%1");       // truncated at end of string
+    EXPECT_EQ (url_decode ("%"), "%");         // lone percent
+    EXPECT_EQ (url_decode ("a%2"), "a%2");     // truncated escape after text
+    EXPECT_EQ (url_decode ("%g0state"), "%g0state");
+}
+
+TEST (Encoding, UrlEncodeDecodeRoundTrip) {
+    for (const std::string s : { "hello world", "a+b&c=d", "/p?x#y", "" }) {
+        EXPECT_EQ (url_decode (url_encode (s)), s);
+    }
 }
 
 TEST (Encoding, FormEncodeOrdersAndEscapes) {

@@ -17,6 +17,10 @@ import type { OAuth2Config } from "@/types";
  *
  *   accessTokenUrl \x1f clientId \x1f (credentialsId|"default")
  *   \x1f (grantType === "password" ? username : "")
+ *
+ * Note: `scope`/`audience`/`resource` are intentionally omitted (matches
+ * Postman's keying). Configs differing only in scope share a cached token; set a
+ * distinct credentialsId to separate them.
  */
 export function computeOAuth2CacheKey(config: OAuth2Config): string {
 	const US = "\x1f"; // unit separator

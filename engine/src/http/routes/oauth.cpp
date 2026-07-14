@@ -131,9 +131,10 @@ nlohmann::json authorize_status_json (const AuthorizeStatus& st) {
 } // namespace
 
 void register_oauth_routes (RouteContext& ctx) {
-    // One authorization manager for the process lifetime; owns any live loopback
-    // listeners and is torn down when the server (and thus routes) go away.
-    static OAuth2AuthorizeManager authorize_manager;
+    // The authorization manager is owned by the Server (ctx.authorize_manager,
+    // see server.hpp) so its dtor stops any live loopback listeners while the
+    // Database is still alive — no process-lifetime static. Handlers reach it
+    // through the captured ctx (a stable heap object), never a local reference.
 
     ctx.server.Post ("/oauth2/token",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -160,7 +161,7 @@ void register_oauth_routes (RouteContext& ctx) {
         }
         const auto config = body.value ("config", nlohmann::json ());
         const auto mode   = body.value ("mode", std::string{ "loopback" });
-        auto result       = authorize_manager.start (ctx.db, config, mode);
+        auto result       = ctx.authorize_manager.start (ctx.db, config, mode);
         if (!result.ok) {
             res.status = result.http_status;
             res.set_content (nlohmann::json{ { "error",
@@ -190,22 +191,22 @@ void register_oauth_routes (RouteContext& ctx) {
             "application/json");
             return;
         }
-        const auto st = authorize_manager.complete (ctx.db,
+        const auto st = ctx.authorize_manager.complete (ctx.db,
         body.value ("attemptId", std::string{}), body.value ("callbackUrl", std::string{}));
         res.status = st.state == "not_found" ? 404 : 200;
         res.set_content (authorize_status_json (st).dump (), "application/json");
     });
 
     ctx.server.Get (R"(/oauth2/authorize/([^/]+))",
-    [] (const httplib::Request& req, httplib::Response& res) {
-        const auto st = authorize_manager.status (req.matches[1]);
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        const auto st = ctx.authorize_manager.status (req.matches[1]);
         res.status = st.state == "not_found" ? 404 : 200;
         res.set_content (authorize_status_json (st).dump (), "application/json");
     });
 
     ctx.server.Delete (R"(/oauth2/authorize/([^/]+))",
-    [] (const httplib::Request& req, httplib::Response& res) {
-        authorize_manager.cancel (req.matches[1]);
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        ctx.authorize_manager.cancel (req.matches[1]);
         res.status = 200;
         res.set_content (R"({"cancelled":true})", "application/json");
     });

@@ -124,6 +124,8 @@ scope TEXT, expires_in INTEGER, created_at INTEGER (ms epoch), raw_response TEXT
 
 Expiry check: `now > created_at + expires_in*1000 - 45_000` (45 s skew); missing `expires_in` → non-expiring. On refresh: rotate `refresh_token` if the response contains a new one; on refresh failure: delete the row (Bruno's behavior).
 
+> **Cache-key scope caveat.** The key intentionally omits `scope` (and `audience`/`resource`), matching Postman's keying. Two configs for the same endpoint + client + identity that differ only in requested scope therefore share one cached token, so a token minted with a narrow scope can be reused for a request that asks for a broader one (and vice-versa). Set a distinct `credentialsId` to force separate cache slots when the same client is used with different scopes. The final derivation is implemented byte-identically in `vayu::http::oauth::cache_key` (engine) and `computeOAuth2CacheKey` (app), pinned by shared test vectors.
+
 ## 5. UI plan
 
 All forms follow `docs/design-system.md` tokens and reuse `components/ui/` primitives + `VariableInput`.

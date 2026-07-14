@@ -45,22 +45,7 @@ std::string field (const nlohmann::json& obj, const char* key) {
     return {};
 }
 
-std::string url_decode (const std::string& in) {
-    std::string out;
-    out.reserve (in.size ());
-    for (size_t i = 0; i < in.size (); ++i) {
-        if (in[i] == '+') {
-            out.push_back (' ');
-        } else if (in[i] == '%' && i + 2 < in.size ()) {
-            out.push_back (
-            static_cast<char> (std::stoi (in.substr (i + 1, 2), nullptr, 16)));
-            i += 2;
-        } else {
-            out.push_back (in[i]);
-        }
-    }
-    return out;
-}
+using vayu::utils::url_decode;
 
 // Parse a query string ("a=1&b=2") into decoded key/value pairs.
 std::map<std::string, std::string> parse_query (const std::string& query) {
@@ -159,12 +144,22 @@ void OAuth2AuthorizeManager::teardown_locked (Attempt& attempt) {
 
 void OAuth2AuthorizeManager::reap_timed_out_locked () {
     const int64_t now = now_ms ();
-    for (auto& [id, attempt] : attempts_) {
-        if (attempt->result_state.load () == 0 &&
-            now > attempt->created_at + kAttemptTtlMs) {
-            attempt->result_state.store (2);
-            attempt->error = "Authorization timed out";
-            teardown_locked (*attempt);
+    for (auto it = attempts_.begin (); it != attempts_.end ();) {
+        Attempt& attempt = *it->second;
+        const int state  = attempt.result_state.load ();
+        if (state == 0 && now > attempt.created_at + kAttemptTtlMs) {
+            // Pending past its TTL → fail it and free the listener.
+            attempt.result_state.store (2);
+            attempt.error = "Authorization timed out";
+            teardown_locked (attempt);
+            ++it;
+        } else if (state != 0 && now > attempt.created_at + 2 * kAttemptTtlMs) {
+            // Terminal and well past the polling window → drop the record so the
+            // map does not grow unbounded on a long-lived daemon.
+            teardown_locked (attempt);
+            it = attempts_.erase (it);
+        } else {
+            ++it;
         }
     }
 }
@@ -285,38 +280,63 @@ const nlohmann::json& config, const std::string& mode) {
 
 AuthorizeStatus OAuth2AuthorizeManager::complete (vayu::db::Database& db,
 const std::string& attempt_id, const std::string& callback_url) {
+    // Snapshot what the exchange needs under the lock, then release it: the token
+    // exchange is a network round-trip and must not stall status() polls for
+    // other attempts (the manager is shared across all in-flight authorizations).
+    std::string state, code_verifier, redirect_uri;
+    nlohmann::json config;
+    {
+        std::lock_guard<std::mutex> lock (mutex_);
+        auto it = attempts_.find (attempt_id);
+        if (it == attempts_.end ()) {
+            return { "not_found", "", "" };
+        }
+        Attempt& attempt = *it->second;
+        if (const int s = attempt.result_state.load (); s != 0) {
+            // Already resolved (e.g. a duplicate complete) — return as-is.
+            return { s == 1 ? "completed" : "failed", attempt.error, attempt.cache_key };
+        }
+        state         = attempt.state;
+        code_verifier = attempt.code_verifier;
+        redirect_uri  = attempt.redirect_uri;
+        config        = attempt.config;
+    }
+
+    const auto qpos = callback_url.find ('?');
+    const auto params =
+    parse_query (qpos == std::string::npos ? "" : callback_url.substr (qpos + 1));
+
+    int result_state = 2;
+    std::string error;
+    std::string cache_key;
+    if (const auto err = params.find ("error"); err != params.end ()) {
+        error = err->second;
+    } else if (params.count ("state") == 0 || params.at ("state") != state) {
+        error = "State mismatch (possible CSRF)";
+    } else {
+        const std::string code = params.count ("code") ? params.at ("code") : "";
+        oauth::InteractiveExchange ex{ code, code_verifier, redirect_uri };
+        auto result = oauth::acquire_token (db, config, false, ex); // no lock held
+        if (std::holds_alternative<vayu::db::OAuthToken> (result)) {
+            result_state = 1;
+            cache_key    = oauth::cache_key (config);
+        } else {
+            error = std::get<oauth::TokenError> (result).message;
+        }
+    }
+
+    // Re-acquire the lock to store the outcome; the attempt may have been
+    // cancelled while the exchange was in flight.
     std::lock_guard<std::mutex> lock (mutex_);
     auto it = attempts_.find (attempt_id);
     if (it == attempts_.end ()) {
         return { "not_found", "", "" };
     }
     Attempt& attempt = *it->second;
-
-    const auto qpos = callback_url.find ('?');
-    const auto params =
-    parse_query (qpos == std::string::npos ? "" : callback_url.substr (qpos + 1));
-
-    if (const auto err = params.find ("error"); err != params.end ()) {
-        attempt.result_state.store (2);
-        attempt.error = err->second;
-    } else if (params.count ("state") == 0 || params.at ("state") != attempt.state) {
-        attempt.result_state.store (2);
-        attempt.error = "State mismatch (possible CSRF)";
-    } else {
-        const std::string code = params.count ("code") ? params.at ("code") : "";
-        oauth::InteractiveExchange ex{ code, attempt.code_verifier, attempt.redirect_uri };
-        auto result = oauth::acquire_token (db, attempt.config, false, ex);
-        if (std::holds_alternative<vayu::db::OAuthToken> (result)) {
-            attempt.cache_key = oauth::cache_key (attempt.config);
-            attempt.result_state.store (1);
-        } else {
-            attempt.error = std::get<oauth::TokenError> (result).message;
-            attempt.result_state.store (2);
-        }
-    }
-
-    const int s = attempt.result_state.load ();
-    return { s == 1 ? "completed" : "failed", attempt.error, attempt.cache_key };
+    attempt.result_state.store (result_state);
+    attempt.error     = error;
+    attempt.cache_key = cache_key;
+    return { result_state == 1 ? "completed" : "failed", attempt.error, attempt.cache_key };
 }
 
 AuthorizeStatus OAuth2AuthorizeManager::status (const std::string& attempt_id) {

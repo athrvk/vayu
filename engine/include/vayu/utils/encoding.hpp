@@ -103,6 +103,43 @@ inline std::string url_encode (std::string_view in) {
 }
 
 /**
+ * @brief Decode an application/x-www-form-urlencoded token ('+' → space, %XX).
+ *
+ * The inverse of url_encode for a single component. A malformed escape (a '%'
+ * not followed by two hex digits, including a truncated one at end-of-string)
+ * is passed through literally rather than throwing — callers decode
+ * attacker-influenced query strings and token bodies, so this must never abort.
+ */
+inline std::string url_decode (std::string_view in) {
+    const auto unhex = [] (char c) -> int {
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
+        return -1;
+    };
+
+    std::string out;
+    out.reserve (in.size ());
+    for (size_t i = 0; i < in.size (); ++i) {
+        const char ch = in[i];
+        int hi = -1, lo = -1;
+        if (ch == '+') {
+            out.push_back (' ');
+        } else if (ch == '%' && i + 2 < in.size () &&
+        (hi = unhex (in[i + 1])) >= 0 && (lo = unhex (in[i + 2])) >= 0) {
+            out.push_back (static_cast<char> ((hi << 4) | lo));
+            i += 2;
+        } else {
+            out.push_back (ch);
+        }
+    }
+    return out;
+}
+
+/**
  * @brief Encode key/value pairs as an application/x-www-form-urlencoded body.
  *
  * Keys and values are individually url_encode()d and joined with '&'. Order is

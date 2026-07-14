@@ -15,6 +15,7 @@
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/oauth_authorize.hpp"
 #include "vayu/http/routes.hpp"
 
 namespace vayu::http {
@@ -42,6 +43,11 @@ class Server {
     vayu::core::RunManager& run_manager_;
     int port_;
     bool verbose_;
+    // Declared before server_ so it is destroyed *after* server_ (reverse member
+    // order): the httplib lambdas that reference it are gone before its dtor
+    // stops and joins any live loopback listeners, and db_ (external) is still
+    // alive at that point. Previously a function-local static outliving db_.
+    OAuth2AuthorizeManager oauth_authorize_manager_;
     httplib::Server server_;
     std::thread server_thread_;
     std::atomic<bool> is_running_{ false };
