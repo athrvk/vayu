@@ -130,6 +130,26 @@ describe("parseCommand — curl", () => {
 		expect(r.authConfig.password).toBe("secret");
 	});
 
+	test("--oauth2-bearer → bearer auth", () => {
+		const r = parseCommand(`curl https://x.com --oauth2-bearer 'tok-123'`)!;
+		expect(r.authType).toBe("bearer");
+		expect(r.authConfig.token).toBe("tok-123");
+		// The flag maps to typed auth, not a raw header.
+		expect(r.headers).toEqual([]);
+	});
+
+	test("--oauth2-bearer=token inline form, preserves {{variables}}", () => {
+		const r = parseCommand(`curl https://x.com --oauth2-bearer={{token}}`)!;
+		expect(r.authType).toBe("bearer");
+		expect(r.authConfig.token).toBe("{{token}}");
+	});
+
+	test("--oauth2-bearer wins over -u", () => {
+		const r = parseCommand(`curl https://x.com -u 'a:b' --oauth2-bearer 'tok'`)!;
+		expect(r.authType).toBe("bearer");
+		expect(r.authConfig.token).toBe("tok");
+	});
+
 	test("-I → HEAD", () => {
 		const r = parseCommand(`curl -I https://x.com`)!;
 		expect(r.method).toBe("HEAD");

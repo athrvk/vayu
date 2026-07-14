@@ -88,6 +88,7 @@ interface Builder {
 	jsonShortcut: boolean; // curl --json
 	uploadFile: boolean; // curl -T (implies PUT)
 	basic: { username: string; password: string } | null;
+	bearer: string | null; // curl --oauth2-bearer
 }
 
 function newBuilder(): Builder {
@@ -102,6 +103,7 @@ function newBuilder(): Builder {
 		jsonShortcut: false,
 		uploadFile: false,
 		basic: null,
+		bearer: null,
 	};
 }
 
@@ -173,7 +175,12 @@ function resolve(b: Builder): ParsedRequest {
 
 	let authType: ParsedRequest["authType"] = "none";
 	const authConfig: RequestState["authConfig"] = {};
-	if (b.basic) {
+	// Bearer (curl --oauth2-bearer) wins over basic if both are somehow present,
+	// mirroring curl sending the last-set Authorization scheme.
+	if (b.bearer !== null) {
+		authType = "bearer";
+		authConfig.token = b.bearer;
+	} else if (b.basic) {
 		authType = "basic";
 		// Flat shape, matching what the Auth tab reads/writes.
 		authConfig.username = b.basic.username;
@@ -329,6 +336,10 @@ function parseCurl(args: string[]): ParsedRequest {
 			case "-u":
 			case "--user":
 				setBasicAuth(b, value());
+				break;
+			case "--oauth2-bearer":
+				// curl's dedicated OAuth 2.0 bearer flag → Vayu bearer auth.
+				b.bearer = value();
 				break;
 			case "-d":
 			case "--data":
