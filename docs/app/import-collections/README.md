@@ -125,7 +125,8 @@ Supporting value types:
   `{mode:"form-data"|"x-www-form-urlencoded", fields: KeyValueEntry[]}`.
 - `RequestAuth`: `{mode:"none"}` | `{mode:"inherit"}` | `{mode:"bearer", token}` |
   `{mode:"basic", username, password}` | `{mode:"apikey", key, value, in}` |
-  `{mode:"oauth2"|"digest"|"aws"|"ntlm", config}`.
+  `{mode:"oauth2", config: OAuth2Config}` (executable) |
+  `{mode:"digest"|"aws"|"ntlm", config}` (stored, not executed).
 
 ---
 
@@ -175,8 +176,22 @@ and **preserves duplicates and disabled rows**. (`shared.ts`)
 `mapPostmanAuth(auth)` — a Postman `auth` object (collection / folder / request) → `RequestAuth`.
 Reads the per-type detail via `authDetail`, which handles both v2.1's array shape
 (`[{key, value}]`) and v2.0's object shape. Maps `bearer`/`basic`/`apikey` to concrete auth,
-stores `oauth2`/`digest`/`aws`/`ntlm` as `{mode, config}` (not executed), `noauth` → `none`,
-and missing/`inherit` → `inherit`. (`shared.ts`)
+maps `oauth2` to an **executable** `{mode:"oauth2", config}` via `mapPostmanOAuth2` (below),
+stores `digest`/`aws`/`ntlm` as `{mode, config}` (not executed), `noauth` → `none`, and
+missing/`inherit` → `inherit`. (`shared.ts`)
+
+### OAuth 2.0 mapping (`oauth2-import.ts`)
+Turns each source format's OAuth 2.0 block into Vayu's typed `OAuth2Config`, so imported
+OAuth 2.0 auth is **executable** (not a passive `{mode, config}` bag):
+- `mapPostmanOAuth2(params)` — Postman v2.1 `oauth2` params, incl. grant normalization
+  (`authorization_code_with_pkce` → auth-code + PKCE; `implicit` → auth-code + PKCE; a minimal
+  export with only a pre-fetched `accessToken` → a bearer token).
+- `mapInsomniaOAuth2(auth)` — Insomnia's camelCase `oauth2` object.
+- `mapOpenApiV3OAuth2(scheme)` / `mapSwaggerOAuth2(scheme)` — pick the first usable flow from an
+  OpenAPI v3 / Swagger v2 `oauth2` security scheme (client id/secret seeded as `{{variables}}`).
+
+Grant/field normalization is shared here so the parsers agree. Only `digest`/`aws`/`ntlm`
+remain non-executable and are counted in `meta.nonExecutableAuth`.
 
 ### rawBody
 `rawBody(content, language)` — Postman raw body → `RequestBody`. `json`/`text` map directly;

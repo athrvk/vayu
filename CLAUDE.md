@@ -135,6 +135,7 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | POST | `/run` | Start a load test run |
 | GET | `/metrics/live/:runId` | SSE stream of live metrics |
 | GET | `/stats/:runId` | Historical stats for a run |
+| POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
 
 See `docs/engine/api-reference.md` for full reference.

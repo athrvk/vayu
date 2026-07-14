@@ -2,11 +2,25 @@
 
 **Base URL:** `http://127.0.0.1:9876` (default, configurable via `--port`)
 
-All endpoints return JSON. Error responses follow this format:
+All endpoints return JSON. Most error responses follow this format:
 
 ```json
 {
   "error": "Error message"
+}
+```
+
+The OAuth 2.0 endpoints (`/oauth2/*`) use a **nested** error shape that also
+carries a machine-readable code (and any provider detail):
+
+```json
+{
+  "error": {
+    "code": "oauth2_provider_error",
+    "message": "Token endpoint rejected the request: invalid_client",
+    "providerStatus": 401,
+    "providerError": "invalid_client"
+  }
 }
 ```
 
@@ -258,11 +272,111 @@ Set global variables.
 
 **Response:** The saved globals object.
 
+## Authentication
+
+The engine **resolves auth server-side**. Every request's `auth` object (on
+`POST /request` and `POST /run`) is applied to the outgoing request before it
+hits the wire:
+
+| `auth.mode` | Effect |
+|-------------|--------|
+| `none` / `inherit` | No-op (`inherit` is resolved app-side before it reaches the engine) |
+| `bearer` | `Authorization: Bearer <token>` |
+| `basic` | `Authorization: Basic <base64(user:pass)>` |
+| `apikey` | Header `key: value`, or `?key=value` when `in: "query"` |
+| `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement` |
+
+A user-supplied `Authorization` header always wins over `bearer`/`basic`/`oauth2`.
+Header names are matched case-insensitively.
+
+### OAuth 2.0 token cache
+
+Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
+deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
+username-if-password-grant`). Expiry uses a 45s skew; a missing `expires_in`
+means non-expiring. There is **no mid-run refresh** — a token is fetched at run
+start and reused for the whole run.
+
+#### POST /oauth2/token
+
+Acquire (or return a cached) token for an `OAuth2Config`. Supports the
+`client_credentials`, `password`, and `authorization_code` grants; the
+`authorization_code` grant requires an `interactive` code exchange (see below).
+
+**Request:**
+```json
+{
+  "config": { "grantType": "client_credentials", "accessTokenUrl": "https://idp/token",
+              "clientId": "...", "clientSecret": "...", "scope": "openid" },
+  "force": false,
+  "interactive": { "code": "...", "codeVerifier": "...", "redirectUri": "..." }
+}
+```
+
+`force: true` bypasses the cache (refreshes via the refresh token when present,
+else re-acquires). `interactive` is only used for the `authorization_code` grant.
+
+**Response (`200`):**
+```json
+{
+  "cacheKey": "https://idp/token...",
+  "accessToken": "ya29...",
+  "tokenType": "Bearer",
+  "scope": "openid",
+  "expiresIn": 3600,
+  "createdAt": 1234567890000,
+  "expiresAt": 1234567893600,
+  "hasRefreshToken": true
+}
+```
+
+`expiresAt` is `null` for a non-expiring token; `scope` is omitted when empty.
+Errors use the nested shape: `400` invalid config, `401` provider rejected the
+request, `409` interactive authorization required, `502` network error.
+
+#### GET /oauth2/token?key=&lt;cacheKey&gt;
+
+Inspect the cached token for a key (used by the UI status row). Always `200`.
+
+```json
+{ "found": true, "expired": false, "token": { "...": "serialized token" } }
+```
+
+Returns `{ "found": false }` when no token is cached.
+
+#### DELETE /oauth2/token?key=&lt;cacheKey&gt;
+
+Clear a cached token. `200 { "deleted": true }` (`false` if nothing was cached).
+
+### Interactive Authorization Code flow
+
+For the `authorization_code` grant the engine owns PKCE (S256), the `state`
+value, and the code exchange; the app only opens the browser. In **loopback**
+mode the engine binds an ephemeral `127.0.0.1` listener; in **embedded** mode
+(providers that reject loopback redirects) the app captures the redirect URL and
+hands it back.
+
+| Method / Path | Purpose |
+|---------------|---------|
+| `POST /oauth2/authorize/start` | `{config, mode?}` → `{attemptId, authorizeUrl, redirectUri}` |
+| `GET /oauth2/authorize/:attemptId` | Poll status → `{state: "pending"\|"completed"\|"failed"\|"not_found", error?, cacheKey?}` |
+| `POST /oauth2/authorize/complete` | `{attemptId, callbackUrl}` → status (embedded mode) |
+| `DELETE /oauth2/authorize/:attemptId` | Cancel → `{cancelled: true}` |
+
+Attempts time out after 5 minutes; on success the token is written to the cache
+and `cacheKey` is returned.
+
 ## Execution
 
 ### POST /request
 
 Execute a single HTTP request (Design Mode). Returns immediate response with test results.
+
+The request's `auth` (see [Authentication](#authentication)) is resolved before
+the pre-request script runs, so `pm.request` reflects the real outgoing headers.
+If a non-interactive OAuth 2.0 token cannot be obtained, the engine still returns
+`200` but the body carries `statusCode: 0`, an `errorCode` of `AUTH_REQUIRED`
+(interactive sign-in needed) or `AUTH_FAILED`, and an `authErrorCode` hint.
 
 **Request:**
 ```json
@@ -349,6 +463,12 @@ Start a load test run (Vayu Mode).
   "status": "running"
 }
 ```
+
+**Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
+token **before** creating the run and warms the cache for the workers. An
+unauthorizable config is rejected up front with `409` (interactive sign-in
+required) or `400`, using the nested `/oauth2` error shape, so a bad token never
+surfaces as a silently-failed run.
 
 **Concurrency model.** `constant_concurrency`, `ramp_up`, and `iterations` are
 **closed-loop**: the engine holds in-flight requests at a target (`concurrency`,
@@ -612,9 +732,12 @@ Get script engine API completions for UI autocomplete.
 | Code | Meaning |
 |------|---------|
 | 200 | Success |
-| 400 | Bad request (invalid JSON, missing required fields) |
+| 400 | Bad request (invalid JSON, missing required fields, invalid OAuth 2.0 config) |
+| 401 | OAuth 2.0 provider rejected the token request |
 | 404 | Resource not found |
+| 409 | OAuth 2.0 interactive authorization required (`/run` pre-flight, `/oauth2/token`) |
 | 500 | Internal server error |
+| 502 | OAuth 2.0 token-endpoint network error |
 
 ## Notes
 

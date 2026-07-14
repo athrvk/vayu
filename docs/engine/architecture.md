@@ -118,6 +118,31 @@ JavaScript execution engine for pre-request and test scripts:
 - **Linux/macOS**: Original QuickJS
 - **Windows**: QuickJS-NG (MSVC-compatible fork)
 
+### Auth Resolution & OAuth 2.0
+
+The engine resolves request auth server-side — the persisted `auth` object is
+applied to the outgoing request rather than being left to the UI. This lives in
+`vayu_core` (so both the design and load paths share it):
+
+- **`request_builder`** (`build_request`) — the single request-construction
+  pipeline: deserialize the payload, apply the resolved timeout, then resolve
+  auth. Both `POST /request` and `POST /run` go through it.
+- **`auth_resolver`** (`apply_auth` / `preflight_auth`) — a typed `Auth` variant
+  with an exhaustive per-mode handler: bearer/basic/api-key are injected inline;
+  `oauth2` delegates to the token client. A user-supplied `Authorization` header
+  always wins.
+- **`oauth_client`** (`acquire_token`) — grant handling (client_credentials,
+  password, authorization_code), the [`oauth_tokens`](db-schema.md#oauth_tokens)
+  cache (45s expiry skew, refresh-token rotation), and RFC 6749 client auth. It
+  never logs token bodies/headers.
+- **`oauth_authorize`** — the interactive Authorization Code manager: an
+  engine-hosted `127.0.0.1` loopback listener + PKCE (S256) and `state`, so the
+  entire flow (including the code exchange) stays in-process; the app only opens
+  the browser. Owned by the `Server` for a clean shutdown.
+
+PKCE hashing uses the vendored MIT **picosha2** single-header (no OpenSSL). See
+the [API reference](api-reference.md#authentication) for the `/oauth2/*` routes.
+
 ### Database (`SQLite`)
 
 Persistent storage using sqlite_orm:
@@ -130,6 +155,7 @@ Persistent storage using sqlite_orm:
 - `runs`: Test execution records (design mode or load test)
 - `metrics`: Time-series metrics (RPS, latency percentiles, bytes, dropped, status codes, …)
 - `results`: Individual request results (errors + sampled successes)
+- `oauth_tokens`: Cached OAuth 2.0 access/refresh tokens (keyed by config identity)
 - `config_entries`: Engine configuration registry (read/written via `/config`)
 
 See [Database Schema](db-schema.md) for the full column list.
@@ -141,7 +167,8 @@ See [Database Schema](db-schema.md) for the full column list.
 ```
 1. POST /request
    ↓
-2. Parse request JSON
+2. Build request: parse JSON + apply timeout + resolve auth (bearer/basic/
+   apikey/oauth2). Auth is resolved BEFORE the script so pm.request is accurate
    ↓
 3. Create Run record (type: Design)
    ↓
@@ -161,7 +188,8 @@ See [Database Schema](db-schema.md) for the full column list.
 ```
 1. POST /run
    ↓
-2. Parse load test config
+2. Parse config + pre-flight auth (oauth2 tokens acquired & cache warmed;
+   409 up front if interactive sign-in is required)
    ↓
 3. Create Run record (type: Load)
    ↓
@@ -278,6 +306,12 @@ data/
 - **Local-only binding**: Server only listens on `127.0.0.1`
 - **Script sandboxing**: QuickJS contexts have no filesystem/network access
 - **Single instance**: File lock prevents multiple daemon instances
+- **Secret handling (v1 posture)**: auth credentials and cached OAuth 2.0 tokens
+  are stored in **plaintext** in SQLite; `runs.config_snapshot` redacts its
+  `auth` object to `{mode}` before persistence; and curl verbose logs redact the
+  values of sensitive headers (`Authorization`, cookies, etc.). Token request
+  bodies/responses are never logged. On-disk encryption (`safeStorage`) and
+  mid-run token refresh are deferred.
 
 ## Dependencies
 
@@ -287,3 +321,4 @@ data/
 - **sqlite3**: Embedded database
 - **sqlite-orm**: C++ ORM for SQLite
 - **QuickJS**: JavaScript engine (vendored)
+- **picosha2**: SHA-256 single-header for PKCE (vendored, MIT)

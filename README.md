@@ -89,7 +89,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **Collections & folder hierarchy** — nested collections with per-collection variables, auth, and pre/post scripts
 - **One-drop import** — Postman v2.0/v2.1, Insomnia v4, OpenAPI 3.0, Swagger 2.0
 - **Layered environments** — variable resolution flows from globals → collection chain → active environment, with overrides at any level
-- **Auth, the way you expect it** — Bearer token, Basic auth, and API key (header or query); inherits down the collection tree
+- **Auth, the way you expect it** — Bearer token, Basic auth, API key (header or query), and OAuth 2.0 (client credentials, password, and interactive authorization code with PKCE); resolved engine-side and inherits down the collection tree
 - **Postman-compatible test scripts** — QuickJS engine implementing `pm.test()`, `pm.expect()`, `pm.environment.set()`, `pm.response.*` — most Postman scripts run unmodified
 - **Composable scripting** — pre/post-request scripts compose down the hierarchy (root → folder → request)
 - **Private by default** — 100% offline execution; no telemetry, no account, no cloud sync

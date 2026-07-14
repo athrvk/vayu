@@ -149,10 +149,10 @@ Auth is applied **only at the root collection**; every request is `{ mode: "inhe
 | `type: "http"`, `scheme: "bearer"` | `{ mode: "bearer", token: "" }` |
 | `type: "http"`, `scheme: "basic"` | `{ mode: "basic", username: "", password: "" }` |
 | `type: "apiKey"` | `{ mode: "apikey", key: scheme.name ?? "", value: "", in: scheme.in === "query" ? "query" : "header" }` |
-| `type: "oauth2"` | `{ mode: "oauth2", config: {} }` |
+| `type: "oauth2"` | `{ mode: "oauth2", config: OAuth2Config }` via `mapOpenApiV3OAuth2` — picks the first usable flow (`clientCredentials` → `authorizationCode`+PKCE → `password` → `implicit`→auth-code+PKCE), fills its `tokenUrl`/`authorizationUrl`/`scope`, and seeds `clientId`/`clientSecret` as `{{clientId}}`/`{{clientSecret}}` placeholders |
 | missing / any other type (incl. `openIdConnect`, `http` with other schemes) | `{ mode: "none" }` |
 
-**`nonExecutableAuth`:** set to `1` when the picked primary scheme is `oauth2` (Vayu has no OAuth2 execution path), otherwise `0`. This is a flag for the chosen scheme, not a per-request count.
+**`nonExecutableAuth`:** always `0` — `oauth2` now maps to an executable config, and the other mapped schemes (bearer/basic/apikey) are executable too.
 
 ## Options & lossy behavior
 
@@ -168,7 +168,7 @@ Dropped / not represented:
 - **`authorization` / `content-type` header parameters:** dropped (Vayu manages them).
 - **Multi-tag grouping:** only the first tag groups an operation.
 
-`meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built, `folderCount` = number of tag collections, `environmentCount = 0`, `skipped = []` (this parser never emits `SkippedItem`s), `nonExecutableAuth` = `1` if primary scheme is oauth2 else `0`.
+`meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built, `folderCount` = number of tag collections, `environmentCount = 0`, `skipped = []` (this parser never emits `SkippedItem`s), `nonExecutableAuth = 0` (oauth2 is now executable).
 
 ## Shared helpers used
 

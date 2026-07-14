@@ -31,7 +31,8 @@ Stores folder/group hierarchy for requests.
 | `updated_at`         | INTEGER | Unix ms                                      |
 
 **auth** is a JSON discriminated union: `{"mode":"none"}` | `{"mode":"bearer","token":"..."}` |
-`{"mode":"basic","username":"...","password":"..."}` | `{"mode":"apikey","key":"...","value":"...","in":"header"|"query"}`.
+`{"mode":"basic","username":"...","password":"..."}` | `{"mode":"apikey","key":"...","value":"...","in":"header"|"query"}` |
+`{"mode":"oauth2","config":{…}}` (see [`requests.auth`](#requests) and [`oauth_tokens`](#oauth_tokens)).
 Collections are always auth sources — they never store `{"mode":"inherit"}`.
 
 **Cascade delete**: deleting a collection performs BFS to collect all descendant IDs, then
@@ -83,7 +84,13 @@ Duplicate keys are allowed.
 {"mode":"bearer","token":"..."}
 {"mode":"basic","username":"...","password":"..."}
 {"mode":"apikey","key":"...","value":"...","in":"header"|"query"}
+{"mode":"oauth2","config":{ /* OAuth2Config */ }}
 ```
+
+The `oauth2` `config` holds the grant type, endpoints, client id/secret,
+placement options, etc. Secret fields (`clientSecret`, `password`) are stored
+**in plaintext** here, same as bearer/basic credentials — the v1 posture. The
+resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
 
 ---
 
@@ -133,6 +140,37 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 
 There is **no** `summary` column — aggregate metrics for a finished run are reconstructed at
 read time from the `metrics` and `results` tables (see `GET /run/:runId/report`).
+
+**`config_snapshot` redaction** — the snapshot is the raw run payload, which can
+carry auth credentials. Before persistence, its top-level `auth` object is
+reduced to just `{"mode": "..."}` (via `sanitize_config_snapshot` in
+`utils/json.cpp`) — an allowlist, so no current or future auth field
+(`clientSecret`, `password`, tokens) leaks into a stored run.
+
+---
+
+### `oauth_tokens`
+
+Cached OAuth 2.0 access/refresh tokens, keyed by config identity. Written by the
+token client (`engine/src/http/oauth_client.cpp`); struct is `db::OAuthToken`.
+Auto-created by `sync_schema()`.
+
+| Column          | Type    | Notes                                                             |
+|-----------------|---------|-------------------------------------------------------------------|
+| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f username?` — byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource) |
+| `access_token`  | TEXT    | Bearer token (plaintext at rest)                                  |
+| `token_type`    | TEXT    | Defaults to `"Bearer"` when the provider omits it                 |
+| `refresh_token` | TEXT    | `""` when none                                                    |
+| `scope`         | TEXT    | Granted scope, if returned                                        |
+| `expires_in`    | INTEGER | Seconds; `0` = non-expiring                                       |
+| `created_at`    | INTEGER | Unix ms                                                           |
+| `raw_response`  | TEXT    | Provider JSON (truncated to 4 KB); debugging only, never logged   |
+
+Expiry is `now > created_at + expires_in*1000 − 45s` (skew). On refresh the
+`refresh_token` rotates when the provider issues a new one; a rejected refresh
+token clears the row and falls back to a fresh grant. There is **no** mid-run
+refresh. Tokens are plaintext at rest (v1 posture); the row is cleared via
+`DELETE /oauth2/token`.
 
 ---
 
