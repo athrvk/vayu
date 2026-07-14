@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { OpenApiV2Parser, swaggerSchemeToAuth } from "./openapi-v2";
-import { defaultOAuth2Config } from "@/services/oauth/defaults";
 
 const raw = readFileSync(join(__dirname, "__fixtures__/swagger-v2.json"), "utf8");
 const parsed = JSON.parse(raw);
@@ -47,12 +46,23 @@ describe("OpenApiV2Parser", () => {
 			username: "",
 			password: "",
 		});
-		// PR5 will map OpenAPI flows; for now oauth2 is detected with a default
-		// (non-executable) config so it round-trips through the typed model.
-		expect(swaggerSchemeToAuth({ type: "oauth2" })).toEqual({
-			mode: "oauth2",
-			config: defaultOAuth2Config(),
+		// The Swagger `flow` maps to a Vayu grant; client id/secret are seeded as
+		// {{variables}} since a spec never carries them.
+		const app = swaggerSchemeToAuth({
+			type: "oauth2",
+			flow: "application",
+			tokenUrl: "https://idp/token",
+			scopes: { read: "", write: "" },
 		});
+		expect(app.mode).toBe("oauth2");
+		expect(
+			(app as { config: { grantType: string; accessTokenUrl: string; scope: string } }).config
+		).toMatchObject({
+			grantType: "client_credentials",
+			accessTokenUrl: "https://idp/token",
+			scope: "read write",
+		});
+		expect((app as { config: { clientId: string } }).config.clientId).toBe("{{clientId}}");
 	});
 
 	it("resolves $ref parameters from top-level parameters", () => {

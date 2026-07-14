@@ -90,7 +90,7 @@ function pmRequest(item: any, ctx: Ctx): RequestDraft {
 	const rq = item.request ?? {};
 	const { url, params } = pmUrl(rq.url);
 	const auth = mapPostmanAuth(rq.auth);
-	if (["oauth2", "digest", "aws", "ntlm"].includes(auth.mode)) ctx.nonExecutableAuth += 1;
+	if (["digest", "aws", "ntlm"].includes(auth.mode)) ctx.nonExecutableAuth += 1;
 	ctx.requestCount += 1;
 	const events: any[] = Array.isArray(item.event) ? item.event : [];
 	const pre = events.find((e) => e.listen === "prerequest");

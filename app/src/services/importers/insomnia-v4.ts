@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import { asString, mapKeyValues } from "./shared";
 import { normalizeVars } from "./var-normalize";
+import { mapInsomniaOAuth2 } from "./oauth2-import";
 
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 function toMethod(m: unknown): HttpMethod {
@@ -54,6 +55,7 @@ function insomniaAuth(auth: any, ctx: { nonExec: number }): RequestAuth {
 				in: auth.addTo === "queryParams" ? "query" : "header",
 			};
 		case "oauth2":
+			return mapInsomniaOAuth2(auth);
 		case "digest":
 		case "ntlm": {
 			ctx.nonExec += 1;

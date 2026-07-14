@@ -7,6 +7,7 @@
 
 import type { KeyValueEntry, RequestAuth, RequestBody, VariableValue } from "@/types";
 import { normalizeVars } from "./var-normalize";
+import { mapPostmanOAuth2 } from "./oauth2-import";
 
 /** Coerce any scalar to its string form (Vayu stores all values as strings). */
 export function asString(v: unknown): string {
@@ -82,6 +83,7 @@ export function mapPostmanAuth(auth: any): RequestAuth {
 				in: d.in === "query" ? "query" : "header",
 			};
 		case "oauth2":
+			return mapPostmanOAuth2(d);
 		case "digest":
 		case "aws":
 		case "ntlm":
