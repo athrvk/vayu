@@ -208,7 +208,16 @@ function resolve(b: Builder): ParsedRequest {
 		} else if (contentType.includes("application/json") || b.jsonShortcut) {
 			bodyMode = "json";
 			body = dataJoined;
+		} else if (looksLikeFormData(dataJoined)) {
+			// curl's -d/--data defaults to application/x-www-form-urlencoded on the
+			// wire even without an explicit Content-Type header (curl.1). Match that
+			// when the data is form-shaped (key=value&…), like Postman/Bruno do, so
+			// the fields land as editable rows instead of one opaque text blob.
+			bodyMode = "x-www-form-urlencoded";
+			urlEncoded = toItems(parseFormPairs(b.dataParts));
 		} else {
+			// A raw, non-form payload (e.g. a JSON blob or plain text) with no
+			// Content-Type — keep it verbatim rather than mangling it into rows.
 			bodyMode = "text";
 			body = dataJoined;
 		}
@@ -226,6 +235,21 @@ function resolve(b: Builder): ParsedRequest {
 		authType,
 		authConfig,
 	};
+}
+
+/**
+ * Does the joined `-d` data look like x-www-form-urlencoded content
+ * (`key=value` pairs joined by `&`), as opposed to a raw JSON/text blob?
+ * Every `&`-segment must carry a non-empty key before its `=`. A leading
+ * `{`/`[` (JSON) short-circuits to false.
+ */
+function looksLikeFormData(data: string): boolean {
+	const trimmed = data.trim();
+	if (!trimmed || trimmed.startsWith("{") || trimmed.startsWith("[")) return false;
+	return trimmed
+		.split("&")
+		.filter(Boolean)
+		.every((pair) => pair.indexOf("=") > 0);
 }
 
 /** Split `key=value` data parts into pairs (for urlencoded bodies/params). */
