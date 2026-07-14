@@ -7,7 +7,8 @@
 
 import { useState } from "react";
 import { Loader2, AlertTriangle } from "lucide-react";
-import type { LoadTestConfig } from "@/types";
+import type { LoadTestConfig, OAuth2Config } from "@/types";
+import OAuth2LoadTestGuard from "./OAuth2LoadTestGuard";
 import { validateRampDuration } from "../utils/loadTestValidation";
 import { LOAD_TEST_DEFAULTS, LOAD_TEST_LIMITS } from "@/constants/load-test";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
@@ -69,6 +70,9 @@ interface LoadTestConfigDialogProps {
 	 *  Surfaces a warning that pre-request scripts are not executed during
 	 *  load tests (engine accepts them only on /request, not /run). */
 	hasPreRequestScript?: boolean;
+	/** Variable-resolved OAuth 2.0 config for the pending request, when its
+	 *  effective auth is oauth2. Enables the token-expiry-vs-duration guard. */
+	oauth2Config?: OAuth2Config;
 }
 
 export default function LoadTestConfigDialog({
@@ -76,6 +80,7 @@ export default function LoadTestConfigDialog({
 	onStart,
 	isStarting = false,
 	hasPreRequestScript = false,
+	oauth2Config,
 }: LoadTestConfigDialogProps) {
 	// Load saved config or use defaults
 	const saved = loadSavedConfig();
@@ -106,6 +111,7 @@ export default function LoadTestConfigDialog({
 		saved.saveTimingBreakdown ?? LOAD_TEST_DEFAULTS.SAVE_TIMING_BREAKDOWN
 	);
 	const [comment, setComment] = useState(""); // Don't persist comment
+	const [oauthGated, setOauthGated] = useState(false);
 
 	const rampDurationError = validateRampDuration(mode, duration, rampDuration);
 
@@ -402,13 +408,23 @@ export default function LoadTestConfigDialog({
 					</div>
 				</div>
 
+				{oauth2Config && (
+					<div className="mt-4">
+						<OAuth2LoadTestGuard
+							config={oauth2Config}
+							durationSeconds={mode === "iterations" ? null : duration}
+							onGateChange={setOauthGated}
+						/>
+					</div>
+				)}
+
 				<DialogFooter>
 					<Button variant="outline" onClick={onClose} disabled={isStarting}>
 						Cancel
 					</Button>
 					<Button
 						onClick={handleStart}
-						disabled={isStarting || rampDurationError !== null}
+						disabled={isStarting || rampDurationError !== null || oauthGated}
 						className="bg-purple-600 hover:bg-purple-700"
 					>
 						{isStarting ? (

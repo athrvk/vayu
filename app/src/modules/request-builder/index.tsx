@@ -44,6 +44,7 @@ import type {
 	StartLoadTestRequest,
 	RequestBody,
 	RequestAuth,
+	OAuth2Config,
 	Collection,
 } from "@/types";
 
@@ -104,6 +105,26 @@ export default function RequestBuilder() {
 	const { resolveString, resolveObject } = useVariableResolver({
 		collectionId: fetchedRequest?.collectionId || undefined,
 	});
+
+	// Effective (variable-resolved) OAuth 2.0 config for the pending load-test
+	// request, if its auth resolves to oauth2. Drives the token-expiry guard.
+	const pendingOAuth2Config = useMemo<OAuth2Config | null>(() => {
+		const req = pendingLoadTestRequest;
+		if (!req) return null;
+		let auth: RequestAuth | undefined;
+		if (req.authType === "oauth2") {
+			auth = editorToAuth("oauth2", req.authConfig);
+		} else if (req.authType === "inherit") {
+			for (let i = collectionAncestors.length - 1; i >= 0; i--) {
+				if (collectionAncestors[i].auth.mode !== "none") {
+					auth = collectionAncestors[i].auth;
+					break;
+				}
+			}
+		}
+		if (!auth || auth.mode !== "oauth2") return null;
+		return resolveObject(auth.config) as OAuth2Config;
+	}, [pendingLoadTestRequest, collectionAncestors, resolveObject]);
 
 	// Convert fetched request to RequestState format
 	const initialRequest = useMemo((): Partial<RequestState> | undefined => {
@@ -610,6 +631,7 @@ export default function RequestBuilder() {
 					onStart={handleConfirmLoadTest}
 					isStarting={isStartingLoadTest}
 					hasPreRequestScript={!!pendingLoadTestRequest?.preRequestScript?.trim()}
+					oauth2Config={pendingOAuth2Config ?? undefined}
 				/>
 			)}
 		</>
