@@ -20,6 +20,7 @@
 #endif
 
 #include "vayu/http/client.hpp"
+#include "vayu/http/debug_redact.hpp"
 #include "vayu/http/status.hpp"
 
 #include <curl/curl.h>
@@ -51,8 +52,12 @@ int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, v
 
     switch (type) {
     case CURLINFO_TEXT: vayu::utils::log_debug ("* " + text); break;
-    case CURLINFO_HEADER_OUT: vayu::utils::log_debug ("> " + text); break;
-    case CURLINFO_HEADER_IN: vayu::utils::log_debug ("< " + text); break;
+    case CURLINFO_HEADER_OUT:
+        vayu::utils::log_debug ("> " + vayu::http::detail::redact_header_line (text));
+        break;
+    case CURLINFO_HEADER_IN:
+        vayu::utils::log_debug ("< " + vayu::http::detail::redact_header_line (text));
+        break;
     default: break;
     }
     return 0;

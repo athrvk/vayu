@@ -386,6 +386,7 @@ if(VAYU_BUILD_TESTS)
         tests/oauth_client_test.cpp
         tests/oauth_route_test.cpp
         tests/pkce_test.cpp
+        tests/debug_redact_test.cpp
         tests/oauth_authorize_test.cpp
         src/http/routes/import.cpp
         src/http/routes/oauth.cpp
