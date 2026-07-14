@@ -161,7 +161,7 @@ export default function AuthPanel() {
 						</div>
 						<div className="space-y-2">
 							<Label>Password</Label>
-							<VariableInput
+							<SecretInput
 								value={authConfig.password || ""}
 								onChange={(password) => updateConfig({ password })}
 								placeholder="Password"
