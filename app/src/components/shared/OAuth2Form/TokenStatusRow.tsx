@@ -115,27 +115,37 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 	const expired = status?.expired ?? false;
 
 	return (
-		<div className="flex items-center gap-3 flex-wrap rounded-md border border-border bg-panel px-3 py-2">
-			<div className="flex items-center gap-2 min-w-0 flex-1">
-				<span
-					className={`h-2 w-2 rounded-full shrink-0 ${
-						token
-							? expired
-								? "bg-amber-500"
-								: "bg-emerald-500"
-							: "bg-muted-foreground/40"
-					}`}
-					aria-hidden
-				/>
-				{token ? (
-					<span className="flex items-center gap-1.5 min-w-0 text-xs text-muted-foreground">
-						<code className={`text-foreground ${revealed ? "break-all" : "truncate"}`}>
-							{revealed ? token.accessToken : maskToken(token.accessToken)}
-						</code>
-						<button
-							type="button"
+		<div className="rounded-md border border-border bg-panel">
+			{/* Summary row - geometry never changes */}
+			<div className="flex items-center gap-3 px-3 py-2">
+				<div className="flex items-center gap-2 min-w-0 flex-1">
+					<span
+						className={`h-2 w-2 rounded-full shrink-0 ${token
+								? expired
+									? "bg-amber-500"
+									: "bg-emerald-500"
+								: "bg-muted-foreground/40"
+							}`}
+						aria-hidden
+					/>
+					{token ? (
+						<span className="text-xs text-muted-foreground">
+							<code className="text-foreground">{maskToken(token.accessToken)}</code>
+							{" · "}
+							{expired ? "expired" : humanizeExpiry(token.expiresAt)}
+						</span>
+					) : (
+						<span className="text-xs text-muted-foreground">No token cached</span>
+					)}
+				</div>
+
+				{/* Action rail - fixed position, never shifts */}
+				<div className="flex items-center gap-1 shrink-0">
+					{token && (
+						<Button
+							size="sm"
+							variant="ghost"
 							onClick={() => setRevealed((v) => !v)}
-							className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
 							title={revealed ? "Hide token" : "Show full token"}
 							aria-label={revealed ? "Hide token" : "Show full token"}
 							aria-pressed={revealed}
@@ -145,42 +155,42 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 							) : (
 								<Eye className="w-3.5 h-3.5" />
 							)}
-						</button>
-						<span className="shrink-0">
-							{" · "}
-							{expired ? "expired" : humanizeExpiry(token.expiresAt)}
+						</Button>
+					)}
+					<Button size="sm" variant="outline" onClick={handleGetToken} disabled={busy}>
+						{fetchMutation.isPending || authorizing ? (
+							<Loader2 className="w-3.5 h-3.5 animate-spin" />
+						) : token && !expired ? (
+							<RefreshCw className="w-3.5 h-3.5" />
+						) : (
+							<KeyRound className="w-3.5 h-3.5" />
+						)}
+						<span className="ml-1.5">
+							{token ? (expired ? "Refresh" : "Renew") : "Get Token"}
 						</span>
-					</span>
-				) : (
-					<span className="text-xs text-muted-foreground">No token cached</span>
-				)}
+					</Button>
+					{token && (
+						<Button
+							size="sm"
+							variant="ghost"
+							onClick={handleClear}
+							disabled={busy}
+							title="Clear cached token"
+						>
+							<Trash2 className="w-3.5 h-3.5" />
+						</Button>
+					)}
+				</div>
 			</div>
 
-			<div className="flex items-center gap-1.5 shrink-0">
-				<Button size="sm" variant="outline" onClick={handleGetToken} disabled={busy}>
-					{fetchMutation.isPending || authorizing ? (
-						<Loader2 className="w-3.5 h-3.5 animate-spin" />
-					) : token && !expired ? (
-						<RefreshCw className="w-3.5 h-3.5" />
-					) : (
-						<KeyRound className="w-3.5 h-3.5" />
-					)}
-					<span className="ml-1.5">
-						{token ? (expired ? "Refresh" : "Renew") : "Get Token"}
-					</span>
-				</Button>
-				{token && (
-					<Button
-						size="sm"
-						variant="ghost"
-						onClick={handleClear}
-						disabled={busy}
-						title="Clear cached token"
-					>
-						<Trash2 className="w-3.5 h-3.5" />
-					</Button>
-				)}
-			</div>
+			{/* Full token disclosure - expands below, doesn't affect the row above */}
+			{revealed && token && (
+				<div className="border-t border-border px-3 py-2">
+					<code className="block break-all text-[11px] leading-relaxed text-foreground select-all">
+						{token.accessToken}
+					</code>
+				</div>
+			)}
 		</div>
 	);
 }
