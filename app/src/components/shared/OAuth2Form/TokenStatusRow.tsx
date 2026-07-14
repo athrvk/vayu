@@ -7,7 +7,7 @@
 
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { KeyRound, RefreshCw, Trash2, Loader2 } from "lucide-react";
+import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui";
 import { ApiError } from "@/services/http-client";
 import {
@@ -46,11 +46,20 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 	const showToast = useToastStore((s) => s.showToast);
 	const queryClient = useQueryClient();
 	const [authorizing, setAuthorizing] = useState(false);
+	const [revealed, setRevealed] = useState(false);
 
 	const cacheKey = useMemo(() => {
 		if (!resolvedConfig.accessTokenUrl || !resolvedConfig.clientId) return null;
 		return computeOAuth2CacheKey(resolvedConfig);
 	}, [resolvedConfig]);
+
+	// Re-hide the token whenever the config identity changes (render-phase reset)
+	// so switching requests never reveals a different token unmasked.
+	const [prevKey, setPrevKey] = useState(cacheKey);
+	if (cacheKey !== prevKey) {
+		setPrevKey(cacheKey);
+		setRevealed(false);
+	}
 
 	const statusQuery = useOAuth2TokenStatusQuery(cacheKey);
 	const fetchMutation = useFetchOAuth2TokenMutation();
@@ -119,10 +128,28 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 					aria-hidden
 				/>
 				{token ? (
-					<span className="text-xs text-muted-foreground truncate">
-						<code className="text-foreground">{maskToken(token.accessToken)}</code>
-						{" · "}
-						{expired ? "expired" : humanizeExpiry(token.expiresAt)}
+					<span className="flex items-center gap-1.5 min-w-0 text-xs text-muted-foreground">
+						<code className={`text-foreground ${revealed ? "break-all" : "truncate"}`}>
+							{revealed ? token.accessToken : maskToken(token.accessToken)}
+						</code>
+						<button
+							type="button"
+							onClick={() => setRevealed((v) => !v)}
+							className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+							title={revealed ? "Hide token" : "Show full token"}
+							aria-label={revealed ? "Hide token" : "Show full token"}
+							aria-pressed={revealed}
+						>
+							{revealed ? (
+								<EyeOff className="w-3.5 h-3.5" />
+							) : (
+								<Eye className="w-3.5 h-3.5" />
+							)}
+						</button>
+						<span className="shrink-0">
+							{" · "}
+							{expired ? "expired" : humanizeExpiry(token.expiresAt)}
+						</span>
 					</span>
 				) : (
 					<span className="text-xs text-muted-foreground">No token cached</span>

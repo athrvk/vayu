@@ -15,6 +15,7 @@ export { CodeEditor } from "./code-editor";
 export type { CodeEditorProps } from "./code-editor";
 
 export { Input } from "./input";
+export { SecretInput } from "./secret-input";
 export { Textarea } from "./textarea";
 export type { TextareaProps } from "./textarea";
 

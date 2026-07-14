@@ -24,6 +24,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 	Label,
+	SecretInput,
 } from "@/components/ui";
 import OAuth2Form from "@/components/shared/OAuth2Form";
 import type { OAuth2TextInput } from "@/components/shared/OAuth2Form/types";
@@ -43,10 +44,15 @@ const AUTH_TYPES: { value: AuthType; label: string; icon: typeof Key }[] = [
 ];
 
 // Variable-aware text input for the OAuth 2.0 form (so {{variables}} work in
-// every field). VariableInput handles masking-free display of secret variables.
-const VariableTextInput: OAuth2TextInput = ({ value, onChange, placeholder }) => (
-	<VariableInput value={value} onChange={onChange} placeholder={placeholder} />
-);
+// every field). Secret fields (client secret / password) instead use the masked
+// SecretInput with a reveal toggle — masking and {{variable}} token highlighting
+// can't coexist, and hiding the secret at rest wins for those fields.
+const VariableTextInput: OAuth2TextInput = ({ value, onChange, placeholder, type }) =>
+	type === "password" ? (
+		<SecretInput value={value} onChange={onChange} placeholder={placeholder} />
+	) : (
+		<VariableInput value={value} onChange={onChange} placeholder={placeholder} />
+	);
 
 export default function AuthPanel() {
 	const { request, updateField, setRequest, resolveString } = useRequestBuilderContext();

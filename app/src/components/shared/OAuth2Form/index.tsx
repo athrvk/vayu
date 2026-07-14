@@ -24,6 +24,7 @@ import {
 	Label,
 	Switch,
 	Input,
+	SecretInput,
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
@@ -39,15 +40,19 @@ const GRANT_TYPES: { value: OAuth2GrantType; label: string }[] = [
 ];
 
 // A plain-input fallback when the host does not inject a variable-aware input.
-const PlainTextInput: OAuth2TextInput = ({ value, onChange, placeholder, type }) => (
-	<Input
-		value={value}
-		onChange={(e) => onChange(e.target.value)}
-		placeholder={placeholder}
-		type={type ?? "text"}
-		className="font-mono text-sm"
-	/>
-);
+// Secret fields render a masked input with a reveal toggle.
+const PlainTextInput: OAuth2TextInput = ({ value, onChange, placeholder, type }) =>
+	type === "password" ? (
+		<SecretInput value={value} onChange={onChange} placeholder={placeholder} />
+	) : (
+		<Input
+			value={value}
+			onChange={(e) => onChange(e.target.value)}
+			placeholder={placeholder}
+			type="text"
+			className="font-mono text-sm"
+		/>
+	);
 
 export default function OAuth2Form({
 	value,
