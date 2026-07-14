@@ -1,5 +1,12 @@
 #pragma once
 
+/*
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the AGPL v3 license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
 // Compact, dependency-free SHA-256 (FIPS 180-4). Used for PKCE code challenges
 // (RFC 7636 S256) so the engine does not need to link OpenSSL. Public-domain
 // style implementation; not constant-time (not required for PKCE challenges).

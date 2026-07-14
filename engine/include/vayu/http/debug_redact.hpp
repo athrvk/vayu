@@ -1,5 +1,12 @@
 #pragma once
 
+/*
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the AGPL v3 license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
 // Redaction for curl verbose/debug header dumps. The debug callbacks log each
 // outgoing/incoming header line ("> Name: value" / "< Name: value"); without
 // this, a verbose run would print Authorization (bearer/basic/oauth2 tokens),

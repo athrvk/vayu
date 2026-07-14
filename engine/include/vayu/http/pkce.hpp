@@ -1,5 +1,12 @@
 #pragma once
 
+/*
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the AGPL v3 license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
 // PKCE (RFC 7636) helpers plus a small CSPRNG-ish token generator for `state`
 // and the code verifier. Localhost dev-tool context: std::random_device is an
 // acceptable entropy source here.
