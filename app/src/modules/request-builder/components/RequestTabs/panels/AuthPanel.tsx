@@ -26,8 +26,7 @@ import {
 	Label,
 	SecretInput,
 } from "@/components/ui";
-import OAuth2Form from "@/components/shared/OAuth2Form";
-import type { OAuth2TextInput } from "@/components/shared/OAuth2Form/types";
+import { OAuth2Form, type OAuth2TextInput } from "@/components/shared/OAuth2Form";
 import { defaultOAuth2Config } from "@/services/oauth/defaults";
 import { useRequestBuilderContext } from "../../../context";
 import VariableInput from "../../../shared/VariableInput";
