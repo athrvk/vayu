@@ -87,10 +87,10 @@ vayu-cli run request.json --daemon http://localhost:9999
 
 **Load Test Modes:**
 
-- **constant_rps**: Open-loop — dispatch at `targetRps` for `duration` (use `maxInFlight` to cap outstanding requests)
-- **constant_concurrency**: Closed-loop — hold `concurrency` in-flight requests for `duration`
-- **ramp_up**: Closed-loop — ramp concurrency `startConcurrency` → `concurrency` over `rampUpDuration`, then hold to `duration` (total)
-- **iterations**: Closed-loop, bounded — issue `iterations` total requests at `concurrency`
+- **constant_rps**: Open-loop - dispatch at `targetRps` for `duration` (use `maxInFlight` to cap outstanding requests)
+- **constant_concurrency**: Closed-loop - hold `concurrency` in-flight requests for `duration`
+- **ramp_up**: Closed-loop - ramp concurrency `startConcurrency` → `concurrency` over `rampUpDuration`, then hold to `duration` (total)
+- **iterations**: Closed-loop, bounded - issue `iterations` total requests at `concurrency`
 
 ## Output
 

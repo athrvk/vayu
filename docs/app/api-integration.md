@@ -176,7 +176,7 @@ apiService.completeOAuth2Authorize(attemptId, callbackUrl): Promise<OAuth2Author
 ```
 
 These back the OAuth 2.0 auth editor. TanStack Query wraps the non-interactive
-ones in `queries/oauth.ts` (`useOAuth2TokenStatusQuery` — polls status ~30s;
+ones in `queries/oauth.ts` (`useOAuth2TokenStatusQuery` - polls status ~30s;
 `useFetchOAuth2TokenMutation`, `useClearOAuth2TokenMutation`). The token
 `cacheKey` is computed client-side by `services/oauth/cache-key.ts`, byte-identical
 to the engine so the app and engine agree on cache slots without a round-trip.
@@ -193,7 +193,7 @@ Server-Sent Events client for real-time load test metrics streaming.
 ### Features
 
 - **Single endpoint**: Connects to `/metrics/live/:runId`. The engine retains a replayable tick
-  topic, so the client connects immediately after `POST /run` with no attach race — it replays
+  topic, so the client connects immediately after `POST /run` with no attach race - it replays
   from offset 0 and tails to the `complete` event (even for sub-second runs).
 - **No custom reconnect loop**: The engine sends an explicit `complete` event at normal run end,
   so a `CLOSED` readyState is treated as terminal. Transient `CONNECTING` errors are left to the
@@ -263,13 +263,13 @@ export const API_ENDPOINTS = {
   // Real-time stats (SSE)
   METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`,
 
-  // Time-series metrics (JSON, paginated) — used to hydrate history
+  // Time-series metrics (JSON, paginated) - used to hydrate history
   STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0) =>
     `/stats/${runId}?format=json&limit=${limit}&offset=${offset}`,
 };
 ```
 
-> Note: the old `STATS_STREAM` SSE constant was removed — live metrics go through
+> Note: the old `STATS_STREAM` SSE constant was removed - live metrics go through
 > `METRICS_LIVE` only; `/stats` is now used solely for paginated historical reads.
 
 ## Request Execution Flow
@@ -284,7 +284,7 @@ export const API_ENDPOINTS = {
 6. **Display**: Response shown in ResponseViewer
 
 Auth (bearer/basic/api-key/oauth2) is resolved **engine-side** from the request's
-`auth` object — the app no longer builds `Authorization` headers itself. When a
+`auth` object - the app no longer builds `Authorization` headers itself. When a
 non-interactive OAuth 2.0 token can't be obtained, the response carries an
 `errorCode` of `AUTH_REQUIRED` (interactive sign-in needed) or `AUTH_FAILED`, and
 the request builder surfaces a toast pointing the user at the Auth tab.

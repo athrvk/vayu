@@ -61,7 +61,7 @@ pm.response.responseTime      // Perceived latency in ms (submit → completion)
                               // In load tests this includes generator-side
                               // queue wait. For pure server wire time, use
                               // responseTimeWire.
-pm.response.responseTimeWire  // CURLINFO_TOTAL_TIME in ms — DNS + TCP + TLS +
+pm.response.responseTimeWire  // CURLINFO_TOTAL_TIME in ms - DNS + TCP + TLS +
                               // send + recv. Matches the pre-v0.3 meaning of
                               // responseTime; use this to assert on server SLAs
                               // independent of generator load.

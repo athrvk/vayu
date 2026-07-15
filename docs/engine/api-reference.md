@@ -294,7 +294,7 @@ Header names are matched case-insensitively.
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
 deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
 username-if-password-grant`). Expiry uses a 45s skew; a missing `expires_in`
-means non-expiring. There is **no mid-run refresh** — a token is fetched at run
+means non-expiring. There is **no mid-run refresh** - a token is fetched at run
 start and reused for the whole run.
 
 #### POST /oauth2/token
@@ -449,7 +449,7 @@ Start a load test run (Vayu Mode).
   "rampUpDuration": "10s",   // Ramp-up time (ramp_up mode)
   "iterations": 0,           // Number of iterations (iterations mode)
   "targetRps": 1000,         // Target requests per second (constant_rps mode)
-  "maxInFlight": 10000,      // Optional; see "maxInFlight" note below — constant_rps only
+  "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
   "requestId": "req_1234567890",      // Optional, links to saved request
   "environmentId": "env_1234567890",  // Optional
   "tests": ""                // Optional, deferred validation script
@@ -472,7 +472,7 @@ surfaces as a silently-failed run.
 
 **Concurrency model.** `constant_concurrency`, `ramp_up`, and `iterations` are
 **closed-loop**: the engine holds in-flight requests at a target (`concurrency`,
-or the ramp curve from `startConcurrency` to `concurrency`) — when a request
+or the ramp curve from `startConcurrency` to `concurrency`) - when a request
 completes, another is issued. Throughput is a *result* (`concurrency ÷ latency`),
 not an input. `constant_rps` is **open-loop**: it dispatches at `targetRps`
 regardless of how fast responses return.
@@ -487,7 +487,7 @@ target *is* the in-flight bound, so `maxInFlight` is ignored there.
 
 ### GET /stats/:runId
 
-> **Prefer `GET /metrics/live/:runId`** (below) for live dashboards — it replays a retained
+> **Prefer `GET /metrics/live/:runId`** (below) for live dashboards - it replays a retained
 > in-memory tick topic with no attach race. `/stats/:runId` is the legacy DB-polling path; it
 > remains useful for **historical** retrieval via `?format=json&limit=&offset=` (paginated
 > time-series read), which the app uses to hydrate the history view.
@@ -522,7 +522,7 @@ in-memory tick topic. The engine produces one wire-ready `metrics` tick per
 replays that buffer **from offset 0** and then tails new ticks until the run
 finishes, ending with a `complete` event. Because the topic is retained for
 `liveRetentionMs` (default 60000ms) after completion, a client that connects
-late — even after a sub-second run has already finished — still receives the
+late - even after a sub-second run has already finished - still receives the
 full series. There is no attach race.
 
 **Events:**
@@ -571,15 +571,15 @@ needed), and the stream resumes from `Last-Event-ID + 1`.
 
 **Application-level reconnect**: clients that close the EventSource themselves
 (e.g. after observing `readyState === CLOSED`) should NOT open a new connection
-and rely on `Last-Event-ID` — `EventSource` does not expose a header-setting
+and rely on `Last-Event-ID` - `EventSource` does not expose a header-setting
 API, so a fresh connect would request `from=0` and replay the entire retained
 topic, duplicating ticks already shown. The canonical recovery is to converge
 on the stored report via `GET /run/:runId/report` (the same path used at normal
 run end). This is the pattern the bundled app uses.
 
 **Responses:**
-- `200` — SSE stream (active run, or finished run still within the retention window).
-- `404` — run not found or evicted past `liveRetentionMs`; the body hints
+- `200` - SSE stream (active run, or finished run still within the retention window).
+- `404` - run not found or evicted past `liveRetentionMs`; the body hints
   `Use /run/:runId/report for the stored report`. Clients should fall back to
   the stored report in this case.
 

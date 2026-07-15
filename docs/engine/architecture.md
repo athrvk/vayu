@@ -120,22 +120,22 @@ JavaScript execution engine for pre-request and test scripts:
 
 ### Auth Resolution & OAuth 2.0
 
-The engine resolves request auth server-side — the persisted `auth` object is
+The engine resolves request auth server-side - the persisted `auth` object is
 applied to the outgoing request rather than being left to the UI. This lives in
 `vayu_core` (so both the design and load paths share it):
 
-- **`request_builder`** (`build_request`) — the single request-construction
+- **`request_builder`** (`build_request`) - the single request-construction
   pipeline: deserialize the payload, apply the resolved timeout, then resolve
   auth. Both `POST /request` and `POST /run` go through it.
-- **`auth_resolver`** (`apply_auth` / `preflight_auth`) — a typed `Auth` variant
+- **`auth_resolver`** (`apply_auth` / `preflight_auth`) - a typed `Auth` variant
   with an exhaustive per-mode handler: bearer/basic/api-key are injected inline;
   `oauth2` delegates to the token client. A user-supplied `Authorization` header
   always wins.
-- **`oauth_client`** (`acquire_token`) — grant handling (client_credentials,
+- **`oauth_client`** (`acquire_token`) - grant handling (client_credentials,
   password, authorization_code), the [`oauth_tokens`](db-schema.md#oauth_tokens)
   cache (45s expiry skew, refresh-token rotation), and RFC 6749 client auth. It
   never logs token bodies/headers.
-- **`oauth_authorize`** — the interactive Authorization Code manager: an
+- **`oauth_authorize`** - the interactive Authorization Code manager: an
   engine-hosted `127.0.0.1` loopback listener + PKCE (S256) and `state`, so the
   entire flow (including the code exchange) stays in-process; the app only opens
   the browser. Owned by the `Server` for a clean shutdown.
@@ -213,7 +213,7 @@ See [Database Schema](db-schema.md) for the full column list.
 
 ## Load Test Strategies
 
-Four load test modes are supported (`LoadTestType` in `types.hpp`). Three are **closed-loop** —
+Four load test modes are supported (`LoadTestType` in `types.hpp`). Three are **closed-loop** -
 the engine holds in-flight requests at a target and issues a new request as each completes, so
 throughput is a *result* (`concurrency ÷ latency`), not an input. One is **open-loop**.
 
@@ -247,7 +247,7 @@ Interpolates the concurrency target from `startConcurrency` to `concurrency` ove
 
 ### 4. `iterations` (closed-loop, bounded)
 
-Issues a fixed total number of requests at the target concurrency, then stops — exact count at
+Issues a fixed total number of requests at the target concurrency, then stops - exact count at
 run end.
 
 ```json

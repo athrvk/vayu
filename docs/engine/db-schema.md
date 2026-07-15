@@ -2,7 +2,7 @@
 
 Vayu uses SQLite via `sqlite_orm`. The schema is defined in `engine/src/db/database.cpp` and the
 struct definitions live in `engine/include/vayu/types.hpp`. `sync_schema()` adds new columns
-automatically on startup — no migration scripts are needed for additive changes.
+automatically on startup - no migration scripts are needed for additive changes.
 
 > **Breaking changes**: because Vayu is pre-release, destructive schema changes (column removal,
 > type changes) wipe the database rather than migrating it. The `PRAGMA user_version` is
@@ -33,7 +33,7 @@ Stores folder/group hierarchy for requests.
 **auth** is a JSON discriminated union: `{"mode":"none"}` | `{"mode":"bearer","token":"..."}` |
 `{"mode":"basic","username":"...","password":"..."}` | `{"mode":"apikey","key":"...","value":"...","in":"header"|"query"}` |
 `{"mode":"oauth2","config":{…}}` (see [`requests.auth`](#requests) and [`oauth_tokens`](#oauth_tokens)).
-Collections are always auth sources — they never store `{"mode":"inherit"}`.
+Collections are always auth sources - they never store `{"mode":"inherit"}`.
 
 **Cascade delete**: deleting a collection performs BFS to collect all descendant IDs, then
 deletes all their requests before deleting the collections deepest-first. See `Database::delete_collection()`.
@@ -63,21 +63,21 @@ Stores individual HTTP request definitions.
 | `created_at`          | INTEGER | Unix ms                                              |
 | `updated_at`          | INTEGER | Unix ms                                              |
 
-**params / headers** — stored as a JSON array of objects:
+**params / headers** - stored as a JSON array of objects:
 ```json
 [{"key":"Content-Type","value":"application/json","enabled":true,"description":""}]
 ```
 Disabled rows (`"enabled":false`) are preserved in storage and filtered at HTTP-execution time only.
 Duplicate keys are allowed.
 
-**body** — discriminated union:
+**body** - discriminated union:
 ```json
 {"mode":"none"}
 {"mode":"json"|"text"|"graphql","content":"..."}
 {"mode":"form-data"|"x-www-form-urlencoded","fields":[{"key":"...","value":"...","enabled":true}]}
 ```
 
-**auth** — discriminated union (same shape as collection auth, plus `inherit`):
+**auth** - discriminated union (same shape as collection auth, plus `inherit`):
 ```json
 {"mode":"none"}
 {"mode":"inherit"}                                        // resolved at execution time
@@ -89,7 +89,7 @@ Duplicate keys are allowed.
 
 The `oauth2` `config` holds the grant type, endpoints, client id/secret,
 placement options, etc. Secret fields (`clientSecret`, `password`) are stored
-**in plaintext** here, same as bearer/basic credentials — the v1 posture. The
+**in plaintext** here, same as bearer/basic credentials - the v1 posture. The
 resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
 
 ---
@@ -138,13 +138,13 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `start_time`      | INTEGER | Unix ms                                                     |
 | `end_time`        | INTEGER | Unix ms                                                     |
 
-There is **no** `summary` column — aggregate metrics for a finished run are reconstructed at
+There is **no** `summary` column - aggregate metrics for a finished run are reconstructed at
 read time from the `metrics` and `results` tables (see `GET /run/:runId/report`).
 
-**`config_snapshot` redaction** — the snapshot is the raw run payload, which can
+**`config_snapshot` redaction** - the snapshot is the raw run payload, which can
 carry auth credentials. Before persistence, its top-level `auth` object is
 reduced to just `{"mode": "..."}` (via `sanitize_config_snapshot` in
-`utils/json.cpp`) — an allowlist, so no current or future auth field
+`utils/json.cpp`) - an allowlist, so no current or future auth field
 (`clientSecret`, `password`, tokens) leaks into a stored run.
 
 ---
@@ -157,7 +157,7 @@ Auto-created by `sync_schema()`.
 
 | Column          | Type    | Notes                                                             |
 |-----------------|---------|-------------------------------------------------------------------|
-| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f username?` — byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource) |
+| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f username?` - byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource) |
 | `access_token`  | TEXT    | Bearer token (plaintext at rest)                                  |
 | `token_type`    | TEXT    | Defaults to `"Bearer"` when the provider omits it                 |
 | `refresh_token` | TEXT    | `""` when none                                                    |
@@ -200,7 +200,7 @@ metrics producer thread writes a batch each tick. Struct is `db::Metric`.
 
 ### `results`
 
-Individual request outcomes — all errors plus sampled successes (sampling is configurable in
+Individual request outcomes - all errors plus sampled successes (sampling is configurable in
 `MetricsCollector`). Struct is `db::Result`.
 
 | Column        | Type       | Notes                                                        |
@@ -212,7 +212,7 @@ Individual request outcomes — all errors plus sampled successes (sampling is c
 | `status_text` | TEXT       | Wire reason phrase or canonical IANA text                    |
 | `latency_ms`  | REAL       | **Perceived** latency (`completion − submitted_at`), not wire time |
 | `error`       | TEXT       | Error message for failures; empty on success                 |
-| `trace_data`  | TEXT       | JSON (headers/body/timing breakdown) — design mode + errors + slow samples |
+| `trace_data`  | TEXT       | JSON (headers/body/timing breakdown) - design mode + errors + slow samples |
 
 `trace_data` timing breakdown includes `total`, `wire`, `queueWait`, `dns`, `connect`, `tls`,
 `firstByte`, `download` (all ms). `total` is perceived latency; `wire` is libcurl's
@@ -222,7 +222,7 @@ Individual request outcomes — all errors plus sampled successes (sampling is c
 
 ### `config_entries`
 
-Engine configuration registry — each tunable setting with UI metadata. Read by `GET /config`,
+Engine configuration registry - each tunable setting with UI metadata. Read by `GET /config`,
 written by `POST /config`. Struct is `db::ConfigEntry`.
 
 | Column          | Type    | Notes                                                  |
@@ -253,6 +253,6 @@ Used in `collections.variables`, `environments.variables`, and `globals.variable
 }
 ```
 
-`secret` is a UI masking hint only — values are not encrypted at rest. `type` is a UI/script
-conversion hint, one of `"string"` (default), `"number"`, `"boolean"`, `"json"` — it controls
+`secret` is a UI masking hint only - values are not encrypted at rest. `type` is a UI/script
+conversion hint, one of `"string"` (default), `"number"`, `"boolean"`, `"json"` - it controls
 how scripts read the variable via `pm.*.get(...)`.
