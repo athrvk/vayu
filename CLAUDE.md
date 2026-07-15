@@ -150,6 +150,20 @@ See `docs/engine/api-reference.md` for full reference.
 
 macOS also ships a one-command installer: `install.sh` (repo root) downloads the release zip, ad-hoc signs the app + sidecar on-device, and strips quarantine (no Apple Developer cert). Unit-tested via `scripts/test/install_test.sh` (set `VAYU_DRYRUN=1`), shellchecked in CI on Linux + macOS.
 
+### Release changelog
+
+Release notes live on the [GitHub Releases](https://github.com/athrvk/vayu/releases) page (there is no `CHANGELOG.md` in the repo). Write them in [Keep a Changelog](https://keepachangelog.com) style so entries stay consistent across versions:
+
+- **Heading:** `## [X.Y.Z] - YYYY-MM-DD` (ISO date).
+- **Lead paragraph:** 2-4 sentences naming the release theme and where the change concentrates (engine vs app), e.g. "The OAuth 2.0 release ... the bulk of the change is new C++ in the engine and new React/Electron surface in the app."
+- **Grouped sections, in this order, omitting any that are empty:** `### Added`, `### Changed`, `### Fixed`. Use `### Security` / `### Removed` / `### Deprecated` only when they apply.
+- **Bullets:** lead with a bold headline, then the detail, e.g. `- **OAuth 2.0 auth mode.** A new \`oauth2\` mode in the request Auth panel and Collection Detail ...`. Prefer user-facing wording; reference files/endpoints only when they aid a contributor.
+- **Fold internal churn** (doc hygiene, refactors with no user-visible effect) into a single summary bullet rather than listing each commit.
+- **Compare link footer:** `[X.Y.Z]: https://github.com/athrvk/vayu/compare/vPREV...vX.Y.Z`.
+- **Version choice:** patch = fixes only; minor = new user-facing feature; major = breaking change (still `0.x`, so reserve major for a stable milestone). See the [prior releases](https://github.com/athrvk/vayu/releases) for worked examples.
+
+**Keep the GitHub Release current.** Whenever a new `vX.Y.Z` tag is created (Releasing step 3), Claude should write/refresh that version's GitHub Release notes to a changelog entry in the format above, derived from `git log vPREV..vX.Y.Z`. Discover the right tooling at runtime rather than assuming a fixed command — look for a release-publishing capability among the session's tools (search available MCP tools for release create/edit, or fall back to a CLI like `gh` if present), read a recent release to match voice, then publish. If only read-only release tools are available, draft the notes and hand them off rather than skipping the step.
+
 ## Key Docs
 
 - `docs/architecture.md` - sidecar pattern details
