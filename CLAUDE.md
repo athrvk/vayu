@@ -162,6 +162,8 @@ Release notes live on the [GitHub Releases](https://github.com/athrvk/vayu/relea
 - **Compare link footer:** `[X.Y.Z]: https://github.com/athrvk/vayu/compare/vPREV...vX.Y.Z`.
 - **Version choice:** patch = fixes only; minor = new user-facing feature; major = breaking change (still `0.x`, so reserve major for a stable milestone). See the [prior releases](https://github.com/athrvk/vayu/releases) for worked examples.
 
+**Keep the GitHub Release current.** Whenever a new `vX.Y.Z` tag is created (Releasing step 3), Claude should write/refresh that version's GitHub Release notes to a changelog entry in the format above, derived from `git log vPREV..vX.Y.Z`. Discover the right tooling at runtime rather than assuming a fixed command — look for a release-publishing capability among the session's tools (search available MCP tools for release create/edit, or fall back to a CLI like `gh` if present), read a recent release to match voice, then publish. If only read-only release tools are available, draft the notes and hand them off rather than skipping the step.
+
 ## Key Docs
 
 - `docs/architecture.md` - sidecar pattern details
