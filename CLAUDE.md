@@ -39,7 +39,7 @@ vayu/
 
 - CMake ≥ 3.25, Ninja, C++20 compiler (g++ or clang++)
 - vcpkg with `$VCPKG_ROOT` set
-- Node.js ≥ 20.19 (22 LTS recommended - see `.nvmrc`), pnpm ≥ 10
+- Node.js ≥ 20.19 (22 LTS recommended - see `app/.nvmrc`), pnpm ≥ 10
 
 Run `python build.py --setup` to install all prerequisites automatically (Linux/macOS only).
 
@@ -120,7 +120,7 @@ cd app && pnpm format:check        # Prettier
 
 - Strict TypeScript - no `any`, no `@ts-ignore` without justification
 - Component files: PascalCase `.tsx`; utilities: camelCase `.ts`
-- App UI is feature-organized: `app/src/modules/<feature>/` (request-builder, collections, dashboard, history, variables, settings, welcome); shared shell + primitives in `app/src/components/` (layout, ui, shared, status). See `docs/app/COMPONENTS.md`.
+- App UI is feature-organized: `app/src/modules/<feature>/` (request-builder, collections, dashboard, history, variables, settings, welcome); shared shell + primitives in `app/src/components/` (layout, shared, ui). See `docs/app/COMPONENTS.md`.
 - Import parsers: `app/src/services/importers/` (factory → ordered detectors → drafts → orchestrator); per-format docs in `docs/app/import-collections/`.
 - State: Zustand for UI state, TanStack Query for server state
 - Styling: Tailwind CSS v4 - all colors via CSS custom properties; see `docs/design-system.md`
