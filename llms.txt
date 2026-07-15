@@ -1,18 +1,19 @@
 # Vayu
 
-> Open source desktop app for REST API testing and load testing. Local-first, no account required, no cloud sync.
+> Open source desktop app for REST and GraphQL API testing and load testing. Local-first, no account required, no cloud sync.
 
 Vayu is a free Postman alternative that runs entirely on your machine. It combines a familiar request-builder UI (Electron + React) with a high-performance C++ execution engine that can sustain tens of thousands of HTTP requests per second for load testing.
 
 ## Key facts
 
 - **Platforms**: Windows (x64), macOS (universal), Linux (AppImage)
-- **License**: Engine — AGPL-3.0 / UI — Apache-2.0
+- **License**: Engine - AGPL-3.0 / UI - Apache-2.0
 - **No account, no telemetry, 100% offline**
 - **Import formats**: Postman v2.0/v2.1, Insomnia v4, OpenAPI 3.0, Swagger 2.0
-- **Scripting**: QuickJS with `pm.*` API — compatible with Postman test scripts
+- **Scripting**: QuickJS with `pm.*` API - compatible with Postman test scripts
+- **Auth**: Bearer, Basic, API key, and OAuth 2.0 (client credentials, password, authorization code + PKCE); resolved engine-side
 - **Load testing**: built-in, real-time metrics streaming via SSE
-- **Variable resolution**: layered — globals → collection chain → active environment
+- **Variable resolution**: layered - globals → collection chain → active environment
 
 ## Architecture
 
