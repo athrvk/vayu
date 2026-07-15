@@ -122,7 +122,7 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 | `bearer` | `{ mode: "bearer", token }` | no |
 | `basic` | `{ mode: "basic", username, password }` | no |
 | `apikey` | `{ mode: "apikey", key, value, in }` — `in` is `"query"` when `addTo === "queryParams"`, else `"header"` | no |
-| `oauth2` | `{ mode: "oauth2", config }` (full auth object minus `type`/`disabled`) | **yes** |
+| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` via `mapInsomniaOAuth2` — **executable** | no |
 | `digest` | `{ mode: "digest", config }` | **yes** |
 | `ntlm` | `{ mode: "ntlm", config }` | **yes** |
 | `iam` | `{ mode: "aws", config }` — Insomnia names AWS IAM `"iam"`; Vayu stores it as the `aws` config bag | **yes** |
@@ -131,7 +131,7 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 Notes:
 
 - **`disabled` takes precedence over `type`.** If `authentication.disabled === true`, the result is `{ mode: "none" }` regardless of `type`. If `authentication` is missing or has no `type` (and is not disabled), the result is `{ mode: "inherit" }`.
-- `oauth2`/`digest`/`ntlm`/`iam` are stored as opaque `config` bags (the auth object with `type` and `disabled` removed) and are **not executed** by Vayu — each occurrence increments `meta.nonExecutableAuth`.
+- `oauth2` is mapped to an executable `OAuth2Config` (`mapInsomniaOAuth2`) and does **not** count. `digest`/`ntlm`/`iam` are stored as opaque `config` bags (the auth object with `type` and `disabled` removed) and are **not executed** by Vayu — each occurrence increments `meta.nonExecutableAuth`.
 - The same `insomniaAuth` is called for **collection-level** auth (workspace/request_group), sharing the same `authCtx`. So a non-executable auth on a workspace or folder also counts toward `nonExecutableAuth`. For collections, an `inherit` result is coerced to `{ mode: "none" }` (collections can never inherit).
 
 ## Environments
@@ -159,7 +159,7 @@ Lossy / dropped, summary:
 
 - gRPC, WebSocket, API spec, unit test, and unit-test-suite resources are dropped and counted in `meta.skipped` (only when encountered as direct children of a workspace/request_group during the tree walk; see counting nuance above).
 - `multipart/form-data` file parts are dropped silently — **not** reflected in `meta.skipped`.
-- Non-executable auth types (`oauth2`, `digest`, `ntlm`, `iam→aws`) are stored but not run; each occurrence (request or collection level) increments `meta.nonExecutableAuth`.
+- Non-executable auth types (`digest`, `ntlm`, `iam→aws`) are stored but not run; each occurrence (request or collection level) increments `meta.nonExecutableAuth`. `oauth2` is executable and excluded.
 - Nunjucks tags and filtered template expressions are preserved as literal text.
 - request_group inline environments, collection/group scripts, and resource `_id`s are not carried into the draft model.
 

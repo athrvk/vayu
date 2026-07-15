@@ -18,6 +18,7 @@ import { Lock } from "lucide-react";
 import {
 	Button,
 	Input,
+	SecretInput,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -244,12 +245,10 @@ function AuthConfig({ auth, onChange }: AuthConfigProps) {
 				</div>
 				<div>
 					<SectionLabel>Password</SectionLabel>
-					<Input
-						type="password"
+					<SecretInput
 						value={auth.password}
-						onChange={(e) => onChange({ ...auth, password: e.target.value })}
+						onChange={(password) => onChange({ ...auth, password })}
 						placeholder="{{password}}"
-						className={cn("font-mono", auth.password.includes("{{") && "text-variable")}
 					/>
 				</div>
 			</div>

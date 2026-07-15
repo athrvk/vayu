@@ -61,12 +61,44 @@ export type RequestBody =
  * `inherit` resolves by walking the parent collection chain at execution time.
  * Collections never use `inherit` — they are always the auth source.
  */
+export type OAuth2GrantType = "authorization_code" | "client_credentials" | "password";
+
+/**
+ * OAuth 2.0 configuration. Every string field may contain {{variables}},
+ * resolved app-side before the config is sent to the engine. `state` is
+ * intentionally absent — it is always generated per authorization attempt.
+ */
+export interface OAuth2Config {
+	grantType: OAuth2GrantType;
+	authorizationUrl?: string; // authorization_code only
+	accessTokenUrl: string;
+	refreshTokenUrl?: string; // defaults to accessTokenUrl
+	callbackUrl?: string; // authorization_code; empty = auto loopback
+	clientId: string;
+	clientSecret?: string;
+	credentialsPlacement?: "basic_auth_header" | "body"; // default basic_auth_header
+	username?: string; // password grant
+	password?: string; // password grant
+	pkce?: boolean; // default true (authorization_code)
+	scope?: string;
+	audience?: string;
+	resource?: string;
+	tokenPlacement?: "header" | "query"; // default header
+	headerPrefix?: string; // default "Bearer"
+	queryParamName?: string; // default "access_token"
+	autoFetchToken?: boolean; // default true
+	autoRefreshToken?: boolean; // default true
+	useEmbeddedBrowser?: boolean; // default false
+	credentialsId?: string; // default "default"
+}
+
 export type RequestAuth =
 	| { mode: "none" | "inherit" }
 	| { mode: "bearer"; token: string }
 	| { mode: "basic"; username: string; password: string }
 	| { mode: "apikey"; key: string; value: string; in: "header" | "query" }
-	| { mode: "oauth2" | "digest" | "aws" | "ntlm"; config: Record<string, unknown> };
+	| { mode: "oauth2"; config: OAuth2Config }
+	| { mode: "digest" | "aws" | "ntlm"; config: Record<string, unknown> };
 
 export interface Collection {
 	id: string;

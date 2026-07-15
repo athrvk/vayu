@@ -17,8 +17,11 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/request_builder.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/http/status.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
@@ -285,10 +288,16 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
-        auto request_result = vayu::json::deserialize_request (json);
-        if (request_result.is_error ()) {
+        // Build the request once: deserialize + timeout + auth. A malformed
+        // payload fails here (before any run record is created); an auth
+        // failure is surfaced after the run exists (below).
+        const int request_timeout_ms = resolve_request_timeout_ms (
+        json, ctx.db.get_config_int (
+        "defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
+        auto built = vayu::http::build_request (json, &ctx.db, request_timeout_ms);
+        if (built.parse_failed) {
             vayu::utils::log_warning ("POST /request - Invalid request format");
-            send_error (res, 400, request_result.error ().message);
+            send_error (res, 400, built.error_message);
             return;
         }
 
@@ -304,7 +313,7 @@ void register_execution_routes (RouteContext& ctx) {
         run.type            = vayu::RunType::Design;
         run.status          = vayu::RunStatus::Running;
         run.start_time      = now_ms ();
-        run.config_snapshot = req.body;
+        run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
 
         if (json.contains ("requestId") && !json["requestId"].is_null ()) {
             run.request_id = json["requestId"].get<std::string> ();
@@ -368,15 +377,26 @@ void register_execution_routes (RouteContext& ctx) {
             }
         }
 
-        // Get the request (may be modified by pre-request script)
-        auto request = request_result.value ();
+        // Take the request built above (auth already resolved into headers/url,
+        // so pm.request reflects the real outgoing set). It may be further
+        // modified by the pre-request script.
+        auto request = std::move (built.request);
 
-        // deserialize_request defaults an omitted timeout to the compile-time
-        // constant; override with the engine's configured defaultTimeout so the
-        // user-facing setting governs how long a slow design-mode request runs.
-        request.timeout_ms = resolve_request_timeout_ms (json,
-        ctx.db.get_config_int (
-        "defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
+        // Auth failure: record a failed result against the run and return the
+        // error in the body (engine returns 200; the status lives in the body).
+        if (!built.ok) {
+            vayu::Response auth_resp;
+            auth_resp.status_code   = 0;
+            auth_resp.status_text   = vayu::http::status_text (0);
+            auth_resp.error_code    = built.error_code;
+            auth_resp.error_message = built.error_message;
+            store_result (ctx.db, run_id, request, auth_resp);
+            nlohmann::json body   = vayu::json::serialize (auth_resp);
+            body["authErrorCode"] = built.detail_code;
+            res.status            = 200;
+            res.set_content (body.dump (2), "application/json");
+            return;
+        }
 
         // Execute pre-request script
         vayu::runtime::ScriptContext pre_ctx;
@@ -459,7 +479,7 @@ void register_execution_routes (RouteContext& ctx) {
         run.id              = run_id;
         run.type            = vayu::RunType::Load;
         run.status          = vayu::RunStatus::Pending;
-        run.config_snapshot = req.body;
+        run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
         run.start_time      = now_ms ();
         run.end_time        = run.start_time;
 
@@ -489,6 +509,23 @@ void register_execution_routes (RouteContext& ctx) {
         ", concurrency=" + std::to_string (json.value ("concurrency", 1)) +
         ", request_id=" + run.request_id.value_or ("none") +
         ", environment_id=" + run.environment_id.value_or ("none"));
+
+        // Pre-flight auth: reject an unauthorizable run before creating it, and
+        // warm the token cache so the worker's apply_auth is a cache hit.
+        auto preflight =
+        vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
+        if (!preflight.ok) {
+            vayu::utils::log_warning ("POST /run - Auth pre-flight failed: " +
+            preflight.message);
+            res.status =
+            (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
+            res.set_content (nlohmann::json{ { "error",
+                                 { { "code", preflight.detail_code },
+                                 { "message", preflight.message } } } }
+            .dump (),
+            "application/json");
+            return;
+        }
 
         try {
             ctx.db.create_run (run);

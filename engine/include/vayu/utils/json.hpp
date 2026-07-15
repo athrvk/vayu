@@ -115,4 +115,15 @@ int indent = vayu::core::constants::json::DEFAULT_INDENT);
  */
 void serialize_to_stream (const vayu::db::Request& request, std::ostream& out);
 
+/**
+ * @brief Sanitize a run's config snapshot before persistence.
+ *
+ * Parses `body` (the raw /request or /run payload) and reduces the top-level
+ * `auth` object to just its `mode`, dropping every credential field. This is an
+ * allowlist (keep `mode`) rather than a blocklist of known secret names, so no
+ * future auth field can leak into the stored snapshot. Non-auth fields are left
+ * intact. If `body` is not valid JSON it is returned unchanged.
+ */
+[[nodiscard]] std::string sanitize_config_snapshot (const std::string& body);
+
 } // namespace vayu::json

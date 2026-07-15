@@ -34,7 +34,8 @@ import {
 } from "@/queries";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
-import type { AuthConfigState, RequestState, ResponseState } from "./types";
+import type { RequestState, ResponseState } from "./types";
+import { authToEditor, editorToAuth } from "./utils/auth-mapping";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
 import type {
@@ -43,6 +44,7 @@ import type {
 	StartLoadTestRequest,
 	RequestBody,
 	RequestAuth,
+	OAuth2Config,
 	Collection,
 } from "@/types";
 
@@ -104,6 +106,26 @@ export default function RequestBuilder() {
 		collectionId: fetchedRequest?.collectionId || undefined,
 	});
 
+	// Effective (variable-resolved) OAuth 2.0 config for the pending load-test
+	// request, if its auth resolves to oauth2. Drives the token-expiry guard.
+	const pendingOAuth2Config = useMemo<OAuth2Config | null>(() => {
+		const req = pendingLoadTestRequest;
+		if (!req) return null;
+		let auth: RequestAuth | undefined;
+		if (req.authType === "oauth2") {
+			auth = editorToAuth("oauth2", req.authConfig);
+		} else if (req.authType === "inherit") {
+			for (let i = collectionAncestors.length - 1; i >= 0; i--) {
+				if (collectionAncestors[i].auth.mode !== "none") {
+					auth = collectionAncestors[i].auth;
+					break;
+				}
+			}
+		}
+		if (!auth || auth.mode !== "oauth2") return null;
+		return resolveObject(auth.config) as OAuth2Config;
+	}, [pendingLoadTestRequest, collectionAncestors, resolveObject]);
+
 	// Convert fetched request to RequestState format
 	const initialRequest = useMemo((): Partial<RequestState> | undefined => {
 		if (!fetchedRequest) return undefined;
@@ -128,26 +150,8 @@ export default function RequestBuilder() {
 			"fields" in body && body.mode === "x-www-form-urlencoded" ? body.fields : [];
 
 		const auth = fetchedRequest.auth;
-		const authType =
-			auth.mode === "bearer"
-				? "bearer"
-				: auth.mode === "basic"
-					? "basic"
-					: auth.mode === "apikey"
-						? "api-key"
-						: auth.mode === "inherit"
-							? "inherit"
-							: "none";
 		// Map the domain auth (discriminated by mode) onto the flat editor state.
-		// Note the field rename: domain apikey uses `in`, the editor uses `addTo`.
-		const authConfig: AuthConfigState =
-			auth.mode === "bearer"
-				? { token: auth.token }
-				: auth.mode === "basic"
-					? { username: auth.username, password: auth.password }
-					: auth.mode === "apikey"
-						? { key: auth.key, value: auth.value, addTo: auth.in }
-						: {};
+		const { authType, authConfig } = authToEditor(auth);
 
 		return {
 			id: fetchedRequest.id,
@@ -229,10 +233,10 @@ export default function RequestBuilder() {
 					execAuth = resolveInheritedAuth(collectionAncestors);
 					if (execAuth) execAuth = resolveObject(execAuth) as Record<string, unknown>;
 				} else if (request.authType !== "none") {
-					const concreteAuth = {
-						mode: request.authType,
-						...request.authConfig,
-					} as Exclude<RequestAuth, { mode: "inherit" }>;
+					const concreteAuth = editorToAuth(
+						request.authType,
+						request.authConfig
+					) as Exclude<RequestAuth, { mode: "inherit" }>;
 					const raw = authToRecord(concreteAuth);
 					execAuth = raw ? (resolveObject(raw) as Record<string, unknown>) : undefined;
 				}
@@ -266,6 +270,18 @@ export default function RequestBuilder() {
 				);
 
 				if (!result) return null;
+
+				// Surface an OAuth 2.0 authorization requirement (the engine could
+				// not fetch a token non-interactively) — the response still renders
+				// its error, but the toast points the user at the fix.
+				if (result.errorCode === "AUTH_REQUIRED") {
+					showToast(
+						"OAuth 2.0 token required — open the Auth tab and click Get Token",
+						"error"
+					);
+				} else if (result.errorCode === "AUTH_FAILED") {
+					showToast(result.errorMessage || "OAuth 2.0 token request failed", "error");
+				}
 
 				// Refresh variables so script-set values (e.g. pm.environment.set) appear in the UI
 				if (composedPreScript) {
@@ -375,27 +391,7 @@ export default function RequestBuilder() {
 			}
 
 			// Build RequestAuth from UI state
-			let authPayload: RequestAuth;
-			if (request.authType === "bearer") {
-				authPayload = { mode: "bearer", token: request.authConfig.token ?? "" };
-			} else if (request.authType === "basic") {
-				authPayload = {
-					mode: "basic",
-					username: request.authConfig.username ?? "",
-					password: request.authConfig.password ?? "",
-				};
-			} else if (request.authType === "api-key") {
-				authPayload = {
-					mode: "apikey",
-					key: request.authConfig.key ?? "",
-					value: request.authConfig.value ?? "",
-					in: request.authConfig.addTo ?? "header",
-				};
-			} else if (request.authType === "inherit") {
-				authPayload = { mode: "inherit" };
-			} else {
-				authPayload = { mode: "none" };
-			}
+			const authPayload: RequestAuth = editorToAuth(request.authType, request.authConfig);
 
 			await updateRequestMutation.mutateAsync({
 				id: fetchedRequest.id,
@@ -497,10 +493,10 @@ export default function RequestBuilder() {
 					if (loadTestAuth)
 						loadTestAuth = resolveObject(loadTestAuth) as Record<string, unknown>;
 				} else if (pendingLoadTestRequest.authType !== "none") {
-					const concreteAuth = {
-						mode: pendingLoadTestRequest.authType,
-						...pendingLoadTestRequest.authConfig,
-					} as Exclude<RequestAuth, { mode: "inherit" }>;
+					const concreteAuth = editorToAuth(
+						pendingLoadTestRequest.authType,
+						pendingLoadTestRequest.authConfig
+					) as Exclude<RequestAuth, { mode: "inherit" }>;
 					const raw = authToRecord(concreteAuth);
 					loadTestAuth = raw
 						? (resolveObject(raw) as Record<string, unknown>)
@@ -635,6 +631,7 @@ export default function RequestBuilder() {
 					onStart={handleConfirmLoadTest}
 					isStarting={isStartingLoadTest}
 					hasPreRequestScript={!!pendingLoadTestRequest?.preRequestScript?.trim()}
+					oauth2Config={pendingOAuth2Config ?? undefined}
 				/>
 			)}
 		</>

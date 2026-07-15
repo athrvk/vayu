@@ -159,7 +159,7 @@ The app uses a dual-state management approach:
   - Handles error transformation and user-friendly messages
 
 - **`sse-client.ts`**: Server-Sent Events client for real-time metrics
-  - Connects to `/metrics/live/:runId` (replayable tick topic — no attach race)
+  - Connects to `/metrics/live/:runId` (replayable tick topic - no attach race)
   - No custom reconnect loop: the engine sends an explicit `complete` event, so `CLOSED` is terminal and transient errors are left to the browser's `EventSource` retry
   - Parses and forwards metrics to dashboard store
 
@@ -229,7 +229,7 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **TanStack Query**: Server state and caching
 - **Radix UI**: Accessible component primitives
 - **Tailwind CSS**: Utility-first styling
-- **Monaco Editor**: Code editing — scripts, JSON body, and GraphQL (with syntax diagnostics, autocomplete, hover, and formatting via `graphql-language-service`)
+- **Monaco Editor**: Code editing - scripts, JSON body, and GraphQL (with syntax diagnostics, autocomplete, hover, and formatting via `graphql-language-service`)
 - **Recharts**: Charts for metrics visualization
 - **Vite**: Build tool and dev server
 

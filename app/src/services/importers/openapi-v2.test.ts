@@ -46,7 +46,23 @@ describe("OpenApiV2Parser", () => {
 			username: "",
 			password: "",
 		});
-		expect(swaggerSchemeToAuth({ type: "oauth2" })).toEqual({ mode: "oauth2", config: {} });
+		// The Swagger `flow` maps to a Vayu grant; client id/secret are seeded as
+		// {{variables}} since a spec never carries them.
+		const app = swaggerSchemeToAuth({
+			type: "oauth2",
+			flow: "application",
+			tokenUrl: "https://idp/token",
+			scopes: { read: "", write: "" },
+		});
+		expect(app.mode).toBe("oauth2");
+		expect(
+			(app as { config: { grantType: string; accessTokenUrl: string; scope: string } }).config
+		).toMatchObject({
+			grantType: "client_credentials",
+			accessTokenUrl: "https://idp/token",
+			scope: "read write",
+		});
+		expect((app as { config: { clientId: string } }).config.clientId).toBe("{{clientId}}");
 	});
 
 	it("resolves $ref parameters from top-level parameters", () => {

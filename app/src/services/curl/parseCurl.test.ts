@@ -67,8 +67,48 @@ describe("parseCommand — curl", () => {
 	test("data without explicit method implies POST", () => {
 		const r = parseCommand(`curl https://x.com -d 'hello'`)!;
 		expect(r.method).toBe("POST");
+		// A raw, non-form blob with no Content-Type stays a text body.
 		expect(r.bodyMode).toBe("text");
 		expect(r.body).toBe("hello");
+	});
+
+	test("form-shaped -d without Content-Type → urlencoded rows (curl default)", () => {
+		const r = parseCommand(`curl https://x.com -d 'a=1' -d 'b=2'`)!;
+		expect(r.method).toBe("POST");
+		expect(r.bodyMode).toBe("x-www-form-urlencoded");
+		expect(r.urlEncoded).toEqual(
+			kv([
+				{ key: "a", value: "1" },
+				{ key: "b", value: "2" },
+			])
+		);
+	});
+
+	test("JSON blob via -d without Content-Type stays text (not mangled into rows)", () => {
+		const r = parseCommand(`curl https://x.com -d '{"a":1}'`)!;
+		expect(r.bodyMode).toBe("text");
+		expect(r.body).toBe('{"a":1}');
+	});
+
+	test("OAuth2 token-endpoint curl imports as urlencoded form fields", () => {
+		const r = parseCommand(
+			`curl -s http://localhost:9099/default/token -d grant_type=password ` +
+				`-d client_id=my-client -d client_secret=my-secret -d username=alice ` +
+				`-d password=whatever -d scope=openid`
+		)!;
+		expect(r.method).toBe("POST");
+		expect(r.url).toBe("http://localhost:9099/default/token");
+		expect(r.bodyMode).toBe("x-www-form-urlencoded");
+		expect(r.urlEncoded).toEqual(
+			kv([
+				{ key: "grant_type", value: "password" },
+				{ key: "client_id", value: "my-client" },
+				{ key: "client_secret", value: "my-secret" },
+				{ key: "username", value: "alice" },
+				{ key: "password", value: "whatever" },
+				{ key: "scope", value: "openid" },
+			])
+		);
 	});
 
 	test("--json shortcut sets headers + json mode", () => {
@@ -128,6 +168,26 @@ describe("parseCommand — curl", () => {
 		expect(r.authType).toBe("basic");
 		expect(r.authConfig.username).toBe("admin");
 		expect(r.authConfig.password).toBe("secret");
+	});
+
+	test("--oauth2-bearer → bearer auth", () => {
+		const r = parseCommand(`curl https://x.com --oauth2-bearer 'tok-123'`)!;
+		expect(r.authType).toBe("bearer");
+		expect(r.authConfig.token).toBe("tok-123");
+		// The flag maps to typed auth, not a raw header.
+		expect(r.headers).toEqual([]);
+	});
+
+	test("--oauth2-bearer=token inline form, preserves {{variables}}", () => {
+		const r = parseCommand(`curl https://x.com --oauth2-bearer={{token}}`)!;
+		expect(r.authType).toBe("bearer");
+		expect(r.authConfig.token).toBe("{{token}}");
+	});
+
+	test("--oauth2-bearer wins over -u", () => {
+		const r = parseCommand(`curl https://x.com -u 'a:b' --oauth2-bearer 'tok'`)!;
+		expect(r.authType).toBe("bearer");
+		expect(r.authConfig.token).toBe("tok");
 	});
 
 	test("-I → HEAD", () => {

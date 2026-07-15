@@ -261,7 +261,18 @@ inline auto make_storage (const std::string& path) {
     // Globals: App-wide variables (singleton row with id="globals")
     make_table ("globals", make_column ("id", &Globals::id, primary_key ()),
     make_column ("variables", &Globals::variables), // JSON: {key: {value, enabled}}
-    make_column ("updated_at", &Globals::updated_at)));
+    make_column ("updated_at", &Globals::updated_at)),
+
+    // OAuth tokens: cached access/refresh tokens keyed by config identity
+    make_table ("oauth_tokens",
+    make_column ("cache_key", &OAuthToken::cache_key, primary_key ()),
+    make_column ("access_token", &OAuthToken::access_token),
+    make_column ("token_type", &OAuthToken::token_type),
+    make_column ("refresh_token", &OAuthToken::refresh_token),
+    make_column ("scope", &OAuthToken::scope),
+    make_column ("expires_in", &OAuthToken::expires_in),
+    make_column ("created_at", &OAuthToken::created_at),
+    make_column ("raw_response", &OAuthToken::raw_response)));
 }
 
 using Storage = decltype (make_storage (""));
@@ -630,6 +641,30 @@ std::optional<Globals> Database::get_globals () {
     if (globals.empty ())
         return std::nullopt;
     return globals.front ();
+}
+
+// ============================================================================
+// OAuth token cache
+// ============================================================================
+
+void Database::save_oauth_token (const OAuthToken& t) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    impl_->storage.replace (t);
+}
+
+std::optional<OAuthToken> Database::get_oauth_token (const std::string& cache_key) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto rows = impl_->storage.get_all<OAuthToken> (
+    where (c (&OAuthToken::cache_key) == cache_key));
+    if (rows.empty ())
+        return std::nullopt;
+    return rows.front ();
+}
+
+void Database::delete_oauth_token (const std::string& cache_key) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    impl_->storage.remove_all<OAuthToken> (
+    where (c (&OAuthToken::cache_key) == cache_key));
 }
 
 // ============================================================================

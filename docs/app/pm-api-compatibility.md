@@ -47,14 +47,14 @@ Chai-style chains, implemented in the QuickJS runtime:
 
 ## Not (yet) supported
 
-These Postman APIs are **not** implemented — scripts that rely on them will fail:
+These Postman APIs are **not** implemented - scripts that rely on them will fail:
 
-- `pm.sendRequest(...)` — sending auxiliary requests from a script
-- `pm.variables.*` — the merged/resolved variable accessor (use the scoped
+- `pm.sendRequest(...)` - sending auxiliary requests from a script
+- `pm.variables.*` - the merged/resolved variable accessor (use the scoped
   `pm.environment` / `pm.collectionVariables` / `pm.globals` instead)
-- `pm.iterationData.*` — data-file driven runs
+- `pm.iterationData.*` - data-file driven runs
 - `pm.cookies.*`
-- Request mutation — `pm.request.headers.add/upsert/remove(...)`, and editing the URL,
+- Request mutation - `pm.request.headers.add/upsert/remove(...)`, and editing the URL,
   method, or body from a script (see below)
 - `pm.info`, `pm.execution`, `pm.visualizer`
 - The `tests["name"] = bool` legacy assertion style (use `pm.test`)
@@ -78,13 +78,13 @@ A pre-request script **cannot change the outgoing request** in Vayu today.
   subsequent runs.
 
 This matches Postman's behaviour for the URL/method/body (its docs mark the body immutable
-and provide no URL mutators) but **diverges on headers** — Postman _does_ support
+and provide no URL mutators) but **diverges on headers** - Postman _does_ support
 `pm.request.headers.add/upsert/remove`, which Vayu does not yet implement.
 
 ### TODO (future)
 
-To make the full Postman pattern work — "set a variable in a pre-request script and have it
-change the outgoing URL/headers" — variable resolution has to move (or be duplicated) into
+To make the full Postman pattern work - "set a variable in a pre-request script and have it
+change the outgoing URL/headers" - variable resolution has to move (or be duplicated) into
 the engine and run **after** the pre-request script, instead of entirely app-side beforehand.
 That means sending the _unresolved_ URL/headers plus the variable maps to the engine and
 interpolating `{{…}}` in C++ post-script (and applying the same to the load-test path). This

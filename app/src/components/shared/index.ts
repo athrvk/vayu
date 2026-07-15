@@ -13,3 +13,6 @@
 
 // Response Viewer
 export * from "./response-viewer";
+
+// OAuth 2.0 auth form
+export * from "./OAuth2Form";

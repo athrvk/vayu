@@ -210,10 +210,10 @@ const primaryScheme = (reqName && defs[reqName]) || Object.values(defs)[0];
 |-----------------------------|--------------------|
 | `type: "basic"` | `{ mode: "basic", username: "", password: "" }` |
 | `type: "apiKey"` | `{ mode: "apikey", key: scheme.name ?? "", value: "", in: scheme.in === "query" ? "query" : "header" }` |
-| `type: "oauth2"` | `{ mode: "oauth2", config: {} }` |
+| `type: "oauth2"` | `{ mode: "oauth2", config: OAuth2Config }` via `mapSwaggerOAuth2` — maps the Swagger `flow` (`application` → client-credentials, `accessCode` → auth-code+PKCE, `password`, `implicit`→auth-code+PKCE), fills `tokenUrl`/`authorizationUrl`/`scope`, seeds `clientId`/`clientSecret` as `{{variables}}` |
 | missing scheme / missing `type` / any other type | `{ mode: "none" }` |
 
-**`nonExecutableAuth`:** set to `1` when the picked primary scheme is `oauth2` (Vayu has no OAuth2 execution path), otherwise `0`. As in v3, this is a flag for the chosen scheme — not a per-request count.
+**`nonExecutableAuth`:** always `0` — `oauth2` now maps to an executable config (as do bearer/basic/apikey).
 
 ## Options & lossy behavior
 
@@ -231,7 +231,7 @@ Dropped / not represented:
 - **Multi-tag grouping:** only the first tag groups an operation.
 - **`SkippedItem`s:** never emitted — `meta.skipped` is always `[]`.
 
-`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `skipped = []`, `nonExecutableAuth` = `1` if the primary scheme is `oauth2` else `0`.
+`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of tag collections (`tagCollections.size`), `environmentCount = 0`, `skipped = []`, `nonExecutableAuth = 0` (oauth2 is now executable).
 
 ## Differences from OpenAPI 3.0
 

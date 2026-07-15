@@ -173,7 +173,7 @@ Orchestrates auto-save across the app with a registry of saveable contexts (e.g.
 const {
   registerContext, unregisterContext, updateContext,
   setActiveContext, getActiveContext,
-  triggerSave,       // Ctrl/Cmd+S — saves active or first dirty context
+  triggerSave,       // Ctrl/Cmd+S - saves active or first dirty context
   flushAll           // Save all dirty contexts (used before app quit)
 } = useSaveStore();
 ```
@@ -347,24 +347,24 @@ Located in `app/src/services/queries/` (or `hooks/`), with types and cache inval
 
 #### Collections & Requests
 
-- **`useCollectionsQuery()`** — Fetch all collections
-- **`useCollectionQuery(id)`** — Fetch single collection
-- **`useRequestsQuery(collectionId)`** — Fetch requests in a collection
-- **`useRequestQuery(requestId)`** — Fetch single request
+- **`useCollectionsQuery()`** - Fetch all collections
+- **`useCollectionQuery(id)`** - Fetch single collection
+- **`useRequestsQuery(collectionId)`** - Fetch requests in a collection
+- **`useRequestQuery(requestId)`** - Fetch single request
 
 **Mutations:**
-- **`useCreateCollectionMutation()`** — Create collection
-- **`useUpdateCollectionMutation()`** — Update collection (with cache update)
-- **`useDeleteCollectionMutation()`** — Delete collection (with cache removal)
-- **`useCreateRequestMutation()`** — Create request
-- **`useUpdateRequestMutation()`** — Update request
-- **`useDeleteRequestMutation()`** — Delete request
+- **`useCreateCollectionMutation()`** - Create collection
+- **`useUpdateCollectionMutation()`** - Update collection (with cache update)
+- **`useDeleteCollectionMutation()`** - Delete collection (with cache removal)
+- **`useCreateRequestMutation()`** - Create request
+- **`useUpdateRequestMutation()`** - Update request
+- **`useDeleteRequestMutation()`** - Delete request
 
 #### Environments & Variables
 
-- **`useEnvironmentsQuery()`** — Fetch all environments
-- **`useEnvironmentQuery(id)`** — Fetch single environment
-- **`useGlobalsQuery()`** — Fetch global variables
+- **`useEnvironmentsQuery()`** - Fetch all environments
+- **`useEnvironmentQuery(id)`** - Fetch single environment
+- **`useGlobalsQuery()`** - Fetch global variables
 
 **Mutations:**
 - **`useCreateEnvironmentMutation()`**
@@ -374,19 +374,19 @@ Located in `app/src/services/queries/` (or `hooks/`), with types and cache inval
 
 #### Runs & History
 
-- **`useRunsQuery()`** — Fetch all runs
-- **`useRunQuery(runId)`** — Fetch single run
-- **`useRunReportQuery(runId)`** — Fetch final report for a run
+- **`useRunsQuery()`** - Fetch all runs
+- **`useRunQuery(runId)`** - Fetch single run
+- **`useRunReportQuery(runId)`** - Fetch final report for a run
 
 **Mutations:**
-- **`useStopRunMutation()`** — Stop a running load test
-- **`useDeleteRunMutation()`** — Delete a run
+- **`useStopRunMutation()`** - Stop a running load test
+- **`useDeleteRunMutation()`** - Delete a run
 
 #### Engine Health & Config
 
-- **`useHealthQuery()`** — Health check with automatic polling (enables connection indicator)
-- **`useConfigQuery()`** — Fetch engine configuration
-- **`useScriptCompletionsQuery()`** — Fetch script autocomplete data (for request scripting)
+- **`useHealthQuery()`** - Health check with automatic polling (enables connection indicator)
+- **`useConfigQuery()`** - Fetch engine configuration
+- **`useScriptCompletionsQuery()`** - Fetch script autocomplete data (for request scripting)
 
 ### Query Keys & Cache Invalidation
 
@@ -415,7 +415,7 @@ export const queryKeys = {
 **Stale Time:**
 - Collections/Requests: 30 seconds
 - Environments: 30 seconds
-- Health: 5 seconds (polling — drives connection status)
+- Health: 5 seconds (polling - drives connection status)
 - Runs: 10 seconds
 - Run Reports: 1 minute (lazily refetched if stale when opened)
 

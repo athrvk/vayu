@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import { sampleSchema } from "./schema-sampler";
 import { normalizeVars } from "./var-normalize";
+import { mapOpenApiV3OAuth2 } from "./oauth2-import";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
 
@@ -32,7 +33,7 @@ export function schemeToAuth(scheme: any): Exclude<RequestAuth, { mode: "inherit
 			in: scheme.in === "query" ? "query" : "header",
 		};
 	}
-	if (scheme.type === "oauth2") return { mode: "oauth2", config: {} };
+	if (scheme.type === "oauth2") return mapOpenApiV3OAuth2(scheme);
 	return { mode: "none" };
 }
 
@@ -102,7 +103,7 @@ export class OpenApiV3Parser implements ImportParser {
 				folderCount: tagCollections.size,
 				environmentCount: 0,
 				skipped: [],
-				nonExecutableAuth: primaryScheme?.type === "oauth2" ? 1 : 0,
+				nonExecutableAuth: 0,
 			},
 		};
 	}

@@ -66,7 +66,7 @@ electron/
 - **Zustand** (UI state)
 - **TanStack Query** (server state)
 - **Tailwind CSS v4** + **Radix UI**
-- **Monaco Editor** (code editing — JSON, scripts, GraphQL with language service)
+- **Monaco Editor** (code editing - JSON, scripts, GraphQL with language service)
 - **Recharts** (charts)
 - **Vite** (build)
 

@@ -9,6 +9,7 @@ import { app, BrowserWindow, ipcMain, nativeTheme, Menu, shell } from "electron"
 import path from "path";
 import { fileURLToPath } from "url";
 import { EngineSidecar } from "./sidecar.js";
+import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow } from "./updater.js";
 import {
@@ -339,6 +340,9 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 
 // IPC Handlers
 function setupIpcHandlers() {
+	// OAuth 2.0 interactive flow (system browser / embedded window)
+	setupOAuthIpcHandlers();
+
 	// Handle engine restart request from renderer
 	ipcMain.handle("engine:restart", async () => {
 		return await restartEngine();

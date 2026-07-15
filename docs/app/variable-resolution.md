@@ -20,7 +20,7 @@ always wins over a global.
 ### 1. Globals
 
 App-wide variables stored in the singleton `globals` table. Edited via the Globals panel.
-These form the base layer — any layer above can override them.
+These form the base layer - any layer above can override them.
 
 ### 2. Collection chain
 
@@ -54,13 +54,13 @@ per-environment values like base URLs and API keys.
 // 1. Globals
 for ([key, val] of globalsData.variables) result[key] = { value, scope: "global" };
 
-// 2. Collection chain — root first so leaf overrides parent
+// 2. Collection chain - root first so leaf overrides parent
 const chain = buildCollectionChain(activeCollectionId, collections); // root-first array
 for (const col of chain)
   for ([key, val] of col.variables)
     result[key] = { value, scope: "collection" };
 
-// 3. Environment — highest priority
+// 3. Environment - highest priority
 for ([key, val] of env.variables)
   result[key] = { value, scope: "environment" };
 ```

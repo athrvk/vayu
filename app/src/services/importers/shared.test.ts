@@ -43,10 +43,26 @@ describe("mapPostmanAuth", () => {
 	it("noauth → none", () => {
 		expect(mapPostmanAuth({ type: "noauth" })).toEqual({ mode: "none" });
 	});
-	it("oauth2 stored as config", () => {
-		const r = mapPostmanAuth({ type: "oauth2", oauth2: [{ key: "accessToken", value: "A" }] });
+	it("oauth2 with a flow maps to a typed config", () => {
+		const r = mapPostmanAuth({
+			type: "oauth2",
+			oauth2: [
+				{ key: "grant_type", value: "client_credentials" },
+				{ key: "accessTokenUrl", value: "https://idp/token" },
+				{ key: "clientId", value: "cid" },
+			],
+		});
 		expect(r.mode).toBe("oauth2");
-		expect((r as any).config.accessToken).toBe("A");
+		expect(
+			(r as { config: { grantType: string; accessTokenUrl: string } }).config.grantType
+		).toBe("client_credentials");
+		expect((r as { config: { accessTokenUrl: string } }).config.accessTokenUrl).toBe(
+			"https://idp/token"
+		);
+	});
+	it("oauth2 minimal export (accessToken only) → bearer", () => {
+		const r = mapPostmanAuth({ type: "oauth2", oauth2: [{ key: "accessToken", value: "A" }] });
+		expect(r).toEqual({ mode: "bearer", token: "A" });
 	});
 	it("unknown type → none", () => {
 		expect(mapPostmanAuth({ type: "weird" })).toEqual({ mode: "none" });

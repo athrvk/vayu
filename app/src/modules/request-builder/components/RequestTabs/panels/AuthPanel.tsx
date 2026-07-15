@@ -16,16 +16,18 @@
  * - OAuth 2.0 (TODO)
  */
 
-import { Key, Lock, User, KeyRound } from "lucide-react";
+import { Key, Lock, User, KeyRound, ShieldCheck } from "lucide-react";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-	Badge,
 	Label,
+	SecretInput,
 } from "@/components/ui";
+import { OAuth2Form, type OAuth2TextInput } from "@/components/shared/OAuth2Form";
+import { defaultOAuth2Config } from "@/services/oauth/defaults";
 import { useRequestBuilderContext } from "../../../context";
 import VariableInput from "../../../shared/VariableInput";
 import type { AuthType, AuthConfigState } from "../../../types";
@@ -37,10 +39,22 @@ const AUTH_TYPES: { value: AuthType; label: string; icon: typeof Key }[] = [
 	{ value: "bearer", label: "Bearer Token", icon: Key },
 	{ value: "basic", label: "Basic Auth", icon: User },
 	{ value: "api-key", label: "API Key", icon: KeyRound },
+	{ value: "oauth2", label: "OAuth 2.0", icon: ShieldCheck },
 ];
 
+// Variable-aware text input for the OAuth 2.0 form (so {{variables}} work in
+// every field). Secret fields (client secret / password) instead use the masked
+// SecretInput with a reveal toggle — masking and {{variable}} token highlighting
+// can't coexist, and hiding the secret at rest wins for those fields.
+const VariableTextInput: OAuth2TextInput = ({ value, onChange, placeholder, type }) =>
+	type === "password" ? (
+		<SecretInput value={value} onChange={onChange} placeholder={placeholder} />
+	) : (
+		<VariableInput value={value} onChange={onChange} placeholder={placeholder} />
+	);
+
 export default function AuthPanel() {
-	const { request, updateField, setRequest } = useRequestBuilderContext();
+	const { request, updateField, setRequest, resolveString } = useRequestBuilderContext();
 	const authType = request.authType;
 	const authConfig = request.authConfig;
 
@@ -61,6 +75,8 @@ export default function AuthPanel() {
 				value: authConfig.value || "",
 				addTo: authConfig.addTo || "header",
 			};
+		} else if (type === "oauth2") {
+			newConfig = { oauth2: authConfig.oauth2 ?? defaultOAuth2Config() };
 		}
 
 		setRequest({ authType: type, authConfig: newConfig });
@@ -144,7 +160,7 @@ export default function AuthPanel() {
 						</div>
 						<div className="space-y-2">
 							<Label>Password</Label>
-							<VariableInput
+							<SecretInput
 								value={authConfig.password || ""}
 								onChange={(password) => updateConfig({ password })}
 								placeholder="Password"
@@ -198,12 +214,14 @@ export default function AuthPanel() {
 				</div>
 			)}
 
-			{/* OAuth 2.0 TODO */}
-			<div className="pt-4 border-t border-border">
-				<Badge variant="outline" className="text-xs">
-					OAuth 2.0 - Coming Soon
-				</Badge>
-			</div>
+			{authType === "oauth2" && (
+				<OAuth2Form
+					value={authConfig.oauth2 ?? defaultOAuth2Config()}
+					onChange={(oauth2) => updateConfig({ oauth2 })}
+					resolveString={resolveString}
+					TextInput={VariableTextInput}
+				/>
+			)}
 		</div>
 	);
 }

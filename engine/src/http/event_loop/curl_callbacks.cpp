@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "vayu/http/debug_redact.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -26,8 +27,12 @@ int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, v
 
     switch (type) {
     case CURLINFO_TEXT: vayu::utils::log_debug ("* " + text); break;
-    case CURLINFO_HEADER_OUT: vayu::utils::log_debug ("> " + text); break;
-    case CURLINFO_HEADER_IN: vayu::utils::log_debug ("< " + text); break;
+    case CURLINFO_HEADER_OUT:
+        vayu::utils::log_debug ("> " + redact_header_line (text));
+        break;
+    case CURLINFO_HEADER_IN:
+        vayu::utils::log_debug ("< " + redact_header_line (text));
+        break;
     default: break;
     }
     return 0;

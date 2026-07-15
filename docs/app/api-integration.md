@@ -162,6 +162,30 @@ apiService.deleteRun(id): Promise<void>
 apiService.getScriptCompletions(): Promise<ScriptCompletionsResponse>
 ```
 
+#### OAuth 2.0
+
+```typescript
+apiService.fetchOAuth2Token(data): Promise<OAuth2TokenResponse>        // POST   /oauth2/token
+apiService.getOAuth2TokenStatus(cacheKey): Promise<OAuth2StatusResponse> // GET  /oauth2/token?key=
+apiService.clearOAuth2Token(cacheKey): Promise<void>                   // DELETE /oauth2/token?key=
+
+// Interactive Authorization Code flow (engine-hosted loopback + PKCE)
+apiService.startOAuth2Authorize(data): Promise<OAuth2AuthorizeStart>
+apiService.getOAuth2AuthorizeStatus(attemptId): Promise<OAuth2AuthorizeStatus>
+apiService.completeOAuth2Authorize(attemptId, callbackUrl): Promise<OAuth2AuthorizeStatus>
+```
+
+These back the OAuth 2.0 auth editor. TanStack Query wraps the non-interactive
+ones in `queries/oauth.ts` (`useOAuth2TokenStatusQuery` - polls status ~30s;
+`useFetchOAuth2TokenMutation`, `useClearOAuth2TokenMutation`). The token
+`cacheKey` is computed client-side by `services/oauth/cache-key.ts`, byte-identical
+to the engine so the app and engine agree on cache slots without a round-trip.
+The interactive flow is orchestrated in `services/oauth/authorize.ts` (opens the
+system browser or an embedded Electron window, then polls the engine).
+
+> **`HttpClient.delete`** takes an optional `params` argument so the token-clear
+> call can pass `?key=`.
+
 ## SSE Client (`services/sse-client.ts`)
 
 Server-Sent Events client for real-time load test metrics streaming.
@@ -169,7 +193,7 @@ Server-Sent Events client for real-time load test metrics streaming.
 ### Features
 
 - **Single endpoint**: Connects to `/metrics/live/:runId`. The engine retains a replayable tick
-  topic, so the client connects immediately after `POST /run` with no attach race — it replays
+  topic, so the client connects immediately after `POST /run` with no attach race - it replays
   from offset 0 and tails to the `complete` event (even for sub-second runs).
 - **No custom reconnect loop**: The engine sends an explicit `complete` event at normal run end,
   so a `CLOSED` readyState is treated as terminal. Transient `CONNECTING` errors are left to the
@@ -223,6 +247,12 @@ export const API_ENDPOINTS = {
   // Execution
   EXECUTE_REQUEST: "/request",
   START_LOAD_TEST: "/run",
+
+  // OAuth 2.0
+  OAUTH2_TOKEN: "/oauth2/token",
+  OAUTH2_AUTHORIZE_START: "/oauth2/authorize/start",
+  OAUTH2_AUTHORIZE_COMPLETE: "/oauth2/authorize/complete",
+  OAUTH2_AUTHORIZE_STATUS: (id: string) => `/oauth2/authorize/${id}`,
   
   // Runs
   RUNS: "/runs",
@@ -233,13 +263,13 @@ export const API_ENDPOINTS = {
   // Real-time stats (SSE)
   METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`,
 
-  // Time-series metrics (JSON, paginated) — used to hydrate history
+  // Time-series metrics (JSON, paginated) - used to hydrate history
   STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0) =>
     `/stats/${runId}?format=json&limit=${limit}&offset=${offset}`,
 };
 ```
 
-> Note: the old `STATS_STREAM` SSE constant was removed — live metrics go through
+> Note: the old `STATS_STREAM` SSE constant was removed - live metrics go through
 > `METRICS_LIVE` only; `/stats` is now used solely for paginated historical reads.
 
 ## Request Execution Flow
@@ -252,6 +282,12 @@ export const API_ENDPOINTS = {
 4. **API Call**: `apiService.executeRequest()` → `POST /request`
 5. **Response Transformation**: Backend format → frontend format
 6. **Display**: Response shown in ResponseViewer
+
+Auth (bearer/basic/api-key/oauth2) is resolved **engine-side** from the request's
+`auth` object - the app no longer builds `Authorization` headers itself. When a
+non-interactive OAuth 2.0 token can't be obtained, the response carries an
+`errorCode` of `AUTH_REQUIRED` (interactive sign-in needed) or `AUTH_FAILED`, and
+the request builder surfaces a toast pointing the user at the Auth tab.
 
 **Example Request:**
 ```typescript

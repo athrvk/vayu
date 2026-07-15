@@ -236,6 +236,9 @@ endif()
 
 add_library(vayu_core STATIC
     src/http/client.cpp
+    src/http/auth_resolver.cpp
+    src/http/request_builder.cpp
+    src/http/oauth_client.cpp
     src/http/event_loop.cpp
     src/http/event_loop/curl_callbacks.cpp
     src/http/event_loop/transfer_context.cpp
@@ -257,6 +260,12 @@ add_library(vayu_core STATIC
 
 target_include_directories(vayu_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Vendored single-header SHA-256 (picosha2, MIT) used for PKCE. SYSTEM so its
+# warnings are suppressed under the engine's strict flags.
+target_include_directories(vayu_core SYSTEM PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/picosha2
 )
 
 target_link_libraries(vayu_core PUBLIC
@@ -342,6 +351,8 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/metrics.cpp
         src/http/routes/scripting.cpp
         src/http/routes/import.cpp
+        src/http/routes/oauth.cpp
+        src/http/routes/oauth_authorize.cpp
     )
     
     target_link_libraries(vayu-engine PRIVATE
@@ -375,7 +386,17 @@ if(VAYU_BUILD_TESTS)
         tests/load_strategy_test.cpp
         tests/refill_deficit_test.cpp
         tests/run_manager_test.cpp
+        tests/encoding_test.cpp
+        tests/auth_resolver_test.cpp
+        tests/request_builder_test.cpp
+        tests/oauth_client_test.cpp
+        tests/oauth_route_test.cpp
+        tests/pkce_test.cpp
+        tests/debug_redact_test.cpp
+        tests/oauth_authorize_test.cpp
         src/http/routes/import.cpp
+        src/http/routes/oauth.cpp
+        src/http/routes/oauth_authorize.cpp
         src/http/routes/execution.cpp
     )
     

@@ -12,6 +12,8 @@
  * @brief Common types used throughout Vayu Engine
  */
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <map>
 #include <optional>
@@ -83,9 +85,26 @@ inline std::optional<HttpMethod> parse_method (const std::string& str) {
 }
 
 /**
- * @brief HTTP Headers (case-insensitive keys recommended)
+ * @brief Case-insensitive ordering for HTTP header names.
+ *
+ * HTTP header field names are case-insensitive (RFC 9110 §5.1), so the Headers
+ * map treats `Authorization` and `authorization` as the same key. This removes
+ * a whole class of duplicate-header / missed-lookup bugs.
  */
-using Headers = std::map<std::string, std::string>;
+struct CaseInsensitiveLess {
+    bool operator() (const std::string& a, const std::string& b) const {
+        return std::lexicographical_compare (
+        a.begin (), a.end (), b.begin (), b.end (),
+        [] (unsigned char c1, unsigned char c2) {
+            return std::tolower (c1) < std::tolower (c2);
+        });
+    }
+};
+
+/**
+ * @brief HTTP Headers (case-insensitive keys)
+ */
+using Headers = std::map<std::string, std::string, CaseInsensitiveLess>;
 
 /**
  * @brief Request body content types
@@ -145,6 +164,8 @@ enum class ErrorCode {
     InvalidUrl,
     InvalidMethod,
     ScriptError,
+    AuthRequired,
+    AuthFailed,
     InternalError
 };
 
@@ -161,6 +182,8 @@ inline const char* to_string (ErrorCode code) {
     case ErrorCode::InvalidUrl: return "INVALID_URL";
     case ErrorCode::InvalidMethod: return "INVALID_METHOD";
     case ErrorCode::ScriptError: return "SCRIPT_ERROR";
+    case ErrorCode::AuthRequired: return "AUTH_REQUIRED";
+    case ErrorCode::AuthFailed: return "AUTH_FAILED";
     case ErrorCode::InternalError: return "INTERNAL_ERROR";
     }
     return "UNKNOWN";
@@ -765,6 +788,23 @@ struct Globals {
     std::string id;        // Always "globals" - singleton
     std::string variables; // JSON - Global variables
     int64_t updated_at;
+};
+
+/**
+ * @brief Cached OAuth 2.0 token, keyed by config identity.
+ *
+ * cache_key derivation lives in vayu::http::oauth::cache_key and must stay
+ * byte-identical with the app's computeOAuth2CacheKey.
+ */
+struct OAuthToken {
+    std::string cache_key;     // PK
+    std::string access_token;
+    std::string token_type;    // "Bearer" when the provider omits it
+    std::string refresh_token; // "" = none
+    std::string scope;
+    int64_t expires_in;   // seconds; 0 = non-expiring
+    int64_t created_at;   // ms epoch
+    std::string raw_response; // provider JSON (truncated); debugging only, never logged
 };
 } // namespace db
 

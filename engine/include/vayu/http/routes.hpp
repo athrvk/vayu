@@ -15,6 +15,13 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 
+namespace vayu::http {
+// Owns interactive OAuth 2.0 authorization attempts; defined in oauth_authorize.hpp.
+// Forward-declared here so RouteContext can carry a reference without every route
+// TU pulling in the loopback listener machinery.
+class OAuth2AuthorizeManager;
+} // namespace vayu::http
+
 namespace vayu::http::routes {
 
 /**
@@ -55,7 +62,8 @@ struct RouteContext {
     vayu::db::Database& db;
     vayu::core::RunManager& run_manager;
     bool verbose;
-    ShutdownCallback on_shutdown; // Optional callback for graceful shutdown
+    ShutdownCallback on_shutdown;                       // Optional graceful-shutdown callback
+    vayu::http::OAuth2AuthorizeManager& authorize_manager; // Owned by Server; see server.hpp
 };
 
 // Route registration functions (implemented in separate files)
@@ -70,5 +78,6 @@ void register_execution_routes (RouteContext& ctx);
 void register_metrics_routes (RouteContext& ctx);
 void register_scripting_routes (RouteContext& ctx);
 void register_import_routes (RouteContext& ctx);
+void register_oauth_routes (RouteContext& ctx);
 
 } // namespace vayu::http::routes

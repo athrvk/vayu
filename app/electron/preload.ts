@@ -82,6 +82,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// Platform info
 	platform: process.platform,
 
+	// OAuth 2.0 interactive flow
+	oauthOpenExternal: (url: string): Promise<void> =>
+		ipcRenderer.invoke("oauth:openExternal", url),
+	oauthOpenWindow: (params: {
+		authorizeUrl: string;
+		redirectUri: string;
+		partition?: string;
+	}): Promise<{ callbackUrl: string } | { error: string }> =>
+		ipcRenderer.invoke("oauth:openWindow", params),
+
 	// App paths
 	getAppPaths: (): Promise<{
 		appDir: string;

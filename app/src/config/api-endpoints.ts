@@ -61,4 +61,10 @@ export const API_ENDPOINTS = {
 
 	// Import
 	IMPORT_FETCH: `/import/fetch`,
+
+	// OAuth 2.0
+	OAUTH2_TOKEN: `/oauth2/token`,
+	OAUTH2_AUTHORIZE_START: `/oauth2/authorize/start`,
+	OAUTH2_AUTHORIZE_COMPLETE: `/oauth2/authorize/complete`,
+	OAUTH2_AUTHORIZE_STATUS: (attemptId: string) => `/oauth2/authorize/${attemptId}`,
 } as const;

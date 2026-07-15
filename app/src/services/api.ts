@@ -43,6 +43,12 @@ import type {
 	UpdateConfigRequest,
 	GlobalsResponse,
 	ImportFetchResponse,
+	OAuth2TokenRequest,
+	OAuth2TokenResponse,
+	OAuth2TokenStatusResponse,
+	OAuth2AuthorizeStartRequest,
+	OAuth2AuthorizeStartResponse,
+	OAuth2AuthorizeStatusResponse,
 } from "@/types";
 import type { TimeSeriesResponse } from "@/modules/history/types";
 import { queryClient } from "@/lib/query-client";
@@ -239,6 +245,51 @@ export const apiService = {
 			API_ENDPOINTS.IMPORT_FETCH,
 			{ url },
 			{ timeout: proxiedRequestTimeoutMs() }
+		);
+	},
+
+	// OAuth 2.0 — the engine proxies the token endpoint, so use the longer
+	// proxied timeout (as with executeRequest / importFetch).
+	async fetchOAuth2Token(data: OAuth2TokenRequest): Promise<OAuth2TokenResponse> {
+		return await httpClient.post<OAuth2TokenResponse>(API_ENDPOINTS.OAUTH2_TOKEN, data, {
+			timeout: proxiedRequestTimeoutMs(),
+		});
+	},
+
+	async getOAuth2TokenStatus(cacheKey: string): Promise<OAuth2TokenStatusResponse> {
+		return await httpClient.get<OAuth2TokenStatusResponse>(API_ENDPOINTS.OAUTH2_TOKEN, {
+			key: cacheKey,
+		});
+	},
+
+	async clearOAuth2Token(cacheKey: string): Promise<void> {
+		await httpClient.delete<{ deleted: boolean }>(API_ENDPOINTS.OAUTH2_TOKEN, {
+			key: cacheKey,
+		});
+	},
+
+	async startOAuth2Authorize(
+		data: OAuth2AuthorizeStartRequest
+	): Promise<OAuth2AuthorizeStartResponse> {
+		return await httpClient.post<OAuth2AuthorizeStartResponse>(
+			API_ENDPOINTS.OAUTH2_AUTHORIZE_START,
+			data
+		);
+	},
+
+	async completeOAuth2Authorize(
+		attemptId: string,
+		callbackUrl: string
+	): Promise<OAuth2AuthorizeStatusResponse> {
+		return await httpClient.post<OAuth2AuthorizeStatusResponse>(
+			API_ENDPOINTS.OAUTH2_AUTHORIZE_COMPLETE,
+			{ attemptId, callbackUrl }
+		);
+	},
+
+	async getOAuth2AuthorizeStatus(attemptId: string): Promise<OAuth2AuthorizeStatusResponse> {
+		return await httpClient.get<OAuth2AuthorizeStatusResponse>(
+			API_ENDPOINTS.OAUTH2_AUTHORIZE_STATUS(attemptId)
 		);
 	},
 };

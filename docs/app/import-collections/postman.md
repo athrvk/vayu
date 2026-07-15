@@ -47,7 +47,7 @@ The returned `CollectionDraft` carries `name`, `description`, `variables`, `auth
 
 ### Request build — `pmRequest`
 
-`pmRequest(item, ctx)` reads `item.request`, derives `url`/`params` via `pmUrl`, maps auth via `mapPostmanAuth`, increments `ctx.requestCount`, and (if the request auth mode is `oauth2`/`digest`/`aws`/`ntlm`) increments `ctx.nonExecutableAuth`. Scripts come from `item.event[]` (`prerequest`, `test`).
+`pmRequest(item, ctx)` reads `item.request`, derives `url`/`params` via `pmUrl`, maps auth via `mapPostmanAuth`, increments `ctx.requestCount`, and (if the request auth mode is `digest`/`aws`/`ntlm`) increments `ctx.nonExecutableAuth`. Scripts come from `item.event[]` (`prerequest`, `test`).
 
 ## Field mapping
 
@@ -126,7 +126,8 @@ Auth is mapped by `mapPostmanAuth(auth)` (`shared.ts`). It reads `auth.type`, th
 | `bearer` | `{ mode: "bearer", token }` | `token` normalized |
 | `basic` | `{ mode: "basic", username, password }` | both normalized |
 | `apikey` | `{ mode: "apikey", key, value, in }` | `in` = `"query"` only if detail `in === "query"`, else `"header"` |
-| `oauth2` / `digest` / `aws` / `ntlm` | `{ mode: type, config }` | `config` is the raw flattened detail map; **not executed** by Vayu (counted as `nonExecutableAuth` per request) |
+| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` | mapped via `mapPostmanOAuth2` (`oauth2-import.ts`) — **executable**; grant normalized, minimal `accessToken`-only exports become a bearer token |
+| `digest` / `aws` / `ntlm` | `{ mode: type, config }` | `config` is the raw flattened detail map; **not executed** by Vayu (counted as `nonExecutableAuth` per request) |
 | `inherit` | `{ mode: "inherit" }` | |
 | `noauth` | `{ mode: "none" }` | |
 | any other type | `{ mode: "none" }` | |
@@ -138,7 +139,7 @@ Auth is mapped by `mapPostmanAuth(auth)` (`shared.ts`). It reads `auth.type`, th
 - **Requests** keep `mapPostmanAuth` output verbatim — `inherit` is a valid mode for a `RequestDraft` and is resolved at execution time.
 - **Collections and folders** go through `collectionAuth`, which calls `mapPostmanAuth` and then rewrites `inherit` → `{ mode: "none" }`. Collections never inherit (the `CollectionDraft.auth` type excludes `inherit`). So an absent/`inherit`/`noauth` auth on a collection or folder all collapse to `{ mode: "none" }`.
 
-**`nonExecutableAuth` counting:** only **request** auth contributes (`pmRequest` increments the counter). Collection/folder auth in the `oauth2`/`digest`/`aws`/`ntlm` family is stored but not counted.
+**`nonExecutableAuth` counting:** only **request** auth contributes (`pmRequest` increments the counter). Collection/folder auth in the `digest`/`aws`/`ntlm` family is stored but not counted. `oauth2` is executable and never counts.
 
 ## Variables & environments
 
@@ -156,7 +157,7 @@ Postman **collection** files do not embed environments, so this parser always re
 
 **`meta.skipped`** — this parser populates **only** the `file_body` kind, and only when `ctx.skippedFileBody > 0` (from `formdata` file fields and `file`-mode bodies). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
 
-**`meta.nonExecutableAuth`** — populated: incremented once per **request** whose mapped auth mode is `oauth2`, `digest`, `aws`, or `ntlm`. These auths are stored on the draft (with their `config`) but Vayu has no execution path for them.
+**`meta.nonExecutableAuth`** — populated: incremented once per **request** whose mapped auth mode is `digest`, `aws`, or `ntlm`. These auths are stored on the draft (with their `config`) but Vayu has no execution path for them. `oauth2` is now mapped to an executable config and does **not** count.
 
 > Note: `types.ts` carries a TODO comment implying `skipped`/`nonExecutableAuth` are not yet wired up. That comment is stale for this parser — both fields are populated here as described above (within the limits noted: only `file_body`, and request-level non-executable auth).
 

@@ -19,6 +19,7 @@ import type {
 	KeyValueEntry,
 	RequestBody,
 	RequestAuth,
+	OAuth2Config,
 	LoadTestMode,
 } from "./domain";
 
@@ -27,6 +28,55 @@ export interface ApiResponse<T> {
 	success: boolean;
 	data?: T;
 	error?: string;
+}
+
+// OAuth 2.0 token endpoints
+export interface OAuth2InteractiveExchange {
+	code: string;
+	codeVerifier: string;
+	redirectUri: string;
+}
+
+export interface OAuth2TokenRequest {
+	config: OAuth2Config;
+	force?: boolean;
+	interactive?: OAuth2InteractiveExchange;
+}
+
+export interface OAuth2TokenResponse {
+	cacheKey: string;
+	accessToken: string;
+	tokenType: string;
+	scope?: string;
+	expiresIn: number;
+	createdAt: number;
+	expiresAt: number | null;
+	hasRefreshToken: boolean;
+}
+
+export interface OAuth2TokenStatusResponse {
+	found: boolean;
+	expired?: boolean;
+	token?: OAuth2TokenResponse;
+}
+
+export type OAuth2AuthorizeMode = "loopback" | "embedded";
+
+export interface OAuth2AuthorizeStartRequest {
+	config: OAuth2Config;
+	mode?: OAuth2AuthorizeMode;
+}
+
+export interface OAuth2AuthorizeStartResponse {
+	attemptId: string;
+	authorizeUrl: string;
+	redirectUri: string;
+}
+
+export interface OAuth2AuthorizeStatusResponse {
+	state: "pending" | "completed" | "failed" | "not_found";
+	error?: string;
+	cacheKey?: string;
 }
 
 // Collections API

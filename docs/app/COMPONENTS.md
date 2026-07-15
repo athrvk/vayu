@@ -4,23 +4,23 @@ The React component structure of the Vayu app (`app/src`).
 
 The UI is organized into two top-level trees:
 
-- **`components/`** — app-shell layout, status, shared response rendering, and the `ui/` primitive library. Cross-cutting pieces not owned by a single feature.
-- **`modules/`** — feature modules, each self-contained (its own components, and where needed `context/`, `hooks/`, `utils/`, `shared/`): `request-builder`, `collections`, `dashboard`, `history`, `variables`, `settings`, `welcome`.
+- **`components/`** - app-shell layout, status, shared response rendering, and the `ui/` primitive library. Cross-cutting pieces not owned by a single feature.
+- **`modules/`** - feature modules, each self-contained (its own components, and where needed `context/`, `hooks/`, `utils/`, `shared/`): `request-builder`, `collections`, `dashboard`, `history`, `variables`, `settings`, `welcome`.
 
 State lives outside components: **Zustand** stores (`stores/`) for UI/navigation state, **TanStack Query** (`queries/`) for server state from the engine.
 
 ## Component Hierarchy
 
 ```
-<App />                                  // App.tsx — mounts providers, kicks off health/prefetch queries, OS theme sync
-├── <TitleBar />                         // components/layout/TitleBar.tsx — h-[38px] drag region + logo + tabs + env pill
+<App />                                  // App.tsx - mounts providers, kicks off health/prefetch queries, OS theme sync
+├── <TitleBar />                         // components/layout/TitleBar.tsx - h-[38px] drag region + logo + tabs + env pill
 │   ├── Logo (all platforms)
 │   ├── <TabStrip />                     // Open tabs + "+" button
 │   └── EnvPill + WindowControls (Linux only; Windows native overlay; macOS traffic lights)
 ├── <UpdateBanner />
-└── <Shell />                            // components/layout/Shell.tsx — tab-centric layout with drawer + context bar
-    ├── <ImportModal />                  // modules/collections/ImportModal.tsx — global overlay, open-state in a store
-    ├── <Drawer />                       // components/layout/Drawer.tsx — resizable 220–480px; switches between views
+└── <Shell />                            // components/layout/Shell.tsx - tab-centric layout with drawer + context bar
+    ├── <ImportModal />                  // modules/collections/ImportModal.tsx - global overlay, open-state in a store
+    ├── <Drawer />                       // components/layout/Drawer.tsx - resizable 220–480px; switches between views
     │   ├── <CollectionTree />           //   collections view (default)
     │   ├── <HistoryList />              //   history view
     │   └── <VariablesCategoryTree />    //   variables view
@@ -32,8 +32,8 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
     │   ├── <HistoryDetail />            // type="run"         modules/history/main/
     │   ├── <VariablesMain />            // type="variables"   modules/variables/main/
     │   └── <SettingsMain />             // type="settings"    modules/settings/main/ (with SettingsCategoryTree sidebar)
-    ├── <ContextBar />                   // components/layout/ContextBar.tsx — 252px; request tabs only; push ≥1200px / overlay <1200px
-    └── <Dock />                         // components/layout/Dock.tsx — drawer view switchers + engine/save status + toggles
+    ├── <ContextBar />                   // components/layout/ContextBar.tsx - 252px; request tabs only; push ≥1200px / overlay <1200px
+    └── <Dock />                         // components/layout/Dock.tsx - drawer view switchers + engine/save status + toggles
 ```
 
 ## App Shell
@@ -60,7 +60,7 @@ Horizontal row of open tabs plus a "+" button. Reads from `useTabsStore` (open t
 - **One tab per open entity**, deduplicated per type and `entityId`. Tabs show: icon (method badge for requests, folder for collections, lightning for dashboard, etc.), label (request method + URL path / collection name / screen name).
 - **Max 12 tabs** with LRU eviction when exceeding; dashboard tabs are exempt from eviction. Dirty tabs (unsaved) are skipped during eviction (autosave is the safety net).
 - **Middle-click closes** a tab (browser-like).
-- **No unsaved dot** — autosave ensures safety.
+- **No unsaved dot** - autosave ensures safety.
 - **Keyboard support:** ⌘1–9 jump to tab; displayed via dock shortcuts.
 
 ### `Shell` (`components/layout/Shell.tsx`)
@@ -77,9 +77,9 @@ Main layout: tab-centric with resizable drawer, split/overlay context bar, and d
 
 Resizable sidebar (220–480px default, per view). One of three views per `useLayoutStore.drawerView`:
 
-- **`collections`** — `CollectionTree` (hierarchical collections + requests).
-- **`history`** — `HistoryList` (past runs, filtered/sorted).
-- **`variables`** — `VariablesCategoryTree` (variable scopes: globals, collections, environments).
+- **`collections`** - `CollectionTree` (hierarchical collections + requests).
+- **`history`** - `HistoryList` (past runs, filtered/sorted).
+- **`variables`** - `VariablesCategoryTree` (variable scopes: globals, collections, environments).
 
 Resize handle on the right edge (double-click resets to defaults). Visibility toggled by `toggleDrawer()` or ⌘B.
 
@@ -96,15 +96,15 @@ Resize handle on the right edge (double-click resets to defaults). Visibility to
 
 Footer bar (h-8, shrink-0). Horizontal layout:
 
-- **Left — drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U). Active state highlights when drawer is open and matching view.
-- **Middle — ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved / error), app version.
-- **Right — toggles:** Context bar toggle (⌘I), Settings (⌘,).
+- **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U). Active state highlights when drawer is open and matching view.
+- **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved / error), app version.
+- **Right - toggles:** Context bar toggle (⌘I), Settings (⌘,).
 
 ## Request Builder (`modules/request-builder/`)
 
 The request editor. Entry: `modules/request-builder/index.tsx`.
 
-**Container (`index.tsx`)** — fetches the selected request (`useRequestQuery(selectedRequestId)`), maps the stored `Request` (discriminated-union `body`/`auth`) into flat UI state, and provides callbacks through `RequestBuilderProvider` to `RequestBuilderLayout`. Responsibilities:
+**Container (`index.tsx`)** - fetches the selected request (`useRequestQuery(selectedRequestId)`), maps the stored `Request` (discriminated-union `body`/`auth`) into flat UI state, and provides callbacks through `RequestBuilderProvider` to `RequestBuilderLayout`. Responsibilities:
 
 - **Execute:** resolves `{{variables}}` in URL/headers/body, injects per-request system headers (`X-Request-ID`, `X-Vayu-Version`), resolves auth, composes scripts, and calls the engine via `useEngine()`.
 - **Auth inheritance:** for `auth.mode === "inherit"` it walks the collection ancestor chain **leaf-first** (`useCollectionAncestors`) and uses the first non-`none` auth.
@@ -118,18 +118,19 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 |---|---|
 | `context/RequestBuilderProvider.tsx`, `context/RequestBuilderContext.tsx` | Local request-editing state + the execute/save/load-test callbacks |
 | `components/RequestBuilderLayout.tsx` | Resizable vertical layout composing UrlBar / RequestTabs / ResponseViewer |
-| `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` — method dropdown, URL input (variable highlighting), Send + Load Test buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
-| `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel` |
+| `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` - method dropdown, URL input (variable highlighting), Send + Load Test buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
+| `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel`. `AuthPanel` supports None / Bearer / Basic / API Key / **OAuth 2.0** (via the shared [`OAuth2Form`](#shared-oauth-20-form)) |
 | `components/ResponseViewer/` | `index`, `ResponseHeader`, `ResponseHeadersTab`, `ResponseCookies`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` |
 | `components/RequestDescription.tsx` | Editable request description |
-| `components/LoadTestConfigDialog.tsx` | Load-test configuration dialog (mode, duration, RPS, concurrency, …) |
-| `shared/KeyValueEditor/` | `index`, `KeyValueRow` — reusable key/value table (params, headers, form fields) |
-| `shared/VariableInput/` | `index`, `EditableVariable` — input with `{{variable}}` highlighting + autocomplete |
+| `components/LoadTestConfigDialog.tsx` | Load-test configuration dialog (mode, duration, RPS, concurrency, …). Renders `OAuth2LoadTestGuard` when the request's effective auth is OAuth 2.0 |
+| `components/OAuth2LoadTestGuard.tsx`, `components/oauth2-load-test-coverage.ts` | Warns when a duration-based load test would outlive its access token (the engine acquires a token once per run, no mid-run refresh): offers **Refresh** when a fresh token would cover the run, or **blocks Start** (with a "Start anyway" override) when even a fresh token can't. The pure coverage decision lives in `oauth2-load-test-coverage.ts` |
+| `shared/KeyValueEditor/` | `index`, `KeyValueRow` - reusable key/value table (params, headers, form fields) |
+| `shared/VariableInput/` | `index`, `EditableVariable` - input with `{{variable}}` highlighting + autocomplete |
 | `hooks/`, `utils/` | Module hooks; `utils/key-value` (flat↔entry conversions), `utils/id` |
 
-> **cURL / wget import:** pasting a `curl` or `wget` command into the URL field auto-populates the whole request (method, URL, params, headers, body, basic auth). Detection + parsing live in `services/curl/` (`tokenize.ts` shell tokenizer + `parseCurl.ts`), kept separate from the collection `importers/` pipeline since this targets the active request. The paste is a request-shape replacement — identity (`id`, `name`, `collectionId`) and scripts are preserved; file references (`-d @file`, `-F field=@file`, `--post-file`) are skipped since they can't be read from pasted text. Non-command pastes fall through to normal input.
+> **cURL / wget import:** pasting a `curl` or `wget` command into the URL field auto-populates the whole request (method, URL, params, headers, body, auth). Auth maps `-u`/`--user` (and wget `--http-user`/`--http-password`) to Basic, and curl `--oauth2-bearer` to Bearer; an `Authorization` header is left as a raw header (to preserve `{{variables}}`). Form-shaped `-d`/`--data` without an explicit `Content-Type` maps to `x-www-form-urlencoded` rows (curl's on-the-wire default), while a raw JSON/text blob stays a text body. Detection + parsing live in `services/curl/` (`tokenize.ts` shell tokenizer + `parseCurl.ts`), kept separate from the collection `importers/` pipeline since this targets the active request. The paste is a request-shape replacement - identity (`id`, `name`, `collectionId`) and scripts are preserved; file references (`-d @file`, `-F field=@file`, `--post-file`) are skipped since they can't be read from pasted text. Non-command pastes fall through to normal input.
 
-> **Body tabs** support `none` / `json` / `text` / `graphql` / `form-data` / `x-www-form-urlencoded`. The `graphql` mode renders a split resizable editor: a **Query** pane (Monaco `graphql` language with diagnostics, autocomplete, hover, and formatting) and a **Variables** pane (Monaco `json` with schema-derived validation). **Scripts** are two separate panels — pre-request and test — not a single tab.
+> **Body tabs** support `none` / `json` / `text` / `graphql` / `form-data` / `x-www-form-urlencoded`. The `graphql` mode renders a split resizable editor: a **Query** pane (Monaco `graphql` language with diagnostics, autocomplete, hover, and formatting) and a **Variables** pane (Monaco `json` with schema-derived validation). **Scripts** are two separate panels - pre-request and test - not a single tab.
 
 ## GraphQL Library (`lib/graphql/`)
 
@@ -137,7 +138,7 @@ Shared, Monaco-independent modules that power the GraphQL body mode.
 
 | File | Role |
 |---|---|
-| `diagnostics.ts` | Pure (Monaco-free) diagnostic computation — syntax check via `graphql.parse` when no schema is available; full field/type validation via `graphql-language-service.getDiagnostics` when a schema is loaded. Returns 1-based `GqlMarker[]` matching Monaco's `IMarkerData` shape. |
+| `diagnostics.ts` | Pure (Monaco-free) diagnostic computation - syntax check via `graphql.parse` when no schema is available; full field/type validation via `graphql-language-service.getDiagnostics` when a schema is loaded. Returns 1-based `GqlMarker[]` matching Monaco's `IMarkerData` shape. |
 | `introspect.ts` | Fetches a `GraphQLSchema` by routing the standard introspection query through the engine (`apiService.executeRequest`), avoiding CORS and reusing the request's auth headers. |
 | `schema-cache.ts` | Zustand store (`useSchemaCache`) keyed by resolved endpoint URL. States: `idle → loading → ready \| error`. `ensureSchema` skips URLs already attempted; `refreshSchema` forces a re-fetch. Exposes `getActiveSchema()` and `getActiveStatus()` for Monaco providers. |
 | `language-providers.ts` | Registers Monaco language providers for the `graphql` language: completion (fields, types, directives), hover type info, debounced inline diagnostics (re-runs on content change and on schema cache updates), and document formatting (`print(parse(...))`). Call once after `loader.config`. |
@@ -183,32 +184,32 @@ The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run con
 |---|---|
 | `DashboardHeader.tsx` | Title, run status, stop button |
 | `RunMetadata.tsx` | Endpoint, config (mode/duration/RPS/concurrency), timing |
-| `MetricsView.tsx` | Orchestrator — composes the hero row, stat row, and charts per mode |
+| `MetricsView.tsx` | Orchestrator - composes the hero row, stat row, and charts per mode |
 | `RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests |
 | `MetricCard.tsx` | Single metric stat card |
 | `shared.tsx`, `tooltips.tsx` | Shared bits (Eyebrow/InfoChip) + centralized InfoChip wording |
 
-**`hero/` — mode-adaptive hero cards** (`HeroRow.tsx` selects per mode, all built on `HeroCardShell.tsx`): `RateFidelityCard`, `DroppedRequestsCard`, `AchievedThroughputCard`, `ThroughputCard`, `ThroughputTwinCard`, `CurrentConcurrencyCard`, `ConcurrencyUtilCard`, `SaturationCard`, `ProgressCard`, `ErrorRateCard`.
+**`hero/` - mode-adaptive hero cards** (`HeroRow.tsx` selects per mode, all built on `HeroCardShell.tsx`): `RateFidelityCard`, `DroppedRequestsCard`, `AchievedThroughputCard`, `ThroughputCard`, `ThroughputTwinCard`, `CurrentConcurrencyCard`, `ConcurrencyUtilCard`, `SaturationCard`, `ProgressCard`, `ErrorRateCard`.
 
 **`charts/`** (all built on the shared `TimeSeriesChart.tsx` + `utils/chartGeometry.ts`): `ThroughputOverTimeChart` (configured-vs-achieved for ramp_up), `LatencyOverTimeChart` (wire/queue-wait split), `PercentilesOverTimeChart` (p50/p95/p99), `StatusCodesOverTimeChart` (stacked), `ResponseTimeVsConcurrencyScatter` (ramp_up capacity discovery w/ breakpoint marker), `HdrPercentilePlot`, `TimingWaterfall`.
 
-**`stats/`** — `ModeStatsRow.tsx` routes to the per-mode Row 4 stat set; `ModeStatCards.tsx`, `StatCard.tsx`.
+**`stats/`** - `ModeStatsRow.tsx` routes to the per-mode Row 4 stat set; `ModeStatCards.tsx`, `StatCard.tsx`.
 
-**`hooks/`** — `useMode.ts` (run-config → mode discriminator).
+**`hooks/`** - `useMode.ts` (run-config → mode discriminator).
 
-**`utils/`** — `metricsTransforms.ts` (SSE history → chart series), `reportToDerived.ts` (stored `RunReport` → the same `DashboardDerived` shape, so history reuses the live components), `computeBreakpoint.ts`, `computeEta.ts`, `chartGeometry.ts`. `types.ts` holds the shared dashboard types (`DashboardDerived`, etc.).
+**`utils/`** - `metricsTransforms.ts` (SSE history → chart series), `reportToDerived.ts` (stored `RunReport` → the same `DashboardDerived` shape, so history reuses the live components), `computeBreakpoint.ts`, `computeEta.ts`, `chartGeometry.ts`. `types.ts` holds the shared dashboard types (`DashboardDerived`, etc.).
 
 ## History (`modules/history/`)
 
 Past runs (single executions and load tests), split into a sidebar list and a main detail view.
 
-**Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row — method badge, status, relative time, URL, load-test chips).
+**Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row - method badge, status, relative time, URL, load-test chips).
 
-**Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunDetail.tsx` (single request execution — reuses the shared response viewer) or `LoadTestDetail.tsx` (load-test report). `LoadTestDetail` is **mode-aware** (header strip + tabs adapt to the run's mode, derived via `reportToDerived` → the same `DashboardDerived` shape the live dashboard uses) and composes the tabbed report under `main/components/`:
+**Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunDetail.tsx` (single request execution - reuses the shared response viewer) or `LoadTestDetail.tsx` (load-test report). `LoadTestDetail` is **mode-aware** (header strip + tabs adapt to the run's mode, derived via `reportToDerived` → the same `DashboardDerived` shape the live dashboard uses) and composes the tabbed report under `main/components/`:
 
 | Component | Role |
 |---|---|
-| `OverviewTab.tsx` | Summary — renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps` |
+| `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps` |
 | `PerformanceTab.tsx` | Latency/throughput detail |
 | `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs |
 | `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
@@ -218,33 +219,43 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 
 ## Variables (`modules/variables/`)
 
-- **Sidebar (`sidebar/VariablesCategoryTree.tsx`)** — tree of variable scopes (globals, collections, environments); receives `collections` + `environments` from the Sidebar.
-- **Main (`main/`)** — `VariablesMain.tsx` (screen `"variables"`) hosts `VariableTableEditor.tsx`, the table editor for the selected scope, including the active-environment selector.
+- **Sidebar (`sidebar/VariablesCategoryTree.tsx`)** - tree of variable scopes (globals, collections, environments); receives `collections` + `environments` from the Sidebar.
+- **Main (`main/`)** - `VariablesMain.tsx` (screen `"variables"`) hosts `VariableTableEditor.tsx`, the table editor for the selected scope, including the active-environment selector.
 
 ## Settings (`modules/settings/`)
 
-- **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** — settings category navigation.
-- **Main (`main/`)** — `SettingsMain.tsx` (screen `"settings"`) hosting category panels such as `UISettingsPanel.tsx`.
+- **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** - settings category navigation.
+- **Main (`main/`)** - `SettingsMain.tsx` (screen `"settings"`) hosting category panels such as `UISettingsPanel.tsx`.
 
 ## Welcome (`modules/welcome/`)
 
-`WelcomeScreen.tsx` — default screen when no request/collection is selected; entry points include opening the import modal.
+`WelcomeScreen.tsx` - default screen when no request/collection is selected; entry points include opening the import modal.
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 
 Response-rendering primitives reused outside the request builder (e.g. history detail):
 
-- `UnifiedResponseViewer.tsx` — top-level response view
-- `ResponseBody.tsx` — body rendering (JSON/text/HTML/XML)
-- `HeadersViewer.tsx` — response headers
+- `UnifiedResponseViewer.tsx` - top-level response view
+- `ResponseBody.tsx` - body rendering (JSON/text/HTML/XML)
+- `HeadersViewer.tsx` - response headers
 
 > Note: the request builder has its own richer `components/ResponseViewer/` (with console output, test results, cookies, raw request/response, client-error view). The `shared/response-viewer/` set is the lighter, reusable one.
+
+## Shared OAuth 2.0 Form (`components/shared/OAuth2Form/`)
+
+The reusable OAuth 2.0 auth editor, consumed by the request builder's `AuthPanel` (and structured to be host-agnostic). A barreled module like `response-viewer/` (its `index.ts` exports the public surface):
+
+- `OAuth2Form.tsx` - grant-type select (Client Credentials / Password / Authorization Code + PKCE), per-grant fields, an advanced section (placement, prefix, audience/resource, credentials id), and the token status row. Takes an **injected `TextInput`** so the host supplies a variable-aware input; secret fields render the masked `SecretInput` instead.
+- `TokenStatusRow.tsx` - cached-token status (masked token + expiry countdown, with a reveal toggle) and Get/Refresh/Clear actions. Drives interactive sign-in via `services/oauth/authorize.ts` for the Authorization Code grant. Internal to the module.
+- `types.ts` - `OAuth2FormProps`, `OAuth2TextInput`.
+
+Config resolution (`{{variables}}`), the token cache key (`services/oauth/cache-key.ts`, byte-identical to the engine), and the token queries (`queries/oauth.ts`) sit behind it.
 
 ## UI Primitives (`components/ui/`)
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `input`, `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`.
+`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`.
 
 ## Component Patterns
 
@@ -271,13 +282,13 @@ Form inputs are controlled; values flow from module context/stores and changes f
 
 ## State Management in Components
 
-- **Local `useState`** — component-only UI state (dialog open/close, window maximized, window width).
-- **Zustand stores (`stores/`)** — tabs (`useTabsStore`: open/active/add/close/focus), layout (`useLayoutStore`: drawer open/view/width, context bar open, split mode), dashboard metrics (`useDashboardStore`), variables (`useVariablesStore`), save (`useSaveStore`), engine connection, session (active environment), history filters, import-modal open-state.
-- **TanStack Query (`queries/`)** — server state: collections, requests, runs, environments, globals, health, script completions; mutations for create/update/delete.
+- **Local `useState`** - component-only UI state (dialog open/close, window maximized, window width).
+- **Zustand stores (`stores/`)** - tabs (`useTabsStore`: open/active/add/close/focus), layout (`useLayoutStore`: drawer open/view/width, context bar open, split mode), dashboard metrics (`useDashboardStore`), variables (`useVariablesStore`), save (`useSaveStore`), engine connection, session (active environment), history filters, import-modal open-state.
+- **TanStack Query (`queries/`)** - server state: collections, requests, runs, environments, globals, health, script completions, OAuth 2.0 token status; mutations for create/update/delete (and OAuth token fetch/clear).
 
 ## Component Communication
 
-- **Props / callbacks** — parent↔child.
-- **Context** — module-local shared state (request builder).
-- **Stores** — cross-module UI state + navigation.
-- **Queries/mutations** — engine-backed server state.
+- **Props / callbacks** - parent↔child.
+- **Context** - module-local shared state (request builder).
+- **Stores** - cross-module UI state + navigation.
+- **Queries/mutations** - engine-backed server state.

@@ -618,4 +618,26 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "}";
 }
 
+std::string sanitize_config_snapshot (const std::string& body) {
+    Json parsed;
+    try {
+        parsed = Json::parse (body);
+    } catch (const std::exception&) {
+        return body; // not JSON; store as-is
+    }
+
+    // Allowlist within the auth subtree: keep only the mode, drop every
+    // credential field. Because we keep a fixed key rather than blocking known
+    // secret names, no future auth field (client secrets, tokens, private keys)
+    // can leak into the persisted snapshot.
+    if (parsed.is_object ()) {
+        if (auto it = parsed.find ("auth");
+            it != parsed.end () && it->is_object ()) {
+            const std::string mode = it->value ("mode", std::string{ "none" });
+            *it                    = Json::object ({ { "mode", mode } });
+        }
+    }
+    return parsed.dump ();
+}
+
 } // namespace vayu::json

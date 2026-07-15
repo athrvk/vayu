@@ -52,6 +52,14 @@ interface ElectronAPI {
 	// Menu-driven navigation
 	onOpenSettings: (callback: () => void) => () => void;
 
+	// OAuth 2.0 interactive flow
+	oauthOpenExternal: (url: string) => Promise<void>;
+	oauthOpenWindow: (params: {
+		authorizeUrl: string;
+		redirectUri: string;
+		partition?: string;
+	}) => Promise<{ callbackUrl: string } | { error: string }>;
+
 	// Platform info
 	platform: NodeJS.Platform;
 
