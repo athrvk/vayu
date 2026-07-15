@@ -19,12 +19,12 @@ vayu/
 │   │   └── utils/
 │   ├── include/vayu/      # Public headers
 │   ├── tests/             # Google Test suite
-│   ├── vendor/            # Vendored deps (QuickJS etc.)
+│   ├── vendor/            # Vendored deps: quickjs-ng, picosha2 (PKCE/SHA-256), hdrhistogram
 │   ├── CMakeLists.txt
 │   ├── CMakePresets.json
 │   └── vcpkg.json         # curl, nlohmann-json, cpp-httplib, gtest, sqlite3, sqlite-orm
 ├── app/
-│   ├── src/               # React + TypeScript UI
+│   ├── src/               # React + TS UI (modules, components, services, queries, stores, hooks)
 │   ├── electron/          # Electron main process
 │   └── package.json
 ├── scripts/
@@ -132,6 +132,7 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
+| POST | `/request` | Send a single request (auth resolved engine-side) |
 | POST | `/run` | Start a load test run |
 | GET | `/metrics/live/:runId` | SSE stream of live metrics |
 | GET | `/stats/:runId` | Historical stats for a run |
@@ -157,4 +158,6 @@ macOS also ships a one-command installer: `install.sh` (repo root) downloads the
 - `docs/app/COMPONENTS.md` - React component architecture (`modules/` + `components/`)
 - `docs/app/import-collections/` - import parser pipeline + per-format mapping (Postman/Insomnia/OpenAPI)
 - `docs/engine/api-reference.md` - engine HTTP API
+- `docs/engine/architecture.md` - engine internals, incl. engine-side auth resolution (bearer/basic/apikey/oauth2)
+- `docs/engine/db-schema.md` - SQLite tables and JSON shapes (runs, metrics, oauth_tokens)
 - `CONTRIBUTING.md` - PR process and code style
