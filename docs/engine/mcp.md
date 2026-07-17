@@ -83,8 +83,45 @@ claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
 
 - Non-CLI: a **"Connect to Claude Code" button** in the app writes that config
   and prints the URL for other agents.
-- The same URL works across all Streamable-HTTP clients (Cursor, Zed, Desktop).
+- The same URL works across all Streamable-HTTP clients (see compatibility below).
 - Requires the Vayu app to be running when the client connects.
+
+## Client compatibility & config (researched)
+
+MCP defines three transports: **stdio**, **Streamable HTTP**, and the legacy
+**HTTP+SSE** (deprecated in spec 2025-03-26 — we do **not** build for it).
+Streamable HTTP is the modern remote/multi-client transport and is the right fit
+for our always-running-app model. Support as of mid-2026:
+
+| Client | stdio | Streamable HTTP | Legacy SSE | Config location | `url`-based entry works? |
+| --- | --- | --- | --- | --- | --- |
+| **Claude Code** | ✅ | ✅ (`http`, alias `streamable-http`) | ⚠️ deprecated | `.mcp.json`, `~/.claude.json`, `claude mcp add(-json)` | ✅ |
+| **OpenAI Codex** (CLI / ChatGPT desktop / IDE) | ✅ | ✅ | ❌ | `~/.codex/config.toml`, `.codex/config.toml` (TOML) | ✅ |
+| **Cursor** | ✅ | ✅ | ⚠️ | `.cursor/mcp.json`, `~/.cursor/mcp.json` | ✅ |
+| **Zed** | ✅ | ❌ **not yet** | ⚠️ | `context_servers` in settings | ❌ — stdio only |
+
+**Takeaway:** our fixed-port Streamable HTTP endpoint covers Claude Code, Codex,
+and Cursor with a single URL — no per-client server variants. **Zed is the lone
+exception** (no Streamable HTTP yet); it needs a stdio entry, which the deferred
+`vayu mcp` Node CLI (stdio mode) covers when we choose to support it.
+
+Concrete entries for the same `:9877/mcp` endpoint:
+
+```bash
+# Claude Code
+claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
+```
+
+```json
+// Claude Code (.mcp.json) / Cursor (.cursor/mcp.json)
+{ "mcpServers": { "vayu": { "type": "http", "url": "http://127.0.0.1:9877/mcp" } } }
+```
+
+```toml
+# Codex (~/.codex/config.toml) — presence of `url` selects Streamable HTTP
+[mcp_servers.vayu]
+url = "http://127.0.0.1:9877/mcp"
+```
 
 ## Protocol surface (V1)
 
@@ -160,8 +197,8 @@ No load runs. No collection/environment writes.
 - **In-engine C++ over Streamable HTTP** (via `mcp-cpp`) — revisit only if an
   engine-only/headless deployment becomes a hard requirement.
 - **Standalone `vayu mcp` Node CLI** — reuse the same TS server module to serve
-  MCP without the Electron app, covering headless/CI. Preferred over in-engine
-  C++ for that case.
+  MCP without the Electron app, covering headless/CI **and stdio-only clients
+  (Zed)**. Preferred over in-engine C++ for those cases.
 
 ## Open questions (need a call)
 
@@ -178,5 +215,6 @@ No load runs. No collection/environment writes.
 
 - [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) · [MCP SDKs](https://modelcontextprotocol.io/docs/sdk)
 - [Streamable HTTP transport spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) · [2026-07-28 RC](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
+- Client MCP docs: [Claude Code](https://code.claude.com/docs/en/mcp) · [Codex](https://developers.openai.com/codex/mcp) · [Cursor](https://cursor.com/docs/mcp) · [Zed streamable-HTTP gap](https://github.com/zed-industries/zed/discussions/29370)
 - C++ libs (deferred): [`mcp-cpp`](https://github.com/Neumann-Labs/mcp-cpp) · [`cpp-mcp`](https://github.com/hkr04/cpp-mcp) · [`gopher-mcp`](https://github.com/GopherSecurity/gopher-mcp)
 - Engine API surface: [`docs/engine/api-reference.md`](./api-reference.md)
