@@ -157,7 +157,17 @@ export default function TitleBar() {
 			{/* Right controls */}
 			<div
 				className="flex items-center gap-2 px-3 shrink-0"
-				style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+				style={
+					{
+						WebkitAppRegion: "no-drag",
+						// Windows paints native min/max/close as an overlay on top of the
+						// web content in the top-right corner. Reserve its width (exposed by
+						// the Window Controls Overlay API) so the env switcher isn't covered.
+						...(isWindows && {
+							paddingRight: "calc(100vw - env(titlebar-area-width, 100vw) + 0.5rem)",
+						}),
+					} as React.CSSProperties
+				}
 			>
 				<EnvSwitcher />
 				{/* Linux only — Windows uses native overlay, macOS uses traffic lights */}

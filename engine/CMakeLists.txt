@@ -382,6 +382,7 @@ if(VAYU_BUILD_TESTS)
         tests/metrics_helper_test.cpp
         tests/metrics_collector_test.cpp
         tests/import_route_test.cpp
+        tests/config_route_test.cpp
         tests/execution_timeout_test.cpp
         tests/load_strategy_test.cpp
         tests/refill_deficit_test.cpp
@@ -395,6 +396,7 @@ if(VAYU_BUILD_TESTS)
         tests/debug_redact_test.cpp
         tests/oauth_authorize_test.cpp
         src/http/routes/import.cpp
+        src/http/routes/config.cpp
         src/http/routes/oauth.cpp
         src/http/routes/oauth_authorize.cpp
         src/http/routes/execution.cpp
