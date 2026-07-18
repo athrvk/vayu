@@ -73,6 +73,13 @@ export default {
 
 				// Variable highlighting
 				variable: "hsl(var(--variable))",
+
+				// Variable scope (categorical): global / collection / environment
+				scope: {
+					global: "hsl(var(--scope-global))",
+					collection: "hsl(var(--scope-collection))",
+					environment: "hsl(var(--scope-environment))",
+				},
 			},
 			fontFamily: {
 				sans: ["Space Grotesk", "system-ui", "sans-serif"],

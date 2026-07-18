@@ -105,6 +105,36 @@ These differ between light and dark mode.
 --destructive:          0 62.8% 30.6%;  /* darker red */
 ```
 
+### Variable Scope Colors (Categorical)
+
+Variable scopes use a **categorical** palette (not semantic status): a distinct
+hue per scope, mode-adaptive so it reads on both light and dark surfaces. Used
+as text/icon/border at full strength and as tinted backgrounds via opacity.
+
+```css
+/* Light */
+--scope-global:      142 72% 29%;   /* green-700 */
+--scope-collection:   21 90% 42%;   /* orange-700 */
+--scope-environment: 217 91% 45%;   /* blue-600 */
+
+/* Dark */
+--scope-global:      142 69% 58%;   /* green-400 */
+--scope-collection:   27 96% 61%;   /* orange-400 */
+--scope-environment: 213 94% 68%;   /* blue-400 */
+```
+
+**Utility classes** (`text-`, `bg-`, `border-`, `ring-`, `accent-`):
+`text-scope-global`, `bg-scope-collection/10`, `border-scope-environment/20`, …
+
+| Scope | Token | Convention |
+|-------|-------|-----------|
+| Global | `scope-global` | icon/text solid; `bg-scope-global/10` tint |
+| Collection | `scope-collection` | icon/text solid; `bg-scope-collection/10` tint |
+| Environment | `scope-environment` | icon/text solid; `bg-scope-environment/10` tint |
+
+Never hardcode `bg-green-50 dark:bg-green-950` pairs for scopes — use the token
+at an opacity (`/10` background, `/20`–`/30` border, full for text/icon).
+
 ### HTTP Method Color Tokens
 
 Method colors are design tokens defined in `:root`, not hardcoded hex values. They are consistent between light and dark mode.
