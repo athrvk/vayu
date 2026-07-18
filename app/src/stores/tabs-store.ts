@@ -39,6 +39,8 @@ interface TabsState {
 
 	openTab: (tab: Omit<Tab, "id">) => void;
 	closeTab: (tabId: string) => void;
+	/** Close every tab bound to one of the given entity ids (e.g. after deletion). */
+	closeTabsForEntities: (entityIds: Iterable<string>) => void;
 	focusTab: (tabId: string) => void;
 	/** Replace the active tab in place (used when welcome tab spawns a request) */
 	replaceActiveTab: (tab: Omit<Tab, "id">) => void;
@@ -112,6 +114,33 @@ export const useTabsStore = create<TabsState>()(
 					// Focus the tab to the left, or the new last tab
 					const newFocus = remaining[Math.max(0, idx - 1)];
 					nextActiveId = newFocus?.id ?? null;
+				}
+
+				set({ openTabs: remaining, activeTabId: nextActiveId });
+			},
+
+			closeTabsForEntities: (entityIds) => {
+				const ids = new Set(entityIds);
+				if (ids.size === 0) return;
+				const { openTabs, activeTabId } = get();
+				const shouldClose = (t: Tab) => t.entityId !== null && ids.has(t.entityId);
+
+				const remaining = openTabs.filter((t) => !shouldClose(t));
+				if (remaining.length === openTabs.length) return; // nothing matched
+
+				let nextActiveId = activeTabId;
+				const activeIdx = openTabs.findIndex((t) => t.id === activeTabId);
+				if (activeIdx !== -1 && shouldClose(openTabs[activeIdx])) {
+					// Active tab is closing: focus the nearest survivor, preferring the
+					// left (matches closeTab's behavior).
+					let pick: Tab | undefined;
+					for (let i = activeIdx - 1; i >= 0 && !pick; i--) {
+						if (!shouldClose(openTabs[i])) pick = openTabs[i];
+					}
+					for (let i = activeIdx + 1; i < openTabs.length && !pick; i++) {
+						if (!shouldClose(openTabs[i])) pick = openTabs[i];
+					}
+					nextActiveId = pick?.id ?? null;
 				}
 
 				set({ openTabs: remaining, activeTabId: nextActiveId });
