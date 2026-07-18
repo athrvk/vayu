@@ -834,9 +834,11 @@ def setup_environment(project_root: Path):
     vcpkg_bin = Path(vcpkg_root) / "vcpkg"
     engine_dir = project_root / "engine"
     triplet = "x64-osx" if system_name == "macOS" else "x64-linux"
-    vcpkg_packages = ["curl", "nlohmann-json", "cpp-httplib", "gtest", "sqlite3", "sqlite-orm"]
+    # engine/ has a vcpkg.json manifest, so vcpkg runs in manifest mode and
+    # installs the declared dependencies. Manifest mode rejects individual
+    # package arguments, so pass only the triplet and let vcpkg.json drive it.
     result = subprocess.run(
-        [str(vcpkg_bin), "install"] + vcpkg_packages + ["--triplet", triplet],
+        [str(vcpkg_bin), "install", "--triplet", triplet],
         cwd=engine_dir,
     )
     if result.returncode == 0:
