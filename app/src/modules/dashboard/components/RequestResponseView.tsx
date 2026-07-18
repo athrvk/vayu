@@ -159,31 +159,41 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 					<CardContent>
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
 							<div>
-								<p className="text-sm text-muted-foreground">DNS</p>
+								<p className="text-sm text-muted-foreground">
+									DNS <InfoChip tip={PHASE_TIPS.dns} />
+								</p>
 								<p className="font-bold">
 									{report.timingBreakdown.avgDnsMs.toFixed(2)}ms
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Connect</p>
+								<p className="text-sm text-muted-foreground">
+									Connect <InfoChip tip={PHASE_TIPS.connect} />
+								</p>
 								<p className="font-bold">
 									{report.timingBreakdown.avgConnectMs.toFixed(2)}ms
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">TLS</p>
+								<p className="text-sm text-muted-foreground">
+									TLS <InfoChip tip={PHASE_TIPS.tls} />
+								</p>
 								<p className="font-bold">
 									{report.timingBreakdown.avgTlsMs.toFixed(2)}ms
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">First Byte</p>
+								<p className="text-sm text-muted-foreground">
+									First Byte <InfoChip tip={PHASE_TIPS.ttfb} />
+								</p>
 								<p className="font-bold">
 									{report.timingBreakdown.avgFirstByteMs.toFixed(2)}ms
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Download</p>
+								<p className="text-sm text-muted-foreground">
+									Download <InfoChip tip={PHASE_TIPS.download} />
+								</p>
 								<p className="font-bold">
 									{report.timingBreakdown.avgDownloadMs.toFixed(2)}ms
 								</p>
