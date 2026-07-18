@@ -205,7 +205,7 @@ export function VariablePopover({
 											</div>
 										)}
 									</div>
-									<div className="relative font-mono text-sm bg-muted px-2 py-1.5 rounded break-all">
+									<div className="relative font-mono text-sm bg-muted px-2 py-1.5 rounded-md break-all">
 										{varInfo.secret && !isSecretRevealed ? (
 											<span className="select-none">••••••••</span>
 										) : varInfo.value ? (

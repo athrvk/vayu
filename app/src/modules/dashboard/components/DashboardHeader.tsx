@@ -105,7 +105,7 @@ export default function DashboardHeader({
 			{/* Method badge */}
 			{requestMethod && (
 				<span
-					className="text-[11px] font-bold font-mono px-1.5 py-0.5 rounded shrink-0"
+					className="text-[11px] font-bold font-mono px-1.5 py-0.5 rounded-md shrink-0"
 					style={{
 						color: `hsl(${getMethodColor(requestMethod)})`,
 						background: `hsl(${getMethodColor(requestMethod)} / 0.094)`,

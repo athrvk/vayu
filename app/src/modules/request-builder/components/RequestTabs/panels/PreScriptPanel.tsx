@@ -42,7 +42,7 @@ export default function PreScriptPanel() {
 			<div className="flex items-center justify-between">
 				<p className="text-sm text-muted-foreground">
 					Execute JavaScript before sending the request. Use the{" "}
-					<code className="bg-muted px-1 rounded">pm</code> API.
+					<code className="bg-muted px-1 rounded-md">pm</code> API.
 				</p>
 				{hasReferencedVars && (
 					<Button
@@ -109,7 +109,7 @@ export default function PreScriptPanel() {
 			{/* Quick Reference */}
 			<div className="text-xs text-muted-foreground space-y-1">
 				<p className="font-medium">Quick Reference:</p>
-				<code className="block bg-muted p-2 rounded">
+				<code className="block bg-muted p-2 rounded-md">
 					pm.environment.get("variable")
 					<br />
 					pm.environment.set("key", "value")

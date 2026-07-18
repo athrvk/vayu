@@ -137,7 +137,7 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 					e.stopPropagation();
 					closeTab(tab.id);
 				}}
-				className="shrink-0 rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+				className="shrink-0 rounded-md p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
 			>
 				<X size={12} />
 			</span>

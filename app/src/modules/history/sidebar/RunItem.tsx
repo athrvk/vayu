@@ -152,7 +152,7 @@ export default function RunItem({
 					<div className="flex items-start gap-2 mb-1.5 min-w-0 flex-wrap">
 						{method && (
 							<span
-								className="text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded"
+								className="text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded-md"
 								style={methodBadgeStyle(method)}
 							>
 								{method}

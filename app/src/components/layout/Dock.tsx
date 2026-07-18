@@ -43,7 +43,7 @@ function DockButton({ active, onClick, tooltip, children }: DockButtonProps) {
 				<button
 					onClick={onClick}
 					className={cn(
-						"flex items-center justify-center w-7 h-7 rounded text-xs transition-colors",
+						"flex items-center justify-center w-7 h-7 rounded-md text-xs transition-colors",
 						active
 							? "bg-accent text-accent-foreground"
 							: "text-muted-foreground hover:bg-muted/50 hover:text-foreground"

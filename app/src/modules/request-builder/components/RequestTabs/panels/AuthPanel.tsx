@@ -126,7 +126,7 @@ export default function AuthPanel() {
 				<div className="space-y-4">
 					<p className="text-sm text-muted-foreground">
 						The token will be sent as{" "}
-						<code className="bg-muted px-1 rounded">
+						<code className="bg-muted px-1 rounded-md">
 							Authorization: Bearer &lt;token&gt;
 						</code>
 					</p>
@@ -145,7 +145,7 @@ export default function AuthPanel() {
 				<div className="space-y-4">
 					<p className="text-sm text-muted-foreground">
 						Credentials will be sent as{" "}
-						<code className="bg-muted px-1 rounded">
+						<code className="bg-muted px-1 rounded-md">
 							Authorization: Basic &lt;base64&gt;
 						</code>
 					</p>

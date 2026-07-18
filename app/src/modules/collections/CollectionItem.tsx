@@ -146,7 +146,7 @@ export default function CollectionItem({
 			{/* Collection Header */}
 			<div
 				className={cn(
-					"flex items-center gap-1 py-1.5 pr-2 rounded group transition-colors cursor-pointer",
+					"flex items-center gap-1 py-1.5 pr-2 rounded-md group transition-colors cursor-pointer",
 					isSelected
 						? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
 						: "hover:bg-accent"

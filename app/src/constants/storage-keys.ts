@@ -21,6 +21,8 @@ export const STORAGE_KEYS = {
 	UI_FONT: "vayu-ui-font",
 	/** Interface scale (compact/default/comfortable). Read pre-paint in index.html. */
 	UI_SCALE: "vayu-ui-scale",
+	/** Corner roundedness (square/default/rounded). Read pre-paint in index.html. */
+	UI_RADIUS: "vayu-ui-radius",
 	/** Last-used load test configuration (LoadTestConfigDialog). */
 	LAST_LOAD_TEST_CONFIG: "vayu:lastLoadTestConfig",
 	/** Zustand persist name for session state (active environment/collection). */

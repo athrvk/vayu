@@ -364,7 +364,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 															<p className="text-xs font-medium text-muted-foreground">
 																Error
 															</p>
-															<p className="text-sm bg-destructive/10 text-destructive p-2 rounded font-mono text-xs break-all">
+															<p className="text-sm bg-destructive/10 text-destructive p-2 rounded-md font-mono text-xs break-all">
 																{result.error}
 															</p>
 														</div>
@@ -500,7 +500,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 															{/* Slow Request Warning */}
 															{result.trace.isSlow && (
-																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive p-2 rounded">
+																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive p-2 rounded-md">
 																	<Clock className="w-3 h-3" />
 																	<span>
 																		Slow request:{" "}
@@ -531,7 +531,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																		<p className="text-xs font-medium text-muted-foreground">
 																			Response Headers
 																		</p>
-																		<div className="bg-muted p-2 rounded text-xs font-mono max-h-32 overflow-auto">
+																		<div className="bg-muted p-2 rounded-md text-xs font-mono max-h-32 overflow-auto">
 																			{Object.entries(
 																				result.trace.headers
 																			).map(
@@ -559,7 +559,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																	<p className="text-xs font-medium text-muted-foreground">
 																		Response Body
 																	</p>
-																	<pre className="bg-muted p-2 rounded text-xs font-mono max-h-48 overflow-auto whitespace-pre-wrap break-all">
+																	<pre className="bg-muted p-2 rounded-md text-xs font-mono max-h-48 overflow-auto whitespace-pre-wrap break-all">
 																		{result.trace.body}
 																	</pre>
 																</div>

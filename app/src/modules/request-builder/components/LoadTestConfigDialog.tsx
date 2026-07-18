@@ -380,7 +380,7 @@ export default function LoadTestConfigDialog({
 					)}
 
 					{/* Info Box */}
-					<div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-200">
+					<div className="p-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-200">
 						<p className="font-medium mb-1">What will happen:</p>
 						{mode === "constant_rps" && (
 							<p>

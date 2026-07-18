@@ -39,7 +39,7 @@ export default function TimingBreakdown({
 	return (
 		<div className="grid grid-cols-5 gap-2">
 			{dnsMs !== undefined && (
-				<div className={`bg-blue-50 dark:bg-blue-950/30 ${padding} rounded text-center`}>
+				<div className={`bg-blue-50 dark:bg-blue-950/30 ${padding} rounded-md text-center`}>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>DNS</p>
 					<p className={`${textSize} font-bold text-blue-700 dark:text-blue-300`}>
 						{dnsMs.toFixed(1)}
@@ -49,7 +49,7 @@ export default function TimingBreakdown({
 			)}
 			{connectMs !== undefined && (
 				<div
-					className={`bg-purple-50 dark:bg-purple-950/30 ${padding} rounded text-center`}
+					className={`bg-purple-50 dark:bg-purple-950/30 ${padding} rounded-md text-center`}
 				>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>Connect</p>
 					<p className={`${textSize} font-bold text-purple-700 dark:text-purple-300`}>
@@ -60,7 +60,7 @@ export default function TimingBreakdown({
 			)}
 			{tlsMs !== undefined && (
 				<div
-					className={`bg-indigo-50 dark:bg-indigo-950/30 ${padding} rounded text-center`}
+					className={`bg-indigo-50 dark:bg-indigo-950/30 ${padding} rounded-md text-center`}
 				>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>TLS</p>
 					<p className={`${textSize} font-bold text-indigo-700 dark:text-indigo-300`}>
@@ -70,7 +70,7 @@ export default function TimingBreakdown({
 				</div>
 			)}
 			{firstByteMs !== undefined && (
-				<div className={`bg-green-50 dark:bg-green-950/30 ${padding} rounded text-center`}>
+				<div className={`bg-green-50 dark:bg-green-950/30 ${padding} rounded-md text-center`}>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>TTFB</p>
 					<p className={`${textSize} font-bold text-green-700 dark:text-green-300`}>
 						{firstByteMs.toFixed(1)}
@@ -80,7 +80,7 @@ export default function TimingBreakdown({
 			)}
 			{downloadMs !== undefined && (
 				<div
-					className={`bg-yellow-50 dark:bg-yellow-950/30 ${padding} rounded text-center`}
+					className={`bg-yellow-50 dark:bg-yellow-950/30 ${padding} rounded-md text-center`}
 				>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>Download</p>
 					<p className={`${textSize} font-bold text-yellow-700 dark:text-yellow-300`}>

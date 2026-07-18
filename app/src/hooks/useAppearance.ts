@@ -8,29 +8,38 @@
 /**
  * useAppearance Hook
  *
- * Owns the two renderer-only interface preferences — UI font and interface
- * scale — persisting them to localStorage and applying them to the document.
- * Font swaps the `--font-sans` custom property; scale sets the page zoom
- * factor (webFrame in Electron, a CSS `zoom` fallback in the browser). The
- * pre-paint script in index.html applies the same values before React mounts;
- * this hook stays the source of truth once it runs.
+ * Owns the renderer-only interface preferences — UI font, interface scale, and
+ * corner roundedness — persisting them to localStorage and applying them to the
+ * document. Font swaps the `--font-sans` custom property; radius swaps
+ * `--radius`; scale sets the page zoom factor (webFrame in Electron, a CSS
+ * `zoom` fallback in the browser). The pre-paint script in index.html applies
+ * the same values before React mounts; this hook stays the source of truth
+ * once it runs.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
 	DEFAULT_UI_FONT,
+	DEFAULT_UI_RADIUS,
 	DEFAULT_UI_SCALE,
 	fontStack,
 	isUiFont,
+	isUiRadius,
 	isUiScale,
+	radiusValue,
 	scaleFactor,
 	type UiFont,
+	type UiRadius,
 	type UiScale,
 } from "@/constants/appearance";
 
 function applyFont(font: UiFont): void {
 	document.documentElement.style.setProperty("--font-sans", fontStack(font));
+}
+
+function applyRadius(radius: UiRadius): void {
+	document.documentElement.style.setProperty("--radius", radiusValue(radius));
 }
 
 function applyScale(scale: UiScale): void {
@@ -54,16 +63,23 @@ function readScale(): UiScale {
 	return isUiScale(saved) ? saved : DEFAULT_UI_SCALE;
 }
 
+function readRadius(): UiRadius {
+	const saved = localStorage.getItem(STORAGE_KEYS.UI_RADIUS);
+	return isUiRadius(saved) ? saved : DEFAULT_UI_RADIUS;
+}
+
 export function useAppearance() {
 	// Seed from localStorage during render (lazy init) so there's no setState in
 	// the mount effect; the effect below only re-applies to the DOM, which the
 	// pre-paint script already did for the first frame.
 	const [font, setFontState] = useState<UiFont>(readFont);
 	const [scale, setScaleState] = useState<UiScale>(readScale);
+	const [radius, setRadiusState] = useState<UiRadius>(readRadius);
 
 	useEffect(() => {
 		applyFont(font);
 		applyScale(scale);
+		applyRadius(radius);
 		// Mount-only: re-assert the persisted values against the live DOM.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
@@ -80,5 +96,11 @@ export function useAppearance() {
 		localStorage.setItem(STORAGE_KEYS.UI_SCALE, next);
 	}, []);
 
-	return { font, setFont, scale, setScale };
+	const setRadius = useCallback((next: UiRadius) => {
+		setRadiusState(next);
+		applyRadius(next);
+		localStorage.setItem(STORAGE_KEYS.UI_RADIUS, next);
+	}, []);
+
+	return { font, setFont, scale, setScale, radius, setRadius };
 }

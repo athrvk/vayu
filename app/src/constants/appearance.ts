@@ -76,8 +76,27 @@ export const UI_SCALES = [
 export type UiScale = (typeof UI_SCALES)[number]["value"];
 export const DEFAULT_UI_SCALE: UiScale = "default";
 
+export interface RadiusOption {
+	readonly value: string;
+	readonly label: string;
+	readonly description: string;
+	/** CSS length assigned to --radius (rounded-lg/md/sm derive from it). */
+	readonly radius: string;
+}
+
+export const UI_RADII = [
+	{ value: "square", label: "Square", description: "Sharp corners", radius: "0rem" },
+	{ value: "default", label: "Default", description: "Lightly rounded", radius: "0.375rem" },
+	{ value: "rounded", label: "Rounded", description: "Softer corners", radius: "0.75rem" },
+] as const satisfies readonly RadiusOption[];
+
+/** Corner roundedness, applied by overriding the `--radius` custom property. */
+export type UiRadius = (typeof UI_RADII)[number]["value"];
+export const DEFAULT_UI_RADIUS: UiRadius = "default";
+
 const FONT_VALUES = new Set<string>(UI_FONTS.map((f) => f.value));
 const SCALE_VALUES = new Set<string>(UI_SCALES.map((s) => s.value));
+const RADIUS_VALUES = new Set<string>(UI_RADII.map((r) => r.value));
 
 export function isUiFont(value: unknown): value is UiFont {
 	return typeof value === "string" && FONT_VALUES.has(value);
@@ -85,6 +104,14 @@ export function isUiFont(value: unknown): value is UiFont {
 
 export function isUiScale(value: unknown): value is UiScale {
 	return typeof value === "string" && SCALE_VALUES.has(value);
+}
+
+export function isUiRadius(value: unknown): value is UiRadius {
+	return typeof value === "string" && RADIUS_VALUES.has(value);
+}
+
+export function radiusValue(radius: UiRadius): string {
+	return (UI_RADII.find((r) => r.value === radius) ?? UI_RADII[1]).radius;
 }
 
 export function fontStack(font: UiFont): string {

@@ -350,19 +350,25 @@ text stays JetBrains Mono regardless.
 ## Geometry
 
 ```css
---radius: 0.375rem;   /* 6px — base border radius */
+--radius: 0.375rem;   /* 6px — base border radius (default) */
 ```
 
 | Class | Value |
 |-------|-------|
-| `rounded-sm` | `calc(0.375rem - 4px)` = 2px |
-| `rounded-md` | `calc(0.375rem - 2px)` = 4px |
-| `rounded-lg` | `0.375rem` = 6px |
+| `rounded-sm` | `calc(var(--radius) - 4px)` |
+| `rounded-md` | `calc(var(--radius) - 2px)` |
+| `rounded-lg` | `var(--radius)` |
 | `rounded-full` | pill / circle |
 
-Note: Tailwind's unsuffixed `rounded` is its own default scale (4px) and is not in the custom config. Prefer explicit `rounded-md` or `rounded-lg`.
+**User-adjustable.** Settings → Appearance → Interface → Roundedness sets
+`--radius` (Square `0rem` / Default `0.375rem` / Rounded `0.75rem`), owned by
+`useAppearance`, persisted, applied pre-paint. So `rounded-sm/md/lg` reshape
+live. **Always use `rounded-md`/`rounded-lg`/`rounded-sm`, never Tailwind's
+unsuffixed `rounded`** (fixed 4px — it ignores `--radius` and won't follow the
+control). `rounded-full` stays a pill regardless.
 
-Cards and panels use `rounded-md`. Badges/chips use `rounded` or `rounded-sm`. Status pills use `rounded-full`.
+Cards and panels use `rounded-md`. Badges/chips use `rounded-sm`. Status pills
+use `rounded-full`.
 
 ---
 

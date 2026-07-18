@@ -42,6 +42,10 @@
 							el.style.zoom = String(factor);
 						}
 					}
+
+					var radii = { square: "0rem", rounded: "0.75rem" };
+					var radius = radii[localStorage.getItem("vayu-ui-radius")];
+					if (radius) el.style.setProperty("--radius", radius);
 				} catch (e) {
 					/* localStorage unavailable — the hooks apply on mount */
 				}

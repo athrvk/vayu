@@ -608,7 +608,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												performSaveRef.current();
 											}}
 											className={cn(
-												"w-4 h-4 rounded border-input",
+												"w-4 h-4 rounded-md border-input",
 												editorConfig.checkboxColor
 											)}
 											disabled={variable.isNew && !variable.key}

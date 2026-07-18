@@ -123,7 +123,7 @@ export default function OverviewTab({ report, derived }: TabProps) {
 								{Object.entries(report.errors.types).map(([errorType, count]) => (
 									<div
 										key={errorType}
-										className="flex justify-between items-center p-2 bg-muted rounded text-sm"
+										className="flex justify-between items-center p-2 bg-muted rounded-md text-sm"
 									>
 										<span className="capitalize">
 											{errorType.replace(/_/g, " ")}
@@ -146,7 +146,7 @@ export default function OverviewTab({ report, derived }: TabProps) {
 										([code, count]) => (
 											<div
 												key={code}
-												className="flex justify-between items-center p-2 bg-muted rounded text-sm"
+												className="flex justify-between items-center p-2 bg-muted rounded-md text-sm"
 											>
 												<span className="font-mono">
 													{code === "0"

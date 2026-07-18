@@ -103,7 +103,7 @@ export default function ParamsPanel() {
 			<div className="flex items-center justify-between">
 				<p className="text-sm text-muted-foreground">
 					Add query parameters to include with your request. Use{" "}
-					<code className="bg-muted px-1 rounded">{"{{variable}}"}</code> for dynamic
+					<code className="bg-muted px-1 rounded-md">{"{{variable}}"}</code> for dynamic
 					values.
 				</p>
 				<Button variant="outline" size="sm" onClick={handleToggleMode} className="shrink-0">
@@ -132,7 +132,7 @@ export default function ParamsPanel() {
 						className="font-mono text-sm min-h-[400px]"
 					/>
 					<p className="text-xs text-muted-foreground">
-						Format: <code className="bg-muted px-1 rounded">key=value</code> (one per
+						Format: <code className="bg-muted px-1 rounded-md">key=value</code> (one per
 						line). Duplicate keys will override previous values.
 					</p>
 				</div>

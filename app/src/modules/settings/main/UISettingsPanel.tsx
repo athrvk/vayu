@@ -23,6 +23,7 @@ import {
 	FolderOpen,
 	Type,
 	Maximize2,
+	Squircle,
 } from "lucide-react";
 import {
 	Card,
@@ -35,7 +36,7 @@ import {
 import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
 import { useAppearance } from "@/hooks/useAppearance";
 import { COLOR_SCHEMES } from "@/constants/color-schemes";
-import { UI_FONTS, UI_SCALES } from "@/constants/appearance";
+import { UI_FONTS, UI_SCALES, UI_RADII } from "@/constants/appearance";
 import { cn } from "@/lib/utils";
 
 interface AppPaths {
@@ -48,7 +49,7 @@ interface AppPaths {
 export default function UISettingsPanel() {
 	const { themeSource, setTheme, colorScheme, setColorScheme, isDark, isLoading } =
 		useElectronTheme();
-	const { font, setFont, scale, setScale } = useAppearance();
+	const { font, setFont, scale, setScale, radius, setRadius } = useAppearance();
 	const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
 
 	useEffect(() => {
@@ -319,6 +320,46 @@ export default function UISettingsPanel() {
 														: "border-border"
 												)}
 											>
+												<span className="text-sm font-medium">
+													{option.label}
+												</span>
+												<span className="text-xs text-muted-foreground">
+													{option.description}
+												</span>
+												{isSelected && (
+													<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
+												)}
+											</button>
+										);
+									})}
+								</div>
+							</div>
+
+							<div>
+								<p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+									<Squircle className="w-3.5 h-3.5" />
+									Roundedness
+								</p>
+								<div className="grid grid-cols-3 gap-3">
+									{UI_RADII.map((option) => {
+										const isSelected = radius === option.value;
+										return (
+											<button
+												key={option.value}
+												onClick={() => setRadius(option.value)}
+												className={cn(
+													"relative flex flex-col items-start gap-1.5 p-3 rounded-lg border-2 text-left transition-all",
+													"hover:bg-accent hover:border-accent-foreground/20",
+													isSelected
+														? "border-primary bg-primary/5"
+														: "border-border"
+												)}
+											>
+												<span
+													className="h-6 w-9 border-2 border-muted-foreground/40 bg-muted"
+													style={{ borderRadius: option.radius }}
+													aria-hidden
+												/>
 												<span className="text-sm font-medium">
 													{option.label}
 												</span>

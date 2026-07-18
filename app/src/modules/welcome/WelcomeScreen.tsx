@@ -402,7 +402,7 @@ export default function WelcomeScreen() {
 											>
 												<div className="flex-1 min-w-0">
 													<div className="flex items-center gap-2 mb-1">
-														<span className="text-xs font-medium px-2 py-0.5 rounded bg-muted">
+														<span className="text-xs font-medium px-2 py-0.5 rounded-md bg-muted">
 															{run.type === "load"
 																? "Load Test"
 																: "Design"}
