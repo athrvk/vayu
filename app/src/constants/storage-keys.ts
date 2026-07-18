@@ -13,9 +13,9 @@
  */
 
 export const STORAGE_KEYS = {
-	/** "system" | "light" | "dark" theme preference. */
+	/** "system" | "light" | "dark" theme preference. Read pre-paint in index.html. */
 	THEME_SOURCE: "vayu-theme-source",
-	/** Resolved color scheme cached for instant paint before electron answers. */
+	/** Accent color scheme name (sunset/sky/…). Read pre-paint in index.html. */
 	COLOR_SCHEME: "vayu-color-scheme",
 	/** Last-used load test configuration (LoadTestConfigDialog). */
 	LAST_LOAD_TEST_CONFIG: "vayu:lastLoadTestConfig",

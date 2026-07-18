@@ -5,6 +5,29 @@
 		<link rel="icon" type="image/svg+xml" href="/vite.svg" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Vayu</title>
+		<!--
+			Pre-paint theme: apply the persisted accent + light/dark before React
+			mounts, so the first frame isn't a flash of the wrong theme. Keys mirror
+			STORAGE_KEYS (THEME_SOURCE / COLOR_SCHEME) in src/constants/storage-keys.ts;
+			the useElectronTheme hook remains the source of truth once it runs.
+		-->
+		<script>
+			(function () {
+				try {
+					var el = document.documentElement;
+					var scheme = localStorage.getItem("vayu-color-scheme");
+					if (scheme) el.setAttribute("data-color-scheme", scheme);
+					var source = localStorage.getItem("vayu-theme-source");
+					var dark =
+						source === "dark" ||
+						((source === "system" || !source) &&
+							window.matchMedia("(prefers-color-scheme: dark)").matches);
+					if (dark) el.classList.add("dark");
+				} catch (e) {
+					/* localStorage unavailable — the hook will apply the theme on mount */
+				}
+			})();
+		</script>
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 		<link
