@@ -235,7 +235,7 @@ export function ImportModal() {
 									<button
 										onClick={handleFetchUrl}
 										disabled={!url}
-										className="h-9 rounded bg-primary px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+										className="h-9 rounded bg-primary-fill px-4 text-[13px] font-semibold text-white disabled:opacity-50"
 									>
 										Fetch
 									</button>
@@ -252,7 +252,7 @@ export function ImportModal() {
 									<button
 										onClick={() => runDetect(pasteText)}
 										disabled={!pasteText.trim()}
-										className="mt-2 h-9 rounded bg-primary px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+										className="mt-2 h-9 rounded bg-primary-fill px-4 text-[13px] font-semibold text-white disabled:opacity-50"
 									>
 										Detect &amp; Preview
 									</button>
@@ -301,7 +301,7 @@ export function ImportModal() {
 							<button
 								onClick={handleImport}
 								disabled={importMutation.isPending}
-								className="h-9 rounded bg-primary px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+								className="h-9 rounded bg-primary-fill px-4 text-[13px] font-semibold text-white disabled:opacity-50"
 							>
 								{importMutation.isPending ? "Importing…" : "Import →"}
 							</button>

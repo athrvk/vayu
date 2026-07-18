@@ -10,6 +10,7 @@
 	--color-popover: hsl(var(--popover));
 	--color-popover-foreground: hsl(var(--popover-foreground));
 	--color-primary: hsl(var(--primary));
+	--color-primary-fill: hsl(var(--primary-fill));
 	--color-primary-foreground: hsl(var(--primary-foreground));
 	--color-secondary: hsl(var(--secondary));
 	--color-secondary-foreground: hsl(var(--secondary-foreground));
@@ -83,8 +84,11 @@
 		--popover: 0 0% 100%;
 		--popover-foreground: 240 6% 10%;
 
-		/* Primary — Sunset orange (default) */
-		--primary: 24.6 95% 53.1%; /* #f97316 orange-500 */
+		/* Primary — Sunset orange (default). --primary is the accent (text/border/
+		 * tints); --primary-fill is the button-background value (white labels).
+		 * They match in light mode and diverge in dark (see .dark). */
+		--primary: 24 90% 46%;
+		--primary-fill: 24 90% 46%;
 		--primary-foreground: 0 0% 100%;
 
 		/* Secondary */
@@ -106,19 +110,21 @@
 		--border: 40 9% 80%; /* ≈ rgba(0,0,0,0.09) on warm stone */
 		--border-strong: 40 6% 72%; /* ≈ rgba(0,0,0,0.18) on warm stone */
 		--input: 40 9% 80%;
-		--ring: 24.6 95% 53.1%;
+		--ring: 24 90% 46%;
 
 		/* Destructive */
 		--destructive: 0 84.2% 60.2%;
 		--destructive-foreground: 0 0% 98%;
 		--destructive-text: 0 60% 48%; /* muted rose — accessible text on light bg, ~4.8:1 */
 
-		/* Charts */
-		--chart-1: 24.6 95% 53.1%;
-		--chart-2: 173 58% 39%;
-		--chart-3: 197 37% 24%;
-		--chart-4: 43 74% 66%;
-		--chart-5: 27 87% 67%;
+		/* Charts — cohesive categorical set: accent + 4 evenly-spaced hues,
+		 * consistent with dark mode (tuned only in lightness). chart-1 tracks
+		 * the active accent. */
+		--chart-1: 24 90% 46%;
+		--chart-2: 172 66% 38%; /* teal */
+		--chart-3: 258 55% 55%; /* violet */
+		--chart-4: 38 88% 48%; /* amber */
+		--chart-5: 340 72% 50%; /* rose */
 
 		/* HTTP method colors */
 		--method-get: 142 76% 36%;
@@ -130,7 +136,7 @@
 		--method-options: 240 5% 64%;
 
 		/* Variable highlight */
-		--variable: 24.6 95% 53.1%;
+		--variable: 24 90% 46%;
 
 		/* Semantic — `-text` variants are darkened for legible text on light
 		 * surfaces (the base tokens are tuned as fills/indicators, like
@@ -166,52 +172,62 @@
 
 	/* ── Accent color schemes (light mode) ── */
 
+	/* Light: --primary is the accent (used for text/border/ring/tints) and is
+	 * deep enough to read on light surfaces; --primary-fill (button fills) is
+	 * the same deep value here — white labels clear AA-large. In dark mode the
+	 * two diverge (see the .dark blocks). */
 	[data-color-scheme="sunset"] {
-		--primary: 24.6 95% 53.1%;
+		--primary: 24 90% 46%;
+		--primary-fill: 24 90% 46%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 24.6 95% 53.1%;
-		--variable: 24.6 95% 53.1%;
-		--chart-1: 24.6 95% 53.1%;
+		--ring: 24 90% 46%;
+		--variable: 24 90% 46%;
+		--chart-1: 24 90% 46%;
 	}
 
 	[data-color-scheme="sky"] {
-		--primary: 188 94% 43%; /* #22d3ee cyan-400 */
+		--primary: 192 95% 36%;
+		--primary-fill: 192 95% 36%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 188 94% 43%;
-		--variable: 188 94% 43%;
-		--chart-1: 188 94% 43%;
+		--ring: 192 95% 36%;
+		--variable: 192 95% 36%;
+		--chart-1: 192 95% 36%;
 	}
 
 	[data-color-scheme="ocean"] {
-		--primary: 217 91% 60%;
+		--primary: 217 80% 48%;
+		--primary-fill: 217 80% 48%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 217 91% 60%;
-		--variable: 217 91% 60%;
-		--chart-1: 217 91% 60%;
+		--ring: 217 80% 48%;
+		--variable: 217 80% 48%;
+		--chart-1: 217 80% 48%;
 	}
 
 	[data-color-scheme="forest"] {
-		--primary: 142 76% 36%;
+		--primary: 142 72% 33%;
+		--primary-fill: 142 72% 33%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 142 76% 36%;
-		--variable: 142 76% 36%;
-		--chart-1: 142 76% 36%;
+		--ring: 142 72% 33%;
+		--variable: 142 72% 33%;
+		--chart-1: 142 72% 33%;
 	}
 
 	[data-color-scheme="aurora"] {
-		--primary: 258 87% 74%; /* #a78bfa violet-400 */
+		--primary: 262 55% 54%;
+		--primary-fill: 262 55% 54%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 258 87% 74%;
-		--variable: 258 87% 74%;
-		--chart-1: 258 87% 74%;
+		--ring: 262 55% 54%;
+		--variable: 262 55% 54%;
+		--chart-1: 262 55% 54%;
 	}
 
 	[data-color-scheme="coral"] {
-		--primary: 0 72% 65%;
+		--primary: 0 68% 54%;
+		--primary-fill: 0 68% 54%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 0 72% 65%;
-		--variable: 0 72% 65%;
-		--chart-1: 0 72% 65%;
+		--ring: 0 68% 54%;
+		--variable: 0 68% 54%;
+		--chart-1: 0 68% 54%;
 	}
 
 	/* ── Dark mode ── */
@@ -226,8 +242,10 @@
 		--popover: 240 6% 11%;
 		--popover-foreground: 240 5% 96%;
 
-		/* Primary — Sunset orange (default) */
-		--primary: 24.6 95% 53.1%;
+		/* Primary — Sunset orange (default). Brightened accent for text on the
+		 * near-black canvas; --primary-fill stays deep for white-labelled buttons. */
+		--primary: 24 95% 58%;
+		--primary-fill: 24 90% 46%;
 		--primary-foreground: 0 0% 100%;
 
 		/* Secondary */
@@ -249,22 +267,23 @@
 		--border: 0 0% 10%; /* ≈ rgba(255,255,255,0.07) on dark canvas */
 		--border-strong: 0 0% 18%; /* ≈ rgba(255,255,255,0.15) on dark canvas */
 		--input: 240 6% 11%;
-		--ring: 24.6 95% 53.1%;
+		--ring: 24 95% 58%;
 
 		/* Destructive */
 		--destructive: 0 62.8% 30.6%;
 		--destructive-foreground: 0 0% 98%;
 		--destructive-text: 0 65% 63%; /* muted rose — accessible text on dark bg, ~4.5:1 */
 
-		/* Charts */
-		--chart-1: 24.6 95% 53.1%;
-		--chart-2: 160 60% 45%;
-		--chart-3: 30 80% 55%;
-		--chart-4: 280 65% 60%;
-		--chart-5: 340 75% 55%;
+		/* Charts — same cohesive hues as light, lifted in lightness for the dark
+		 * ground. chart-1 tracks the active accent. */
+		--chart-1: 24 95% 58%;
+		--chart-2: 172 60% 52%; /* teal */
+		--chart-3: 258 78% 72%; /* violet */
+		--chart-4: 38 90% 60%; /* amber */
+		--chart-5: 340 74% 62%; /* rose */
 
 		/* Variable highlight */
-		--variable: 24.6 95% 53.1%;
+		--variable: 24 95% 58%;
 
 		/* Semantic — `-text` variants tuned lighter for legible text on dark. */
 		--success: 142 70% 45%;
@@ -284,52 +303,62 @@
 
 	/* ── Accent color schemes (dark mode) ── */
 
+	/* Dark: --primary (accent text/border/tints/ring) is brightened so it reads
+	 * on the near-black canvas; --primary-fill (button backgrounds) stays deep so
+	 * white labels clear AA-large. This is the split that resolves the
+	 * bright-text vs white-on-fill bind. */
 	.dark[data-color-scheme="sunset"] {
-		--primary: 24.6 95% 53.1%;
+		--primary: 24 95% 58%;
+		--primary-fill: 24 90% 46%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 24.6 95% 53.1%;
-		--variable: 24.6 95% 53.1%;
-		--chart-1: 24.6 95% 53.1%;
+		--ring: 24 95% 58%;
+		--variable: 24 95% 58%;
+		--chart-1: 24 95% 58%;
 	}
 
 	.dark[data-color-scheme="sky"] {
-		--primary: 188 94% 43%;
+		--primary: 188 90% 52%;
+		--primary-fill: 192 95% 36%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 188 94% 43%;
-		--variable: 188 94% 43%;
-		--chart-1: 188 94% 43%;
+		--ring: 188 90% 52%;
+		--variable: 188 90% 52%;
+		--chart-1: 188 90% 52%;
 	}
 
 	.dark[data-color-scheme="ocean"] {
-		--primary: 217 78% 51%;
+		--primary: 217 90% 66%;
+		--primary-fill: 217 80% 48%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 217 78% 51%;
-		--variable: 217 78% 51%;
-		--chart-1: 217 78% 51%;
+		--ring: 217 90% 66%;
+		--variable: 217 90% 66%;
+		--chart-1: 217 90% 66%;
 	}
 
 	.dark[data-color-scheme="forest"] {
-		--primary: 142 70% 45%;
+		--primary: 142 65% 52%;
+		--primary-fill: 142 72% 33%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 142 70% 45%;
-		--variable: 142 70% 45%;
-		--chart-1: 142 70% 45%;
+		--ring: 142 65% 52%;
+		--variable: 142 65% 52%;
+		--chart-1: 142 65% 52%;
 	}
 
 	.dark[data-color-scheme="aurora"] {
-		--primary: 258 87% 74%;
+		--primary: 258 88% 76%;
+		--primary-fill: 262 55% 54%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 258 87% 74%;
-		--variable: 258 87% 74%;
-		--chart-1: 258 87% 74%;
+		--ring: 258 88% 76%;
+		--variable: 258 88% 76%;
+		--chart-1: 258 88% 76%;
 	}
 
 	.dark[data-color-scheme="coral"] {
-		--primary: 0 72% 55%;
+		--primary: 0 80% 68%;
+		--primary-fill: 0 68% 54%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 0 72% 55%;
-		--variable: 0 72% 55%;
-		--chart-1: 0 72% 55%;
+		--ring: 0 80% 68%;
+		--variable: 0 80% 68%;
+		--chart-1: 0 80% 68%;
 	}
 }
 

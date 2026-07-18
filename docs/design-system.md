@@ -82,13 +82,25 @@ sub-labels), tuned to stay legible (~3:1 on card) while remaining below
 
 ### Primary (Accent Color)
 
-Default is Sunset orange. Overridden by `[data-color-scheme]` attribute.
+Default is Sunset orange. Overridden by `[data-color-scheme]` attribute. The
+accent is **split into two tokens** to resolve a contrast bind:
+
+- **`--primary`** — the accent used for text, borders, rings, tints, indicators
+  (`text-primary`, `border-primary`, `bg-primary/10`). Mode-adaptive: deep on
+  the light card, brightened on the near-black dark canvas so it reads in both.
+- **`--primary-fill`** — solid button/badge backgrounds that carry a white
+  label (`bg-primary-fill`). Kept deep in **both** modes so white text clears
+  AA-large (a brightened dark accent would fail white-on-fill).
+
+Rule: white-labelled solid fills use `bg-primary-fill`; everything else accent
+uses `--primary`. `--primary-foreground` (white) sits on the fill.
 
 ```css
---primary:            24.6 95% 53.1%;   /* #f97316 — orange-500 */
---primary-foreground:  0   0% 100%;     /* white text on primary */
---ring:               24.6 95% 53.1%;   /* focus rings */
---variable:           24.6 95% 53.1%;   /* variable highlights in URL/body */
+/* Sunset (default) */
+--primary:       24 90% 46%;   /* light — deep accent */    /* dark: 24 95% 58% (brighter) */
+--primary-fill:  24 90% 46%;   /* both modes — white-safe button fill */
+--primary-foreground: 0 0% 100%;
+--ring / --variable: track --primary
 ```
 
 ### Semantic Status Colors
@@ -253,27 +265,34 @@ const METHOD_COLORS: Record<HttpMethod, string> = {
 
 ### Charts
 
-```css
-/* Dark */
---chart-1: 24.6 95% 53.1%;   /* primary (orange by default) */
---chart-2: 160  60% 45%;
---chart-3:  30  80% 55%;
---chart-4: 280  65% 60%;
---chart-5: 340  75% 55%;
+A cohesive categorical set — `chart-1` tracks the active accent, then four
+evenly-spaced hues (teal / violet / amber / rose) shared across modes and tuned
+only in lightness for each ground.
 
+```css
 /* Light */
---chart-1: 24.6 95% 53.1%;   /* same */
---chart-2: 173 58% 39%;
---chart-3: 197 37% 24%;
---chart-4:  43 74% 66%;
---chart-5:  27 87% 67%;
+--chart-1: <accent>;         /* tracks --primary */
+--chart-2: 172 66% 38%;   /* teal */
+--chart-3: 258 55% 55%;   /* violet */
+--chart-4:  38 88% 48%;   /* amber */
+--chart-5: 340 72% 50%;   /* rose */
+
+/* Dark — same hues, lifted for the dark ground */
+--chart-1: <accent>;
+--chart-2: 172 60% 52%;
+--chart-3: 258 78% 72%;
+--chart-4:  38 90% 60%;
+--chart-5: 340 74% 62%;
 ```
 
 ---
 
 ## Color Schemes (Accent Themes)
 
-Applied via `data-color-scheme` attribute on `<html>`. Only `--primary`, `--primary-foreground`, `--ring`, `--variable`, and `--chart-1` change.
+Applied via `data-color-scheme` attribute on `<html>`. Each scheme sets
+`--primary`, `--primary-fill`, `--primary-foreground`, `--ring`, `--variable`,
+and `--chart-1`. The authoritative per-scheme values (deep fill + mode-adaptive
+accent) live in `app/src/index.css`; the table below is an approximate guide.
 
 | Scheme | Light HSL | Dark HSL |
 |--------|-----------|----------|

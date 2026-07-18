@@ -140,7 +140,7 @@ export default function UISettingsPanel() {
 													className={cn(
 														"w-10 h-10 rounded-full flex items-center justify-center",
 														isSelected
-															? "bg-primary text-primary-foreground"
+															? "bg-primary-fill text-primary-foreground"
 															: "bg-muted text-muted-foreground"
 													)}
 												>
@@ -217,7 +217,7 @@ export default function UISettingsPanel() {
 													<div
 														data-color-scheme={option.value}
 														className={cn(
-															"w-8 h-8 rounded-full flex items-center justify-center bg-primary",
+															"w-8 h-8 rounded-full flex items-center justify-center bg-primary-fill",
 															isDark && "dark",
 															isSelected &&
 																"ring-2 ring-offset-2 ring-primary ring-offset-background"
