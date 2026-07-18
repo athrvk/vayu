@@ -178,11 +178,11 @@ export default function LoadTestConfigDialog({
 					    scripts on /request but not on /run, so the script will be
 					    silently skipped during the load test. */}
 					{hasPreRequestScript && (
-						<div className="flex gap-2.5 rounded-md border border-warning/30 bg-warning/10 px-3 py-2.5 text-[12px] text-warning">
+						<div className="flex gap-2.5 rounded-md border border-warning/30 bg-warning/10 px-3 py-2.5 text-[12px] text-warning-text">
 							<AlertTriangle className="h-4 w-4 shrink-0 mt-px" />
 							<div className="space-y-1">
 								<p className="font-semibold">Pre-request script will not run</p>
-								<p className="text-[11.5px] text-warning/85 leading-relaxed">
+								<p className="text-[11.5px] text-warning-text/85 leading-relaxed">
 									Vayu's load test engine doesn't execute pre-request scripts
 									(running JS per request would cap throughput). Your test script
 									will still run once after the test, against sampled responses.
@@ -373,7 +373,7 @@ export default function LoadTestConfigDialog({
 
 					{/* Ramp duration validation — total duration must include the ramp. */}
 					{rampDurationError && (
-						<div className="flex gap-2.5 rounded-md border border-warning/30 bg-warning/10 px-3 py-2.5 text-[12px] text-warning">
+						<div className="flex gap-2.5 rounded-md border border-warning/30 bg-warning/10 px-3 py-2.5 text-[12px] text-warning-text">
 							<AlertTriangle className="h-4 w-4 shrink-0 mt-px" />
 							<p className="leading-relaxed">{rampDurationError}</p>
 						</div>

@@ -106,7 +106,7 @@ export default function OAuth2LoadTestGuard({
 	if (state.kind === "no-token") {
 		return (
 			<div className="flex items-center gap-2 rounded-md border border-border bg-panel px-3 py-2 text-xs text-muted-foreground">
-				<AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />
+				<AlertTriangle className="h-3.5 w-3.5 text-warning-text shrink-0" />
 				<span className="flex-1">
 					No token cached yet. One is fetched when the test starts; if its lifetime is
 					shorter than the test, requests will fail after it expires.
@@ -133,7 +133,7 @@ export default function OAuth2LoadTestGuard({
 	return (
 		<div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5">
 			<div className="flex items-start gap-2">
-				<AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+				<AlertTriangle className="h-4 w-4 text-warning-text shrink-0 mt-0.5" />
 				<div className="text-xs text-foreground">
 					{isRefreshable ? (
 						<>

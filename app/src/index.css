@@ -29,8 +29,10 @@
 	--color-subtle-foreground: hsl(var(--subtle-foreground));
 	--color-success: hsl(var(--success));
 	--color-success-foreground: hsl(var(--success-foreground));
+	--color-success-text: hsl(var(--success-text));
 	--color-warning: hsl(var(--warning));
 	--color-warning-foreground: hsl(var(--warning-foreground));
+	--color-warning-text: hsl(var(--warning-text));
 	--color-info: hsl(var(--info));
 	--color-info-foreground: hsl(var(--info-foreground));
 	--color-variable: hsl(var(--variable));
@@ -98,7 +100,7 @@
 
 		/* Foreground scale */
 		--foreground: 240 6% 10%; /* #18181b — zinc-900 */
-		--subtle-foreground: 240 7% 78%; /* #c4c4cc — muted placeholder */
+		--subtle-foreground: 240 4% 58%; /* de-emphasized text, still the faintest tier (~3:1 on card) */
 
 		/* Borders */
 		--border: 40 9% 80%; /* ≈ rgba(0,0,0,0.09) on warm stone */
@@ -130,11 +132,15 @@
 		/* Variable highlight */
 		--variable: 24.6 95% 53.1%;
 
-		/* Semantic */
+		/* Semantic — `-text` variants are darkened for legible text on light
+		 * surfaces (the base tokens are tuned as fills/indicators, like
+		 * --destructive vs --destructive-text). */
 		--success: 142 76% 36%;
 		--success-foreground: 0 0% 100%;
+		--success-text: 142 72% 30%; /* accessible green text on light bg (~5:1) */
 		--warning: 38 92% 50%;
 		--warning-foreground: 0 0% 100%;
+		--warning-text: 38 90% 35%; /* accessible amber text on light bg (~4.6:1) */
 		--info: 199 89% 48%;
 		--info-foreground: 0 0% 100%;
 
@@ -237,7 +243,7 @@
 
 		/* Foreground scale */
 		--foreground: 240 5% 96%; /* #f4f4f5 — zinc-100 */
-		--subtle-foreground: 240 5% 34%; /* #52525b — zinc-600 */
+		--subtle-foreground: 240 4% 44%; /* de-emphasized text, still the faintest tier (~3:1 on card) */
 
 		/* Borders */
 		--border: 0 0% 10%; /* ≈ rgba(255,255,255,0.07) on dark canvas */
@@ -260,11 +266,13 @@
 		/* Variable highlight */
 		--variable: 24.6 95% 53.1%;
 
-		/* Semantic */
+		/* Semantic — `-text` variants tuned lighter for legible text on dark. */
 		--success: 142 70% 45%;
 		--success-foreground: 0 0% 100%;
+		--success-text: 142 60% 55%; /* accessible green text on dark bg */
 		--warning: 38 92% 50%;
 		--warning-foreground: 0 0% 100%;
+		--warning-text: 40 92% 60%; /* accessible amber text on dark bg */
 		--info: 199 89% 48%;
 		--info-foreground: 0 0% 100%;
 

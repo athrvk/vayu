@@ -198,8 +198,8 @@ export function VariablePopover({
 										</label>
 										{varInfo.secret && (
 											<div className="flex items-center gap-1">
-												<KeyRound className="w-3 h-3 text-warning" />
-												<span className="text-[10px] text-warning">
+												<KeyRound className="w-3 h-3 text-warning-text" />
+												<span className="text-[10px] text-warning-text">
 													Secret
 												</span>
 											</div>

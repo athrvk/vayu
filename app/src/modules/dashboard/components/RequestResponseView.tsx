@@ -92,7 +92,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 											code === "0" && "text-status-error",
 											code.startsWith("2") && "text-status-success",
 											code.startsWith("3") && "text-status-running",
-											code.startsWith("4") && "text-warning",
+											code.startsWith("4") && "text-warning-text",
 											code.startsWith("5") && "text-status-error"
 										)}
 									>

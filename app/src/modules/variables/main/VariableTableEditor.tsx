@@ -741,7 +741,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												className={cn(
 													"h-8 w-8 transition-colors",
 													variable.secret
-														? "text-warning hover:text-warning hover:bg-warning/10"
+														? "text-warning-text hover:text-warning-text hover:bg-warning/10"
 														: "text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
 												)}
 												title={

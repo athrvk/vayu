@@ -44,13 +44,17 @@ All tokens live in `app/src/index.css` as HSL channel values (no `hsl()` wrapper
 /* Dark */
 --foreground:         240  5% 96%;   /* #f4f4f5 — primary text */
 --muted-foreground:   240  5% 65%;   /* #a1a1aa — secondary / labels */
---subtle-foreground:  240  5% 34%;   /* #52525b — de-emphasized, placeholders */
+--subtle-foreground:  240  4% 44%;   /* de-emphasized text — faintest readable tier */
 
 /* Light */
 --foreground:         240  6% 10%;   /* #18181b — primary text */
 --muted-foreground:   240  4% 46%;   /* #71717a — secondary / labels */
---subtle-foreground:  240  7% 78%;   /* #c4c4cc — de-emphasized, placeholders */
+--subtle-foreground:  240  4% 58%;   /* de-emphasized text — faintest readable tier */
 ```
+
+`subtle-foreground` is the least-prominent text tier (ancillary units, dashes,
+sub-labels), tuned to stay legible (~3:1 on card) while remaining below
+`muted-foreground` in emphasis.
 
 ### Interactive States
 
@@ -103,6 +107,20 @@ These differ between light and dark mode.
 --warning:             38 92% 50%;   /* same */
 --info:               199 89% 48%;   /* same */
 --destructive:          0 62.8% 30.6%;  /* darker red */
+```
+
+**`-text` variants for legible text.** The base `--success` / `--warning` /
+`--destructive` tokens are tuned as *fills and indicators*; as small text on a
+light surface they fall below AA. Use the darkened (light) / lightened (dark)
+`-text` variant when the color is the text itself — `text-success-text`,
+`text-warning-text`, `text-destructive-text` — keeping `bg-*` / `border-*`
+fills on the base token.
+
+```css
+/* Light — accessible text on light surfaces */
+--success-text:  142 72% 30%;   --warning-text:  38 90% 35%;   --destructive-text: 0 60% 48%;
+/* Dark — accessible text on dark surfaces */
+--success-text:  142 60% 55%;   --warning-text:  40 92% 60%;   --destructive-text: 0 65% 63%;
 ```
 
 ### Variable Scope Colors (Categorical)

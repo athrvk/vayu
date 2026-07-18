@@ -94,7 +94,7 @@ function SchemaStatusBadge({ status }: { status: "idle" | "loading" | "ready" | 
 	}
 	if (status === "ready") {
 		return (
-			<span className="flex items-center gap-1 text-[10px] text-success">
+			<span className="flex items-center gap-1 text-[10px] text-success-text">
 				<CheckCircle2 className="w-3 h-3" />
 				Schema
 			</span>

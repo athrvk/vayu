@@ -408,12 +408,12 @@ export default function WelcomeScreen() {
 																: "Design"}
 														</span>
 														{run.status === "completed" && (
-															<span className="text-xs text-success">
+															<span className="text-xs text-success-text">
 																Completed
 															</span>
 														)}
 														{run.status === "stopped" && (
-															<span className="text-xs text-warning">
+															<span className="text-xs text-warning-text">
 																Stopped
 															</span>
 														)}
