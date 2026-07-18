@@ -39,7 +39,7 @@ export const COLOR_SCHEMES = [
 export type ColorScheme = (typeof COLOR_SCHEMES)[number]["value"];
 
 /** Accent applied before the user picks one. */
-export const DEFAULT_COLOR_SCHEME: ColorScheme = "sunset";
+export const DEFAULT_COLOR_SCHEME: ColorScheme = "ocean";
 
 const SCHEME_VALUES = new Set<string>(COLOR_SCHEMES.map((s) => s.value));
 
