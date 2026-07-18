@@ -52,7 +52,7 @@ export const UI_FONTS = [
 
 /** UI font preference, applied by overriding the `--font-sans` custom property. */
 export type UiFont = (typeof UI_FONTS)[number]["value"];
-export const DEFAULT_UI_FONT: UiFont = "grotesk";
+export const DEFAULT_UI_FONT: UiFont = "inter";
 
 export interface ScaleOption {
 	readonly value: string;
