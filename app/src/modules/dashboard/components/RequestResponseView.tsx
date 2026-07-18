@@ -24,6 +24,19 @@ import {
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
+import { InfoChip } from "./shared";
+
+// Per-phase explanations for the network timing breakdown. Kept in sync with
+// the wording in ResponseTimingTab (request-builder), which explains the same
+// DNS → Connect → TLS → TTFB → Download sequence.
+const PHASE_TIPS = {
+	dns: "Hostname → IP resolution. Usually a few ms once cached; >50ms suggests slow DNS or a fresh lookup.",
+	connect: "TCP three-way handshake. Zero on connection reuse (HTTP keep-alive / HTTP/2).",
+	tls: "SSL/TLS handshake (HTTPS only). Zero for plain HTTP and on resumed connections.",
+	ttfb: "Time to first byte — server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
+	download:
+		"Response body transfer time. Large for big payloads or slow links; near-zero for small JSON.",
+} as const;
 
 // Helper to format timestamp
 function formatTime(timestamp: number): string {
@@ -379,7 +392,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																			undefined && (
 																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
-																					DNS
+																					DNS{" "}
+																					<InfoChip
+																						tip={
+																							PHASE_TIPS.dns
+																						}
+																					/>
 																				</p>
 																				<p className="font-mono font-medium">
 																					{result.trace.dnsMs.toFixed(
@@ -393,7 +411,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																			undefined && (
 																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
-																					Connect
+																					Connect{" "}
+																					<InfoChip
+																						tip={
+																							PHASE_TIPS.connect
+																						}
+																					/>
 																				</p>
 																				<p className="font-mono font-medium">
 																					{result.trace.connectMs.toFixed(
@@ -407,7 +430,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																			undefined && (
 																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
-																					TLS
+																					TLS{" "}
+																					<InfoChip
+																						tip={
+																							PHASE_TIPS.tls
+																						}
+																					/>
 																				</p>
 																				<p className="font-mono font-medium">
 																					{result.trace.tlsMs.toFixed(
@@ -422,7 +450,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																			undefined && (
 																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
-																					TTFB
+																					TTFB{" "}
+																					<InfoChip
+																						tip={
+																							PHASE_TIPS.ttfb
+																						}
+																					/>
 																				</p>
 																				<p className="font-mono font-medium">
 																					{result.trace.firstByteMs.toFixed(
@@ -436,7 +469,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																			undefined && (
 																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
-																					Download
+																					Download{" "}
+																					<InfoChip
+																						tip={
+																							PHASE_TIPS.download
+																						}
+																					/>
 																				</p>
 																				<p className="font-mono font-medium">
 																					{result.trace.downloadMs.toFixed(

@@ -17,7 +17,7 @@ import {
 	Monitor,
 	Sun,
 	Moon,
-	Palette,
+	SunMoon,
 	CheckCircle2,
 	SwatchBook,
 	FolderOpen,
@@ -105,7 +105,7 @@ export default function UISettingsPanel() {
 					<Card>
 						<CardHeader className="pb-3">
 							<div className="flex items-center gap-2">
-								<Palette className="w-5 h-5 text-muted-foreground" />
+								<SunMoon className="w-5 h-5 text-muted-foreground" />
 								<CardTitle className="text-base">Theme Mode</CardTitle>
 							</div>
 							<CardDescription>
