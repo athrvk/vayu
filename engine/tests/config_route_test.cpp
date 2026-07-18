@@ -34,6 +34,11 @@ class ConfigRouteTest : public ::testing::Test {
     void SetUp () override {
         cleanup ();
         db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        // The constructor only syncs the schema; seeding the default config
+        // (incl. the "workers" key these tests exercise) happens in init(),
+        // exactly as the daemon does at startup. Without this the config table
+        // is empty and every keyed update is rejected as an unknown key.
+        db_->init ();
     }
     void TearDown () override {
         db_.reset ();
