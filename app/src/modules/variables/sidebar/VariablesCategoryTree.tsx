@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, Button, Input, DeleteConfirmDialog } from "@/components/ui";
+import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 
 interface VariablesCategoryTreeProps {
 	collections: Collection[];
@@ -54,7 +55,7 @@ export default function VariablesCategoryTree({
 
 	// Environment management state
 	const [creatingEnvironment, setCreatingEnvironment] = useState(false);
-	const [newEnvName, setNewEnvName] = useState("New Environment");
+	const [newEnvName, setNewEnvName] = useState(DEFAULT_ENVIRONMENT_NAME);
 	const [deletingEnvId, setDeletingEnvId] = useState<string | null>(null);
 	const [deleteConfirmEnvId, setDeleteConfirmEnvId] = useState<string | null>(null);
 
@@ -90,7 +91,7 @@ export default function VariablesCategoryTree({
 		});
 
 		setCreatingEnvironment(false);
-		setNewEnvName("New Environment");
+		setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
 		selectCategory({ type: "environment", environmentId: newEnv.id });
 	};
 
@@ -183,7 +184,7 @@ export default function VariablesCategoryTree({
 										if (e.key === "Enter") handleCreateEnvironment();
 										if (e.key === "Escape") {
 											setCreatingEnvironment(false);
-											setNewEnvName("New Environment");
+											setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
 										}
 									}}
 									onBlur={() => {
@@ -191,7 +192,7 @@ export default function VariablesCategoryTree({
 											handleCreateEnvironment();
 										} else {
 											setCreatingEnvironment(false);
-											setNewEnvName("New Environment");
+											setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
 										}
 									}}
 									autoFocus

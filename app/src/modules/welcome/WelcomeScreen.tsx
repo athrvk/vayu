@@ -41,6 +41,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { formatDistanceToNow } from "date-fns";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
+import { DEFAULT_COLLECTION_NAME } from "@/constants/collection";
 
 export default function WelcomeScreen() {
 	const openImport = useImportModalStore((s) => s.open);
@@ -102,7 +103,7 @@ export default function WelcomeScreen() {
 			if (!targetCollectionId) {
 				// Create a default collection
 				const newCollection = await createCollectionMutation.mutateAsync({
-					name: "New Collection",
+					name: DEFAULT_COLLECTION_NAME,
 				});
 				targetCollectionId = newCollection.id;
 			}
