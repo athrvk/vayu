@@ -205,8 +205,8 @@ export class EngineSidecar {
 	/**
 	 * Get the path to the vayu-engine binary
 	 * Development:
-	 *   - Unix: ../engine/build/vayu-engine
-	 *   - Windows: ../engine/build/Release/vayu-engine.exe
+	 *   - All platforms: ../engine/build/vayu-engine[.exe]
+	 *   - Legacy Windows multi-config layout: ../engine/build/Debug/vayu-engine.exe
 	 * Production:
 	 *   - macOS: Contents/Resources/bin/vayu-engine
 	 *   - Windows: resources/bin/vayu-engine.exe
@@ -217,29 +217,16 @@ export class EngineSidecar {
 		const binaryName = isWindows ? "vayu-engine.exe" : "vayu-engine";
 
 		if (isDev) {
-			// In development, use the build directory
-			if (isWindows) {
-				// Windows build outputs to build/Debug/
-				const devBinaryPath = path.join(
-					app.getAppPath(),
-					"..",
-					"engine",
-					"build",
-					"Debug",
-					binaryName
-				);
-				return devBinaryPath;
-			} else {
-				// Unix systems (macOS, Linux)
-				const devBinaryPath = path.join(
-					app.getAppPath(),
-					"..",
-					"engine",
-					"build",
-					binaryName
-				);
-				return devBinaryPath;
-			}
+			// Every dev preset now uses the Ninja generator, which is single-config
+			// and writes straight into build/. Older Windows trees configured with
+			// the Visual Studio generator nest the binary under build/Debug/, so
+			// fall back to that rather than failing on a stale build directory.
+			const buildDir = path.join(app.getAppPath(), "..", "engine", "build");
+			const candidates = [
+				path.join(buildDir, binaryName),
+				path.join(buildDir, "Debug", binaryName),
+			];
+			return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
 		} else {
 			// In production, the binary is in resources/bin
 			// process.resourcesPath points to the Resources directory
