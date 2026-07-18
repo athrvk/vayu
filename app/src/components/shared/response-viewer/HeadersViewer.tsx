@@ -37,7 +37,7 @@ export default function HeadersViewer({
 	return (
 		<Collapsible open={isOpen} onOpenChange={setIsOpen} className={className}>
 			<CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
-				<div className="flex items-center justify-center w-5 h-5 rounded bg-muted group-hover:bg-muted/80 transition-colors">
+				<div className="flex items-center justify-center w-5 h-5 rounded-md bg-muted group-hover:bg-muted/80 transition-colors">
 					{isOpen ? (
 						<ChevronDown className="w-4 h-4 text-muted-foreground" />
 					) : (

@@ -94,7 +94,7 @@ function SchemaStatusBadge({ status }: { status: "idle" | "loading" | "ready" | 
 	}
 	if (status === "ready") {
 		return (
-			<span className="flex items-center gap-1 text-[10px] text-success">
+			<span className="flex items-center gap-1 text-[10px] text-success-text">
 				<CheckCircle2 className="w-3 h-3" />
 				Schema
 			</span>
@@ -336,7 +336,7 @@ export default function BodyPanel() {
 								</label>
 							)}
 							<div
-								className="border border-input overflow-hidden"
+								className="rounded-md border border-input overflow-hidden"
 								style={{ height: editorHeight }}
 							>
 								<CodeEditor
@@ -355,7 +355,7 @@ export default function BodyPanel() {
 									Resolved Preview
 								</label>
 								<pre
-									className="p-3 border border-input font-mono text-sm bg-muted/50 overflow-auto whitespace-pre-wrap"
+									className="p-3 rounded-md border border-input font-mono text-sm bg-muted/50 overflow-auto whitespace-pre-wrap"
 									style={{ height: editorHeight }}
 								>
 									{resolvedBody || (
@@ -374,7 +374,7 @@ export default function BodyPanel() {
 			{request.bodyMode === "graphql" && (
 				<div>
 					<div
-						className="border border-input overflow-hidden"
+						className="rounded-md border border-input overflow-hidden"
 						style={{ height: editorHeight }}
 					>
 						<ResizablePanelGroup orientation="vertical" className="h-full">

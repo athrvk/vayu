@@ -23,16 +23,16 @@ interface LatencyMetricProps {
 export default function LatencyMetric({ label, value, variant = "default" }: LatencyMetricProps) {
 	const colorClass = {
 		default: "text-foreground",
-		primary: "text-blue-600 dark:text-blue-400",
-		warning: "text-orange-600 dark:text-orange-400",
-		danger: "text-red-600 dark:text-red-400",
+		primary: "text-status-running",
+		warning: "text-status-stopped",
+		danger: "text-status-error",
 	}[variant];
 
 	const bgClass = {
 		default: "bg-muted/50",
-		primary: "bg-blue-50 dark:bg-blue-950/30",
-		warning: "bg-orange-50 dark:bg-orange-950/30",
-		danger: "bg-red-50 dark:bg-red-950/30",
+		primary: "bg-status-running/10",
+		warning: "bg-status-stopped/10",
+		danger: "bg-status-error/10",
 	}[variant];
 
 	return (

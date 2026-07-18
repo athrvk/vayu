@@ -40,27 +40,27 @@ export default function TestResults({ results }: TestResultsProps) {
 						className={cn(
 							"p-3 border",
 							test.passed
-								? "bg-green-500/10 border-green-500/20"
-								: "bg-red-500/10 border-red-500/20"
+								? "bg-status-success/10 border-status-success/20"
+								: "bg-status-error/10 border-status-error/20"
 						)}
 					>
 						<div className="flex items-start gap-2">
 							{test.passed ? (
-								<CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
+								<CheckCircle className="w-5 h-5 text-status-success mt-0.5 flex-shrink-0" />
 							) : (
-								<XCircle className="w-5 h-5 text-destructive mt-0.5 flex-shrink-0" />
+								<XCircle className="w-5 h-5 text-status-error mt-0.5 flex-shrink-0" />
 							)}
 							<div className="flex-1">
 								<p
 									className={cn(
 										"text-sm font-medium",
-										test.passed ? "text-green-500" : "text-red-500"
+										test.passed ? "text-status-success" : "text-status-error"
 									)}
 								>
 									{test.name}
 								</p>
 								{test.error && (
-									<p className="text-sm text-red-400 mt-1 font-mono">
+									<p className="text-sm text-status-error mt-1 font-mono">
 										{test.error}
 									</p>
 								)}

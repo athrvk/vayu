@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, Button, Input, DeleteConfirmDialog } from "@/components/ui";
+import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 
 interface VariablesCategoryTreeProps {
 	collections: Collection[];
@@ -54,7 +55,7 @@ export default function VariablesCategoryTree({
 
 	// Environment management state
 	const [creatingEnvironment, setCreatingEnvironment] = useState(false);
-	const [newEnvName, setNewEnvName] = useState("New Environment");
+	const [newEnvName, setNewEnvName] = useState(DEFAULT_ENVIRONMENT_NAME);
 	const [deletingEnvId, setDeletingEnvId] = useState<string | null>(null);
 	const [deleteConfirmEnvId, setDeleteConfirmEnvId] = useState<string | null>(null);
 
@@ -90,7 +91,7 @@ export default function VariablesCategoryTree({
 		});
 
 		setCreatingEnvironment(false);
-		setNewEnvName("New Environment");
+		setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
 		selectCategory({ type: "environment", environmentId: newEnv.id });
 	};
 
@@ -131,7 +132,7 @@ export default function VariablesCategoryTree({
 					className={cn(
 						"w-full flex items-center gap-2 px-8 py-2 text-left text-sm hover:bg-accent transition-colors",
 						isSelected({ type: "globals" }) &&
-							"bg-green-50 text-green-700 dark:bg-green-950/50 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-950/70"
+							"bg-scope-global/10 text-scope-global hover:bg-scope-global/20"
 					)}
 				>
 					<Globe className="w-3 h-3" />
@@ -183,7 +184,7 @@ export default function VariablesCategoryTree({
 										if (e.key === "Enter") handleCreateEnvironment();
 										if (e.key === "Escape") {
 											setCreatingEnvironment(false);
-											setNewEnvName("New Environment");
+											setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
 										}
 									}}
 									onBlur={() => {
@@ -191,7 +192,7 @@ export default function VariablesCategoryTree({
 											handleCreateEnvironment();
 										} else {
 											setCreatingEnvironment(false);
-											setNewEnvName("New Environment");
+											setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
 										}
 									}}
 									autoFocus
@@ -220,7 +221,7 @@ export default function VariablesCategoryTree({
 												type: "environment",
 												environmentId: environment.id,
 											}) &&
-												"bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/70"
+												"bg-scope-environment/10 text-scope-environment hover:bg-scope-environment/20"
 										)}
 										onClick={() =>
 											selectCategory({
@@ -234,7 +235,7 @@ export default function VariablesCategoryTree({
 										{variableCount > 0 && (
 											<Badge
 												variant="secondary"
-												className="text-xs bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-300 px-1.5 py-0 shrink-0"
+												className="text-xs bg-scope-environment/10 text-scope-environment px-1.5 py-0 shrink-0"
 											>
 												{variableCount}
 											</Badge>
@@ -305,7 +306,7 @@ export default function VariablesCategoryTree({
 												type: "collection",
 												collectionId: collection.id,
 											}) &&
-												"bg-orange-50 text-orange-700 dark:bg-orange-950/50 dark:text-orange-300 hover:bg-orange-100 dark:hover:bg-orange-950/70"
+												"bg-scope-collection/10 text-scope-collection hover:bg-scope-collection/20"
 										)}
 									>
 										{/* <Folder className="w-4 h-4 text-orange-400" /> */}
@@ -313,7 +314,7 @@ export default function VariablesCategoryTree({
 										{variableCount > 0 && (
 											<Badge
 												variant="secondary"
-												className="text-xs bg-orange-100 text-orange-600 dark:bg-orange-950 dark:text-orange-300 px-1.5 py-0"
+												className="text-xs bg-scope-collection/10 text-scope-collection px-1.5 py-0"
 											>
 												{variableCount}
 											</Badge>

@@ -40,7 +40,7 @@ export default function TestScriptPanel() {
 			<div className="flex items-center justify-between">
 				<p className="text-sm text-muted-foreground">
 					Execute JavaScript after receiving the response. Use{" "}
-					<code className="bg-muted px-1 rounded">pm.test()</code> for assertions.
+					<code className="bg-muted px-1 rounded-md">pm.test()</code> for assertions.
 				</p>
 				{hasReferencedVars && (
 					<Button
@@ -79,7 +79,7 @@ export default function TestScriptPanel() {
 
 			{/* All Variables Panel */}
 			{showVariables && (
-				<div className="p-3 bg-muted/50 border border-input max-h-40 overflow-y-auto">
+				<div className="p-3 bg-muted/50 rounded-md border border-input max-h-40 overflow-y-auto">
 					<div className="grid grid-cols-2 gap-2 text-xs font-mono">
 						{Object.entries(allVariables).map(([name, info]) => (
 							<div key={name} className="flex items-center gap-2">
@@ -95,7 +95,7 @@ export default function TestScriptPanel() {
 			)}
 
 			{/* Script Editor */}
-			<div className="border border-input overflow-hidden">
+			<div className="rounded-md border border-input overflow-hidden">
 				<CodeEditor
 					height="350px"
 					language="javascript"
@@ -107,7 +107,7 @@ export default function TestScriptPanel() {
 			{/* Quick Reference */}
 			<div className="text-xs text-muted-foreground space-y-1">
 				<p className="font-medium">Quick Reference:</p>
-				<code className="block bg-muted p-2 rounded">
+				<code className="block bg-muted p-2 rounded-md">
 					pm.test("Test name", () =&gt; {"{"}
 					<br />
 					&nbsp;&nbsp;pm.response.to.have.status(200);

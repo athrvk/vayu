@@ -143,7 +143,7 @@ export function ImportModal() {
 				role="dialog"
 				aria-modal="true"
 				aria-label="Import Collection"
-				className="flex w-[500px] max-h-[82vh] flex-col overflow-hidden rounded-[10px] border border-border-strong bg-card shadow-2xl"
+				className="flex w-[500px] max-h-[82vh] flex-col overflow-hidden rounded-lg border border-border-strong bg-card shadow-2xl"
 				onClick={(e) => e.stopPropagation()}
 			>
 				<div className="flex items-center justify-between border-b border-border px-5 py-4">
@@ -216,7 +216,7 @@ export function ImportModal() {
 										{FORMAT_BADGES.map((b) => (
 											<span
 												key={b}
-												className="rounded border border-border bg-card px-2 py-0.5 text-[10px] font-semibold"
+												className="rounded-md border border-border bg-card px-2 py-0.5 text-[10px] font-semibold"
 											>
 												{b}
 											</span>
@@ -230,12 +230,12 @@ export function ImportModal() {
 										value={url}
 										onChange={(e) => setUrl(e.target.value)}
 										placeholder="https://petstore.swagger.io/v2/swagger.json"
-										className="h-9 flex-1 rounded border border-border bg-card px-3 text-[13px]"
+										className="h-9 flex-1 rounded-md border border-border bg-card px-3 text-[13px]"
 									/>
 									<button
 										onClick={handleFetchUrl}
 										disabled={!url}
-										className="h-9 rounded bg-primary px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+										className="h-9 rounded-md bg-primary-fill px-4 text-[13px] font-semibold text-white disabled:opacity-50"
 									>
 										Fetch
 									</button>
@@ -247,12 +247,12 @@ export function ImportModal() {
 										value={pasteText}
 										onChange={(e) => setPasteText(e.target.value)}
 										placeholder="Paste collection JSON or YAML here"
-										className="h-40 w-full rounded border border-border bg-card p-3 font-mono text-[12px]"
+										className="h-40 w-full rounded-md border border-border bg-card p-3 font-mono text-[12px]"
 									/>
 									<button
 										onClick={() => runDetect(pasteText)}
 										disabled={!pasteText.trim()}
-										className="mt-2 h-9 rounded bg-primary px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+										className="mt-2 h-9 rounded-md bg-primary-fill px-4 text-[13px] font-semibold text-white disabled:opacity-50"
 									>
 										Detect &amp; Preview
 									</button>
@@ -294,14 +294,14 @@ export function ImportModal() {
 							<button
 								onClick={handleClose}
 								disabled={importMutation.isPending}
-								className="h-9 rounded border border-border px-4 text-[13px]"
+								className="h-9 rounded-md border border-border px-4 text-[13px]"
 							>
 								Cancel
 							</button>
 							<button
 								onClick={handleImport}
 								disabled={importMutation.isPending}
-								className="h-9 rounded bg-primary px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+								className="h-9 rounded-md bg-primary-fill px-4 text-[13px] font-semibold text-white disabled:opacity-50"
 							>
 								{importMutation.isPending ? "Importing…" : "Import →"}
 							</button>
@@ -321,7 +321,7 @@ function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: (
 				className="flex items-center gap-2 rounded-md border px-3 py-2"
 				style={{ background: "rgba(34,197,94,0.08)", borderColor: "rgba(34,197,94,0.22)" }}
 			>
-				<CheckCircle2 className="h-4 w-4 text-green-500" />
+				<CheckCircle2 className="h-4 w-4 text-status-success" />
 				<span className="text-[12px] font-semibold">{meta.format}</span>
 				{meta.fileName && (
 					<span className="font-mono text-[11px] text-muted-foreground">

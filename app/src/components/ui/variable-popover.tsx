@@ -198,14 +198,14 @@ export function VariablePopover({
 										</label>
 										{varInfo.secret && (
 											<div className="flex items-center gap-1">
-												<KeyRound className="w-3 h-3 text-amber-500" />
-												<span className="text-[10px] text-amber-600 dark:text-amber-400">
+												<KeyRound className="w-3 h-3 text-warning-text" />
+												<span className="text-[10px] text-warning-text">
 													Secret
 												</span>
 											</div>
 										)}
 									</div>
-									<div className="relative font-mono text-sm bg-muted px-2 py-1.5 rounded break-all">
+									<div className="relative font-mono text-sm bg-muted px-2 py-1.5 rounded-md break-all">
 										{varInfo.secret && !isSecretRevealed ? (
 											<span className="select-none">••••••••</span>
 										) : varInfo.value ? (

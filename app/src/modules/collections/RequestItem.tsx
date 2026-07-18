@@ -83,7 +83,7 @@ export default function RequestItem({
 		<div
 			data-request-id={request.id}
 			className={cn(
-				"flex items-center gap-2 px-3 py-1.5 rounded group cursor-pointer transition-colors",
+				"flex items-center gap-2 px-3 py-1.5 rounded-md group cursor-pointer transition-colors",
 				isDeleting && "opacity-50",
 				isSelected
 					? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"

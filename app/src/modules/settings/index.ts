@@ -12,4 +12,5 @@
  */
 
 export { default as SettingsMain } from "./main/SettingsMain";
+export { default as SettingsLayout } from "./main/SettingsLayout";
 export { default as SettingsCategoryTree } from "./sidebar/SettingsCategoryTree";

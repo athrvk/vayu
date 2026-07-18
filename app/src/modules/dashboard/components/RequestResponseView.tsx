@@ -24,6 +24,19 @@ import {
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
+import { InfoChip } from "./shared";
+
+// Per-phase explanations for the network timing breakdown. Kept in sync with
+// the wording in ResponseTimingTab (request-builder), which explains the same
+// DNS → Connect → TLS → TTFB → Download sequence.
+const PHASE_TIPS = {
+	dns: "Hostname → IP resolution. Usually a few ms once cached; >50ms suggests slow DNS or a fresh lookup.",
+	connect: "TCP three-way handshake. Zero on connection reuse (HTTP keep-alive / HTTP/2).",
+	tls: "SSL/TLS handshake (HTTPS only). Zero for plain HTTP and on resumed connections.",
+	ttfb: "Time to first byte — server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
+	download:
+		"Response body transfer time. Large for big payloads or slow links; near-zero for small JSON.",
+} as const;
 
 // Helper to format timestamp
 function formatTime(timestamp: number): string {
@@ -89,14 +102,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									<span
 										className={cn(
 											"font-mono font-bold text-lg",
-											code === "0" && "text-red-600 dark:text-red-400",
-											code.startsWith("2") &&
-												"text-green-600 dark:text-green-400",
-											code.startsWith("3") &&
-												"text-blue-600 dark:text-blue-400",
-											code.startsWith("4") &&
-												"text-yellow-600 dark:text-yellow-400",
-											code.startsWith("5") && "text-red-600 dark:text-red-400"
+											code === "0" && "text-status-error",
+											code.startsWith("2") && "text-status-success",
+											code.startsWith("3") && "text-status-running",
+											code.startsWith("4") && "text-warning-text",
+											code.startsWith("5") && "text-status-error"
 										)}
 									>
 										{code === "0" ? "Error" : code}
@@ -149,31 +159,41 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 					<CardContent>
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
 							<div>
-								<p className="text-sm text-muted-foreground">DNS</p>
+								<p className="text-sm text-muted-foreground">
+									DNS <InfoChip tip={PHASE_TIPS.dns} />
+								</p>
 								<p className="font-bold">
 									{report.timingBreakdown.avgDnsMs.toFixed(2)}ms
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Connect</p>
+								<p className="text-sm text-muted-foreground">
+									Connect <InfoChip tip={PHASE_TIPS.connect} />
+								</p>
 								<p className="font-bold">
 									{report.timingBreakdown.avgConnectMs.toFixed(2)}ms
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">TLS</p>
+								<p className="text-sm text-muted-foreground">
+									TLS <InfoChip tip={PHASE_TIPS.tls} />
+								</p>
 								<p className="font-bold">
 									{report.timingBreakdown.avgTlsMs.toFixed(2)}ms
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">First Byte</p>
+								<p className="text-sm text-muted-foreground">
+									First Byte <InfoChip tip={PHASE_TIPS.ttfb} />
+								</p>
 								<p className="font-bold">
 									{report.timingBreakdown.avgFirstByteMs.toFixed(2)}ms
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Download</p>
+								<p className="text-sm text-muted-foreground">
+									Download <InfoChip tip={PHASE_TIPS.download} />
+								</p>
 								<p className="font-bold">
 									{report.timingBreakdown.avgDownloadMs.toFixed(2)}ms
 								</p>
@@ -193,7 +213,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
 							<div>
 								<p className="text-sm text-muted-foreground">Slow Requests</p>
-								<p className="font-bold text-orange-600 dark:text-orange-400">
+								<p className="font-bold text-status-stopped">
 									{report.slowRequests.count}
 								</p>
 							</div>
@@ -230,7 +250,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 							</div>
 							<div>
 								<p className="text-sm text-muted-foreground">Passed</p>
-								<p className="font-bold text-green-600 dark:text-green-400">
+								<p className="font-bold text-status-success">
 									{report.testValidation.testsPassed}
 								</p>
 							</div>
@@ -289,9 +309,9 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 													{isError ? (
 														<AlertCircle className="w-4 h-4 text-destructive shrink-0" />
 													) : isSlow ? (
-														<Clock className="w-4 h-4 text-orange-500 shrink-0" />
+														<Clock className="w-4 h-4 text-status-stopped shrink-0" />
 													) : (
-														<CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+														<CheckCircle2 className="w-4 h-4 text-status-success shrink-0" />
 													)}
 
 													{/* Request Number */}
@@ -315,8 +335,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 													<span
 														className={cn(
 															"text-sm font-mono shrink-0",
-															isSlow &&
-																"text-orange-600 dark:text-orange-400"
+															isSlow && "text-status-stopped"
 														)}
 													>
 														{result.latencyMs.toFixed(1)}ms
@@ -345,7 +364,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 															<p className="text-xs font-medium text-muted-foreground">
 																Error
 															</p>
-															<p className="text-sm bg-destructive/10 text-destructive p-2 rounded font-mono text-xs break-all">
+															<p className="text-sm bg-destructive/10 text-destructive p-2 rounded-md font-mono text-xs break-all">
 																{result.error}
 															</p>
 														</div>
@@ -383,7 +402,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																			undefined && (
 																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
-																					DNS
+																					DNS{" "}
+																					<InfoChip
+																						tip={
+																							PHASE_TIPS.dns
+																						}
+																					/>
 																				</p>
 																				<p className="font-mono font-medium">
 																					{result.trace.dnsMs.toFixed(
@@ -397,7 +421,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																			undefined && (
 																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
-																					Connect
+																					Connect{" "}
+																					<InfoChip
+																						tip={
+																							PHASE_TIPS.connect
+																						}
+																					/>
 																				</p>
 																				<p className="font-mono font-medium">
 																					{result.trace.connectMs.toFixed(
@@ -411,7 +440,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																			undefined && (
 																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
-																					TLS
+																					TLS{" "}
+																					<InfoChip
+																						tip={
+																							PHASE_TIPS.tls
+																						}
+																					/>
 																				</p>
 																				<p className="font-mono font-medium">
 																					{result.trace.tlsMs.toFixed(
@@ -426,7 +460,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																			undefined && (
 																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
-																					TTFB
+																					TTFB{" "}
+																					<InfoChip
+																						tip={
+																							PHASE_TIPS.ttfb
+																						}
+																					/>
 																				</p>
 																				<p className="font-mono font-medium">
 																					{result.trace.firstByteMs.toFixed(
@@ -440,7 +479,12 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																			undefined && (
 																			<div className="bg-card border border-border rounded-md p-2 text-center">
 																				<p className="text-muted-foreground">
-																					Download
+																					Download{" "}
+																					<InfoChip
+																						tip={
+																							PHASE_TIPS.download
+																						}
+																					/>
 																				</p>
 																				<p className="font-mono font-medium">
 																					{result.trace.downloadMs.toFixed(
@@ -456,7 +500,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 															{/* Slow Request Warning */}
 															{result.trace.isSlow && (
-																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive p-2 rounded">
+																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive p-2 rounded-md">
 																	<Clock className="w-3 h-3" />
 																	<span>
 																		Slow request:{" "}
@@ -487,7 +531,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																		<p className="text-xs font-medium text-muted-foreground">
 																			Response Headers
 																		</p>
-																		<div className="bg-muted p-2 rounded text-xs font-mono max-h-32 overflow-auto">
+																		<div className="bg-muted p-2 rounded-md text-xs font-mono max-h-32 overflow-auto">
 																			{Object.entries(
 																				result.trace.headers
 																			).map(
@@ -515,7 +559,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																	<p className="text-xs font-medium text-muted-foreground">
 																		Response Body
 																	</p>
-																	<pre className="bg-muted p-2 rounded text-xs font-mono max-h-48 overflow-auto whitespace-pre-wrap break-all">
+																	<pre className="bg-muted p-2 rounded-md text-xs font-mono max-h-48 overflow-auto whitespace-pre-wrap break-all">
 																		{result.trace.body}
 																	</pre>
 																</div>

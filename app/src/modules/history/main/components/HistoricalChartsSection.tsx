@@ -168,7 +168,7 @@ export default function HistoricalChartsSection({
 								contentStyle={{
 									backgroundColor: "hsl(var(--card))",
 									border: "1px solid hsl(var(--border))",
-									borderRadius: "6px",
+									borderRadius: "var(--radius)",
 								}}
 								labelFormatter={(value: number) => `Time: ${value}s`}
 							/>
@@ -217,7 +217,7 @@ export default function HistoricalChartsSection({
 								contentStyle={{
 									backgroundColor: "hsl(var(--card))",
 									border: "1px solid hsl(var(--border))",
-									borderRadius: "6px",
+									borderRadius: "var(--radius)",
 								}}
 								labelFormatter={(value: number) => `Time: ${value}s`}
 								formatter={(value: number | undefined) => [
@@ -270,7 +270,7 @@ export default function HistoricalChartsSection({
 								contentStyle={{
 									backgroundColor: "hsl(var(--card))",
 									border: "1px solid hsl(var(--border))",
-									borderRadius: "6px",
+									borderRadius: "var(--radius)",
 								}}
 								labelFormatter={(value: number) => `Time: ${value}s`}
 							/>

@@ -36,7 +36,7 @@ export default function UrlBar() {
 			<button
 				onClick={executeRequest}
 				disabled={!canExecute}
-				className="h-[34px] px-4 rounded-md bg-primary text-white text-[13px] font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-opacity shrink-0 font-[inherit]"
+				className="h-[34px] px-4 rounded-md bg-primary-fill text-white text-[13px] font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-opacity shrink-0 font-[inherit]"
 			>
 				{isExecuting ? (
 					<>

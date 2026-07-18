@@ -401,7 +401,7 @@ function MetricsView({
 							).map(([label, color]) => (
 								<span key={label}>
 									<span
-										className="inline-block w-2.5 h-2.5 mr-1.5 align-middle rounded-[2px]"
+										className="inline-block w-2.5 h-2.5 mr-1.5 align-middle rounded-sm"
 										style={{ background: color }}
 									/>
 									{label}

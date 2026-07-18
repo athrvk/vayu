@@ -18,6 +18,7 @@ import {
 	useRunsQuery,
 } from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
+import { useAppearance } from "./hooks/useAppearance";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
 import { useMenuActions } from "./hooks/useMenuActions";
 import { useSaveStore } from "./stores/save-store";
@@ -27,6 +28,9 @@ function App() {
 
 	// Sync theme with OS/Electron settings
 	useElectronTheme();
+
+	// Apply UI font + interface scale preferences
+	useAppearance();
 
 	// Initialize health check with automatic polling
 	useHealthQuery();

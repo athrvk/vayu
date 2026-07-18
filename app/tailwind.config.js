@@ -18,6 +18,7 @@ export default {
 				},
 				primary: {
 					DEFAULT: "hsl(var(--primary))",
+					fill: "hsl(var(--primary-fill))",
 					foreground: "hsl(var(--primary-foreground))",
 				},
 				secondary: {
@@ -52,10 +53,12 @@ export default {
 				success: {
 					DEFAULT: "hsl(var(--success))",
 					foreground: "hsl(var(--success-foreground))",
+					text: "hsl(var(--success-text))",
 				},
 				warning: {
 					DEFAULT: "hsl(var(--warning))",
 					foreground: "hsl(var(--warning-foreground))",
+					text: "hsl(var(--warning-text))",
 				},
 				info: {
 					DEFAULT: "hsl(var(--info))",
@@ -73,6 +76,21 @@ export default {
 
 				// Variable highlighting
 				variable: "hsl(var(--variable))",
+
+				// Variable scope (categorical): global / collection / environment
+				scope: {
+					global: "hsl(var(--scope-global))",
+					collection: "hsl(var(--scope-collection))",
+					environment: "hsl(var(--scope-environment))",
+				},
+
+				// Run / connection / test status indicators (mode-consistent)
+				status: {
+					success: "hsl(var(--status-success))",
+					error: "hsl(var(--status-error))",
+					running: "hsl(var(--status-running))",
+					stopped: "hsl(var(--status-stopped))",
+				},
 			},
 			fontFamily: {
 				sans: ["Space Grotesk", "system-ui", "sans-serif"],
@@ -123,5 +141,5 @@ export default {
 			},
 		},
 	},
-	plugins: [require("tailwindcss-animate")],
+	plugins: [],
 };

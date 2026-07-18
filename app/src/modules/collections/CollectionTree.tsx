@@ -35,10 +35,12 @@ import CollectionItem from "./CollectionItem";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
 import { TIMING } from "@/config/timing";
+import { DEFAULT_REQUEST_NAME } from "@/constants/request";
+import { DEFAULT_COLLECTION_NAME, DEFAULT_FOLDER_NAME } from "@/constants/collection";
 
 export default function CollectionTree() {
 	const openImport = useImportModalStore((s) => s.open);
-	const { openTab, openTabs, activeTabId } = useTabsStore();
+	const { openTab, openTabs, activeTabId, closeTabsForEntities } = useTabsStore();
 	const { expandedCollectionIds, toggleCollectionExpanded, expandCollections } =
 		useCollectionsStore();
 	const { startSaving, completeSave, failSave, setStatus } = useSaveStore();
@@ -54,7 +56,6 @@ export default function CollectionTree() {
 		openTab({ type: "request", entityId: requestId });
 	const navigateToCollection = (collectionId: string) =>
 		openTab({ type: "collection", entityId: collectionId });
-	const navigateToWelcome = () => openTab({ type: "welcome", entityId: null });
 
 	// TanStack Query hooks
 	const { data: collections = [], isLoading: isLoadingCollections } = useCollectionsQuery();
@@ -122,8 +123,8 @@ export default function CollectionTree() {
 
 	const [creatingCollection, setCreatingCollection] = useState(false);
 	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID
-	const [newCollectionName, setNewCollectionName] = useState("New Collection");
-	const [newSubCollectionName, setNewSubCollectionName] = useState("New Folder");
+	const [newCollectionName, setNewCollectionName] = useState(DEFAULT_COLLECTION_NAME);
+	const [newSubCollectionName, setNewSubCollectionName] = useState(DEFAULT_FOLDER_NAME);
 	const [contextMenu, setContextMenu] = useState<{
 		collectionId: string;
 		x: number;
@@ -166,7 +167,7 @@ export default function CollectionTree() {
 
 	const handleCancelSubfolder = useCallback(() => {
 		setCreatingSubfolder(null);
-		setNewSubCollectionName("New Folder");
+		setNewSubCollectionName(DEFAULT_FOLDER_NAME);
 	}, []);
 
 	const handleCollectionClick = useCallback(
@@ -184,7 +185,7 @@ export default function CollectionTree() {
 	);
 
 	const handleOpenNewCollectionForm = useCallback(() => {
-		setNewCollectionName("New Collection");
+		setNewCollectionName(DEFAULT_COLLECTION_NAME);
 		setCreatingCollection(true);
 	}, []);
 
@@ -240,7 +241,7 @@ export default function CollectionTree() {
 
 		const request = await createRequestMutation.mutateAsync({
 			collectionId: collectionId,
-			name: "New Request",
+			name: DEFAULT_REQUEST_NAME,
 			method: "GET",
 			url: "",
 		});
@@ -309,16 +310,28 @@ export default function CollectionTree() {
 		async (collectionId: string) => {
 			setDeletingCollectionId(collectionId);
 			setDeleteConfirm(null);
+			// Gather the collection, its descendant folders, and every request they
+			// contain: deleting a collection cascades, so all their tabs go stale.
+			const affected = new Set<string>([collectionId]);
+			const stack = [collectionId];
+			while (stack.length > 0) {
+				const current = stack.pop()!;
+				for (const req of getRequestsByCollection(current)) affected.add(req.id);
+				for (const child of collections) {
+					if (child.parentId === current) {
+						affected.add(child.id);
+						stack.push(child.id);
+					}
+				}
+			}
 			try {
 				await deleteCollectionMutation.mutateAsync(collectionId);
-				if (selectedCollectionId === collectionId) {
-					navigateToWelcome();
-				}
+				closeTabsForEntities(affected);
 			} finally {
 				setDeletingCollectionId(null);
 			}
 		},
-		[deleteCollectionMutation, selectedCollectionId, navigateToWelcome]
+		[deleteCollectionMutation, closeTabsForEntities, collections, getRequestsByCollection]
 	);
 
 	const handleDeleteRequest = useCallback(
@@ -327,14 +340,13 @@ export default function CollectionTree() {
 			setDeleteConfirm(null);
 			try {
 				await deleteRequestMutation.mutateAsync(requestId);
-				if (selectedRequestId === requestId) {
-					navigateToWelcome();
-				}
+				// Close any open tab pointing at the now-deleted request.
+				closeTabsForEntities([requestId]);
 			} finally {
 				setDeletingRequestId(null);
 			}
 		},
-		[deleteRequestMutation, selectedRequestId, navigateToWelcome]
+		[deleteRequestMutation, closeTabsForEntities]
 	);
 
 	const handleRequestDeleteClick = useCallback((requestId: string, requestName: string) => {
@@ -518,9 +530,9 @@ export default function CollectionTree() {
 				<div className="space-y-2 py-2">
 					{[1, 2, 3].map((i) => (
 						<div key={i} className="flex items-center gap-2 px-2 py-1.5">
-							<Skeleton className="h-4 w-4 rounded" />
-							<Skeleton className="h-4 w-5 flex-shrink-0 rounded" />
-							<Skeleton className="h-4 flex-1 rounded" />
+							<Skeleton className="h-4 w-4 rounded-md" />
+							<Skeleton className="h-4 w-5 flex-shrink-0 rounded-md" />
+							<Skeleton className="h-4 flex-1 rounded-md" />
 						</div>
 					))}
 				</div>
@@ -594,7 +606,7 @@ export default function CollectionTree() {
 			{contextMenu && (
 				<div
 					ref={contextMenuRef}
-					className="fixed bg-popover border shadow-md py-1 z-50 min-w-[180px]"
+					className="fixed bg-popover border rounded-lg shadow-md py-1 z-50 min-w-[180px]"
 					style={{
 						top: contextMenu.y,
 						left: contextMenu.x,
