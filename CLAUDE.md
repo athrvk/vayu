@@ -144,9 +144,10 @@ See `docs/engine/api-reference.md` for full reference.
 ## Releasing
 
 1. `python build.py --bump-version patch` - updates VERSION, CMakeLists.txt, vcpkg.json, package.json
-2. Commit: `git commit -m "chore(release): x.y.z"`
-3. Tag: `git tag v$(cat VERSION) && git push origin --tags`
-4. CI builds and uploads installers automatically.
+2. Write the curated release notes to `.github/release-notes/vX.Y.Z.md` (Keep a Changelog format, see below).
+3. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes file together).
+4. Tag: `git tag v$(cat VERSION) && git push origin --tags`
+5. CI builds installers and publishes the GitHub Release, using `.github/release-notes/<tag>.md` as the release body automatically (no manual paste).
 
 **Tag *after* the release commit lands on the default branch.** When the version bump goes through a pull request (the usual path), run steps 1-2 on the feature branch so the bump merges with the PR, but do **not** tag the PR-branch commit. A squash/rebase merge rewrites the commit hash, so a tag on the pre-merge commit would point at a commit that never reaches the default branch. Wait for the PR to merge, then run step 3 against the merged commit on the default branch (`git checkout <default-branch> && git pull && git tag v$(cat VERSION) && git push origin --tags`). The tag triggers the release build, so it must sit on the canonical merged history.
 
@@ -164,7 +165,9 @@ Release notes live on the [GitHub Releases](https://github.com/athrvk/vayu/relea
 - **Compare link footer:** `[X.Y.Z]: https://github.com/athrvk/vayu/compare/vPREV...vX.Y.Z`.
 - **Version choice:** patch = fixes only; minor = new user-facing feature; major = breaking change (still `0.x`, so reserve major for a stable milestone). See the [prior releases](https://github.com/athrvk/vayu/releases) for worked examples.
 
-**Keep the GitHub Release current.** Whenever a new `vX.Y.Z` tag is created (Releasing step 3), Claude should write/refresh that version's GitHub Release notes to a changelog entry in the format above, derived from `git log vPREV..vX.Y.Z`. Discover the right tooling at runtime rather than assuming a fixed command — look for a release-publishing capability among the session's tools (search available MCP tools for release create/edit, or fall back to a CLI like `gh` if present), read a recent release to match voice, then publish. If only read-only release tools are available, draft the notes and hand them off rather than skipping the step.
+**Release notes are published from a file — no manual paste.** Curated notes for each version live in the repo at `.github/release-notes/vX.Y.Z.md`, committed alongside the version bump (Releasing step 2). On tag push, `.github/workflows/release.yml` reads `.github/release-notes/<tag>.md` and sets it as the GitHub Release body via `softprops/action-gh-release`'s `body_path`. If that file is missing for the tag, the workflow falls back to GitHub's automatically generated PR-based notes (`generate_release_notes`) so a release is never published empty.
+
+**Authoring the notes (Claude's job before tagging).** When preparing a release, write `.github/release-notes/vX.Y.Z.md` in the format above, derived from `git log vPREV..vX.Y.Z`; read a recent entry to match voice. The file *is* the release body, so it needs no tooling to publish — CI handles it. Because the workflow resolves the file from the tagged commit's tree, the notes file must be committed **before** the tag is pushed (i.e., it rides along in the release PR). To correct a published release's notes after the fact, edit the file, then either re-run the release workflow or update the release body by hand.
 
 ## Key Docs
 
