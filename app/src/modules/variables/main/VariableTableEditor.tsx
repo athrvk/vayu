@@ -420,6 +420,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		}
 
 		setVariables(newVariables);
+		// Keep the ref in sync immediately (not just via the post-render effect):
+		// the secret toggle calls performSaveRef.current() synchronously right
+		// after this, and performSave reads variablesRef.current — a stale ref
+		// would persist the pre-edit value and the backend re-sync would then
+		// revert the change. Mirrors removeVariable.
+		variablesRef.current = newVariables;
 		setHasPendingChanges(true);
 		markPendingSave(contextId);
 	};
