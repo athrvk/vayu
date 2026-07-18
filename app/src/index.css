@@ -66,19 +66,19 @@
  *
  * Color Philosophy: 3-level elevation system
  * Dark:  canvas (#09090b) → panel (#111113) → card (#1a1a1f)
- * Light: warm stone canvas (#e6e3dc) → warm panel (#f2f0eb) → white card (#ffffff)
+ * Light: paper-white canvas (#f4f4f5) → panel (#fafafa) → white card (#ffffff)
  *
  * Primary accent: Sunset orange (default), Electric cyan, Royal violet
  */
 
 @layer base {
 	:root {
-		/* ── Light mode — Warm Stone ── */
+		/* ── Light mode — Paper White ── */
 
-		/* 3-level elevation */
-		--background: 42 17% 88%; /* #e6e3dc — warm stone canvas */
+		/* 3-level elevation (cool near-neutral; higher surfaces are lighter) */
+		--background: 240 6% 96%; /* #f4f4f5 — paper-white canvas */
 		--card: 0 0% 100%; /* #ffffff — white card (floats on bg) */
-		--panel: 42 21% 94%; /* #f2f0eb — sidebar/panel (between canvas and card) */
+		--panel: 240 5% 98%; /* #fafafa — sidebar/panel (between canvas and card) */
 
 		--card-foreground: 240 6% 10%;
 		--popover: 0 0% 100%;
@@ -92,24 +92,24 @@
 		--primary-foreground: 0 0% 100%;
 
 		/* Secondary */
-		--secondary: 42 21% 94%;
+		--secondary: 240 5% 94%;
 		--secondary-foreground: 240 6% 10%;
 
 		/* Hover / active states */
-		--muted: 38 20% 89%; /* #e9e5de — accent-hover */
+		--muted: 240 5% 93%; /* #ededef — accent-hover */
 		--muted-foreground: 240 4% 46%; /* #71717a — zinc-500 */
-		--accent: 38 20% 89%; /* #e9e5de — accent-hover */
+		--accent: 240 5% 93%; /* #ededef — accent-hover */
 		--accent-foreground: 240 6% 10%;
-		--accent-active: 40 16% 85%; /* #dedad2 — accent-active / selected */
+		--accent-active: 240 5% 88%; /* #e0e0e4 — accent-active / selected */
 
 		/* Foreground scale */
 		--foreground: 240 6% 10%; /* #18181b — zinc-900 */
 		--subtle-foreground: 240 4% 58%; /* de-emphasized text, still the faintest tier (~3:1 on card) */
 
 		/* Borders */
-		--border: 40 9% 80%; /* ≈ rgba(0,0,0,0.09) on warm stone */
-		--border-strong: 40 6% 72%; /* ≈ rgba(0,0,0,0.18) on warm stone */
-		--input: 40 9% 80%;
+		--border: 240 6% 89%; /* #e2e2e5 — default dividers on paper white */
+		--border-strong: 240 5% 82%; /* #cfcfd5 — prominent borders */
+		--input: 240 6% 89%;
 		--ring: 24 90% 46%;
 
 		/* Destructive */

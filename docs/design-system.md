@@ -11,11 +11,11 @@
 
 | Level | Token | Dark | Light |
 |-------|-------|------|-------|
-| Canvas (outermost) | `bg-background` | `#09090b` | `#e6e3dc` |
-| Panel (sidebar/header/toolbar) | `bg-panel` | `#111113` | `#f2f0eb` |
+| Canvas (outermost) | `bg-background` | `#09090b` | `#f4f4f5` |
+| Panel (sidebar/header/toolbar) | `bg-panel` | `#111113` | `#fafafa` |
 | Card (content surface) | `bg-card` | `#1a1a1f` | `#ffffff` |
 
-**Warm Stone light mode** — light surfaces use warm gray-stone tones, never cold white/gray.  
+**Paper White light mode** — light surfaces use a cool near-neutral (zinc) family; higher surfaces are lighter (canvas → panel → white card).  
 **Dark canvas** — dark mode uses near-black with subtle violet undertones (zinc-950 family).
 
 ---
@@ -33,9 +33,9 @@ All tokens live in `app/src/index.css` as HSL channel values (no `hsl()` wrapper
 --card:       240  6% 11%;   /* #1a1a1f — elevated surface */
 
 /* Light */
---background: 42 17% 88%;   /* #e6e3dc — warm stone canvas */
---panel:      42 21% 94%;   /* #f2f0eb — warm panel */
---card:        0  0% 100%;  /* #ffffff — white card */
+--background: 240  6% 96%;  /* #f4f4f5 — paper-white canvas */
+--panel:      240  5% 98%;  /* #fafafa — panel */
+--card:         0  0% 100%; /* #ffffff — white card */
 ```
 
 ### Foreground Scale
@@ -64,8 +64,8 @@ sub-labels), tuned to stay legible (~3:1 on card) while remaining below
 --accent-active: 240  6% 21%;   /* #323238 — selected / active background */
 
 /* Light */
---accent:        38 20% 89%;   /* #e9e5de — hover background */
---accent-active: 40 16% 85%;   /* #dedad2 — selected / active background */
+--accent:        240 5% 93%;   /* #ededef — hover background */
+--accent-active: 240 5% 88%;   /* #e0e0e4 — selected / active background */
 ```
 
 ### Borders
@@ -76,8 +76,8 @@ sub-labels), tuned to stay legible (~3:1 on card) while remaining below
 --border-strong: 0  0% 18%;   /* ≈ rgba(255,255,255,0.15) — prominent borders */
 
 /* Light */
---border:       40  9% 80%;   /* ≈ rgba(0,0,0,0.09) — default dividers */
---border-strong: 40  6% 72%;  /* ≈ rgba(0,0,0,0.18) — prominent borders */
+--border:       240  6% 89%;   /* #e2e2e5 — default dividers */
+--border-strong: 240 5% 82%;   /* #cfcfd5 — prominent borders */
 ```
 
 ### Primary (Accent Color)
