@@ -11,3 +11,8 @@ Thumbs.db
 # Python (build.py bytecode)
 __pycache__/
 *.py[cod]
+
+# Engine data dir when the daemon is run from the repo root (it defaults to
+# ./data relative to the working directory). Anchored so it only matches here -
+# the in-tree location, engine/data/, is ignored by engine/.gitignore.
+/data/
