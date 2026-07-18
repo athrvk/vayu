@@ -321,7 +321,7 @@ function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: (
 				className="flex items-center gap-2 rounded-md border px-3 py-2"
 				style={{ background: "rgba(34,197,94,0.08)", borderColor: "rgba(34,197,94,0.22)" }}
 			>
-				<CheckCircle2 className="h-4 w-4 text-green-500" />
+				<CheckCircle2 className="h-4 w-4 text-status-success" />
 				<span className="text-[12px] font-semibold">{meta.format}</span>
 				{meta.fileName && (
 					<span className="font-mono text-[11px] text-muted-foreground">

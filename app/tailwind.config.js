@@ -80,6 +80,14 @@ export default {
 					collection: "hsl(var(--scope-collection))",
 					environment: "hsl(var(--scope-environment))",
 				},
+
+				// Run / connection / test status indicators (mode-consistent)
+				status: {
+					success: "hsl(var(--status-success))",
+					error: "hsl(var(--status-error))",
+					running: "hsl(var(--status-running))",
+					stopped: "hsl(var(--status-stopped))",
+				},
 			},
 			fontFamily: {
 				sans: ["Space Grotesk", "system-ui", "sans-serif"],

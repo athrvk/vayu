@@ -37,6 +37,10 @@
 	--color-scope-global: hsl(var(--scope-global));
 	--color-scope-collection: hsl(var(--scope-collection));
 	--color-scope-environment: hsl(var(--scope-environment));
+	--color-status-success: hsl(var(--status-success));
+	--color-status-error: hsl(var(--status-error));
+	--color-status-running: hsl(var(--status-running));
+	--color-status-stopped: hsl(var(--status-stopped));
 	--color-chart-1: hsl(var(--chart-1));
 	--color-chart-2: hsl(var(--chart-2));
 	--color-chart-3: hsl(var(--chart-3));
@@ -140,6 +144,15 @@
 		--scope-global: 142 72% 29%; /* green-700 */
 		--scope-collection: 21 90% 42%; /* orange-700 */
 		--scope-environment: 217 91% 45%; /* blue-600 */
+
+		/* Run / connection / test status indicators (dots, bars, pills, icons).
+		 * A cohesive, mode-consistent set — deliberately the same in light and
+		 * dark so a green dot reads as "good" on either surface. Distinct from
+		 * --success/--destructive, which tune for banner text and button fills. */
+		--status-success: 142 71% 45%; /* green-500 — completed / connected / pass */
+		--status-error: 0 84% 60%; /* red-500 — failed / test fail */
+		--status-running: 217 91% 60%; /* blue-500 — running */
+		--status-stopped: 25 95% 53%; /* orange-500 — stopped */
 
 		/* Geometry */
 		--radius: 0.375rem;

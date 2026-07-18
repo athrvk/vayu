@@ -66,13 +66,13 @@ export default function RunItem({
 	const getStatusIcon = () => {
 		switch (run.status) {
 			case "completed":
-				return <CheckCircle2 className="w-4 h-4 text-green-500" />;
+				return <CheckCircle2 className="w-4 h-4 text-status-success" />;
 			case "failed":
-				return <XCircle className="w-4 h-4 text-destructive" />;
+				return <XCircle className="w-4 h-4 text-status-error" />;
 			case "running":
-				return <Activity className="w-4 h-4 text-blue-500 animate-pulse" />;
+				return <Activity className="w-4 h-4 text-status-running animate-pulse" />;
 			case "stopped":
-				return <StopCircle className="w-4 h-4 text-orange-500" />;
+				return <StopCircle className="w-4 h-4 text-status-stopped" />;
 			default:
 				return <Clock className="w-4 h-4 text-muted-foreground" />;
 		}
@@ -92,10 +92,10 @@ export default function RunItem({
 			<div
 				className={cn(
 					"absolute left-0 top-0 bottom-0 w-1",
-					run.status === "completed" && "bg-green-500",
-					run.status === "failed" && "bg-red-500",
-					run.status === "running" && "bg-blue-500",
-					run.status === "stopped" && "bg-orange-500",
+					run.status === "completed" && "bg-status-success",
+					run.status === "failed" && "bg-status-error",
+					run.status === "running" && "bg-status-running",
+					run.status === "stopped" && "bg-status-stopped",
 					run.status === "pending" && "bg-muted-foreground"
 				)}
 			/>
@@ -108,10 +108,10 @@ export default function RunItem({
 						<span
 							className={cn(
 								"text-xs font-medium capitalize shrink-0",
-								run.status === "completed" && "text-green-600 dark:text-green-400",
-								run.status === "failed" && "text-red-600 dark:text-red-400",
-								run.status === "running" && "text-blue-600 dark:text-blue-400",
-								run.status === "stopped" && "text-orange-600 dark:text-orange-400",
+								run.status === "completed" && "text-status-success",
+								run.status === "failed" && "text-status-error",
+								run.status === "running" && "text-status-running",
+								run.status === "stopped" && "text-status-stopped",
 								run.status === "pending" && "text-muted-foreground"
 							)}
 						>

@@ -135,6 +135,26 @@ as text/icon/border at full strength and as tinted backgrounds via opacity.
 Never hardcode `bg-green-50 dark:bg-green-950` pairs for scopes — use the token
 at an opacity (`/10` background, `/20`–`/30` border, full for text/icon).
 
+### Run / Status Indicator Colors
+
+Run, connection, and test status (dots, left-bars, pills, status icons) use a
+cohesive `--status-*` set. Unlike everything else, these are **mode-consistent**
+— the same value in light and dark — because a status dot should read as the
+same "good / bad / busy" signal on either surface. Distinct from `--success` /
+`--destructive`, which are tuned for banner text and button fills respectively.
+
+```css
+--status-success: 142 71% 45%;   /* green-500  — completed / connected / pass */
+--status-error:   0 84% 60%;     /* red-500    — failed / test fail */
+--status-running: 217 91% 60%;   /* blue-500   — running */
+--status-stopped: 25 95% 53%;    /* orange-500 — stopped */
+/* pending → text-muted-foreground / bg-muted-foreground */
+```
+
+**Utility classes** (`text-`, `bg-`, `border-`): `text-status-success`,
+`bg-status-error`, `border-status-running/25`, etc. Use `--warning` for
+"expiring / caution" indicators (amber) and `--success` for success *banners*.
+
 ### HTTP Method Color Tokens
 
 Method colors are design tokens defined in `:root`, not hardcoded hex values. They are consistent between light and dark mode.

@@ -220,7 +220,7 @@ export class ErrorBoundary extends Component<Props, State> {
 								>
 									{copied ? (
 										<>
-											<Check className="w-4 h-4 mr-2 text-green-500" />
+											<Check className="w-4 h-4 mr-2 text-status-success" />
 											Copied!
 										</>
 									) : (
