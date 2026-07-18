@@ -9,4 +9,4 @@
 export const DEFAULT_COLLECTION_NAME = "New Collection";
 
 /** Name pre-filled when creating a new sub-collection (folder). */
-export const DEFAULT_FOLDER_NAME = "New Folder";
+export const DEFAULT_FOLDER_NAME = "New Sub Collection";
