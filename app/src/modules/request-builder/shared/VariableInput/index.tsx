@@ -422,7 +422,7 @@ export default function VariableInput({
 
 			{/* Plain Text Suggestions Popover (e.g., for standard headers) */}
 			{showPlainSuggestions && !showSuggestions && filteredSuggestions.length > 0 && (
-				<div className="absolute left-0 top-full mt-1 z-50 w-64 max-h-48 overflow-y-auto border bg-popover shadow-md">
+				<div className="absolute left-0 top-full mt-1 z-50 w-64 max-h-48 overflow-y-auto rounded-lg border bg-popover shadow-md">
 					{filteredSuggestions.slice(0, 10).map((suggestion, index) => (
 						<button
 							key={suggestion}

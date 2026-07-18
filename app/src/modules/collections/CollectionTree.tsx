@@ -606,7 +606,7 @@ export default function CollectionTree() {
 			{contextMenu && (
 				<div
 					ref={contextMenuRef}
-					className="fixed bg-popover border shadow-md py-1 z-50 min-w-[180px]"
+					className="fixed bg-popover border rounded-lg shadow-md py-1 z-50 min-w-[180px]"
 					style={{
 						top: contextMenu.y,
 						left: contextMenu.x,

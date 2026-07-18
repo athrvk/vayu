@@ -98,7 +98,9 @@ export default function UnifiedResponseViewer({
 	// Compact mode: simpler layout for embedded views
 	if (compact) {
 		return (
-			<div className={cn("flex flex-col bg-card border overflow-hidden", className)}>
+			<div
+				className={cn("flex flex-col bg-card border rounded-lg overflow-hidden", className)}
+			>
 				{/* Simple tab buttons */}
 				<div className="flex gap-2 p-3 border-b bg-muted/30">
 					<Button
