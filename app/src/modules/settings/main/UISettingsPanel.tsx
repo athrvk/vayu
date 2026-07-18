@@ -19,7 +19,7 @@ import {
 	Moon,
 	Palette,
 	CheckCircle2,
-	Circle,
+	SwatchBook,
 	FolderOpen,
 	Type,
 	Maximize2,
@@ -174,7 +174,7 @@ export default function UISettingsPanel() {
 					<Card>
 						<CardHeader className="pb-3">
 							<div className="flex items-center gap-2">
-								<Circle className="w-5 h-5 text-muted-foreground" />
+								<SwatchBook className="w-5 h-5 text-muted-foreground" />
 								<CardTitle className="text-base">Color Scheme</CardTitle>
 							</div>
 							<CardDescription>
