@@ -34,9 +34,10 @@ function pathLabel(url: string): string {
 	}
 }
 
-// Placeholder names given to freshly-created requests. Treated as "unnamed"
-// so the tab falls back to the request path until the user picks a real name.
-const DEFAULT_REQUEST_NAMES = new Set(["New Request", "Untitled Request"]);
+// Placeholder name given to freshly-created requests (see CollectionTree and
+// WelcomeScreen). Treated as "unnamed" so the tab falls back to the request
+// path until the user picks a real name.
+const DEFAULT_REQUEST_NAME = "New Request";
 
 /**
  * Title for a request tab: the user-set name when there is one, otherwise the
@@ -44,7 +45,7 @@ const DEFAULT_REQUEST_NAMES = new Set(["New Request", "Untitled Request"]);
  */
 function requestTabTitle(name: string, resolvedUrl: string): string {
 	const trimmed = name.trim();
-	if (trimmed && !DEFAULT_REQUEST_NAMES.has(trimmed)) return trimmed;
+	if (trimmed && trimmed !== DEFAULT_REQUEST_NAME) return trimmed;
 	return pathLabel(resolvedUrl) || trimmed;
 }
 
