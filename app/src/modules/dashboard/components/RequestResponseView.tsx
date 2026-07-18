@@ -89,14 +89,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									<span
 										className={cn(
 											"font-mono font-bold text-lg",
-											code === "0" && "text-red-600 dark:text-red-400",
-											code.startsWith("2") &&
-												"text-green-600 dark:text-green-400",
-											code.startsWith("3") &&
-												"text-blue-600 dark:text-blue-400",
-											code.startsWith("4") &&
-												"text-yellow-600 dark:text-yellow-400",
-											code.startsWith("5") && "text-red-600 dark:text-red-400"
+											code === "0" && "text-status-error",
+											code.startsWith("2") && "text-status-success",
+											code.startsWith("3") && "text-status-running",
+											code.startsWith("4") && "text-warning",
+											code.startsWith("5") && "text-status-error"
 										)}
 									>
 										{code === "0" ? "Error" : code}
@@ -193,7 +190,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
 							<div>
 								<p className="text-sm text-muted-foreground">Slow Requests</p>
-								<p className="font-bold text-orange-600 dark:text-orange-400">
+								<p className="font-bold text-status-stopped">
 									{report.slowRequests.count}
 								</p>
 							</div>
@@ -230,7 +227,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 							</div>
 							<div>
 								<p className="text-sm text-muted-foreground">Passed</p>
-								<p className="font-bold text-green-600 dark:text-green-400">
+								<p className="font-bold text-status-success">
 									{report.testValidation.testsPassed}
 								</p>
 							</div>
@@ -289,9 +286,9 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 													{isError ? (
 														<AlertCircle className="w-4 h-4 text-destructive shrink-0" />
 													) : isSlow ? (
-														<Clock className="w-4 h-4 text-orange-500 shrink-0" />
+														<Clock className="w-4 h-4 text-status-stopped shrink-0" />
 													) : (
-														<CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+														<CheckCircle2 className="w-4 h-4 text-status-success shrink-0" />
 													)}
 
 													{/* Request Number */}
@@ -315,8 +312,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 													<span
 														className={cn(
 															"text-sm font-mono shrink-0",
-															isSlow &&
-																"text-orange-600 dark:text-orange-400"
+															isSlow && "text-status-stopped"
 														)}
 													>
 														{result.latencyMs.toFixed(1)}ms

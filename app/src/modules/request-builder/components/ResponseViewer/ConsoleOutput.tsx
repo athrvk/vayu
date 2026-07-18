@@ -59,7 +59,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 									<p className="text-sm font-semibold text-destructive">
 										Pre-request Script Error
 									</p>
-									<pre className="text-sm text-red-400 mt-1 font-mono whitespace-pre-wrap break-words overflow-x-auto">
+									<pre className="text-sm text-status-error mt-1 font-mono whitespace-pre-wrap break-words overflow-x-auto">
 										{errors.pre}
 									</pre>
 								</div>
@@ -74,7 +74,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 									<p className="text-sm font-semibold text-destructive">
 										Test Script Error
 									</p>
-									<pre className="text-sm text-red-400 mt-1 font-mono whitespace-pre-wrap break-words overflow-x-auto">
+									<pre className="text-sm text-status-error mt-1 font-mono whitespace-pre-wrap break-words overflow-x-auto">
 										{errors.post}
 									</pre>
 								</div>

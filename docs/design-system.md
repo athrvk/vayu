@@ -155,6 +155,25 @@ same "good / bad / busy" signal on either surface. Distinct from `--success` /
 `bg-status-error`, `border-status-running/25`, etc. Use `--warning` for
 "expiring / caution" indicators (amber) and `--success` for success *banners*.
 
+The same set also colors **HTTP response severity** (2xx → `status-success`,
+3xx → `status-running`, 4xx → `warning`, 5xx/0 → `status-error`) and **latency
+thresholds** (normal → `status-running`, slow → `status-stopped`, danger →
+`status-error`), since those map onto the same hues.
+
+### Decorative categorical palettes (the one token exception)
+
+A few surfaces use a **fixed decorative palette** to give items a stable
+identity by color rather than to signal state — the same idea as `--chart-*`.
+These intentionally keep Tailwind hue utilities (with `dark:` variants) instead
+of tokens, because they never respond to theme and don't carry semantics:
+
+- **Settings sections** — per-section accent (pink/blue/amber/cyan/purple/green).
+- **Timing phases** — DNS / connect / TLS / TTFB / download in the breakdown.
+- **Console sections** — Pre-request (blue) vs Test (green) script groups; the
+  console body is a deliberately dark terminal (`zinc-900`) in both modes.
+
+Everything else — state, status, scope, semantics — must use tokens.
+
 ### HTTP Method Color Tokens
 
 Method colors are design tokens defined in `:root`, not hardcoded hex values. They are consistent between light and dark mode.
