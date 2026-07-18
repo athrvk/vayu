@@ -9,7 +9,7 @@
 // This file runs in the renderer process before web content begins loading
 // NOTE: Preload scripts with contextIsolation must use require() syntax
 
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webFrame } = require("electron");
 
 // Expose protected methods that allow the renderer process to use
 // ipcRenderer without exposing the entire object
@@ -78,6 +78,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		ipcRenderer.on("menu:open-settings", handler);
 		return () => ipcRenderer.removeListener("menu:open-settings", handler);
 	},
+
+	// Interface scale — real page zoom (reflows the viewport).
+	setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
+	getZoomFactor: (): number => webFrame.getZoomFactor(),
 
 	// Platform info
 	platform: process.platform,

@@ -301,9 +301,18 @@ Applied via `data-color-scheme` attribute on `<html>`. Only `--primary`, `--prim
 ```
 
 ```css
-body { font-family: "Space Grotesk", system-ui, sans-serif; }
+body { font-family: var(--font-sans); } /* default: "Space Grotesk", system-ui, sans-serif */
 /* mono via font-mono Tailwind class, or .font-code utility */
 ```
+
+**User-selectable UI font + scale.** Settings → Appearance → Interface lets the
+user pick the sans/body face (Space Grotesk / System / JetBrains Mono) and an
+interface scale (Compact / Default / Comfortable). Font swaps the `--font-sans`
+custom property (so `body` + every `font-sans` utility follow); scale sets the
+page zoom factor (Electron `webFrame`, CSS `zoom` fallback in the browser).
+Both are owned by `useAppearance` (source of truth `constants/appearance.ts`),
+persisted to localStorage, and applied pre-paint in `index.html`. Code/mono
+text stays JetBrains Mono regardless.
 
 ### Type Scale Conventions
 

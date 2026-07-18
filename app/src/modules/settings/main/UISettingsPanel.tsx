@@ -13,7 +13,17 @@
  */
 
 import { useState, useEffect } from "react";
-import { Monitor, Sun, Moon, Palette, CheckCircle2, Circle, FolderOpen } from "lucide-react";
+import {
+	Monitor,
+	Sun,
+	Moon,
+	Palette,
+	CheckCircle2,
+	Circle,
+	FolderOpen,
+	Type,
+	Maximize2,
+} from "lucide-react";
 import {
 	Card,
 	CardContent,
@@ -23,7 +33,9 @@ import {
 	Skeleton,
 } from "@/components/ui";
 import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
+import { useAppearance } from "@/hooks/useAppearance";
 import { COLOR_SCHEMES } from "@/constants/color-schemes";
+import { UI_FONTS, UI_SCALES } from "@/constants/appearance";
 import { cn } from "@/lib/utils";
 
 interface AppPaths {
@@ -36,6 +48,7 @@ interface AppPaths {
 export default function UISettingsPanel() {
 	const { themeSource, setTheme, colorScheme, setColorScheme, isDark, isLoading } =
 		useElectronTheme();
+	const { font, setFont, scale, setScale } = useAppearance();
 	const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
 
 	useEffect(() => {
@@ -234,6 +247,92 @@ export default function UISettingsPanel() {
 									})}
 								</div>
 							)}
+						</CardContent>
+					</Card>
+
+					{/* Interface — font + scale */}
+					<Card>
+						<CardHeader className="pb-3">
+							<div className="flex items-center gap-2">
+								<Type className="w-5 h-5 text-muted-foreground" />
+								<CardTitle className="text-base">Interface</CardTitle>
+							</div>
+							<CardDescription>
+								Choose the interface font and how large the app is drawn.
+							</CardDescription>
+						</CardHeader>
+						<CardContent className="space-y-5">
+							<div>
+								<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+									Font
+								</p>
+								<div className="grid grid-cols-3 gap-3">
+									{UI_FONTS.map((option) => {
+										const isSelected = font === option.value;
+										return (
+											<button
+												key={option.value}
+												onClick={() => setFont(option.value)}
+												className={cn(
+													"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
+													"hover:bg-accent hover:border-accent-foreground/20",
+													isSelected
+														? "border-primary bg-primary/5"
+														: "border-border"
+												)}
+											>
+												<span
+													className="text-sm font-medium"
+													style={{ fontFamily: option.stack }}
+												>
+													{option.label}
+												</span>
+												<span className="text-xs text-muted-foreground">
+													{option.description}
+												</span>
+												{isSelected && (
+													<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
+												)}
+											</button>
+										);
+									})}
+								</div>
+							</div>
+
+							<div>
+								<p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+									<Maximize2 className="w-3.5 h-3.5" />
+									Scale
+								</p>
+								<div className="grid grid-cols-3 gap-3">
+									{UI_SCALES.map((option) => {
+										const isSelected = scale === option.value;
+										return (
+											<button
+												key={option.value}
+												onClick={() => setScale(option.value)}
+												className={cn(
+													"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
+													"hover:bg-accent hover:border-accent-foreground/20",
+													isSelected
+														? "border-primary bg-primary/5"
+														: "border-border"
+												)}
+											>
+												<span className="text-sm font-medium">
+													{option.label}
+												</span>
+												<span className="text-xs text-muted-foreground">
+													{option.description}
+												</span>
+												{isSelected && (
+													<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
+												)}
+											</button>
+										);
+									})}
+								</div>
+							</div>
 						</CardContent>
 					</Card>
 

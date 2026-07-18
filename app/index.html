@@ -6,10 +6,11 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Vayu</title>
 		<!--
-			Pre-paint theme: apply the persisted accent + light/dark before React
-			mounts, so the first frame isn't a flash of the wrong theme. Keys mirror
-			STORAGE_KEYS (THEME_SOURCE / COLOR_SCHEME) in src/constants/storage-keys.ts;
-			the useElectronTheme hook remains the source of truth once it runs.
+			Pre-paint appearance: apply the persisted accent, light/dark, UI font,
+			and interface scale before React mounts, so the first frame isn't a
+			flash of the wrong theme/size. Keys and font stacks mirror
+			src/constants/storage-keys.ts + src/constants/appearance.ts; the
+			useElectronTheme / useAppearance hooks remain the source of truth.
 		-->
 		<script>
 			(function () {
@@ -23,8 +24,25 @@
 						((source === "system" || !source) &&
 							window.matchMedia("(prefers-color-scheme: dark)").matches);
 					if (dark) el.classList.add("dark");
+
+					var fonts = {
+						system: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+						mono: '"JetBrains Mono", "Consolas", "Monaco", monospace',
+					};
+					var font = localStorage.getItem("vayu-ui-font");
+					if (fonts[font]) el.style.setProperty("--font-sans", fonts[font]);
+
+					var scales = { compact: 0.9, comfortable: 1.1 };
+					var factor = scales[localStorage.getItem("vayu-ui-scale")];
+					if (factor) {
+						if (window.electronAPI && window.electronAPI.setZoomFactor) {
+							window.electronAPI.setZoomFactor(factor);
+						} else {
+							el.style.zoom = String(factor);
+						}
+					}
 				} catch (e) {
-					/* localStorage unavailable — the hook will apply the theme on mount */
+					/* localStorage unavailable — the hooks apply on mount */
 				}
 			})();
 		</script>

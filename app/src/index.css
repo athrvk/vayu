@@ -346,7 +346,9 @@
 
 	body {
 		@apply bg-background text-foreground;
-		font-family: "Space Grotesk", system-ui, sans-serif;
+		/* Drives from --font-sans so the UI-font preference (useAppearance) can
+		 * override it at runtime; defaults to Space Grotesk via @theme inline. */
+		font-family: var(--font-sans);
 		height: 100%;
 		margin: 0;
 		padding: 0;

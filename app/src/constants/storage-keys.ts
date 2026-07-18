@@ -17,6 +17,10 @@ export const STORAGE_KEYS = {
 	THEME_SOURCE: "vayu-theme-source",
 	/** Accent color scheme name (sunset/sky/…). Read pre-paint in index.html. */
 	COLOR_SCHEME: "vayu-color-scheme",
+	/** UI font preference (grotesk/system/mono). Read pre-paint in index.html. */
+	UI_FONT: "vayu-ui-font",
+	/** Interface scale (compact/default/comfortable). Read pre-paint in index.html. */
+	UI_SCALE: "vayu-ui-scale",
 	/** Last-used load test configuration (LoadTestConfigDialog). */
 	LAST_LOAD_TEST_CONFIG: "vayu:lastLoadTestConfig",
 	/** Zustand persist name for session state (active environment/collection). */
