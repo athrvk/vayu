@@ -2,7 +2,7 @@
 
 Living backlog of deferred / surfaced work. Each item notes **why** it's pending and **what** it needs so it can be picked up as a focused plan.
 
-_Last updated: 2026-06-05 (branch `claude/sweet-johnson-vUNGE`)._
+_Last updated: 2026-07-18 (branch `claude/session-tjt2op`; base master `05357cf`, engine `0.6.0`)._
 
 ---
 
@@ -31,8 +31,13 @@ Against `/fast` on loopback, tuned Vayu reaches ~45k req/s (vs `wrk` ~51k), but 
 
 **Needs:** lower the default `workers`; make the connection cap a **global budget** (or auto-derive from workers); bound the default `maxInFlight`. (Confirmed PR #10 is NOT the cause; ceiling is long-standing architecture. The branch-only 12-worker collapse was traced to added per-completion CPU and only bites at `workers=ncpu`.) Needs a spec.
 
-### P2. `/config` validation error message
-`POST /config` returns a generic `"Failed to update configuration. Check logs for details."` on a validation failure - the specific reason (which key / out-of-range / min-max) is logged server-side (`config.cpp:167`) but never returned. **Needs:** echo the specific validation error in the 400 body. Small UX fix.
+### P2. `/config` validation error message - _done on `claude/session-tjt2op` (commit `4a6ce5f`), pending build+merge_
+`POST /config` returned a generic `"Failed to update configuration. Check logs for details."` on a validation failure. Turned out to be **two** bugs: the reason wasn't returned, **and** the generic `send_error` helper emits the flat `{"error":"..."}` shape while the app's http-client reads the nested `error.message` shape - so even the generic string was dropped and surfaced as a bare "HTTP 400".
+
+**Fix (shipped on branch):** extracted the parse/validate/apply logic into a pure `apply_config_update(db, body) -> {status, json}` (mirrors `oauth2_token_post`, now unit-testable via `config_route_test.cpp`); returns the specific reason (unknown key / non-numeric / out-of-range with offending value + bound) in the **nested** shape the client surfaces. All-or-nothing preserved. _Not yet built/verified - the sandbox can't reach vcpkg dep hosts; needs a local `build.py -t && ctest` or CI green before merge._
+
+### P3. Remaining flat-error routes swallowed by the app client _(surfaced 2026-07-18 during P2)_
+The generic `send_error` helper (`routes.hpp:39`) emits flat `{"error":"<string>"}`, but `http-client.ts` only reads the nested `error.message`/`error.code`. Every route still using the flat helper (e.g. `config.cpp`'s "Invalid JSON", `execution.cpp:287/456`, `health`, 500 fallbacks) therefore shows a bare `HTTP <status>` in the UI, dropping the message. P2 fixed only the `/config` validation path. **Needs:** either migrate `send_error` to the nested shape (audit all call sites - some may rely on the flat body) or teach the client to accept both. Small, but cross-cutting. Low priority - most of these are developer-facing.
 
 ---
 
@@ -55,9 +60,9 @@ A `startConcurrency=0` ramp shows ~0.8% structural lag on a healthy run (integer
 
 ## Process
 
-- **Branch `claude/sweet-johnson-vUNGE` is well past reviewable** - ~40+ commits spanning many features, diverged from origin (ahead, 1 behind), **no PR**. Land PR(s); pull fresh master first; confirm target per qa→staging→master.
-- **cpp-httplib FD_SETSIZE fix is a master bug** - worth cherry-picking to master independently/first.
-- `docs/engine/api-reference.md` updated for `/metrics/live` replay + `liveRetentionMs` - currently uncommitted.
+- **`claude/sweet-johnson-vUNGE` concerns are resolved** - that work (OAuth 2.0 + N1 metrics + live retention) landed via PRs #45/#46 into **`0.6.0`**; the `/metrics/live` + `liveRetentionMs` api-reference doc is committed. The branch no longer exists on origin.
+- **cpp-httplib FD_SETSIZE fix - status unclear.** No `FD_SETSIZE`/`CPPHTTPLIB_` reference exists anywhere in `engine/` on current master, despite the "Shipped" note below claiming it landed. Re-verify whether the high-FD ceiling is actually addressed before relying on it.
+- Active branch `claude/session-tjt2op` carries the P2 fix (unmerged); rebased onto master `05357cf`.
 
 ---
 
