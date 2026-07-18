@@ -266,7 +266,7 @@ export default function UISettingsPanel() {
 								<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
 									Font
 								</p>
-								<div className="grid grid-cols-3 gap-3">
+								<div className="grid grid-cols-2 gap-3">
 									{UI_FONTS.map((option) => {
 										const isSelected = font === option.value;
 										return (

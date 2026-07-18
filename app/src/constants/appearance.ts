@@ -31,6 +31,12 @@ export const UI_FONTS = [
 		stack: '"Space Grotesk", system-ui, sans-serif',
 	},
 	{
+		value: "inter",
+		label: "Inter",
+		description: "Neutral, highly legible",
+		stack: '"Inter", system-ui, sans-serif',
+	},
+	{
 		value: "system",
 		label: "System",
 		description: "Your OS interface font",
