@@ -15,9 +15,11 @@
 
 import { useEffect, useCallback, useState } from "react";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
+import type { ThemeSource } from "@/types/ui";
+import { DEFAULT_COLOR_SCHEME, isColorScheme, type ColorScheme } from "@/constants/color-schemes";
 
-export type ThemeSource = "system" | "light" | "dark";
-export type ColorScheme = "sky" | "ocean" | "forest" | "sunset" | "aurora" | "coral";
+// Re-exported so existing `@/hooks/useElectronTheme` type imports keep working.
+export type { ThemeSource, ColorScheme };
 
 interface UseElectronThemeOptions {
 	/** Called when theme changes */
@@ -27,14 +29,18 @@ interface UseElectronThemeOptions {
 export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 	const { onThemeChange } = options;
 	const [themeSource, setThemeSource] = useState<ThemeSource>("system");
-	const [colorScheme, setColorScheme] = useState<ColorScheme>("sunset");
+	const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
+	const [isDark, setIsDark] = useState(false);
 	const [isLoading, setIsLoading] = useState(true);
 
-	// Apply theme to document
+	// Apply theme to document. `scheme` is required (not defaulted from state) so
+	// this callback stays stable across accent changes — otherwise the init
+	// effect below, keyed on it, would re-run (and re-hit Electron) every time
+	// the accent changes.
 	const applyTheme = useCallback(
-		(isDark: boolean, scheme: ColorScheme = colorScheme) => {
+		(dark: boolean, scheme: ColorScheme) => {
 			// Apply dark mode class
-			if (isDark) {
+			if (dark) {
 				document.documentElement.classList.add("dark");
 			} else {
 				document.documentElement.classList.remove("dark");
@@ -43,30 +49,29 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 			// Apply color scheme data attribute
 			document.documentElement.setAttribute("data-color-scheme", scheme);
 
-			onThemeChange?.(isDark);
+			setIsDark(dark);
+			onThemeChange?.(dark);
 		},
-		[colorScheme, onThemeChange]
+		[onThemeChange]
 	);
 
 	// Initialize theme
 	useEffect(() => {
 		const initTheme = async () => {
 			let source: ThemeSource = "system";
-			let scheme: ColorScheme = "sunset";
 
 			// Load from localStorage
 			const savedSource = localStorage.getItem(
 				STORAGE_KEYS.THEME_SOURCE
 			) as ThemeSource | null;
-			const savedScheme = localStorage.getItem(
-				STORAGE_KEYS.COLOR_SCHEME
-			) as ColorScheme | null;
+			const rawScheme = localStorage.getItem(STORAGE_KEYS.COLOR_SCHEME);
+			const scheme: ColorScheme = isColorScheme(rawScheme) ? rawScheme : DEFAULT_COLOR_SCHEME;
 
 			if (window.electronAPI) {
 				// Get theme from Electron
 				const theme = await window.electronAPI.getTheme();
 				source = theme.themeSource as ThemeSource;
-				applyTheme(theme.shouldUseDarkColors, savedScheme || scheme);
+				applyTheme(theme.shouldUseDarkColors, scheme);
 			} else {
 				// Fallback: check localStorage or system preference
 				if (savedSource) {
@@ -75,18 +80,14 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 						const prefersDark = window.matchMedia(
 							"(prefers-color-scheme: dark)"
 						).matches;
-						applyTheme(prefersDark, savedScheme || scheme);
+						applyTheme(prefersDark, scheme);
 					} else {
-						applyTheme(source === "dark", savedScheme || scheme);
+						applyTheme(source === "dark", scheme);
 					}
 				} else {
 					const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-					applyTheme(prefersDark, savedScheme || scheme);
+					applyTheme(prefersDark, scheme);
 				}
-			}
-
-			if (savedScheme) {
-				scheme = savedScheme;
 			}
 
 			setThemeSource(source);
@@ -151,5 +152,12 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 		[applyTheme]
 	);
 
-	return { themeSource, setTheme, colorScheme, setColorScheme: changeColorScheme, isLoading };
+	return {
+		themeSource,
+		setTheme,
+		colorScheme,
+		setColorScheme: changeColorScheme,
+		isDark,
+		isLoading,
+	};
 }

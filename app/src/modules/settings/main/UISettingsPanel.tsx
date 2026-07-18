@@ -13,21 +13,7 @@
  */
 
 import { useState, useEffect } from "react";
-import {
-	Monitor,
-	Sun,
-	Moon,
-	Palette,
-	CheckCircle2,
-	Circle,
-	Cloud,
-	Waves,
-	Trees,
-	Sunset,
-	Sparkles,
-	Heart,
-	FolderOpen,
-} from "lucide-react";
+import { Monitor, Sun, Moon, Palette, CheckCircle2, Circle, FolderOpen } from "lucide-react";
 import {
 	Card,
 	CardContent,
@@ -36,7 +22,8 @@ import {
 	CardTitle,
 	Skeleton,
 } from "@/components/ui";
-import { useElectronTheme, type ThemeSource, type ColorScheme } from "@/hooks/useElectronTheme";
+import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
+import { COLOR_SCHEMES } from "@/constants/color-schemes";
 import { cn } from "@/lib/utils";
 
 interface AppPaths {
@@ -47,11 +34,15 @@ interface AppPaths {
 }
 
 export default function UISettingsPanel() {
-	const { themeSource, setTheme, colorScheme, setColorScheme, isLoading } = useElectronTheme();
+	const { themeSource, setTheme, colorScheme, setColorScheme, isDark, isLoading } =
+		useElectronTheme();
 	const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
 
 	useEffect(() => {
-		window.electronAPI?.getAppPaths().then(setAppPaths).catch(() => {});
+		window.electronAPI
+			?.getAppPaths()
+			.then(setAppPaths)
+			.catch(() => {});
 	}, []);
 
 	const themeOptions: {
@@ -77,57 +68,6 @@ export default function UISettingsPanel() {
 			label: "Dark",
 			icon: Moon,
 			description: "Always use dark theme",
-		},
-	];
-
-	const colorSchemeOptions: {
-		value: ColorScheme;
-		label: string;
-		icon: typeof Cloud;
-		description: string;
-		color: string;
-	}[] = [
-		{
-			value: "sky",
-			label: "Sky",
-			icon: Cloud,
-			description: "Calm and airy",
-			color: "bg-sky-500",
-		},
-		{
-			value: "ocean",
-			label: "Ocean",
-			icon: Waves,
-			description: "Deep and professional",
-			color: "bg-blue-500",
-		},
-		{
-			value: "forest",
-			label: "Forest",
-			icon: Trees,
-			description: "Fresh and natural",
-			color: "bg-green-500",
-		},
-		{
-			value: "sunset",
-			label: "Sunset",
-			icon: Sunset,
-			description: "Warm and energetic",
-			color: "bg-orange-500",
-		},
-		{
-			value: "aurora",
-			label: "Aurora",
-			icon: Sparkles,
-			description: "Magical and modern",
-			color: "bg-purple-500",
-		},
-		{
-			value: "coral",
-			label: "Coral",
-			icon: Heart,
-			description: "Vibrant and lively",
-			color: "bg-rose-500",
 		},
 	];
 
@@ -241,7 +181,7 @@ export default function UISettingsPanel() {
 								</div>
 							) : (
 								<div className="grid grid-cols-3 gap-3">
-									{colorSchemeOptions.map((option) => {
+									{COLOR_SCHEMES.map((option) => {
 										const Icon = option.icon;
 										const isSelected = colorScheme === option.value;
 										return (
@@ -257,15 +197,20 @@ export default function UISettingsPanel() {
 												)}
 											>
 												<div className="flex items-center gap-2">
+													{/* Swatch derives from the scheme's own accent
+													    token so it can never drift from reality.
+													    data-color-scheme (+ dark) scopes --primary
+													    to this scheme regardless of the active one. */}
 													<div
+														data-color-scheme={option.value}
 														className={cn(
-															"w-8 h-8 rounded-full flex items-center justify-center",
-															option.color,
+															"w-8 h-8 rounded-full flex items-center justify-center bg-primary",
+															isDark && "dark",
 															isSelected &&
 																"ring-2 ring-offset-2 ring-primary ring-offset-background"
 														)}
 													>
-														<Icon className="w-4 h-4 text-white" />
+														<Icon className="w-4 h-4 text-primary-foreground" />
 													</div>
 												</div>
 												<div className="text-center">
@@ -314,10 +259,7 @@ export default function UISettingsPanel() {
 											["Logs", appPaths.logsPath],
 										] as const
 									).map(([label, value]) => (
-										<div
-											key={label}
-											className="flex flex-col gap-0.5"
-										>
+										<div key={label} className="flex flex-col gap-0.5">
 											<span className="text-xs font-medium text-muted-foreground">
 												{label}
 											</span>
