@@ -35,6 +35,7 @@ import CollectionItem from "./CollectionItem";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
 import { TIMING } from "@/config/timing";
+import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 
 export default function CollectionTree() {
 	const openImport = useImportModalStore((s) => s.open);
@@ -240,7 +241,7 @@ export default function CollectionTree() {
 
 		const request = await createRequestMutation.mutateAsync({
 			collectionId: collectionId,
-			name: "New Request",
+			name: DEFAULT_REQUEST_NAME,
 			method: "GET",
 			url: "",
 		});

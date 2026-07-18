@@ -40,6 +40,7 @@ import {
 } from "@/queries";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { formatDistanceToNow } from "date-fns";
+import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 
 export default function WelcomeScreen() {
 	const openImport = useImportModalStore((s) => s.open);
@@ -109,7 +110,7 @@ export default function WelcomeScreen() {
 			// Create a new request
 			const newRequest = await createRequestMutation.mutateAsync({
 				collectionId: targetCollectionId,
-				name: "New Request",
+				name: DEFAULT_REQUEST_NAME,
 				method: "GET",
 				url: "",
 			});

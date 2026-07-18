@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { useTabsStore, type Tab } from "@/stores";
 import { useRequestQuery, useCollectionsQuery } from "@/queries";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
+import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 
 /**
  * Extract a short display path from a request URL. URLs may contain
@@ -33,11 +34,6 @@ function pathLabel(url: string): string {
 		return decodeURIComponent(stripped) || decodeURIComponent(url);
 	}
 }
-
-// Placeholder name given to freshly-created requests (see CollectionTree and
-// WelcomeScreen). Treated as "unnamed" so the tab falls back to the request
-// path until the user picks a real name.
-const DEFAULT_REQUEST_NAME = "New Request";
 
 /**
  * Title for a request tab: the user-set name when there is one, otherwise the
