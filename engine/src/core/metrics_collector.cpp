@@ -40,6 +40,21 @@ MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorC
         throw std::runtime_error ("Failed to initialize HdrHistogram");
     }
 
+    // Windowed (rolling) percentile source. Same value range / precision as the
+    // cumulative histogram, but sampled-and-reset per tick so live percentiles
+    // reflect the recent window instead of the all-time distribution.
+    int interval_result = hdr_interval_recorder_init_all (
+        &interval_recorder_,
+        1,  // Minimum value (1 microsecond)
+        constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
+        constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES);
+    if (interval_result != 0) {
+        hdr_close (latency_histogram_);
+        latency_histogram_ = nullptr;
+        throw std::runtime_error ("Failed to initialize hdr_interval_recorder");
+    }
+    interval_recorder_ready_ = true;
+
     // Pre-allocate vectors to avoid reallocation during test
     size_t expected = config_.expected_requests;
 
@@ -65,6 +80,10 @@ MetricsCollector::~MetricsCollector () {
     if (latency_histogram_ != nullptr) {
         hdr_close (latency_histogram_);
         latency_histogram_ = nullptr;
+    }
+    if (interval_recorder_ready_) {
+        hdr_interval_recorder_destroy (&interval_recorder_);
+        interval_recorder_ready_ = false;
     }
 }
 
@@ -93,6 +112,8 @@ const std::string& trace_data) {
     int64_t latency_us = static_cast<int64_t> (latency_ms * 1000.0);
     if (latency_us < 1) latency_us = 1;  // Minimum 1 microsecond
     hdr_record_value (latency_histogram_, latency_us);
+    // Also feed the rolling-window recorder for the live per-tick percentiles.
+    hdr_interval_recorder_record_value (&interval_recorder_, latency_us);
 
     // Store success result if configured (sampled)
     if (config_.store_success_traces && !trace_data.empty ()) {
@@ -159,6 +180,7 @@ void MetricsCollector::record_latency (double latency_ms) {
     int64_t latency_us = static_cast<int64_t> (latency_ms * 1000.0);
     if (latency_us < 1) latency_us = 1;  // Minimum 1 microsecond
     hdr_record_value (latency_histogram_, latency_us);
+    hdr_interval_recorder_record_value (&interval_recorder_, latency_us);
 }
 
 MetricsCollector::Percentiles MetricsCollector::calculate_percentiles () {
@@ -181,6 +203,39 @@ MetricsCollector::Percentiles MetricsCollector::calculate_percentiles () {
     result.p95  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 95.0));
     result.p99  = us_to_ms (hdr_value_at_percentile (latency_histogram_, 99.0));
     result.p999 = us_to_ms (hdr_value_at_percentile (latency_histogram_, 99.9));
+
+    return result;
+}
+
+MetricsCollector::Percentiles MetricsCollector::sample_window_percentiles () {
+    Percentiles result;
+
+    if (!interval_recorder_ready_) {
+        return result;
+    }
+
+    // Sample-and-recycle: hand back the histogram that has been accumulating since
+    // the previous call and swap in a fresh (reset) one for the next window. Safe
+    // to call concurrently with the recording writers via the phaser; must be
+    // driven by a single reader thread only (the metrics producer). The returned
+    // pointer is owned by the recorder and valid until the next sample.
+    struct hdr_histogram* interval = hdr_interval_recorder_sample (&interval_recorder_);
+    if (interval == nullptr || interval->total_count == 0) {
+        return result;  // empty window → zeros
+    }
+
+    auto us_to_ms = [] (int64_t us) -> double {
+        return static_cast<double> (us) / 1000.0;
+    };
+
+    result.min  = us_to_ms (hdr_min (interval));
+    result.max  = us_to_ms (hdr_max (interval));
+    result.p50  = us_to_ms (hdr_value_at_percentile (interval, 50.0));
+    result.p75  = us_to_ms (hdr_value_at_percentile (interval, 75.0));
+    result.p90  = us_to_ms (hdr_value_at_percentile (interval, 90.0));
+    result.p95  = us_to_ms (hdr_value_at_percentile (interval, 95.0));
+    result.p99  = us_to_ms (hdr_value_at_percentile (interval, 99.0));
+    result.p999 = us_to_ms (hdr_value_at_percentile (interval, 99.9));
 
     return result;
 }
@@ -300,7 +355,8 @@ nlohmann::json MetricsCollector::get_current_stats (size_t current_active,
 double elapsed_seconds,
 size_t requests_sent,
 size_t requests_expected,
-const std::map<int, size_t>* status_snapshot) const {
+const std::map<int, size_t>* status_snapshot,
+const Percentiles* window_percentiles) const {
     // Lock-free reads from atomic counters
     size_t total    = total_requests ();
     size_t errors   = total_errors ();
@@ -364,10 +420,16 @@ const std::map<int, size_t>* status_snapshot) const {
     stats["droppedRequests"] = dropped_requests_.load (std::memory_order_relaxed);
     stats["avgQueueWaitMs"] = average_queue_wait ();
 
-    // Per-tick latency percentiles — live snapshot from the lock-free
-    // histogram (same source as the post-run final report). Microsecond
-    // storage converted back to ms. Zero when no samples recorded yet.
-    if (latency_histogram_ != nullptr && latency_histogram_->total_count > 0) {
+    // Per-tick latency percentiles. When the caller supplies windowed (rolling)
+    // percentiles — the live producer samples the interval recorder each tick —
+    // emit those so the "percentiles over time" chart tracks the recent window
+    // instead of flattening. When absent (callers/tests that don't drive the
+    // interval recorder), fall back to the cumulative-from-start histogram.
+    if (window_percentiles != nullptr) {
+        stats["latencyP50Ms"] = window_percentiles->p50;
+        stats["latencyP95Ms"] = window_percentiles->p95;
+        stats["latencyP99Ms"] = window_percentiles->p99;
+    } else if (latency_histogram_ != nullptr && latency_histogram_->total_count > 0) {
         stats["latencyP50Ms"] =
         static_cast<double> (hdr_value_at_percentile (latency_histogram_, 50.0)) / 1000.0;
         stats["latencyP95Ms"] =

@@ -213,15 +213,18 @@ void register_run_routes (RouteContext& ctx) {
                     bytes_sent = m.value;
                 } else if (m.name == vayu::MetricName::BytesReceived) {
                     bytes_received = m.value;
-                } else if (m.name == vayu::MetricName::LatencyP50) {
+                } else if (m.name == vayu::MetricName::LatencyP50 && !m.labels.empty ()) {
+                    // Only the labeled cumulative final-summary row counts here; the
+                    // unlabeled per-tick windowed rows (persisted during the run)
+                    // must not overwrite the whole-run percentile in the report.
                     report.latency_p50 = m.value;
                 } else if (m.name == vayu::MetricName::LatencyP75) {
                     report.latency_p75 = m.value;
                 } else if (m.name == vayu::MetricName::LatencyP90) {
                     report.latency_p90 = m.value;
-                } else if (m.name == vayu::MetricName::LatencyP95) {
+                } else if (m.name == vayu::MetricName::LatencyP95 && !m.labels.empty ()) {
                     report.latency_p95 = m.value;
-                } else if (m.name == vayu::MetricName::LatencyP99) {
+                } else if (m.name == vayu::MetricName::LatencyP99 && !m.labels.empty ()) {
                     report.latency_p99 = m.value;
                 } else if (m.name == vayu::MetricName::LatencyP999) {
                     report.latency_p999 = m.value;

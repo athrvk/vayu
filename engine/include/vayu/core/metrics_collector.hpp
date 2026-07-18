@@ -31,6 +31,7 @@
 #include <vector>
 
 #include <hdr/hdr_histogram.h>
+#include <hdr/hdr_interval_recorder.h>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
@@ -243,6 +244,24 @@ class MetricsCollector {
     [[nodiscard]] Percentiles calculate_percentiles ();
 
     /**
+     * @brief Sample the rolling (windowed) latency percentiles for the interval
+     *        that has elapsed since the previous call, then reset the window.
+     *
+     * Backed by a phaser-based hdr_interval_recorder: record_success/record_latency
+     * feed the recorder concurrently from worker threads while this single-reader
+     * sample-and-recycle runs safely alongside them (this is what properly resolves
+     * the cumulative-histogram concurrent read/write concern, D8). Unlike
+     * calculate_percentiles() — which reads the cumulative-from-start histogram and
+     * therefore flattens as a run progresses — each call here reflects only the most
+     * recent window, so the live percentile chart tracks the current load instead of
+     * the all-time distribution.
+     *
+     * @note Mutating (samples and resets the window). Call once per metrics tick
+     *       from the producer thread only. Returns zeros when the window is empty.
+     */
+    [[nodiscard]] Percentiles sample_window_percentiles ();
+
+    /**
      * @brief Get status code distribution
      */
     [[nodiscard]] std::map<int, size_t> status_code_distribution () const;
@@ -303,13 +322,20 @@ class MetricsCollector {
      *        derived class breakdown, avoiding a redundant scan when the caller
      *        already snapshotted the distribution this tick. When null the
      *        distribution is computed internally.
+     * @param window_percentiles Optional windowed (rolling) percentiles for the
+     *        `latencyP50Ms`/`latencyP95Ms`/`latencyP99Ms` fields. When non-null the
+     *        live tick carries these recent-window values (see
+     *        sample_window_percentiles). When null the fields fall back to the
+     *        cumulative-from-start histogram — kept for callers/tests that don't
+     *        drive the interval recorder.
      * @return JSON object with current metrics
      */
     [[nodiscard]] nlohmann::json get_current_stats (size_t current_active,
     double elapsed_seconds,
     size_t requests_sent,
     size_t requests_expected                     = 0,
-    const std::map<int, size_t>* status_snapshot = nullptr) const;
+    const std::map<int, size_t>* status_snapshot = nullptr,
+    const Percentiles* window_percentiles        = nullptr) const;
 
     private:
     std::string run_id_;
@@ -334,8 +360,16 @@ class MetricsCollector {
     static constexpr int STATUS_CODE_SLOTS = 600;
     std::array<std::atomic<size_t>, STATUS_CODE_SLOTS> status_code_counts_{};
 
-    // Lock-free HdrHistogram for latency recording (thread-safe)
+    // Lock-free HdrHistogram for latency recording (thread-safe). Cumulative from
+    // start of run — feeds calculate_percentiles() for the final report.
     struct hdr_histogram* latency_histogram_{ nullptr };
+
+    // Phaser-based interval recorder for the windowed (rolling) percentiles that
+    // the live/history per-tick series consume. Writers (record_success/
+    // record_latency) record here in parallel with the cumulative histogram; the
+    // producer thread sample-and-recycles it once per tick (sample_window_percentiles).
+    struct hdr_interval_recorder interval_recorder_{};
+    bool interval_recorder_ready_{ false };
 
     mutable std::mutex errors_mutex_;
     std::vector<ResultRecord> errors_;
