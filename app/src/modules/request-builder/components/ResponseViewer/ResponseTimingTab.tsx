@@ -133,7 +133,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 						className="grid grid-cols-[10px_1fr_auto_46px] items-center gap-2.5"
 					>
 						<span
-							className="h-2.5 w-2.5 rounded-[3px]"
+							className="h-2.5 w-2.5 rounded-sm"
 							style={{ background: p.color }}
 							aria-hidden
 						/>

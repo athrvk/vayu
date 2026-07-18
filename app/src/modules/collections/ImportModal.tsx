@@ -143,7 +143,7 @@ export function ImportModal() {
 				role="dialog"
 				aria-modal="true"
 				aria-label="Import Collection"
-				className="flex w-[500px] max-h-[82vh] flex-col overflow-hidden rounded-[10px] border border-border-strong bg-card shadow-2xl"
+				className="flex w-[500px] max-h-[82vh] flex-col overflow-hidden rounded-lg border border-border-strong bg-card shadow-2xl"
 				onClick={(e) => e.stopPropagation()}
 			>
 				<div className="flex items-center justify-between border-b border-border px-5 py-4">
