@@ -51,11 +51,7 @@
       "displayName": "Windows Debug",
       "description": "Development build for Windows (Debug)",
       "inherits": ["base", "base-fallback"],
-      "generator": "Visual Studio 17 2022",
-      "architecture": {
-        "value": "x64",
-        "strategy": "set"
-      },
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -188,7 +184,6 @@
       "name": "windows-dev",
       "displayName": "Build Windows Debug",
       "configurePreset": "windows-dev",
-      "configuration": "Debug",
       "jobs": 0
     },
     {
@@ -239,7 +234,6 @@
       "name": "windows-dev",
       "displayName": "Test Windows Debug",
       "configurePreset": "windows-dev",
-      "configuration": "Debug",
       "output": {
         "outputOnFailure": true
       }
