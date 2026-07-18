@@ -34,6 +34,20 @@ function pathLabel(url: string): string {
 	}
 }
 
+// Placeholder names given to freshly-created requests. Treated as "unnamed"
+// so the tab falls back to the request path until the user picks a real name.
+const DEFAULT_REQUEST_NAMES = new Set(["New Request", "Untitled Request"]);
+
+/**
+ * Title for a request tab: the user-set name when there is one, otherwise the
+ * request path. A blank or still-default placeholder name counts as "not set".
+ */
+function requestTabTitle(name: string, resolvedUrl: string): string {
+	const trimmed = name.trim();
+	if (trimmed && !DEFAULT_REQUEST_NAMES.has(trimmed)) return trimmed;
+	return pathLabel(resolvedUrl) || trimmed;
+}
+
 function TabIcon({ type }: { type: Tab["type"] }) {
 	switch (type) {
 		case "collection":
@@ -78,7 +92,7 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 						{request.method}
 					</span>
 					<span className="truncate">
-						{pathLabel(resolveString(request.url)) || request.name}
+						{requestTabTitle(request.name, resolveString(request.url))}
 					</span>
 				</span>
 			) : (
