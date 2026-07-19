@@ -39,6 +39,7 @@ import { useClientSettingsStore } from "@/stores";
 import { COLOR_SCHEMES } from "@/constants/color-schemes";
 import { UI_FONTS, UI_SCALES, UI_RADII, MONO_FONTS } from "@/constants/appearance";
 import { cn } from "@/lib/utils";
+import { ToggleRow } from "./SettingControls";
 
 export default function AppearancePanel() {
 	const { themeSource, setTheme, colorScheme, setColorScheme, isDark, isLoading } =
@@ -46,6 +47,8 @@ export default function AppearancePanel() {
 	const { font, setFont, scale, setScale, radius, setRadius } = useAppearance();
 	const monoFont = useClientSettingsStore((s) => s.monoFont);
 	const setMonoFont = useClientSettingsStore((s) => s.setMonoFont);
+	const reducedMotion = useClientSettingsStore((s) => s.reducedMotion);
+	const setReducedMotion = useClientSettingsStore((s) => s.setReducedMotion);
 
 	const themeOptions: {
 		value: ThemeSource;
@@ -377,6 +380,15 @@ export default function AppearancePanel() {
 								);
 							})}
 						</div>
+					</div>
+
+					<div className="border-t border-border pt-4">
+						<ToggleRow
+							label="Reduced motion"
+							description="Minimize animations and transitions across the app"
+							checked={reducedMotion}
+							onChange={setReducedMotion}
+						/>
 					</div>
 				</CardContent>
 			</Card>

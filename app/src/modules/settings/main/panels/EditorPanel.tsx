@@ -21,10 +21,16 @@ import { EDITOR_FONT_SIZES, EDITOR_TAB_SIZES } from "@/constants/client-settings
 import { CodeEditor } from "@/components/ui/code-editor";
 import { OptionButtons, ToggleRow } from "./SettingControls";
 
-const SAMPLE = `function greet(name) {
-  // Live preview of your editor settings
-  return \`Hello, \${name}!\`;
-}`;
+// Tab-indented (real \t) + nested so changing the tab width visibly reflows the
+// indentation in the read-only preview below.
+const SAMPLE = [
+	"function greet(name) {",
+	"\tif (!name) {",
+	'\t\treturn "Hello, world!";',
+	"\t}",
+	"\treturn `Hello, ${name}!`;",
+	"}",
+].join("\n");
 
 export default function EditorPanel() {
 	const editor = useClientSettingsStore((s) => s.editor);
@@ -92,7 +98,8 @@ export default function EditorPanel() {
 				</CardContent>
 			</Card>
 
-			{/* Live preview — reflects the settings above (and the code font). */}
+			{/* Live preview — reflects the settings above (font, wrap, line numbers,
+			    minimap, tab width) and the code font. */}
 			<Card>
 				<CardHeader className="pb-3">
 					<CardTitle className="text-base">Preview</CardTitle>
@@ -101,7 +108,7 @@ export default function EditorPanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<div className="h-40 overflow-hidden rounded-md border border-border">
+					<div className="h-48 overflow-hidden rounded-md border border-border">
 						<CodeEditor value={SAMPLE} language="javascript" readOnly />
 					</div>
 				</CardContent>

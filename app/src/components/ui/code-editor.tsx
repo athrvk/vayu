@@ -42,6 +42,9 @@ const DEFAULT_OPTIONS = {
 	scrollBeyondLastLine: false,
 	wordWrap: "on",
 	tabSize: 2,
+	// Honor the user's configured tab width instead of inferring it from file
+	// content (Monaco defaults this on, which would override the preference).
+	detectIndentation: false,
 	automaticLayout: true,
 	// Render suggestion/hover/context-menu widgets in a body-level overlay so they
 	// are not clipped by editor containers with `overflow: hidden` + fixed height.

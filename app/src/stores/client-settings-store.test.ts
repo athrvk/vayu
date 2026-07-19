@@ -24,6 +24,7 @@ describe("client-settings store", () => {
 			sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS,
 			liveRefreshMs: 500,
 			autoSave: { enabled: true, delayMs: 3000 },
+			reducedMotion: false,
 		});
 	});
 
@@ -57,6 +58,14 @@ describe("client-settings store", () => {
 		const a = useClientSettingsStore.getState().autoSave;
 		expect(a.enabled).toBe(false);
 		expect(a.delayMs).toBe(3000); // untouched
+	});
+
+	it("toggles reduced motion and flags the document", () => {
+		useClientSettingsStore.getState().setReducedMotion(true);
+		expect(useClientSettingsStore.getState().reducedMotion).toBe(true);
+		expect(document.documentElement.getAttribute("data-reduced-motion")).toBe("true");
+		useClientSettingsStore.getState().setReducedMotion(false);
+		expect(document.documentElement.hasAttribute("data-reduced-motion")).toBe(false);
 	});
 
 	it("reset key list covers every renderer preference but not workspace state", () => {

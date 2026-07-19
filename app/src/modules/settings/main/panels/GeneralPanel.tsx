@@ -16,7 +16,16 @@
 
 import { useState, useEffect } from "react";
 import { FolderOpen, Save, Database, RotateCcw, Loader2 } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, Button } from "@/components/ui";
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+	Button,
+	Kbd,
+} from "@/components/ui";
+import { modKey } from "@/lib/platform";
 import { useClientSettingsStore } from "@/stores";
 import { useToastStore } from "@/stores";
 import { useRunsQuery, useInvalidateRuns } from "@/queries/runs";
@@ -94,8 +103,12 @@ export default function GeneralPanel() {
 						<CardTitle className="text-base">Auto-save</CardTitle>
 					</div>
 					<CardDescription>
-						Automatically save edits to requests after you stop typing. Manual save
-						(Ctrl/Cmd+S) always works regardless.
+						Automatically save edits to requests after you stop typing. Manual save{" "}
+						<span className="inline-flex items-center gap-1 align-middle">
+							<Kbd size="sm">{modKey}</Kbd>
+							<Kbd size="sm">S</Kbd>
+						</span>{" "}
+						always works regardless.
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">

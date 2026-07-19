@@ -50,6 +50,7 @@ interface ClientSettingsState {
 	sloThresholdMs: number;
 	liveRefreshMs: number;
 	autoSave: AutoSavePrefs;
+	reducedMotion: boolean;
 
 	setEditor: (patch: Partial<EditorPrefs>) => void;
 	setMonoFont: (font: MonoFont) => void;
@@ -57,6 +58,7 @@ interface ClientSettingsState {
 	setSloThresholdMs: (ms: number) => void;
 	setLiveRefreshMs: (ms: number) => void;
 	setAutoSave: (patch: Partial<AutoSavePrefs>) => void;
+	setReducedMotion: (on: boolean) => void;
 	/** Clear every renderer preference and reload so defaults re-apply cleanly. */
 	resetAll: () => void;
 }
@@ -68,6 +70,13 @@ function applyMonoFont(font: MonoFont): void {
 	document.documentElement.style.setProperty("--font-mono", monoFontStack(font));
 }
 
+/** Flag the document so the global CSS can collapse transitions/animations. */
+function applyReducedMotion(on: boolean): void {
+	if (typeof document === "undefined") return;
+	if (on) document.documentElement.setAttribute("data-reduced-motion", "true");
+	else document.documentElement.removeAttribute("data-reduced-motion");
+}
+
 export const useClientSettingsStore = create<ClientSettingsState>()(
 	persist(
 		(set) => ({
@@ -77,6 +86,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 			sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS,
 			liveRefreshMs: DEFAULT_LIVE_REFRESH_MS,
 			autoSave: { ...DEFAULT_AUTO_SAVE_PREFS },
+			reducedMotion: false,
 
 			setEditor: (patch) => set((s) => ({ editor: { ...s.editor, ...patch } })),
 			setMonoFont: (font) => {
@@ -87,6 +97,10 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 			setSloThresholdMs: (ms) => set({ sloThresholdMs: clampSloThresholdMs(ms) }),
 			setLiveRefreshMs: (ms) => set({ liveRefreshMs: ms }),
 			setAutoSave: (patch) => set((s) => ({ autoSave: { ...s.autoSave, ...patch } })),
+			setReducedMotion: (on) => {
+				applyReducedMotion(on);
+				set({ reducedMotion: on });
+			},
 
 			resetAll: () => {
 				for (const key of SETTINGS_STORAGE_KEYS) localStorage.removeItem(key);
@@ -104,10 +118,14 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				sloThresholdMs: s.sloThresholdMs,
 				liveRefreshMs: s.liveRefreshMs,
 				autoSave: s.autoSave,
+				reducedMotion: s.reducedMotion,
 			}),
 			onRehydrateStorage: () => (state) => {
-				// Re-assert the persisted mono font onto the CSS var after rehydrate.
-				if (state) applyMonoFont(state.monoFont);
+				// Re-assert persisted DOM-affecting prefs after rehydrate.
+				if (state) {
+					applyMonoFont(state.monoFont);
+					applyReducedMotion(state.reducedMotion);
+				}
 			},
 		}
 	)
