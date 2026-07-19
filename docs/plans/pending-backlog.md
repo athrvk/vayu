@@ -52,8 +52,8 @@ The generic `send_error` helper (`routes.hpp:39`) emits flat `{"error":"<string>
 
 ## Parked (revisit only if the trigger becomes real)
 
-### D8. HdrHistogram concurrent read/write
-`get_current_stats()` reads the histogram lock-free while workers record. Benign on x86_64 / Apple Silicon / Linux arm64 (atomic 64-bit reads). **W1's interval recorder resolves this properly** (phaser-based). Otherwise only a concern on an arch without atomic 64-bit reads → switch to `hdr_record_value_atomic`.
+### D8. HdrHistogram concurrent read/write - _mitigated by W1; cumulative-path atomic cure intentionally deferred_
+`get_current_stats()` read the histogram lock-free while workers record. **W1 mitigated this:** the live percentile path now reads the phaser-based `hdr_interval_recorder` (race-free by construction), and the cumulative histogram is no longer read concurrently on the live path — `calculate_percentiles()` runs post-run after workers stop. The literal cure (switch cumulative recording to `hdr_record_value_atomic`) is **intentionally not applied**: it adds a CAS per sample on the 60k+ RPS hot path (works against P1) for a race that is benign on every arch Vayu ships (x86_64 / Apple Silicon / Linux arm64 all have atomic 64-bit reads). Revisit only if a 32-bit / non-atomic-64-bit-read arch becomes a target — and pair it with a hot-path benchmark.
 
 ### D9. RampUp `ramp_lag` baseline for `start=0`
 A `startConcurrency=0` ramp shows ~0.8% structural lag on a healthy run (integer truncation vs real-valued integral). Far below the >5% real-stall threshold; signal intact. Optional cure: floor `startConcurrency` to 1 at the UI/validation layer (not the engine).
