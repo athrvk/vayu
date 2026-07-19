@@ -21,6 +21,8 @@ import {
 	savePersistedSafety,
 	loadMcpEnabled,
 	saveMcpEnabled,
+	connectClient,
+	type McpConnectClient,
 	type McpSafetyConfig,
 } from "./mcp/index.js";
 import {
@@ -416,6 +418,17 @@ function setupIpcHandlers() {
 			url: mcpService?.getUrl() ?? MCP_ENDPOINT_URL,
 			enabled: loadMcpEnabled(),
 		};
+	});
+
+	// One-click connect: register the Vayu endpoint with a client via its own CLI
+	// (`claude mcp add`, `code --add-mcp`). Returns cli-not-found so the renderer
+	// can fall back to the copy snippet.
+	ipcMain.handle("mcp:connectClient", async (_event, client: unknown) => {
+		if (client !== "claude" && client !== "vscode") {
+			return { ok: false, reason: "unsupported", message: "Unsupported client" };
+		}
+		const url = mcpService?.getUrl() ?? MCP_ENDPOINT_URL;
+		return connectClient(client as McpConnectClient, url);
 	});
 
 	// Toggle the MCP server on/off from Settings. Persists the preference and

@@ -10,7 +10,7 @@
  */
 
 import type { ThemeSource } from "./ui";
-import type { McpSafetyConfig, McpStatus } from "./domain";
+import type { McpSafetyConfig, McpStatus, McpConnectClient, McpConnectResult } from "./domain";
 
 interface ThemeInfo {
 	shouldUseDarkColors: boolean;
@@ -37,6 +37,7 @@ interface ElectronAPI {
 	getMcpSafety: () => Promise<McpSafetyConfig>;
 	updateMcpSafety: (partial: Partial<McpSafetyConfig>) => Promise<McpSafetyConfig>;
 	setMcpEnabled: (enabled: boolean) => Promise<McpStatus>;
+	connectMcpClient: (client: McpConnectClient) => Promise<McpConnectResult>;
 
 	// Theme management
 	getTheme: () => Promise<ThemeInfo>;

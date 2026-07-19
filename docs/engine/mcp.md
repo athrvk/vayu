@@ -290,7 +290,7 @@ The server toggle, allowlist (incl. allow-all), caps, and write toggle are now
 editable from **Settings → MCP** and persisted in the Electron main process
 (`electron-store`, `mcp-config.json`), so they survive a restart. The panel is a
 registered app-settings panel and also shows live connection status and the
-one-command connect snippets (Claude Code / Cursor / VS Code / Codex). Flow:
+connect snippets (Claude Code / VS Code / Cursor / Codex). Flow:
 
 - `electron/mcp/store.ts` persists both the safety override and the
   enabled/disabled preference. On startup `main.ts` skips `startMcp()` when
@@ -301,6 +301,14 @@ one-command connect snippets (Claude Code / Cursor / VS Code / Codex). Flow:
   `mcp:status` reports `{ running, url, enabled }`. Renderer input is sanitized
   in `main.ts` via `sanitizeSafetyInput` (normalizes + de-dupes hosts, clamps
   caps, coerces the `allowAll` flag) before it is applied and written to disk.
+- **One-click connect.** For clients with an add-CLI, a **Connect** button
+  registers Vayu automatically: `mcp:connectClient` (`electron/mcp/connect.ts`)
+  shells out to `claude mcp add --transport http --scope user vayu <url>`
+  (Claude Code) or `code --add-mcp <json>` (VS Code). The binary is resolved
+  through a login shell (`command -v`) to survive a GUI app's stripped PATH,
+  then spawned with an argument array. If the CLI isn't installed it returns
+  `cli-not-found` and the UI falls back to the copy snippet. Cursor / Codex have
+  no add-CLI, so they stay copy-only.
 - The panel (`app/src/modules/settings/main/panels/McpSettingsPanel.tsx`) is
   cards-only and auto-persisting, and talks to `window.electronAPI` directly
   rather than the engine config query, since MCP config is app-level.

@@ -76,3 +76,5 @@ export {
 	loadMcpEnabled,
 	saveMcpEnabled,
 } from "./store.js";
+export { connectClient } from "./connect.js";
+export type { McpConnectClient, McpConnectResult } from "./connect.js";

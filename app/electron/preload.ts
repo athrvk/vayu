@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	getMcpSafety: () => ipcRenderer.invoke("mcp:getSafety"),
 	updateMcpSafety: (partial: unknown) => ipcRenderer.invoke("mcp:updateSafety", partial),
 	setMcpEnabled: (enabled: boolean) => ipcRenderer.invoke("mcp:setEnabled", enabled),
+	connectMcpClient: (client: "claude" | "vscode") =>
+		ipcRenderer.invoke("mcp:connectClient", client),
 
 	// Theme management
 	getTheme: (): Promise<{ shouldUseDarkColors: boolean; themeSource: string }> =>

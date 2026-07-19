@@ -30,6 +30,8 @@ import {
 	X,
 	Check,
 	Copy,
+	Zap,
+	Loader2,
 	CircleCheck,
 	CircleSlash,
 	AlertTriangle,
@@ -47,25 +49,35 @@ import {
 	CardTitle,
 	Skeleton,
 } from "@/components/ui";
-import type { McpSafetyConfig, McpStatus } from "@/types";
+import type { McpConnectClient, McpSafetyConfig, McpStatus } from "@/types";
+import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_ENDPOINT = "http://127.0.0.1:9877/mcp";
 
+interface ConnectSnippet {
+	label: string;
+	code: string;
+	/** When set, the client has a CLI we can shell out to for one-click connect. */
+	client?: McpConnectClient;
+}
+
 /** Config snippets an agent uses to connect to the running Vayu MCP endpoint. */
-function connectSnippets(url: string): { label: string; code: string }[] {
+function connectSnippets(url: string): ConnectSnippet[] {
 	return [
 		{
 			label: "Claude Code",
 			code: `claude mcp add --transport http vayu ${url}`,
-		},
-		{
-			label: "Cursor · Claude Code (.mcp.json)",
-			code: `{\n  "mcpServers": {\n    "vayu": { "type": "http", "url": "${url}" }\n  }\n}`,
+			client: "claude",
 		},
 		{
 			label: "VS Code (.vscode/mcp.json)",
 			code: `{\n  "servers": {\n    "vayu": { "type": "http", "url": "${url}" }\n  }\n}`,
+			client: "vscode",
+		},
+		{
+			label: "Cursor (.cursor/mcp.json)",
+			code: `{\n  "mcpServers": {\n    "vayu": { "type": "http", "url": "${url}" }\n  }\n}`,
 		},
 		{
 			label: "Codex (~/.codex/config.toml)",
@@ -73,6 +85,15 @@ function connectSnippets(url: string): { label: string; code: string }[] {
 		},
 	];
 }
+
+const CLIENT_LABEL: Record<McpConnectClient, string> = {
+	claude: "Claude Code",
+	vscode: "VS Code",
+};
+const CLIENT_CLI: Record<McpConnectClient, string> = {
+	claude: "claude",
+	vscode: "code",
+};
 
 /** A small copy-to-clipboard button that flips to a check for a moment. */
 function CopyButton({ text, className }: { text: string; className?: string }) {
@@ -132,11 +153,14 @@ const CAP_FIELDS: CapField[] = [
 export default function McpSettingsPanel() {
 	const hasElectron = typeof window !== "undefined" && !!window.electronAPI;
 
+	const showToast = useToastStore((s) => s.showToast);
+
 	const [status, setStatus] = useState<McpStatus | null>(null);
 	const [config, setConfig] = useState<McpSafetyConfig | null>(null);
 	const [newHost, setNewHost] = useState("");
 	const [capDrafts, setCapDrafts] = useState<Partial<Record<CapField["key"], string>>>({});
 	const [isLoading, setIsLoading] = useState(true);
+	const [connecting, setConnecting] = useState<McpConnectClient | null>(null);
 
 	// Load status + current safety config on mount.
 	useEffect(() => {
@@ -183,6 +207,31 @@ export default function McpSettingsPanel() {
 		const s = await window.electronAPI.setMcpEnabled(next);
 		setStatus(s);
 	}, []);
+
+	// One-click connect: shell out to the client's own CLI. Falls back to the
+	// copy snippet (already shown) when the CLI isn't installed.
+	const handleConnect = useCallback(
+		async (client: McpConnectClient) => {
+			if (!window.electronAPI) return;
+			setConnecting(client);
+			try {
+				const res = await window.electronAPI.connectMcpClient(client);
+				if (res.ok) {
+					showToast(`Added Vayu to ${CLIENT_LABEL[client]}.`, "success");
+				} else if (res.reason === "cli-not-found") {
+					showToast(
+						`The ${CLIENT_CLI[client]} CLI wasn't found — copy the snippet below to add Vayu manually.`,
+						"error"
+					);
+				} else {
+					showToast(res.message || `Couldn't connect ${CLIENT_LABEL[client]}.`, "error");
+				}
+			} finally {
+				setConnecting(null);
+			}
+		},
+		[showToast]
+	);
 
 	const addHost = useCallback(() => {
 		const host = newHost.trim().toLowerCase();
@@ -304,7 +353,30 @@ export default function McpSettingsPanel() {
 								<span className="text-xs font-medium text-muted-foreground">
 									{snippet.label}
 								</span>
-								<CopyButton text={snippet.code} />
+								<div className="flex items-center gap-1">
+									{snippet.client && (
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => void handleConnect(snippet.client!)}
+											disabled={
+												!hasElectron || !enabled || connecting !== null
+											}
+											className="h-7 px-2 text-xs shrink-0"
+											title={
+												enabled ? undefined : "Enable the MCP server first"
+											}
+										>
+											{connecting === snippet.client ? (
+												<Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+											) : (
+												<Zap className="w-3.5 h-3.5 mr-1" />
+											)}
+											Connect
+										</Button>
+									)}
+									<CopyButton text={snippet.code} />
+								</div>
 							</div>
 							<pre className="text-xs font-mono bg-muted rounded px-3 py-2 overflow-x-auto whitespace-pre">
 								{snippet.code}

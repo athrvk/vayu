@@ -483,6 +483,16 @@ export interface McpStatus {
 	enabled: boolean;
 }
 
+/** Clients Vayu can register itself with via their own CLI (one-click connect). */
+export type McpConnectClient = "claude" | "vscode";
+
+export interface McpConnectResult {
+	ok: boolean;
+	/** "cli-not-found" → the client's CLI isn't installed; fall back to the snippet. */
+	reason?: "cli-not-found" | "error" | "unsupported";
+	message?: string;
+}
+
 export interface ScriptCompletion {
 	label: string;
 	kind: number;
