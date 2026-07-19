@@ -88,7 +88,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 		>
 			{copied ? (
 				<>
-					<Check className="w-3.5 h-3.5 mr-1 text-green-600 dark:text-green-400" />
+					<Check className="w-3.5 h-3.5 mr-1 text-success" />
 					Copied
 				</>
 			) : (
@@ -208,9 +208,9 @@ export default function McpSettingsPanel() {
 	return (
 		<>
 			{!hasElectron && (
-				<Card className="border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10">
+				<Card className="border-warning/40 bg-warning/10">
 					<CardContent className="flex items-start gap-3 py-4">
-						<AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+						<AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
 						<p className="text-sm text-muted-foreground">
 							MCP settings are only available in the desktop app. Run Vayu via
 							Electron to configure the MCP server.
@@ -230,7 +230,7 @@ export default function McpSettingsPanel() {
 						) : running ? (
 							<Badge
 								variant="secondary"
-								className="ml-1 bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300"
+								className="ml-1 border border-success/20 bg-success/10 text-success-text"
 							>
 								<CircleCheck className="w-3 h-3 mr-1" />
 								Running
