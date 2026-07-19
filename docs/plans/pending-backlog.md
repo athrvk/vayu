@@ -48,6 +48,9 @@ The generic `send_error` helper (`routes.hpp:39`) emits flat `{"error":"<string>
 ### N2. Lint sweep
 ~120 ESLint findings in the app (mostly `@typescript-eslint/no-explicit-any` + misc). Janitorial; no behaviour change.
 
+### N3. Unify charting on uPlot (drop recharts)
+Two charting stacks today: a good hand-rolled SVG system (live dashboard) and recharts in one history file (`HistoricalChartsSection`, duplicate throughput chart, copy-pasted LineCharts). Load tests are dense time-series → the app already downsamples (`CHART_DOWNSAMPLE_MAX_POINTS`), and neither stack lets a user correlate metrics or zoom the moment of degradation. **Spike done** (`docs/plans/chart-spike-uplot.md`, branch `spike/uplot-charts`): uPlot (Canvas) is ~22.8 KB gz vs recharts ~96.9 KB gz (−~74 KB, ~4×), stays token-themed, and adds synced cursor / drag-zoom / breakpoint annotations - the "understand the service" interactivity. **Needs:** land `TimeSeriesUPlot` + tests, migrate history off recharts (drop the dep), then migrate live SVG charts incrementally, wire synced cursor + W1 breakpoint annotation. Medium; do after W1 merges.
+
 ---
 
 ## Parked (revisit only if the trigger becomes real)
