@@ -443,13 +443,18 @@ export interface ConfigEntry {
 	requiresRestart?: boolean;
 }
 
-export type SettingsCategory =
+/** Client-side settings panels (localStorage-backed prefs, rendered by app panels). */
+export type ClientSettingsCategory = "appearance" | "dashboard" | "general";
+
+/** Engine settings categories (data-driven from the engine `/config` API). */
+export type EngineSettingsCategory =
 	| "general_engine"
 	| "database_performance"
 	| "network_performance"
 	| "scripting_sandbox"
-	| "observability"
-	| "ui";
+	| "observability";
+
+export type SettingsCategory = ClientSettingsCategory | EngineSettingsCategory;
 
 export interface ScriptCompletion {
 	label: string;
