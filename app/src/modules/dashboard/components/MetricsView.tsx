@@ -63,11 +63,13 @@ function MetricsView({
 }: MetricsViewProps) {
 	const loadMode = useMode(mode);
 
-	// Single capped window shared by all time-series charts so their x-axes
-	// cover identical time spans (the throughput chart and the RampUp overlay
-	// share one x-axis — they must be built from the same window or the
-	// configured/achieved lines misalign with throughput on long runs).
-	const chartWindow = useMemo(() => historicalMetrics.slice(-2400), [historicalMetrics]);
+	// All time-series charts render the full retained live buffer (the store caps
+	// it at HISTORICAL_METRICS_CAP for memory; ~5 min at the default 10 Hz tick).
+	// They share this one array so their x-axes cover identical spans (the
+	// throughput chart and the ramp overlay share an x-axis). The old extra
+	// slice(-2400) chart-level cap existed only to bound SVG/recharts DOM nodes —
+	// uPlot (Canvas) renders the whole buffer cheaply, so it's gone.
+	const chartWindow = historicalMetrics;
 
 	const latencyChartData = useMemo(() => buildLatencyChartData(chartWindow), [chartWindow]);
 
