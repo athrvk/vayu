@@ -54,3 +54,53 @@ export const DEFAULT_MCP_SAFETY_CONFIG: McpSafetyConfig = {
 export function resolveSafetyConfig(override?: Partial<McpSafetyConfig>): McpSafetyConfig {
 	return { ...DEFAULT_MCP_SAFETY_CONFIG, ...(override ?? {}) };
 }
+
+/**
+ * Reduce a user-entered value to a bare hostname: strip scheme, path, query,
+ * and port, then lowercase. `"https://api.example.com:8080/v1"` → `"api.example.com"`.
+ * Matches the exact-hostname comparison the allowlist guard performs, so what the
+ * user types in Settings lines up with what an agent's request URL resolves to.
+ */
+export function normalizeHost(raw: string): string {
+	let host = raw.trim().toLowerCase();
+	if (host === "") return "";
+	host = host.replace(/^[a-z][a-z0-9+.-]*:\/\//, ""); // scheme://
+	host = host.split("/")[0].split("?")[0]; // path / query
+	host = host.split(":")[0]; // port
+	return host.trim();
+}
+
+function isFiniteNumber(v: unknown): v is number {
+	return typeof v === "number" && Number.isFinite(v);
+}
+
+/**
+ * Sanitize a partial safety override arriving from the (untrusted) renderer
+ * before it is applied or persisted: normalize + de-duplicate allowlist hosts,
+ * clamp caps to positive integers, and drop anything malformed. Only recognized,
+ * well-formed fields survive — every other input is ignored rather than trusted.
+ */
+export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<McpSafetyConfig> {
+	const out: Partial<McpSafetyConfig> = {};
+
+	if (Array.isArray(input.allowlist)) {
+		const hosts = input.allowlist
+			.filter((h): h is string => typeof h === "string")
+			.map(normalizeHost)
+			.filter((h) => h.length > 0);
+		out.allowlist = Array.from(new Set(hosts));
+	}
+	if (isFiniteNumber(input.maxRps) && input.maxRps > 0) {
+		out.maxRps = Math.floor(input.maxRps);
+	}
+	if (isFiniteNumber(input.maxConcurrency) && input.maxConcurrency > 0) {
+		out.maxConcurrency = Math.floor(input.maxConcurrency);
+	}
+	if (isFiniteNumber(input.maxDurationSeconds) && input.maxDurationSeconds > 0) {
+		out.maxDurationSeconds = Math.floor(input.maxDurationSeconds);
+	}
+	if (typeof input.allowWrites === "boolean") {
+		out.allowWrites = input.allowWrites;
+	}
+	return out;
+}

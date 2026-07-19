@@ -149,6 +149,10 @@ Enforced in the TS MCP layer (configurable from app Settings):
 - **Read-only by default** — collection/environment writes behind a toggle.
 - MCP-originated runs tagged so the History view shows "started via MCP."
 
+The allowlist, caps, and write toggle are editable in **Settings → MCP (AI
+Agents)** and persisted across restarts (see "Resolved: safety-config storage &
+UI").
+
 ## Tool scope phasing
 
 ### V1 — wedge (validate demand): read + single-shot execute
@@ -263,13 +267,27 @@ host is added). See `SECURITY.md`.
 
 ## Open questions (still a call)
 
-1. **Safety-config storage & UI** — the caps/allowlist currently use in-memory
-   defaults (`VayuMcpService.updateSafety`); wire them to a persisted app
-   Settings surface (and a "Connect to Claude Code" button) next.
-2. **MCP-originated run tagging** — tag runs started via MCP so History shows
+1. **MCP-originated run tagging** — tag runs started via MCP so History shows
    provenance (needs a small field on the run payload/metadata).
-3. **Packaging the stdio CLI** — expose it as a `vayu mcp` bin / documented
+2. **Packaging the stdio CLI** — expose it as a `vayu mcp` bin / documented
    `node` entrypoint in the installer.
+
+### Resolved: safety-config storage & UI
+
+The caps/allowlist are now editable from **Settings → MCP (AI Agents)** and
+persisted in the Electron main process (`electron-store`, `mcp-config.json`),
+so they survive a restart. The panel also shows live connection status and the
+one-command connect snippets (Claude Code / Cursor / Codex). Flow:
+
+- `electron/mcp/store.ts` loads the persisted override on startup and merges it
+  onto the safe defaults; `main.ts` passes it to `VayuMcpService`.
+- `mcp:getSafety` / `mcp:updateSafety` IPC handlers read and apply changes. The
+  renderer's input is sanitized in `main.ts` via `sanitizeSafetyInput`
+  (normalizes + de-dupes hosts, clamps caps to positive integers) before it is
+  applied live and written to disk.
+- The panel (`app/src/modules/settings/main/McpSettingsPanel.tsx`) talks to
+  `window.electronAPI` directly rather than the engine config query, since MCP
+  config is app-level, not engine-level.
 
 ## References
 

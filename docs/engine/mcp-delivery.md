@@ -69,12 +69,15 @@ This container cannot launch Electron or a live engine, so:
 - `get_live_metrics` SSE parsing is unit-tested but not exercised against a
   running load test.
 
-## Follow-ups (deferred)
+## Follow-ups
 
-1. **Settings UI + "Connect to Claude Code" button** — caps/allowlist currently
-   use in-memory defaults (`VayuMcpService.updateSafety` is wired but not
-   surfaced in Settings).
-2. **MCP-originated run tagging** — mark runs started via MCP so History shows
-   provenance.
-3. **Package the stdio CLI** as a `vayu mcp` bin / documented entrypoint in the
-   installer.
+1. ~~**Settings UI + "Connect to Claude Code" button**~~ — **done.**
+   `Settings → MCP (AI Agents)` edits the allowlist, caps, and write toggle,
+   persists them in the Electron main process (`electron-store`), and shows live
+   connection status + connect snippets for Claude Code / Cursor / Codex. Renderer
+   input is sanitized main-side (`sanitizeSafetyInput`). See `mcp.md` → "Resolved:
+   safety-config storage & UI".
+2. **MCP-originated run tagging** (deferred) — mark runs started via MCP so
+   History shows provenance.
+3. **Package the stdio CLI** (deferred) as a `vayu mcp` bin / documented
+   entrypoint in the installer.

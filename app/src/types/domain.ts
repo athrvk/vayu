@@ -449,7 +449,31 @@ export type SettingsCategory =
 	| "network_performance"
 	| "scripting_sandbox"
 	| "observability"
-	| "ui";
+	| "ui"
+	| "mcp";
+
+/**
+ * MCP safety guardrails, mirrored from the Electron main process
+ * (`electron/mcp/config.ts`). The renderer cannot import from `electron/`, so
+ * the shape is redeclared here for the Settings panel and the preload typings.
+ */
+export interface McpSafetyConfig {
+	/** Hostnames an agent may send traffic to. Empty = deny all (safe default). */
+	allowlist: string[];
+	/** Hard ceiling on `targetRps` for load runs. */
+	maxRps: number;
+	/** Hard ceiling on `concurrency` for load runs. */
+	maxConcurrency: number;
+	/** Hard ceiling on a load run's duration, in seconds. */
+	maxDurationSeconds: number;
+	/** When false (default), collection/environment write tools are disabled. */
+	allowWrites: boolean;
+}
+
+export interface McpStatus {
+	running: boolean;
+	url: string;
+}
 
 export interface ScriptCompletion {
 	label: string;

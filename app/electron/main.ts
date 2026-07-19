@@ -12,7 +12,15 @@ import { EngineSidecar } from "./sidecar.js";
 import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow } from "./updater.js";
-import { VayuMcpService } from "./mcp/index.js";
+import {
+	VayuMcpService,
+	DEFAULT_MCP_SAFETY_CONFIG,
+	resolveSafetyConfig,
+	sanitizeSafetyInput,
+	loadPersistedSafety,
+	savePersistedSafety,
+	type McpSafetyConfig,
+} from "./mcp/index.js";
 import {
 	DOCS_URL,
 	SCRIPTING_DOCS_URL,
@@ -326,6 +334,7 @@ async function startMcp() {
 			host: MCP_HOST,
 			port: MCP_PORT,
 			version: app.getVersion(),
+			safety: loadPersistedSafety(),
 		});
 		await mcpService.start();
 		console.log("[Main] MCP server listening at", mcpService.getUrl());
@@ -400,6 +409,29 @@ function setupIpcHandlers() {
 			running: mcpService?.isRunning() ?? false,
 			url: mcpService?.getUrl() ?? MCP_ENDPOINT_URL,
 		};
+	});
+
+	// Current MCP safety config (allowlist / caps / writes) for the Settings panel.
+	ipcMain.handle("mcp:getSafety", (): McpSafetyConfig => {
+		return mcpService?.getSafety() ?? DEFAULT_MCP_SAFETY_CONFIG;
+	});
+
+	// Apply and persist a safety-config change from Settings. The renderer input
+	// is sanitized here (never trusted), applied live to the running server, and
+	// written to disk so it survives a restart. Returns the resolved config.
+	ipcMain.handle("mcp:updateSafety", (_event, partial: unknown): McpSafetyConfig => {
+		const clean = sanitizeSafetyInput((partial ?? {}) as Partial<McpSafetyConfig>);
+		if (mcpService) {
+			mcpService.updateSafety(clean);
+			const resolved = mcpService.getSafety();
+			savePersistedSafety(resolved);
+			return resolved;
+		}
+		// MCP server never came up (e.g. port in use) — still persist so the
+		// change takes effect on the next launch.
+		const resolved = resolveSafetyConfig({ ...loadPersistedSafety(), ...clean });
+		savePersistedSafety(resolved);
+		return resolved;
 	});
 
 	// Theme management

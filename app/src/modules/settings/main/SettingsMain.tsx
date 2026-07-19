@@ -43,6 +43,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import UISettingsPanel from "./UISettingsPanel";
+import McpSettingsPanel from "./McpSettingsPanel";
 import { isSizeConfig, formatBytes, formatSizeRange } from "../utils/format-size";
 import { TIMING } from "@/config/timing";
 
@@ -58,6 +59,10 @@ const CATEGORY_TITLES: Record<SettingsCategory, { title: string; description: st
 	ui: {
 		title: "Appearance",
 		description: "Customize the look and feel of the application",
+	},
+	mcp: {
+		title: "MCP (AI Agents)",
+		description: "Expose Vayu to AI agents like Claude Code, and set the safety guardrails",
 	},
 	general_engine: {
 		title: "General & Engine",
@@ -91,12 +96,8 @@ interface EditedValue {
 
 export default function SettingsMain() {
 	const { selectedCategory } = useSettingsStore();
-	const {
-		pendingRestart,
-		restartRequiredKeys,
-		addRestartRequiredKey,
-		clearRestartRequired,
-	} = useEngineStore();
+	const { pendingRestart, restartRequiredKeys, addRestartRequiredKey, clearRestartRequired } =
+		useEngineStore();
 	const {
 		startSaving,
 		completeSave,
@@ -203,7 +204,13 @@ export default function SettingsMain() {
 	const contextId = "settings";
 	useEffect(() => {
 		// Only register when we have a valid settings view (not loading, no error, category selected, not a client-side category)
-		if (isLoading || error || !selectedCategory || selectedCategory === "ui") {
+		if (
+			isLoading ||
+			error ||
+			!selectedCategory ||
+			selectedCategory === "ui" ||
+			selectedCategory === "mcp"
+		) {
 			return;
 		}
 
@@ -231,7 +238,13 @@ export default function SettingsMain() {
 
 	// Update context when hasChanges changes
 	useEffect(() => {
-		if (isLoading || error || !selectedCategory || selectedCategory === "ui") {
+		if (
+			isLoading ||
+			error ||
+			!selectedCategory ||
+			selectedCategory === "ui" ||
+			selectedCategory === "mcp"
+		) {
 			return;
 		}
 		updateContext(contextId, {
@@ -257,6 +270,12 @@ export default function SettingsMain() {
 	// UI settings are handled by a separate panel (client-side only)
 	if (selectedCategory === "ui") {
 		return <UISettingsPanel />;
+	}
+
+	// MCP settings are client-side too (persisted in the Electron main process,
+	// not the engine config store).
+	if (selectedCategory === "mcp") {
+		return <McpSettingsPanel />;
 	}
 
 	if (isLoading) {

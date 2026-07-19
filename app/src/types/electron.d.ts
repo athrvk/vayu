@@ -10,6 +10,7 @@
  */
 
 import type { ThemeSource } from "./ui";
+import type { McpSafetyConfig, McpStatus } from "./domain";
 
 interface ThemeInfo {
 	shouldUseDarkColors: boolean;
@@ -30,6 +31,11 @@ interface ElectronAPI {
 	// Engine management
 	restartEngine: () => Promise<{ success: boolean; error?: string }>;
 	getEngineStatus: () => Promise<{ running: boolean; url: string | null }>;
+
+	// MCP server (exposes Vayu to agents like Claude Code)
+	getMcpStatus: () => Promise<McpStatus>;
+	getMcpSafety: () => Promise<McpSafetyConfig>;
+	updateMcpSafety: (partial: Partial<McpSafetyConfig>) => Promise<McpSafetyConfig>;
 
 	// Theme management
 	getTheme: () => Promise<ThemeInfo>;

@@ -18,7 +18,7 @@
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useConfigQuery } from "@/queries";
 import type { SettingsCategory } from "@/types";
-import { Server, Code, Settings, Palette, Network, Activity, Database } from "lucide-react";
+import { Server, Code, Settings, Palette, Network, Activity, Database, Plug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, Skeleton } from "@/components/ui";
 
@@ -30,6 +30,11 @@ const CATEGORY_CONFIG: Record<
 		label: "Appearance",
 		icon: Palette,
 		color: "pink",
+	},
+	mcp: {
+		label: "MCP (AI Agents)",
+		icon: Plug,
+		color: "indigo",
 	},
 	general_engine: {
 		label: "General & Engine",
@@ -70,7 +75,7 @@ export default function SettingsCategoryTree() {
 		}
 	}
 
-	const appCategories: SettingsCategory[] = ["ui"];
+	const appCategories: SettingsCategory[] = ["ui", "mcp"];
 	const engineCategories: SettingsCategory[] = [
 		"general_engine",
 		"database_performance",
@@ -110,6 +115,9 @@ export default function SettingsCategoryTree() {
 			pink: isSelected
 				? "bg-pink-50 text-pink-700 dark:bg-pink-950/50 dark:text-pink-300 hover:bg-pink-100 dark:hover:bg-pink-950/70"
 				: "",
+			indigo: isSelected
+				? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-950/70"
+				: "",
 			blue: isSelected
 				? "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/70"
 				: "",
@@ -129,6 +137,7 @@ export default function SettingsCategoryTree() {
 
 		const badgeClasses: Record<string, string> = {
 			pink: "bg-pink-100 text-pink-600 dark:bg-pink-950 dark:text-pink-300",
+			indigo: "bg-indigo-100 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-300",
 			blue: "bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-300",
 			amber: "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-300",
 			cyan: "bg-cyan-100 text-cyan-600 dark:bg-cyan-950 dark:text-cyan-300",

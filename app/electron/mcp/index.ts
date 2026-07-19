@@ -68,5 +68,6 @@ export class VayuMcpService {
 	}
 }
 
-export { DEFAULT_MCP_SAFETY_CONFIG } from "./config.js";
+export { DEFAULT_MCP_SAFETY_CONFIG, resolveSafetyConfig, sanitizeSafetyInput } from "./config.js";
 export type { McpSafetyConfig } from "./config.js";
+export { loadPersistedSafety, savePersistedSafety } from "./store.js";
