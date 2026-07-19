@@ -14,12 +14,14 @@
  * lives under Appearance alongside the UI font.
  */
 
-import { Code2 } from "lucide-react";
+import { Code2, CheckCircle2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { useClientSettingsStore } from "@/stores";
 import { EDITOR_FONT_SIZES, EDITOR_TAB_SIZES } from "@/constants/client-settings";
+import { MONO_FONTS } from "@/constants/appearance";
 import { CodeEditor } from "@/components/ui/code-editor";
 import { OptionButtons, ToggleRow } from "./SettingControls";
+import { cn } from "@/lib/utils";
 
 // Tab-indented (real \t) + nested so changing the tab width visibly reflows the
 // indentation in the read-only preview below.
@@ -35,6 +37,8 @@ const SAMPLE = [
 export default function EditorPanel() {
 	const editor = useClientSettingsStore((s) => s.editor);
 	const setEditor = useClientSettingsStore((s) => s.setEditor);
+	const monoFont = useClientSettingsStore((s) => s.monoFont);
+	const setMonoFont = useClientSettingsStore((s) => s.setMonoFont);
 
 	return (
 		<>
@@ -50,6 +54,43 @@ export default function EditorPanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-5">
+					<div>
+						<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+							Code font
+						</p>
+						<div className="grid grid-cols-2 gap-3">
+							{MONO_FONTS.map((option) => {
+								const isSelected = monoFont === option.value;
+								return (
+									<button
+										key={option.value}
+										onClick={() => setMonoFont(option.value)}
+										className={cn(
+											"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
+											"hover:bg-accent hover:border-accent-foreground/20",
+											isSelected
+												? "border-primary bg-primary/5"
+												: "border-border"
+										)}
+									>
+										<span
+											className="text-sm font-medium"
+											style={{ fontFamily: option.stack }}
+										>
+											{option.label}
+										</span>
+										<span className="text-xs text-muted-foreground">
+											{option.description}
+										</span>
+										{isSelected && (
+											<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
+										)}
+									</button>
+								);
+							})}
+						</div>
+					</div>
+
 					<div>
 						<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
 							Font size

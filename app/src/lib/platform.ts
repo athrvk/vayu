@@ -31,3 +31,30 @@ export const isMac: boolean = detectMac();
 
 /** Primary modifier key glyph/label for the current platform (⌘ on macOS). */
 export const modKey: string = isMac ? "⌘" : "Ctrl";
+
+export interface Chord {
+	/** Primary modifier — ⌘ on macOS, Ctrl elsewhere. */
+	mod?: boolean;
+	shift?: boolean;
+	alt?: boolean;
+	/** The final key, e.g. "E", "," or "↵". */
+	key: string;
+}
+
+/**
+ * Format a keyboard chord for display, platform-appropriately. macOS uses tight
+ * Apple glyphs in canonical order (⌃⌥⇧⌘key, e.g. "⇧⌘E"); other platforms use
+ * `+`-joined words ("Ctrl+Shift+E"). This is the single place shortcut hints are
+ * rendered so every surface (Dock, tooltips, empty states) stays consistent.
+ */
+export function formatChord({ mod, shift, alt, key }: Chord): string {
+	if (isMac) {
+		return `${alt ? "⌥" : ""}${shift ? "⇧" : ""}${mod ? "⌘" : ""}${key}`;
+	}
+	const parts: string[] = [];
+	if (mod) parts.push("Ctrl");
+	if (shift) parts.push("Shift");
+	if (alt) parts.push("Alt");
+	parts.push(key);
+	return parts.join("+");
+}

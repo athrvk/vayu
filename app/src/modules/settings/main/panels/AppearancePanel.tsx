@@ -37,7 +37,7 @@ import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
 import { useAppearance } from "@/hooks/useAppearance";
 import { useClientSettingsStore } from "@/stores";
 import { COLOR_SCHEMES } from "@/constants/color-schemes";
-import { UI_FONTS, UI_SCALES, UI_RADII, MONO_FONTS } from "@/constants/appearance";
+import { UI_FONTS, UI_SCALES, UI_RADII } from "@/constants/appearance";
 import { cn } from "@/lib/utils";
 import { ToggleRow } from "./SettingControls";
 
@@ -45,8 +45,6 @@ export default function AppearancePanel() {
 	const { themeSource, setTheme, colorScheme, setColorScheme, isDark, isLoading } =
 		useElectronTheme();
 	const { font, setFont, scale, setScale, radius, setRadius } = useAppearance();
-	const monoFont = useClientSettingsStore((s) => s.monoFont);
-	const setMonoFont = useClientSettingsStore((s) => s.setMonoFont);
 	const reducedMotion = useClientSettingsStore((s) => s.reducedMotion);
 	const setReducedMotion = useClientSettingsStore((s) => s.setReducedMotion);
 
@@ -248,43 +246,6 @@ export default function AppearancePanel() {
 									<button
 										key={option.value}
 										onClick={() => setFont(option.value)}
-										className={cn(
-											"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
-											"hover:bg-accent hover:border-accent-foreground/20",
-											isSelected
-												? "border-primary bg-primary/5"
-												: "border-border"
-										)}
-									>
-										<span
-											className="text-sm font-medium"
-											style={{ fontFamily: option.stack }}
-										>
-											{option.label}
-										</span>
-										<span className="text-xs text-muted-foreground">
-											{option.description}
-										</span>
-										{isSelected && (
-											<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
-										)}
-									</button>
-								);
-							})}
-						</div>
-					</div>
-
-					<div>
-						<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-							Code font
-						</p>
-						<div className="grid grid-cols-2 gap-3">
-							{MONO_FONTS.map((option) => {
-								const isSelected = monoFont === option.value;
-								return (
-									<button
-										key={option.value}
-										onClick={() => setMonoFont(option.value)}
 										className={cn(
 											"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
 											"hover:bg-accent hover:border-accent-foreground/20",

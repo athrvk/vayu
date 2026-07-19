@@ -33,6 +33,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
+import { modKey } from "@/lib/platform";
 import { useDashboardStore } from "@/stores";
 import { ResponseBody as SharedResponseBody } from "@/components/shared/response-viewer";
 import { TIMING } from "@/config/timing";
@@ -98,7 +99,7 @@ export default function ResponseViewer() {
 					</p>
 					<div className="flex items-center justify-center gap-1.5 text-[12px] text-muted-foreground">
 						<span>Press</span>
-						<Kbd>⌘</Kbd>
+						<Kbd>{modKey}</Kbd>
 						<Kbd>↵</Kbd>
 						<span>or click Send</span>
 					</div>

@@ -156,7 +156,7 @@ export default function GeneralPanel() {
 							size="sm"
 							onClick={clearHistory}
 							disabled={runs.length === 0 || clearing}
-							className="text-destructive hover:text-destructive"
+							className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 						>
 							{clearing ? (
 								<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
@@ -226,7 +226,7 @@ export default function GeneralPanel() {
 						variant="outline"
 						size="sm"
 						onClick={resetSettings}
-						className="text-destructive hover:text-destructive"
+						className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 					>
 						<RotateCcw className="w-4 h-4 mr-1.5" />
 						Reset to defaults
