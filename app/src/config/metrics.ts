@@ -15,8 +15,5 @@
 /** Max historical data points retained in the dashboard store per run. */
 export const HISTORICAL_METRICS_CAP = 3000;
 
-/** Max points per historical chart before downsampling kicks in. */
-export const CHART_DOWNSAMPLE_MAX_POINTS = 2000;
-
 /** Throttle for committing live SSE metrics into the UI store. */
 export const METRICS_UI_THROTTLE_MS = 500;

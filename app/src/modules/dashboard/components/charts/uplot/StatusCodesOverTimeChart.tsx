@@ -16,7 +16,7 @@ import type uPlot from "uplot";
 import type { LoadTestMetrics } from "@/types";
 import { buildStatusOverTime } from "../../../utils/metricsTransforms";
 import { UPlotChart, type UPlotSeriesSpec } from "./UPlotChart";
-import { fmtCount, fmtSeconds } from "./formatters";
+import { fmtCount } from "./formatters";
 
 export function StatusCodesOverTimeChart({
 	history,
@@ -83,7 +83,7 @@ export function StatusCodesOverTimeChart({
 		<UPlotChart
 			data={data}
 			series={series}
-			xTooltipFormat={fmtSeconds}
+			xTime
 			height={height}
 			yFormat={(v) => `${Math.round(v)}`}
 			isLive={!isCompleted}

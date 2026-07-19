@@ -28,17 +28,30 @@ export function ResponseTimeVsConcurrencyChart({
 	history,
 	height,
 	breakpoint,
+	syncKey,
 }: {
 	history: LoadTestMetrics[];
 	height?: number;
 	breakpoint?: Breakpoint | null;
+	/** Join a chart group's focus channel — hovering a time chart highlights the
+	 *  dot for that tick, and hovering a dot moves the time charts' cursor. */
+	syncKey?: string;
 }) {
-	const data = useMemo<uPlot.AlignedData>(() => {
+	const { data, focusTimes } = useMemo(() => {
 		// uPlot needs x ascending; concurrency rises over a ramp, but sort to be safe.
+		// Keep each point's timestamp aligned to the sorted order so the focus
+		// channel can map a dot ↔ a moment in time.
 		const pts = history
-			.map((m) => ({ c: pickConcurrency(m), p99: m.latency_p99_ms ?? 0 }))
+			.map((m) => ({
+				c: pickConcurrency(m),
+				p99: m.latency_p99_ms ?? 0,
+				t: m.elapsed_seconds,
+			}))
 			.sort((a, b) => a.c - b.c);
-		return [pts.map((p) => p.c), pts.map((p) => p.p99)];
+		return {
+			data: [pts.map((p) => p.c), pts.map((p) => p.p99)] as uPlot.AlignedData,
+			focusTimes: pts.map((p) => p.t),
+		};
 	}, [history]);
 
 	const series: UPlotSeriesSpec[] = [
@@ -75,6 +88,9 @@ export function ResponseTimeVsConcurrencyChart({
 			yFormat={axisMs}
 			isLive={false}
 			markers={markers}
+			syncKey={syncKey}
+			xValueSync={false}
+			focusTimes={focusTimes}
 		/>
 	);
 }

@@ -29,6 +29,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { readUplotTheme, currentThemeKey, type ColorRole } from "./uplotTheme";
 import { markersPlugin, tooltipPlugin, type Marker, type ValueFormatter } from "./plugins";
+import { subscribeFocus, publishFocus, type FocusValue } from "./chartFocus";
 
 export type { Marker } from "./plugins";
 
@@ -66,20 +67,49 @@ export interface UPlotChartProps {
 	 * granularity while the axis ticks stay whole-second.
 	 */
 	xTooltipFormat?: (v: number) => string;
+	/**
+	 * Mark the x axis as elapsed-seconds. Constrains tick increments to whole
+	 * seconds so ticks never land on 0.5 s (which the whole-second axis formatter
+	 * would round to a DUPLICATE/mislabeled tick — e.g. 3.5 s shown as "4s" under
+	 * the cursor), and defaults the tooltip to 0.5 s resolution.
+	 */
+	xTime?: boolean;
 	yFormat?: (v: number) => string;
 	y2Format?: (v: number) => string;
 	/** Reference markers: breakpoint (vertical), target/SLO (horizontal). */
 	markers?: Marker[];
 	/** Shared key → hover/zoom on one chart drives every chart with the same key. */
 	syncKey?: string;
+	/**
+	 * Whether this chart joins uPlot's native x-VALUE cursor sync (default true).
+	 * Charts whose x axis is not time (the concurrency scatter) set this false:
+	 * they still join the group's focus channel (cross-highlight by timestamp) but
+	 * must not x-value-sync against time charts.
+	 */
+	xValueSync?: boolean;
+	/**
+	 * Per-data-point timestamps (elapsed seconds), for charts whose x axis is not
+	 * time. Lets the focus channel map this chart's points to/from a moment so it
+	 * can cross-highlight with the time charts (the scatter passes this).
+	 */
+	focusTimes?: number[];
 	/** Pulsing dot on the last point of the first primary-axis series. */
 	isLive?: boolean;
 }
 
 const dpr = () => (typeof devicePixelRatio === "number" ? devicePixelRatio : 1);
 
+// Whole-second (and above) tick increments for an elapsed-seconds x axis, so
+// ticks never land on a half-second and get a rounded/duplicated label.
+const TIME_INCRS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+
 function defaultY(v: number): string {
 	return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}`;
+}
+
+/** Default 0.5 s tooltip time formatter for elapsed-seconds x axes. */
+function defaultTimeTooltip(v: number): string {
+	return `${v.toFixed(1)}s`;
 }
 
 export function UPlotChart({
@@ -88,20 +118,33 @@ export function UPlotChart({
 	height = 220,
 	xFormat = (v) => `${v.toFixed(0)}s`,
 	xTooltipFormat,
+	xTime = false,
 	yFormat = defaultY,
 	y2Format = (v) => `${Math.round(v)}`,
 	markers = [],
 	syncKey,
+	xValueSync = true,
+	focusTimes,
 	isLive = false,
 }: UPlotChartProps) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const plotRef = useRef<uPlot | null>(null);
 	const markersRef = useRef<Marker[]>(markers);
+	// Cross-chart focus (scatter ↔ time). A stable identity so a chart ignores its
+	// own echo; a suppress flag so applying an external focus never re-publishes
+	// (this is what makes the pub/sub loop-safe).
+	const originRef = useRef<symbol>(Symbol("uplot-chart"));
+	const suppressPublishRef = useRef(false);
+	const focusTimesRef = useRef<number[] | undefined>(focusTimes);
 
 	useEffect(() => {
 		markersRef.current = markers;
 		plotRef.current?.redraw();
 	}, [markers]);
+
+	useEffect(() => {
+		focusTimesRef.current = focusTimes;
+	}, [focusTimes]);
 
 	const themeKey = typeof document !== "undefined" ? currentThemeKey() : "ssr";
 	const hasY2 = series.some((s) => s.scale === "y2");
@@ -115,8 +158,9 @@ export function UPlotChart({
 					(s) =>
 						`${s.label}:${s.role}:${s.kind ?? "line"}:${s.scale ?? "y"}:${s.bandTo ?? ""}`
 				)
-				.join("|") + `|${themeKey}|${height}|${syncKey ?? ""}|${isLive}`,
-		[series, themeKey, height, syncKey, isLive]
+				.join("|") +
+			`|${themeKey}|${height}|${syncKey ?? ""}|${isLive}|${xTime}|${xValueSync}`,
+		[series, themeKey, height, syncKey, isLive, xTime, xValueSync]
 	);
 
 	useEffect(() => {
@@ -177,7 +221,13 @@ export function UPlotChart({
 			});
 
 			const axes: uPlot.Axis[] = [
-				{ ...axisBase, values: (_u, sp) => sp.map((v) => xFormat(v)) },
+				{
+					...axisBase,
+					// Integer-second ticks for a time axis → no 0.5 s ticks that would
+					// round to a duplicate/mislabeled second.
+					...(xTime ? { incrs: TIME_INCRS } : {}),
+					values: (_u, sp) => sp.map((v) => xFormat(v)),
+				},
 				{ ...axisBase, scale: "y", values: (_u, sp) => sp.map((v) => yFormat(v)) },
 			];
 			if (hasY2) {
@@ -200,8 +250,9 @@ export function UPlotChart({
 					// Sync on the x scale by VALUE (not pixel): charts with a second
 					// axis have a different plot width, so pixel-based sync would land
 					// the cursor at the wrong time. Matching the "x" scale keeps every
-					// synced chart on the same instant.
-					sync: syncKey ? { key: syncKey, scales: ["x", null] } : undefined,
+					// synced chart on the same instant. Non-time charts (scatter) opt
+					// out of value sync and cross-highlight via the focus channel below.
+					sync: syncKey && xValueSync ? { key: syncKey, scales: ["x", null] } : undefined,
 					points: { size: 6 },
 				},
 				scales: { x: { time: false } },
@@ -209,13 +260,32 @@ export function UPlotChart({
 				series: uSeries,
 				bands,
 				axes,
+				hooks: {
+					// Broadcast the hovered timestamp to the group's focus channel so
+					// the scatter (different x axis) can highlight the same tick — and
+					// vice versa. Guarded so applying an external focus never re-emits.
+					setCursor: [
+						(u: uPlot) => {
+							if (!syncKey || suppressPublishRef.current) return;
+							const idx = u.cursor.idx;
+							const ft = focusTimesRef.current;
+							const t: FocusValue =
+								idx == null
+									? null
+									: ft
+										? (ft[idx] ?? null)
+										: (u.data[0][idx] as number);
+							publishFocus(syncKey, t, originRef.current);
+						},
+					],
+				},
 				plugins: [
 					markersPlugin(() => markersRef.current, theme),
 					tooltipPlugin({
 						theme,
 						format: perSeriesFormat,
 						skip,
-						xLabel: xTooltipFormat ?? xFormat,
+						xLabel: xTooltipFormat ?? (xTime ? defaultTimeTooltip : xFormat),
 					}),
 				],
 			};
@@ -238,7 +308,49 @@ export function UPlotChart({
 				: null;
 		ro?.observe(host);
 
+		// Receive focus from another chart in the group and place our cursor on the
+		// matching instant: nearest point by timestamp (scatter uses focusTimes; a
+		// time chart's x IS the timestamp). Suppressed so it never re-publishes.
+		let unsubFocus: (() => void) | undefined;
+		if (activePlot && syncKey) {
+			const applyExternalFocus = (u: uPlot, t: FocusValue) => {
+				suppressPublishRef.current = true;
+				try {
+					if (t == null) {
+						u.setCursor({ left: -10, top: -10 });
+						return;
+					}
+					const ft = focusTimesRef.current;
+					const xs = (ft ?? (u.data[0] as number[])) || [];
+					if (xs.length === 0) return;
+					let idx = 0;
+					let best = Infinity;
+					for (let i = 0; i < xs.length; i++) {
+						const d = Math.abs((xs[i] as number) - t);
+						if (d < best) {
+							best = d;
+							idx = i;
+						}
+					}
+					const xVal = (u.data[0][idx] as number) ?? 0;
+					const yScale = (u.series[1]?.scale as string) ?? "y";
+					const yVal = (u.data[1]?.[idx] as number) ?? 0;
+					u.setCursor({
+						left: Math.round(u.valToPos(xVal, "x", false)),
+						top: Math.round(u.valToPos(yVal, yScale, false)),
+					});
+				} finally {
+					suppressPublishRef.current = false;
+				}
+			};
+			unsubFocus = subscribeFocus(syncKey, (t, origin) => {
+				if (origin === originRef.current || !plotRef.current) return;
+				applyExternalFocus(plotRef.current, t);
+			});
+		}
+
 		return () => {
+			unsubFocus?.();
 			ro?.disconnect();
 			activePlot?.destroy();
 			plotRef.current = null;

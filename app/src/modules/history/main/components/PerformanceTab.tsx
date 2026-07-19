@@ -74,6 +74,7 @@ export default function PerformanceTab({
 							<ResponseTimeVsConcurrencyChart
 								history={timeSeries}
 								breakpoint={derived.breakpoint}
+								syncKey={CHART_SYNC.history}
 							/>
 						</CardContent>
 					</Card>

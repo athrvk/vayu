@@ -334,6 +334,7 @@ function MetricsView({
 							<ResponseTimeVsConcurrencyChart
 								history={historicalMetrics}
 								breakpoint={breakpoint}
+								syncKey={CHART_SYNC.live}
 							/>
 						</div>
 					)

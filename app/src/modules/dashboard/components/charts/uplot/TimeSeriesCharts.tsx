@@ -31,16 +31,7 @@ import {
 	pickConcurrency,
 	pickErrorRate,
 } from "./buildData";
-import {
-	axisMs,
-	axisRate,
-	axisPct,
-	fmtMs,
-	fmtRate,
-	fmtCount,
-	fmtPct,
-	fmtSeconds,
-} from "./formatters";
+import { axisMs, axisRate, axisPct, fmtMs, fmtRate, fmtCount, fmtPct } from "./formatters";
 
 interface BaseProps {
 	history: LoadTestMetrics[];
@@ -92,7 +83,7 @@ export function LatencyPercentilesChart({
 		<UPlotChart
 			data={data}
 			series={series}
-			xTooltipFormat={fmtSeconds}
+			xTime
 			height={height}
 			yFormat={axisMs}
 			isLive={!isCompleted}
@@ -131,7 +122,7 @@ export function LatencyBreakdownChart({ history, isCompleted, syncKey, height }:
 		<UPlotChart
 			data={data}
 			series={series}
-			xTooltipFormat={fmtSeconds}
+			xTime
 			height={height}
 			yFormat={axisMs}
 			isLive={!isCompleted}
@@ -206,7 +197,7 @@ export function RequestRateChart({
 		<UPlotChart
 			data={data}
 			series={series}
-			xTooltipFormat={fmtSeconds}
+			xTime
 			height={height}
 			yFormat={axisRate}
 			y2Format={(v) => `${Math.round(v)}`}
@@ -232,7 +223,7 @@ export function ConnectionsChart({ history, isCompleted, syncKey, height, breakp
 		<UPlotChart
 			data={data}
 			series={series}
-			xTooltipFormat={fmtSeconds}
+			xTime
 			height={height}
 			yFormat={(v) => `${Math.round(v)}`}
 			isLive={!isCompleted}
@@ -256,7 +247,7 @@ export function ErrorRateChart({ history, isCompleted, syncKey, height, breakpoi
 		<UPlotChart
 			data={data}
 			series={series}
-			xTooltipFormat={fmtSeconds}
+			xTime
 			height={height ?? 160}
 			yFormat={axisPct}
 			isLive={!isCompleted}
