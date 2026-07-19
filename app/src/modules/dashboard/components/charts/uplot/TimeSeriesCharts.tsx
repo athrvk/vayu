@@ -26,12 +26,14 @@ import type { Breakpoint } from "../../../utils/computeBreakpoint";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
 import {
 	bucketColumns,
+	rebucket,
 	pickThroughput,
 	pickSendRate,
 	pickConcurrency,
 	pickErrorRate,
 } from "./buildData";
 import { axisMs, axisRate, axisPct, fmtMs, fmtRate, fmtCount, fmtPct } from "./formatters";
+import { useClientSettingsStore } from "@/stores";
 
 interface BaseProps {
 	history: LoadTestMetrics[];
@@ -62,21 +64,22 @@ export function LatencyPercentilesChart({
 	height,
 	breakpoint,
 }: BaseProps) {
+	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const { data, series } = useMemo(() => {
 		const d = buildPercentileChartData(history);
-		const aligned: uPlot.AlignedData = [
+		const { times, cols } = rebucket(
 			d.map((p) => p.time),
-			d.map((p) => p.p50),
-			d.map((p) => p.p95),
-			d.map((p) => p.p99),
-		];
+			[d.map((p) => p.p50), d.map((p) => p.p95), d.map((p) => p.p99)],
+			bucketSeconds
+		);
+		const aligned: uPlot.AlignedData = [times, ...cols];
 		const spec: UPlotSeriesSpec[] = [
 			{ label: "p50", role: "success", format: fmtMs },
 			{ label: "p95", role: "warning", format: fmtMs },
 			{ label: "p99", role: "destructive", width: 1.8, format: fmtMs },
 		];
 		return { data: aligned, series: spec };
-	}, [history]);
+	}, [history, bucketSeconds]);
 
 	if (data[0].length < 2) return null;
 	return (
@@ -95,13 +98,15 @@ export function LatencyPercentilesChart({
 
 /** Latency breakdown: perceived latency vs wire time, with the queue-wait gap band. */
 export function LatencyBreakdownChart({ history, isCompleted, syncKey, height }: BaseProps) {
+	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const { data, series } = useMemo(() => {
 		const d = buildLatencyChartData(history);
-		const aligned: uPlot.AlignedData = [
+		const { times, cols } = rebucket(
 			d.map((p) => p.time),
-			d.map((p) => p.latencyMs),
-			d.map((p) => p.wireMs),
-		];
+			[d.map((p) => p.latencyMs), d.map((p) => p.wireMs)],
+			bucketSeconds
+		);
+		const aligned: uPlot.AlignedData = [times, ...cols];
 		// Band between latency (idx 1) and wire (idx 2) = the generator queue-wait gap.
 		const spec: UPlotSeriesSpec[] = [
 			{
@@ -115,7 +120,7 @@ export function LatencyBreakdownChart({ history, isCompleted, syncKey, height }:
 			{ label: "wire", role: "info", format: fmtMs },
 		];
 		return { data: aligned, series: spec };
-	}, [history]);
+	}, [history, bucketSeconds]);
 
 	if (data[0].length < 2) return null;
 	return (
@@ -145,8 +150,13 @@ export function RequestRateChart({
 	rampOverlay,
 	breakpoint,
 }: BaseProps & { targetRps?: number; rampOverlay?: RampOverlay | null }) {
+	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const { data, series, hasRamp } = useMemo(() => {
-		const { times, cols } = bucketColumns(history, [pickThroughput, pickSendRate]);
+		const { times, cols } = bucketColumns(
+			history,
+			[pickThroughput, pickSendRate],
+			bucketSeconds
+		);
 		const spec: UPlotSeriesSpec[] = [
 			{ label: "throughput", role: "primary", kind: "area", width: 1.8, format: fmtRate },
 			{ label: "send rate", role: "info", format: fmtRate },
@@ -177,7 +187,7 @@ export function RequestRateChart({
 		}
 		const aligned: uPlot.AlignedData = [times, ...columns];
 		return { data: aligned, series: spec, hasRamp: ramp };
-	}, [history, rampOverlay]);
+	}, [history, rampOverlay, bucketSeconds]);
 
 	const markers = useMemo<Marker[]>(() => {
 		const m: Marker[] = [];
@@ -211,10 +221,11 @@ export function RequestRateChart({
 
 /** Active connections (in-flight) over time. */
 export function ConnectionsChart({ history, isCompleted, syncKey, height, breakpoint }: BaseProps) {
+	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const data = useMemo<uPlot.AlignedData>(() => {
-		const { times, cols } = bucketColumns(history, [pickConcurrency]);
+		const { times, cols } = bucketColumns(history, [pickConcurrency], bucketSeconds);
 		return [times, cols[0]];
-	}, [history]);
+	}, [history, bucketSeconds]);
 	const series: UPlotSeriesSpec[] = [
 		{ label: "connections", role: "info", kind: "area", format: fmtCount },
 	];
@@ -235,10 +246,11 @@ export function ConnectionsChart({ history, isCompleted, syncKey, height, breakp
 
 /** Error rate (%) over time. */
 export function ErrorRateChart({ history, isCompleted, syncKey, height, breakpoint }: BaseProps) {
+	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const data = useMemo<uPlot.AlignedData>(() => {
-		const { times, cols } = bucketColumns(history, [pickErrorRate]);
+		const { times, cols } = bucketColumns(history, [pickErrorRate], bucketSeconds);
 		return [times, cols[0]];
-	}, [history]);
+	}, [history, bucketSeconds]);
 	const series: UPlotSeriesSpec[] = [
 		{ label: "error rate", role: "destructive", kind: "area", format: fmtPct },
 	];

@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import type { LoadTestMetrics } from "@/types";
-import { bucketColumns, pickThroughput, pickErrorRate } from "./buildData";
+import { bucketColumns, rebucket, pickThroughput, pickErrorRate } from "./buildData";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	return {
@@ -54,5 +54,34 @@ describe("bucketColumns", () => {
 			[pickErrorRate]
 		);
 		expect(cols[0][0]).toBeCloseTo(5, 5);
+	});
+
+	it("honors a custom bucket width (2s coarsens 0.5s ticks)", () => {
+		const history = [
+			tick({ elapsed_seconds: 0.5, throughput: 10 }), // → bucket 0
+			tick({ elapsed_seconds: 1.5, throughput: 20 }), // → bucket 2 (round(1.5/2)*2)
+			tick({ elapsed_seconds: 3.4, throughput: 30 }), // → bucket 4
+		];
+		const { times, cols } = bucketColumns(history, [pickThroughput], 2);
+		expect(times).toEqual([0, 2, 4]);
+		expect(cols[0]).toEqual([10, 20, 30]);
+	});
+});
+
+describe("rebucket", () => {
+	it("re-buckets aligned series to a coarser width, last-write-wins", () => {
+		const times = [0, 0.5, 1, 1.5, 2];
+		const p99 = [10, 20, 30, 40, 50];
+		const { times: outT, cols } = rebucket(times, [p99], 1);
+		// round(t): 0→0 (10); 0.5→1 (20) then 1→1 (30 wins); 1.5→2 (40) then 2→2 (50 wins)
+		expect(outT).toEqual([0, 1, 2]);
+		expect(cols[0]).toEqual([10, 30, 50]);
+	});
+
+	it("defaults to 0.5s and preserves per-tick points at that rate", () => {
+		const times = [0, 0.5, 1];
+		const { times: outT, cols } = rebucket(times, [[1, 2, 3]]);
+		expect(outT).toEqual([0, 0.5, 1]);
+		expect(cols[0]).toEqual([1, 2, 3]);
 	});
 });

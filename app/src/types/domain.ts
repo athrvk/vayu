@@ -444,7 +444,7 @@ export interface ConfigEntry {
 }
 
 /** Client-side settings panels (localStorage-backed prefs, rendered by app panels). */
-export type ClientSettingsCategory = "appearance" | "dashboard" | "general";
+export type ClientSettingsCategory = "appearance" | "editor" | "dashboard" | "general";
 
 /** Engine settings categories (data-driven from the engine `/config` API). */
 export type EngineSettingsCategory =

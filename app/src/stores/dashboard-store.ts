@@ -9,7 +9,8 @@
 
 import { create } from "zustand";
 import type { LoadTestMetrics, RunReport } from "@/types";
-import { DEFAULT_SLO_MS, type Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+import { type Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+import { useClientSettingsStore } from "./client-settings-store";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
 	DEFAULT_LIVE_WINDOW,
@@ -179,13 +180,14 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			// Fold the new ticks into the running aggregates. Both are monotone:
 			// peak only grows, breakpoint is latched on the first SLO crossing —
 			// so we walk each batch entry exactly once, never the full history.
+			const sloMs = useClientSettingsStore.getState().sloThresholdMs;
 			let peak = state.peakConcurrency;
 			let bp = state.breakpoint;
 			for (const m of batch) {
 				if (m.current_concurrency > peak) peak = m.current_concurrency;
 				if (!bp.crossed) {
 					const p99 = m.latency_p99_ms ?? 0;
-					if (p99 > DEFAULT_SLO_MS) {
+					if (p99 > sloMs) {
 						bp = {
 							crossed: true,
 							concurrency: m.current_concurrency,

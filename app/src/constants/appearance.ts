@@ -54,6 +54,43 @@ export const UI_FONTS = [
 export type UiFont = (typeof UI_FONTS)[number]["value"];
 export const DEFAULT_UI_FONT: UiFont = "inter";
 
+/**
+ * Monospace (code) font — applied by overriding the `--font-mono` custom
+ * property (Tailwind's `font-mono` utilities read it) and passed to the Monaco
+ * editor's `fontFamily`. Stacks reference faces already loaded by index.html
+ * (JetBrains Mono) or system fonts, so switching never triggers a fetch.
+ */
+export const MONO_FONTS = [
+	{
+		value: "jetbrains",
+		label: "JetBrains Mono",
+		description: "Default — clear, wide glyphs",
+		stack: '"JetBrains Mono", "Consolas", "Monaco", monospace',
+	},
+	{
+		value: "fira",
+		label: "Fira Code",
+		description: "Popular coding face",
+		stack: '"Fira Code", "JetBrains Mono", monospace',
+	},
+	{
+		value: "ibm-plex",
+		label: "IBM Plex Mono",
+		description: "Neutral and even",
+		stack: '"IBM Plex Mono", "JetBrains Mono", monospace',
+	},
+	{
+		value: "system",
+		label: "System Mono",
+		description: "Your OS monospace font",
+		stack: 'ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace',
+	},
+] as const satisfies readonly FontOption[];
+
+/** Monospace font preference, applied to `--font-mono` and the code editor. */
+export type MonoFont = (typeof MONO_FONTS)[number]["value"];
+export const DEFAULT_MONO_FONT: MonoFont = "jetbrains";
+
 export interface ScaleOption {
 	readonly value: string;
 	readonly label: string;
@@ -95,6 +132,7 @@ export type UiRadius = (typeof UI_RADII)[number]["value"];
 export const DEFAULT_UI_RADIUS: UiRadius = "default";
 
 const FONT_VALUES = new Set<string>(UI_FONTS.map((f) => f.value));
+const MONO_FONT_VALUES = new Set<string>(MONO_FONTS.map((f) => f.value));
 const SCALE_VALUES = new Set<string>(UI_SCALES.map((s) => s.value));
 const RADIUS_VALUES = new Set<string>(UI_RADII.map((r) => r.value));
 
@@ -116,6 +154,14 @@ export function radiusValue(radius: UiRadius): string {
 
 export function fontStack(font: UiFont): string {
 	return (UI_FONTS.find((f) => f.value === font) ?? UI_FONTS[0]).stack;
+}
+
+export function isMonoFont(value: unknown): value is MonoFont {
+	return typeof value === "string" && MONO_FONT_VALUES.has(value);
+}
+
+export function monoFontStack(font: MonoFont): string {
+	return (MONO_FONTS.find((f) => f.value === font) ?? MONO_FONTS[0]).stack;
 }
 
 export function scaleFactor(scale: UiScale): number {

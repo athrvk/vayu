@@ -17,9 +17,10 @@
 
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Palette, LayoutDashboard, Info } from "lucide-react";
+import { Palette, Code2, LayoutDashboard, Info } from "lucide-react";
 import type { ClientSettingsCategory, SettingsCategory } from "@/types";
 import AppearancePanel from "./panels/AppearancePanel";
+import EditorPanel from "./panels/EditorPanel";
 import DashboardPanel from "./panels/DashboardPanel";
 import GeneralPanel from "./panels/GeneralPanel";
 
@@ -39,6 +40,13 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 		description: "Customize the look and feel of the application",
 		icon: Palette,
 		Component: AppearancePanel,
+	},
+	{
+		id: "editor",
+		label: "Editor",
+		description: "Code-editor behavior across scripts and request/response bodies",
+		icon: Code2,
+		Component: EditorPanel,
 	},
 	{
 		id: "dashboard",

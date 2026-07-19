@@ -19,6 +19,7 @@ import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { useRunTimeSeriesQuery } from "@/queries/runs";
+import { useClientSettingsStore } from "@/stores";
 import { OverviewTab, PerformanceTab, SamplesTab } from "./components";
 import type { LoadTestDetailProps, TimeSeriesResponse } from "../types";
 
@@ -60,11 +61,12 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 	// p99 series, now persisted per W1). Derive it from the time-series and fold it
 	// into the dashboard bundle so the Saturation card / Breakpoint stat light up
 	// for completed ramp_up runs instead of showing the "healthy"/"—" defaults.
+	const sloThresholdMs = useClientSettingsStore((s) => s.sloThresholdMs);
 	const derived = useMemo(() => {
 		const base = reportToDerived(report);
 		if (timeSeries.length < 2) return base;
-		return { ...base, breakpoint: computeBreakpoint(timeSeries) };
-	}, [report, timeSeries]);
+		return { ...base, breakpoint: computeBreakpoint(timeSeries, sloThresholdMs) };
+	}, [report, timeSeries, sloThresholdMs]);
 
 	const successRate =
 		report.summary.totalRequests > 0

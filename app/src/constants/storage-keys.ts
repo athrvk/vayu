@@ -25,6 +25,8 @@ export const STORAGE_KEYS = {
 	UI_RADIUS: "vayu-ui-radius",
 	/** Live dashboard chart retention window (1m/5m/15m/30m/full). */
 	LIVE_CHART_WINDOW: "vayu-live-chart-window",
+	/** Zustand persist name for renderer-only client settings (editor, charts, auto-save). */
+	CLIENT_SETTINGS: "vayu.client-settings",
 	/** Last-used load test configuration (LoadTestConfigDialog). */
 	LAST_LOAD_TEST_CONFIG: "vayu:lastLoadTestConfig",
 	/** Zustand persist name for session state (active environment/collection). */

@@ -14,7 +14,8 @@
 import { useMemo } from "react";
 import type uPlot from "uplot";
 import type { LoadTestMetrics, RunReport } from "@/types";
-import { DEFAULT_SLO_MS, type Breakpoint } from "../../../utils/computeBreakpoint";
+import { type Breakpoint } from "../../../utils/computeBreakpoint";
+import { useClientSettingsStore } from "@/stores";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
 import { pickConcurrency } from "./buildData";
 import { axisMs, fmtMs } from "./formatters";
@@ -58,13 +59,14 @@ export function ResponseTimeVsConcurrencyChart({
 		{ label: "p99", role: "primary", kind: "scatter", format: fmtMs },
 	];
 
+	const sloMs = useClientSettingsStore((s) => s.sloThresholdMs);
 	const markers = useMemo<Marker[]>(() => {
 		const m: Marker[] = [
 			{
 				orient: "horizontal",
-				value: DEFAULT_SLO_MS,
+				value: sloMs,
 				role: "subtle",
-				label: `SLO ${DEFAULT_SLO_MS}ms`,
+				label: `SLO ${sloMs}ms`,
 			},
 		];
 		if (breakpoint?.crossed && breakpoint.concurrency != null) {
@@ -76,7 +78,7 @@ export function ResponseTimeVsConcurrencyChart({
 			});
 		}
 		return m;
-	}, [breakpoint]);
+	}, [breakpoint, sloMs]);
 
 	if (data[0].length < 2) return null;
 	return (
