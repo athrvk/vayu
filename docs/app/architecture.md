@@ -230,7 +230,7 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **Radix UI**: Accessible component primitives
 - **Tailwind CSS**: Utility-first styling
 - **Monaco Editor**: Code editing - scripts, JSON body, and GraphQL (with syntax diagnostics, autocomplete, hover, and formatting via `graphql-language-service`)
-- **Recharts**: Charts for metrics visualization
+- **uPlot**: Charts for metrics visualization (all dashboard/history charts centralize on one Canvas primitive; see `modules/dashboard/components/charts/uplot/`)
 - **Vite**: Build tool and dev server
 
 ## Electron Preload Bridge

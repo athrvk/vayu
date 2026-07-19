@@ -200,9 +200,21 @@ const { setResponse, getResponse, clearResponse, clearAll } = useResponseStore()
 
 **Non-persisted** (responses are reloadable from backend).
 
+#### `client-settings-store.ts` - Renderer Preferences
+
+Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the capacity SLO threshold, the live refresh rate, and auto-save preferences. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.
+
+**Key exports:**
+```typescript
+const store = useClientSettingsStore();   // editorPrefs, autoSavePrefs, monoFont, chartBucketSeconds, sloThresholdMs, liveRefreshMs, ...
+import { SETTINGS_STORAGE_KEYS } from "@/stores";  // localStorage keys reset by "Reset app settings"
+```
+
+**Persisted** to localStorage (via `zustand/persist`); workspace/session state (open tabs, layout, active collection) is deliberately excluded from the reset.
+
 #### `dashboard-store.ts` - Load Test Metrics & State
 
-Manages live load test run state: streaming metrics, final reports, and running aggregates (peak concurrency, SLO breakpoint). Caps historical metrics at **3,000 points** (defined in `app/src/config/metrics.ts` as `HISTORICAL_METRICS_CAP = 3000`). This provides ~5 minutes of full-fidelity data at the engine's 10 Hz tick rate, long enough for typical load test sessions but short enough to keep chart slicing efficient.
+Manages live load test run state: streaming metrics, final reports, and running aggregates (peak concurrency, SLO breakpoint). Retention is **time-based, not a fixed point count**: `addMetricsBatch` trims ticks older than the user-configurable live window (`liveWindowSeconds`, sourced from `constants/live-window.ts`, default 5m, `null` = full run), backstopped by a hard `MAX_RETAINED_TICKS` safety cap (20,000). The window is kept in sync by the `useLiveChartWindow` hook and drives what the live charts plot. (`app/src/config/metrics.ts` now only holds the SSE commit throttle, `METRICS_UI_THROTTLE_MS`.)
 
 **State:**
 ```typescript
@@ -211,7 +223,8 @@ Manages live load test run state: streaming metrics, final reports, and running 
   mode: "running" | "completed" | "stopped"
   isStreaming: boolean
   currentMetrics: LoadTestMetrics | null
-  historicalMetrics: LoadTestMetrics[]  // Capped at 3,000
+  historicalMetrics: LoadTestMetrics[]  // Trimmed to liveWindowSeconds (cap: MAX_RETAINED_TICKS)
+  liveWindowSeconds: number | null             // Live retention window; null = full run
   finalReport: RunReport | null
   error: string | null
   activeView: "metrics" | "request-response"
@@ -229,6 +242,7 @@ const {
   startRun, stopRun, setStreaming,
   addMetricsBatch,  // Efficiently fold batch into history and update aggregates
   setFinalReport, setError, setActiveView, setStopping,
+  setLiveWindowSeconds,  // Update the live retention window (from useLiveChartWindow)
   reset,
   getLatestMetrics, getMetricsWindow
 } = useDashboardStore();
