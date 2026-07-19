@@ -128,15 +128,29 @@ claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
 url = "http://127.0.0.1:9877/mcp"
 ```
 
-## Protocol surface (V1)
+## Protocol surface
 
-The official SDK handles JSON-RPC framing, the `initialize`/`initialized`
-handshake, and capability negotiation. We register:
+Built on the SDK's high-level **`McpServer`** (`server.ts`), so JSON-RPC framing,
+the `initialize` handshake, and capability negotiation are handled for us. What
+we use:
 
-- `tools/*` — the tool set below.
-- _(later, optional)_ `resources/*`, `prompts/*`.
+- **`tools/*`** — the tool set below, registered via `registerTool` with **Zod**
+  input schemas (arguments validated by the SDK before the handler runs) and MCP
+  **tool annotations** (`readOnlyHint` / `destructiveHint` / `idempotentHint` /
+  `openWorldHint` + a display `title`) so clients can gate auto-approval.
+- **Structured output** — tools with a natural shape (`get_engine_health`,
+  `compare_runs`) declare an `outputSchema` and return validated
+  `structuredContent` alongside the text rendering.
+- **Elicitation** — `start_load_run` asks the human to confirm via the client
+  (`server.elicitInput`) when the client negotiated the `elicitation` capability;
+  otherwise it falls back to the `confirmed: true` flag. Elicitation needs a
+  bidirectional channel, so it works on stdio and in-memory transports; on the
+  stateless JSON HTTP host (no server→client push) the flag fallback is used.
+- **`tools/list_changed`** — advertised by `McpServer` (the capability is on);
+  effective for stdio, and a no-op push-wise on the stateless HTTP host.
 
-We do **not** implement client-side features (sampling, elicitation).
+Deferred (design doc V3): `resources/*`, `prompts/*`. Not used: sampling, roots,
+logging, sessions, OAuth.
 
 ## Safety model (locked approach)
 

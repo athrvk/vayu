@@ -16,32 +16,61 @@
  */
 
 import http from "node:http";
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpServer } from "./server.js";
 import { McpHttpServer } from "./http.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import type { ToolContext } from "./tools.js";
 import type { EngineClient } from "./engine-client.js";
 
-function fakeClient(): EngineClient {
+const REPORT = {
+	summary: { totalRequests: 100, errorCount: 1 },
+	latency: { p50: 5, p95: 12, p99: 20 },
+	statusCodes: { "200": 99, "500": 1 },
+};
+
+function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}): EngineClient {
 	return {
 		health: async () => ({ status: "ok", version: "9.9.9" }),
 		getConfig: async () => ({ entries: [{ key: "workers", value: "8" }] }),
+		getRunReport: async () => REPORT,
+		startRun: vi.fn().mockResolvedValue({ runId: "run_1", status: "running" }),
+		...overrides,
 	} as unknown as EngineClient;
 }
 
-function contextProvider(safety?: Partial<McpSafetyConfig>): () => ToolContext {
-	return () => ({ client: fakeClient(), config: resolveSafetyConfig(safety) });
+function contextProvider(
+	safety?: Partial<McpSafetyConfig>,
+	client?: EngineClient
+): () => ToolContext {
+	return () => ({ client: client ?? fakeClient(), config: resolveSafetyConfig(safety) });
 }
 
 /** Connect a real SDK client to the Vayu server over a linked in-memory pair. */
-async function connectClient(safety?: Partial<McpSafetyConfig>) {
+async function connectClient(
+	opts: {
+		safety?: Partial<McpSafetyConfig>;
+		client?: EngineClient;
+		elicit?: (req: unknown) => { action: string; content?: Record<string, unknown> };
+	} = {}
+) {
 	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-	const server = createMcpServer({ name: "vayu", version: "test" }, contextProvider(safety));
+	const server = createMcpServer(
+		{ name: "vayu", version: "test" },
+		contextProvider(opts.safety, opts.client)
+	);
 	await server.connect(serverTransport);
-	const client = new Client({ name: "test-client", version: "1.0.0" });
+	const client = new Client(
+		{ name: "test-client", version: "1.0.0" },
+		opts.elicit ? { capabilities: { elicitation: {} } } : undefined
+	);
+	if (opts.elicit) {
+		const handler = opts.elicit;
+		client.setRequestHandler(ElicitRequestSchema, async (req) => handler(req));
+	}
 	// connect() performs the initialize handshake.
 	await client.connect(clientTransport);
 	return { client, server };
@@ -59,6 +88,19 @@ describe("MCP protocol handshake (in-memory)", () => {
 		await server.close();
 	});
 
+	it("exposes tool annotations (read-only / destructive hints + title)", async () => {
+		const { client, server } = await connectClient();
+		const { tools } = await client.listTools();
+		const health = tools.find((t) => t.name === "get_engine_health");
+		expect(health?.annotations).toMatchObject({
+			title: "Check engine health",
+			readOnlyHint: true,
+		});
+		const load = tools.find((t) => t.name === "start_load_run");
+		expect(load?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+		await server.close();
+	});
+
 	it("calls a tool and returns the engine response", async () => {
 		const { client, server } = await connectClient();
 		const res = (await client.callTool({ name: "get_engine_health", arguments: {} })) as {
@@ -70,17 +112,67 @@ describe("MCP protocol handshake (in-memory)", () => {
 		await server.close();
 	});
 
+	it("returns structured content for compare_runs (outputSchema)", async () => {
+		const { client, server } = await connectClient();
+		const { tools } = await client.listTools();
+		expect(tools.find((t) => t.name === "compare_runs")?.outputSchema).toBeDefined();
+		const res = (await client.callTool({
+			name: "compare_runs",
+			arguments: { baseRunId: "a", targetRunId: "b" },
+		})) as { structuredContent?: { latency?: unknown[]; baseRunId?: string } };
+		expect(res.structuredContent?.baseRunId).toBe("a");
+		expect(Array.isArray(res.structuredContent?.latency)).toBe(true);
+		await server.close();
+	});
+
 	it("omits a disabled tool from tools/list and rejects calling it", async () => {
-		const { client, server } = await connectClient({ disabledTools: ["get_engine_health"] });
+		const { client, server } = await connectClient({
+			safety: { disabledTools: ["get_engine_health"] },
+		});
 		const { tools } = await client.listTools();
 		expect(tools.map((t) => t.name)).not.toContain("get_engine_health");
-		// Still listed tools work; the disabled one errors if called anyway.
+		// Unregistered → the SDK returns an error result ("tool not found").
 		const res = (await client.callTool({ name: "get_engine_health", arguments: {} })) as {
 			content: Array<{ text: string }>;
 			isError?: boolean;
 		};
 		expect(res.isError).toBe(true);
-		expect(res.content[0].text).toMatch(/disabled/i);
+		expect(res.content[0].text).toMatch(/not found/i);
+		await server.close();
+	});
+
+	it("uses elicitation to confirm a load run when the client supports it", async () => {
+		const startRun = vi.fn().mockResolvedValue({ runId: "run_9", status: "running" });
+		const { client, server } = await connectClient({
+			safety: { allowlist: ["api.example.com"], maxRps: 1000 },
+			client: fakeClient({ startRun }),
+			// Human accepts the elicitation prompt.
+			elicit: () => ({ action: "accept", content: { proceed: true } }),
+		});
+		// No `confirmed` flag — confirmation comes from elicitation.
+		const res = (await client.callTool({
+			name: "start_load_run",
+			arguments: { url: "https://api.example.com/x", mode: "constant_rps", targetRps: 50 },
+		})) as { content: Array<{ text: string }>; isError?: boolean };
+		expect(res.isError).toBeFalsy();
+		expect(startRun).toHaveBeenCalledTimes(1);
+		expect(res.content[0].text).not.toMatch(/AWAITING CONFIRMATION/);
+		await server.close();
+	});
+
+	it("declines the load run when the user rejects the elicitation", async () => {
+		const startRun = vi.fn();
+		const { client, server } = await connectClient({
+			safety: { allowlist: ["api.example.com"], maxRps: 1000 },
+			client: fakeClient({ startRun }),
+			elicit: () => ({ action: "decline" }),
+		});
+		const res = (await client.callTool({
+			name: "start_load_run",
+			arguments: { url: "https://api.example.com/x", mode: "constant_rps", targetRps: 50 },
+		})) as { content: Array<{ text: string }> };
+		expect(startRun).not.toHaveBeenCalled();
+		expect(res.content[0].text).toMatch(/declined/i);
 		await server.close();
 	});
 });
