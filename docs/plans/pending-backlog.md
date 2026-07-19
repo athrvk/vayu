@@ -48,8 +48,17 @@ The generic `send_error` helper (`routes.hpp:39`) emits flat `{"error":"<string>
 ### N2. Lint sweep
 ~120 ESLint findings in the app (mostly `@typescript-eslint/no-explicit-any` + misc). Janitorial; no behaviour change.
 
-### N3. Unify charting on uPlot (drop recharts)
-Two charting stacks today: a good hand-rolled SVG system (live dashboard) and recharts in one history file (`HistoricalChartsSection`, duplicate throughput chart, copy-pasted LineCharts). Load tests are dense time-series → the app already downsamples (`CHART_DOWNSAMPLE_MAX_POINTS`), and neither stack lets a user correlate metrics or zoom the moment of degradation. **Spike done** (`docs/plans/chart-spike-uplot.md`, branch `spike/uplot-charts`): uPlot (Canvas) is ~22.8 KB gz vs recharts ~96.9 KB gz (−~74 KB, ~4×), stays token-themed, and adds synced cursor / drag-zoom / breakpoint annotations - the "understand the service" interactivity. **Needs:** land `TimeSeriesUPlot` + tests, migrate history off recharts (drop the dep), then migrate live SVG charts incrementally, wire synced cursor + W1 breakpoint annotation. Medium; do after W1 merges.
+### N3. Unify charting on uPlot (drop recharts) - _implemented on `claude/charts-uplot-unify` (off the W1 branch), pending merge_
+Two charting stacks (hand-rolled SVG on the live dashboard + recharts in `HistoricalChartsSection`) are now **one**: a single Canvas `UPlotChart` primitive (`components/charts/uplot/`) with token-driven theming, crosshair + multi-series tooltip, drag-to-zoom, **synced cursor** across a stack of charts, and reference markers (W1 breakpoint / target / SLO).
+
+**Shipped on branch:**
+- Primitive: `UPlotChart` + `uplotTheme` (CSS-token→Canvas) + `plugins` (markers, tooltip) + `buildData`/`formatters`. Supports lines/areas/scatter, a secondary axis, bands (latency gap / ramp lag), stacked areas, and reference markers.
+- Semantic components (every UI imports these, never the primitive): `LatencyPercentilesChart`, `LatencyBreakdownChart`, `RequestRateChart` (+ target + ramp overlay), `ConnectionsChart`, `ErrorRateChart`, `ResponseTimeVsConcurrencyChart`, `StatusCodesOverTimeChart` (stacked), `HdrPercentileChart`.
+- Migrated **both** consumers: live `MetricsView` and history `HistoricalChartsSection`/`PerformanceTab` now render the same components; live dashboard charts share one cursor (`syncKey="live-charts"`), history another. Deleted the 6 old SVG charts + the SVG `TimeSeriesChart` frame; **dropped the `recharts` dependency** (charts chunk 96.9 KB gz → 22.2 KB gz, −~75 KB / ~4.4×).
+- Timing waterfall kept bespoke (a single-request horizontal duration bar — not an x/y series; uPlot is the wrong engine). HDR skeleton kept for the live pre-report state.
+- Tests: jsdom canvas/matchMedia/Path2D mocks in `src/test/setup.ts`; replaced the SVG snapshot tests with a render smoke test over all 8 charts + a `bucketColumns` data test.
+
+_Verified: `type-check` clean, changed files lint-clean, `pnpm test` (291) green, `pnpm build` green (uplot chunk), and all 8 real components rendered in-browser (Playwright)._
 
 ---
 

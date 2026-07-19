@@ -8,55 +8,76 @@
 /**
  * uPlot plugins for Vayu — the diagnostic-interactivity layer.
  *
- * SPIKE (N3): the point of moving to uPlot is NOT prettier lines — it's letting
- * a user *understand the service under test*. That means reading exact values at
- * any instant, correlating metrics at the same instant, zooming into the moment
- * of degradation, and seeing computed insights (the capacity breakpoint) marked
- * on the axis. These plugins provide those affordances; uPlot's built-ins
+ * The point of the Canvas migration is not prettier lines; it is letting a user
+ * *understand the service under test*: read exact values at any instant,
+ * correlate metrics at that instant, zoom into the moment of degradation, and
+ * see computed insights (the capacity breakpoint, the target rate, the SLO)
+ * marked on the axes. These plugins provide those affordances; uPlot's built-ins
  * (drag-zoom, cursor.sync) provide the rest.
  */
 
 import type uPlot from "uplot";
-import type { UplotTheme } from "./uplotTheme";
-
-/** One vertical marker on the time axis (e.g. the SLO breakpoint, ramp phases). */
-export interface Annotation {
-	/** x value (elapsed seconds) at which to draw the marker. */
-	x: number;
-	label: string;
-	color: string;
-}
+import type { UplotTheme, ColorRole } from "./uplotTheme";
 
 /**
- * Draw vertical annotation lines with labels — ties a chart to a computed
- * insight. The obvious first use is the W1 capacity breakpoint: "p99 crossed the
- * SLO here, at concurrency N". Static markers, redrawn each frame via the `draw`
- * hook so they survive zoom/pan.
+ * A reference marker: a dashed line + label. Vertical markers pin an x value (the
+ * W1 capacity breakpoint, ramp phase boundaries); horizontal markers pin a y
+ * value on a scale (the configured target RPS, the latency SLO). Color is given
+ * as a semantic role and resolved against the live theme when drawn.
  */
-export function annotationsPlugin(getAnnotations: () => Annotation[]): uPlot.Plugin {
+export interface Marker {
+	orient: "vertical" | "horizontal";
+	/** x value for vertical markers; y value for horizontal markers. */
+	value: number;
+	/** y-scale key for horizontal markers (default "y"). */
+	scale?: string;
+	label: string;
+	role: ColorRole;
+	/** Horizontal label side (default "right"); vertical always insets from the line. */
+	align?: "left" | "right";
+}
+
+const dpr = () => (typeof devicePixelRatio === "number" ? devicePixelRatio : 1);
+
+/** Draw reference markers each frame (survives zoom/pan) via the `draw` hook. */
+export function markersPlugin(getMarkers: () => Marker[], theme: UplotTheme): uPlot.Plugin {
 	return {
 		hooks: {
 			draw: (u: uPlot) => {
-				const { ctx } = u;
-				const annos = getAnnotations();
-				const top = u.bbox.top;
-				const height = u.bbox.height;
+				const ctx = u.ctx;
+				const { left, top, width, height } = u.bbox;
 				ctx.save();
-				for (const a of annos) {
-					const cx = u.valToPos(a.x, "x", true);
-					if (cx < u.bbox.left || cx > u.bbox.left + u.bbox.width) continue;
-					ctx.strokeStyle = a.color;
-					ctx.lineWidth = 1.5 * devicePixelRatio;
-					ctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio]);
-					ctx.beginPath();
-					ctx.moveTo(cx, top);
-					ctx.lineTo(cx, top + height);
-					ctx.stroke();
-					ctx.setLineDash([]);
-					ctx.fillStyle = a.color;
-					ctx.font = `${10 * devicePixelRatio}px "JetBrains Mono", monospace`;
-					ctx.textAlign = "left";
-					ctx.fillText(a.label, cx + 4 * devicePixelRatio, top + 11 * devicePixelRatio);
+				ctx.lineWidth = 1.5 * dpr();
+				ctx.setLineDash([4 * dpr(), 4 * dpr()]);
+				ctx.font = `${10 * dpr()}px "JetBrains Mono", monospace`;
+				for (const m of getMarkers()) {
+					const color = theme.color(m.role);
+					ctx.strokeStyle = color;
+					ctx.fillStyle = color;
+					if (m.orient === "vertical") {
+						const cx = u.valToPos(m.value, "x", true);
+						if (cx < left || cx > left + width) continue;
+						ctx.beginPath();
+						ctx.moveTo(cx, top);
+						ctx.lineTo(cx, top + height);
+						ctx.stroke();
+						ctx.textAlign = "left";
+						ctx.fillText(m.label, cx + 4 * dpr(), top + 11 * dpr());
+					} else {
+						const cy = u.valToPos(m.value, m.scale ?? "y", true);
+						if (cy < top || cy > top + height) continue;
+						ctx.beginPath();
+						ctx.moveTo(left, cy);
+						ctx.lineTo(left + width, cy);
+						ctx.stroke();
+						const right = (m.align ?? "right") === "right";
+						ctx.textAlign = right ? "right" : "left";
+						ctx.fillText(
+							m.label,
+							right ? left + width - 4 * dpr() : left + 4 * dpr(),
+							cy - 4 * dpr()
+						);
+					}
 				}
 				ctx.restore();
 			},
@@ -64,26 +85,25 @@ export function annotationsPlugin(getAnnotations: () => Annotation[]): uPlot.Plu
 	};
 }
 
-/** Formats a value for the tooltip; falls back to a dash for gaps/nulls. */
 export type ValueFormatter = (v: number | null | undefined) => string;
 
 /**
  * Cursor tooltip — a positioned DOM overlay showing every series' value at the
- * hovered instant. This is the core "understand the service" affordance: at
- * t=42.1s you see RPS, p50/p95/p99, error-rate and concurrency together, so a
- * p99 spike can be read against the concurrency and error columns at the same x.
- *
- * Pairs with uPlot's `cursor.sync` (same sync key across charts) so hovering one
- * chart moves the cursor on all of them — cross-metric correlation for free.
+ * hovered instant. The core "understand the service" affordance: at t=42.1s you
+ * see RPS, p50/p95/p99, error-rate and concurrency together, so a p99 spike is
+ * read against the concurrency and error columns at the same x. Pairs with
+ * uPlot's `cursor.sync` so hovering one chart moves the cursor on all of them.
  */
 export function tooltipPlugin(opts: {
 	theme: UplotTheme;
-	/** Per-series value formatter, indexed by series position (1-based data idx). */
+	/** Per-series value formatter, keyed by series position (1-based data idx). */
 	format?: Record<number, ValueFormatter>;
+	skip?: Set<number>;
 	xLabel?: (x: number) => string;
 }): uPlot.Plugin {
 	let tip: HTMLDivElement | null = null;
 	const fmt = opts.format ?? {};
+	const skip = opts.skip ?? new Set<number>();
 	const xLabel = opts.xLabel ?? ((x: number) => `${x.toFixed(1)}s`);
 
 	return {
@@ -100,7 +120,7 @@ export function tooltipPlugin(opts: {
 					color: "hsl(var(--card-foreground))",
 					border: "1px solid hsl(var(--border))",
 					borderRadius: "6px",
-					boxShadow: "0 4px 12px hsl(var(--foreground) / 0.12)",
+					boxShadow: "0 4px 12px hsl(var(--foreground) / 0.14)",
 					transform: "translate(-50%, calc(-100% - 12px))",
 					whiteSpace: "nowrap",
 					opacity: "0",
@@ -120,6 +140,7 @@ export function tooltipPlugin(opts: {
 					`<div style="opacity:.7;margin-bottom:2px">${xLabel(xVal as number)}</div>`,
 				];
 				for (let s = 1; s < u.series.length; s++) {
+					if (skip.has(s)) continue;
 					const series = u.series[s];
 					if (series.show === false) continue;
 					const raw = u.data[s][idx];

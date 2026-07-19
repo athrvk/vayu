@@ -8,44 +8,45 @@
 /**
  * uplotTheme — bridges Vayu's CSS design tokens into uPlot's Canvas world.
  *
- * SPIKE (N3): the open question with a Canvas charting lib is "can it stay
- * theme-driven like our SVG charts, which use `hsl(var(--token))` everywhere?"
- * Answer: yes. uPlot takes concrete color strings, and our tokens hold raw HSL
- * channels (e.g. `--primary: 222 47% 11%`), so we resolve them at build time via
+ * uPlot takes concrete color strings, and our tokens hold raw HSL channels
+ * (e.g. `--primary: 222 47% 11%`), so we resolve them at build time via
  * getComputedStyle and hand uPlot real `hsl(...)` strings. Re-resolve whenever
  * the theme flips (light/dark) by re-creating the chart with a new themeKey.
+ *
+ * This keeps the Canvas charts as token-driven as the SVG charts they replace —
+ * every color still comes from the design system, nothing is hard-coded.
  */
 
-/** Resolve a CSS custom property to a usable `hsl(...)` string. */
-function token(root: Element, name: string, alpha = 1): string {
-	const raw = getComputedStyle(root).getPropertyValue(name).trim();
-	// Tokens store bare HSL channels ("222 47% 11%"); wrap them. Fall back to the
-	// raw value if a token is already a full color (defensive).
-	if (!raw) return "transparent";
-	return alpha < 1 ? `hsl(${raw} / ${alpha})` : `hsl(${raw})`;
-}
+/** Semantic color roles, mapped to CSS custom properties. */
+export type ColorRole =
+	| "primary"
+	| "success"
+	| "warning"
+	| "destructive"
+	| "info"
+	| "muted"
+	| "subtle"
+	| "accent";
+
+const ROLE_TOKEN: Record<ColorRole, string> = {
+	primary: "--primary",
+	success: "--success",
+	warning: "--warning",
+	destructive: "--destructive",
+	info: "--info",
+	muted: "--muted-foreground",
+	subtle: "--subtle-foreground",
+	accent: "--accent",
+};
 
 export interface UplotTheme {
 	axis: string;
 	grid: string;
 	text: string;
 	font: string;
-	/** Series stroke palette, keyed by semantic role. */
-	series: {
-		primary: string;
-		success: string;
-		warning: string;
-		destructive: string;
-		muted: string;
-	};
-	/** Translucent fills for area/band series. */
-	fill: {
-		primary: string;
-		destructive: string;
-	};
-	/** Cursor crosshair + zoom-selection styling. */
 	cursor: string;
-	selection: string;
+	/** Resolve a semantic role to an `hsl(...)` string, optionally translucent. */
+	color: (role: ColorRole, alpha?: number) => string;
 }
 
 /**
@@ -53,25 +54,23 @@ export interface UplotTheme {
  * creation and after a light/dark toggle (the tokens change value, not name).
  */
 export function readUplotTheme(root: Element = document.documentElement): UplotTheme {
+	const cs = getComputedStyle(root);
+	const raw = (name: string) => cs.getPropertyValue(name).trim();
+	const wrap = (channels: string, alpha?: number) =>
+		!channels
+			? "transparent"
+			: alpha != null && alpha < 1
+				? `hsl(${channels} / ${alpha})`
+				: `hsl(${channels})`;
+
 	return {
-		axis: token(root, "--border"),
-		grid: token(root, "--border", 0.5),
-		text: token(root, "--subtle-foreground"),
+		axis: wrap(raw("--border")),
+		grid: wrap(raw("--border"), 0.5),
+		text: wrap(raw("--subtle-foreground")),
 		// Match the SVG charts' JetBrains Mono tick labels for visual continuity.
 		font: '10px "JetBrains Mono", ui-monospace, monospace',
-		series: {
-			primary: token(root, "--primary"),
-			success: token(root, "--success"),
-			warning: token(root, "--warning"),
-			destructive: token(root, "--destructive"),
-			muted: token(root, "--muted-foreground"),
-		},
-		fill: {
-			primary: token(root, "--primary", 0.12),
-			destructive: token(root, "--destructive", 0.12),
-		},
-		cursor: token(root, "--muted-foreground", 0.55),
-		selection: token(root, "--primary", 0.12),
+		cursor: wrap(raw("--muted-foreground"), 0.55),
+		color: (role, alpha) => wrap(raw(ROLE_TOKEN[role]), alpha),
 	};
 }
 
