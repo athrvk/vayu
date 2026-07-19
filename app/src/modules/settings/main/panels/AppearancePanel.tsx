@@ -37,14 +37,26 @@ import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
 import { useAppearance } from "@/hooks/useAppearance";
 import { useClientSettingsStore } from "@/stores";
 import { COLOR_SCHEMES } from "@/constants/color-schemes";
-import { UI_FONTS, UI_SCALES, UI_RADII } from "@/constants/appearance";
+import {
+	UI_FONTS,
+	UI_SCALES,
+	UI_RADII,
+	customSansStack,
+	type UiFontChoice,
+} from "@/constants/appearance";
 import { cn } from "@/lib/utils";
 import { ToggleRow } from "./SettingControls";
+import { FontPicker } from "./FontPicker";
+
+// Vayu-flavored preview: an HTTP method, path, status, and latency — mixed case
+// and digits so the face's letterforms still read clearly.
+const UI_FONT_SAMPLE = "GET /users · 200 OK · 45ms";
 
 export default function AppearancePanel() {
 	const { themeSource, setTheme, colorScheme, setColorScheme, isDark, isLoading } =
 		useElectronTheme();
-	const { font, setFont, scale, setScale, radius, setRadius } = useAppearance();
+	const { font, setFont, fontCustom, setFontCustom, scale, setScale, radius, setRadius } =
+		useAppearance();
 	const reducedMotion = useClientSettingsStore((s) => s.reducedMotion);
 	const setReducedMotion = useClientSettingsStore((s) => s.setReducedMotion);
 
@@ -239,37 +251,16 @@ export default function AppearancePanel() {
 						<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
 							Font
 						</p>
-						<div className="grid grid-cols-2 gap-3">
-							{UI_FONTS.map((option) => {
-								const isSelected = font === option.value;
-								return (
-									<button
-										key={option.value}
-										onClick={() => setFont(option.value)}
-										className={cn(
-											"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
-											"hover:bg-accent hover:border-accent-foreground/20",
-											isSelected
-												? "border-primary bg-primary/5"
-												: "border-border"
-										)}
-									>
-										<span
-											className="text-sm font-medium"
-											style={{ fontFamily: option.stack }}
-										>
-											{option.label}
-										</span>
-										<span className="text-xs text-muted-foreground">
-											{option.description}
-										</span>
-										{isSelected && (
-											<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
-										)}
-									</button>
-								);
-							})}
-						</div>
+						<FontPicker
+							options={UI_FONTS}
+							value={font}
+							onChange={(v) => setFont(v as UiFontChoice)}
+							customValue={fontCustom}
+							onCustomChange={setFontCustom}
+							sample={UI_FONT_SAMPLE}
+							customStack={customSansStack}
+							placeholder="e.g. Söhne, SF Pro, Segoe UI"
+						/>
 					</div>
 
 					<div>

@@ -31,7 +31,21 @@
 						mono: '"JetBrains Mono", "Consolas", "Monaco", monospace',
 					};
 					var font = localStorage.getItem("vayu-ui-font");
-					if (fonts[font]) el.style.setProperty("--font-sans", fonts[font]);
+					if (font === "custom") {
+						var cf = localStorage.getItem("vayu-ui-font-custom");
+						if (cf && cf.trim()) {
+							el.style.setProperty(
+								"--font-sans",
+								cf.indexOf(",") >= 0
+									? cf
+									: '"' +
+											cf.replace(/["']/g, "") +
+											'", Inter, system-ui, sans-serif'
+							);
+						}
+					} else if (fonts[font]) {
+						el.style.setProperty("--font-sans", fonts[font]);
+					}
 
 					var scales = { compact: 0.9, comfortable: 1.1 };
 					var factor = scales[localStorage.getItem("vayu-ui-scale")];

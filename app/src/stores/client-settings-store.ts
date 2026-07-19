@@ -19,7 +19,12 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
-import { DEFAULT_MONO_FONT, monoFontStack, type MonoFont } from "@/constants/appearance";
+import {
+	DEFAULT_MONO_FONT,
+	monoFontStack,
+	customMonoStack,
+	type MonoFontChoice,
+} from "@/constants/appearance";
 import {
 	DEFAULT_EDITOR_PREFS,
 	DEFAULT_AUTO_SAVE_PREFS,
@@ -37,6 +42,7 @@ export const SETTINGS_STORAGE_KEYS: readonly string[] = [
 	STORAGE_KEYS.THEME_SOURCE,
 	STORAGE_KEYS.COLOR_SCHEME,
 	STORAGE_KEYS.UI_FONT,
+	STORAGE_KEYS.UI_FONT_CUSTOM,
 	STORAGE_KEYS.UI_SCALE,
 	STORAGE_KEYS.UI_RADIUS,
 	STORAGE_KEYS.LIVE_CHART_WINDOW,
@@ -45,7 +51,10 @@ export const SETTINGS_STORAGE_KEYS: readonly string[] = [
 
 interface ClientSettingsState {
 	editor: EditorPrefs;
-	monoFont: MonoFont;
+	/** Selected code font — a preset or "custom". */
+	monoFont: MonoFontChoice;
+	/** User-typed family, used when monoFont === "custom". */
+	monoFontCustom: string;
 	chartBucketSeconds: number;
 	sloThresholdMs: number;
 	liveRefreshMs: number;
@@ -53,7 +62,8 @@ interface ClientSettingsState {
 	reducedMotion: boolean;
 
 	setEditor: (patch: Partial<EditorPrefs>) => void;
-	setMonoFont: (font: MonoFont) => void;
+	setMonoFont: (font: MonoFontChoice) => void;
+	setMonoFontCustom: (family: string) => void;
 	setChartBucketSeconds: (seconds: number) => void;
 	setSloThresholdMs: (ms: number) => void;
 	setLiveRefreshMs: (ms: number) => void;
@@ -63,11 +73,21 @@ interface ClientSettingsState {
 	resetAll: () => void;
 }
 
-/** Push the monospace font onto `--font-mono` so `font-mono` utilities pick it
+/** Resolve the active code-font CSS stack (preset or custom family). */
+function resolveMonoStack(font: MonoFontChoice, custom: string): string {
+	return font === "custom" ? customMonoStack(custom) : monoFontStack(font);
+}
+
+/** Selector: the active code-font stack — used by the Monaco wrapper. */
+export function selectMonoStack(s: { monoFont: MonoFontChoice; monoFontCustom: string }): string {
+	return resolveMonoStack(s.monoFont, s.monoFontCustom);
+}
+
+/** Push the resolved stack onto `--font-mono` so `font-mono` utilities pick it
  *  up immediately (the Monaco editor reads the same stack via CodeEditor). */
-function applyMonoFont(font: MonoFont): void {
+function applyMonoStack(stack: string): void {
 	if (typeof document === "undefined") return;
-	document.documentElement.style.setProperty("--font-mono", monoFontStack(font));
+	document.documentElement.style.setProperty("--font-mono", stack);
 }
 
 /** Flag the document so the global CSS can collapse transitions/animations. */
@@ -79,9 +99,10 @@ function applyReducedMotion(on: boolean): void {
 
 export const useClientSettingsStore = create<ClientSettingsState>()(
 	persist(
-		(set) => ({
+		(set, get) => ({
 			editor: { ...DEFAULT_EDITOR_PREFS },
 			monoFont: DEFAULT_MONO_FONT,
+			monoFontCustom: "",
 			chartBucketSeconds: DEFAULT_CHART_BUCKET_SECONDS,
 			sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS,
 			liveRefreshMs: DEFAULT_LIVE_REFRESH_MS,
@@ -90,8 +111,12 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 
 			setEditor: (patch) => set((s) => ({ editor: { ...s.editor, ...patch } })),
 			setMonoFont: (font) => {
-				applyMonoFont(font);
+				applyMonoStack(resolveMonoStack(font, get().monoFontCustom));
 				set({ monoFont: font });
+			},
+			setMonoFontCustom: (family) => {
+				set({ monoFontCustom: family });
+				if (get().monoFont === "custom") applyMonoStack(customMonoStack(family));
 			},
 			setChartBucketSeconds: (seconds) => set({ chartBucketSeconds: seconds }),
 			setSloThresholdMs: (ms) => set({ sloThresholdMs: clampSloThresholdMs(ms) }),
@@ -114,6 +139,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 			partialize: (s) => ({
 				editor: s.editor,
 				monoFont: s.monoFont,
+				monoFontCustom: s.monoFontCustom,
 				chartBucketSeconds: s.chartBucketSeconds,
 				sloThresholdMs: s.sloThresholdMs,
 				liveRefreshMs: s.liveRefreshMs,
@@ -123,7 +149,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 			onRehydrateStorage: () => (state) => {
 				// Re-assert persisted DOM-affecting prefs after rehydrate.
 				if (state) {
-					applyMonoFont(state.monoFont);
+					applyMonoStack(resolveMonoStack(state.monoFont, state.monoFontCustom));
 					applyReducedMotion(state.reducedMotion);
 				}
 			},

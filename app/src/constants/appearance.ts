@@ -54,6 +54,9 @@ export const UI_FONTS = [
 export type UiFont = (typeof UI_FONTS)[number]["value"];
 export const DEFAULT_UI_FONT: UiFont = "inter";
 
+/** A preset UI font, or "custom" — a user-typed family (see {@link customSansStack}). */
+export type UiFontChoice = UiFont | "custom";
+
 /**
  * Monospace (code) font — applied by overriding the `--font-mono` custom
  * property (Tailwind's `font-mono` utilities read it) and passed to the Monaco
@@ -96,6 +99,9 @@ export const MONO_FONTS = [
 /** Monospace font preference, applied to `--font-mono` and the code editor. */
 export type MonoFont = (typeof MONO_FONTS)[number]["value"];
 export const DEFAULT_MONO_FONT: MonoFont = "jetbrains";
+
+/** A preset face, or "custom" — a user-typed family (see {@link customMonoStack}). */
+export type MonoFontChoice = MonoFont | "custom";
 
 export interface ScaleOption {
 	readonly value: string;
@@ -168,6 +174,28 @@ export function isMonoFont(value: unknown): value is MonoFont {
 
 export function monoFontStack(font: MonoFont): string {
 	return (MONO_FONTS.find((f) => f.value === font) ?? MONO_FONTS[0]).stack;
+}
+
+/**
+ * Build a CSS font stack from a user-typed family (VS Code-style custom font).
+ * A bare family is quoted and given `fallback`; a value that already contains a
+ * comma is treated as a complete stack and used verbatim. Empty → `fallback`.
+ */
+export function customFontStack(family: string, fallback: string): string {
+	const fam = family.trim();
+	if (!fam) return fallback;
+	if (fam.includes(",")) return fam;
+	return `"${fam.replace(/["']/g, "")}", ${fallback}`;
+}
+
+/** Custom monospace stack, falling back to the default mono faces. */
+export function customMonoStack(family: string): string {
+	return customFontStack(family, '"JetBrains Mono", "Consolas", "Monaco", monospace');
+}
+
+/** Custom UI (sans) stack, falling back to the default sans faces. */
+export function customSansStack(family: string): string {
+	return customFontStack(family, "Inter, system-ui, sans-serif");
 }
 
 export function scaleFactor(scale: UiScale): number {

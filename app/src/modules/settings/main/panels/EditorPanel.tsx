@@ -14,17 +14,15 @@
  * lives under Appearance alongside the UI font.
  */
 
-import { Code2, CheckCircle2 } from "lucide-react";
+import { Code2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { useClientSettingsStore } from "@/stores";
 import { EDITOR_FONT_SIZES, EDITOR_TAB_SIZES } from "@/constants/client-settings";
-import { MONO_FONTS } from "@/constants/appearance";
+import { MONO_FONTS, customMonoStack, type MonoFontChoice } from "@/constants/appearance";
 import { CodeEditor } from "@/components/ui/code-editor";
 import { OptionButtons, ToggleRow } from "./SettingControls";
-import { cn } from "@/lib/utils";
+import { FontPicker } from "./FontPicker";
 
-// Tab-indented (real \t) + nested so changing the tab width visibly reflows the
-// indentation in the read-only preview below.
 // Glyph-rich one-liner shown under each code-font choice. Lowercase g/a, the
 // zero, i/l/1, and the => ligature are where monospace faces differ most.
 const MONO_SAMPLE = "fn(0) => {a_g}";
@@ -43,6 +41,8 @@ export default function EditorPanel() {
 	const setEditor = useClientSettingsStore((s) => s.setEditor);
 	const monoFont = useClientSettingsStore((s) => s.monoFont);
 	const setMonoFont = useClientSettingsStore((s) => s.setMonoFont);
+	const monoFontCustom = useClientSettingsStore((s) => s.monoFontCustom);
+	const setMonoFontCustom = useClientSettingsStore((s) => s.setMonoFontCustom);
 
 	return (
 		<>
@@ -62,40 +62,16 @@ export default function EditorPanel() {
 						<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
 							Code font
 						</p>
-						<div className="grid grid-cols-2 gap-3">
-							{MONO_FONTS.map((option) => {
-								const isSelected = monoFont === option.value;
-								return (
-									<button
-										key={option.value}
-										onClick={() => setMonoFont(option.value)}
-										className={cn(
-											"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
-											"hover:bg-accent hover:border-accent-foreground/20",
-											isSelected
-												? "border-primary bg-primary/5"
-												: "border-border"
-										)}
-									>
-										<span className="text-sm font-medium">{option.label}</span>
-										<span className="text-xs text-muted-foreground">
-											{option.description}
-										</span>
-										{/* Glyph-rich sample rendered in the font so the faces
-										    are visibly distinct (0/O, i/l/1, ligatures, arrows). */}
-										<span
-											className="mt-1.5 text-[15px] leading-tight text-foreground"
-											style={{ fontFamily: option.stack }}
-										>
-											{MONO_SAMPLE}
-										</span>
-										{isSelected && (
-											<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
-										)}
-									</button>
-								);
-							})}
-						</div>
+						<FontPicker
+							options={MONO_FONTS}
+							value={monoFont}
+							onChange={(v) => setMonoFont(v as MonoFontChoice)}
+							customValue={monoFontCustom}
+							onCustomChange={setMonoFontCustom}
+							sample={MONO_SAMPLE}
+							customStack={customMonoStack}
+							placeholder="e.g. Cascadia Code, Comic Mono"
+						/>
 					</div>
 
 					<div>

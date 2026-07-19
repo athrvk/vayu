@@ -16,7 +16,7 @@
 import { useState, useEffect } from "react";
 import { Editor, type EditorProps, type OnMount } from "@monaco-editor/react";
 import { useClientSettingsStore } from "@/stores";
-import { monoFontStack } from "@/constants/appearance";
+import { selectMonoStack } from "@/stores/client-settings-store";
 
 type EditorOptions = NonNullable<EditorProps["options"]>;
 
@@ -82,14 +82,14 @@ export function CodeEditor({
 }: CodeEditorProps) {
 	const isDark = useDarkMode();
 	const editor = useClientSettingsStore((s) => s.editor);
-	const monoFont = useClientSettingsStore((s) => s.monoFont);
+	const monoStack = useClientSettingsStore(selectMonoStack);
 
 	// User editor preferences override the shared defaults; an explicit
 	// `fontSize` prop still wins over the preference, and per-call `options`
 	// win over everything.
 	const prefOptions: EditorOptions = {
 		fontSize: fontSize ?? editor.fontSize,
-		fontFamily: monoFontStack(monoFont),
+		fontFamily: monoStack,
 		wordWrap: editor.wordWrap ? "on" : "off",
 		minimap: { enabled: editor.minimap },
 		lineNumbers: editor.lineNumbers ? "on" : "off",
