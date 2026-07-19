@@ -195,7 +195,7 @@ Key settings in `vite.config.ts`:
 - **Radix UI**: Component primitives
 - **Tailwind CSS**: Styling
 - **Monaco Editor**: Code editing
-- **Recharts**: Charts
+- **uPlot**: Charts
 
 ### Development Dependencies
 
