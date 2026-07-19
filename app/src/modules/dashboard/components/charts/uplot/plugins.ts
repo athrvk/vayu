@@ -110,6 +110,7 @@ export function tooltipPlugin(opts: {
 		hooks: {
 			init: (u: uPlot) => {
 				tip = document.createElement("div");
+				tip.className = "vayu-chart-tooltip";
 				Object.assign(tip.style, {
 					position: "absolute",
 					pointerEvents: "none",

@@ -21,6 +21,7 @@ import {
 	RequestRateChart,
 	ConnectionsChart,
 	StatusCodesOverTimeChart,
+	CHART_SYNC,
 } from "@/modules/dashboard/components/charts/uplot";
 
 interface HistoricalChartsSectionProps {
@@ -31,7 +32,7 @@ interface HistoricalChartsSectionProps {
 	breakpoint?: Breakpoint | null;
 }
 
-const SYNC_KEY = "history-charts";
+const SYNC_KEY = CHART_SYNC.history;
 
 export default function HistoricalChartsSection({
 	data,

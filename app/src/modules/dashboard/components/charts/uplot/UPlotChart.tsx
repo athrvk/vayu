@@ -58,8 +58,14 @@ export interface UPlotChartProps {
 	data: uPlot.AlignedData;
 	series: UPlotSeriesSpec[];
 	height?: number;
-	/** x tick + tooltip formatter (default: seconds). */
+	/** x-axis tick formatter (default: whole seconds). */
 	xFormat?: (v: number) => string;
+	/**
+	 * x formatter for the hover tooltip. Defaults to `xFormat`, but time-series
+	 * charts pass a finer one (0.5 s) so the readout matches the 0.5 s data
+	 * granularity while the axis ticks stay whole-second.
+	 */
+	xTooltipFormat?: (v: number) => string;
 	yFormat?: (v: number) => string;
 	y2Format?: (v: number) => string;
 	/** Reference markers: breakpoint (vertical), target/SLO (horizontal). */
@@ -81,6 +87,7 @@ export function UPlotChart({
 	series,
 	height = 220,
 	xFormat = (v) => `${v.toFixed(0)}s`,
+	xTooltipFormat,
 	yFormat = defaultY,
 	y2Format = (v) => `${Math.round(v)}`,
 	markers = [],
@@ -190,7 +197,11 @@ export function UPlotChart({
 				cursor: {
 					drag: { x: true, y: false },
 					focus: { prox: 16 },
-					sync: syncKey ? { key: syncKey } : undefined,
+					// Sync on the x scale by VALUE (not pixel): charts with a second
+					// axis have a different plot width, so pixel-based sync would land
+					// the cursor at the wrong time. Matching the "x" scale keeps every
+					// synced chart on the same instant.
+					sync: syncKey ? { key: syncKey, scales: ["x", null] } : undefined,
 					points: { size: 6 },
 				},
 				scales: { x: { time: false } },
@@ -200,7 +211,12 @@ export function UPlotChart({
 				axes,
 				plugins: [
 					markersPlugin(() => markersRef.current, theme),
-					tooltipPlugin({ theme, format: perSeriesFormat, skip, xLabel: xFormat }),
+					tooltipPlugin({
+						theme,
+						format: perSeriesFormat,
+						skip,
+						xLabel: xTooltipFormat ?? xFormat,
+					}),
 				],
 			};
 

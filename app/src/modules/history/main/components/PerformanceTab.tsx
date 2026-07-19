@@ -22,6 +22,7 @@ import {
 import {
 	LatencyPercentilesChart,
 	ResponseTimeVsConcurrencyChart,
+	CHART_SYNC,
 } from "@/modules/dashboard/components/charts/uplot";
 import LatencyMetric from "./LatencyMetric";
 import HistoricalChartsSection from "./HistoricalChartsSection";
@@ -87,6 +88,7 @@ export default function PerformanceTab({
 							<LatencyPercentilesChart
 								history={timeSeries}
 								isCompleted
+								syncKey={CHART_SYNC.history}
 								breakpoint={derived.breakpoint}
 							/>
 						</CardContent>

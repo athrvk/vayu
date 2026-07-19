@@ -46,6 +46,7 @@ import {
 	StatusCodesOverTimeChart,
 	ResponseTimeVsConcurrencyChart,
 	HdrPercentileChart,
+	CHART_SYNC,
 } from "./charts/uplot";
 import { SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
@@ -231,7 +232,7 @@ function MetricsView({
 						targetRps={targetRps}
 						isCompleted={isCompleted}
 						rampOverlay={rampOverlay}
-						syncKey="live-charts"
+						syncKey={CHART_SYNC.live}
 						breakpoint={breakpoint}
 					/>
 					{rampOverlay && (
@@ -298,7 +299,7 @@ function MetricsView({
 					<LatencyBreakdownChart
 						history={chartWindow}
 						isCompleted={isCompleted}
-						syncKey="live-charts"
+						syncKey={CHART_SYNC.live}
 					/>
 				</div>
 			)}
@@ -371,7 +372,7 @@ function MetricsView({
 							<LatencyPercentilesChart
 								history={chartWindow}
 								isCompleted={isCompleted}
-								syncKey="live-charts"
+								syncKey={CHART_SYNC.live}
 								breakpoint={breakpoint}
 							/>
 						</div>
@@ -414,7 +415,7 @@ function MetricsView({
 					<StatusCodesOverTimeChart
 						history={chartWindow}
 						isCompleted={isCompleted}
-						syncKey="live-charts"
+						syncKey={CHART_SYNC.live}
 					/>
 				</div>
 			)}
