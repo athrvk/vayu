@@ -2,24 +2,7 @@
 
 Living backlog of deferred / surfaced work. Each item notes **why** it's pending and **what** it needs so it can be picked up as a focused plan.
 
-_Last updated: 2026-07-18 (branch `claude/backlog-prioritization-sku0xx`; base master `367902f`, engine `0.7.0`)._
-
----
-
-## Open features
-
-_(none currently open — W1 implemented, see below)_
-
-### W1. Windowed (rolling) percentiles - _implemented on `claude/backlog-prioritization-sku0xx`, pending merge_
-The latency percentiles were computed from a single **cumulative-from-start** HdrHistogram, so the live "Response time percentiles over time" chart **flattened** as a run progressed (each point was the all-time percentile, not the recent window). This also left several history surfaces empty/inert.
-
-**Shipped on branch:**
-- Engine: a **windowed** percentile source (`MetricsCollector::sample_window_percentiles`) backed by the vendored `hdr_interval_recorder` (writer/reader phaser, sample-and-reset per tick; also properly resolves D8). `record_success`/`record_latency` record into both the cumulative histogram and the interval recorder; `get_current_stats` now takes an optional `window_percentiles` and prefers it for `latencyP50/95/99Ms`.
-- Producer (`collect_metrics`): samples the window once per tick, emits windowed percentiles in the live tick blob, and **persists per-tick `LatencyP50/P95/P99`** (unlabeled rows) to the DB. `/run/:id/report` keys on the summary label so per-tick rows don't clobber the cumulative report; `/stats?format=json` maps the per-tick rows into `latency_p50/95/99_ms`.
-- App: history view now fetches the per-tick series in `LoadTestDetail`, derives the capacity breakpoint from it (Saturation card / Breakpoint stat / p99-at-peak light up for completed ramp_up runs), and renders the percentiles-over-time chart / response-time-vs-concurrency scatter in the Performance tab. Live chart consumes the windowed values with no client change.
-- Tests: 6 new `MetricsCollector` tests (windowed-vs-cumulative, reset-between-intervals, concurrent-writer safety, `get_current_stats` preference); history-detail characterization tests wrapped in a `QueryClientProvider`.
-
-_Verified: engine `build.py -t` + `ctest` green; app `type-check` + `test` (293) green; changed files lint-clean._
+_Last updated: 2026-07-19. Recently shipped and removed from this list: **W1** (windowed percentiles) via PR #54; **N3** (uPlot chart unification) + the four-category app-settings overhaul via PR #55 (0.8.0); **P2** (`/config` validation message) via PR #50._
 
 ---
 
@@ -33,11 +16,6 @@ Against `/fast` on loopback, tuned Vayu reaches ~45k req/s (vs `wrk` ~51k), but 
 
 **Needs:** lower the default `workers`; make the connection cap a **global budget** (or auto-derive from workers); bound the default `maxInFlight`. (Confirmed PR #10 is NOT the cause; ceiling is long-standing architecture. The branch-only 12-worker collapse was traced to added per-completion CPU and only bites at `workers=ncpu`.) Needs a spec.
 
-### P2. `/config` validation error message - _✅ merged (PR #50, commit `4a6ce5f`); test-seed follow-up in `83a5397`_
-`POST /config` returned a generic `"Failed to update configuration. Check logs for details."` on a validation failure. Turned out to be **two** bugs: the reason wasn't returned, **and** the generic `send_error` helper emits the flat `{"error":"..."}` shape while the app's http-client reads the nested `error.message` shape - so even the generic string was dropped and surfaced as a bare "HTTP 400".
-
-**Fix (shipped on branch):** extracted the parse/validate/apply logic into a pure `apply_config_update(db, body) -> {status, json}` (mirrors `oauth2_token_post`, now unit-testable via `config_route_test.cpp`); returns the specific reason (unknown key / non-numeric / out-of-range with offending value + bound) in the **nested** shape the client surfaces. All-or-nothing preserved. _Not yet built/verified - the sandbox can't reach vcpkg dep hosts; needs a local `build.py -t && ctest` or CI green before merge._
-
 ### P3. Remaining flat-error routes swallowed by the app client _(surfaced 2026-07-18 during P2)_
 The generic `send_error` helper (`routes.hpp:39`) emits flat `{"error":"<string>"}`, but `http-client.ts` only reads the nested `error.message`/`error.code`. Every route still using the flat helper (e.g. `config.cpp`'s "Invalid JSON", `execution.cpp:287/456`, `health`, 500 fallbacks) therefore shows a bare `HTTP <status>` in the UI, dropping the message. P2 fixed only the `/config` validation path. **Needs:** either migrate `send_error` to the nested shape (audit all call sites - some may rely on the flat body) or teach the client to accept both. Small, but cross-cutting. Low priority - most of these are developer-facing.
 
@@ -47,18 +25,6 @@ The generic `send_error` helper (`routes.hpp:39`) emits flat `{"error":"<string>
 
 ### N2. Lint sweep
 ~120 ESLint findings in the app (mostly `@typescript-eslint/no-explicit-any` + misc). Janitorial; no behaviour change.
-
-### N3. Unify charting on uPlot (drop recharts) - _implemented on `claude/charts-uplot-unify` (off the W1 branch), pending merge_
-Two charting stacks (hand-rolled SVG on the live dashboard + recharts in `HistoricalChartsSection`) are now **one**: a single Canvas `UPlotChart` primitive (`components/charts/uplot/`) with token-driven theming, crosshair + multi-series tooltip, drag-to-zoom, **synced cursor** across a stack of charts, and reference markers (W1 breakpoint / target / SLO).
-
-**Shipped on branch:**
-- Primitive: `UPlotChart` + `uplotTheme` (CSS-token→Canvas) + `plugins` (markers, tooltip) + `buildData`/`formatters`. Supports lines/areas/scatter, a secondary axis, bands (latency gap / ramp lag), stacked areas, and reference markers.
-- Semantic components (every UI imports these, never the primitive): `LatencyPercentilesChart`, `LatencyBreakdownChart`, `RequestRateChart` (+ target + ramp overlay), `ConnectionsChart`, `ErrorRateChart`, `ResponseTimeVsConcurrencyChart`, `StatusCodesOverTimeChart` (stacked), `HdrPercentileChart`.
-- Migrated **both** consumers: live `MetricsView` and history `HistoricalChartsSection`/`PerformanceTab` now render the same components; live dashboard charts share one cursor (`syncKey="live-charts"`), history another. Deleted the 6 old SVG charts + the SVG `TimeSeriesChart` frame; **dropped the `recharts` dependency** (charts chunk 96.9 KB gz → 22.2 KB gz, −~75 KB / ~4.4×).
-- Timing waterfall kept bespoke (a single-request horizontal duration bar — not an x/y series; uPlot is the wrong engine). HDR skeleton kept for the live pre-report state.
-- Tests: jsdom canvas/matchMedia/Path2D mocks in `src/test/setup.ts`; replaced the SVG snapshot tests with a render smoke test over all 8 charts + a `bucketColumns` data test.
-
-_Verified: `type-check` clean, changed files lint-clean, `pnpm test` (291) green, `pnpm build` green (uplot chunk), and all 8 real components rendered in-browser (Playwright)._
 
 ---
 
@@ -72,15 +38,6 @@ A `startConcurrency=0` ramp shows ~0.8% structural lag on a healthy run (integer
 
 ---
 
-## Process
+## Open questions
 
-- **`claude/sweet-johnson-vUNGE` concerns are resolved** - that work (OAuth 2.0 + N1 metrics + live retention) landed via PRs #45/#46 into **`0.6.0`**; the `/metrics/live` + `liveRetentionMs` api-reference doc is committed. The branch no longer exists on origin.
-- **cpp-httplib FD_SETSIZE fix - status unclear.** No `FD_SETSIZE`/`CPPHTTPLIB_` reference exists anywhere in `engine/` on current master, despite the "Shipped" note below claiming it landed. Re-verify whether the high-FD ceiling is actually addressed before relying on it.
-- P2 landed via PR #50; its `ConfigRouteTest` seeding was fixed in `83a5397` (seed config via `init()`), so the suite is green on master `367902f` (engine `0.7.0`).
-- Active branch `claude/backlog-prioritization-sku0xx` carries the W1 implementation (unmerged); rebased onto master `367902f`.
-
----
-
-## Shipped (history)
-
-Plans 1–4 (latency accuracy · backpressure/`maxInFlight` · UI surfaces · mode-adaptive dashboard) and their follow-ups (A1–A4, B5–B6, C7, D10 E2E validation) - all shipped. This session also shipped: B1 closed-loop concurrency · metrics enrichment (per-tick dropped/bytes/status, peak/queue/bytes in reports) · `maxInFlight` relocation · live-timer fix · mode-adaptive history view · transport-errors-as-status-0 · dropped-card gate fix · **cpp-httplib FD_SETSIZE fix** · **N1 in-memory metrics topic** (race-free live metrics + retention + DB enrichment, E2E-verified) + its UI regression fix.
+- **cpp-httplib FD_SETSIZE fix - status unclear.** No `FD_SETSIZE`/`CPPHTTPLIB_` reference exists anywhere in `engine/` on current master, despite an earlier "Shipped" note claiming it landed. Re-verify whether the high-FD ceiling is actually addressed before relying on it.
