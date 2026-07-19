@@ -12,6 +12,7 @@ import { EngineSidecar } from "./sidecar.js";
 import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow } from "./updater.js";
+import { VayuMcpService } from "./mcp/index.js";
 import {
 	DOCS_URL,
 	SCRIPTING_DOCS_URL,
@@ -22,6 +23,11 @@ import {
 	WINDOW_MIN_WIDTH,
 	WINDOW_MIN_HEIGHT,
 	TITLEBAR_HEIGHT,
+	ENGINE_HOST,
+	ENGINE_PORT,
+	MCP_HOST,
+	MCP_PORT,
+	MCP_ENDPOINT_URL,
 } from "./constants.js";
 
 const isDev = process.env.NODE_ENV === "development";
@@ -43,6 +49,8 @@ const __dirname = path.dirname(__filename);
 
 // Global sidecar instance
 let engineSidecar: EngineSidecar | null = null;
+// MCP server (Streamable HTTP) exposing the engine to agents. See mcp/index.ts.
+let mcpService: VayuMcpService | null = null;
 let mainWindow: BrowserWindow | null = null;
 
 // Track if we've already sent the before-quit flush message
@@ -311,6 +319,36 @@ async function startEngine() {
 	}
 }
 
+async function startMcp() {
+	try {
+		mcpService = new VayuMcpService({
+			engineBaseUrl: `http://${ENGINE_HOST}:${ENGINE_PORT}`,
+			host: MCP_HOST,
+			port: MCP_PORT,
+			version: app.getVersion(),
+		});
+		await mcpService.start();
+		console.log("[Main] MCP server listening at", mcpService.getUrl());
+	} catch (error) {
+		// The MCP server is a non-critical convenience — a bind failure (e.g. port
+		// in use) must not take down the app. Log and continue.
+		console.error("[Main] Failed to start MCP server (continuing without it):", error);
+		mcpService = null;
+	}
+}
+
+async function stopMcp() {
+	if (mcpService) {
+		try {
+			await mcpService.stop();
+			console.log("[Main] MCP server stopped");
+		} catch (error) {
+			console.error("[Main] Error stopping MCP server:", error);
+		}
+		mcpService = null;
+	}
+}
+
 async function stopEngine() {
 	if (engineSidecar) {
 		try {
@@ -353,6 +391,14 @@ function setupIpcHandlers() {
 		return {
 			running: engineSidecar?.isRunning() ?? false,
 			url: engineSidecar?.getApiUrl() ?? null,
+		};
+	});
+
+	// MCP server status — used by Settings to show the connect URL and state.
+	ipcMain.handle("mcp:status", () => {
+		return {
+			running: mcpService?.isRunning() ?? false,
+			url: mcpService?.getUrl() ?? MCP_ENDPOINT_URL,
 		};
 	});
 
@@ -453,6 +499,9 @@ app.whenReady().then(async () => {
 	// Start the engine
 	await startEngine();
 
+	// Start the MCP server (best-effort; never blocks app startup)
+	await startMcp();
+
 	// Then create the window
 	createWindow();
 
@@ -498,10 +547,11 @@ app.on("before-quit", (event) => {
 		return;
 	}
 
-	// Second pass: stop the engine before actually quitting
-	if (engineSidecar && engineSidecar.isRunning()) {
+	// Second pass: stop the MCP server and engine before actually quitting
+	if ((engineSidecar && engineSidecar.isRunning()) || mcpService) {
 		event.preventDefault();
 		(async () => {
+			await stopMcp();
 			await stopEngine();
 			// Continue with quit process
 			setImmediate(() => app.quit());

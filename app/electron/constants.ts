@@ -20,6 +20,15 @@ export const ENGINE_PORT = 9876;
 /** Lock file written by the engine inside its data dir. */
 export const ENGINE_LOCK_FILE = "vayu.lock";
 
+// MCP server (Model Context Protocol) — a TypeScript sidecar hosted in this
+// main process that exposes the engine's capabilities to agents (Claude Code,
+// Codex, Cursor, …) over Streamable HTTP. Bound to loopback only. See
+// docs/engine/mcp.md.
+export const MCP_HOST = "127.0.0.1";
+export const MCP_PORT = 9877;
+/** URL agents connect to, e.g. `claude mcp add --transport http vayu <url>`. */
+export const MCP_ENDPOINT_URL = `http://${MCP_HOST}:${MCP_PORT}/mcp`;
+
 // Engine lifecycle
 export const ENGINE_HEALTH_MAX_ATTEMPTS = 90;
 export const ENGINE_HEALTH_POLL_INTERVAL_MS = 500;
