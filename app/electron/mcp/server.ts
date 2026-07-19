@@ -36,10 +36,15 @@ export function createMcpServer(info: McpServerInfo, contextProvider: ToolContex
 		{
 			capabilities: { tools: {} },
 			instructions:
-				"Vayu exposes API testing and load testing. Use get_engine_health first. " +
+				"Vayu exposes API testing, load testing, and engine configuration. Call " +
+				"get_engine_health first. Tools are grouped as read (inspect collections, " +
+				"runs, config, metrics), write (run_request, update_engine_config), and load " +
+				"(start_load_run, stop_run, get_live_metrics, compare_runs). " +
 				"Network-touching tools (run_request, start_load_run) are restricted to an " +
 				"allowlist and hard rate/duration caps; start_load_run must be called with " +
-				"confirmed:true to actually generate load.",
+				"confirmed:true to actually generate load. update_engine_config requires the " +
+				"user to enable config writes. The user may disable individual tools, so treat " +
+				"tools/list as authoritative and expect some tools to be absent.",
 		}
 	);
 

@@ -35,6 +35,11 @@ function readSafetyFromEnv(): Partial<McpSafetyConfig> {
 		cfg.maxDurationSeconds = Number(env.VAYU_MCP_MAX_DURATION_SECONDS);
 	if (env.VAYU_MCP_ALLOW_ALL === "true") cfg.allowAll = true;
 	if (env.VAYU_MCP_ALLOW_WRITES === "true") cfg.allowWrites = true;
+	if (env.VAYU_MCP_DISABLED_TOOLS) {
+		cfg.disabledTools = env.VAYU_MCP_DISABLED_TOOLS.split(",")
+			.map((t) => t.trim())
+			.filter(Boolean);
+	}
 	return cfg;
 }
 

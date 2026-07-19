@@ -462,6 +462,12 @@ function setupIpcHandlers() {
 	// written to disk so it survives a restart. Returns the resolved config.
 	ipcMain.handle("mcp:updateSafety", (_event, partial: unknown): McpSafetyConfig => {
 		const clean = sanitizeSafetyInput((partial ?? {}) as Partial<McpSafetyConfig>);
+		// Drop unknown tool names so a stale/hand-edited disabled list can't
+		// accumulate junk (the sanitizer can't see the registry).
+		if (clean.disabledTools) {
+			const known = new Set(toolCatalog().map((t) => t.name));
+			clean.disabledTools = clean.disabledTools.filter((name) => known.has(name));
+		}
 		if (mcpService) {
 			mcpService.updateSafety(clean);
 			const resolved = mcpService.getSafety();

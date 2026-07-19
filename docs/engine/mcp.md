@@ -144,17 +144,30 @@ Enforced in the TS MCP layer (configurable from app Settings):
 
 - **Target allowlist** (default empty) — network-touching tools refuse off-list
   hosts with an actionable error. An **"Allow all hosts"** opt-in bypasses the
-  list (still rejects unresolved `{{variables}}`); off by default.
+  list (still rejects unresolved `{{variables}}`); off by default. **Enforcement.**
 - **Hard caps** — max RPS / concurrency / duration; over-cap requests rejected.
-- **Confirmation gate** on load-run start.
-- **Read-only by default** — collection/environment writes behind a toggle.
+  **Enforcement** — with the allowlist these are the real limits on generated load.
+- **Confirmation gate** on load-run start — prevents an *accidental* start (a
+  stray tool call), but it is agent-side (the same model can send the second
+  call), so it is anti-accident, not anti-adversary. The caps/allowlist are the
+  enforcement. A stronger version would use MCP elicitation to ask the human.
+- **Config writes off by default** — `update_engine_config` is refused unless the
+  user enables config writes. Does **not** gate `run_request` or load runs.
+- **Per-tool control** — any tool or read/write/load category can be switched
+  off; disabled tools are omitted from `tools/list` and rejected by `tools/call`.
 - **Server on/off** — the MCP server can be disabled entirely from Settings; the
   preference persists, and while off the endpoint is unavailable.
 - MCP-originated runs tagged so the History view shows "started via MCP."
 
-The server toggle, allowlist (incl. allow-all), caps, and write toggle are
-editable in **Settings → MCP** and persisted across restarts (see "Resolved:
-safety-config storage & UI").
+The server toggle, allowlist (incl. allow-all), caps, config-write toggle, and
+per-tool switches are editable in **Settings → MCP** and persisted across
+restarts (see "Resolved: safety-config storage & UI").
+
+**Fixed port, fail-soft.** The endpoint is a fixed `127.0.0.1:9877` so the
+connect snippets/commands are stable across launches. A bind failure (port in
+use) is logged and the app continues without MCP rather than failing startup;
+Settings shows a "Stopped" state with a Retry. This fixed-port + fail-soft
+tradeoff is accepted deliberately.
 
 ## Tool scope phasing
 
@@ -270,8 +283,9 @@ url = "http://127.0.0.1:9877/mcp"
 
 **Zed / headless / CI** (stdio, no Streamable HTTP): run the standalone server
 `node dist-electron/mcp/cli.js`. It honours `VAYU_ENGINE_URL` and
-`VAYU_MCP_ALLOWLIST` / `VAYU_MCP_MAX_RPS` / `VAYU_MCP_MAX_CONCURRENCY` /
-`VAYU_MCP_MAX_DURATION_SECONDS` / `VAYU_MCP_ALLOW_WRITES`.
+`VAYU_MCP_ALLOWLIST` / `VAYU_MCP_ALLOW_ALL` / `VAYU_MCP_MAX_RPS` /
+`VAYU_MCP_MAX_CONCURRENCY` / `VAYU_MCP_MAX_DURATION_SECONDS` /
+`VAYU_MCP_ALLOW_WRITES` / `VAYU_MCP_DISABLED_TOOLS` (comma-separated tool names).
 
 Safety defaults are conservative (empty allowlist ⇒ no outbound requests until a
 host is added). See `SECURITY.md`.

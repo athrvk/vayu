@@ -37,9 +37,10 @@ export interface McpSafetyConfig {
 	/** Hard ceiling on a load run's duration, in seconds. */
 	maxDurationSeconds: number;
 	/**
-	 * When false (default), collection/environment write tools are disabled and
-	 * load runs require an explicit `confirmed: true`. Read + single-request
-	 * execution are always available (subject to the allowlist).
+	 * Gates config-mutating tools (currently `update_engine_config`). When false
+	 * (default), those tools refuse. It does **not** gate `run_request` or load
+	 * runs — those are governed by the allowlist, the hard caps, and the load-run
+	 * confirmation gate independently.
 	 */
 	allowWrites: boolean;
 	/**

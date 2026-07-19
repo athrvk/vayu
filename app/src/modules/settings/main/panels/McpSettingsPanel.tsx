@@ -209,6 +209,20 @@ export default function McpSettingsPanel() {
 		};
 	}, []);
 
+	// Re-check status when the user returns to the window — the server may have
+	// died or been toggled elsewhere while the panel sat open.
+	useEffect(() => {
+		if (!window.electronAPI) return;
+		const onFocus = () => {
+			window.electronAPI
+				?.getMcpStatus()
+				.then(setStatus)
+				.catch(() => {});
+		};
+		window.addEventListener("focus", onFocus);
+		return () => window.removeEventListener("focus", onFocus);
+	}, []);
+
 	const endpoint = status?.url ?? DEFAULT_ENDPOINT;
 	const running = status?.running ?? false;
 	const enabled = status?.enabled ?? false;
@@ -371,6 +385,27 @@ export default function McpSettingsPanel() {
 							disabled={isLoading || !hasElectron}
 						/>
 					</div>
+
+					{/* Enabled but not listening — usually a port conflict. Offer a retry. */}
+					{!isLoading && enabled && !running && (
+						<div className="flex items-start justify-between gap-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2">
+							<div className="flex items-start gap-2">
+								<AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+								<p className="text-xs text-muted-foreground">
+									The server is enabled but not listening — the port may be in
+									use.
+								</p>
+							</div>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => void toggleEnabled(true)}
+								className="h-7 px-2 text-xs shrink-0"
+							>
+								Retry
+							</Button>
+						</div>
+					)}
 
 					<div className="flex items-center gap-2">
 						<Label className="text-xs font-medium text-muted-foreground w-20 shrink-0">
@@ -657,17 +692,19 @@ export default function McpSettingsPanel() {
 				</CardContent>
 			</Card>
 
-			{/* Writes */}
+			{/* Engine config writes */}
 			<Card>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<ShieldCheck className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Write access</CardTitle>
+						<CardTitle className="text-base">Engine config writes</CardTitle>
 					</div>
 					<CardDescription>
-						When off (default), agents can read and run single requests, and load runs
-						stay confirmation-gated. Turning this on permits collection/environment
-						writes.
+						When off (default), the{" "}
+						<code className="font-mono">update_engine_config</code> tool is disabled —
+						agents can read the engine config but not change it. This does not affect{" "}
+						<code className="font-mono">run_request</code> or load runs, which are
+						governed by the allowlist and caps.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -678,7 +715,7 @@ export default function McpSettingsPanel() {
 							disabled={!config}
 						/>
 						<Label className="text-sm text-muted-foreground">
-							{config?.allowWrites ? "Writes enabled" : "Read-only"}
+							{config?.allowWrites ? "Config writes enabled" : "Config writes off"}
 						</Label>
 					</div>
 				</CardContent>
