@@ -168,9 +168,24 @@ safety-config storage & UI").
 | `list_environments` | `GET /environments`                 |
 | `list_runs`         | `GET /runs`                         |
 | `get_run_report`    | `GET /run/:runId/report`            |
+| `get_engine_config` | `GET /config`                       |
 | `run_request`       | `POST /request` (allowlist applies) |
 
-No load runs. No collection/environment writes.
+### Configuration tools
+
+- `get_engine_config` — `GET /config` (read; the engine's tunables with value /
+  default / type / range).
+- `update_engine_config` — `POST /config`, **gated by the write toggle**
+  (`allowWrites`); the engine validates types/ranges and rejects the batch on any
+  invalid value.
+
+### Tool categories & per-tool control
+
+Every tool carries a `category` (`read` / `write` / `load`). The Settings tool
+list groups them by category and lets the user switch any tool (or a whole
+category) off. A disabled tool is omitted from `tools/list` **and** rejected by
+`tools/call`, so control does not rely on client good behavior. The disabled set
+persists in `disabledTools`.
 
 ### V2 — load testing (the real value)
 

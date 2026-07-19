@@ -474,6 +474,19 @@ export interface McpSafetyConfig {
 	maxDurationSeconds: number;
 	/** When false (default), collection/environment write tools are disabled. */
 	allowWrites: boolean;
+	/** Tool names the user has switched off (omitted from tools/list + rejected). */
+	disabledTools: string[];
+}
+
+/** Feature grouping for the MCP tool list in Settings. */
+export type McpToolCategory = "read" | "write" | "load";
+
+/** Metadata for one MCP tool, surfaced in Settings for enable/disable control. */
+export interface McpToolInfo {
+	name: string;
+	description: string;
+	category: McpToolCategory;
+	readOnly: boolean;
 }
 
 export interface McpStatus {

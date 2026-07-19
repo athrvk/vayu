@@ -22,6 +22,7 @@ import {
 	loadMcpEnabled,
 	saveMcpEnabled,
 	connectClient,
+	toolCatalog,
 	type McpConnectClient,
 	type McpSafetyConfig,
 } from "./mcp/index.js";
@@ -452,6 +453,9 @@ function setupIpcHandlers() {
 	ipcMain.handle("mcp:getSafety", (): McpSafetyConfig => {
 		return mcpService?.getSafety() ?? DEFAULT_MCP_SAFETY_CONFIG;
 	});
+
+	// The tool catalog (name/description/category) for the Settings tool list.
+	ipcMain.handle("mcp:getTools", () => toolCatalog());
 
 	// Apply and persist a safety-config change from Settings. The renderer input
 	// is sanitized here (never trusted), applied live to the running server, and

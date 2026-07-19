@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	getMcpStatus: (): Promise<{ running: boolean; url: string; enabled: boolean }> =>
 		ipcRenderer.invoke("mcp:status"),
 	getMcpSafety: () => ipcRenderer.invoke("mcp:getSafety"),
+	getMcpTools: () => ipcRenderer.invoke("mcp:getTools"),
 	updateMcpSafety: (partial: unknown) => ipcRenderer.invoke("mcp:updateSafety", partial),
 	setMcpEnabled: (enabled: boolean) => ipcRenderer.invoke("mcp:setEnabled", enabled),
 	connectMcpClient: (client: "claude" | "vscode") =>

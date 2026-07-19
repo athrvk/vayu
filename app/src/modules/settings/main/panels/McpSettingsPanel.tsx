@@ -26,6 +26,7 @@ import {
 	ShieldCheck,
 	Globe,
 	Gauge,
+	Wrench,
 	Plus,
 	X,
 	Check,
@@ -49,7 +50,13 @@ import {
 	CardTitle,
 	Skeleton,
 } from "@/components/ui";
-import type { McpConnectClient, McpSafetyConfig, McpStatus } from "@/types";
+import type {
+	McpConnectClient,
+	McpSafetyConfig,
+	McpStatus,
+	McpToolCategory,
+	McpToolInfo,
+} from "@/types";
 import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 
@@ -94,6 +101,17 @@ const CLIENT_CLI: Record<McpConnectClient, string> = {
 	claude: "claude",
 	vscode: "code",
 };
+
+/** Tool categories, in display order, with their sidebar copy. */
+const TOOL_CATEGORIES: { id: McpToolCategory; label: string; description: string }[] = [
+	{ id: "read", label: "Read", description: "Inspect collections, runs, config, and metrics." },
+	{ id: "write", label: "Write", description: "Send a single request or change engine config." },
+	{
+		id: "load",
+		label: "Load testing",
+		description: "Start/stop load runs and read their metrics.",
+	},
+];
 
 /** A small copy-to-clipboard button that flips to a check for a moment. */
 function CopyButton({ text, className }: { text: string; className?: string }) {
@@ -157,6 +175,7 @@ export default function McpSettingsPanel() {
 
 	const [status, setStatus] = useState<McpStatus | null>(null);
 	const [config, setConfig] = useState<McpSafetyConfig | null>(null);
+	const [tools, setTools] = useState<McpToolInfo[]>([]);
 	const [newHost, setNewHost] = useState("");
 	const [capDrafts, setCapDrafts] = useState<Partial<Record<CapField["key"], string>>>({});
 	const [isLoading, setIsLoading] = useState(true);
@@ -171,13 +190,15 @@ export default function McpSettingsPanel() {
 				return;
 			}
 			try {
-				const [s, c] = await Promise.all([
+				const [s, c, t] = await Promise.all([
 					window.electronAPI.getMcpStatus(),
 					window.electronAPI.getMcpSafety(),
+					window.electronAPI.getMcpTools(),
 				]);
 				if (cancelled) return;
 				setStatus(s);
 				setConfig(c);
+				setTools(t);
 			} finally {
 				if (!cancelled) setIsLoading(false);
 			}
@@ -263,6 +284,20 @@ export default function McpSettingsPanel() {
 				}
 				return next;
 			});
+		},
+		[config, persist]
+	);
+
+	// Enable/disable a set of tools by name (persists the resulting disabled list).
+	const setToolsEnabled = useCallback(
+		(names: string[], enabled: boolean) => {
+			if (!config) return;
+			const disabled = new Set(config.disabledTools);
+			for (const name of names) {
+				if (enabled) disabled.delete(name);
+				else disabled.add(name);
+			}
+			void persist({ disabledTools: [...disabled] });
 		},
 		[config, persist]
 	);
@@ -383,6 +418,91 @@ export default function McpSettingsPanel() {
 							</pre>
 						</div>
 					))}
+				</CardContent>
+			</Card>
+
+			{/* Tools */}
+			<Card>
+				<CardHeader className="pb-3">
+					<div className="flex items-center gap-2">
+						<Wrench className="w-5 h-5 text-muted-foreground" />
+						<CardTitle className="text-base">Tools</CardTitle>
+					</div>
+					<CardDescription>
+						Choose which tools agents can use. A disabled tool is hidden from the
+						agent's tool list and rejected if called anyway.
+					</CardDescription>
+				</CardHeader>
+				<CardContent className="space-y-5">
+					{isLoading ? (
+						<Skeleton className="h-24 w-full" />
+					) : (
+						TOOL_CATEGORIES.map((cat) => {
+							const catTools = tools.filter((t) => t.category === cat.id);
+							if (catTools.length === 0) return null;
+							const names = catTools.map((t) => t.name);
+							const enabledCount = catTools.filter(
+								(t) => !(config?.disabledTools ?? []).includes(t.name)
+							).length;
+							const allOn = enabledCount === catTools.length;
+							return (
+								<div key={cat.id}>
+									<div className="flex items-center justify-between gap-4 mb-2">
+										<div>
+											<div className="flex items-center gap-2">
+												<span className="text-sm font-semibold">
+													{cat.label}
+												</span>
+												<span className="text-xs text-muted-foreground">
+													{enabledCount}/{catTools.length} on
+												</span>
+											</div>
+											<p className="text-xs text-muted-foreground mt-0.5">
+												{cat.description}
+											</p>
+										</div>
+										<Switch
+											checked={allOn}
+											onCheckedChange={(checked) =>
+												setToolsEnabled(names, checked)
+											}
+											disabled={!config}
+											title="Toggle all in this group"
+										/>
+									</div>
+									<div className="space-y-1 border-l border-border pl-3">
+										{catTools.map((tool) => {
+											const on = !(config?.disabledTools ?? []).includes(
+												tool.name
+											);
+											return (
+												<div
+													key={tool.name}
+													className="flex items-center justify-between gap-4 py-1"
+												>
+													<div className="min-w-0">
+														<code className="text-xs font-mono">
+															{tool.name}
+														</code>
+														<p className="text-xs text-muted-foreground mt-0.5">
+															{tool.description}
+														</p>
+													</div>
+													<Switch
+														checked={on}
+														onCheckedChange={(checked) =>
+															setToolsEnabled([tool.name], checked)
+														}
+														disabled={!config}
+													/>
+												</div>
+											);
+										})}
+									</div>
+								</div>
+							);
+						})
+					)}
 				</CardContent>
 			</Card>
 

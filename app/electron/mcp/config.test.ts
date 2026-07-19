@@ -73,6 +73,19 @@ describe("sanitizeSafetyInput", () => {
 		).toBeUndefined();
 	});
 
+	it("normalizes disabledTools: trims, drops non-strings, de-dupes", () => {
+		const out = sanitizeSafetyInput({
+			disabledTools: [
+				"run_request",
+				" run_request ",
+				"",
+				5,
+				"stop_run",
+			] as unknown as string[],
+		});
+		expect(out.disabledTools).toEqual(["run_request", "stop_run"]);
+	});
+
 	it("ignores unknown fields", () => {
 		const out = sanitizeSafetyInput({ nope: 1 } as unknown as Record<string, never>);
 		expect(out).toEqual({});

@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test, vi } from "vitest";
-import { dispatchTool, TOOLS, type ToolContext } from "./tools.js";
+import { dispatchTool, toolCatalog, TOOLS, type ToolContext } from "./tools.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import type { EngineClient } from "./engine-client.js";
 
@@ -23,6 +23,8 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		startRun: vi.fn().mockResolvedValue({ runId: "run_1", status: "running" }),
 		stopRun: vi.fn().mockResolvedValue({ message: "Run stopped" }),
 		getLiveMetricsSnapshot: vi.fn().mockResolvedValue([{ currentRps: 100 }]),
+		getConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "8" }] }),
+		updateConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "16" }] }),
 		...overrides,
 	} as unknown as EngineClient;
 }
@@ -40,6 +42,66 @@ describe("tool registry", () => {
 		expect(names).toContain("run_request");
 		expect(names).toContain("start_load_run");
 		expect(names).toContain("compare_runs");
+	});
+
+	test("every tool has a valid category", () => {
+		for (const t of TOOLS) {
+			expect(["read", "write", "load"]).toContain(t.category);
+		}
+	});
+
+	test("toolCatalog mirrors the registry as IPC-safe metadata", () => {
+		const catalog = toolCatalog();
+		expect(catalog).toHaveLength(TOOLS.length);
+		const get = catalog.find((t) => t.name === "get_engine_config");
+		expect(get).toMatchObject({ category: "read", readOnly: true });
+		const upd = catalog.find((t) => t.name === "update_engine_config");
+		expect(upd).toMatchObject({ category: "write", readOnly: false });
+		// Metadata only — no handler leaks across the boundary.
+		expect(get).not.toHaveProperty("handler");
+	});
+});
+
+describe("disabled tools", () => {
+	test("a disabled tool is rejected by dispatch", async () => {
+		const res = await dispatchTool(
+			"get_engine_health",
+			{},
+			ctxWith(fakeClient(), { disabledTools: ["get_engine_health"] })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/disabled/i);
+	});
+});
+
+describe("engine config tools", () => {
+	test("get_engine_config passes the engine response through", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool("get_engine_config", {}, ctxWith(client));
+		expect(res.isError).toBeFalsy();
+		expect(firstText(res)).toContain("workers");
+	});
+
+	test("update_engine_config is refused when writes are disabled", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_engine_config",
+			{ entries: { workers: "16" } },
+			ctxWith(client, { allowWrites: false })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.updateConfig).not.toHaveBeenCalled();
+	});
+
+	test("update_engine_config applies when writes are enabled", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_engine_config",
+			{ entries: { workers: "16" } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.updateConfig).toHaveBeenCalledWith({ entries: { workers: "16" } });
 	});
 });
 

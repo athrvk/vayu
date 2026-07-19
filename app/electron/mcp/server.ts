@@ -43,13 +43,16 @@ export function createMcpServer(info: McpServerInfo, contextProvider: ToolContex
 		}
 	);
 
-	server.setRequestHandler(ListToolsRequestSchema, async () => ({
-		tools: TOOLS.map((t) => ({
-			name: t.name,
-			description: t.description,
-			inputSchema: t.inputSchema,
-		})),
-	}));
+	server.setRequestHandler(ListToolsRequestSchema, async () => {
+		const { config } = contextProvider();
+		return {
+			tools: TOOLS.filter((t) => !config.disabledTools.includes(t.name)).map((t) => ({
+				name: t.name,
+				description: t.description,
+				inputSchema: t.inputSchema,
+			})),
+		};
+	});
 
 	server.setRequestHandler(CallToolRequestSchema, async (request) => {
 		const { name, arguments: args } = request.params;

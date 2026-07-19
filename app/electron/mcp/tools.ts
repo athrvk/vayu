@@ -29,6 +29,13 @@ export interface ToolResult {
 	isError?: boolean;
 }
 
+/**
+ * Feature grouping surfaced in Settings so the user can enable/disable tools by
+ * area: `read` (inspection), `write` (sends a request / mutates config), `load`
+ * (generates or observes load tests).
+ */
+export type ToolCategory = "read" | "write" | "load";
+
 export interface McpTool {
 	name: string;
 	description: string;
@@ -36,7 +43,17 @@ export interface McpTool {
 	inputSchema: Record<string, unknown>;
 	/** Whether the tool only reads (never mutates state or sends load). */
 	readOnly: boolean;
+	/** Feature group for the Settings tool list. */
+	category: ToolCategory;
 	handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolResult>;
+}
+
+/** Tool metadata safe to cross the IPC boundary (no handler/schema). */
+export interface McpToolInfo {
+	name: string;
+	description: string;
+	category: ToolCategory;
+	readOnly: boolean;
 }
 
 // --- Result helpers ----------------------------------------------------------
@@ -110,6 +127,7 @@ function buildExecutionPayload(args: Record<string, unknown>): Record<string, un
 export const TOOLS: McpTool[] = [
 	{
 		name: "get_engine_health",
+		category: "read",
 		description:
 			"Check the Vayu engine's status and version. Use this first to confirm Vayu is running.",
 		readOnly: true,
@@ -118,6 +136,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "list_collections",
+		category: "read",
 		description: "List all request collections (folders that organize saved requests).",
 		readOnly: true,
 		inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -125,6 +144,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "list_requests",
+		category: "read",
 		description: "List the saved requests inside a collection.",
 		readOnly: true,
 		inputSchema: {
@@ -138,6 +158,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "list_environments",
+		category: "read",
 		description: "List all environments (named sets of variables like baseUrl, apiKey).",
 		readOnly: true,
 		inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -145,6 +166,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "list_runs",
+		category: "read",
 		description:
 			"List past runs (both single Design-mode requests and load tests), newest first.",
 		readOnly: true,
@@ -153,6 +175,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "get_run_report",
+		category: "read",
 		description:
 			"Get the full report for a completed run: summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown. Ideal input for analyzing performance.",
 		readOnly: true,
@@ -166,7 +189,17 @@ export const TOOLS: McpTool[] = [
 			callEngine(() => ctx.client.getRunReport(requireStr(args, "runId"))),
 	},
 	{
+		name: "get_engine_config",
+		category: "read",
+		description:
+			"Get the engine's tunable configuration entries (workers, timeouts, connection limits, buffer sizes, etc.), each with its current value, default, type, and allowed range.",
+		readOnly: true,
+		inputSchema: { type: "object", properties: {}, additionalProperties: false },
+		handler: (_args, ctx) => callEngine(() => ctx.client.getConfig()),
+	},
+	{
 		name: "run_request",
+		category: "write",
 		description:
 			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist.",
 		readOnly: false,
@@ -199,7 +232,39 @@ export const TOOLS: McpTool[] = [
 		},
 	},
 	{
+		name: "update_engine_config",
+		category: "write",
+		description:
+			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine restart to take effect.",
+		readOnly: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				entries: {
+					type: "object",
+					description: 'Map of config key to new value, e.g. { "workers": "8" }.',
+					additionalProperties: { type: "string" },
+				},
+			},
+			required: ["entries"],
+			additionalProperties: false,
+		},
+		handler: async (args, ctx) => {
+			if (!ctx.config.allowWrites) {
+				return errorResult(
+					"Config writes are disabled. Turn on write access in Vayu Settings → MCP to allow this."
+				);
+			}
+			const entries = args.entries;
+			if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
+				return errorResult('"entries" must be an object mapping config keys to values.');
+			}
+			return callEngine(() => ctx.client.updateConfig({ entries }));
+		},
+	},
+	{
 		name: "start_load_run",
+		category: "load",
 		description:
 			"Start a load test against a URL. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. Call once without `confirmed` to get a preview of what will run, then again with `confirmed: true` to actually start it.",
 		readOnly: false,
@@ -283,6 +348,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "stop_run",
+		category: "load",
 		description: "Stop an in-progress load test.",
 		readOnly: false,
 		inputSchema: {
@@ -295,6 +361,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "get_live_metrics",
+		category: "load",
 		description:
 			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream.",
 		readOnly: true,
@@ -318,6 +385,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "compare_runs",
+		category: "load",
 		description:
 			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix. Use to answer 'did this change regress performance?'.",
 		readOnly: true,
@@ -366,6 +434,16 @@ export function findTool(name: string): McpTool | undefined {
 	return TOOLS.find((t) => t.name === name);
 }
 
+/** IPC-safe metadata for every tool, for the Settings tool list. */
+export function toolCatalog(): McpToolInfo[] {
+	return TOOLS.map((t) => ({
+		name: t.name,
+		description: t.description,
+		category: t.category,
+		readOnly: t.readOnly,
+	}));
+}
+
 /**
  * Dispatch a `tools/call`. Converts argument errors into tool errors so the
  * agent gets a readable message instead of a protocol failure.
@@ -377,8 +455,11 @@ export async function dispatchTool(
 ): Promise<ToolResult> {
 	const tool = findTool(name);
 	if (!tool) return errorResult(`Unknown tool: ${name}`);
-	// Write tools are disabled unless the user opted in (load runs excepted —
-	// they are gated by confirmation + caps instead).
+	// Tools the user switched off in Settings are rejected (and are also omitted
+	// from tools/list, so a well-behaved client won't call them).
+	if (ctx.config.disabledTools.includes(name)) {
+		return errorResult(`Tool "${name}" is disabled in Vayu Settings → MCP.`);
+	}
 	try {
 		return await tool.handler(args, ctx);
 	} catch (err) {

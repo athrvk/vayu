@@ -107,6 +107,16 @@ export class EngineClient {
 		return this.request("GET", `/run/${encodeURIComponent(runId)}/report`);
 	}
 
+	// --- Engine configuration ------------------------------------------------
+
+	getConfig(): Promise<unknown> {
+		return this.request("GET", "/config");
+	}
+
+	updateConfig(payload: unknown): Promise<unknown> {
+		return this.request("POST", "/config", payload);
+	}
+
 	// --- Execute -------------------------------------------------------------
 
 	executeRequest(payload: unknown): Promise<unknown> {

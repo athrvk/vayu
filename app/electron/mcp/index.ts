@@ -78,3 +78,5 @@ export {
 } from "./store.js";
 export { connectClient } from "./connect.js";
 export type { McpConnectClient, McpConnectResult } from "./connect.js";
+export { toolCatalog } from "./tools.js";
+export type { McpToolInfo, ToolCategory } from "./tools.js";

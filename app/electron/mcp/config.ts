@@ -42,6 +42,11 @@ export interface McpSafetyConfig {
 	 * execution are always available (subject to the allowlist).
 	 */
 	allowWrites: boolean;
+	/**
+	 * Tool names the user has switched off. A disabled tool is omitted from
+	 * `tools/list` and rejected by `tools/call`. Empty by default (all on).
+	 */
+	disabledTools: string[];
 }
 
 /**
@@ -56,6 +61,7 @@ export const DEFAULT_MCP_SAFETY_CONFIG: McpSafetyConfig = {
 	maxConcurrency: 200,
 	maxDurationSeconds: 300,
 	allowWrites: false,
+	disabledTools: [],
 };
 
 /** Merge a partial override (e.g. from Settings) onto the safe defaults. */
@@ -112,6 +118,13 @@ export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<Mc
 	}
 	if (typeof input.allowWrites === "boolean") {
 		out.allowWrites = input.allowWrites;
+	}
+	if (Array.isArray(input.disabledTools)) {
+		const names = input.disabledTools
+			.filter((n): n is string => typeof n === "string")
+			.map((n) => n.trim())
+			.filter((n) => n.length > 0);
+		out.disabledTools = Array.from(new Set(names));
 	}
 	return out;
 }
