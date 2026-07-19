@@ -23,6 +23,8 @@ export const STORAGE_KEYS = {
 	UI_SCALE: "vayu-ui-scale",
 	/** Corner roundedness (square/default/rounded). Read pre-paint in index.html. */
 	UI_RADIUS: "vayu-ui-radius",
+	/** Live dashboard chart retention window (1m/5m/15m/30m/full). */
+	LIVE_CHART_WINDOW: "vayu-live-chart-window",
 	/** Last-used load test configuration (LoadTestConfigDialog). */
 	LAST_LOAD_TEST_CONFIG: "vayu:lastLoadTestConfig",
 	/** Zustand persist name for session state (active environment/collection). */

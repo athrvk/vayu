@@ -63,9 +63,10 @@ function MetricsView({
 }: MetricsViewProps) {
 	const loadMode = useMode(mode);
 
-	// All time-series charts render the full retained live buffer (the store caps
-	// it at HISTORICAL_METRICS_CAP for memory; ~5 min at the default 10 Hz tick).
-	// They share this one array so their x-axes cover identical spans (the
+	// All time-series charts render the full retained live buffer. The store trims
+	// it to the user's configurable time window (constants/live-window.ts; default
+	// 5 min) plus a hard safety cap, so this array already reflects the chosen
+	// window. They share this one array so their x-axes cover identical spans (the
 	// throughput chart and the ramp overlay share an x-axis). The old extra
 	// slice(-2400) chart-level cap existed only to bound SVG/recharts DOM nodes —
 	// uPlot (Canvas) renders the whole buffer cheaply, so it's gone.

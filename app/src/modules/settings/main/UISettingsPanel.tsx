@@ -24,6 +24,7 @@ import {
 	Type,
 	Maximize2,
 	Squircle,
+	History,
 } from "lucide-react";
 import {
 	Card,
@@ -35,8 +36,10 @@ import {
 } from "@/components/ui";
 import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
 import { useAppearance } from "@/hooks/useAppearance";
+import { useLiveChartWindow } from "@/hooks/useLiveChartWindow";
 import { COLOR_SCHEMES } from "@/constants/color-schemes";
 import { UI_FONTS, UI_SCALES, UI_RADII } from "@/constants/appearance";
+import { LIVE_WINDOW_OPTIONS } from "@/constants/live-window";
 import { cn } from "@/lib/utils";
 
 interface AppPaths {
@@ -50,6 +53,7 @@ export default function UISettingsPanel() {
 	const { themeSource, setTheme, colorScheme, setColorScheme, isDark, isLoading } =
 		useElectronTheme();
 	const { font, setFont, scale, setScale, radius, setRadius } = useAppearance();
+	const { window: liveWindow, setWindow: setLiveWindow } = useLiveChartWindow();
 	const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
 
 	useEffect(() => {
@@ -373,6 +377,55 @@ export default function UISettingsPanel() {
 										);
 									})}
 								</div>
+							</div>
+						</CardContent>
+					</Card>
+
+					{/* Live Dashboard — chart retention window */}
+					<Card>
+						<CardHeader className="pb-3">
+							<div className="flex items-center gap-2">
+								<History className="w-5 h-5 text-muted-foreground" />
+								<CardTitle className="text-base">Live Dashboard</CardTitle>
+							</div>
+							<CardDescription>
+								How much recent history the live charts keep. Older data rolls off;
+								completed runs in History always show the full run.
+							</CardDescription>
+						</CardHeader>
+						<CardContent>
+							<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+								Chart window
+							</p>
+							<div className="grid grid-cols-5 gap-3">
+								{LIVE_WINDOW_OPTIONS.map((option) => {
+									const isSelected = liveWindow === option.value;
+									return (
+										<button
+											key={option.value}
+											onClick={() => setLiveWindow(option.value)}
+											className={cn(
+												"relative flex items-center justify-center p-3 rounded-lg border-2 text-center transition-all",
+												"hover:bg-accent hover:border-accent-foreground/20",
+												isSelected
+													? "border-primary bg-primary/5"
+													: "border-border"
+											)}
+										>
+											<span
+												className={cn(
+													"text-sm font-medium",
+													isSelected && "text-primary"
+												)}
+											>
+												{option.label}
+											</span>
+											{isSelected && (
+												<CheckCircle2 className="w-4 h-4 text-primary absolute top-1.5 right-1.5" />
+											)}
+										</button>
+									);
+								})}
 							</div>
 						</CardContent>
 					</Card>

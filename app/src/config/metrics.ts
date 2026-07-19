@@ -12,8 +12,11 @@
  * how often it re-renders. These trade chart fidelity for memory and CPU.
  */
 
-/** Max historical data points retained in the dashboard store per run. */
-export const HISTORICAL_METRICS_CAP = 3000;
+/**
+ * Live retained metrics are bounded by the user-configurable **time** window
+ * (see `constants/live-window.ts`, applied in `dashboard-store.addMetricsBatch`)
+ * plus a hard `MAX_RETAINED_TICKS` safety cap — not by a fixed point count.
+ */
 
 /** Throttle for committing live SSE metrics into the UI store. */
 export const METRICS_UI_THROTTLE_MS = 500;
