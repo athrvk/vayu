@@ -19,8 +19,11 @@ import {
 	isRateLimitedRun,
 	buildPercentileChartData,
 } from "@/modules/dashboard/utils/metricsTransforms";
-import { PercentilesOverTimeChart } from "@/modules/dashboard/components/charts/PercentilesOverTimeChart";
-import { ResponseTimeVsConcurrencyScatter } from "@/modules/dashboard/components/charts/ResponseTimeVsConcurrencyScatter";
+import {
+	LatencyPercentilesChart,
+	ResponseTimeVsConcurrencyChart,
+	CHART_SYNC,
+} from "@/modules/dashboard/components/charts/uplot";
 import LatencyMetric from "./LatencyMetric";
 import HistoricalChartsSection from "./HistoricalChartsSection";
 import type { PerformanceTabProps } from "../../types";
@@ -51,10 +54,14 @@ export default function PerformanceTab({
 					isLoading={isLoadingSeries}
 					isFetchingMore={isFetchingMore}
 					progress={progress}
+					breakpoint={derived.breakpoint}
 				/>
 			)}
 
-			{/* Latency percentiles over time / response-time-vs-concurrency (W1) */}
+			{/* Latency percentiles over time / response-time-vs-concurrency (W1).
+			    Mirror MetricsView's split: ramp_up → concurrency scatter (capacity
+			    elbow), other modes → percentiles-over-time. Both use the centralized
+			    uPlot charts, so live + history are identical. */}
 			{hasPercentileData &&
 				(isRampUp ? (
 					<Card>
@@ -64,7 +71,11 @@ export default function PerformanceTab({
 							</CardTitle>
 						</CardHeader>
 						<CardContent>
-							<ResponseTimeVsConcurrencyScatter data={timeSeries} isCompleted />
+							<ResponseTimeVsConcurrencyChart
+								history={timeSeries}
+								breakpoint={derived.breakpoint}
+								syncKey={CHART_SYNC.history}
+							/>
 						</CardContent>
 					</Card>
 				) : (
@@ -75,7 +86,12 @@ export default function PerformanceTab({
 							</CardTitle>
 						</CardHeader>
 						<CardContent>
-							<PercentilesOverTimeChart data={percentileChartData} isCompleted />
+							<LatencyPercentilesChart
+								history={timeSeries}
+								isCompleted
+								syncKey={CHART_SYNC.history}
+								breakpoint={derived.breakpoint}
+							/>
 						</CardContent>
 					</Card>
 				))}

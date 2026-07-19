@@ -504,3 +504,18 @@
 		@apply bg-[hsl(var(--method-options))];
 	}
 }
+
+/*
+ * Reduced motion — user preference toggled from Settings → Appearance. When on,
+ * the document carries data-reduced-motion="true" and we collapse transitions
+ * and animations app-wide. Kept out of @layer so the !important overrides win.
+ */
+html[data-reduced-motion="true"],
+html[data-reduced-motion="true"] *,
+html[data-reduced-motion="true"] *::before,
+html[data-reduced-motion="true"] *::after {
+	animation-duration: 0.01ms !important;
+	animation-iteration-count: 1 !important;
+	transition-duration: 0.01ms !important;
+	scroll-behavior: auto !important;
+}

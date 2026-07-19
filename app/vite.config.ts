@@ -52,7 +52,7 @@ export default defineConfig({
 						},
 						{
 							name: "charts",
-							test: /node_modules[\\/]recharts[\\/]/,
+							test: /node_modules[\\/]uplot[\\/]/,
 							priority: 15,
 						},
 					],

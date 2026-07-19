@@ -18,7 +18,7 @@ import { useEngineStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useConfigQuery, useUpdateConfigMutation } from "@/queries";
-import type { ConfigEntry, SettingsCategory } from "@/types";
+import type { ConfigEntry, EngineSettingsCategory } from "@/types";
 import {
 	Settings,
 	Save,
@@ -42,7 +42,8 @@ import {
 	Skeleton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import UISettingsPanel from "./UISettingsPanel";
+import ClientSettingsPanel from "./panels/ClientSettingsPanel";
+import { getAppPanel, isClientCategory } from "./app-panels";
 import { isSizeConfig, formatBytes, formatSizeRange } from "../utils/format-size";
 import { TIMING } from "@/config/timing";
 
@@ -54,11 +55,9 @@ const isRestartRequired = (entry: ConfigEntry): boolean => {
 	return entry.label.includes("(Requires Restart)") || entry.requiresRestart === true;
 };
 
-const CATEGORY_TITLES: Record<SettingsCategory, { title: string; description: string }> = {
-	ui: {
-		title: "Appearance",
-		description: "Customize the look and feel of the application",
-	},
+// Client (app) categories render their own header via ClientSettingsPanel; only
+// the engine categories are titled here (this map drives the engine config view).
+const CATEGORY_TITLES: Record<EngineSettingsCategory, { title: string; description: string }> = {
 	general_engine: {
 		title: "General & Engine",
 		description: "Core settings defining the application's base capacity and threading model",
@@ -126,7 +125,10 @@ export default function SettingsMain() {
 					.filter((entry) => entry.category === selectedCategory)
 					.sort((a, b) => a.key.localeCompare(b.key))
 			: [];
-	const categoryConfig = selectedCategory ? CATEGORY_TITLES[selectedCategory] : null;
+	const categoryConfig =
+		selectedCategory && !isClientCategory(selectedCategory)
+			? CATEGORY_TITLES[selectedCategory]
+			: null;
 
 	// Check if there are unsaved changes (calculate before early returns)
 	const hasChanges = Object.keys(editedValues).length > 0;
@@ -203,7 +205,7 @@ export default function SettingsMain() {
 	const contextId = "settings";
 	useEffect(() => {
 		// Only register when we have a valid settings view (not loading, no error, category selected, not a client-side category)
-		if (isLoading || error || !selectedCategory || selectedCategory === "ui") {
+		if (isLoading || error || !selectedCategory || isClientCategory(selectedCategory)) {
 			return;
 		}
 
@@ -231,7 +233,7 @@ export default function SettingsMain() {
 
 	// Update context when hasChanges changes
 	useEffect(() => {
-		if (isLoading || error || !selectedCategory || selectedCategory === "ui") {
+		if (isLoading || error || !selectedCategory || isClientCategory(selectedCategory)) {
 			return;
 		}
 		updateContext(contextId, {
@@ -254,9 +256,16 @@ export default function SettingsMain() {
 		);
 	}
 
-	// UI settings are handled by a separate panel (client-side only)
-	if (selectedCategory === "ui") {
-		return <UISettingsPanel />;
+	// Client (app) categories are rendered by their registered panel, wrapped in
+	// the shared shell (no Save/Reset bar — these prefs auto-persist).
+	const appPanel = getAppPanel(selectedCategory);
+	if (appPanel) {
+		const Panel = appPanel.Component;
+		return (
+			<ClientSettingsPanel title={appPanel.label} description={appPanel.description}>
+				<Panel />
+			</ClientSettingsPanel>
+		);
 	}
 
 	if (isLoading) {

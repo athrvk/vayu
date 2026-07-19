@@ -31,7 +31,21 @@
 						mono: '"JetBrains Mono", "Consolas", "Monaco", monospace',
 					};
 					var font = localStorage.getItem("vayu-ui-font");
-					if (fonts[font]) el.style.setProperty("--font-sans", fonts[font]);
+					if (font === "custom") {
+						var cf = localStorage.getItem("vayu-ui-font-custom");
+						if (cf && cf.trim()) {
+							el.style.setProperty(
+								"--font-sans",
+								cf.indexOf(",") >= 0
+									? cf
+									: '"' +
+											cf.replace(/["']/g, "") +
+											'", Inter, system-ui, sans-serif'
+							);
+						}
+					} else if (fonts[font]) {
+						el.style.setProperty("--font-sans", fonts[font]);
+					}
 
 					var scales = { compact: 0.9, comfortable: 1.1 };
 					var factor = scales[localStorage.getItem("vayu-ui-scale")];
@@ -54,7 +68,7 @@
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 		<link
-			href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+			href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Fira+Code:wght@400;500&family=IBM+Plex+Mono:wght@400;500&family=Space+Mono:wght@400;700&display=swap"
 			rel="stylesheet"
 		/>
 	</head>

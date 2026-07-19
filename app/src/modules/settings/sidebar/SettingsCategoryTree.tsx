@@ -8,61 +8,49 @@
 /**
  * Settings Category Tree
  *
- * Displays categories for settings in the sidebar:
- * - UI (App Settings)
- * - Server (Engine Settings)
- * - Scripting (Engine Settings)
- * - Performance (Engine Settings)
+ * Sidebar list of settings categories, split into two sections:
+ * - App Settings — client-side panels, declared in the app-panels registry.
+ * - Engine Settings — data-driven from the engine `/config` API.
+ *
+ * Category rows share a single selected treatment (the app's `--primary`
+ * accent); there is no per-category color.
  */
 
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useConfigQuery } from "@/queries";
-import type { SettingsCategory } from "@/types";
-import { Server, Code, Settings, Palette, Network, Activity, Database } from "lucide-react";
+import type { EngineSettingsCategory, SettingsCategory } from "@/types";
+import type { LucideIcon } from "lucide-react";
+import { Server, Code, Settings, Network, Activity, Database } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, Skeleton } from "@/components/ui";
+import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 
-const CATEGORY_CONFIG: Record<
-	SettingsCategory,
-	{ label: string; icon: typeof Server; color: string }
-> = {
-	ui: {
-		label: "Appearance",
-		icon: Palette,
-		color: "pink",
-	},
-	general_engine: {
-		label: "General & Engine",
-		icon: Server,
-		color: "blue",
-	},
-	database_performance: {
-		label: "Database Performance",
-		icon: Database,
-		color: "amber",
-	},
-	network_performance: {
-		label: "Network & Connectivity",
-		icon: Network,
-		color: "cyan",
-	},
-	scripting_sandbox: {
-		label: "Scripting Environment",
-		icon: Code,
-		color: "purple",
-	},
-	observability: {
-		label: "Observability & Data",
-		icon: Activity,
-		color: "green",
-	},
+interface CategoryMeta {
+	label: string;
+	icon: LucideIcon;
+}
+
+const ENGINE_CATEGORY_META: Record<EngineSettingsCategory, CategoryMeta> = {
+	general_engine: { label: "General & Engine", icon: Server },
+	database_performance: { label: "Database Performance", icon: Database },
+	network_performance: { label: "Network & Connectivity", icon: Network },
+	scripting_sandbox: { label: "Scripting Environment", icon: Code },
+	observability: { label: "Observability & Data", icon: Activity },
 };
+
+const ENGINE_CATEGORIES = Object.keys(ENGINE_CATEGORY_META) as EngineSettingsCategory[];
+
+function categoryMeta(category: SettingsCategory): CategoryMeta {
+	const app = APP_SETTINGS_PANELS.find((p) => p.id === category);
+	if (app) return { label: app.label, icon: app.icon };
+	return ENGINE_CATEGORY_META[category as EngineSettingsCategory];
+}
 
 export default function SettingsCategoryTree() {
 	const { selectedCategory, setSelectedCategory } = useSettingsStore();
 	const { data: configResponse, isLoading, error } = useConfigQuery();
 
-	// Count entries per category
+	// Count entries per category (engine categories only carry counts).
 	const categoryCounts: Record<string, number> = {};
 	if (configResponse?.entries) {
 		for (const entry of configResponse.entries) {
@@ -70,91 +58,28 @@ export default function SettingsCategoryTree() {
 		}
 	}
 
-	const appCategories: SettingsCategory[] = ["ui"];
-	const engineCategories: SettingsCategory[] = [
-		"general_engine",
-		"database_performance",
-		"network_performance",
-		"scripting_sandbox",
-		"observability",
-	];
-
-	if (isLoading) {
-		return (
-			<div className="flex flex-col h-full w-full py-2 px-3 space-y-2">
-				<Skeleton className="h-10 w-full" />
-				<Skeleton className="h-10 w-full" />
-				<Skeleton className="h-10 w-full" />
-			</div>
-		);
-	}
-
-	if (error) {
-		return (
-			<div className="flex flex-col h-full w-full py-4 px-3">
-				<div className="text-sm text-destructive">Failed to load settings</div>
-				<div className="text-xs text-muted-foreground mt-1">
-					{error instanceof Error ? error.message : "Unknown error"}
-				</div>
-			</div>
-		);
-	}
+	const appCategories = APP_SETTINGS_PANELS.map((p) => p.id);
 
 	const renderCategory = (category: SettingsCategory, showCount = true) => {
-		const config = CATEGORY_CONFIG[category];
-		const Icon = config.icon;
+		const { label, icon: Icon } = categoryMeta(category);
 		const count = categoryCounts[category] || 0;
 		const isSelected = selectedCategory === category;
-
-		const colorClasses: Record<string, string> = {
-			pink: isSelected
-				? "bg-pink-50 text-pink-700 dark:bg-pink-950/50 dark:text-pink-300 hover:bg-pink-100 dark:hover:bg-pink-950/70"
-				: "",
-			blue: isSelected
-				? "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/70"
-				: "",
-			amber: isSelected
-				? "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/70"
-				: "",
-			cyan: isSelected
-				? "bg-cyan-50 text-cyan-700 dark:bg-cyan-950/50 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-950/70"
-				: "",
-			purple: isSelected
-				? "bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-950/70"
-				: "",
-			green: isSelected
-				? "bg-green-50 text-green-700 dark:bg-green-950/50 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-950/70"
-				: "",
-		};
-
-		const badgeClasses: Record<string, string> = {
-			pink: "bg-pink-100 text-pink-600 dark:bg-pink-950 dark:text-pink-300",
-			blue: "bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-300",
-			amber: "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-300",
-			cyan: "bg-cyan-100 text-cyan-600 dark:bg-cyan-950 dark:text-cyan-300",
-			purple: "bg-purple-100 text-purple-600 dark:bg-purple-950 dark:text-purple-300",
-			green: "bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-300",
-		};
 
 		return (
 			<button
 				key={category}
 				onClick={() => setSelectedCategory(category)}
 				className={cn(
-					"w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-accent transition-colors",
-					colorClasses[config.color]
+					"w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors",
+					isSelected
+						? "bg-primary/10 text-primary font-medium"
+						: "text-foreground hover:bg-accent"
 				)}
 			>
 				<Icon className="w-4 h-4 shrink-0" />
-				<span className="flex-1 truncate">{config.label}</span>
+				<span className="flex-1 truncate">{label}</span>
 				{showCount && count > 0 && (
-					<Badge
-						variant="secondary"
-						className={cn(
-							"text-xs px-1.5 py-0 shrink-0",
-							isSelected && badgeClasses[config.color]
-						)}
-					>
+					<Badge variant="secondary" className="text-xs px-1.5 py-0 shrink-0">
 						{count}
 					</Badge>
 				)}
@@ -174,16 +99,33 @@ export default function SettingsCategoryTree() {
 				{appCategories.map((category) => renderCategory(category, false))}
 			</div>
 
-			{/* Engine Settings Section */}
+			{/* Engine Settings Section — depends on the engine `/config` query, so
+			    its loading/error states are scoped here. App Settings above always
+			    render (client-side), so Settings stays usable when the engine is down. */}
 			<div className="px-3 py-2 mb-1">
 				<div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
 					<Settings className="w-3 h-3" />
 					Engine Settings
 				</div>
 			</div>
-			<div className="space-y-1">
-				{engineCategories.map((category) => renderCategory(category))}
-			</div>
+			{isLoading ? (
+				<div className="space-y-2 px-3">
+					<Skeleton className="h-9 w-full" />
+					<Skeleton className="h-9 w-full" />
+					<Skeleton className="h-9 w-full" />
+				</div>
+			) : error ? (
+				<div className="px-4 py-2">
+					<div className="text-xs text-destructive">Engine settings unavailable</div>
+					<div className="text-xs text-muted-foreground mt-0.5">
+						{error instanceof Error ? error.message : "The engine isn't responding."}
+					</div>
+				</div>
+			) : (
+				<div className="space-y-1">
+					{ENGINE_CATEGORIES.map((category) => renderCategory(category))}
+				</div>
+			)}
 		</div>
 	);
 }

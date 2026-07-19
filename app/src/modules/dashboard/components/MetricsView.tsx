@@ -39,13 +39,17 @@ import {
 } from "../utils/metricsTransforms";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
-import { ThroughputOverTimeChart, type ThroughputPoint } from "./charts/ThroughputOverTimeChart";
-import { LatencyOverTimeChart } from "./charts/LatencyOverTimeChart";
-import { PercentilesOverTimeChart } from "./charts/PercentilesOverTimeChart";
-import { StatusCodesOverTimeChart } from "./charts/StatusCodesOverTimeChart";
-import { HdrPercentilePlot, SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
+import {
+	RequestRateChart,
+	LatencyBreakdownChart,
+	LatencyPercentilesChart,
+	StatusCodesOverTimeChart,
+	ResponseTimeVsConcurrencyChart,
+	HdrPercentileChart,
+	CHART_SYNC,
+} from "./charts/uplot";
+import { SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
-import { ResponseTimeVsConcurrencyScatter } from "./charts/ResponseTimeVsConcurrencyScatter";
 
 function MetricsView({
 	metrics,
@@ -59,26 +63,14 @@ function MetricsView({
 }: MetricsViewProps) {
 	const loadMode = useMode(mode);
 
-	// Single capped window shared by all time-series charts so their x-axes
-	// cover identical time spans (the throughput chart and the RampUp overlay
-	// share one x-axis — they must be built from the same window or the
-	// configured/achieved lines misalign with throughput on long runs).
-	const chartWindow = useMemo(() => historicalMetrics.slice(-2400), [historicalMetrics]);
-
-	// Bucket per-tick history by 0.5s for the chart
-	const chartData = useMemo<ThroughputPoint[]>(() => {
-		const window = chartWindow;
-		const byBucket = new Map<number, ThroughputPoint>();
-		for (const m of window) {
-			const t = Math.round(m.elapsed_seconds * 2) / 2;
-			byBucket.set(t, {
-				time: t,
-				rps: m.throughput ?? m.current_rps ?? 0,
-				sendRate: m.send_rate ?? 0,
-			});
-		}
-		return Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
-	}, [chartWindow]);
+	// All time-series charts render the full retained live buffer. The store trims
+	// it to the user's configurable time window (constants/live-window.ts; default
+	// 5 min) plus a hard safety cap, so this array already reflects the chosen
+	// window. They share this one array so their x-axes cover identical spans (the
+	// throughput chart and the ramp overlay share an x-axis). The old extra
+	// slice(-2400) chart-level cap existed only to bound SVG/recharts DOM nodes —
+	// uPlot (Canvas) renders the whole buffer cheaply, so it's gone.
+	const chartWindow = historicalMetrics;
 
 	const latencyChartData = useMemo(() => buildLatencyChartData(chartWindow), [chartWindow]);
 
@@ -187,7 +179,7 @@ function MetricsView({
 			<HeroRow d={derived} />
 
 			{/* Row 2 — Throughput over time */}
-			{chartData.length > 1 && (
+			{chartWindow.length > 1 && (
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-[12px] font-semibold text-foreground">
@@ -238,11 +230,13 @@ function MetricsView({
 							)}
 						</div>
 					</div>
-					<ThroughputOverTimeChart
-						data={chartData}
+					<RequestRateChart
+						history={chartWindow}
 						targetRps={targetRps}
 						isCompleted={isCompleted}
 						rampOverlay={rampOverlay}
+						syncKey={CHART_SYNC.live}
+						breakpoint={breakpoint}
 					/>
 					{rampOverlay && (
 						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-[11px] font-mono text-muted-foreground">
@@ -305,7 +299,11 @@ function MetricsView({
 							</span>
 						</div>
 					</div>
-					<LatencyOverTimeChart data={latencyChartData} isCompleted={isCompleted} />
+					<LatencyBreakdownChart
+						history={chartWindow}
+						isCompleted={isCompleted}
+						syncKey={CHART_SYNC.live}
+					/>
 				</div>
 			)}
 
@@ -336,9 +334,10 @@ function MetricsView({
 									</span>
 								</div>
 							</div>
-							<ResponseTimeVsConcurrencyScatter
-								data={historicalMetrics}
-								isCompleted={isCompleted}
+							<ResponseTimeVsConcurrencyChart
+								history={historicalMetrics}
+								breakpoint={breakpoint}
+								syncKey={CHART_SYNC.live}
 							/>
 						</div>
 					)
@@ -374,9 +373,11 @@ function MetricsView({
 									</span>
 								</div>
 							</div>
-							<PercentilesOverTimeChart
-								data={percentileChartData}
+							<LatencyPercentilesChart
+								history={chartWindow}
 								isCompleted={isCompleted}
+								syncKey={CHART_SYNC.live}
+								breakpoint={breakpoint}
 							/>
 						</div>
 					)}
@@ -415,7 +416,11 @@ function MetricsView({
 							)}
 						</div>
 					</div>
-					<StatusCodesOverTimeChart data={statusChartData} />
+					<StatusCodesOverTimeChart
+						history={chartWindow}
+						isCompleted={isCompleted}
+						syncKey={CHART_SYNC.live}
+					/>
 				</div>
 			)}
 
@@ -439,7 +444,7 @@ function MetricsView({
 					    in yet — keeps the card height stable across the live → completed
 					    transition. */}
 					{finalReport ? (
-						<HdrPercentilePlot report={finalReport} />
+						<HdrPercentileChart report={finalReport} />
 					) : (
 						<SkeletonHdrPlot message="p50 / p95 / p99 finalize after the run completes" />
 					)}
