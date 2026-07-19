@@ -491,6 +491,12 @@ target *is* the in-flight bound, so `maxInFlight` is ignored there.
 > in-memory tick topic with no attach race. `/stats/:runId` is the legacy DB-polling path; it
 > remains useful for **historical** retrieval via `?format=json&limit=&offset=` (paginated
 > time-series read), which the app uses to hydrate the history view.
+>
+> The `?format=json` per-tick rows carry the **windowed** latency percentiles
+> (`latency_p50_ms` / `latency_p95_ms` / `latency_p99_ms`, snake_case) alongside
+> rps/throughput/concurrency/status codes, so the history view can rebuild the
+> percentiles-over-time chart, the response-time-vs-concurrency scatter, and the
+> capacity-breakpoint / saturation stats from stored data.
 
 Stream real-time metrics for a load test using Server-Sent Events (SSE).
 
@@ -558,7 +564,7 @@ data: {"event":"complete","runId":"run_1234567890"}
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `avgLatencyMs` | Mean **perceived** latency |
 | `avgQueueWaitMs` | Mean time queued inside the generator before the wire |
-| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live percentiles (cumulative HdrHistogram) |
+| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles - a rolling per-tick window sampled from a phaser-based `hdr_interval_recorder`, so the chart tracks recent load instead of flattening toward the all-time distribution (the final report still uses the cumulative histogram) |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA) |
 | `status2xx`–`status5xx` | Per-class counts |

@@ -11,19 +11,60 @@
  * Displays details for a load test run with tabs for overview, performance, and samples.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { CheckCircle, Activity, TrendingUp, BarChart3, Settings2 } from "lucide-react";
 import { Badge, Tabs, TabsContent, TabsList, TabsTrigger, ScrollArea } from "@/components/ui";
 import { formatNumber, loadTestTypeToLabel } from "@/utils";
 import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
+import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+import { useRunTimeSeriesQuery } from "@/queries/runs";
 import { OverviewTab, PerformanceTab, SamplesTab } from "./components";
-import type { LoadTestDetailProps } from "../types";
+import type { LoadTestDetailProps, TimeSeriesResponse } from "../types";
 
 export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadTestDetailProps) {
 	const [activeTab, setActiveTab] = useState("overview");
 	const config = report.metadata?.configuration;
-	const derived = useMemo(() => reportToDerived(report), [report]);
+
+	// Fetch the persisted per-tick time-series once, here, so both the Overview
+	// stat cards (breakpoint / saturation, derived below) and the Performance tab
+	// charts read the same data — one query, shared cache.
+	const {
+		data: timeSeriesData,
+		isLoading: isLoadingSeries,
+		isFetchingNextPage,
+		hasNextPage,
+		fetchNextPage,
+	} = useRunTimeSeriesQuery(runId ?? null);
+
+	// Auto-page through the full series so breakpoint detection and the charts see
+	// every tick, not just the first page.
+	useEffect(() => {
+		if (hasNextPage && !isFetchingNextPage) {
+			fetchNextPage();
+		}
+	}, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+	const timeSeries = useMemo(
+		() => timeSeriesData?.pages?.flatMap((page: TimeSeriesResponse) => page.data) ?? [],
+		[timeSeriesData]
+	);
+
+	const seriesProgress = useMemo(() => {
+		if (!timeSeriesData?.pages?.length) return undefined;
+		const lastPage = timeSeriesData.pages[timeSeriesData.pages.length - 1];
+		return { loaded: timeSeries.length, total: lastPage.pagination.total };
+	}, [timeSeriesData, timeSeries]);
+
+	// The report alone can't supply the capacity breakpoint (it needs the per-tick
+	// p99 series, now persisted per W1). Derive it from the time-series and fold it
+	// into the dashboard bundle so the Saturation card / Breakpoint stat light up
+	// for completed ramp_up runs instead of showing the "healthy"/"—" defaults.
+	const derived = useMemo(() => {
+		const base = reportToDerived(report);
+		if (timeSeries.length < 2) return base;
+		return { ...base, breakpoint: computeBreakpoint(timeSeries) };
+	}, [report, timeSeries]);
 
 	const successRate =
 		report.summary.totalRequests > 0
@@ -162,7 +203,15 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 						</TabsContent>
 
 						<TabsContent value="performance" className="mt-0 space-y-4">
-							<PerformanceTab report={report} runId={runId} derived={derived} />
+							<PerformanceTab
+								report={report}
+								runId={runId}
+								derived={derived}
+								timeSeries={timeSeries}
+								isLoadingSeries={isLoadingSeries}
+								isFetchingMore={isFetchingNextPage}
+								progress={seriesProgress}
+							/>
 						</TabsContent>
 
 						<TabsContent value="samples" className="mt-0 space-y-4">

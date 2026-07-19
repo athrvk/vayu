@@ -196,6 +196,19 @@ metrics producer thread writes a batch each tick. Struct is `db::Metric`.
 `peak_concurrency`, `status_codes`, `test_duration`, `setup_overhead`, and the
 `tests_validating/passed/failed/sampled` script-validation metrics.
 
+**Latency percentile rows come in two flavors, disambiguated by `labels`:**
+
+- **Per-tick windowed rows** (`latency_p50/p95/p99`, empty `labels`): written ~1/s during
+  the run. Each is a **rolling window** sampled from a phaser-based `hdr_interval_recorder`
+  (sample-and-reset per tick), so the value reflects the *recent* interval, not the
+  all-time distribution. These power the live/history "percentiles over time" chart, the
+  response-time-vs-concurrency scatter, and the capacity-breakpoint / saturation
+  derivations. `latency_p75/p90/p999/min/max` are **not** persisted per tick.
+- **Final-summary rows** (`latency_p50/p75/p90/p95/p99/p999/min/max`, `labels` =
+  `{"percentile":"p50"}` etc.): written once at completion from the cumulative-from-start
+  HdrHistogram — the whole-run numbers the report surfaces. The `/run/:id/report` reader
+  keys on the non-empty label so the per-tick windowed rows never overwrite these.
+
 ---
 
 ### `results`

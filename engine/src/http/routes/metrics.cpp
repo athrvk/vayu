@@ -100,10 +100,18 @@ void register_metrics_routes (RouteContext& ctx) {
                         bucket["bytes_sent"] = 0;
                         bucket["bytes_received"] = 0;
                         bucket["status_codes"] = nlohmann::json::object ();
+                        // Windowed per-tick latency percentiles (0 until a tick
+                        // carries them). Snake_case keys match the app's
+                        // LoadTestMetrics shape (consumed without a transformer).
+                        bucket["latency_p50_ms"] = 0.0;
+                        bucket["latency_p95_ms"] = 0.0;
+                        bucket["latency_p99_ms"] = 0.0;
                     }
 
-                    // Map metric values to LoadTestMetrics fields
-                    // Note: LatencyAvg/P50/P95/P99 are only stored as final summary, not periodically
+                    // Map metric values to LoadTestMetrics fields. Latency percentiles
+                    // are now persisted per-tick as windowed (rolling) values —
+                    // unlabeled rows; the labeled cumulative final-summary rows are
+                    // skipped here so the series stays purely windowed.
                     if (metric.name == vayu::MetricName::Rps) {
                         bucket["current_rps"] = metric.value;
                     } else if (metric.name == vayu::MetricName::ErrorRate) {
@@ -127,6 +135,15 @@ void register_metrics_routes (RouteContext& ctx) {
                         bucket["bytes_sent"] = static_cast<size_t> (metric.value);
                     } else if (metric.name == vayu::MetricName::BytesReceived) {
                         bucket["bytes_received"] = static_cast<size_t> (metric.value);
+                    } else if (metric.name == vayu::MetricName::LatencyP50 &&
+                    metric.labels.empty ()) {
+                        bucket["latency_p50_ms"] = metric.value;
+                    } else if (metric.name == vayu::MetricName::LatencyP95 &&
+                    metric.labels.empty ()) {
+                        bucket["latency_p95_ms"] = metric.value;
+                    } else if (metric.name == vayu::MetricName::LatencyP99 &&
+                    metric.labels.empty ()) {
+                        bucket["latency_p99_ms"] = metric.value;
                     } else if (metric.name == vayu::MetricName::StatusCodes &&
                     !metric.labels.empty ()) {
                         // Last-write-wins per timestamp (the final StatusCodes row
