@@ -64,20 +64,26 @@ export const MONO_FONTS = [
 	{
 		value: "jetbrains",
 		label: "JetBrains Mono",
-		description: "Default — clear, wide glyphs",
+		description: "Default — geometric, wide",
 		stack: '"JetBrains Mono", "Consolas", "Monaco", monospace',
 	},
 	{
 		value: "fira",
 		label: "Fira Code",
-		description: "Popular coding face",
+		description: "Rounded, coding ligatures",
 		stack: '"Fira Code", "JetBrains Mono", monospace',
 	},
 	{
 		value: "ibm-plex",
 		label: "IBM Plex Mono",
-		description: "Neutral and even",
+		description: "Humanist, softer curves",
 		stack: '"IBM Plex Mono", "JetBrains Mono", monospace',
+	},
+	{
+		value: "space-mono",
+		label: "Space Mono",
+		description: "Retro, distinctive shapes",
+		stack: '"Space Mono", "JetBrains Mono", monospace',
 	},
 	{
 		value: "system",

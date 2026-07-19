@@ -25,6 +25,10 @@ import { cn } from "@/lib/utils";
 
 // Tab-indented (real \t) + nested so changing the tab width visibly reflows the
 // indentation in the read-only preview below.
+// Glyph-rich one-liner shown under each code-font choice. Lowercase g/a, the
+// zero, i/l/1, and the => ligature are where monospace faces differ most.
+const MONO_SAMPLE = "fn(0) => {a_g}";
+
 const SAMPLE = [
 	"function greet(name) {",
 	"\tif (!name) {",
@@ -73,14 +77,17 @@ export default function EditorPanel() {
 												: "border-border"
 										)}
 									>
-										<span
-											className="text-sm font-medium"
-											style={{ fontFamily: option.stack }}
-										>
-											{option.label}
-										</span>
+										<span className="text-sm font-medium">{option.label}</span>
 										<span className="text-xs text-muted-foreground">
 											{option.description}
+										</span>
+										{/* Glyph-rich sample rendered in the font so the faces
+										    are visibly distinct (0/O, i/l/1, ligatures, arrows). */}
+										<span
+											className="mt-1.5 text-[15px] leading-tight text-foreground"
+											style={{ fontFamily: option.stack }}
+										>
+											{MONO_SAMPLE}
 										</span>
 										{isSelected && (
 											<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
