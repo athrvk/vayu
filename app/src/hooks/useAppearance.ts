@@ -24,18 +24,24 @@ import {
 	DEFAULT_UI_RADIUS,
 	DEFAULT_UI_SCALE,
 	fontStack,
+	customSansStack,
 	isUiFont,
 	isUiRadius,
 	isUiScale,
 	radiusValue,
 	scaleFactor,
-	type UiFont,
+	type UiFontChoice,
 	type UiRadius,
 	type UiScale,
 } from "@/constants/appearance";
 
-function applyFont(font: UiFont): void {
-	document.documentElement.style.setProperty("--font-sans", fontStack(font));
+/** Resolve the active UI-font stack (preset or custom family). */
+function sansStack(font: UiFontChoice, custom: string): string {
+	return font === "custom" ? customSansStack(custom) : fontStack(font);
+}
+
+function applyFont(font: UiFontChoice, custom: string): void {
+	document.documentElement.style.setProperty("--font-sans", sansStack(font, custom));
 }
 
 function applyRadius(radius: UiRadius): void {
@@ -53,9 +59,14 @@ function applyScale(scale: UiScale): void {
 	}
 }
 
-function readFont(): UiFont {
+function readFont(): UiFontChoice {
 	const saved = localStorage.getItem(STORAGE_KEYS.UI_FONT);
-	return isUiFont(saved) ? saved : DEFAULT_UI_FONT;
+	if (saved === "custom" || isUiFont(saved)) return saved;
+	return DEFAULT_UI_FONT;
+}
+
+function readFontCustom(): string {
+	return localStorage.getItem(STORAGE_KEYS.UI_FONT_CUSTOM) ?? "";
 }
 
 function readScale(): UiScale {
@@ -72,23 +83,37 @@ export function useAppearance() {
 	// Seed from localStorage during render (lazy init) so there's no setState in
 	// the mount effect; the effect below only re-applies to the DOM, which the
 	// pre-paint script already did for the first frame.
-	const [font, setFontState] = useState<UiFont>(readFont);
+	const [font, setFontState] = useState<UiFontChoice>(readFont);
+	const [fontCustom, setFontCustomState] = useState<string>(readFontCustom);
 	const [scale, setScaleState] = useState<UiScale>(readScale);
 	const [radius, setRadiusState] = useState<UiRadius>(readRadius);
 
 	useEffect(() => {
-		applyFont(font);
+		applyFont(font, fontCustom);
 		applyScale(scale);
 		applyRadius(radius);
 		// Mount-only: re-assert the persisted values against the live DOM.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
-	const setFont = useCallback((next: UiFont) => {
-		setFontState(next);
-		applyFont(next);
-		localStorage.setItem(STORAGE_KEYS.UI_FONT, next);
-	}, []);
+	const setFont = useCallback(
+		(next: UiFontChoice) => {
+			setFontState(next);
+			applyFont(next, fontCustom);
+			localStorage.setItem(STORAGE_KEYS.UI_FONT, next);
+		},
+		[fontCustom]
+	);
+
+	const setFontCustom = useCallback(
+		(next: string) => {
+			setFontCustomState(next);
+			localStorage.setItem(STORAGE_KEYS.UI_FONT_CUSTOM, next);
+			// Only re-apply live when the custom family is the active choice.
+			if (font === "custom") applyFont("custom", next);
+		},
+		[font]
+	);
 
 	const setScale = useCallback((next: UiScale) => {
 		setScaleState(next);
@@ -102,5 +127,5 @@ export function useAppearance() {
 		localStorage.setItem(STORAGE_KEYS.UI_RADIUS, next);
 	}, []);
 
-	return { font, setFont, scale, setScale, radius, setRadius };
+	return { font, setFont, fontCustom, setFontCustom, scale, setScale, radius, setRadius };
 }

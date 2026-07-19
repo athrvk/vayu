@@ -17,9 +17,10 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import { useSaveStore } from "@/stores/save-store";
+import { useClientSettingsStore } from "@/stores";
 import { TIMING } from "@/config/timing";
 
-const { AUTO_SAVE_DELAY_MS, SAVED_STATUS_DURATION_MS } = TIMING;
+const { SAVED_STATUS_DURATION_MS } = TIMING;
 
 interface UseSaveManagerOptions {
 	/** Unique identifier for this save context (e.g., request ID) */
@@ -66,6 +67,9 @@ export function useSaveManager({
 		updateContext,
 		setActiveContext,
 	} = useSaveStore();
+
+	const autoSaveEnabled = useClientSettingsStore((s) => s.autoSave.enabled);
+	const autoSaveDelayMs = useClientSettingsStore((s) => s.autoSave.delayMs);
 
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const savedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -197,25 +201,40 @@ export function useSaveManager({
 			return;
 		}
 
-		// Mark as pending
+		// Mark as pending regardless — the "unsaved changes" state (and manual
+		// save via Cmd+S) still applies even when auto-save is turned off.
 		markPendingSave(entityId);
+
+		// Respect the global auto-save preference: when disabled, leave the entity
+		// marked dirty but never schedule an automatic save.
+		if (!autoSaveEnabled) {
+			return;
+		}
 
 		// Clear existing timeout
 		if (timeoutRef.current) {
 			clearTimeout(timeoutRef.current);
 		}
 
-		// Set new timeout for auto-save
+		// Set new timeout for auto-save (user-configurable delay)
 		timeoutRef.current = setTimeout(() => {
 			performSave();
-		}, AUTO_SAVE_DELAY_MS);
+		}, autoSaveDelayMs);
 
 		return () => {
 			if (timeoutRef.current) {
 				clearTimeout(timeoutRef.current);
 			}
 		};
-	}, [enabled, hasChanges, entityId, markPendingSave, performSave]);
+	}, [
+		enabled,
+		hasChanges,
+		entityId,
+		markPendingSave,
+		performSave,
+		autoSaveEnabled,
+		autoSaveDelayMs,
+	]);
 
 	return {
 		forceSave,

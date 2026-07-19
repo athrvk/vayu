@@ -9,13 +9,26 @@
 
 import { create } from "zustand";
 import type { LoadTestMetrics, RunReport } from "@/types";
-import { DEFAULT_SLO_MS, type Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
-// With the engine at 10 Hz and the UI commit throttle buffering every tick
-// (load-test-service.ts), the cap is ~5 minutes of full-fidelity history
-// before the oldest points roll off — long enough for a typical load-test
-// session, short enough to keep chart slicing cheap.
-import { HISTORICAL_METRICS_CAP } from "@/config/metrics";
+import { type Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+import { useClientSettingsStore } from "./client-settings-store";
+import { STORAGE_KEYS } from "@/constants/storage-keys";
+import {
+	DEFAULT_LIVE_WINDOW,
+	isLiveWindow,
+	liveWindowSeconds as windowSecondsFor,
+	MAX_RETAINED_TICKS,
+} from "@/constants/live-window";
 import type { DashboardMode, DashboardView } from "@/modules/dashboard/types";
+
+/** Read the persisted live-window preference → seconds (null = full run). */
+function initialLiveWindowSeconds(): number | null {
+	try {
+		const saved = localStorage.getItem(STORAGE_KEYS.LIVE_CHART_WINDOW);
+		return windowSecondsFor(isLiveWindow(saved) ? saved : DEFAULT_LIVE_WINDOW);
+	} catch {
+		return windowSecondsFor(DEFAULT_LIVE_WINDOW);
+	}
+}
 
 // Config passed when starting a load test (for display during streaming)
 export interface LoadTestRunConfig {
@@ -60,11 +73,18 @@ interface DashboardState {
 	/**
 	 * Running monotonic aggregates updated on each tick in {@link addMetricsBatch}.
 	 * Stored here instead of recomputed in MetricsView so that consumers see O(1)
-	 * updates per tick rather than a full scan of {@link historicalMetrics} (which
-	 * holds up to {@link HISTORICAL_METRICS_CAP} entries). See PR #26 / #25.
+	 * updates per tick rather than a full scan of {@link historicalMetrics}. Both
+	 * are latched (peak only grows, breakpoint sticks on first crossing), so they
+	 * survive old ticks rolling out of the retention window. See PR #26 / #25.
 	 */
 	peakConcurrency: number;
 	breakpoint: Breakpoint;
+	/**
+	 * Live retention window in seconds (null = full run, bounded by
+	 * MAX_RETAINED_TICKS). Seeded from the persisted preference; drives the
+	 * time-based trim in {@link addMetricsBatch}. Kept in sync by useLiveChartWindow.
+	 */
+	liveWindowSeconds: number | null;
 
 	// Actions
 	startRun: (
@@ -75,6 +95,7 @@ interface DashboardState {
 	) => void;
 	stopRun: () => void;
 	setStreaming: (streaming: boolean) => void;
+	setLiveWindowSeconds: (seconds: number | null) => void;
 	addMetricsBatch: (batch: LoadTestMetrics[]) => void;
 	setFinalReport: (report: RunReport) => void;
 	setError: (error: string | null) => void;
@@ -102,6 +123,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 	sourceRequestId: null,
 	peakConcurrency: 0,
 	breakpoint: INITIAL_BREAKPOINT,
+	liveWindowSeconds: initialLiveWindowSeconds(),
 
 	startRun: (runId, config, requestInfo, sourceRequestId) =>
 		set({
@@ -129,23 +151,43 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
 	setStreaming: (streaming) => set({ isStreaming: streaming }),
 
+	setLiveWindowSeconds: (seconds) => set({ liveWindowSeconds: seconds }),
+
 	addMetricsBatch: (batch) =>
 		set((state) => {
 			if (batch.length === 0) return state;
-			const newHistory = [...state.historicalMetrics, ...batch].slice(
-				-HISTORICAL_METRICS_CAP
-			);
+			let newHistory = [...state.historicalMetrics, ...batch];
+
+			// Time-based retention: drop ticks older than the configured window,
+			// measured against the newest tick's elapsed time. History is
+			// time-ordered ascending and trimmed every batch, so this scans only
+			// the few newly-expired ticks at the front (not the whole array).
+			const winS = state.liveWindowSeconds;
+			if (winS != null) {
+				const cutoff = newHistory[newHistory.length - 1].elapsed_seconds - winS;
+				let start = 0;
+				while (start < newHistory.length && newHistory[start].elapsed_seconds < cutoff) {
+					start++;
+				}
+				if (start > 0) newHistory = newHistory.slice(start);
+			}
+			// Hard safety cap regardless of window (bounds memory on a very long
+			// "full run" or an unexpectedly high tick rate).
+			if (newHistory.length > MAX_RETAINED_TICKS) {
+				newHistory = newHistory.slice(-MAX_RETAINED_TICKS);
+			}
 
 			// Fold the new ticks into the running aggregates. Both are monotone:
 			// peak only grows, breakpoint is latched on the first SLO crossing —
 			// so we walk each batch entry exactly once, never the full history.
+			const sloMs = useClientSettingsStore.getState().sloThresholdMs;
 			let peak = state.peakConcurrency;
 			let bp = state.breakpoint;
 			for (const m of batch) {
 				if (m.current_concurrency > peak) peak = m.current_concurrency;
 				if (!bp.crossed) {
 					const p99 = m.latency_p99_ms ?? 0;
-					if (p99 > DEFAULT_SLO_MS) {
+					if (p99 > sloMs) {
 						bp = {
 							crossed: true,
 							concurrency: m.current_concurrency,

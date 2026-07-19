@@ -6,8 +6,21 @@
  */
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import LoadTestDetail from "../LoadTestDetail";
 import type { RunReport } from "@/types";
+
+/**
+ * LoadTestDetail now fetches the per-tick time-series (for the breakpoint /
+ * percentile surfaces), so it needs a QueryClient. The default (Overview) tab
+ * snapshotted here doesn't depend on that data — the query stays in its loading
+ * state during the synchronous render — so the locked DOM is unaffected.
+ */
+function renderWithClient(ui: ReactElement) {
+	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
 
 function report(mode: string, cfg: Record<string, unknown>): RunReport {
 	return {
@@ -61,7 +74,7 @@ const noop = () => {};
 
 describe("LoadTestDetail (mode-adaptive)", () => {
 	it("constant_rps", () => {
-		const { container } = render(
+		const { container } = renderWithClient(
 			<LoadTestDetail
 				report={report("constant_rps", { targetRps: 200 })}
 				onBack={noop}
@@ -71,7 +84,7 @@ describe("LoadTestDetail (mode-adaptive)", () => {
 		expect(container.innerHTML).toMatchSnapshot();
 	});
 	it("constant_concurrency", () => {
-		const { container } = render(
+		const { container } = renderWithClient(
 			<LoadTestDetail
 				report={report("constant_concurrency", { concurrency: 50 })}
 				onBack={noop}
@@ -81,7 +94,7 @@ describe("LoadTestDetail (mode-adaptive)", () => {
 		expect(container.innerHTML).toMatchSnapshot();
 	});
 	it("iterations", () => {
-		const { container } = render(
+		const { container } = renderWithClient(
 			<LoadTestDetail
 				report={report("iterations", { concurrency: 20 })}
 				onBack={noop}
@@ -91,9 +104,13 @@ describe("LoadTestDetail (mode-adaptive)", () => {
 		expect(container.innerHTML).toMatchSnapshot();
 	});
 	it("ramp_up", () => {
-		const { container } = render(
+		const { container } = renderWithClient(
 			<LoadTestDetail
-				report={report("ramp_up", { concurrency: 50, startConcurrency: 1, rampUpDuration: "2s" })}
+				report={report("ramp_up", {
+					concurrency: 50,
+					startConcurrency: 1,
+					rampUpDuration: "2s",
+				})}
 				onBack={noop}
 				runId="r"
 			/>

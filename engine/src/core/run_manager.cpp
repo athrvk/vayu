@@ -671,6 +671,12 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // Declared here so it is in scope inside the try block below.
     int tick_interval_ms = 0;
 
+    // Windowed (rolling) percentiles sampled by emit_live_tick each tick. Captured
+    // here so the 1 Hz DB-gated block below can persist the same window it just
+    // published — sample_window_percentiles() resets the window, so it must only be
+    // called once per tick (inside emit_live_tick) and reused, not re-sampled.
+    double win_p50 = 0.0, win_p95 = 0.0, win_p99 = 0.0;
+
     // Build and append one SSE "metrics" event to the in-memory tick topic.
     // Fields match the SSE handler (metrics.cpp) field-for-field. The wall-clock
     // timestamp is passed in by the caller so that the SSE tick and any
@@ -686,8 +692,16 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         double elapsed_seconds =
         context->start_time_ms > 0 ?
         static_cast<double> (now_wall_ms - context->start_time_ms) / 1000.0 : 0.0;
+
+        // Sample the rolling window exactly once per tick (it resets on read) and
+        // carry the values out for the 1 Hz persistence below.
+        auto window = context->metrics_collector->sample_window_percentiles ();
+        win_p50 = window.p50;
+        win_p95 = window.p95;
+        win_p99 = window.p99;
+
         auto stats = context->metrics_collector->get_current_stats (active_count,
-        elapsed_seconds, requests_sent, requests_expected, status_snapshot);
+        elapsed_seconds, requests_sent, requests_expected, status_snapshot, &window);
 
         // Instantaneous RPS: delta-based, updated every ≥100 ms.
         auto now_steady     = std::chrono::steady_clock::now ();
@@ -800,7 +814,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                 try {
                     auto timestamp = tick_wall_ms;
                     std::vector<vayu::db::Metric> metrics;
-                    metrics.reserve (14);
+                    metrics.reserve (18);
 
                     metrics.push_back ({ 0, context->run_id, timestamp,
                     vayu::MetricName::Rps, current_rps, "" });
@@ -832,6 +846,20 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                     metrics.push_back ({ 0, context->run_id, timestamp,
                     vayu::MetricName::QueueWaitAvg,
                     context->metrics_collector->average_queue_wait (), "" });
+
+                    // Windowed per-tick percentiles (rolling, from the interval
+                    // recorder) — unlabeled to distinguish them from the cumulative
+                    // final-summary percentile rows (which carry a {"percentile":..}
+                    // label). These power the history percentile chart, the
+                    // response-time-vs-concurrency scatter, and the capacity
+                    // breakpoint / saturation derivations. Reuses the window already
+                    // sampled by emit_live_tick this tick (do not re-sample).
+                    metrics.push_back ({ 0, context->run_id, timestamp,
+                    vayu::MetricName::LatencyP50, win_p50, "" });
+                    metrics.push_back ({ 0, context->run_id, timestamp,
+                    vayu::MetricName::LatencyP95, win_p95, "" });
+                    metrics.push_back ({ 0, context->run_id, timestamp,
+                    vayu::MetricName::LatencyP99, win_p99, "" });
 
                     // Single transaction instead of 5 separate lock acquisitions
                     db.add_metrics_batch (metrics);

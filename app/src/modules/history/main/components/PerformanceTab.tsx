@@ -11,60 +11,90 @@
  * Displays latency distribution, rate control metrics, and time-series charts.
  */
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
-import { useRunTimeSeriesQuery } from "@/queries/runs";
-import { isRateLimitedRun } from "@/modules/dashboard/utils/metricsTransforms";
+import {
+	isRateLimitedRun,
+	buildPercentileChartData,
+} from "@/modules/dashboard/utils/metricsTransforms";
+import {
+	LatencyPercentilesChart,
+	ResponseTimeVsConcurrencyChart,
+	CHART_SYNC,
+} from "@/modules/dashboard/components/charts/uplot";
 import LatencyMetric from "./LatencyMetric";
 import HistoricalChartsSection from "./HistoricalChartsSection";
-import type { TabProps, TimeSeriesResponse } from "../../types";
+import type { PerformanceTabProps } from "../../types";
 
-export default function PerformanceTab({ report, runId, derived }: TabProps) {
-	// Fetch time-series data for charts
-	const {
-		data: timeSeriesData,
-		isLoading,
-		isFetchingNextPage,
-		hasNextPage,
-		fetchNextPage,
-	} = useRunTimeSeriesQuery(runId ?? null);
-
-	// Auto-fetch all pages when component mounts or when more pages are available
-	useEffect(() => {
-		if (hasNextPage && !isFetchingNextPage) {
-			fetchNextPage();
-		}
-	}, [hasNextPage, isFetchingNextPage, fetchNextPage]);
-
-	// Flatten paginated data into a single array
-	const flattenedData = useMemo(() => {
-		if (!timeSeriesData?.pages) return [];
-		return timeSeriesData.pages.flatMap((page: TimeSeriesResponse) => page.data);
-	}, [timeSeriesData]);
-
-	// Calculate progress for loading indicator
-	const progress = useMemo(() => {
-		if (!timeSeriesData?.pages?.length) return undefined;
-		const lastPage = timeSeriesData.pages[timeSeriesData.pages.length - 1];
-		return {
-			loaded: flattenedData.length,
-			total: lastPage.pagination.total,
-		};
-	}, [timeSeriesData, flattenedData]);
+export default function PerformanceTab({
+	report,
+	runId,
+	derived,
+	timeSeries,
+	isLoadingSeries,
+	isFetchingMore,
+	progress,
+}: PerformanceTabProps) {
+	// Windowed per-tick percentiles now persist for completed runs (W1), so the
+	// history percentile chart / scatter can render the same views as the live
+	// dashboard. Mirror MetricsView's split: ramp_up → response-time-vs-concurrency
+	// scatter (capacity elbow), other modes → percentiles-over-time.
+	const percentileChartData = useMemo(() => buildPercentileChartData(timeSeries), [timeSeries]);
+	const hasPercentileData = percentileChartData.some((d) => d.p99 > 0);
+	const isRampUp = derived.mode === "ramp_up";
 
 	return (
 		<div className="space-y-6">
 			{/* Time-Series Charts */}
 			{runId && (
 				<HistoricalChartsSection
-					data={flattenedData}
-					isLoading={isLoading}
-					isFetchingMore={isFetchingNextPage}
+					data={timeSeries}
+					isLoading={isLoadingSeries}
+					isFetchingMore={isFetchingMore}
 					progress={progress}
+					breakpoint={derived.breakpoint}
 				/>
 			)}
+
+			{/* Latency percentiles over time / response-time-vs-concurrency (W1).
+			    Mirror MetricsView's split: ramp_up → concurrency scatter (capacity
+			    elbow), other modes → percentiles-over-time. Both use the centralized
+			    uPlot charts, so live + history are identical. */}
+			{hasPercentileData &&
+				(isRampUp ? (
+					<Card>
+						<CardHeader className="pb-2">
+							<CardTitle className="text-base">
+								Response Time vs Concurrency
+							</CardTitle>
+						</CardHeader>
+						<CardContent>
+							<ResponseTimeVsConcurrencyChart
+								history={timeSeries}
+								breakpoint={derived.breakpoint}
+								syncKey={CHART_SYNC.history}
+							/>
+						</CardContent>
+					</Card>
+				) : (
+					<Card>
+						<CardHeader className="pb-2">
+							<CardTitle className="text-base">
+								Response Time Percentiles Over Time
+							</CardTitle>
+						</CardHeader>
+						<CardContent>
+							<LatencyPercentilesChart
+								history={timeSeries}
+								isCompleted
+								syncKey={CHART_SYNC.history}
+								breakpoint={derived.breakpoint}
+							/>
+						</CardContent>
+					</Card>
+				))}
 
 			{/* Latency Statistics */}
 			<Card>

@@ -18,6 +18,18 @@ export interface TabProps {
 	derived: DashboardDerived;
 }
 
+/**
+ * PerformanceTab additionally receives the persisted per-tick time-series
+ * (fetched once by LoadTestDetail) so it can render the latency percentile
+ * chart / response-time-vs-concurrency scatter without a second query.
+ */
+export interface PerformanceTabProps extends TabProps {
+	timeSeries: LoadTestMetrics[];
+	isLoadingSeries?: boolean;
+	isFetchingMore?: boolean;
+	progress?: { loaded: number; total: number };
+}
+
 export interface DesignRunDetailProps {
 	report: RunReport;
 	onBack: () => void;

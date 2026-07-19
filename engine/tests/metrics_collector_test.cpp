@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <thread>
 #include <vector>
 
@@ -121,6 +122,131 @@ TEST_F (MetricsCollectorTest, PercentilesHandleSingleValue) {
     EXPECT_NEAR (percentiles.max, 42.0, tolerance);
     EXPECT_NEAR (percentiles.p50, 42.0, tolerance);
     EXPECT_NEAR (percentiles.p99, 42.0, tolerance);
+}
+
+// ============================================================================
+// Windowed (rolling) Percentile Tests
+// ============================================================================
+
+TEST_F (MetricsCollectorTest, SampleWindowEmptyReturnsZeros) {
+    auto window = collector->sample_window_percentiles ();
+    EXPECT_DOUBLE_EQ (window.p50, 0.0);
+    EXPECT_DOUBLE_EQ (window.p95, 0.0);
+    EXPECT_DOUBLE_EQ (window.p99, 0.0);
+    EXPECT_DOUBLE_EQ (window.min, 0.0);
+    EXPECT_DOUBLE_EQ (window.max, 0.0);
+}
+
+TEST_F (MetricsCollectorTest, SampleWindowReflectsRecordedInterval) {
+    for (int i = 1; i <= 100; ++i) {
+        collector->record_success (200, static_cast<double> (i), 0.0);
+    }
+
+    auto window = collector->sample_window_percentiles ();
+
+    constexpr double tolerance = 1.0;  // 1ms — HdrHistogram bucketing
+    EXPECT_NEAR (window.min, 1.0, tolerance);
+    EXPECT_NEAR (window.max, 100.0, tolerance);
+    EXPECT_NEAR (window.p50, 50.0, tolerance);
+    EXPECT_NEAR (window.p95, 95.0, tolerance);
+    EXPECT_NEAR (window.p99, 99.0, tolerance);
+}
+
+TEST_F (MetricsCollectorTest, SampleWindowResetsBetweenIntervals) {
+    // First interval: all low-latency samples.
+    for (int i = 0; i < 500; ++i) {
+        collector->record_success (200, 10.0, 0.0);
+    }
+    auto first = collector->sample_window_percentiles ();
+    EXPECT_NEAR (first.p99, 10.0, 1.0);
+
+    // Second interval: all high-latency samples. The window must NOT carry the
+    // low-latency samples forward — sampling reset it.
+    for (int i = 0; i < 500; ++i) {
+        collector->record_success (200, 500.0, 0.0);
+    }
+    auto second = collector->sample_window_percentiles ();
+    EXPECT_NEAR (second.p99, 500.0, 5.0);
+
+    // Third interval with no new samples: empty window → zeros (not the last value).
+    auto third = collector->sample_window_percentiles ();
+    EXPECT_DOUBLE_EQ (third.p99, 0.0);
+}
+
+TEST_F (MetricsCollectorTest, WindowedTracksRecentWhileCumulativeFlattens) {
+    // Drain a first interval of fast responses.
+    for (int i = 0; i < 1000; ++i) {
+        collector->record_success (200, 10.0, 0.0);
+    }
+    (void) collector->sample_window_percentiles ();
+
+    // Now the server degrades: a second interval of slow responses.
+    for (int i = 0; i < 1000; ++i) {
+        collector->record_success (200, 500.0, 0.0);
+    }
+    auto window = collector->sample_window_percentiles ();
+
+    // Cumulative (from start) blends both halves; the rolling window sees only the
+    // recent (slow) interval. This divergence is the whole point of W1: the live
+    // percentile chart tracks current load instead of the all-time distribution.
+    auto cumulative = collector->calculate_percentiles ();
+    EXPECT_NEAR (window.p50, 500.0, 5.0);
+    EXPECT_LT (cumulative.p50, window.p50);  // cumulative median dragged down by fast half
+}
+
+TEST_F (MetricsCollectorTest, GetCurrentStatsPrefersWindowedPercentiles) {
+    // Record cumulative data that would yield ~100ms percentiles.
+    for (int i = 0; i < 100; ++i) {
+        collector->record_success (200, 100.0, 0.0);
+    }
+
+    // Explicit windowed values (as the producer would pass each tick).
+    MetricsCollector::Percentiles window;
+    window.p50 = 11.0;
+    window.p95 = 12.0;
+    window.p99 = 13.0;
+
+    auto stats = collector->get_current_stats (0, 1.0, 0, 0, nullptr, &window);
+    EXPECT_DOUBLE_EQ (stats["latencyP50Ms"].get<double> (), 11.0);
+    EXPECT_DOUBLE_EQ (stats["latencyP95Ms"].get<double> (), 12.0);
+    EXPECT_DOUBLE_EQ (stats["latencyP99Ms"].get<double> (), 13.0);
+
+    // Without windowed values the fields fall back to the cumulative histogram.
+    auto cumulative_stats = collector->get_current_stats (0, 1.0, 0);
+    EXPECT_NEAR (cumulative_stats["latencyP99Ms"].get<double> (), 100.0, 1.0);
+}
+
+TEST_F (MetricsCollectorTest, SampleWindowSafeUnderConcurrentWriters) {
+    // Writers record while the producer samples the window — the phaser must keep
+    // this race-free (resolves D8 for the windowed source). Assert correctness of
+    // the cumulative count and that sampling never crashes.
+    constexpr int kThreads = 4;
+    constexpr int kPerThread = 5000;
+    std::atomic<bool> stop{ false };
+
+    std::vector<std::thread> writers;
+    writers.reserve (kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        writers.emplace_back ([this] () {
+            for (int i = 0; i < kPerThread; ++i) {
+                collector->record_success (200, 25.0, 0.0);
+            }
+        });
+    }
+
+    // Sample repeatedly from this (single reader) thread while writers run.
+    while (!stop.load ()) {
+        (void) collector->sample_window_percentiles ();
+        bool all_done = collector->total_requests () >=
+        static_cast<size_t> (kThreads * kPerThread);
+        if (all_done) stop.store (true);
+    }
+
+    for (auto& w : writers) w.join ();
+    (void) collector->sample_window_percentiles ();
+
+    EXPECT_EQ (collector->total_requests (),
+    static_cast<size_t> (kThreads * kPerThread));
 }
 
 // ============================================================================

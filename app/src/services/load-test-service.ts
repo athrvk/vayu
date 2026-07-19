@@ -15,7 +15,7 @@
 
 import { sseClient } from "./sse-client";
 import { apiService } from "./api";
-import { useDashboardStore } from "@/stores";
+import { useDashboardStore, useClientSettingsStore } from "@/stores";
 import type { LoadTestMetrics } from "@/types";
 // Engine emits at 10 Hz (100ms cadence — see engine/src/http/routes/metrics.cpp).
 // We throttle UI commits to keep render cost bounded, but BUFFER every tick the
@@ -114,13 +114,16 @@ class LoadTestService {
 		this.pendingBuffer.push(metrics);
 		const now = Date.now();
 		const elapsed = now - this.lastMetricsPushTime;
-		if (elapsed >= METRICS_UI_THROTTLE_MS || this.lastMetricsPushTime === 0) {
+		// User-configurable live refresh rate (falls back to the module default).
+		const throttleMs =
+			useClientSettingsStore.getState().liveRefreshMs || METRICS_UI_THROTTLE_MS;
+		if (elapsed >= throttleMs || this.lastMetricsPushTime === 0) {
 			this.flushMetrics();
 		} else if (!this.throttleTimer) {
 			this.throttleTimer = setTimeout(() => {
 				this.throttleTimer = null;
 				this.flushMetrics();
-			}, METRICS_UI_THROTTLE_MS - elapsed);
+			}, throttleMs - elapsed);
 		}
 	}
 
