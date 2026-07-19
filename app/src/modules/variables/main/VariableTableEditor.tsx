@@ -91,42 +91,43 @@ interface VariableEditorConfig {
 const EDITOR_CONFIGS = {
 	globals: {
 		icon: Globe as LucideIcon,
-		iconColor: "text-green-500",
+		iconColor: "text-scope-global",
 		title: "Global Variables",
 		subtitle: "Global Variables",
 		infoText:
 			"Global variables are available in all requests (lowest priority). They can be overridden by environment and collection variables.",
-		infoBg: "bg-green-50 dark:bg-green-950/50",
-		infoTextColor: "text-green-700 dark:text-green-300",
-		infoBorder: "border-green-100 dark:border-green-900",
-		checkboxColor: "text-green-500 focus:ring-green-500 accent-green-500",
-		loadingColor: "border-green-500",
+		infoBg: "bg-scope-global/10",
+		infoTextColor: "text-scope-global",
+		infoBorder: "border-scope-global/20",
+		checkboxColor: "text-scope-global focus:ring-scope-global accent-scope-global",
+		loadingColor: "border-scope-global",
 	},
 	environment: {
 		icon: Cloud as LucideIcon,
-		iconColor: "text-blue-400",
+		iconColor: "text-scope-environment",
 		title: (name: string) => name,
 		subtitle: "Environment Variables",
 		infoText:
 			"Environment variables override global variables but can be overridden by collection variables.",
-		infoBg: "bg-blue-50 dark:bg-blue-950/50",
-		infoTextColor: "text-blue-700 dark:text-blue-300",
-		infoBorder: "border-blue-100 dark:border-blue-900",
-		checkboxColor: "text-blue-500 focus:ring-blue-500 accent-blue-500",
-		loadingColor: "border-blue-500",
+		infoBg: "bg-scope-environment/10",
+		infoTextColor: "text-scope-environment",
+		infoBorder: "border-scope-environment/20",
+		checkboxColor:
+			"text-scope-environment focus:ring-scope-environment accent-scope-environment",
+		loadingColor: "border-scope-environment",
 	},
 	collection: {
 		icon: Folder as LucideIcon,
-		iconColor: "text-orange-400",
+		iconColor: "text-scope-collection",
 		title: (name: string) => name,
 		subtitle: "Collection Variables",
 		infoText:
 			"Collection variables have the highest priority and override both global and environment variables.",
-		infoBg: "bg-orange-50 dark:bg-orange-950/50",
-		infoTextColor: "text-orange-700 dark:text-orange-300",
-		infoBorder: "border-orange-100 dark:border-orange-900",
-		checkboxColor: "text-orange-500 focus:ring-orange-500 accent-orange-500",
-		loadingColor: "border-orange-500",
+		infoBg: "bg-scope-collection/10",
+		infoTextColor: "text-scope-collection",
+		infoBorder: "border-scope-collection/20",
+		checkboxColor: "text-scope-collection focus:ring-scope-collection accent-scope-collection",
+		loadingColor: "border-scope-collection",
 	},
 } as const;
 
@@ -419,6 +420,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		}
 
 		setVariables(newVariables);
+		// Keep the ref in sync immediately (not just via the post-render effect):
+		// the secret toggle calls performSaveRef.current() synchronously right
+		// after this, and performSave reads variablesRef.current — a stale ref
+		// would persist the pre-edit value and the backend re-sync would then
+		// revert the change. Mirrors removeVariable.
+		variablesRef.current = newVariables;
 		setHasPendingChanges(true);
 		markPendingSave(contextId);
 	};
@@ -515,14 +522,14 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 									variant="outline"
 									size="sm"
 									onClick={handleSetActiveEnvironment}
-									className="min-w-30 border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
+									className="min-w-30 border-scope-environment/40 text-scope-environment hover:bg-scope-environment/10"
 								>
 									Set Active
 								</Button>
 							) : (
 								<Badge
 									variant="outline"
-									className="min-w-30 h-8 justify-center border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
+									className="min-w-30 h-8 justify-center border-scope-environment/40 text-scope-environment hover:bg-scope-environment/10"
 								>
 									Active
 								</Badge>
@@ -601,7 +608,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												performSaveRef.current();
 											}}
 											className={cn(
-												"w-4 h-4 rounded border-input",
+												"w-4 h-4 rounded-md border-input",
 												editorConfig.checkboxColor
 											)}
 											disabled={variable.isNew && !variable.key}
@@ -734,7 +741,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												className={cn(
 													"h-8 w-8 transition-colors",
 													variable.secret
-														? "text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950"
+														? "text-warning-text hover:text-warning-text hover:bg-warning/10"
 														: "text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
 												)}
 												title={

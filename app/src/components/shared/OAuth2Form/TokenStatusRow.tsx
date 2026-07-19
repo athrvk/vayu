@@ -120,12 +120,13 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 			<div className="flex items-center gap-3 px-3 py-2">
 				<div className="flex items-center gap-2 min-w-0 flex-1">
 					<span
-						className={`h-2 w-2 rounded-full shrink-0 ${token
+						className={`h-2 w-2 rounded-full shrink-0 ${
+							token
 								? expired
-									? "bg-amber-500"
-									: "bg-emerald-500"
+									? "bg-warning"
+									: "bg-status-success"
 								: "bg-muted-foreground/40"
-							}`}
+						}`}
 						aria-hidden
 					/>
 					{token ? (

@@ -281,6 +281,24 @@ jobs:
           done
           ls -lh artifacts/
 
+      # Prefer the curated, hand-written notes committed at .github/release-notes/<tag>.md
+      # (Keep a Changelog format, see CLAUDE.md). If that file is absent for this tag,
+      # fall back to GitHub's automatically generated PR-based notes so the release is
+      # never published with an empty body.
+      - name: Resolve release notes
+        if: github.event_name == 'push'
+        id: relnotes
+        shell: bash
+        run: |
+          notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            echo "Using curated release notes: $notes"
+            echo "path=$notes" >> "$GITHUB_OUTPUT"
+          else
+            echo "No curated notes at $notes - falling back to auto-generated notes."
+            echo "path=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload artifacts to release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
@@ -288,5 +306,9 @@ jobs:
           files: |
             artifacts/*
           fail_on_unmatched_files: false
+          # body_path is ignored by the action when empty; generate_release_notes then
+          # supplies GitHub's auto notes as the fallback.
+          body_path: ${{ steps.relnotes.outputs.path }}
+          generate_release_notes: ${{ steps.relnotes.outputs.path == '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { useTabsStore, type Tab } from "@/stores";
 import { useRequestQuery, useCollectionsQuery } from "@/queries";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
+import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 
 /**
  * Extract a short display path from a request URL. URLs may contain
@@ -32,6 +33,16 @@ function pathLabel(url: string): string {
 		const stripped = url.replace(/^[a-z]+:\/\/[^/]*/i, "");
 		return decodeURIComponent(stripped) || decodeURIComponent(url);
 	}
+}
+
+/**
+ * Title for a request tab: the user-set name when there is one, otherwise the
+ * request path. A blank or still-default placeholder name counts as "not set".
+ */
+function requestTabTitle(name: string, resolvedUrl: string): string {
+	const trimmed = name.trim();
+	if (trimmed && trimmed !== DEFAULT_REQUEST_NAME) return trimmed;
+	return pathLabel(resolvedUrl) || trimmed;
 }
 
 function TabIcon({ type }: { type: Tab["type"] }) {
@@ -78,7 +89,7 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 						{request.method}
 					</span>
 					<span className="truncate">
-						{pathLabel(resolveString(request.url)) || request.name}
+						{requestTabTitle(request.name, resolveString(request.url))}
 					</span>
 				</span>
 			) : (
@@ -126,7 +137,7 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 					e.stopPropagation();
 					closeTab(tab.id);
 				}}
-				className="shrink-0 rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+				className="shrink-0 rounded-md p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
 			>
 				<X size={12} />
 			</span>

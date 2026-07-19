@@ -79,7 +79,7 @@ export default function EditableVariable({
 				</span>
 			}
 			triggerClassName={cn(
-				"inline cursor-pointer transition-colors rounded",
+				"inline cursor-pointer transition-colors rounded-md",
 				!resolved
 					? "text-destructive-text hover:bg-destructive-text/10"
 					: !value

@@ -30,7 +30,7 @@ export default function Toaster() {
 					className={cn(
 						"flex items-start gap-2 rounded-md border bg-popover px-3 py-2 text-popover-foreground shadow-lg",
 						toast.variant === "error" && "border-destructive/40",
-						toast.variant === "success" && "border-green-500/40",
+						toast.variant === "success" && "border-status-success/40",
 						toast.variant === "info" && "border-border"
 					)}
 				>

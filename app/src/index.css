@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 @config "../tailwind.config.js";
 
 /* Tailwind 4 theme configuration for custom colors */
@@ -10,6 +11,7 @@
 	--color-popover: hsl(var(--popover));
 	--color-popover-foreground: hsl(var(--popover-foreground));
 	--color-primary: hsl(var(--primary));
+	--color-primary-fill: hsl(var(--primary-fill));
 	--color-primary-foreground: hsl(var(--primary-foreground));
 	--color-secondary: hsl(var(--secondary));
 	--color-secondary-foreground: hsl(var(--secondary-foreground));
@@ -29,11 +31,20 @@
 	--color-subtle-foreground: hsl(var(--subtle-foreground));
 	--color-success: hsl(var(--success));
 	--color-success-foreground: hsl(var(--success-foreground));
+	--color-success-text: hsl(var(--success-text));
 	--color-warning: hsl(var(--warning));
 	--color-warning-foreground: hsl(var(--warning-foreground));
+	--color-warning-text: hsl(var(--warning-text));
 	--color-info: hsl(var(--info));
 	--color-info-foreground: hsl(var(--info-foreground));
 	--color-variable: hsl(var(--variable));
+	--color-scope-global: hsl(var(--scope-global));
+	--color-scope-collection: hsl(var(--scope-collection));
+	--color-scope-environment: hsl(var(--scope-environment));
+	--color-status-success: hsl(var(--status-success));
+	--color-status-error: hsl(var(--status-error));
+	--color-status-running: hsl(var(--status-running));
+	--color-status-stopped: hsl(var(--status-stopped));
 	--color-chart-1: hsl(var(--chart-1));
 	--color-chart-2: hsl(var(--chart-2));
 	--color-chart-3: hsl(var(--chart-3));
@@ -56,60 +67,65 @@
  *
  * Color Philosophy: 3-level elevation system
  * Dark:  canvas (#09090b) → panel (#111113) → card (#1a1a1f)
- * Light: warm stone canvas (#e6e3dc) → warm panel (#f2f0eb) → white card (#ffffff)
+ * Light: paper-white canvas (#f4f4f5) → panel (#fafafa) → white card (#ffffff)
  *
  * Primary accent: Sunset orange (default), Electric cyan, Royal violet
  */
 
 @layer base {
 	:root {
-		/* ── Light mode — Warm Stone ── */
+		/* ── Light mode — Paper White ── */
 
-		/* 3-level elevation */
-		--background: 42 17% 88%; /* #e6e3dc — warm stone canvas */
+		/* 3-level elevation (cool near-neutral; higher surfaces are lighter) */
+		--background: 240 6% 96%; /* #f4f4f5 — paper-white canvas */
 		--card: 0 0% 100%; /* #ffffff — white card (floats on bg) */
-		--panel: 42 21% 94%; /* #f2f0eb — sidebar/panel (between canvas and card) */
+		--panel: 240 5% 98%; /* #fafafa — sidebar/panel (between canvas and card) */
 
 		--card-foreground: 240 6% 10%;
 		--popover: 0 0% 100%;
 		--popover-foreground: 240 6% 10%;
 
-		/* Primary — Sunset orange (default) */
-		--primary: 24.6 95% 53.1%; /* #f97316 orange-500 */
+		/* Primary — Sunset orange (default). --primary is the accent (text/border/
+		 * tints); --primary-fill is the button-background value (white labels).
+		 * They match in light mode and diverge in dark (see .dark). */
+		--primary: 24 90% 46%;
+		--primary-fill: 24 90% 46%;
 		--primary-foreground: 0 0% 100%;
 
 		/* Secondary */
-		--secondary: 42 21% 94%;
+		--secondary: 240 5% 94%;
 		--secondary-foreground: 240 6% 10%;
 
 		/* Hover / active states */
-		--muted: 38 20% 89%; /* #e9e5de — accent-hover */
+		--muted: 240 5% 93%; /* #ededef — accent-hover */
 		--muted-foreground: 240 4% 46%; /* #71717a — zinc-500 */
-		--accent: 38 20% 89%; /* #e9e5de — accent-hover */
+		--accent: 240 5% 93%; /* #ededef — accent-hover */
 		--accent-foreground: 240 6% 10%;
-		--accent-active: 40 16% 85%; /* #dedad2 — accent-active / selected */
+		--accent-active: 240 5% 88%; /* #e0e0e4 — accent-active / selected */
 
 		/* Foreground scale */
 		--foreground: 240 6% 10%; /* #18181b — zinc-900 */
-		--subtle-foreground: 240 7% 78%; /* #c4c4cc — muted placeholder */
+		--subtle-foreground: 240 4% 58%; /* de-emphasized text, still the faintest tier (~3:1 on card) */
 
 		/* Borders */
-		--border: 40 9% 80%; /* ≈ rgba(0,0,0,0.09) on warm stone */
-		--border-strong: 40 6% 72%; /* ≈ rgba(0,0,0,0.18) on warm stone */
-		--input: 40 9% 80%;
-		--ring: 24.6 95% 53.1%;
+		--border: 240 6% 89%; /* #e2e2e5 — default dividers on paper white */
+		--border-strong: 240 5% 82%; /* #cfcfd5 — prominent borders */
+		--input: 240 6% 89%;
+		--ring: 24 90% 46%;
 
 		/* Destructive */
 		--destructive: 0 84.2% 60.2%;
 		--destructive-foreground: 0 0% 98%;
 		--destructive-text: 0 60% 48%; /* muted rose — accessible text on light bg, ~4.8:1 */
 
-		/* Charts */
-		--chart-1: 24.6 95% 53.1%;
-		--chart-2: 173 58% 39%;
-		--chart-3: 197 37% 24%;
-		--chart-4: 43 74% 66%;
-		--chart-5: 27 87% 67%;
+		/* Charts — cohesive categorical set: accent + 4 evenly-spaced hues,
+		 * consistent with dark mode (tuned only in lightness). chart-1 tracks
+		 * the active accent. */
+		--chart-1: 24 90% 46%;
+		--chart-2: 172 66% 38%; /* teal */
+		--chart-3: 258 55% 55%; /* violet */
+		--chart-4: 38 88% 48%; /* amber */
+		--chart-5: 340 72% 50%; /* rose */
 
 		/* HTTP method colors */
 		--method-get: 142 76% 36%;
@@ -121,15 +137,35 @@
 		--method-options: 240 5% 64%;
 
 		/* Variable highlight */
-		--variable: 24.6 95% 53.1%;
+		--variable: 24 90% 46%;
 
-		/* Semantic */
+		/* Semantic — `-text` variants are darkened for legible text on light
+		 * surfaces (the base tokens are tuned as fills/indicators, like
+		 * --destructive vs --destructive-text). */
 		--success: 142 76% 36%;
 		--success-foreground: 0 0% 100%;
+		--success-text: 142 72% 30%; /* accessible green text on light bg (~5:1) */
 		--warning: 38 92% 50%;
 		--warning-foreground: 0 0% 100%;
+		--warning-text: 38 90% 35%; /* accessible amber text on light bg (~4.6:1) */
 		--info: 199 89% 48%;
 		--info-foreground: 0 0% 100%;
+
+		/* Variable scope (categorical) — global / collection / environment.
+		 * Used as text/icon/border at full strength and as tinted backgrounds
+		 * via opacity (e.g. bg-scope-global/10). Mode-adaptive for legibility. */
+		--scope-global: 142 72% 29%; /* green-700 */
+		--scope-collection: 21 90% 42%; /* orange-700 */
+		--scope-environment: 217 91% 45%; /* blue-600 */
+
+		/* Run / connection / test status indicators (dots, bars, pills, icons).
+		 * A cohesive, mode-consistent set — deliberately the same in light and
+		 * dark so a green dot reads as "good" on either surface. Distinct from
+		 * --success/--destructive, which tune for banner text and button fills. */
+		--status-success: 142 71% 45%; /* green-500 — completed / connected / pass */
+		--status-error: 0 84% 60%; /* red-500 — failed / test fail */
+		--status-running: 217 91% 60%; /* blue-500 — running */
+		--status-stopped: 25 95% 53%; /* orange-500 — stopped */
 
 		/* Geometry */
 		--radius: 0.375rem;
@@ -137,52 +173,62 @@
 
 	/* ── Accent color schemes (light mode) ── */
 
+	/* Light: --primary is the accent (used for text/border/ring/tints) and is
+	 * deep enough to read on light surfaces; --primary-fill (button fills) is
+	 * the same deep value here — white labels clear AA-large. In dark mode the
+	 * two diverge (see the .dark blocks). */
 	[data-color-scheme="sunset"] {
-		--primary: 24.6 95% 53.1%;
+		--primary: 24 90% 46%;
+		--primary-fill: 24 90% 46%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 24.6 95% 53.1%;
-		--variable: 24.6 95% 53.1%;
-		--chart-1: 24.6 95% 53.1%;
+		--ring: 24 90% 46%;
+		--variable: 24 90% 46%;
+		--chart-1: 24 90% 46%;
 	}
 
 	[data-color-scheme="sky"] {
-		--primary: 188 94% 43%; /* #22d3ee cyan-400 */
+		--primary: 192 95% 36%;
+		--primary-fill: 192 95% 36%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 188 94% 43%;
-		--variable: 188 94% 43%;
-		--chart-1: 188 94% 43%;
+		--ring: 192 95% 36%;
+		--variable: 192 95% 36%;
+		--chart-1: 192 95% 36%;
 	}
 
 	[data-color-scheme="ocean"] {
-		--primary: 217 91% 60%;
+		--primary: 217 80% 48%;
+		--primary-fill: 217 80% 48%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 217 91% 60%;
-		--variable: 217 91% 60%;
-		--chart-1: 217 91% 60%;
+		--ring: 217 80% 48%;
+		--variable: 217 80% 48%;
+		--chart-1: 217 80% 48%;
 	}
 
 	[data-color-scheme="forest"] {
-		--primary: 142 76% 36%;
+		--primary: 142 72% 33%;
+		--primary-fill: 142 72% 33%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 142 76% 36%;
-		--variable: 142 76% 36%;
-		--chart-1: 142 76% 36%;
+		--ring: 142 72% 33%;
+		--variable: 142 72% 33%;
+		--chart-1: 142 72% 33%;
 	}
 
 	[data-color-scheme="aurora"] {
-		--primary: 258 87% 74%; /* #a78bfa violet-400 */
+		--primary: 262 55% 54%;
+		--primary-fill: 262 55% 54%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 258 87% 74%;
-		--variable: 258 87% 74%;
-		--chart-1: 258 87% 74%;
+		--ring: 262 55% 54%;
+		--variable: 262 55% 54%;
+		--chart-1: 262 55% 54%;
 	}
 
 	[data-color-scheme="coral"] {
-		--primary: 0 72% 65%;
+		--primary: 0 68% 54%;
+		--primary-fill: 0 68% 54%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 0 72% 65%;
-		--variable: 0 72% 65%;
-		--chart-1: 0 72% 65%;
+		--ring: 0 68% 54%;
+		--variable: 0 68% 54%;
+		--chart-1: 0 68% 54%;
 	}
 
 	/* ── Dark mode ── */
@@ -197,8 +243,10 @@
 		--popover: 240 6% 11%;
 		--popover-foreground: 240 5% 96%;
 
-		/* Primary — Sunset orange (default) */
-		--primary: 24.6 95% 53.1%;
+		/* Primary — Sunset orange (default). Brightened accent for text on the
+		 * near-black canvas; --primary-fill stays deep for white-labelled buttons. */
+		--primary: 24 95% 58%;
+		--primary-fill: 24 90% 46%;
 		--primary-foreground: 0 0% 100%;
 
 		/* Secondary */
@@ -214,86 +262,104 @@
 
 		/* Foreground scale */
 		--foreground: 240 5% 96%; /* #f4f4f5 — zinc-100 */
-		--subtle-foreground: 240 5% 34%; /* #52525b — zinc-600 */
+		--subtle-foreground: 240 4% 44%; /* de-emphasized text, still the faintest tier (~3:1 on card) */
 
 		/* Borders */
 		--border: 0 0% 10%; /* ≈ rgba(255,255,255,0.07) on dark canvas */
 		--border-strong: 0 0% 18%; /* ≈ rgba(255,255,255,0.15) on dark canvas */
 		--input: 240 6% 11%;
-		--ring: 24.6 95% 53.1%;
+		--ring: 24 95% 58%;
 
 		/* Destructive */
 		--destructive: 0 62.8% 30.6%;
 		--destructive-foreground: 0 0% 98%;
 		--destructive-text: 0 65% 63%; /* muted rose — accessible text on dark bg, ~4.5:1 */
 
-		/* Charts */
-		--chart-1: 24.6 95% 53.1%;
-		--chart-2: 160 60% 45%;
-		--chart-3: 30 80% 55%;
-		--chart-4: 280 65% 60%;
-		--chart-5: 340 75% 55%;
+		/* Charts — same cohesive hues as light, lifted in lightness for the dark
+		 * ground. chart-1 tracks the active accent. */
+		--chart-1: 24 95% 58%;
+		--chart-2: 172 60% 52%; /* teal */
+		--chart-3: 258 78% 72%; /* violet */
+		--chart-4: 38 90% 60%; /* amber */
+		--chart-5: 340 74% 62%; /* rose */
 
 		/* Variable highlight */
-		--variable: 24.6 95% 53.1%;
+		--variable: 24 95% 58%;
 
-		/* Semantic */
+		/* Semantic — `-text` variants tuned lighter for legible text on dark. */
 		--success: 142 70% 45%;
 		--success-foreground: 0 0% 100%;
+		--success-text: 142 60% 55%; /* accessible green text on dark bg */
 		--warning: 38 92% 50%;
 		--warning-foreground: 0 0% 100%;
+		--warning-text: 40 92% 60%; /* accessible amber text on dark bg */
 		--info: 199 89% 48%;
 		--info-foreground: 0 0% 100%;
+
+		/* Variable scope (categorical) — lighter tints for dark surfaces. */
+		--scope-global: 142 69% 58%; /* green-400 */
+		--scope-collection: 27 96% 61%; /* orange-400 */
+		--scope-environment: 213 94% 68%; /* blue-400 */
 	}
 
 	/* ── Accent color schemes (dark mode) ── */
 
+	/* Dark: --primary (accent text/border/tints/ring) is brightened so it reads
+	 * on the near-black canvas; --primary-fill (button backgrounds) stays deep so
+	 * white labels clear AA-large. This is the split that resolves the
+	 * bright-text vs white-on-fill bind. */
 	.dark[data-color-scheme="sunset"] {
-		--primary: 24.6 95% 53.1%;
+		--primary: 24 95% 58%;
+		--primary-fill: 24 90% 46%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 24.6 95% 53.1%;
-		--variable: 24.6 95% 53.1%;
-		--chart-1: 24.6 95% 53.1%;
+		--ring: 24 95% 58%;
+		--variable: 24 95% 58%;
+		--chart-1: 24 95% 58%;
 	}
 
 	.dark[data-color-scheme="sky"] {
-		--primary: 188 94% 43%;
+		--primary: 188 90% 52%;
+		--primary-fill: 192 95% 36%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 188 94% 43%;
-		--variable: 188 94% 43%;
-		--chart-1: 188 94% 43%;
+		--ring: 188 90% 52%;
+		--variable: 188 90% 52%;
+		--chart-1: 188 90% 52%;
 	}
 
 	.dark[data-color-scheme="ocean"] {
-		--primary: 217 78% 51%;
+		--primary: 217 90% 66%;
+		--primary-fill: 217 80% 48%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 217 78% 51%;
-		--variable: 217 78% 51%;
-		--chart-1: 217 78% 51%;
+		--ring: 217 90% 66%;
+		--variable: 217 90% 66%;
+		--chart-1: 217 90% 66%;
 	}
 
 	.dark[data-color-scheme="forest"] {
-		--primary: 142 70% 45%;
+		--primary: 142 65% 52%;
+		--primary-fill: 142 72% 33%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 142 70% 45%;
-		--variable: 142 70% 45%;
-		--chart-1: 142 70% 45%;
+		--ring: 142 65% 52%;
+		--variable: 142 65% 52%;
+		--chart-1: 142 65% 52%;
 	}
 
 	.dark[data-color-scheme="aurora"] {
-		--primary: 258 87% 74%;
+		--primary: 258 88% 76%;
+		--primary-fill: 262 55% 54%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 258 87% 74%;
-		--variable: 258 87% 74%;
-		--chart-1: 258 87% 74%;
+		--ring: 258 88% 76%;
+		--variable: 258 88% 76%;
+		--chart-1: 258 88% 76%;
 	}
 
 	.dark[data-color-scheme="coral"] {
-		--primary: 0 72% 55%;
+		--primary: 0 80% 68%;
+		--primary-fill: 0 68% 54%;
 		--primary-foreground: 0 0% 100%;
-		--ring: 0 72% 55%;
-		--variable: 0 72% 55%;
-		--chart-1: 0 72% 55%;
+		--ring: 0 80% 68%;
+		--variable: 0 80% 68%;
+		--chart-1: 0 80% 68%;
 	}
 }
 
@@ -310,7 +376,9 @@
 
 	body {
 		@apply bg-background text-foreground;
-		font-family: "Space Grotesk", system-ui, sans-serif;
+		/* Drives from --font-sans so the UI-font preference (useAppearance) can
+		 * override it at runtime; defaults to Space Grotesk via @theme inline. */
+		font-family: var(--font-sans);
 		height: 100%;
 		margin: 0;
 		padding: 0;

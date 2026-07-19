@@ -31,17 +31,17 @@ const SCOPE_CONFIG: Record<VariableScope, { compact: string; full: string; class
 	global: {
 		compact: "G",
 		full: "Global",
-		className: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+		className: "bg-scope-global/10 text-scope-global",
 	},
 	collection: {
 		compact: "C",
 		full: "Collection",
-		className: "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
+		className: "bg-scope-collection/10 text-scope-collection",
 	},
 	environment: {
 		compact: "E",
 		full: "Environment",
-		className: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
+		className: "bg-scope-environment/10 text-scope-environment",
 	},
 };
 
@@ -61,11 +61,14 @@ export function VariableScopeBadge({
 				variant="outline"
 				className={cn(
 					"h-5 px-1.5 text-[10px] font-medium",
+					// global stays neutral; collection/environment carry their scope
+					// hue (previously these two were swapped — collection showed blue,
+					// environment green).
 					scope === "global"
 						? "bg-muted"
 						: scope === "collection"
-							? "bg-blue-50 text-blue-700 border-blue-200"
-							: "bg-green-50 text-green-700 border-green-200",
+							? "bg-scope-collection/10 text-scope-collection border-scope-collection/30"
+							: "bg-scope-environment/10 text-scope-environment border-scope-environment/30",
 					className
 				)}
 			>

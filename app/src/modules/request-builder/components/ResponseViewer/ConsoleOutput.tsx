@@ -59,7 +59,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 									<p className="text-sm font-semibold text-destructive">
 										Pre-request Script Error
 									</p>
-									<pre className="text-sm text-red-400 mt-1 font-mono whitespace-pre-wrap break-words overflow-x-auto">
+									<pre className="text-sm text-status-error mt-1 font-mono whitespace-pre-wrap break-words overflow-x-auto">
 										{errors.pre}
 									</pre>
 								</div>
@@ -74,7 +74,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 									<p className="text-sm font-semibold text-destructive">
 										Test Script Error
 									</p>
-									<pre className="text-sm text-red-400 mt-1 font-mono whitespace-pre-wrap break-words overflow-x-auto">
+									<pre className="text-sm text-status-error mt-1 font-mono whitespace-pre-wrap break-words overflow-x-auto">
 										{errors.post}
 									</pre>
 								</div>
@@ -93,7 +93,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 					{preLogs.length > 0 && (
 						<Collapsible open={preLogsOpen} onOpenChange={setPreLogsOpen}>
 							<CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
-								<div className="flex items-center justify-center w-5 h-5 rounded bg-blue-500/20 group-hover:bg-blue-500/30 transition-colors">
+								<div className="flex items-center justify-center w-5 h-5 rounded-md bg-blue-500/20 group-hover:bg-blue-500/30 transition-colors">
 									{preLogsOpen ? (
 										<ChevronDown className="w-4 h-4 text-blue-500" />
 									) : (
@@ -129,7 +129,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 					{testLogs.length > 0 && (
 						<Collapsible open={testLogsOpen} onOpenChange={setTestLogsOpen}>
 							<CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
-								<div className="flex items-center justify-center w-5 h-5 rounded bg-green-500/20 group-hover:bg-green-500/30 transition-colors">
+								<div className="flex items-center justify-center w-5 h-5 rounded-md bg-green-500/20 group-hover:bg-green-500/30 transition-colors">
 									{testLogsOpen ? (
 										<ChevronDown className="w-4 h-4 text-green-500" />
 									) : (

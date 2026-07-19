@@ -19,9 +19,7 @@ import { Editor, type EditorProps, type OnMount } from "@monaco-editor/react";
 type EditorOptions = NonNullable<EditorProps["options"]>;
 
 function useDarkMode() {
-	const [isDark, setIsDark] = useState(
-		() => document.documentElement.classList.contains("dark")
-	);
+	const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"));
 	useEffect(() => {
 		const observer = new MutationObserver(() => {
 			setIsDark(document.documentElement.classList.contains("dark"));

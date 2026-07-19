@@ -16,7 +16,7 @@ import CollectionDetail from "@/modules/collections/CollectionDetail";
 import LoadTestDashboard from "@/modules/dashboard";
 import { HistoryDetail } from "@/modules/history/main";
 import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
-import { SettingsMain, SettingsCategoryTree } from "@/modules/settings";
+import { SettingsLayout } from "@/modules/settings";
 import VariablesMain from "@/modules/variables/main/VariablesMain";
 
 function renderTabContent(tab: Tab | null): React.ReactNode {
@@ -35,14 +35,7 @@ function renderTabContent(tab: Tab | null): React.ReactNode {
 		case "variables":
 			return <VariablesMain />;
 		case "settings":
-			return (
-				<div className="flex flex-1 min-w-0 h-full overflow-hidden">
-					<div className="w-60 shrink-0 border-r border-border bg-panel overflow-y-auto">
-						<SettingsCategoryTree />
-					</div>
-					<SettingsMain />
-				</div>
-			);
+			return <SettingsLayout />;
 		default:
 			return null;
 	}

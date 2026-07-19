@@ -11,11 +11,11 @@
 
 | Level | Token | Dark | Light |
 |-------|-------|------|-------|
-| Canvas (outermost) | `bg-background` | `#09090b` | `#e6e3dc` |
-| Panel (sidebar/header/toolbar) | `bg-panel` | `#111113` | `#f2f0eb` |
+| Canvas (outermost) | `bg-background` | `#09090b` | `#f4f4f5` |
+| Panel (sidebar/header/toolbar) | `bg-panel` | `#111113` | `#fafafa` |
 | Card (content surface) | `bg-card` | `#1a1a1f` | `#ffffff` |
 
-**Warm Stone light mode** — light surfaces use warm gray-stone tones, never cold white/gray.  
+**Paper White light mode** — light surfaces use a cool near-neutral (zinc) family; higher surfaces are lighter (canvas → panel → white card).  
 **Dark canvas** — dark mode uses near-black with subtle violet undertones (zinc-950 family).
 
 ---
@@ -33,9 +33,9 @@ All tokens live in `app/src/index.css` as HSL channel values (no `hsl()` wrapper
 --card:       240  6% 11%;   /* #1a1a1f — elevated surface */
 
 /* Light */
---background: 42 17% 88%;   /* #e6e3dc — warm stone canvas */
---panel:      42 21% 94%;   /* #f2f0eb — warm panel */
---card:        0  0% 100%;  /* #ffffff — white card */
+--background: 240  6% 96%;  /* #f4f4f5 — paper-white canvas */
+--panel:      240  5% 98%;  /* #fafafa — panel */
+--card:         0  0% 100%; /* #ffffff — white card */
 ```
 
 ### Foreground Scale
@@ -44,13 +44,17 @@ All tokens live in `app/src/index.css` as HSL channel values (no `hsl()` wrapper
 /* Dark */
 --foreground:         240  5% 96%;   /* #f4f4f5 — primary text */
 --muted-foreground:   240  5% 65%;   /* #a1a1aa — secondary / labels */
---subtle-foreground:  240  5% 34%;   /* #52525b — de-emphasized, placeholders */
+--subtle-foreground:  240  4% 44%;   /* de-emphasized text — faintest readable tier */
 
 /* Light */
 --foreground:         240  6% 10%;   /* #18181b — primary text */
 --muted-foreground:   240  4% 46%;   /* #71717a — secondary / labels */
---subtle-foreground:  240  7% 78%;   /* #c4c4cc — de-emphasized, placeholders */
+--subtle-foreground:  240  4% 58%;   /* de-emphasized text — faintest readable tier */
 ```
+
+`subtle-foreground` is the least-prominent text tier (ancillary units, dashes,
+sub-labels), tuned to stay legible (~3:1 on card) while remaining below
+`muted-foreground` in emphasis.
 
 ### Interactive States
 
@@ -60,8 +64,8 @@ All tokens live in `app/src/index.css` as HSL channel values (no `hsl()` wrapper
 --accent-active: 240  6% 21%;   /* #323238 — selected / active background */
 
 /* Light */
---accent:        38 20% 89%;   /* #e9e5de — hover background */
---accent-active: 40 16% 85%;   /* #dedad2 — selected / active background */
+--accent:        240 5% 93%;   /* #ededef — hover background */
+--accent-active: 240 5% 88%;   /* #e0e0e4 — selected / active background */
 ```
 
 ### Borders
@@ -72,19 +76,31 @@ All tokens live in `app/src/index.css` as HSL channel values (no `hsl()` wrapper
 --border-strong: 0  0% 18%;   /* ≈ rgba(255,255,255,0.15) — prominent borders */
 
 /* Light */
---border:       40  9% 80%;   /* ≈ rgba(0,0,0,0.09) — default dividers */
---border-strong: 40  6% 72%;  /* ≈ rgba(0,0,0,0.18) — prominent borders */
+--border:       240  6% 89%;   /* #e2e2e5 — default dividers */
+--border-strong: 240 5% 82%;   /* #cfcfd5 — prominent borders */
 ```
 
 ### Primary (Accent Color)
 
-Default is Sunset orange. Overridden by `[data-color-scheme]` attribute.
+Default is Sunset orange. Overridden by `[data-color-scheme]` attribute. The
+accent is **split into two tokens** to resolve a contrast bind:
+
+- **`--primary`** — the accent used for text, borders, rings, tints, indicators
+  (`text-primary`, `border-primary`, `bg-primary/10`). Mode-adaptive: deep on
+  the light card, brightened on the near-black dark canvas so it reads in both.
+- **`--primary-fill`** — solid button/badge backgrounds that carry a white
+  label (`bg-primary-fill`). Kept deep in **both** modes so white text clears
+  AA-large (a brightened dark accent would fail white-on-fill).
+
+Rule: white-labelled solid fills use `bg-primary-fill`; everything else accent
+uses `--primary`. `--primary-foreground` (white) sits on the fill.
 
 ```css
---primary:            24.6 95% 53.1%;   /* #f97316 — orange-500 */
---primary-foreground:  0   0% 100%;     /* white text on primary */
---ring:               24.6 95% 53.1%;   /* focus rings */
---variable:           24.6 95% 53.1%;   /* variable highlights in URL/body */
+/* Sunset (default) */
+--primary:       24 90% 46%;   /* light — deep accent */    /* dark: 24 95% 58% (brighter) */
+--primary-fill:  24 90% 46%;   /* both modes — white-safe button fill */
+--primary-foreground: 0 0% 100%;
+--ring / --variable: track --primary
 ```
 
 ### Semantic Status Colors
@@ -104,6 +120,89 @@ These differ between light and dark mode.
 --info:               199 89% 48%;   /* same */
 --destructive:          0 62.8% 30.6%;  /* darker red */
 ```
+
+**`-text` variants for legible text.** The base `--success` / `--warning` /
+`--destructive` tokens are tuned as *fills and indicators*; as small text on a
+light surface they fall below AA. Use the darkened (light) / lightened (dark)
+`-text` variant when the color is the text itself — `text-success-text`,
+`text-warning-text`, `text-destructive-text` — keeping `bg-*` / `border-*`
+fills on the base token.
+
+```css
+/* Light — accessible text on light surfaces */
+--success-text:  142 72% 30%;   --warning-text:  38 90% 35%;   --destructive-text: 0 60% 48%;
+/* Dark — accessible text on dark surfaces */
+--success-text:  142 60% 55%;   --warning-text:  40 92% 60%;   --destructive-text: 0 65% 63%;
+```
+
+### Variable Scope Colors (Categorical)
+
+Variable scopes use a **categorical** palette (not semantic status): a distinct
+hue per scope, mode-adaptive so it reads on both light and dark surfaces. Used
+as text/icon/border at full strength and as tinted backgrounds via opacity.
+
+```css
+/* Light */
+--scope-global:      142 72% 29%;   /* green-700 */
+--scope-collection:   21 90% 42%;   /* orange-700 */
+--scope-environment: 217 91% 45%;   /* blue-600 */
+
+/* Dark */
+--scope-global:      142 69% 58%;   /* green-400 */
+--scope-collection:   27 96% 61%;   /* orange-400 */
+--scope-environment: 213 94% 68%;   /* blue-400 */
+```
+
+**Utility classes** (`text-`, `bg-`, `border-`, `ring-`, `accent-`):
+`text-scope-global`, `bg-scope-collection/10`, `border-scope-environment/20`, …
+
+| Scope | Token | Convention |
+|-------|-------|-----------|
+| Global | `scope-global` | icon/text solid; `bg-scope-global/10` tint |
+| Collection | `scope-collection` | icon/text solid; `bg-scope-collection/10` tint |
+| Environment | `scope-environment` | icon/text solid; `bg-scope-environment/10` tint |
+
+Never hardcode `bg-green-50 dark:bg-green-950` pairs for scopes — use the token
+at an opacity (`/10` background, `/20`–`/30` border, full for text/icon).
+
+### Run / Status Indicator Colors
+
+Run, connection, and test status (dots, left-bars, pills, status icons) use a
+cohesive `--status-*` set. Unlike everything else, these are **mode-consistent**
+— the same value in light and dark — because a status dot should read as the
+same "good / bad / busy" signal on either surface. Distinct from `--success` /
+`--destructive`, which are tuned for banner text and button fills respectively.
+
+```css
+--status-success: 142 71% 45%;   /* green-500  — completed / connected / pass */
+--status-error:   0 84% 60%;     /* red-500    — failed / test fail */
+--status-running: 217 91% 60%;   /* blue-500   — running */
+--status-stopped: 25 95% 53%;    /* orange-500 — stopped */
+/* pending → text-muted-foreground / bg-muted-foreground */
+```
+
+**Utility classes** (`text-`, `bg-`, `border-`): `text-status-success`,
+`bg-status-error`, `border-status-running/25`, etc. Use `--warning` for
+"expiring / caution" indicators (amber) and `--success` for success *banners*.
+
+The same set also colors **HTTP response severity** (2xx → `status-success`,
+3xx → `status-running`, 4xx → `warning`, 5xx/0 → `status-error`) and **latency
+thresholds** (normal → `status-running`, slow → `status-stopped`, danger →
+`status-error`), since those map onto the same hues.
+
+### Decorative categorical palettes (the one token exception)
+
+A few surfaces use a **fixed decorative palette** to give items a stable
+identity by color rather than to signal state — the same idea as `--chart-*`.
+These intentionally keep Tailwind hue utilities (with `dark:` variants) instead
+of tokens, because they never respond to theme and don't carry semantics:
+
+- **Settings sections** — per-section accent (pink/blue/amber/cyan/purple/green).
+- **Timing phases** — DNS / connect / TLS / TTFB / download in the breakdown.
+- **Console sections** — Pre-request (blue) vs Test (green) script groups; the
+  console body is a deliberately dark terminal (`zinc-900`) in both modes.
+
+Everything else — state, status, scope, semantics — must use tokens.
 
 ### HTTP Method Color Tokens
 
@@ -166,27 +265,34 @@ const METHOD_COLORS: Record<HttpMethod, string> = {
 
 ### Charts
 
-```css
-/* Dark */
---chart-1: 24.6 95% 53.1%;   /* primary (orange by default) */
---chart-2: 160  60% 45%;
---chart-3:  30  80% 55%;
---chart-4: 280  65% 60%;
---chart-5: 340  75% 55%;
+A cohesive categorical set — `chart-1` tracks the active accent, then four
+evenly-spaced hues (teal / violet / amber / rose) shared across modes and tuned
+only in lightness for each ground.
 
+```css
 /* Light */
---chart-1: 24.6 95% 53.1%;   /* same */
---chart-2: 173 58% 39%;
---chart-3: 197 37% 24%;
---chart-4:  43 74% 66%;
---chart-5:  27 87% 67%;
+--chart-1: <accent>;         /* tracks --primary */
+--chart-2: 172 66% 38%;   /* teal */
+--chart-3: 258 55% 55%;   /* violet */
+--chart-4:  38 88% 48%;   /* amber */
+--chart-5: 340 72% 50%;   /* rose */
+
+/* Dark — same hues, lifted for the dark ground */
+--chart-1: <accent>;
+--chart-2: 172 60% 52%;
+--chart-3: 258 78% 72%;
+--chart-4:  38 90% 60%;
+--chart-5: 340 74% 62%;
 ```
 
 ---
 
 ## Color Schemes (Accent Themes)
 
-Applied via `data-color-scheme` attribute on `<html>`. Only `--primary`, `--primary-foreground`, `--ring`, `--variable`, and `--chart-1` change.
+Applied via `data-color-scheme` attribute on `<html>`. Each scheme sets
+`--primary`, `--primary-fill`, `--primary-foreground`, `--ring`, `--variable`,
+and `--chart-1`. The authoritative per-scheme values (deep fill + mode-adaptive
+accent) live in `app/src/index.css`; the table below is an approximate guide.
 
 | Scheme | Light HSL | Dark HSL |
 |--------|-----------|----------|
@@ -214,9 +320,18 @@ Applied via `data-color-scheme` attribute on `<html>`. Only `--primary`, `--prim
 ```
 
 ```css
-body { font-family: "Space Grotesk", system-ui, sans-serif; }
+body { font-family: var(--font-sans); } /* default: "Space Grotesk", system-ui, sans-serif */
 /* mono via font-mono Tailwind class, or .font-code utility */
 ```
+
+**User-selectable UI font + scale.** Settings → Appearance → Interface lets the
+user pick the sans/body face (Space Grotesk / Inter / System / JetBrains Mono)
+and an interface scale (Compact / Default / Comfortable). Font swaps the `--font-sans`
+custom property (so `body` + every `font-sans` utility follow); scale sets the
+page zoom factor (Electron `webFrame`, CSS `zoom` fallback in the browser).
+Both are owned by `useAppearance` (source of truth `constants/appearance.ts`),
+persisted to localStorage, and applied pre-paint in `index.html`. Code/mono
+text stays JetBrains Mono regardless.
 
 ### Type Scale Conventions
 
@@ -235,19 +350,25 @@ body { font-family: "Space Grotesk", system-ui, sans-serif; }
 ## Geometry
 
 ```css
---radius: 0.375rem;   /* 6px — base border radius */
+--radius: 0.375rem;   /* 6px — base border radius (default) */
 ```
 
 | Class | Value |
 |-------|-------|
-| `rounded-sm` | `calc(0.375rem - 4px)` = 2px |
-| `rounded-md` | `calc(0.375rem - 2px)` = 4px |
-| `rounded-lg` | `0.375rem` = 6px |
+| `rounded-sm` | `calc(var(--radius) - 4px)` |
+| `rounded-md` | `calc(var(--radius) - 2px)` |
+| `rounded-lg` | `var(--radius)` |
 | `rounded-full` | pill / circle |
 
-Note: Tailwind's unsuffixed `rounded` is its own default scale (4px) and is not in the custom config. Prefer explicit `rounded-md` or `rounded-lg`.
+**User-adjustable.** Settings → Appearance → Interface → Roundedness sets
+`--radius` (Square `0rem` / Default `0.375rem` / Rounded `0.75rem`), owned by
+`useAppearance`, persisted, applied pre-paint. So `rounded-sm/md/lg` reshape
+live. **Always use `rounded-md`/`rounded-lg`/`rounded-sm`, never Tailwind's
+unsuffixed `rounded`** (fixed 4px — it ignores `--radius` and won't follow the
+control). `rounded-full` stays a pill regardless.
 
-Cards and panels use `rounded-md`. Badges/chips use `rounded` or `rounded-sm`. Status pills use `rounded-full`.
+Cards and panels use `rounded-md`. Badges/chips use `rounded-sm`. Status pills
+use `rounded-full`.
 
 ---
 

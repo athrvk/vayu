@@ -76,7 +76,7 @@ function KeyValueRow({
 					checked={item.enabled}
 					onChange={(e) => onUpdate(item.id, "enabled", e.target.checked)}
 					disabled={isReadOnly || !canDisable}
-					className="w-4 h-4 rounded border-input cursor-pointer disabled:opacity-50"
+					className="w-4 h-4 rounded-md border-input cursor-pointer disabled:opacity-50"
 				/>
 			) : (
 				<div className="w-4" />

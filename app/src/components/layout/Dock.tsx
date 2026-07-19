@@ -7,7 +7,13 @@
 
 import { FolderOpen, Clock, Zap, PanelRight, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useLayoutStore, useEngineStore, useSaveStore, useTabsStore, type DrawerView } from "@/stores";
+import {
+	useLayoutStore,
+	useEngineStore,
+	useSaveStore,
+	useTabsStore,
+	type DrawerView,
+} from "@/stores";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui";
 
 interface DrawerButton {
@@ -37,7 +43,7 @@ function DockButton({ active, onClick, tooltip, children }: DockButtonProps) {
 				<button
 					onClick={onClick}
 					className={cn(
-						"flex items-center justify-center w-7 h-7 rounded text-xs transition-colors",
+						"flex items-center justify-center w-7 h-7 rounded-md text-xs transition-colors",
 						active
 							? "bg-accent text-accent-foreground"
 							: "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
@@ -82,7 +88,7 @@ export function Dock() {
 					<span
 						className={cn(
 							"flex items-center gap-1 text-xs",
-							isEngineConnected ? "text-green-500" : "text-muted-foreground"
+							isEngineConnected ? "text-status-success" : "text-muted-foreground"
 						)}
 					>
 						<span className="w-1.5 h-1.5 rounded-full bg-current" />
@@ -99,9 +105,7 @@ export function Dock() {
 						<span className="text-xs text-destructive">Save failed</span>
 					)}
 
-					<span className="text-xs text-muted-foreground/50">
-						v{__VAYU_VERSION__}
-					</span>
+					<span className="text-xs text-muted-foreground/50">v{__VAYU_VERSION__}</span>
 				</div>
 
 				{/* Right — toggles */}

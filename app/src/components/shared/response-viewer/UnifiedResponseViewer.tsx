@@ -98,7 +98,9 @@ export default function UnifiedResponseViewer({
 	// Compact mode: simpler layout for embedded views
 	if (compact) {
 		return (
-			<div className={cn("flex flex-col bg-card border overflow-hidden", className)}>
+			<div
+				className={cn("flex flex-col bg-card border rounded-lg overflow-hidden", className)}
+			>
 				{/* Simple tab buttons */}
 				<div className="flex gap-2 p-3 border-b bg-muted/30">
 					<Button
@@ -230,7 +232,7 @@ export default function UnifiedResponseViewer({
 								<TooltipTrigger asChild>
 									<Button size="icon" variant="ghost" onClick={handleCopy}>
 										{copied ? (
-											<Check className="w-4 h-4 text-green-500" />
+											<Check className="w-4 h-4 text-status-success" />
 										) : (
 											<Copy className="w-4 h-4" />
 										)}
@@ -333,12 +335,12 @@ function ResponseStatusBar({
 }) {
 	const statusColor =
 		status >= 200 && status < 300
-			? "bg-green-500"
+			? "bg-status-success"
 			: status >= 300 && status < 400
-				? "bg-yellow-500"
+				? "bg-warning"
 				: status >= 400 && status < 500
-					? "bg-orange-500"
-					: "bg-red-500";
+					? "bg-status-stopped"
+					: "bg-status-error";
 
 	return (
 		<div className="flex items-center gap-4 px-4 py-3 border-b border-border bg-muted/30">

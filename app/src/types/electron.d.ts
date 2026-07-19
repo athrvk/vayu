@@ -58,6 +58,10 @@ interface ElectronAPI {
 	// Menu-driven navigation
 	onOpenSettings: (callback: () => void) => () => void;
 
+	// Interface scale (page zoom)
+	setZoomFactor: (factor: number) => void;
+	getZoomFactor: () => number;
+
 	// OAuth 2.0 interactive flow
 	oauthOpenExternal: (url: string) => Promise<void>;
 	oauthOpenWindow: (params: {

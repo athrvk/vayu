@@ -5,8 +5,10 @@ Modern unified build system for C++ Engine + Electron App
 """
 
 import argparse
+import contextlib
 import json
 import os
+import signal
 import platform
 import re
 import shutil
@@ -17,8 +19,16 @@ from pathlib import Path
 from typing import Optional, Tuple, List
 import threading
 
+# Windows consoles often default to a legacy code page (cp1252) that cannot encode
+# the symbol glyphs used below, which would raise UnicodeEncodeError mid-output.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # Global flags
 VERBOSE = False
+ACTIVE_SPINNER = None  # Set while a Spinner is running, so interrupt handling
+                       # can retire its line instead of leaving it mid-frame.
 CMAKE_PATH = "cmake"  # Will be updated if found in non-standard location
 PNPM_PATH = "pnpm"  # Will be updated if found in non-standard location
 
@@ -49,12 +59,44 @@ class Style:
     DOT = '•'
     SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
+@contextlib.contextmanager
+def defer_interrupt():
+    """Hold off Ctrl+C until the block finishes, then deliver it.
+
+    For short critical sections that must not be left half-applied. Falls back
+    to doing nothing off the main thread, where signal handlers cannot be set.
+    """
+    pending = []
+
+    try:
+        previous = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, lambda *args: pending.append(args))
+    except (ValueError, OSError, AttributeError):
+        yield  # Not on the main thread; run unprotected rather than fail.
+        return
+
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous)
+        if pending and callable(previous):
+            previous(*pending[0])
+
+def fmt_duration(seconds: float) -> str:
+    """Format a duration compactly (e.g. '4.2s', '2m 07s')."""
+    if seconds < 60:
+        return f'{seconds:.1f}s'
+    minutes, secs = divmod(int(round(seconds)), 60)
+    return f'{minutes}m {secs:02d}s'
+
 class Spinner:
-    """Simple spinner for long-running operations."""
+    """Simple spinner for long-running operations. Times the operation it wraps."""
     def __init__(self, message: str):
         self.message = message
         self.running = False
         self.thread = None
+        self.start_time = None
+        self.elapsed = 0.0
 
     def _spin(self):
         idx = 0
@@ -65,18 +107,30 @@ class Spinner:
             idx = (idx + 1) % len(Style.SPINNER)
 
     def start(self):
+        global ACTIVE_SPINNER
+        self.start_time = time.time()
+        ACTIVE_SPINNER = self
         if not VERBOSE:
             self.running = True
-            self.thread = threading.Thread(target=self._spin)
+            # daemon=True so an error path that exits without calling stop()
+            # cannot wedge the interpreter waiting on this thread.
+            self.thread = threading.Thread(target=self._spin, daemon=True)
             self.thread.start()
 
     def stop(self, symbol: str = Style.CHECK, color: str = Style.GREEN):
+        global ACTIVE_SPINNER
+        ACTIVE_SPINNER = None
+        self.elapsed = time.time() - self.start_time if self.start_time else 0.0
+        timing = f'{Style.DIM} ({fmt_duration(self.elapsed)}){Style.RESET}'
         if not VERBOSE:
             self.running = False
             if self.thread:
                 self.thread.join()
-            sys.stdout.write(f'\r  {color}{symbol}{Style.RESET} {self.message}\n')
+            sys.stdout.write(f'\r  {color}{symbol}{Style.RESET} {self.message}{timing}\n')
             sys.stdout.flush()
+        else:
+            # No spinner line to overwrite in verbose mode, but still report timing.
+            print(f'  {color}{symbol}{Style.RESET} {self.message}{timing}')
 
 def log(message: str, prefix: str = '', color: str = ''):
     """Simple log with optional prefix and color."""
@@ -113,10 +167,26 @@ def print_step(step: int, total: int, title: str):
     print(f'  {Style.BOLD}[{step}/{total}] {title}{Style.RESET}')
     print()
 
-def print_success(elapsed: int, artifacts: List[Tuple[str, str]]):
+def print_timing_summary(phases: List[Tuple[str, float]], total: float):
+    """Print per-phase timings and the overall total."""
+    if not phases:
+        return
+    print()
+    print(f'  {Style.BOLD}Timing{Style.RESET}')
+    print()
+    width = max(len(name) for name, _ in phases + [("Total", 0.0)])
+    for name, seconds in phases:
+        share = f'{seconds / total * 100:4.1f}%' if total > 0 else '   - '
+        print(f'  {Style.GRAY}{name.ljust(width)}{Style.RESET}  '
+              f'{fmt_duration(seconds).rjust(8)}  {Style.DIM}{share}{Style.RESET}')
+    print(f'  {Style.BOLD}{"Total".ljust(width)}{Style.RESET}  '
+          f'{Style.BOLD}{fmt_duration(total).rjust(8)}{Style.RESET}')
+    print()
+
+def print_success(elapsed: float, artifacts: List[Tuple[str, str]]):
     """Print success message with artifacts."""
     print()
-    print(f'  {Style.GREEN}{Style.CHECK} Build complete{Style.RESET} {Style.DIM}({elapsed}s){Style.RESET}')
+    print(f'  {Style.GREEN}{Style.CHECK} Build complete{Style.RESET} {Style.DIM}({fmt_duration(elapsed)}){Style.RESET}')
 
     if artifacts:
         print()
@@ -191,8 +261,10 @@ def find_visual_studio() -> Optional[str]:
 
     try:
         # Find VS with VC++ tools
+        # -products * is required to match Build Tools; without it vswhere only
+        # returns the IDE SKUs (Community/Professional/Enterprise).
         result = subprocess.run(
-            [str(vswhere_path), '-latest', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'],
+            [str(vswhere_path), '-products', '*', '-latest', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'],
             capture_output=True,
             text=True,
             check=True
@@ -230,6 +302,117 @@ def find_cmake_windows() -> Optional[str]:
             return str(path)
 
     return None
+
+def find_ninja_windows() -> Optional[str]:
+    """Find Ninja on Windows (PATH, VS)."""
+    # Check PATH first
+    ninja_cmd = shutil.which("ninja")
+    if ninja_cmd:
+        return ninja_cmd
+
+    # Check Visual Studio (ships alongside the bundled CMake)
+    vs_path = find_visual_studio()
+    if vs_path:
+        vs_ninja = Path(vs_path) / 'Common7' / 'IDE' / 'CommonExtensions' / 'Microsoft' / 'CMake' / 'Ninja' / 'ninja.exe'
+        if vs_ninja.exists():
+            return str(vs_ninja)
+
+    return None
+
+def setup_msvc_env() -> bool:
+    """Import the MSVC developer environment on Windows.
+
+    The Ninja generator locates the compiler via PATH, unlike the Visual Studio
+    generator which discovers the toolchain itself. Without this, configuring
+    fails with "No CMAKE_CXX_COMPILER could be found" outside a Developer
+    Command Prompt. No-op on other platforms.
+    """
+    system_name, _ = detect_platform()
+    if system_name != "Windows":
+        return True
+
+    # Already running inside a Developer Command Prompt.
+    if shutil.which("cl"):
+        return True
+
+    vs_path = find_visual_studio()
+    if not vs_path:
+        return False
+
+    vcvars = Path(vs_path) / 'VC' / 'Auxiliary' / 'Build' / 'vcvars64.bat'
+    if not vcvars.exists():
+        return False
+
+    try:
+        # Run vcvars in a child shell and import the environment it produces.
+        # shell=True so cmd parses the line as written - passing this as an
+        # argument list makes cmd mangle the quotes around the space-containing
+        # path and silently fail.
+        result = subprocess.run(
+            f'"{vcvars}" >nul 2>&1 && set',
+            shell=True,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+    except (subprocess.CalledProcessError, OSError):
+        return False
+
+    # vcvars ships its own vcpkg; keep the root we already resolved.
+    preserved_vcpkg_root = os.environ.get("VCPKG_ROOT")
+
+    for line in result.stdout.splitlines():
+        name, sep, value = line.partition('=')
+        if sep and name:
+            os.environ[name] = value
+
+    if preserved_vcpkg_root:
+        os.environ["VCPKG_ROOT"] = preserved_vcpkg_root
+
+    return shutil.which("cl") is not None
+
+def find_build_artifact(build_dir: Path, build_type: str, stem: str) -> Optional[Path]:
+    """Locate a built artifact.
+
+    Multi-config generators (Visual Studio) nest output under a per-config
+    subdirectory; single-config generators (Ninja, Makefiles) write directly to
+    the build directory. Check both so the layout can change without breaking.
+    """
+    system_name, _ = detect_platform()
+    name = f"{stem}.exe" if system_name == "Windows" else stem
+    for candidate in (build_dir / name, build_dir / build_type / name):
+        if candidate.exists():
+            return candidate
+    return None
+
+def find_engine_binary(build_dir: Path, build_type: str) -> Optional[Path]:
+    """Locate the built engine binary."""
+    return find_build_artifact(build_dir, build_type, "vayu-engine")
+
+def resolve_ctest() -> str:
+    """Resolve ctest, which ships next to cmake.
+
+    CMAKE_PATH may point at a Visual Studio bundled cmake that is not on PATH;
+    ctest lives in the same directory, so derive it rather than hoping PATH has
+    it. Resolves cmake independently when needed, because --test-only skips
+    check_prerequisites and so never populates CMAKE_PATH.
+    """
+    system_name, _ = detect_platform()
+
+    cmake_exe = CMAKE_PATH
+    if not cmake_exe or cmake_exe == "cmake":
+        if system_name == "Windows":
+            cmake_exe = find_cmake_windows()
+        else:
+            cmake_exe = shutil.which("cmake")
+
+    if cmake_exe and cmake_exe != "cmake":
+        cmake_path = Path(cmake_exe)
+        candidate = cmake_path.with_name("ctest" + cmake_path.suffix)
+        if candidate.exists():
+            return str(candidate)
+
+    return shutil.which("ctest") or "ctest"
 
 def find_pnpm_windows() -> Optional[str]:
     """Find pnpm on Windows (PATH, npm global, common locations)."""
@@ -358,6 +541,23 @@ def check_tool(name: str, command: List[str]) -> Tuple[bool, str]:
                 version = result.stdout.split('\n')[0] if result.stdout else "installed"
                 # Store for later use
                 CMAKE_PATH = cmake_path
+                return True, version
+            except:
+                return False, ""
+        return False, ""
+
+    # Special handling for Ninja on Windows
+    if name == "Ninja" and system_name == "Windows":
+        ninja_path = find_ninja_windows()
+        if ninja_path:
+            try:
+                result = subprocess.run([ninja_path, "--version"], capture_output=True, text=True, check=True)
+                version = result.stdout.split('\n')[0] if result.stdout else "installed"
+                # CMake locates ninja via PATH, so make the bundled copy reachable
+                # by the configure/build subprocesses.
+                ninja_dir = str(Path(ninja_path).parent)
+                if ninja_dir not in os.environ.get("PATH", "").split(os.pathsep):
+                    os.environ["PATH"] = ninja_dir + os.pathsep + os.environ.get("PATH", "")
                 return True, version
             except:
                 return False, ""
@@ -634,9 +834,11 @@ def setup_environment(project_root: Path):
     vcpkg_bin = Path(vcpkg_root) / "vcpkg"
     engine_dir = project_root / "engine"
     triplet = "x64-osx" if system_name == "macOS" else "x64-linux"
-    vcpkg_packages = ["curl", "nlohmann-json", "cpp-httplib", "gtest", "sqlite3", "sqlite-orm"]
+    # engine/ has a vcpkg.json manifest, so vcpkg runs in manifest mode and
+    # installs the declared dependencies. Manifest mode rejects individual
+    # package arguments, so pass only the triplet and let vcpkg.json drive it.
     result = subprocess.run(
-        [str(vcpkg_bin), "install"] + vcpkg_packages + ["--triplet", triplet],
+        [str(vcpkg_bin), "install", "--triplet", triplet],
         cwd=engine_dir,
     )
     if result.returncode == 0:
@@ -687,6 +889,47 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None, description: str = "
         print_error(f"Command not found: {cmd[0]}")
         return False, ""
 
+def cached_generator(build_dir: Path) -> Optional[str]:
+    """Read CMAKE_GENERATOR out of an existing CMake cache, if any."""
+    cache = build_dir / "CMakeCache.txt"
+    if not cache.exists():
+        return None
+    try:
+        for line in cache.read_text(errors="replace").splitlines():
+            if line.startswith("CMAKE_GENERATOR:"):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+def preset_generator(engine_dir: Path, preset_name: str) -> Optional[str]:
+    """Resolve the generator a configure preset will use, following 'inherits'."""
+    presets_file = engine_dir / "CMakePresets.json"
+    try:
+        data = json.loads(presets_file.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    by_name = {p["name"]: p for p in data.get("configurePresets", []) if "name" in p}
+
+    def resolve(name: str, seen: set) -> Optional[str]:
+        if name in seen or name not in by_name:
+            return None
+        seen.add(name)
+        preset = by_name[name]
+        if "generator" in preset:
+            return preset["generator"]
+        inherits = preset.get("inherits", [])
+        if isinstance(inherits, str):
+            inherits = [inherits]
+        for parent in inherits:
+            found = resolve(parent, seen)
+            if found:
+                return found
+        return None
+
+    return resolve(preset_name, set())
+
 def build_engine(preset: str, clean: bool, run_tests: bool, project_root: Path) -> Optional[Path]:
     """Build C++ engine."""
     engine_dir = project_root / "engine"
@@ -709,6 +952,18 @@ def build_engine(preset: str, clean: bool, run_tests: bool, project_root: Path) 
         shutil.rmtree(build_dir)
         spinner.stop()
         print()
+
+    # CMake refuses to reconfigure a cache that was generated by a different
+    # generator, so a preset switch (e.g. Visual Studio -> Ninja) needs a wipe.
+    if build_dir.exists():
+        was = cached_generator(build_dir)
+        now = preset_generator(engine_dir, preset)
+        if was and now and was != now:
+            spinner = Spinner(f"Generator changed ({was} -> {now}), clearing build directory")
+            spinner.start()
+            shutil.rmtree(build_dir, ignore_errors=True)
+            spinner.stop()
+            print()
 
     # Configure
     spinner = Spinner("Configuring CMake")
@@ -742,16 +997,10 @@ def build_engine(preset: str, clean: bool, run_tests: bool, project_root: Path) 
         return None
 
     # Verify binary
-    system_name, _ = detect_platform()
-    if system_name == "Windows":
-        binary_name = f"{build_type}/vayu-engine.exe"
-    else:
-        binary_name = "vayu-engine"
+    engine_binary = find_engine_binary(build_dir, build_type)
 
-    engine_binary = build_dir / binary_name
-
-    if not engine_binary.exists():
-        print_error(f"Binary not found: {engine_binary}")
+    if not engine_binary:
+        print_error(f"Binary not found under: {build_dir}")
         return None
 
     # Tests
@@ -760,7 +1009,7 @@ def build_engine(preset: str, clean: bool, run_tests: bool, project_root: Path) 
         spinner = Spinner("Running tests")
         spinner.start()
 
-        test_cmd = ["ctest", "--preset", preset]
+        test_cmd = [resolve_ctest(), "--preset", preset]
         success, output = run_command(test_cmd, cwd=engine_dir, description="Unit tests")
 
         if success:
@@ -786,13 +1035,10 @@ def run_tests_only(preset: str, project_root: Path) -> bool:
         return False
 
     # Check if tests were built
-    test_binary = build_dir / "vayu_tests"
-    system_name, _ = detect_platform()
-    if system_name == "Windows":
-        build_type = "Debug" if "dev" in preset else "Release"
-        test_binary = build_dir / build_type / "vayu_tests.exe"
+    build_type = "Debug" if "dev" in preset else "Release"
+    test_binary = find_build_artifact(build_dir, build_type, "vayu_tests")
 
-    if not test_binary.exists():
+    if not test_binary:
         print_error(f"Tests not found. Build with tests first:\npython build.py -e -t")
         return False
 
@@ -803,39 +1049,43 @@ def run_tests_only(preset: str, project_root: Path) -> bool:
     spinner = Spinner("Running tests")
     spinner.start()
 
-    test_cmd = ["ctest", "--preset", preset, "--output-on-failure"]
+    test_cmd = [resolve_ctest(), "--preset", preset, "--output-on-failure"]
 
     # Run with output visible in verbose mode
-    if VERBOSE:
-        spinner.stop()
-        log_dim(f'$ {" ".join(test_cmd)}')
-        result = subprocess.run(test_cmd, cwd=engine_dir)
-        success = result.returncode == 0
-    else:
-        result = subprocess.run(test_cmd, cwd=engine_dir, capture_output=True, text=True)
-        success = result.returncode == 0
-        output = result.stdout + result.stderr
-
-        if success:
+    try:
+        if VERBOSE:
             spinner.stop()
-            # Parse test count from output
-            if "tests passed" in output.lower():
-                for line in output.split('\n'):
-                    if "tests passed" in line.lower():
-                        print(f'  {Style.GREEN}{Style.CHECK}{Style.RESET} {line.strip()}')
-                        break
+            log_dim(f'$ {" ".join(test_cmd)}')
+            result = subprocess.run(test_cmd, cwd=engine_dir)
+            success = result.returncode == 0
         else:
-            spinner.stop(Style.CROSS, Style.RED)
-            print()
-            print(f'  {Style.RED}{Style.CROSS} Tests failed{Style.RESET}')
-            print()
-            # Show failed test output
-            lines = output.strip().split('\n')
-            for line in lines:
-                if any(kw in line.lower() for kw in ['failed', 'error', 'fatal']):
-                    print(f'  {Style.RED}{line}{Style.RESET}')
-                elif line.strip():
-                    print(f'  {Style.GRAY}{line}{Style.RESET}')
+            result = subprocess.run(test_cmd, cwd=engine_dir, capture_output=True, text=True)
+            success = result.returncode == 0
+            output = result.stdout + result.stderr
+
+            if success:
+                spinner.stop()
+                # Parse test count from output
+                if "tests passed" in output.lower():
+                    for line in output.split('\n'):
+                        if "tests passed" in line.lower():
+                            print(f'  {Style.GREEN}{Style.CHECK}{Style.RESET} {line.strip()}')
+                            break
+            else:
+                spinner.stop(Style.CROSS, Style.RED)
+                print()
+                print(f'  {Style.RED}{Style.CROSS} Tests failed{Style.RESET}')
+                print()
+                # Show failed test output
+                lines = output.strip().split('\n')
+                for line in lines:
+                    if any(kw in line.lower() for kw in ['failed', 'error', 'fatal']):
+                        print(f'  {Style.RED}{line}{Style.RESET}')
+                    elif line.strip():
+                        print(f'  {Style.GRAY}{line}{Style.RESET}')
+    except FileNotFoundError:
+        spinner.stop(Style.CROSS, Style.RED)
+        print_error(f"Command not found: {test_cmd[0]}")
 
     return success
 
@@ -1122,40 +1372,37 @@ def bump_version(bump_type: str, project_root: Path, dry_run: bool = False):
 
     new_major, new_minor, new_patch = parse_version(new_version)
 
-    # Update VERSION file
-    log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Updating VERSION')
-    version_file.write_text(new_version + '\n')
-
-    # Update CMakeLists.txt
-    log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Updating engine/CMakeLists.txt')
-    cmake_content = engine_cmake.read_text()
-    cmake_content = re.sub(
-        r'VERSION \d+\.\d+\.\d+',
-        f'VERSION {new_version}',
-        cmake_content
-    )
-    engine_cmake.write_text(cmake_content)
-
-    # Update version.hpp
-    log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Updating engine/include/vayu/version.hpp')
+    # Compute every file's new contents before writing any of them. Writing as
+    # we go means an interrupt (or a read error on a later file) leaves the
+    # version disagreeing across files, which is worse than not bumping at all.
     hpp_content = engine_version_hpp.read_text()
     hpp_content = re.sub(r'#define VAYU_VERSION_MAJOR \d+', f'#define VAYU_VERSION_MAJOR {new_major}', hpp_content)
     hpp_content = re.sub(r'#define VAYU_VERSION_MINOR \d+', f'#define VAYU_VERSION_MINOR {new_minor}', hpp_content)
     hpp_content = re.sub(r'#define VAYU_VERSION_PATCH \d+', f'#define VAYU_VERSION_PATCH {new_patch}', hpp_content)
     hpp_content = re.sub(r'#define VAYU_VERSION_STRING ".*"', f'#define VAYU_VERSION_STRING "{new_version}"', hpp_content)
-    engine_version_hpp.write_text(hpp_content)
 
-    # Update engine/vcpkg.json
-    log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Updating engine/vcpkg.json')
     vcpkg_data = json.loads(engine_vcpkg_json.read_text())
     vcpkg_data['version'] = new_version
-    engine_vcpkg_json.write_text(json.dumps(vcpkg_data, indent=2) + '\n')
 
-    # Update app/package.json
-    log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Updating app/package.json')
     package_data = json.loads(app_package_json.read_text())
     package_data['version'] = new_version
-    app_package_json.write_text(json.dumps(package_data, indent='\t') + '\n')
+
+    pending: List[Tuple[Path, str, str]] = [
+        (version_file, new_version + '\n', 'VERSION'),
+        (engine_cmake,
+         re.sub(r'VERSION \d+\.\d+\.\d+', f'VERSION {new_version}', engine_cmake.read_text()),
+         'engine/CMakeLists.txt'),
+        (engine_version_hpp, hpp_content, 'engine/include/vayu/version.hpp'),
+        (engine_vcpkg_json, json.dumps(vcpkg_data, indent=2) + '\n', 'engine/vcpkg.json'),
+        (app_package_json, json.dumps(package_data, indent='\t') + '\n', 'app/package.json'),
+    ]
+
+    # Writes are deferred to a single tight loop, and Ctrl+C is held off until
+    # every file has landed, so the tree cannot be left half-bumped.
+    with defer_interrupt():
+        for path, content, label in pending:
+            path.write_text(content)
+            log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Updated {label}')
 
     print()
     print(f'  {Style.GREEN}{Style.CHECK} Version bumped to {new_version}{Style.RESET}')
@@ -1174,6 +1421,19 @@ def bump_version(bump_type: str, project_root: Path, dry_run: bool = False):
     print()
 
 def main():
+    """Entry point. Wraps _run so that every branch - including the ones that
+    return before the build sequence (--setup, --bump-version, --test-only) -
+    reports a clean interrupt rather than a raw KeyboardInterrupt traceback.
+    """
+    try:
+        _run()
+    except KeyboardInterrupt:
+        if ACTIVE_SPINNER:
+            ACTIVE_SPINNER.stop(Style.CROSS, Style.RED)
+        print()
+        print_error("Interrupted")
+
+def _run():
     global VERBOSE
 
     parser = argparse.ArgumentParser(
@@ -1259,9 +1519,9 @@ def main():
         if not run_tests_only(preset, project_root):
             sys.exit(1)
 
-        elapsed = int(time.time() - start_time)
+        elapsed = time.time() - start_time
         print()
-        print(f'  {Style.GREEN}{Style.CHECK} Tests complete{Style.RESET} {Style.DIM}({elapsed}s){Style.RESET}')
+        print(f'  {Style.GREEN}{Style.CHECK} Tests complete{Style.RESET} {Style.DIM}({fmt_duration(elapsed)}){Style.RESET}')
         print()
         return
 
@@ -1280,12 +1540,29 @@ def main():
 
     current_step = 0
 
+    phase_times: List[Tuple[str, float]] = []
+
     try:
 
         # Prerequisites
         current_step += 1
         print_step(current_step, total_steps, "Prerequisites")
+        phase_start = time.time()
         check_prerequisites(skip_app)
+
+        # The Ninja generator needs cl.exe on PATH; the Visual Studio generator
+        # does not. Set it up whenever we are going to build the engine.
+        if not skip_engine and system_name == "Windows":
+            spinner = Spinner("Setting up MSVC environment")
+            spinner.start()
+            if setup_msvc_env():
+                spinner.stop()
+            else:
+                spinner.stop(Style.CROSS, Style.RED)
+                print_error("Could not set up the MSVC environment. "
+                            "Run from a Developer Command Prompt, or check that "
+                            "Visual Studio Build Tools has the C++ workload installed.")
+        phase_times.append(("Prerequisites", time.time() - phase_start))
 
         engine_binary = None
 
@@ -1293,21 +1570,19 @@ def main():
         if not skip_engine:
             current_step += 1
             print_step(current_step, total_steps, "Engine")
+            phase_start = time.time()
             engine_binary = build_engine(preset, args.clean, args.tests, project_root)
+            phase_times.append(("Engine", time.time() - phase_start))
             if not engine_binary:
                 sys.exit(1)
         else:
             # Find existing binary
             engine_dir = project_root / "engine"
             build_dir = engine_dir / ("build" if dev_mode else "build-release")
+            build_type = "Debug" if dev_mode else "Release"
+            engine_binary = find_engine_binary(build_dir, build_type)
 
-            if system_name == "Windows":
-                build_type = "Debug" if dev_mode else "Release"
-                engine_binary = build_dir / build_type / "vayu-engine.exe"
-            else:
-                engine_binary = build_dir / "vayu-engine"
-
-            if engine_binary.exists():
+            if engine_binary:
                 log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Using existing engine binary')
                 print()
 
@@ -1315,17 +1590,22 @@ def main():
         if not skip_app:
             current_step += 1
             print_step(current_step, total_steps, "Application")
+            phase_start = time.time()
             if not build_app(dev_mode, engine_binary, project_root):
                 sys.exit(1)
+            phase_times.append(("Application", time.time() - phase_start))
 
         # Success
-        elapsed = int(time.time() - start_time)
+        elapsed = time.time() - start_time
         artifacts = get_artifacts(dev_mode, skip_engine, skip_app, engine_binary, project_root)
 
         print_success(elapsed, artifacts)
+        print_timing_summary(phase_times, elapsed)
         print_next_steps(dev_mode, skip_app, artifacts, project_root)
 
     except KeyboardInterrupt:
+        if ACTIVE_SPINNER:
+            ACTIVE_SPINNER.stop(Style.CROSS, Style.RED)
         print()
         print_error("Build interrupted")
     except Exception as e:

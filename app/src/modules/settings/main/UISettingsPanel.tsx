@@ -17,16 +17,13 @@ import {
 	Monitor,
 	Sun,
 	Moon,
-	Palette,
+	SunMoon,
 	CheckCircle2,
-	Circle,
-	Cloud,
-	Waves,
-	Trees,
-	Sunset,
-	Sparkles,
-	Heart,
+	SwatchBook,
 	FolderOpen,
+	Type,
+	Maximize2,
+	Squircle,
 } from "lucide-react";
 import {
 	Card,
@@ -36,7 +33,10 @@ import {
 	CardTitle,
 	Skeleton,
 } from "@/components/ui";
-import { useElectronTheme, type ThemeSource, type ColorScheme } from "@/hooks/useElectronTheme";
+import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
+import { useAppearance } from "@/hooks/useAppearance";
+import { COLOR_SCHEMES } from "@/constants/color-schemes";
+import { UI_FONTS, UI_SCALES, UI_RADII } from "@/constants/appearance";
 import { cn } from "@/lib/utils";
 
 interface AppPaths {
@@ -47,11 +47,16 @@ interface AppPaths {
 }
 
 export default function UISettingsPanel() {
-	const { themeSource, setTheme, colorScheme, setColorScheme, isLoading } = useElectronTheme();
+	const { themeSource, setTheme, colorScheme, setColorScheme, isDark, isLoading } =
+		useElectronTheme();
+	const { font, setFont, scale, setScale, radius, setRadius } = useAppearance();
 	const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
 
 	useEffect(() => {
-		window.electronAPI?.getAppPaths().then(setAppPaths).catch(() => {});
+		window.electronAPI
+			?.getAppPaths()
+			.then(setAppPaths)
+			.catch(() => {});
 	}, []);
 
 	const themeOptions: {
@@ -80,57 +85,6 @@ export default function UISettingsPanel() {
 		},
 	];
 
-	const colorSchemeOptions: {
-		value: ColorScheme;
-		label: string;
-		icon: typeof Cloud;
-		description: string;
-		color: string;
-	}[] = [
-		{
-			value: "sky",
-			label: "Sky",
-			icon: Cloud,
-			description: "Calm and airy",
-			color: "bg-sky-500",
-		},
-		{
-			value: "ocean",
-			label: "Ocean",
-			icon: Waves,
-			description: "Deep and professional",
-			color: "bg-blue-500",
-		},
-		{
-			value: "forest",
-			label: "Forest",
-			icon: Trees,
-			description: "Fresh and natural",
-			color: "bg-green-500",
-		},
-		{
-			value: "sunset",
-			label: "Sunset",
-			icon: Sunset,
-			description: "Warm and energetic",
-			color: "bg-orange-500",
-		},
-		{
-			value: "aurora",
-			label: "Aurora",
-			icon: Sparkles,
-			description: "Magical and modern",
-			color: "bg-purple-500",
-		},
-		{
-			value: "coral",
-			label: "Coral",
-			icon: Heart,
-			description: "Vibrant and lively",
-			color: "bg-rose-500",
-		},
-	];
-
 	return (
 		<div className="flex-1 flex flex-col overflow-hidden">
 			{/* Header */}
@@ -152,7 +106,7 @@ export default function UISettingsPanel() {
 					<Card>
 						<CardHeader className="pb-3">
 							<div className="flex items-center gap-2">
-								<Palette className="w-5 h-5 text-muted-foreground" />
+								<SunMoon className="w-5 h-5 text-muted-foreground" />
 								<CardTitle className="text-base">Theme Mode</CardTitle>
 							</div>
 							<CardDescription>
@@ -187,7 +141,7 @@ export default function UISettingsPanel() {
 													className={cn(
 														"w-10 h-10 rounded-full flex items-center justify-center",
 														isSelected
-															? "bg-primary text-primary-foreground"
+															? "bg-primary-fill text-primary-foreground"
 															: "bg-muted text-muted-foreground"
 													)}
 												>
@@ -221,7 +175,7 @@ export default function UISettingsPanel() {
 					<Card>
 						<CardHeader className="pb-3">
 							<div className="flex items-center gap-2">
-								<Circle className="w-5 h-5 text-muted-foreground" />
+								<SwatchBook className="w-5 h-5 text-muted-foreground" />
 								<CardTitle className="text-base">Color Scheme</CardTitle>
 							</div>
 							<CardDescription>
@@ -241,7 +195,7 @@ export default function UISettingsPanel() {
 								</div>
 							) : (
 								<div className="grid grid-cols-3 gap-3">
-									{colorSchemeOptions.map((option) => {
+									{COLOR_SCHEMES.map((option) => {
 										const Icon = option.icon;
 										const isSelected = colorScheme === option.value;
 										return (
@@ -257,15 +211,20 @@ export default function UISettingsPanel() {
 												)}
 											>
 												<div className="flex items-center gap-2">
+													{/* Swatch derives from the scheme's own accent
+													    token so it can never drift from reality.
+													    data-color-scheme (+ dark) scopes --primary
+													    to this scheme regardless of the active one. */}
 													<div
+														data-color-scheme={option.value}
 														className={cn(
-															"w-8 h-8 rounded-full flex items-center justify-center",
-															option.color,
+															"w-8 h-8 rounded-full flex items-center justify-center bg-primary-fill",
+															isDark && "dark",
 															isSelected &&
 																"ring-2 ring-offset-2 ring-primary ring-offset-background"
 														)}
 													>
-														<Icon className="w-4 h-4 text-white" />
+														<Icon className="w-4 h-4 text-primary-foreground" />
 													</div>
 												</div>
 												<div className="text-center">
@@ -292,6 +251,132 @@ export default function UISettingsPanel() {
 						</CardContent>
 					</Card>
 
+					{/* Interface — font + scale */}
+					<Card>
+						<CardHeader className="pb-3">
+							<div className="flex items-center gap-2">
+								<Type className="w-5 h-5 text-muted-foreground" />
+								<CardTitle className="text-base">Interface</CardTitle>
+							</div>
+							<CardDescription>
+								Choose the interface font and how large the app is drawn.
+							</CardDescription>
+						</CardHeader>
+						<CardContent className="space-y-5">
+							<div>
+								<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+									Font
+								</p>
+								<div className="grid grid-cols-2 gap-3">
+									{UI_FONTS.map((option) => {
+										const isSelected = font === option.value;
+										return (
+											<button
+												key={option.value}
+												onClick={() => setFont(option.value)}
+												className={cn(
+													"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
+													"hover:bg-accent hover:border-accent-foreground/20",
+													isSelected
+														? "border-primary bg-primary/5"
+														: "border-border"
+												)}
+											>
+												<span
+													className="text-sm font-medium"
+													style={{ fontFamily: option.stack }}
+												>
+													{option.label}
+												</span>
+												<span className="text-xs text-muted-foreground">
+													{option.description}
+												</span>
+												{isSelected && (
+													<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
+												)}
+											</button>
+										);
+									})}
+								</div>
+							</div>
+
+							<div>
+								<p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+									<Maximize2 className="w-3.5 h-3.5" />
+									Scale
+								</p>
+								<div className="grid grid-cols-3 gap-3">
+									{UI_SCALES.map((option) => {
+										const isSelected = scale === option.value;
+										return (
+											<button
+												key={option.value}
+												onClick={() => setScale(option.value)}
+												className={cn(
+													"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
+													"hover:bg-accent hover:border-accent-foreground/20",
+													isSelected
+														? "border-primary bg-primary/5"
+														: "border-border"
+												)}
+											>
+												<span className="text-sm font-medium">
+													{option.label}
+												</span>
+												<span className="text-xs text-muted-foreground">
+													{option.description}
+												</span>
+												{isSelected && (
+													<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
+												)}
+											</button>
+										);
+									})}
+								</div>
+							</div>
+
+							<div>
+								<p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+									<Squircle className="w-3.5 h-3.5" />
+									Roundedness
+								</p>
+								<div className="grid grid-cols-3 gap-3">
+									{UI_RADII.map((option) => {
+										const isSelected = radius === option.value;
+										return (
+											<button
+												key={option.value}
+												onClick={() => setRadius(option.value)}
+												className={cn(
+													"relative flex flex-col items-start gap-1.5 p-3 rounded-lg border-2 text-left transition-all",
+													"hover:bg-accent hover:border-accent-foreground/20",
+													isSelected
+														? "border-primary bg-primary/5"
+														: "border-border"
+												)}
+											>
+												<span
+													className="h-6 w-9 border-2 border-muted-foreground/40 bg-muted"
+													style={{ borderRadius: option.radius }}
+													aria-hidden
+												/>
+												<span className="text-sm font-medium">
+													{option.label}
+												</span>
+												<span className="text-xs text-muted-foreground">
+													{option.description}
+												</span>
+												{isSelected && (
+													<CheckCircle2 className="w-4 h-4 text-primary absolute top-2 right-2" />
+												)}
+											</button>
+										);
+									})}
+								</div>
+							</div>
+						</CardContent>
+					</Card>
+
 					{/* Storage Paths — only shown when running in Electron */}
 					{appPaths && (
 						<Card>
@@ -314,10 +399,7 @@ export default function UISettingsPanel() {
 											["Logs", appPaths.logsPath],
 										] as const
 									).map(([label, value]) => (
-										<div
-											key={label}
-											className="flex flex-col gap-0.5"
-										>
+										<div key={label} className="flex flex-col gap-0.5">
 											<span className="text-xs font-medium text-muted-foreground">
 												{label}
 											</span>

@@ -40,6 +40,8 @@ import {
 } from "@/queries";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { formatDistanceToNow } from "date-fns";
+import { DEFAULT_REQUEST_NAME } from "@/constants/request";
+import { DEFAULT_COLLECTION_NAME } from "@/constants/collection";
 
 export default function WelcomeScreen() {
 	const openImport = useImportModalStore((s) => s.open);
@@ -101,7 +103,7 @@ export default function WelcomeScreen() {
 			if (!targetCollectionId) {
 				// Create a default collection
 				const newCollection = await createCollectionMutation.mutateAsync({
-					name: "New Collection",
+					name: DEFAULT_COLLECTION_NAME,
 				});
 				targetCollectionId = newCollection.id;
 			}
@@ -109,7 +111,7 @@ export default function WelcomeScreen() {
 			// Create a new request
 			const newRequest = await createRequestMutation.mutateAsync({
 				collectionId: targetCollectionId,
-				name: "New Request",
+				name: DEFAULT_REQUEST_NAME,
 				method: "GET",
 				url: "",
 			});
@@ -400,18 +402,18 @@ export default function WelcomeScreen() {
 											>
 												<div className="flex-1 min-w-0">
 													<div className="flex items-center gap-2 mb-1">
-														<span className="text-xs font-medium px-2 py-0.5 rounded bg-muted">
+														<span className="text-xs font-medium px-2 py-0.5 rounded-md bg-muted">
 															{run.type === "load"
 																? "Load Test"
 																: "Design"}
 														</span>
 														{run.status === "completed" && (
-															<span className="text-xs text-success">
+															<span className="text-xs text-success-text">
 																Completed
 															</span>
 														)}
 														{run.status === "stopped" && (
-															<span className="text-xs text-warning">
+															<span className="text-xs text-warning-text">
 																Stopped
 															</span>
 														)}

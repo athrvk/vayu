@@ -32,7 +32,7 @@ export function ThroughputTwinCard({
 				Send · Throughput
 				<InfoChip tip={TOOLTIPS.sendThroughput} />
 				{showQueueChip && (
-					<span className="ml-2 inline-flex items-center normal-case tracking-normal font-mono text-[10px] font-bold px-1.5 py-px rounded-sm bg-warning/10 text-warning">
+					<span className="ml-2 inline-flex items-center normal-case tracking-normal font-mono text-[10px] font-bold px-1.5 py-px rounded-sm bg-warning/10 text-warning-text">
 						queue {avgQueueWaitMs.toFixed(0)}ms
 						<InfoChip tip={TOOLTIPS.queueChip} />
 					</span>
@@ -70,7 +70,7 @@ export function ThroughputTwinCard({
 						className={cn(
 							"inline-block px-1.5 py-px rounded-sm font-mono text-[10px] font-bold",
 							deltaOk
-								? "bg-success/10 text-success"
+								? "bg-success/10 text-success-text"
 								: "bg-destructive/10 text-destructive"
 						)}
 					>

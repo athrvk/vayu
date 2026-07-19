@@ -13,5 +13,8 @@
 /** App theme preference. `system` follows the OS via Electron's nativeTheme. */
 export type ThemeSource = "system" | "light" | "dark";
 
-/** Accent color scheme, applied via the `data-color-scheme` attribute. */
-export type ColorScheme = "sky" | "ocean" | "forest" | "sunset" | "aurora" | "coral";
+/**
+ * Accent color scheme, applied via the `data-color-scheme` attribute.
+ * Re-exported from the single source of truth in `@/constants/color-schemes`.
+ */
+export type { ColorScheme } from "@/constants/color-schemes";

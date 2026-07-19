@@ -365,7 +365,7 @@ export default function VariableInput({
 			className={cn(
 				// Default chrome — overridable via className. Wrapper owns border/bg/size
 				// so the inner input can be borderless and fill it.
-				"relative flex items-center h-9 w-full bg-background border border-input px-3 text-sm font-mono shadow-sm transition-colors",
+				"relative flex items-center h-9 w-full bg-background rounded-md border border-input px-3 text-sm font-mono shadow-sm transition-colors",
 				"focus-within:outline-none focus-within:ring-1 focus-within:ring-ring",
 				disabled && "opacity-50 cursor-not-allowed",
 				className
@@ -422,7 +422,7 @@ export default function VariableInput({
 
 			{/* Plain Text Suggestions Popover (e.g., for standard headers) */}
 			{showPlainSuggestions && !showSuggestions && filteredSuggestions.length > 0 && (
-				<div className="absolute left-0 top-full mt-1 z-50 w-64 max-h-48 overflow-y-auto border bg-popover shadow-md">
+				<div className="absolute left-0 top-full mt-1 z-50 w-64 max-h-48 overflow-y-auto rounded-lg border bg-popover shadow-md">
 					{filteredSuggestions.slice(0, 10).map((suggestion, index) => (
 						<button
 							key={suggestion}

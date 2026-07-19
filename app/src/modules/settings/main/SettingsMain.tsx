@@ -551,13 +551,13 @@ export default function SettingsMain() {
 													{entry.label.replace(" (Requires Restart)", "")}
 												</CardTitle>
 												{needsRestart && (
-													<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+													<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
 														<RefreshCw className="w-2.5 h-2.5" />
 														Restart Required
 													</span>
 												)}
 												{isPendingRestart && (
-													<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500 text-white">
+													<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-amber-500 text-white">
 														Pending
 													</span>
 												)}
