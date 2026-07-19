@@ -60,27 +60,6 @@ export default function SettingsCategoryTree() {
 
 	const appCategories = APP_SETTINGS_PANELS.map((p) => p.id);
 
-	if (isLoading) {
-		return (
-			<div className="flex flex-col h-full w-full py-2 px-3 space-y-2">
-				<Skeleton className="h-10 w-full" />
-				<Skeleton className="h-10 w-full" />
-				<Skeleton className="h-10 w-full" />
-			</div>
-		);
-	}
-
-	if (error) {
-		return (
-			<div className="flex flex-col h-full w-full py-4 px-3">
-				<div className="text-sm text-destructive">Failed to load settings</div>
-				<div className="text-xs text-muted-foreground mt-1">
-					{error instanceof Error ? error.message : "Unknown error"}
-				</div>
-			</div>
-		);
-	}
-
 	const renderCategory = (category: SettingsCategory, showCount = true) => {
 		const { label, icon: Icon } = categoryMeta(category);
 		const count = categoryCounts[category] || 0;
@@ -120,16 +99,33 @@ export default function SettingsCategoryTree() {
 				{appCategories.map((category) => renderCategory(category, false))}
 			</div>
 
-			{/* Engine Settings Section */}
+			{/* Engine Settings Section — depends on the engine `/config` query, so
+			    its loading/error states are scoped here. App Settings above always
+			    render (client-side), so Settings stays usable when the engine is down. */}
 			<div className="px-3 py-2 mb-1">
 				<div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
 					<Settings className="w-3 h-3" />
 					Engine Settings
 				</div>
 			</div>
-			<div className="space-y-1">
-				{ENGINE_CATEGORIES.map((category) => renderCategory(category))}
-			</div>
+			{isLoading ? (
+				<div className="space-y-2 px-3">
+					<Skeleton className="h-9 w-full" />
+					<Skeleton className="h-9 w-full" />
+					<Skeleton className="h-9 w-full" />
+				</div>
+			) : error ? (
+				<div className="px-4 py-2">
+					<div className="text-xs text-destructive">Engine settings unavailable</div>
+					<div className="text-xs text-muted-foreground mt-0.5">
+						{error instanceof Error ? error.message : "The engine isn't responding."}
+					</div>
+				</div>
+			) : (
+				<div className="space-y-1">
+					{ENGINE_CATEGORIES.map((category) => renderCategory(category))}
+				</div>
+			)}
 		</div>
 	);
 }
