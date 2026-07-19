@@ -23,6 +23,13 @@ export interface McpSafetyConfig {
 	 * asks the user to add the host.
 	 */
 	allowlist: string[];
+	/**
+	 * When true, the allowlist is bypassed and an agent may target **any**
+	 * resolvable host. Off by default — this trades the safe-by-default posture
+	 * for convenience, so it is an explicit opt-in. Unresolved `{{variables}}` are
+	 * still rejected.
+	 */
+	allowAll: boolean;
 	/** Hard ceiling on `targetRps` for `start_load_run` (constant_rps mode). */
 	maxRps: number;
 	/** Hard ceiling on `concurrency` for closed-loop load modes. */
@@ -44,6 +51,7 @@ export interface McpSafetyConfig {
  */
 export const DEFAULT_MCP_SAFETY_CONFIG: McpSafetyConfig = {
 	allowlist: [],
+	allowAll: false,
 	maxRps: 1000,
 	maxConcurrency: 200,
 	maxDurationSeconds: 300,
@@ -98,6 +106,9 @@ export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<Mc
 	}
 	if (isFiniteNumber(input.maxDurationSeconds) && input.maxDurationSeconds > 0) {
 		out.maxDurationSeconds = Math.floor(input.maxDurationSeconds);
+	}
+	if (typeof input.allowAll === "boolean") {
+		out.allowAll = input.allowAll;
 	}
 	if (typeof input.allowWrites === "boolean") {
 		out.allowWrites = input.allowWrites;

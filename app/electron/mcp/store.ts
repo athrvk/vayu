@@ -18,6 +18,8 @@ import { resolveSafetyConfig, sanitizeSafetyInput, type McpSafetyConfig } from "
 
 interface McpStoreShape {
 	safety: Partial<McpSafetyConfig>;
+	/** Whether the MCP server should run. Defaults to true when unset. */
+	enabled: boolean;
 }
 
 let store: Store<McpStoreShape> | null = null;
@@ -41,4 +43,15 @@ export function loadPersistedSafety(): McpSafetyConfig {
 /** Persist the full, resolved safety config. */
 export function savePersistedSafety(config: McpSafetyConfig): void {
 	getStore().set("safety", config);
+}
+
+/** Whether the MCP server is enabled (defaults to true when never set). */
+export function loadMcpEnabled(): boolean {
+	const value = getStore().get("enabled");
+	return typeof value === "boolean" ? value : true;
+}
+
+/** Persist the MCP server enabled/disabled preference. */
+export function saveMcpEnabled(enabled: boolean): void {
+	getStore().set("enabled", enabled);
 }

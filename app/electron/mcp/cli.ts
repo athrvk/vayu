@@ -33,6 +33,7 @@ function readSafetyFromEnv(): Partial<McpSafetyConfig> {
 	if (env.VAYU_MCP_MAX_CONCURRENCY) cfg.maxConcurrency = Number(env.VAYU_MCP_MAX_CONCURRENCY);
 	if (env.VAYU_MCP_MAX_DURATION_SECONDS)
 		cfg.maxDurationSeconds = Number(env.VAYU_MCP_MAX_DURATION_SECONDS);
+	if (env.VAYU_MCP_ALLOW_ALL === "true") cfg.allowAll = true;
 	if (env.VAYU_MCP_ALLOW_WRITES === "true") cfg.allowWrites = true;
 	return cfg;
 }

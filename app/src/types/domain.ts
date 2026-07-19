@@ -464,6 +464,8 @@ export type SettingsCategory = ClientSettingsCategory | EngineSettingsCategory;
 export interface McpSafetyConfig {
 	/** Hostnames an agent may send traffic to. Empty = deny all (safe default). */
 	allowlist: string[];
+	/** When true, bypass the allowlist and allow any resolvable host. */
+	allowAll: boolean;
 	/** Hard ceiling on `targetRps` for load runs. */
 	maxRps: number;
 	/** Hard ceiling on `concurrency` for load runs. */
@@ -477,6 +479,8 @@ export interface McpSafetyConfig {
 export interface McpStatus {
 	running: boolean;
 	url: string;
+	/** Whether the MCP server is enabled (may be enabled-but-not-running on error). */
+	enabled: boolean;
 }
 
 export interface ScriptCompletion {

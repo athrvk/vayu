@@ -36,6 +36,7 @@ interface ElectronAPI {
 	getMcpStatus: () => Promise<McpStatus>;
 	getMcpSafety: () => Promise<McpSafetyConfig>;
 	updateMcpSafety: (partial: Partial<McpSafetyConfig>) => Promise<McpSafetyConfig>;
+	setMcpEnabled: (enabled: boolean) => Promise<McpStatus>;
 
 	// Theme management
 	getTheme: () => Promise<ThemeInfo>;

@@ -55,6 +55,10 @@ export function checkAllowlist(url: string, config: McpSafetyConfig): GuardResul
 			error: "Could not determine the target host from the request URL (it may be empty or contain unresolved {{variables}}). Resolve the URL before sending.",
 		};
 	}
+	// "Allow all" bypasses the allowlist entirely (still requires a resolvable host).
+	if (config.allowAll) {
+		return OK;
+	}
 	if (config.allowlist.length === 0) {
 		return {
 			ok: false,

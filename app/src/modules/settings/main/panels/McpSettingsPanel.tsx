@@ -64,6 +64,10 @@ function connectSnippets(url: string): { label: string; code: string }[] {
 			code: `{\n  "mcpServers": {\n    "vayu": { "type": "http", "url": "${url}" }\n  }\n}`,
 		},
 		{
+			label: "VS Code (.vscode/mcp.json)",
+			code: `{\n  "servers": {\n    "vayu": { "type": "http", "url": "${url}" }\n  }\n}`,
+		},
+		{
 			label: "Codex (~/.codex/config.toml)",
 			code: `[mcp_servers.vayu]\nurl = "${url}"`,
 		},
@@ -162,6 +166,7 @@ export default function McpSettingsPanel() {
 
 	const endpoint = status?.url ?? DEFAULT_ENDPOINT;
 	const running = status?.running ?? false;
+	const enabled = status?.enabled ?? false;
 
 	// Apply a change: main sanitizes + persists and returns the resolved config,
 	// which we adopt as the new source of truth.
@@ -169,6 +174,14 @@ export default function McpSettingsPanel() {
 		if (!window.electronAPI) return;
 		const resolved = await window.electronAPI.updateMcpSafety(partial);
 		setConfig(resolved);
+	}, []);
+
+	// Turn the MCP server on/off; main persists the preference and starts/stops
+	// the server, returning the new status.
+	const toggleEnabled = useCallback(async (next: boolean) => {
+		if (!window.electronAPI) return;
+		const s = await window.electronAPI.setMcpEnabled(next);
+		setStatus(s);
 	}, []);
 
 	const addHost = useCallback(() => {
@@ -227,6 +240,14 @@ export default function McpSettingsPanel() {
 						<CardTitle className="text-base">Connection</CardTitle>
 						{isLoading ? (
 							<Skeleton className="h-5 w-16 ml-1" />
+						) : !enabled ? (
+							<Badge
+								variant="secondary"
+								className="ml-1 bg-muted text-muted-foreground"
+							>
+								<CircleSlash className="w-3 h-3 mr-1" />
+								Disabled
+							</Badge>
 						) : running ? (
 							<Badge
 								variant="secondary"
@@ -238,7 +259,7 @@ export default function McpSettingsPanel() {
 						) : (
 							<Badge
 								variant="secondary"
-								className="ml-1 bg-muted text-muted-foreground"
+								className="ml-1 border border-warning/30 bg-warning/10 text-warning-text"
 							>
 								<CircleSlash className="w-3 h-3 mr-1" />
 								Stopped
@@ -251,6 +272,22 @@ export default function McpSettingsPanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">
+					{/* Server on/off */}
+					<div className="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/30 px-3 py-2.5">
+						<div>
+							<Label className="text-sm">Enable MCP server</Label>
+							<p className="text-xs text-muted-foreground mt-0.5">
+								When off, the endpoint is unavailable and connected agents get a
+								clean “start Vayu” error. Persists across restarts.
+							</p>
+						</div>
+						<Switch
+							checked={enabled}
+							onCheckedChange={(checked) => void toggleEnabled(checked)}
+							disabled={isLoading || !hasElectron}
+						/>
+					</div>
+
 					<div className="flex items-center gap-2">
 						<Label className="text-xs font-medium text-muted-foreground w-20 shrink-0">
 							Endpoint
@@ -291,56 +328,90 @@ export default function McpSettingsPanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-3">
-					<div className="flex items-center gap-2">
-						<Input
-							value={newHost}
-							onChange={(e) => setNewHost(e.target.value)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter") {
-									e.preventDefault();
-									addHost();
-								}
-							}}
-							placeholder="api.example.com"
-							className="max-w-xs"
+					{/* Allow all hosts */}
+					<div className="flex items-center justify-between gap-4">
+						<div>
+							<Label className="text-sm">Allow all hosts</Label>
+							<p className="text-xs text-muted-foreground mt-0.5">
+								Bypass the allowlist and let agents target any host. Reduces safety
+								— leave off unless you trust the agent.
+							</p>
+						</div>
+						<Switch
+							checked={config?.allowAll ?? false}
+							onCheckedChange={(checked) => void persist({ allowAll: checked })}
 							disabled={!config}
 						/>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={addHost}
-							disabled={!config || newHost.trim() === ""}
-						>
-							<Plus className="w-4 h-4 mr-1" />
-							Add
-						</Button>
 					</div>
 
-					{isLoading ? (
-						<Skeleton className="h-8 w-full" />
-					) : config && config.allowlist.length > 0 ? (
-						<div className="flex flex-wrap gap-2">
-							{config.allowlist.map((host) => (
-								<span
-									key={host}
-									className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/50 pl-2.5 pr-1 py-1 text-xs font-mono"
-								>
-									{host}
-									<button
-										onClick={() => removeHost(host)}
-										className="rounded p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors"
-										aria-label={`Remove ${host}`}
-									>
-										<X className="w-3.5 h-3.5" />
-									</button>
-								</span>
-							))}
+					{config?.allowAll && (
+						<div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2">
+							<AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+							<p className="text-xs text-muted-foreground">
+								All hosts are allowed. The per-host list below is ignored until you
+								turn this off.
+							</p>
 						</div>
-					) : (
-						<p className="text-xs text-muted-foreground italic">
-							No hosts allowed yet. Agents cannot send requests until you add one.
-						</p>
 					)}
+
+					<div
+						className={cn(
+							"space-y-3",
+							config?.allowAll && "opacity-50 pointer-events-none select-none"
+						)}
+						aria-disabled={config?.allowAll ?? false}
+					>
+						<div className="flex items-center gap-2">
+							<Input
+								value={newHost}
+								onChange={(e) => setNewHost(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") {
+										e.preventDefault();
+										addHost();
+									}
+								}}
+								placeholder="api.example.com"
+								className="max-w-xs"
+								disabled={!config || config.allowAll}
+							/>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={addHost}
+								disabled={!config || config.allowAll || newHost.trim() === ""}
+							>
+								<Plus className="w-4 h-4 mr-1" />
+								Add
+							</Button>
+						</div>
+
+						{isLoading ? (
+							<Skeleton className="h-8 w-full" />
+						) : config && config.allowlist.length > 0 ? (
+							<div className="flex flex-wrap gap-2">
+								{config.allowlist.map((host) => (
+									<span
+										key={host}
+										className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/50 pl-2.5 pr-1 py-1 text-xs font-mono"
+									>
+										{host}
+										<button
+											onClick={() => removeHost(host)}
+											className="rounded p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors"
+											aria-label={`Remove ${host}`}
+										>
+											<X className="w-3.5 h-3.5" />
+										</button>
+									</span>
+								))}
+							</div>
+						) : (
+							<p className="text-xs text-muted-foreground italic">
+								No hosts allowed yet. Agents cannot send requests until you add one.
+							</p>
+						)}
+					</div>
 				</CardContent>
 			</Card>
 

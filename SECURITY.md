@@ -37,10 +37,17 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   unless called again with `confirmed: true`.
 - **Read-only by default.** Collection/environment write tools are not exposed
   unless the user enables writes.
+- **Server disable.** The MCP server can be turned off entirely from Settings;
+  while off the endpoint does not accept connections.
 
 **Residual risk the user accepts by allowlisting a host:** once a host is on the
 allowlist, an agent may send it single requests and (within caps, after
 confirmation) load. Only allowlist hosts you own or are authorized to test.
+
+**"Allow all hosts" removes the allowlist guard.** Enabling it (off by default)
+lets an agent target any resolvable host, so the per-host safety check no longer
+applies — the load caps and confirmation gate still do. Turn it on only when you
+trust the connected agent and understand it can reach arbitrary endpoints.
 
 ## Supported versions
 

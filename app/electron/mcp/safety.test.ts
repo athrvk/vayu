@@ -44,6 +44,16 @@ describe("checkAllowlist", () => {
 		const config = resolveSafetyConfig({ allowlist: ["api.example.com"] });
 		expect(checkAllowlist("{{baseUrl}}/x", config).ok).toBe(false);
 	});
+	test("allowAll bypasses the allowlist for any resolvable host", () => {
+		const config = resolveSafetyConfig({ allowAll: true });
+		expect(checkAllowlist("https://anything.example.org/x", config).ok).toBe(true);
+		// even with an empty allowlist
+		expect(config.allowlist).toEqual([]);
+	});
+	test("allowAll still rejects an unresolvable host (unresolved variables)", () => {
+		const config = resolveSafetyConfig({ allowAll: true });
+		expect(checkAllowlist("{{baseUrl}}/x", config).ok).toBe(false);
+	});
 });
 
 describe("parseDurationSeconds", () => {

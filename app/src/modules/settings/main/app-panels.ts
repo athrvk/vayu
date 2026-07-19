@@ -58,7 +58,7 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 	},
 	{
 		id: "mcp",
-		label: "MCP (AI Agents)",
+		label: "MCP",
 		description: "Expose Vayu to AI agents like Claude Code, and set the safety guardrails",
 		icon: Plug,
 		Component: McpSettingsPanel,

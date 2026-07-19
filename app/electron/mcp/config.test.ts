@@ -66,6 +66,13 @@ describe("sanitizeSafetyInput", () => {
 		).toBeUndefined();
 	});
 
+	it("keeps allowAll only when it is a boolean", () => {
+		expect(sanitizeSafetyInput({ allowAll: true }).allowAll).toBe(true);
+		expect(
+			sanitizeSafetyInput({ allowAll: "yes" as unknown as boolean }).allowAll
+		).toBeUndefined();
+	});
+
 	it("ignores unknown fields", () => {
 		const out = sanitizeSafetyInput({ nope: 1 } as unknown as Record<string, never>);
 		expect(out).toEqual({});

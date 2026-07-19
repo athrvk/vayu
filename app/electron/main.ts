@@ -19,6 +19,8 @@ import {
 	sanitizeSafetyInput,
 	loadPersistedSafety,
 	savePersistedSafety,
+	loadMcpEnabled,
+	saveMcpEnabled,
 	type McpSafetyConfig,
 } from "./mcp/index.js";
 import {
@@ -328,6 +330,10 @@ async function startEngine() {
 }
 
 async function startMcp() {
+	if (!loadMcpEnabled()) {
+		console.log("[Main] MCP server disabled by preference; not starting.");
+		return;
+	}
 	try {
 		mcpService = new VayuMcpService({
 			engineBaseUrl: `http://${ENGINE_HOST}:${ENGINE_PORT}`,
@@ -408,6 +414,24 @@ function setupIpcHandlers() {
 		return {
 			running: mcpService?.isRunning() ?? false,
 			url: mcpService?.getUrl() ?? MCP_ENDPOINT_URL,
+			enabled: loadMcpEnabled(),
+		};
+	});
+
+	// Toggle the MCP server on/off from Settings. Persists the preference and
+	// starts/stops the server live. Returns the resulting status.
+	ipcMain.handle("mcp:setEnabled", async (_event, enabled: unknown) => {
+		const on = enabled === true;
+		saveMcpEnabled(on);
+		if (on && !mcpService) {
+			await startMcp();
+		} else if (!on && mcpService) {
+			await stopMcp();
+		}
+		return {
+			running: mcpService?.isRunning() ?? false,
+			url: mcpService?.getUrl() ?? MCP_ENDPOINT_URL,
+			enabled: on,
 		};
 	});
 
