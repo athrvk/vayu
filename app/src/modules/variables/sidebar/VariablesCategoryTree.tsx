@@ -17,7 +17,12 @@
 import { useState } from "react";
 import { useTabsStore } from "@/stores";
 import { useVariablesStore, type VariableCategory } from "@/modules/variables/variables-store";
-import { useCreateEnvironmentMutation, useDeleteEnvironmentMutation } from "@/queries";
+import {
+	useCreateEnvironmentMutation,
+	useDeleteEnvironmentMutation,
+	useUpdateEnvironmentMutation,
+} from "@/queries";
+import { RowActionsMenu } from "@/components/shared";
 import type { Collection, Environment } from "@/types";
 import {
 	Globe,
@@ -28,6 +33,8 @@ import {
 	Plus,
 	Trash2,
 	Loader2,
+	Edit2,
+	Copy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, Button, Input, DeleteConfirmDialog } from "@/components/ui";
@@ -58,10 +65,45 @@ export default function VariablesCategoryTree({
 	const [newEnvName, setNewEnvName] = useState(DEFAULT_ENVIRONMENT_NAME);
 	const [deletingEnvId, setDeletingEnvId] = useState<string | null>(null);
 	const [deleteConfirmEnvId, setDeleteConfirmEnvId] = useState<string | null>(null);
+	const [renamingEnvId, setRenamingEnvId] = useState<string | null>(null);
+	const [renameEnvValue, setRenameEnvValue] = useState("");
 
 	// Mutations
 	const createEnvironmentMutation = useCreateEnvironmentMutation();
 	const deleteEnvironmentMutation = useDeleteEnvironmentMutation();
+	const updateEnvironmentMutation = useUpdateEnvironmentMutation();
+
+	const startRenameEnvironment = (env: Environment) => {
+		setRenamingEnvId(env.id);
+		setRenameEnvValue(env.name);
+	};
+
+	const cancelRenameEnvironment = () => {
+		setRenamingEnvId(null);
+		setRenameEnvValue("");
+	};
+
+	const submitRenameEnvironment = async (envId: string) => {
+		const name = renameEnvValue.trim();
+		const current = environments.find((e) => e.id === envId);
+		if (!name || name === current?.name) return cancelRenameEnvironment();
+		await updateEnvironmentMutation.mutateAsync({ id: envId, name });
+		cancelRenameEnvironment();
+	};
+
+	/**
+	 * A complete copy — name plus every variable — in a single call. Unlike a
+	 * collection, an environment has no nested children, so nothing is silently
+	 * left behind.
+	 */
+	const duplicateEnvironment = async (env: Environment) => {
+		if (createEnvironmentMutation.isPending) return;
+		await createEnvironmentMutation.mutateAsync({
+			name: `${env.name} (Copy)`,
+			description: env.description,
+			variables: env.variables ?? {},
+		});
+	};
 
 	const isSelected = (category: VariableCategory) => {
 		if (!selectedCategory) return false;
@@ -98,11 +140,6 @@ export default function VariablesCategoryTree({
 	const envToDelete = deleteConfirmEnvId
 		? environments.find((e) => e.id === deleteConfirmEnvId)
 		: null;
-
-	const handleDeleteClick = (envId: string, e: React.MouseEvent) => {
-		e.stopPropagation();
-		setDeleteConfirmEnvId(envId);
-	};
 
 	const handleConfirmDelete = async () => {
 		if (!deleteConfirmEnvId) return;
@@ -231,8 +268,30 @@ export default function VariablesCategoryTree({
 										}
 									>
 										{/* <Cloud className="w-4 h-4 text-blue-400 shrink-0" /> */}
-										<span className="truncate flex-1">{environment.name}</span>
-										{variableCount > 0 && (
+										{renamingEnvId === environment.id ? (
+											<Input
+												autoFocus
+												value={renameEnvValue}
+												onChange={(e) => setRenameEnvValue(e.target.value)}
+												onClick={(e) => e.stopPropagation()}
+												onBlur={() =>
+													submitRenameEnvironment(environment.id)
+												}
+												onKeyDown={(e) => {
+													e.stopPropagation();
+													if (e.key === "Enter")
+														submitRenameEnvironment(environment.id);
+													if (e.key === "Escape")
+														cancelRenameEnvironment();
+												}}
+												className="h-6 flex-1 text-sm"
+											/>
+										) : (
+											<span className="truncate flex-1">
+												{environment.name}
+											</span>
+										)}
+										{variableCount > 0 && renamingEnvId !== environment.id && (
 											<Badge
 												variant="secondary"
 												className="text-xs bg-scope-environment/10 text-scope-environment px-1.5 py-0 shrink-0"
@@ -240,20 +299,36 @@ export default function VariablesCategoryTree({
 												{variableCount}
 											</Badge>
 										)}
-										<Button
-											variant="ghost"
-											size="icon"
-											onClick={(e) => handleDeleteClick(environment.id, e)}
-											disabled={isDeleting}
-											className="h-6 w-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive shrink-0"
-											title="Delete Environment"
-										>
-											{isDeleting ? (
-												<Loader2 className="w-3 h-3 animate-spin" />
-											) : (
-												<Trash2 className="w-3 h-3" />
-											)}
-										</Button>
+										{isDeleting && (
+											<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive" />
+										)}
+										{!isDeleting && renamingEnvId !== environment.id && (
+											<RowActionsMenu
+												label={`More actions for environment ${environment.name}`}
+												className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+												actions={[
+													{
+														label: "Rename",
+														icon: Edit2,
+														onSelect: () =>
+															startRenameEnvironment(environment),
+													},
+													{
+														label: "Duplicate",
+														icon: Copy,
+														onSelect: () =>
+															void duplicateEnvironment(environment),
+													},
+													{
+														label: "Delete",
+														icon: Trash2,
+														destructive: true,
+														onSelect: () =>
+															setDeleteConfirmEnvId(environment.id),
+													},
+												]}
+											/>
+										)}
 									</div>
 								);
 							})

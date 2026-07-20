@@ -470,6 +470,35 @@ selector alongside it.
 
 ---
 
+## Row Actions
+
+Controls that appear on a row you are already hovering — `⋯`, delete, remove.
+
+**Never use `ghost` for these.** `ghost` hovers to `bg-accent`, which is exactly
+what the row underneath already paints, so the button looks like it has no hover
+state at all. Use the dedicated variants, which step up to `accent-active`:
+
+| Variant | Use | Hover |
+|---------|-----|-------|
+| `rowAction` | neutral (`⋯`, edit, copy) | `bg-accent-active` + `text-foreground` |
+| `rowActionDestructive` | delete / remove | `bg-accent-active` + `text-destructive` |
+
+Destructive rows share the neutral shape and differ **only** in glyph colour on
+hover. No red background tint: the row already carries one fill, a second
+competing tint is noise, and `DeleteConfirmDialog` is what actually protects the
+user — the red glyph only needs to signal at the point of intent.
+
+Reveal them with `opacity-0 group-hover:opacity-100 group-focus-within:opacity-100`.
+The `focus-within` half is not optional: without it a keyboard user lands on an
+invisible control.
+
+**Prefer `RowActionsMenu`** (`components/shared`) over adding another inline icon
+button. It renders the `⋯` trigger plus a `DropdownMenu`, so rows expose actions
+consistently and get focus management, Escape-to-close and arrow-key navigation
+for free. Used by request rows and environment rows.
+
+---
+
 ## Tree Navigation (roving tabindex)
 
 The collection tree follows the WAI-ARIA treeview pattern: **the whole tree is

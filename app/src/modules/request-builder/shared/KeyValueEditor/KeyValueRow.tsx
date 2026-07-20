@@ -123,11 +123,12 @@ function KeyValueRow({
 			{/* Remove Button */}
 			<Button
 				size="icon"
-				variant="ghost"
+				variant="rowActionDestructive"
 				onClick={() => onRemove(item.id)}
 				disabled={isReadOnly || !canRemove}
+				aria-label="Remove row"
 				className={cn(
-					"h-8 w-8 text-muted-foreground hover:text-destructive transition-opacity",
+					"h-8 w-8 transition-opacity",
 					!canRemove
 						? "opacity-0 cursor-not-allowed"
 						: "opacity-0 group-hover:opacity-100"

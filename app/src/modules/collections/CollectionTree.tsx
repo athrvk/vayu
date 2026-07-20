@@ -6,7 +6,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Folder, Plus, Trash2, Edit2, Copy, FolderPlus, Loader2, Download } from "lucide-react";
+import { Folder, Plus, Trash2, Edit2, FolderPlus, Loader2, Download } from "lucide-react";
 import { useTabsStore, useSaveStore, useImportModalStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
@@ -283,15 +283,35 @@ export default function CollectionTree() {
 		setRenameValue("");
 	};
 
-	const handleDuplicateCollection = async (collectionId: string) => {
-		if (createCollectionMutation.isPending) return;
-
-		const collection = collections.find((c) => c.id === collectionId);
-		if (!collection) return;
-
-		await createCollectionMutation.mutateAsync({ name: `${collection.name} (Copy)` });
-		setContextMenu(null);
-	};
+	/**
+	 * Duplicate a request, contents and all — method, URL, params, headers,
+	 * body, auth and both scripts. Collections deliberately have no equivalent:
+	 * copying one means recursing through nested folders and issuing a create
+	 * per request, which is its own feature. The previous collection "Duplicate"
+	 * only created an empty folder named "(Copy)", which read as a working clone
+	 * and was not one, so it was removed rather than left misleading.
+	 */
+	const handleDuplicateRequest = useCallback(
+		async (request: Request) => {
+			if (createRequestMutation.isPending) return;
+			const copy = await createRequestMutation.mutateAsync({
+				collectionId: request.collectionId,
+				name: `${request.name} (Copy)`,
+				description: request.description,
+				method: request.method,
+				url: request.url,
+				params: request.params,
+				headers: request.headers,
+				body: request.body,
+				bodyType: request.bodyType,
+				auth: request.auth,
+				preRequestScript: request.preRequestScript,
+				postRequestScript: request.postRequestScript,
+			});
+			openTab({ type: "request", entityId: copy.id });
+		},
+		[createRequestMutation, openTab]
+	);
 
 	const MENU_WIDTH = 180;
 	const MENU_HEIGHT = 260;
@@ -606,6 +626,7 @@ export default function CollectionTree() {
 								onRequestRenameCancel={handleRequestRenameCancel}
 								onStartRequestRename={handleStartRequestRename}
 								onRequestDeleteClick={handleRequestDeleteClick}
+								onDuplicateRequest={handleDuplicateRequest}
 							/>
 						))}
 					</div>
@@ -633,13 +654,6 @@ export default function CollectionTree() {
 					>
 						<Edit2 className="w-4 h-4 mr-2 flex-shrink-0" />
 						<span>Rename</span>
-					</button>
-					<button
-						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
-						onClick={() => handleDuplicateCollection(contextMenu.collectionId)}
-					>
-						<Copy className="w-4 h-4 mr-2 flex-shrink-0" />
-						<span>Duplicate</span>
 					</button>
 					<button
 						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"

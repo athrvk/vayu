@@ -129,13 +129,16 @@ export default function RunItem({
 							<Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />
 						)}
 						<Button
-							variant="ghost"
+							variant="rowActionDestructive"
 							size="icon"
 							onClick={(e) => onDelete(run.id, e)}
 							disabled={isDeleting}
+							aria-label={`Delete run`}
 							className={cn(
-								"h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-opacity",
-								isDeleting ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+								"h-6 w-6 transition-opacity",
+								isDeleting
+									? "opacity-100"
+									: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
 							)}
 						>
 							{isDeleting ? (

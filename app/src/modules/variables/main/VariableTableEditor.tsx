@@ -757,10 +757,11 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 									<td className="py-1">
 										{!variable.isNew && (
 											<Button
-												variant="ghost"
+												variant="rowActionDestructive"
 												size="icon"
 												onClick={() => removeVariable(index)}
-												className="h-8 w-8 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+												aria-label="Delete variable"
+												className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 											>
 												<Trash2 className="w-4 h-4" />
 											</Button>

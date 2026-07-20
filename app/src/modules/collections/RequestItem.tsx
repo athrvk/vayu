@@ -6,10 +6,11 @@
  */
 
 import { useRef } from "react";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2, Trash2, Edit2, Copy } from "lucide-react";
 import { getMethodColor } from "@/utils";
 import type { Request } from "@/types";
-import { Button, Badge, Input } from "@/components/ui";
+import { Badge, Input } from "@/components/ui";
+import { RowActionsMenu } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
 
@@ -27,6 +28,7 @@ export interface RequestItemProps {
 	onRenameSubmit?: (requestId: string) => void;
 	onRenameCancel?: () => void;
 	onStartRename?: (request: Request) => void;
+	onDuplicate?: (request: Request) => void;
 }
 
 export default function RequestItem({
@@ -43,6 +45,7 @@ export default function RequestItem({
 	onRenameSubmit,
 	onRenameCancel,
 	onStartRename,
+	onDuplicate,
 }: RequestItemProps) {
 	const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -77,6 +80,13 @@ export default function RequestItem({
 		}
 
 		onStartRename?.(request);
+	};
+
+	// Prefer the confirmation flow when the tree supplies one.
+	const handleDelete = () => {
+		if (isDeleting) return;
+		if (onBeforeDelete) onBeforeDelete(request.id, request.name);
+		else void onDelete(request.id);
 	};
 
 	return (
@@ -140,34 +150,47 @@ export default function RequestItem({
 				)}
 			</button>
 
-			{!isRenaming && (
-				<Button
-					variant="ghost"
-					size="icon"
-					onClick={() =>
-						onBeforeDelete
-							? onBeforeDelete(request.id, request.name)
-							: onDelete(request.id)
-					}
-					disabled={isDeleting}
-					tabIndex={-1}
-					data-tree-delete
-					aria-label={`Delete request ${request.name}`}
-					className={cn(
-						"h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-opacity",
-						// Also reveal on keyboard focus: this is in the tab order, so
-						// without it a keyboard user lands on an invisible control.
-						isDeleting
-							? "opacity-100"
-							: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-					)}
-				>
-					{isDeleting ? (
-						<Loader2 className="w-3 h-3 animate-spin" />
-					) : (
-						<Trash2 className="w-3 h-3" />
-					)}
-				</Button>
+			{isDeleting && <Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive" />}
+
+			{/*
+			 * Delete moved into the ⋯ menu, but the Delete key still targets a
+			 * data-tree-delete element (see useRovingTreeFocus). This is that
+			 * target: never shown, never announced — a keyboard path only.
+			 */}
+			<button
+				type="button"
+				className="hidden"
+				aria-hidden="true"
+				tabIndex={-1}
+				data-tree-delete
+				onClick={handleDelete}
+			/>
+
+			{!isRenaming && !isDeleting && (
+				<RowActionsMenu
+					label={`More actions for request ${request.name}`}
+					className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+					actions={[
+						{
+							label: "Rename",
+							icon: Edit2,
+							onSelect: () => onStartRename?.(request),
+							disabled: !onStartRename,
+						},
+						{
+							label: "Duplicate",
+							icon: Copy,
+							onSelect: () => onDuplicate?.(request),
+							disabled: !onDuplicate,
+						},
+						{
+							label: "Delete",
+							icon: Trash2,
+							onSelect: handleDelete,
+							destructive: true,
+						},
+					]}
+				/>
 			)}
 		</div>
 	);

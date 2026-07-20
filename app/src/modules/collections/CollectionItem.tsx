@@ -41,6 +41,7 @@ export interface CollectionItemProps {
 	onStartRename: (collection: Collection) => void;
 	onDeleteRequest: (requestId: string) => Promise<void>;
 	onRequestDeleteClick?: (requestId: string, requestName: string) => void;
+	onDuplicateRequest?: (request: Request) => void;
 	onSubCollectionNameChange: (value: string) => void;
 	onCreateSubfolder: (parentId: string) => void;
 	onCancelSubfolder: () => void;
@@ -77,6 +78,7 @@ export default function CollectionItem({
 	onStartRename,
 	onDeleteRequest,
 	onRequestDeleteClick,
+	onDuplicateRequest,
 	onSubCollectionNameChange,
 	onCreateSubfolder,
 	onCancelSubfolder,
@@ -241,7 +243,7 @@ export default function CollectionItem({
 				{!isRenaming && (
 					<div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
 						<Button
-							variant="ghost"
+							variant="rowAction"
 							size="icon"
 							tabIndex={-1}
 							data-tree-menu
@@ -329,6 +331,7 @@ export default function CollectionItem({
 							onStartRename={onStartRename}
 							onDeleteRequest={onDeleteRequest}
 							onRequestDeleteClick={onRequestDeleteClick}
+							onDuplicateRequest={onDuplicateRequest}
 							onSubCollectionNameChange={onSubCollectionNameChange}
 							onCreateSubfolder={onCreateSubfolder}
 							onCancelSubfolder={onCancelSubfolder}
@@ -365,6 +368,7 @@ export default function CollectionItem({
 							onRenameSubmit={onRequestRenameSubmit}
 							onRenameCancel={onRequestRenameCancel}
 							onStartRename={onStartRequestRename}
+							onDuplicate={onDuplicateRequest}
 						/>
 					))}
 				</div>

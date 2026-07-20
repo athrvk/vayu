@@ -24,6 +24,22 @@ const buttonVariants = cva(
 				secondary: "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
 				ghost: "hover:bg-accent hover:text-accent-foreground",
 				link: "text-primary underline-offset-4 hover:underline",
+				/*
+				 * Row actions — the controls that appear on a row you are already
+				 * hovering (⋯, delete, copy). `ghost` is wrong for these: it hovers
+				 * to bg-accent, which is exactly what the row underneath already
+				 * paints, so the button appears to have no hover state at all.
+				 * These step up to accent-active instead.
+				 */
+				rowAction: "text-muted-foreground hover:bg-accent-active hover:text-foreground",
+				/*
+				 * Same shape as rowAction — only the glyph turns red, and only on
+				 * hover. No red background: the row already carries one fill, a
+				 * second competing tint is noise, and the delete confirmation is
+				 * what actually protects the user.
+				 */
+				rowActionDestructive:
+					"text-muted-foreground hover:bg-accent-active hover:text-destructive",
 			},
 			size: {
 				default: "h-9 px-4 py-2",

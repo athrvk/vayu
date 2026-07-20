@@ -16,3 +16,6 @@ export * from "./response-viewer";
 
 // OAuth 2.0 auth form
 export * from "./OAuth2Form";
+
+// Row "⋯" actions menu (requests, environments)
+export * from "./RowActionsMenu";
