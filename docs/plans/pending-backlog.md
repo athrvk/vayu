@@ -40,6 +40,53 @@ The stdio MCP server (`app/electron/mcp/cli.ts`) is built and tested but is only
 
 ---
 
+## Architecture / maintainability
+
+### A1. Request composition is duplicated across engine clients — consolidate into the engine
+
+Preparing a request before it executes — resolving `{{variables}}`, walking the
+collection chain for `inherit` auth, and composing the collection-chain + request
+pre/post scripts — currently happens **client-side, once per engine client**:
+
+- **Renderer:** `app/src/hooks/useVariableResolver.ts` + inline in
+  `app/src/modules/request-builder/index.tsx` (execute + load paths) +
+  `app/src/modules/request-builder/utils/auth-mapping.ts`.
+- **MCP:** `app/electron/mcp/resolve.ts` — a faithful port of the renderer
+  pipeline (added when MCP became a second engine client; see PR / `mcp.md`).
+
+**Root cause — the engine already does most of composition but stops ~80% in.**
+On `POST /request` (`engine/src/http/routes/execution.cpp`) it loads the
+environment, globals, and the request's collection variables (into the script
+context), applies concrete auth (`build_request` → `apply_auth`, incl. the OAuth2
+token cache), and runs the pre/post scripts. It does **not** interpolate `{{var}}`
+into the URL/headers/body, resolve `inherit` auth from the collection chain, or
+compose the chain's scripts — and it takes auth/scripts from the POST body rather
+than from the saved request. It even drops `{"mode":"inherit"}` explicitly as
+"resolved app-side" (`auth_resolver.cpp::parse_auth`). So every client fills that
+gap itself, which is why the logic is duplicated.
+
+**Direction (NOT yet actioned — documented for awareness).** Finish composition
+in the engine: an "execute a saved request by id, fully composed" path that
+interpolates variables, walks the inherit-auth chain, and composes scripts,
+reusing the maps + auth/script machinery it already has. Then MCP drops its
+composition entirely (hands the engine `requestId` + `environmentId`), and the
+renderer can adopt it for **send** while keeping `useVariableResolver` only for
+live UI preview/highlighting — a genuinely separate concern. The codebase already
+accepts this TS-preview / C++-execution split (see the `castByType` mirror note in
+`app/src/lib/variable-cast.ts`).
+
+**Cost / why deferred.** Substantial new C++ in the AGPL engine (+ gtest
+coverage), and it touches the renderer's untested send/load path; it reverses the
+"keep the engine untouched" scoping held during the MCP work. **Until it is done,
+treat `resolve.ts` and the renderer pipeline as a known, intentional duplicate
+that must stay behaviorally in sync — do NOT add a third client-side copy.** A new
+engine client should reuse `app/electron/mcp/resolve.ts` (or the engine path once
+it exists). Parity is currently guarded only by `resolve.test.ts` + the renderer's
+own tests. See `docs/engine/mcp.md` → *Request composition* and
+`docs/engine/architecture.md` → *Request composition boundary*.
+
+---
+
 ## Parked (revisit only if the trigger becomes real)
 
 ### D8. HdrHistogram concurrent read/write - _mitigated by W1; cumulative-path atomic cure intentionally deferred_

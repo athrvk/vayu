@@ -191,6 +191,15 @@ carries a `{{template}}`, or auth is `inherit`); a fully-literal call skips the
 extra round-trips. `run_request` / `start_load_run` take optional `environmentId`
 and `collectionId` to scope resolution.
 
+> **Known duplication (deferred).** `resolve.ts` is a deliberate port of the
+> renderer's composition pipeline, so the same semantics now live in two places
+> (renderer + MCP). This is because the engine only does composition halfway (it
+> loads variables and applies auth/scripts, but does not interpolate `{{var}}`,
+> resolve `inherit`, or compose chain scripts). The intended fix is to finish
+> composition in the engine and let clients go thin. Until then, **keep the two
+> copies in sync and don't add a third.** See `docs/plans/pending-backlog.md` →
+> **A1**.
+
 ## Resources
 
 Read-only Vayu data an agent can attach as context (`resources.ts`):
