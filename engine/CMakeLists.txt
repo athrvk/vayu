@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(vayu-engine
-    VERSION 0.8.0
+    VERSION 0.9.0
     DESCRIPTION "High-performance API execution engine"
     LANGUAGES C CXX
 )
