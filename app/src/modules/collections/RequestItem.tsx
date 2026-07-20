@@ -82,6 +82,9 @@ export default function RequestItem({
 	return (
 		<div
 			data-request-id={request.id}
+			role="treeitem"
+			tabIndex={-1}
+			aria-selected={isSelected}
 			className={cn(
 				// focus-row: this row is the perceived target, not the narrower
 				// label button inside it — it paints the keyboard focus ring.
@@ -97,6 +100,8 @@ export default function RequestItem({
 			<button
 				onClick={handleClick}
 				onDoubleClick={handleDoubleClick}
+				tabIndex={-1}
+				data-tree-activate
 				className="flex items-center gap-2 flex-1 text-left cursor-pointer"
 				disabled={isDeleting || isRenaming}
 			>
@@ -145,6 +150,8 @@ export default function RequestItem({
 							: onDelete(request.id)
 					}
 					disabled={isDeleting}
+					tabIndex={-1}
+					data-tree-delete
 					aria-label={`Delete request ${request.name}`}
 					className={cn(
 						"h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-opacity",

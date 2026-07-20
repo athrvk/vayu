@@ -491,6 +491,10 @@
 	 * toggles expansion rather than opening the collection — opt out with
 	 * .focus-self and keep their own ring, so only one indicator ever shows.
 	 */
+	/* Two cases: the row is itself the focusable element (the tree's roving
+	   tabindex focuses the row), or focus is on a control inside it. `:has()`
+	   is descendant-only and does not cover the first. */
+	:where(.focus-row):focus-visible,
 	:where(.focus-row):has(:focus-visible:not(.focus-self)) {
 		outline: 2px solid hsl(var(--primary) / 0.3);
 		outline-offset: -2px;

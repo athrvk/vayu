@@ -463,6 +463,41 @@ is its own target — the chevron toggles expansion rather than opening the
 collection — keeps its own ring and does not light the row, so exactly one
 indicator ever shows.
 
+`.focus-row` covers two cases: the row is itself focusable (the collection tree's
+roving tabindex focuses the row), or focus sits on a control inside it. `:has()`
+is descendant-only and does not cover the first, hence the `:focus-visible`
+selector alongside it.
+
+---
+
+## Tree Navigation (roving tabindex)
+
+The collection tree follows the WAI-ARIA treeview pattern: **the whole tree is
+one tab stop**. Previously every row and every control in it was a stop — a
+workspace with 2 collections and 4 requests cost 17 presses to tab past.
+
+- Container: `role="tree"`. Rows: `role="treeitem"`, `aria-expanded` on
+  collections, `aria-selected` for the open entity.
+- Rows render `tabIndex={-1}`; `useRovingTreeFocus` promotes exactly one to `0`.
+- Keys: Up/Down move, Home/End jump, Right expands then steps in, Left collapses
+  then moves to the parent, Enter/Space opens, **Delete** deletes, **Shift+F10 /
+  Menu** opens row actions.
+- Every control inside a row is `tabIndex={-1}`, so Delete and Shift+F10 are the
+  keyboard path to row actions — do not remove them without providing another.
+
+Rows declare behaviour through data attributes rather than props
+(`data-tree-activate`, `data-tree-toggle`, `data-tree-menu`, `data-tree-delete`),
+so the hook needs nothing threaded through `CollectionItem`'s prop list.
+
+**Focus is not selection.** Arrows move focus without opening anything; Enter
+opens. Keep roving focus, `aria-selected`, and the open tab in tabs-store
+distinct — conflating them is the classic treeview bug.
+
+Visible order comes from the DOM (`[role="treeitem"]` in document order), since
+collapsed subtrees are not rendered. Note a row's children are a **sibling** of
+that row inside a shared wrapper, not nested within it, so finding a parent row
+means walking up to the enclosing wrapper — not `closest()`.
+
 Currently on `CollectionItem` and `RequestItem` rows. **Only needed where the
 control and the row genuinely differ** — the history, variables and settings
 trees use full-width buttons that are their own target, so they use the baseline.

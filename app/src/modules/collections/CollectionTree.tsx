@@ -32,6 +32,7 @@ import {
 	Skeleton,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
+import { useRovingTreeFocus } from "./useRovingTreeFocus";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
 import { TIMING } from "@/config/timing";
@@ -45,6 +46,7 @@ export default function CollectionTree() {
 		useCollectionsStore();
 	const { startSaving, completeSave, failSave, setStatus } = useSaveStore();
 	const treeRef = useRef<HTMLDivElement>(null);
+	const treeFocus = useRovingTreeFocus(treeRef);
 	const scrolledRequestRef = useRef<string | null>(null);
 
 	// Get selected collection and request IDs from active tab
@@ -556,10 +558,18 @@ export default function CollectionTree() {
 				</div>
 			)}
 
-			{/* Root-level collections (no parentId) - sorted by order, scrollable */}
+			{/* Root-level collections (no parentId) - sorted by order, scrollable.
+			    role="tree" + roving tabindex: the whole tree is one tab stop and
+			    arrow keys move between rows (see useRovingTreeFocus). */}
 			{!isLoadingCollections && rootCollections.length > 0 && (
 				<ScrollArea className="flex-1 min-h-0 -mx-1 px-1">
-					<div className="space-y-0.5 pr-2">
+					<div
+						role="tree"
+						aria-label="Collections"
+						onKeyDown={treeFocus.onKeyDown}
+						onFocus={treeFocus.onFocus}
+						className="space-y-0.5 pr-2"
+					>
 						{rootCollections.map((collection) => (
 							<CollectionItem
 								key={collection.id}

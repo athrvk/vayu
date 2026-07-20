@@ -144,7 +144,14 @@ export default function CollectionItem({
 	return (
 		<div className={cn("select-none", isDeleting && "opacity-50")}>
 			{/* Collection Header */}
+			{/* The row is the treeitem: one tab stop for the whole tree, arrows
+			    move between rows (useRovingTreeFocus). tabIndex starts at -1; the
+			    hook promotes exactly one row to 0. */}
 			<div
+				role="treeitem"
+				tabIndex={-1}
+				aria-expanded={isExpanded}
+				aria-selected={isSelected}
 				className={cn(
 					// focus-row: this row is the perceived target, not the narrower
 					// label button inside it — it paints the keyboard focus ring.
@@ -161,6 +168,8 @@ export default function CollectionItem({
 			>
 				<button
 					onClick={handleToggleClick}
+					tabIndex={-1}
+					data-tree-toggle
 					className={cn(
 						// focus-self: this toggles expansion rather than opening the
 						// collection, so it keeps its own ring instead of lighting
@@ -184,6 +193,8 @@ export default function CollectionItem({
 				<button
 					onClick={handleClick}
 					onDoubleClick={handleDoubleClick}
+					tabIndex={-1}
+					data-tree-activate
 					className="flex items-center gap-2 flex-1 text-left cursor-pointer"
 					disabled={isDeleting || isRenaming}
 				>
@@ -232,6 +243,8 @@ export default function CollectionItem({
 						<Button
 							variant="ghost"
 							size="icon"
+							tabIndex={-1}
+							data-tree-menu
 							className="h-6 w-6"
 							aria-label={`More actions for ${collection.name}`}
 							onClick={(e) => {
