@@ -6,7 +6,7 @@
  */
 
 import { useLayoutStore } from "@/stores";
-import { DEFAULT_DRAWER_WIDTHS } from "@/constants/layout";
+import { DEFAULT_DRAWER_WIDTH } from "@/constants/layout";
 import { useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import { ScrollArea } from "@/components/ui";
 import CollectionTree from "@/modules/collections/CollectionTree";
@@ -15,21 +15,21 @@ import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategory
 import { SettingsCategoryTree } from "@/modules/settings";
 
 export function Drawer() {
-	const { drawerOpen, drawerView, drawerWidths, setDrawerWidth } = useLayoutStore();
+	const { drawerOpen, drawerView, drawerWidth, setDrawerWidth } = useLayoutStore();
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
 
 	if (!drawerOpen) return null;
 
-	const width = drawerWidths[drawerView];
+	const width = drawerWidth;
 
 	const startResize = (e: React.PointerEvent) => {
 		e.currentTarget.setPointerCapture(e.pointerId);
 		const startX = e.clientX;
-		const startWidth = drawerWidths[drawerView];
+		const startWidth = drawerWidth;
 
 		const onMove = (moveEvent: PointerEvent) => {
-			setDrawerWidth(drawerView, startWidth + moveEvent.clientX - startX);
+			setDrawerWidth(startWidth + moveEvent.clientX - startX);
 		};
 		const onUp = () => {
 			window.removeEventListener("pointermove", onMove);
@@ -62,7 +62,7 @@ export function Drawer() {
 			<div
 				className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-accent/20"
 				onPointerDown={startResize}
-				onDoubleClick={() => setDrawerWidth(drawerView, DEFAULT_DRAWER_WIDTHS[drawerView])}
+				onDoubleClick={() => setDrawerWidth(DEFAULT_DRAWER_WIDTH)}
 			>
 				<div className="absolute right-0 top-0 bottom-0 w-px bg-border" />
 			</div>

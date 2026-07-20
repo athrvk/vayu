@@ -10,7 +10,7 @@ import { persist } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
 	DEFAULT_CONTEXT_BAR_WIDTH,
-	DEFAULT_DRAWER_WIDTHS,
+	DEFAULT_DRAWER_WIDTH,
 	PANEL_MIN_WIDTH,
 	PANEL_MAX_WIDTH,
 } from "@/constants/layout";
@@ -21,7 +21,8 @@ interface LayoutState {
 	// Drawer
 	drawerOpen: boolean;
 	drawerView: DrawerView;
-	drawerWidths: Record<DrawerView, number>;
+	/** One width for every view — see DEFAULT_DRAWER_WIDTH. */
+	drawerWidth: number;
 
 	// Context bar (right panel for request tabs)
 	contextBarOpen: boolean;
@@ -36,7 +37,7 @@ interface LayoutState {
 	setDrawerView: (view: DrawerView) => void;
 	/** Open the drawer to a specific view, or toggle it closed if already on that view */
 	activateDrawerView: (view: DrawerView) => void;
-	setDrawerWidth: (view: DrawerView, width: number) => void;
+	setDrawerWidth: (width: number) => void;
 
 	setContextBarOpen: (open: boolean) => void;
 	toggleContextBar: () => void;
@@ -50,7 +51,7 @@ export const useLayoutStore = create<LayoutState>()(
 		(set) => ({
 			drawerOpen: true,
 			drawerView: "collections",
-			drawerWidths: { ...DEFAULT_DRAWER_WIDTHS },
+			drawerWidth: DEFAULT_DRAWER_WIDTH,
 			contextBarOpen: false,
 			contextBarWidth: DEFAULT_CONTEXT_BAR_WIDTH,
 			requestSplitRatio: 0.5,
@@ -63,13 +64,8 @@ export const useLayoutStore = create<LayoutState>()(
 					drawerView: view,
 					drawerOpen: s.drawerView === view ? !s.drawerOpen : true,
 				})),
-			setDrawerWidth: (view, width) =>
-				set((s) => ({
-					drawerWidths: {
-						...s.drawerWidths,
-						[view]: Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, width)),
-					},
-				})),
+			setDrawerWidth: (width) =>
+				set({ drawerWidth: Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, width)) }),
 
 			setContextBarOpen: (open) => set({ contextBarOpen: open }),
 			toggleContextBar: () => set((s) => ({ contextBarOpen: !s.contextBarOpen })),
@@ -83,18 +79,30 @@ export const useLayoutStore = create<LayoutState>()(
 		}),
 		{
 			name: STORAGE_KEYS.LAYOUT_STORE,
-			version: 2,
+			version: 3,
 			migrate: (persisted, version) => {
-				const state = persisted as LayoutState;
+				const state = persisted as LayoutState & {
+					drawerWidths?: Record<string, number>;
+				};
 				// v1 could persist a skewed split ratio while panel sizes were
 				// misparsed as pixels — reset to an even split
 				if (version < 2) state.requestSplitRatio = 0.5;
+				// v2 stored a width per drawer view, which made the main content
+				// resize when switching views. Collapse to a single width, keeping
+				// whatever the user had set for collections (the default view).
+				if (version < 3) {
+					state.drawerWidth =
+						state.drawerWidths?.collections ??
+						state.drawerWidths?.variables ??
+						DEFAULT_DRAWER_WIDTH;
+					delete state.drawerWidths;
+				}
 				return state;
 			},
 			partialize: (state) => ({
 				drawerOpen: state.drawerOpen,
 				drawerView: state.drawerView,
-				drawerWidths: state.drawerWidths,
+				drawerWidth: state.drawerWidth,
 				contextBarOpen: state.contextBarOpen,
 				contextBarWidth: state.contextBarWidth,
 				requestSplitRatio: state.requestSplitRatio,
