@@ -673,6 +673,30 @@ Before adding it, check whether the focusable element already spans the row.
 
 ---
 
+## Flex Items Must Be Told They May Shrink
+
+**A flex item defaults to `min-width: auto` / `min-height: auto`, which refuses
+to shrink below its content.** `flex-1` sets how an item _grows_; it does not
+grant permission to shrink. This has caused two separate bugs in this codebase
+and is worth checking whenever a flex child holds unbounded content.
+
+| Axis       | Add                        | Symptom when missing                                                                                              |
+| ---------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Horizontal | `min-w-0` on the wrapper   | `truncate` never engages — a long name widens the row and the panel scrolls sideways.                              |
+| Vertical   | `min-h-0` on the wrapper   | The child keeps its old height when the container shrinks — the parent overflows and grows a second scrollbar.     |
+
+The vertical case is the more confusing one, because the visible symptom is a
+_scrollbar_, not a sizing error: a Monaco editor in a resizable pane kept its
+previous height when the pane was dragged smaller, so the pane overflowed and
+drew a native scrollbar next to the editor's own. Two scrollbars for one
+editor. The fix is never to hide the extra scrollbar — it is to let the child
+shrink, after which there is no overflow to scroll.
+
+An element that is itself the scroller is exempt on that axis: `overflow: hidden`
+(which `truncate` sets) already gives a flex item an automatic minimum size of 0.
+
+---
+
 ## Layout Structure
 
 ```

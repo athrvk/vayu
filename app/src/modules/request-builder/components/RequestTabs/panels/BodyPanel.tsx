@@ -407,7 +407,14 @@ export default function BodyPanel() {
 										)}
 									</div>
 								</div>
-								<div className="flex-1">
+								{/*
+								 * min-h-0: a flex item will not shrink below its content, so
+								 * without it the editor keeps its old height when the pane is
+								 * dragged smaller. The panel then overflows and grows a native
+								 * scrollbar beside the editor's own — two scrollbars for one
+								 * editor. Same trap as min-w-0 on truncating rows.
+								 */}
+								<div className="min-h-0 flex-1">
 									<CodeEditor
 										height="100%"
 										language="graphql"
@@ -428,7 +435,14 @@ export default function BodyPanel() {
 										Variables
 									</span>
 								</div>
-								<div className="flex-1">
+								{/*
+								 * min-h-0: a flex item will not shrink below its content, so
+								 * without it the editor keeps its old height when the pane is
+								 * dragged smaller. The panel then overflows and grows a native
+								 * scrollbar beside the editor's own — two scrollbars for one
+								 * editor. Same trap as min-w-0 on truncating rows.
+								 */}
+								<div className="min-h-0 flex-1">
 									<CodeEditor
 										height="100%"
 										language="json"
