@@ -22,6 +22,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TooltipProvider } from "@/components/ui";
 import VariablesCategoryTree from "./VariablesCategoryTree";
 
 const queryState = {
@@ -39,9 +40,13 @@ vi.mock("@/queries", () => ({
 
 function renderTree() {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	// TooltipProvider mirrors main.tsx: the tree contains a TooltipIconButton
+	// (Add environment), and Radix Tooltip throws without a provider ancestor.
 	return render(
 		<QueryClientProvider client={qc}>
-			<VariablesCategoryTree />
+			<TooltipProvider>
+				<VariablesCategoryTree />
+			</TooltipProvider>
 		</QueryClientProvider>
 	);
 }

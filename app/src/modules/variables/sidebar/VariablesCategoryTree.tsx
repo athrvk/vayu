@@ -39,7 +39,7 @@ import {
 	Copy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Badge, Button, Input, DeleteConfirmDialog } from "@/components/ui";
+import { Badge, Input, DeleteConfirmDialog, TooltipIconButton } from "@/components/ui";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 
 export default function VariablesCategoryTree() {
@@ -200,18 +200,15 @@ export default function VariablesCategoryTree() {
 									{isLoadingEnvironments ? "—" : environments.length}
 								</Badge>
 							</button>
-							<Button
-								variant="ghost"
-								size="icon"
+							<TooltipIconButton
+								label="Add environment"
+								icon={<Plus className="w-3 h-3" />}
 								onClick={() => {
 									setEnvironmentsExpanded(true);
 									setCreatingEnvironment(true);
 								}}
 								className="h-6 w-6 mr-2"
-								title="Add Environment"
-							>
-								<Plus className="w-3 h-3" />
-							</Button>
+							/>
 						</div>
 
 						{environmentsExpanded && (

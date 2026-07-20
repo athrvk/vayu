@@ -16,7 +16,7 @@
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "./button";
+import { TooltipIconButton } from "./tooltip-icon-button";
 import { Input } from "./input";
 
 interface SecretInputProps {
@@ -45,21 +45,19 @@ export function SecretInput({
 				disabled={disabled}
 				className={cn("pr-9 font-mono text-sm", className)}
 			/>
-			<Button
+			<TooltipIconButton
 				type="button"
-				variant="ghost"
-				size="icon"
 				// Not a tab stop — it's an affordance on the field, not a form control.
 				tabIndex={-1}
 				disabled={disabled}
 				onClick={() => setRevealed((v) => !v)}
 				className="absolute right-0 top-0 h-full w-9 text-muted-foreground hover:text-foreground"
-				title={revealed ? "Hide value" : "Show value"}
-				aria-label={revealed ? "Hide value" : "Show value"}
+				label={revealed ? "Hide value" : "Show value"}
 				aria-pressed={revealed}
-			>
-				{revealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-			</Button>
+				icon={
+					revealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />
+				}
+			/>
 		</div>
 	);
 }

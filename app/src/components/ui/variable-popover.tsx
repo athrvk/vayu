@@ -17,6 +17,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
+import { TooltipIconButton } from "./tooltip-icon-button";
 import { Input } from "./input";
 import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
@@ -216,23 +217,22 @@ export function VariablePopover({
 											</span>
 										)}
 										{varInfo.secret && varInfo.value && (
-											<Button
-												variant="ghost"
-												size="icon"
+											<TooltipIconButton
+												label={
+													isSecretRevealed ? "Hide value" : "Reveal value"
+												}
+												icon={
+													isSecretRevealed ? (
+														<EyeOff className="w-3 h-3" />
+													) : (
+														<Eye className="w-3 h-3" />
+													)
+												}
 												onClick={() =>
 													setIsSecretRevealed(!isSecretRevealed)
 												}
 												className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 text-muted-foreground hover:text-foreground"
-												title={
-													isSecretRevealed ? "Hide value" : "Reveal value"
-												}
-											>
-												{isSecretRevealed ? (
-													<EyeOff className="w-3 h-3" />
-												) : (
-													<Eye className="w-3 h-3" />
-												)}
-											</Button>
+											/>
 										)}
 									</div>
 								</div>
@@ -258,23 +258,22 @@ export function VariablePopover({
 											autoFocus
 										/>
 										{varInfo.secret && (
-											<Button
-												variant="ghost"
-												size="icon"
+											<TooltipIconButton
+												label={
+													isSecretRevealed ? "Hide value" : "Reveal value"
+												}
+												icon={
+													isSecretRevealed ? (
+														<EyeOff className="w-3.5 h-3.5" />
+													) : (
+														<Eye className="w-3.5 h-3.5" />
+													)
+												}
 												onClick={() =>
 													setIsSecretRevealed(!isSecretRevealed)
 												}
 												className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
-												title={
-													isSecretRevealed ? "Hide value" : "Reveal value"
-												}
-											>
-												{isSecretRevealed ? (
-													<EyeOff className="w-3.5 h-3.5" />
-												) : (
-													<Eye className="w-3.5 h-3.5" />
-												)}
-											</Button>
+											/>
 										)}
 									</div>
 								</div>

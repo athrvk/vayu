@@ -31,6 +31,9 @@ import {
 	ResizablePanelGroup,
 	ResizablePanel,
 	ResizableHandle,
+	Tooltip,
+	TooltipTrigger,
+	TooltipContent,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "../../../shared/KeyValueEditor";
@@ -390,20 +393,33 @@ export default function BodyPanel() {
 									<div className="flex items-center gap-2">
 										<SchemaStatusBadge status={schemaStatus} />
 										{resolvedGqlUrl && (
-											<button
-												type="button"
-												onClick={handleRefreshSchema}
-												disabled={schemaStatus === "loading"}
-												title="Refresh schema"
-												className="text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
-											>
-												<RefreshCw
-													className={cn(
-														"w-3 h-3",
-														schemaStatus === "loading" && "animate-spin"
-													)}
-												/>
-											</button>
+											// Bespoke tiny affordance (12px, no button chrome),
+											// so it wraps Tooltip by hand rather than using
+											// TooltipIconButton, whose icon-size Button would
+											// dwarf it here. Same result: a real tooltip plus a
+											// name, replacing the old title.
+											<Tooltip>
+												<TooltipTrigger asChild>
+													<button
+														type="button"
+														onClick={handleRefreshSchema}
+														disabled={schemaStatus === "loading"}
+														aria-label="Refresh schema"
+														className="text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+													>
+														<RefreshCw
+															className={cn(
+																"w-3 h-3",
+																schemaStatus === "loading" &&
+																	"animate-spin"
+															)}
+														/>
+													</button>
+												</TooltipTrigger>
+												<TooltipContent side="top">
+													Refresh schema
+												</TooltipContent>
+											</Tooltip>
 										)}
 									</div>
 								</div>

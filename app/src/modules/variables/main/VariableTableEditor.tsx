@@ -52,6 +52,7 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
+	TooltipIconButton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
@@ -534,15 +535,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 									Active
 								</Badge>
 							)}
-							<Button
-								variant="ghost"
-								size="icon"
+							<TooltipIconButton
+								label="Delete environment"
+								icon={<Trash2 className="w-4 h-4" />}
 								onClick={() => setShowDeleteConfirm(true)}
 								className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-								title="Delete environment"
-							>
-								<Trash2 className="w-4 h-4" />
-							</Button>
+							/>
 						</div>
 					)}
 				</div>
@@ -652,9 +650,19 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												)}
 											/>
 											{variable.secret && !variable.isNew && (
-												<Button
-													variant="ghost"
-													size="icon"
+												<TooltipIconButton
+													label={
+														isSecretRevealed
+															? "Hide value"
+															: "Reveal value"
+													}
+													icon={
+														isSecretRevealed ? (
+															<EyeOff className="w-3.5 h-3.5" />
+														) : (
+															<Eye className="w-3.5 h-3.5" />
+														)
+													}
 													onClick={() => {
 														setRevealedSecrets((prev) => {
 															const newSet = new Set(prev);
@@ -667,18 +675,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 														});
 													}}
 													className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
-													title={
-														isSecretRevealed
-															? "Hide value"
-															: "Reveal value"
-													}
-												>
-													{isSecretRevealed ? (
-														<EyeOff className="w-3.5 h-3.5" />
-													) : (
-														<Eye className="w-3.5 h-3.5" />
-													)}
-												</Button>
+												/>
 											)}
 										</div>
 									</td>
@@ -719,9 +716,13 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 									</td>
 									<td className="py-1 text-center">
 										{!variable.isNew && (
-											<Button
-												variant="ghost"
-												size="icon"
+											<TooltipIconButton
+												label={
+													variable.secret
+														? "Unmark as secret"
+														: "Mark as secret (masks value in UI)"
+												}
+												icon={<KeyRound className="w-4 h-4" />}
 												onClick={() => {
 													updateVariable(
 														index,
@@ -744,14 +745,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 														? "text-warning-text hover:text-warning-text hover:bg-warning/10"
 														: "text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
 												)}
-												title={
-													variable.secret
-														? "Unmark as secret"
-														: "Mark as secret (masks value in UI)"
-												}
-											>
-												<KeyRound className="w-4 h-4" />
-											</Button>
+											/>
 										)}
 									</td>
 									<td className="py-1">

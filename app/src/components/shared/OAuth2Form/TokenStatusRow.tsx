@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Button, TooltipIconButton } from "@/components/ui";
 import { ApiError } from "@/services/http-client";
 import {
 	useOAuth2TokenStatusQuery,
@@ -143,20 +143,19 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 				{/* Action rail - fixed position, never shifts */}
 				<div className="flex items-center gap-1 shrink-0">
 					{token && (
-						<Button
+						<TooltipIconButton
 							size="sm"
-							variant="ghost"
-							onClick={() => setRevealed((v) => !v)}
-							title={revealed ? "Hide token" : "Show full token"}
-							aria-label={revealed ? "Hide token" : "Show full token"}
+							label={revealed ? "Hide token" : "Show full token"}
 							aria-pressed={revealed}
-						>
-							{revealed ? (
-								<EyeOff className="w-3.5 h-3.5" />
-							) : (
-								<Eye className="w-3.5 h-3.5" />
-							)}
-						</Button>
+							onClick={() => setRevealed((v) => !v)}
+							icon={
+								revealed ? (
+									<EyeOff className="w-3.5 h-3.5" />
+								) : (
+									<Eye className="w-3.5 h-3.5" />
+								)
+							}
+						/>
 					)}
 					<Button size="sm" variant="outline" onClick={handleGetToken} disabled={busy}>
 						{fetchMutation.isPending || authorizing ? (
@@ -171,15 +170,13 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 						</span>
 					</Button>
 					{token && (
-						<Button
+						<TooltipIconButton
 							size="sm"
-							variant="ghost"
+							label="Clear cached token"
 							onClick={handleClear}
 							disabled={busy}
-							title="Clear cached token"
-						>
-							<Trash2 className="w-3.5 h-3.5" />
-						</Button>
+							icon={<Trash2 className="w-3.5 h-3.5" />}
+						/>
 					)}
 				</div>
 			</div>

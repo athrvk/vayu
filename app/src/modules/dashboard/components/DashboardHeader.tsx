@@ -12,7 +12,7 @@
  */
 
 import { ArrowLeft, StopCircle, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Button, TooltipIconButton } from "@/components/ui";
 import { useTabsStore, useDashboardStore } from "@/stores";
 import type { DashboardHeaderProps } from "../types";
 import { MethodBadge } from "@/components/shared";
@@ -75,15 +75,12 @@ export default function DashboardHeader({
 		<div className="h-[52px] flex items-center gap-3 px-5 bg-panel border-b border-border shrink-0">
 			{/* Back button — returns to the previous screen (typically request builder) */}
 			{canNavigateBack && (
-				<Button
-					size="icon"
-					variant="ghost"
+				<TooltipIconButton
+					label="Back"
+					icon={<ArrowLeft className="w-4 h-4" />}
 					onClick={navigateBack}
 					className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-					title="Back"
-				>
-					<ArrowLeft className="w-4 h-4" />
-				</Button>
+				/>
 			)}
 
 			{/* Status pill */}
