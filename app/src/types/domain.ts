@@ -444,7 +444,7 @@ export interface ConfigEntry {
 }
 
 /** Client-side settings panels (localStorage-backed prefs, rendered by app panels). */
-export type ClientSettingsCategory = "appearance" | "editor" | "dashboard" | "general";
+export type ClientSettingsCategory = "appearance" | "editor" | "dashboard" | "general" | "mcp";
 
 /** Engine settings categories (data-driven from the engine `/config` API). */
 export type EngineSettingsCategory =
@@ -455,6 +455,56 @@ export type EngineSettingsCategory =
 	| "observability";
 
 export type SettingsCategory = ClientSettingsCategory | EngineSettingsCategory;
+
+/**
+ * MCP safety guardrails, mirrored from the Electron main process
+ * (`electron/mcp/config.ts`). The renderer cannot import from `electron/`, so
+ * the shape is redeclared here for the Settings panel and the preload typings.
+ */
+export interface McpSafetyConfig {
+	/** Hostnames an agent may send traffic to. Empty = deny all (safe default). */
+	allowlist: string[];
+	/** When true, bypass the allowlist and allow any resolvable host. */
+	allowAll: boolean;
+	/** Hard ceiling on `targetRps` for load runs. */
+	maxRps: number;
+	/** Hard ceiling on `concurrency` for load runs. */
+	maxConcurrency: number;
+	/** Hard ceiling on a load run's duration, in seconds. */
+	maxDurationSeconds: number;
+	/** When false (default), collection/environment write tools are disabled. */
+	allowWrites: boolean;
+	/** Tool names the user has switched off (omitted from tools/list + rejected). */
+	disabledTools: string[];
+}
+
+/** Feature grouping for the MCP tool list in Settings. */
+export type McpToolCategory = "read" | "execute" | "write" | "load";
+
+/** Metadata for one MCP tool, surfaced in Settings for enable/disable control. */
+export interface McpToolInfo {
+	name: string;
+	description: string;
+	category: McpToolCategory;
+	readOnly: boolean;
+}
+
+export interface McpStatus {
+	running: boolean;
+	url: string;
+	/** Whether the MCP server is enabled (may be enabled-but-not-running on error). */
+	enabled: boolean;
+}
+
+/** Clients Vayu can register itself with via their own CLI (one-click connect). */
+export type McpConnectClient = "claude" | "vscode";
+
+export interface McpConnectResult {
+	ok: boolean;
+	/** "cli-not-found" → the client's CLI isn't installed; fall back to the snippet. */
+	reason?: "cli-not-found" | "error" | "unsupported";
+	message?: string;
+}
 
 export interface ScriptCompletion {
 	label: string;

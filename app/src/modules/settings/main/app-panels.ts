@@ -17,11 +17,12 @@
 
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Palette, Code2, LayoutDashboard, Info } from "lucide-react";
+import { Palette, Code2, LayoutDashboard, Plug, Info } from "lucide-react";
 import type { ClientSettingsCategory, SettingsCategory } from "@/types";
 import AppearancePanel from "./panels/AppearancePanel";
 import EditorPanel from "./panels/EditorPanel";
 import DashboardPanel from "./panels/DashboardPanel";
+import McpSettingsPanel from "./panels/McpSettingsPanel";
 import GeneralPanel from "./panels/GeneralPanel";
 
 export interface AppSettingsPanel {
@@ -54,6 +55,13 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 		description: "How live test dashboards and charts behave",
 		icon: LayoutDashboard,
 		Component: DashboardPanel,
+	},
+	{
+		id: "mcp",
+		label: "MCP",
+		description: "Expose Vayu to AI agents like Claude Code, and set the safety guardrails",
+		icon: Plug,
+		Component: McpSettingsPanel,
 	},
 	{
 		id: "general",

@@ -20,6 +20,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	getEngineStatus: (): Promise<{ running: boolean; url: string | null }> =>
 		ipcRenderer.invoke("engine:status"),
 
+	// MCP server (exposes Vayu to agents like Claude Code). See electron/mcp/.
+	getMcpStatus: (): Promise<{ running: boolean; url: string; enabled: boolean }> =>
+		ipcRenderer.invoke("mcp:status"),
+	getMcpSafety: () => ipcRenderer.invoke("mcp:getSafety"),
+	getMcpTools: () => ipcRenderer.invoke("mcp:getTools"),
+	updateMcpSafety: (partial: unknown) => ipcRenderer.invoke("mcp:updateSafety", partial),
+	setMcpEnabled: (enabled: boolean) => ipcRenderer.invoke("mcp:setEnabled", enabled),
+	connectMcpClient: (client: "claude" | "vscode") =>
+		ipcRenderer.invoke("mcp:connectClient", client),
+
 	// Theme management
 	getTheme: (): Promise<{ shouldUseDarkColors: boolean; themeSource: string }> =>
 		ipcRenderer.invoke("theme:get"),

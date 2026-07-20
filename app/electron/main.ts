@@ -13,6 +13,20 @@ import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow } from "./updater.js";
 import {
+	VayuMcpService,
+	DEFAULT_MCP_SAFETY_CONFIG,
+	resolveSafetyConfig,
+	sanitizeSafetyInput,
+	loadPersistedSafety,
+	savePersistedSafety,
+	loadMcpEnabled,
+	saveMcpEnabled,
+	connectClient,
+	toolCatalog,
+	type McpConnectClient,
+	type McpSafetyConfig,
+} from "./mcp/index.js";
+import {
 	DOCS_URL,
 	SCRIPTING_DOCS_URL,
 	ISSUES_URL,
@@ -22,6 +36,11 @@ import {
 	WINDOW_MIN_WIDTH,
 	WINDOW_MIN_HEIGHT,
 	TITLEBAR_HEIGHT,
+	ENGINE_HOST,
+	ENGINE_PORT,
+	MCP_HOST,
+	MCP_PORT,
+	MCP_ENDPOINT_URL,
 } from "./constants.js";
 
 const isDev = process.env.NODE_ENV === "development";
@@ -43,6 +62,8 @@ const __dirname = path.dirname(__filename);
 
 // Global sidecar instance
 let engineSidecar: EngineSidecar | null = null;
+// MCP server (Streamable HTTP) exposing the engine to agents. See mcp/index.ts.
+let mcpService: VayuMcpService | null = null;
 let mainWindow: BrowserWindow | null = null;
 
 // Track if we've already sent the before-quit flush message
@@ -311,6 +332,41 @@ async function startEngine() {
 	}
 }
 
+async function startMcp() {
+	if (!loadMcpEnabled()) {
+		console.log("[Main] MCP server disabled by preference; not starting.");
+		return;
+	}
+	try {
+		mcpService = new VayuMcpService({
+			engineBaseUrl: `http://${ENGINE_HOST}:${ENGINE_PORT}`,
+			host: MCP_HOST,
+			port: MCP_PORT,
+			version: app.getVersion(),
+			safety: loadPersistedSafety(),
+		});
+		await mcpService.start();
+		console.log("[Main] MCP server listening at", mcpService.getUrl());
+	} catch (error) {
+		// The MCP server is a non-critical convenience — a bind failure (e.g. port
+		// in use) must not take down the app. Log and continue.
+		console.error("[Main] Failed to start MCP server (continuing without it):", error);
+		mcpService = null;
+	}
+}
+
+async function stopMcp() {
+	if (mcpService) {
+		try {
+			await mcpService.stop();
+			console.log("[Main] MCP server stopped");
+		} catch (error) {
+			console.error("[Main] Error stopping MCP server:", error);
+		}
+		mcpService = null;
+	}
+}
+
 async function stopEngine() {
 	if (engineSidecar) {
 		try {
@@ -369,6 +425,75 @@ function setupIpcHandlers() {
 			running: engineSidecar?.isRunning() ?? false,
 			url: engineSidecar?.getApiUrl() ?? null,
 		};
+	});
+
+	// MCP server status — used by Settings to show the connect URL and state.
+	ipcMain.handle("mcp:status", () => {
+		return {
+			running: mcpService?.isRunning() ?? false,
+			url: mcpService?.getUrl() ?? MCP_ENDPOINT_URL,
+			enabled: loadMcpEnabled(),
+		};
+	});
+
+	// One-click connect: register the Vayu endpoint with a client via its own CLI
+	// (`claude mcp add`, `code --add-mcp`). Returns cli-not-found so the renderer
+	// can fall back to the copy snippet.
+	ipcMain.handle("mcp:connectClient", async (_event, client: unknown) => {
+		if (client !== "claude" && client !== "vscode") {
+			return { ok: false, reason: "unsupported", message: "Unsupported client" };
+		}
+		const url = mcpService?.getUrl() ?? MCP_ENDPOINT_URL;
+		return connectClient(client as McpConnectClient, url);
+	});
+
+	// Toggle the MCP server on/off from Settings. Persists the preference and
+	// starts/stops the server live. Returns the resulting status.
+	ipcMain.handle("mcp:setEnabled", async (_event, enabled: unknown) => {
+		const on = enabled === true;
+		saveMcpEnabled(on);
+		if (on && !mcpService) {
+			await startMcp();
+		} else if (!on && mcpService) {
+			await stopMcp();
+		}
+		return {
+			running: mcpService?.isRunning() ?? false,
+			url: mcpService?.getUrl() ?? MCP_ENDPOINT_URL,
+			enabled: on,
+		};
+	});
+
+	// Current MCP safety config (allowlist / caps / writes) for the Settings panel.
+	ipcMain.handle("mcp:getSafety", (): McpSafetyConfig => {
+		return mcpService?.getSafety() ?? DEFAULT_MCP_SAFETY_CONFIG;
+	});
+
+	// The tool catalog (name/description/category) for the Settings tool list.
+	ipcMain.handle("mcp:getTools", () => toolCatalog());
+
+	// Apply and persist a safety-config change from Settings. The renderer input
+	// is sanitized here (never trusted), applied live to the running server, and
+	// written to disk so it survives a restart. Returns the resolved config.
+	ipcMain.handle("mcp:updateSafety", (_event, partial: unknown): McpSafetyConfig => {
+		const clean = sanitizeSafetyInput((partial ?? {}) as Partial<McpSafetyConfig>);
+		// Drop unknown tool names so a stale/hand-edited disabled list can't
+		// accumulate junk (the sanitizer can't see the registry).
+		if (clean.disabledTools) {
+			const known = new Set(toolCatalog().map((t) => t.name));
+			clean.disabledTools = clean.disabledTools.filter((name) => known.has(name));
+		}
+		if (mcpService) {
+			mcpService.updateSafety(clean);
+			const resolved = mcpService.getSafety();
+			savePersistedSafety(resolved);
+			return resolved;
+		}
+		// MCP server never came up (e.g. port in use) — still persist so the
+		// change takes effect on the next launch.
+		const resolved = resolveSafetyConfig({ ...loadPersistedSafety(), ...clean });
+		savePersistedSafety(resolved);
+		return resolved;
 	});
 
 	// Theme management
@@ -468,6 +593,9 @@ app.whenReady().then(async () => {
 	// Start the engine
 	await startEngine();
 
+	// Start the MCP server (best-effort; never blocks app startup)
+	await startMcp();
+
 	// Then create the window
 	createWindow();
 
@@ -513,10 +641,11 @@ app.on("before-quit", (event) => {
 		return;
 	}
 
-	// Second pass: stop the engine before actually quitting
-	if (engineSidecar && engineSidecar.isRunning()) {
+	// Second pass: stop the MCP server and engine before actually quitting
+	if ((engineSidecar && engineSidecar.isRunning()) || mcpService) {
 		event.preventDefault();
 		(async () => {
+			await stopMcp();
 			await stopEngine();
 			// Continue with quit process
 			setImmediate(() => app.quit());

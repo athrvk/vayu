@@ -141,6 +141,26 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 
 See `docs/engine/api-reference.md` for full reference.
 
+## Request composition (known duplication — do not add a third copy)
+
+Preparing a request before it executes — resolving `{{variables}}`, resolving
+`inherit` auth via the collection-chain walk, and composing the collection-chain +
+request pre/post scripts — happens **client-side** today, and is therefore
+**duplicated** across the two engine clients:
+
+- **Renderer:** `app/src/hooks/useVariableResolver.ts` + inline in
+  `app/src/modules/request-builder/index.tsx` + `utils/auth-mapping.ts`.
+- **MCP:** `app/electron/mcp/resolve.ts`.
+
+The engine does the rest of execution (loads variables for script context, applies
+concrete auth incl. OAuth2, runs scripts) but intentionally does **no** `{{var}}`
+interpolation and drops `{"mode":"inherit"}` as "resolved app-side". If you change
+resolution/auth/script semantics, **change both client copies together** and keep
+them in sync (guarded by `app/electron/mcp/resolve.test.ts`). **Do not add a third
+copy** — a new engine client should reuse `resolve.ts`. The intended long-term fix
+(consolidate composition into the engine) is deferred and documented in
+`docs/plans/pending-backlog.md` → **A1**; do not start it without explicit ask.
+
 ## Releasing
 
 1. `python build.py --bump-version patch` - updates VERSION, CMakeLists.txt, vcpkg.json, package.json
