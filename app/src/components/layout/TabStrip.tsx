@@ -121,10 +121,15 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 				if (e.button === 1) closeTab(tab.id);
 			}}
 			className={cn(
-				"group flex h-full min-w-20 max-w-50 shrink cursor-pointer select-none items-center gap-1.5 border-r border-border/40 px-3 text-sm",
+				// border-t-2 on both states, transparent when inactive, so the
+				// active tab's accent stripe does not shift its contents by 2px.
+				"group flex h-full min-w-20 max-w-50 shrink cursor-pointer select-none items-center gap-1.5 border-r border-border/40 border-t-2 px-3 text-sm",
 				isActive
-					? "bg-background text-foreground"
-					: "border-b border-b-border bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+					? // Accent stripe is the primary signal — it reads identically in
+						// both themes, unlike a surface shift, which light mode carries
+						// far more weakly (see --tab-active).
+						"border-t-primary bg-tab-active text-foreground"
+					: "border-t-transparent border-b border-b-border bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground"
 			)}
 		>
 			<TabIcon type={tab.type} />

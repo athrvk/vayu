@@ -15,6 +15,20 @@
 | Panel (sidebar/header/toolbar) | `bg-panel` | `#111113` | `#fafafa` |
 | Card (content surface) | `bg-card` | `#1a1a1f` | `#ffffff` |
 
+**`--tab-active`** is a fourth, single-purpose surface for the active tab. It
+exists because the elevation model inverts between themes: in dark, `background`
+is *below* `panel`, so an active tab matching the content pane reads darker than
+the bar — correct. In light, `background` (96%) is *lighter-adjacent* to `panel`
+(98%), so the same rule gave only ΔL\* 2.06 of separation and put the active tab
+on the wrong side of the convention (active tabs are normally the lightest thing
+in light UIs). `--tab-active` deepens it to ΔL\* 4.82 in light and stays equal to
+`--background` in dark, where nothing needed fixing.
+
+The active tab also carries a `border-t-2 border-t-primary` stripe. That is the
+*primary* signal, because it reads identically in both themes, where a surface
+shift does not. Inactive tabs carry `border-t-2 border-t-transparent` so the
+stripe does not displace their contents by 2px.
+
 **Paper White light mode** — light surfaces use a cool near-neutral (zinc) family; higher surfaces are lighter (canvas → panel → white card).  
 **Dark canvas** — dark mode uses near-black with subtle violet undertones (zinc-950 family).
 

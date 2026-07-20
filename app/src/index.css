@@ -28,6 +28,7 @@
 	--color-input: hsl(var(--input));
 	--color-ring: hsl(var(--ring));
 	--color-panel: hsl(var(--panel));
+	--color-tab-active: hsl(var(--tab-active));
 	--color-subtle-foreground: hsl(var(--subtle-foreground));
 	--color-success: hsl(var(--success));
 	--color-success-foreground: hsl(var(--success-foreground));
@@ -91,6 +92,13 @@
 		--background: 240 6% 96%; /* #f4f4f5 — paper-white canvas */
 		--card: 0 0% 100%; /* #ffffff — white card (floats on bg) */
 		--panel: 240 5% 98%; /* #fafafa — sidebar/panel (between canvas and card) */
+		/* Active tab surface. It cannot simply be --background: in light mode
+		 * --background (96%) is *darker* than --panel (98%), so an active tab
+		 * that matches the content pane goes darker than the bar around it —
+		 * the opposite of the convention where the active tab is the lightest
+		 * thing, and the reason light mode separated ~40% more weakly than dark
+		 * (dL* 2.1 vs 3.4). Deepened here to dL* ~4.3. */
+		--tab-active: 240 6% 93%;
 
 		--card-foreground: 240 6% 10%;
 		--popover: 0 0% 100%;
@@ -249,6 +257,9 @@
 		--background: 240 10% 4%; /* #09090b — outermost canvas */
 		--card: 240 6% 11%; /* #1a1a1f — elevated surface */
 		--panel: 240 6% 7%; /* #111113 — sidebar/panel bg */
+		/* Dark already reads correctly: the active tab matches the content pane
+		 * and is darker than the bar, so this stays equal to --background. */
+		--tab-active: 240 10% 4%;
 
 		--card-foreground: 240 5% 96%;
 		--popover: 240 6% 11%;
