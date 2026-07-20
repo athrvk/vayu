@@ -6,11 +6,11 @@
  */
 
 import { useState } from "react";
-import { Search, Clock, Loader2 } from "lucide-react";
+import { Search, Clock } from "lucide-react";
 import { useTabsStore, useLayoutStore } from "@/stores";
 import { useHistoryStore, filterRuns } from "@/modules/history/history-store";
 import { useRunsQuery, useDeleteRunMutation } from "@/queries";
-import { DrawerPanel, TruncatedText } from "@/components/shared";
+import { DrawerPanel, TruncatedText, ListSkeleton } from "@/components/shared";
 import {
 	Button,
 	Input,
@@ -170,12 +170,7 @@ export default function HistoryList() {
 				{/* Runs List */}
 				<div className="flex-1 min-h-0 overflow-hidden">
 					<div className="space-y-2 h-full overflow-y-auto pr-2 -mr-2">
-						{isLoading && (
-							<div className="flex flex-col items-center justify-center py-16">
-								<Loader2 className="w-8 h-8 text-primary animate-spin mb-3" />
-								<p className="text-sm text-muted-foreground">Loading runs...</p>
-							</div>
-						)}
+						{isLoading && <ListSkeleton rows={4} leading badge />}
 
 						{!isLoading && runs.length === 0 && (
 							<div className="text-center py-16">

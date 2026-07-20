@@ -31,3 +31,6 @@ export * from "./TruncatedText";
 
 // Shared frame for the drawer views
 export * from "./DrawerPanel";
+
+// Loading placeholder for the drawer's list views
+export * from "./ListSkeleton";

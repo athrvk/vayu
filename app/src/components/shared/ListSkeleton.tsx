@@ -23,18 +23,29 @@ import { Skeleton } from "@/components/ui";
 interface ListSkeletonProps {
 	/** Rows to draw. Keep near the number the list usually shows. */
 	rows?: number;
-	/** Leading square, for lists whose rows start with an icon or badge. */
+	/** Leading square, for lists whose rows start with an icon. */
 	leading?: boolean;
+	/** Short second block, for rows carrying a method badge before the name. */
+	badge?: boolean;
 	className?: string;
 }
 
-export function ListSkeleton({ rows = 3, leading = true, className }: ListSkeletonProps) {
+export function ListSkeleton({
+	rows = 3,
+	leading = true,
+	badge = false,
+	className,
+}: ListSkeletonProps) {
 	return (
-		<div className={className} aria-hidden="true">
-			<div className="space-y-2 py-2">
+		// aria-hidden + role=status on the wrapper: the placeholder bars carry no
+		// information, but their presence does. A screen reader gets "Loading"
+		// once instead of reading a fake list.
+		<div className={className} role="status" aria-label="Loading">
+			<div className="space-y-2 py-2" aria-hidden="true">
 				{Array.from({ length: rows }, (_, i) => (
 					<div key={i} className="flex items-center gap-2 px-2 py-1.5">
 						{leading && <Skeleton className="h-4 w-4 rounded-md shrink-0" />}
+						{badge && <Skeleton className="h-4 w-5 rounded-md shrink-0" />}
 						<Skeleton className="h-4 flex-1 rounded-md" />
 					</div>
 				))}

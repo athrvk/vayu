@@ -27,11 +27,10 @@ import {
 	TooltipTrigger,
 	TooltipProvider,
 	DeleteConfirmDialog,
-	Skeleton,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
-import { DrawerPanel } from "@/components/shared";
+import { DrawerPanel, ListSkeleton } from "@/components/shared";
 import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
@@ -554,17 +553,7 @@ export default function CollectionTree() {
 				)}
 
 				{/* Loading state */}
-				{isLoadingCollections && (
-					<div className="space-y-2 py-2">
-						{[1, 2, 3].map((i) => (
-							<div key={i} className="flex items-center gap-2 px-2 py-1.5">
-								<Skeleton className="h-4 w-4 rounded-md" />
-								<Skeleton className="h-4 w-5 flex-shrink-0 rounded-md" />
-								<Skeleton className="h-4 flex-1 rounded-md" />
-							</div>
-						))}
-					</div>
-				)}
+				{isLoadingCollections && <ListSkeleton rows={3} leading badge />}
 
 				{/* Zero collections empty state */}
 				{!isLoadingCollections && collections.length === 0 && !creatingCollection && (

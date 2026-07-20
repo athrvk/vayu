@@ -18,12 +18,14 @@ import { useState } from "react";
 import { useTabsStore } from "@/stores";
 import { useVariablesStore, type VariableCategory } from "@/modules/variables/variables-store";
 import {
+	useCollectionsQuery,
+	useEnvironmentsQuery,
 	useCreateEnvironmentMutation,
 	useDeleteEnvironmentMutation,
 	useUpdateEnvironmentMutation,
 } from "@/queries";
-import { RowActionsMenu, DrawerPanel, TruncatedText } from "@/components/shared";
-import type { Collection, Environment } from "@/types";
+import { RowActionsMenu, DrawerPanel, TruncatedText, ListSkeleton } from "@/components/shared";
+import type { Environment } from "@/types";
 import {
 	Globe,
 	Layers,
@@ -40,15 +42,15 @@ import { cn } from "@/lib/utils";
 import { Badge, Button, Input, DeleteConfirmDialog } from "@/components/ui";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 
-interface VariablesCategoryTreeProps {
-	collections: Collection[];
-	environments: Environment[];
-}
+export default function VariablesCategoryTree() {
+	// Fetches its own data, like the other three drawer views. It used to
+	// receive both lists as props from the Drawer, which read them with `= []`
+	// defaults and dropped `isLoading` — so an in-flight query rendered as an
+	// empty tree and told the user "No environments" when the truthful answer
+	// was "not loaded yet".
+	const { data: collections = [], isLoading: isLoadingCollections } = useCollectionsQuery();
+	const { data: environments = [], isLoading: isLoadingEnvironments } = useEnvironmentsQuery();
 
-export default function VariablesCategoryTree({
-	collections,
-	environments,
-}: VariablesCategoryTreeProps) {
 	const { selectedCategory, setSelectedCategory } = useVariablesStore();
 	const { openTab } = useTabsStore();
 	const [collectionsExpanded, setCollectionsExpanded] = useState(true);
@@ -195,7 +197,7 @@ export default function VariablesCategoryTree({
 								<Cloud className="w-3 h-3" />
 								<span>Environments</span>
 								<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
-									{environments.length}
+									{isLoadingEnvironments ? "—" : environments.length}
 								</Badge>
 							</button>
 							<Button
@@ -242,7 +244,9 @@ export default function VariablesCategoryTree({
 									</div>
 								)}
 
-								{environments.length === 0 && !creatingEnvironment ? (
+								{isLoadingEnvironments ? (
+									<ListSkeleton rows={2} className="px-1" />
+								) : environments.length === 0 && !creatingEnvironment ? (
 									<div className="px-3 py-2 text-xs text-muted-foreground italic">
 										No environments
 									</div>
@@ -366,13 +370,15 @@ export default function VariablesCategoryTree({
 							<Layers className="w-3 h-3" />
 							<span>Collections</span>
 							<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
-								{collections.length}
+								{isLoadingCollections ? "—" : collections.length}
 							</Badge>
 						</button>
 
 						{collectionsExpanded && (
 							<div className="mt-1">
-								{collections.length === 0 ? (
+								{isLoadingCollections ? (
+									<ListSkeleton rows={2} className="px-1" />
+								) : collections.length === 0 ? (
 									<div className="px-3 py-2 text-xs text-muted-foreground italic">
 										No collections
 									</div>
