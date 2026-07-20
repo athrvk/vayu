@@ -148,7 +148,11 @@ export default function CollectionItem({
 				className={cn(
 					// focus-row: this row is the perceived target, not the narrower
 					// label button inside it — it paints the keyboard focus ring.
-					"focus-row flex items-center gap-1 py-1.5 pr-2 rounded-md group transition-colors cursor-pointer",
+					// The transition deliberately omits outline-color (which
+					// `transition-colors` includes in Tailwind v4): a focus ring must
+					// appear instantly, otherwise it visibly fades between rows as
+					// Tab moves. Hover may ease; focus may not.
+					"focus-row flex items-center gap-1 py-1.5 pr-2 rounded-md group transition-[color,background-color,border-color] cursor-pointer",
 					isSelected
 						? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
 						: "hover:bg-accent"
@@ -220,12 +224,16 @@ export default function CollectionItem({
 					)}
 				</button>
 
+				{/* Row actions. Also revealed on keyboard focus: they are in the tab
+				    order, so without that a keyboard user lands on an invisible
+				    control. */}
 				{!isRenaming && (
-					<div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+					<div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
 						<Button
 							variant="ghost"
 							size="icon"
 							className="h-6 w-6"
+							aria-label={`More actions for ${collection.name}`}
 							onClick={(e) => {
 								e.preventDefault();
 								e.stopPropagation();

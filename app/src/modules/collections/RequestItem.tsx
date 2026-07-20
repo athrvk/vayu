@@ -85,7 +85,9 @@ export default function RequestItem({
 			className={cn(
 				// focus-row: this row is the perceived target, not the narrower
 				// label button inside it — it paints the keyboard focus ring.
-				"focus-row flex items-center gap-2 px-3 py-1.5 rounded-md group cursor-pointer transition-colors",
+				// The transition omits outline-color (see CollectionItem) so the
+				// focus ring appears instantly instead of fading between rows.
+				"focus-row flex items-center gap-2 px-3 py-1.5 rounded-md group cursor-pointer transition-[color,background-color,border-color]",
 				isDeleting && "opacity-50",
 				isSelected
 					? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
@@ -143,9 +145,14 @@ export default function RequestItem({
 							: onDelete(request.id)
 					}
 					disabled={isDeleting}
+					aria-label={`Delete request ${request.name}`}
 					className={cn(
 						"h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-opacity",
-						isDeleting ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+						// Also reveal on keyboard focus: this is in the tab order, so
+						// without it a keyboard user lands on an invisible control.
+						isDeleting
+							? "opacity-100"
+							: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
 					)}
 				>
 					{isDeleting ? (
