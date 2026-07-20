@@ -407,7 +407,7 @@ focus classes for the default case.**
 ```css
 :where(button, [role="button"], a[href], input, select, textarea, summary,
        [tabindex]:not([tabindex="-1"])):focus-visible {
-  outline: 2px solid hsl(var(--ring));
+  outline: 1px solid hsl(var(--ring));
   outline-offset: 2px;
 }
 ```
@@ -416,17 +416,47 @@ focus classes for the default case.**
   without `!important`. The `components/ui/*` primitives already carry their own
   `focus-visible:ring` and keep their appearance.
 - `:focus-visible` fires only on keyboard/AT focus — mouse users never see a ring.
-- `outline` (not `box-shadow`) follows `border-radius` automatically, so the ring
-  tracks the user's roundedness setting.
+- **1px, not 2px.** On dense lists and toolbars a hairline reads as considered;
+  a 2px saturated rectangle reads as a browser default.
+- `outline` follows the **element's own** `border-radius`. That means the
+  roundedness setting governs the ring **only on elements that already carry a
+  `rounded-*` class**. An element with no radius gets a square ring at every
+  setting — so if a ring should reshape with the control, put the indicator on an
+  element that has the radius (see below).
 - Transitions list paint properties explicitly (`background-color`, `color`,
   `border-color`, `opacity`) at **150ms**. Never `transition: all` — it can
   animate layout properties. Reduced motion already collapses these app-wide.
 
 **Clipping panels.** An element whose `overflow-*` would cut off an outset ring
 must carry `.panel-clip`; every focusable descendant then gets
-`outline-offset: -2px`. Currently on the `TabStrip` row and the `Drawer` content
+`outline-offset: -1px`. Currently on the `TabStrip` row and the `Drawer` content
 wrapper. Put it on the element carrying the overflow — not on the rows. For a
 one-off outside such a container, use the `.focus-ring-inset` utility.
+
+**Composite rows — `.focus-row`.** The baseline attaches the ring to whatever is
+*focusable*, which is only right when the focusable element is also what the user
+reads as the target. In a tree row it often isn't: a collection row is 220px with
+a rounded hover fill, but its label button is 150px with square corners, so an
+outline on the button indicates the wrong shape in the wrong place.
+
+Put `.focus-row` on the element that paints the hover background. It then draws
+the indicator itself — at its own radius, so the roundedness control governs it —
+and adds the same accent fill hover uses, which is how native list selection
+reads. The inner control draws nothing.
+
+```css
+:where(.focus-row):has(:focus-visible) {
+  outline: 1px solid hsl(var(--ring));
+  outline-offset: -1px;
+  background-color: hsl(var(--accent));
+}
+.focus-row :focus-visible { outline: none; }
+```
+
+Currently on `CollectionItem` and `RequestItem` rows. **Only needed where the
+control and the row genuinely differ** — the history, variables and settings
+trees use full-width buttons that are their own target, so they use the baseline.
+Before adding it, check whether the focusable element already spans the row.
 
 ---
 

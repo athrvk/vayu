@@ -3,6 +3,8 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TabStrip } from "./TabStrip";
 import { useTabsStore } from "@/stores";
+import collectionItemSrc from "@/modules/collections/CollectionItem.tsx?raw";
+import requestItemSrc from "@/modules/collections/RequestItem.tsx?raw";
 
 vi.mock("@/queries", () => ({
 	useRequestQuery: () => ({ data: undefined }),
@@ -33,6 +35,18 @@ describe("focus containers", () => {
 	it("marks the tab row as a clipping panel", () => {
 		renderTabStrip();
 		expect(screen.getByRole("tablist")).toHaveClass("panel-clip");
+	});
+
+	// Tree rows are wider than the label button inside them, so the row paints
+	// the focus ring (at its own radius, with the accent fill). Losing the
+	// marker sends the ring back to the narrow, square-cornered inner button.
+	// Matches the leading class string, not a bare mention, so the explanatory
+	// comment in those files cannot satisfy this on its own.
+	it.each([
+		["CollectionItem", collectionItemSrc],
+		["RequestItem", requestItemSrc],
+	])("keeps focus-row on the %s row", (_name, src) => {
+		expect(src).toMatch(/["'`]focus-row\s+flex/);
 	});
 
 	it("keeps tabs reachable by keyboard and close controls out of tab order", () => {

@@ -430,16 +430,16 @@
  */
 @layer base {
 	:where(
-			button,
-			[role="button"],
-			a[href],
-			input,
-			select,
-			textarea,
-			summary,
-			[tabindex]:not([tabindex="-1"])
-		):focus-visible {
-		outline: 2px solid hsl(var(--ring));
+		button,
+		[role="button"],
+		a[href],
+		input,
+		select,
+		textarea,
+		summary,
+		[tabindex]:not([tabindex="-1"])
+	):focus-visible {
+		outline: 1px solid hsl(var(--ring));
 		outline-offset: 2px;
 	}
 
@@ -463,7 +463,32 @@
 	 */
 	:where(.panel-clip)
 		:where(button, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
-		outline-offset: -2px;
+		outline-offset: -1px;
+	}
+
+	/*
+	 * Composite rows. In a tree row the focusable control is narrower than the
+	 * region the user reads as the target — a collection row is 220px with a
+	 * rounded hover fill, but its label button is 150px with square corners, so
+	 * an outline on the control indicates the wrong shape in the wrong place.
+	 *
+	 * Put .focus-row on the element that paints the hover background: it draws
+	 * the indicator at its own radius (so the roundedness setting governs it)
+	 * and picks up the same accent fill hover already uses, which is how native
+	 * list selection reads. The inner control then draws nothing.
+	 *
+	 * Only needed where control and row genuinely differ. Full-width rows (the
+	 * history, variables and settings trees) are their own target and use the
+	 * baseline above.
+	 */
+	:where(.focus-row):has(:focus-visible) {
+		outline: 1px solid hsl(var(--ring));
+		outline-offset: -1px;
+		background-color: hsl(var(--accent));
+	}
+
+	.focus-row :focus-visible {
+		outline: none;
 	}
 }
 
