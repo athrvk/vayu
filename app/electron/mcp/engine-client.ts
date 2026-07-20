@@ -55,15 +55,22 @@ export class EngineClient {
 		this.fetchImpl = options.fetchImpl ?? fetch;
 	}
 
-	private async request<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+	private async request<T = unknown>(
+		method: string,
+		path: string,
+		body?: unknown,
+		signal?: AbortSignal
+	): Promise<T> {
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+		// Abort on either our timeout or the caller's signal (MCP tool cancellation).
+		const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
 		try {
 			const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
 				method,
 				headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
 				body: body !== undefined ? JSON.stringify(body) : undefined,
-				signal: controller.signal,
+				signal: combined,
 			});
 			const text = await res.text();
 			if (!res.ok) {
@@ -81,54 +88,59 @@ export class EngineClient {
 
 	// --- Health & metadata ---------------------------------------------------
 
-	health(): Promise<unknown> {
-		return this.request("GET", "/health");
+	health(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/health", undefined, signal);
 	}
 
 	// --- Read: collections / requests / environments / runs ------------------
 
-	listCollections(): Promise<unknown> {
-		return this.request("GET", "/collections");
+	listCollections(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/collections", undefined, signal);
 	}
 
-	listRequests(collectionId: string): Promise<unknown> {
-		return this.request("GET", `/requests?collectionId=${encodeURIComponent(collectionId)}`);
+	listRequests(collectionId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"GET",
+			`/requests?collectionId=${encodeURIComponent(collectionId)}`,
+			undefined,
+			signal
+		);
 	}
 
-	listEnvironments(): Promise<unknown> {
-		return this.request("GET", "/environments");
+	listEnvironments(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/environments", undefined, signal);
 	}
 
-	listRuns(): Promise<unknown> {
-		return this.request("GET", "/runs");
+	listRuns(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/runs", undefined, signal);
 	}
 
-	getRunReport(runId: string): Promise<unknown> {
-		return this.request("GET", `/run/${encodeURIComponent(runId)}/report`);
+	getRunReport(runId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", `/run/${encodeURIComponent(runId)}/report`, undefined, signal);
 	}
 
 	// --- Engine configuration ------------------------------------------------
 
-	getConfig(): Promise<unknown> {
-		return this.request("GET", "/config");
+	getConfig(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/config", undefined, signal);
 	}
 
-	updateConfig(payload: unknown): Promise<unknown> {
-		return this.request("POST", "/config", payload);
+	updateConfig(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/config", payload, signal);
 	}
 
 	// --- Execute -------------------------------------------------------------
 
-	executeRequest(payload: unknown): Promise<unknown> {
-		return this.request("POST", "/request", payload);
+	executeRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/request", payload, signal);
 	}
 
-	startRun(payload: unknown): Promise<unknown> {
-		return this.request("POST", "/run", payload);
+	startRun(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/run", payload, signal);
 	}
 
-	stopRun(runId: string): Promise<unknown> {
-		return this.request("POST", `/run/${encodeURIComponent(runId)}/stop`);
+	stopRun(runId: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", `/run/${encodeURIComponent(runId)}/stop`, undefined, signal);
 	}
 
 	/**
@@ -141,10 +153,13 @@ export class EngineClient {
 	async getLiveMetricsSnapshot(
 		runId: string,
 		limit = 10,
-		budgetMs = 1500
+		budgetMs = 1500,
+		signal?: AbortSignal
 	): Promise<MetricsTick[]> {
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), budgetMs);
+		// Stop on our time budget or the caller's cancellation, whichever first.
+		const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
 		const ticks: MetricsTick[] = [];
 		try {
 			const res = await this.fetchImpl(
@@ -152,7 +167,7 @@ export class EngineClient {
 				{
 					method: "GET",
 					headers: { Accept: "text/event-stream" },
-					signal: controller.signal,
+					signal: combined,
 				}
 			);
 			if (!res.ok) {

@@ -26,16 +26,26 @@ export interface McpServerInfo {
 	version: string;
 }
 
+/** Vayu's identity, surfaced to clients via the server's Implementation info. */
+const VAYU_TITLE = "Vayu";
+const VAYU_DESCRIPTION =
+	"Vayu is a local API testing and load-testing platform: Postman-style requests " +
+	"plus k6-level load tests in one app, driven by a native C++ engine. This MCP " +
+	"server exposes that engine so an agent can send requests, run and analyze load " +
+	"tests, and read or tune engine configuration on the user's machine.";
+const VAYU_WEBSITE = "https://github.com/athrvk/vayu";
+
 const INSTRUCTIONS =
-	"Vayu exposes API testing, load testing, and engine configuration. Call " +
-	"get_engine_health first. Tools are grouped as read (inspect collections, " +
-	"runs, config, metrics), write (run_request, update_engine_config), and load " +
-	"(start_load_run, stop_run, get_live_metrics, compare_runs). " +
-	"Network-touching tools (run_request, start_load_run) are restricted to an " +
-	"allowlist and hard rate/duration caps. start_load_run asks the user to " +
-	"confirm (via elicitation when supported, otherwise a confirmed:true flag). " +
-	"update_engine_config requires the user to enable config writes. The user may " +
-	"disable individual tools, so treat tools/list as authoritative and expect " +
+	"Vayu is a local API testing and load-testing platform (Postman-style requests " +
+	"plus k6-level load tests in one app, backed by a native C++ engine); these " +
+	"tools drive that engine. Call get_engine_health first. Tools are grouped as " +
+	"read (inspect collections, runs, config, metrics), write (run_request, " +
+	"update_engine_config), and load (start_load_run, stop_run, get_live_metrics, " +
+	"compare_runs). Network-touching tools (run_request, start_load_run) are " +
+	"restricted to an allowlist and hard rate/duration caps. start_load_run asks " +
+	"the user to confirm (via elicitation when supported, otherwise a confirmed:true " +
+	"flag). update_engine_config requires the user to enable config writes. The user " +
+	"may disable individual tools, so treat tools/list as authoritative and expect " +
 	"some tools to be absent.";
 
 /**
@@ -49,7 +59,13 @@ export function createMcpServer(
 	contextProvider: ToolContextProvider
 ): McpServer {
 	const mcp = new McpServer(
-		{ name: info.name, version: info.version },
+		{
+			name: info.name,
+			version: info.version,
+			title: VAYU_TITLE,
+			description: VAYU_DESCRIPTION,
+			websiteUrl: VAYU_WEBSITE,
+		},
 		{ capabilities: { tools: {} }, instructions: INSTRUCTIONS }
 	);
 
@@ -80,8 +96,12 @@ export function createMcpServer(
 				...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
 				annotations: tool.annotations,
 			},
-			async (args: Record<string, unknown>) => {
-				const result = await tool.handler((args ?? {}) as Record<string, unknown>, ctx);
+			async (args: Record<string, unknown>, extra: { signal?: AbortSignal }) => {
+				const result = await tool.handler(
+					(args ?? {}) as Record<string, unknown>,
+					ctx,
+					extra?.signal
+				);
 				return result as {
 					content: Array<{ type: "text"; text: string }>;
 					structuredContent?: Record<string, unknown>;

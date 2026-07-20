@@ -82,7 +82,11 @@ export interface McpTool {
 	readOnly: boolean;
 	/** Feature group for the Settings tool list. */
 	category: ToolCategory;
-	handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolResult>;
+	handler: (
+		args: Record<string, unknown>,
+		ctx: ToolContext,
+		signal?: AbortSignal
+	) => Promise<ToolResult>;
 }
 
 /** Tool metadata safe to cross the IPC boundary (no handler/schema). */
@@ -210,9 +214,9 @@ export const TOOLS: McpTool[] = [
 		},
 		inputSchema: {},
 		outputSchema: engineHealthSchema,
-		handler: async (_args, ctx) => {
+		handler: async (_args, ctx, signal) => {
 			try {
-				const value = await ctx.client.health();
+				const value = await ctx.client.health(signal);
 				return value && typeof value === "object"
 					? structuredResult(value as Record<string, unknown>)
 					: jsonResult(value);
@@ -233,7 +237,7 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx) => callEngine(() => ctx.client.listCollections()),
+		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listCollections(signal)),
 	},
 	{
 		name: "list_requests",
@@ -247,8 +251,8 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: { collectionId: z.string().describe("Collection ID to list.") },
-		handler: (args, ctx) =>
-			callEngine(() => ctx.client.listRequests(requireStr(args, "collectionId"))),
+		handler: (args, ctx, signal) =>
+			callEngine(() => ctx.client.listRequests(requireStr(args, "collectionId"), signal)),
 	},
 	{
 		name: "list_environments",
@@ -262,7 +266,7 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx) => callEngine(() => ctx.client.listEnvironments()),
+		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listEnvironments(signal)),
 	},
 	{
 		name: "list_runs",
@@ -277,7 +281,7 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx) => callEngine(() => ctx.client.listRuns()),
+		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listRuns(signal)),
 	},
 	{
 		name: "get_run_report",
@@ -292,8 +296,8 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: { runId: z.string().describe("Run ID to fetch.") },
-		handler: (args, ctx) =>
-			callEngine(() => ctx.client.getRunReport(requireStr(args, "runId"))),
+		handler: (args, ctx, signal) =>
+			callEngine(() => ctx.client.getRunReport(requireStr(args, "runId"), signal)),
 	},
 	{
 		name: "get_engine_config",
@@ -308,7 +312,7 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx) => callEngine(() => ctx.client.getConfig()),
+		handler: (_args, ctx, signal) => callEngine(() => ctx.client.getConfig(signal)),
 	},
 	{
 		name: "run_request",
@@ -336,11 +340,11 @@ export const TOOLS: McpTool[] = [
 			requestId: z.string().optional().describe("Optional saved request ID to link."),
 			environmentId: z.string().optional().describe("Optional environment ID for variables."),
 		},
-		handler: async (args, ctx) => {
+		handler: async (args, ctx, signal) => {
 			const url = requireStr(args, "url");
 			const gate = checkAllowlist(url, ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
-			return callEngine(() => ctx.client.executeRequest(buildExecutionPayload(args)));
+			return callEngine(() => ctx.client.executeRequest(buildExecutionPayload(args), signal));
 		},
 	},
 	{
@@ -361,7 +365,7 @@ export const TOOLS: McpTool[] = [
 				.record(z.string())
 				.describe('Map of config key to new value, e.g. { "workers": "8" }.'),
 		},
-		handler: async (args, ctx) => {
+		handler: async (args, ctx, signal) => {
 			if (!ctx.config.allowWrites) {
 				return errorResult(
 					"Config writes are disabled. Turn on write access in Vayu Settings → MCP to allow this."
@@ -371,7 +375,7 @@ export const TOOLS: McpTool[] = [
 			if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
 				return errorResult('"entries" must be an object mapping config keys to values.');
 			}
-			return callEngine(() => ctx.client.updateConfig({ entries }));
+			return callEngine(() => ctx.client.updateConfig({ entries }, signal));
 		},
 	},
 	{
@@ -416,7 +420,7 @@ export const TOOLS: McpTool[] = [
 					"Fallback confirmation for clients without elicitation: set true to actually start the run."
 				),
 		},
-		handler: async (args, ctx) => {
+		handler: async (args, ctx, signal) => {
 			const url = requireStr(args, "url");
 			const gate = checkAllowlist(url, ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
@@ -470,7 +474,7 @@ export const TOOLS: McpTool[] = [
 					if (outcome.action !== "accept" || outcome.content?.proceed === false) {
 						return textResult("Load run not started — the user declined.");
 					}
-					return callEngine(() => ctx.client.startRun(payload));
+					return callEngine(() => ctx.client.startRun(payload, signal));
 				} catch {
 					// Client can't elicit — fall through to the flag-based gate.
 				}
@@ -484,7 +488,7 @@ export const TOOLS: McpTool[] = [
 						`Planned run:\n${JSON.stringify(payload, null, 2)}`
 				);
 			}
-			return callEngine(() => ctx.client.startRun(payload));
+			return callEngine(() => ctx.client.startRun(payload, signal));
 		},
 	},
 	{
@@ -500,7 +504,8 @@ export const TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: { runId: z.string().describe("Run ID to stop.") },
-		handler: (args, ctx) => callEngine(() => ctx.client.stopRun(requireStr(args, "runId"))),
+		handler: (args, ctx, signal) =>
+			callEngine(() => ctx.client.stopRun(requireStr(args, "runId"), signal)),
 	},
 	{
 		name: "get_live_metrics",
@@ -518,10 +523,12 @@ export const TOOLS: McpTool[] = [
 			runId: z.string().describe("Run ID to sample."),
 			limit: z.number().optional().describe("How many recent ticks to return (default 10)."),
 		},
-		handler: (args, ctx) => {
+		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			const limit = typeof args.limit === "number" ? args.limit : 10;
-			return callEngine(() => ctx.client.getLiveMetricsSnapshot(runId, limit));
+			return callEngine(() =>
+				ctx.client.getLiveMetricsSnapshot(runId, limit, undefined, signal)
+			);
 		},
 	},
 	{
@@ -541,13 +548,13 @@ export const TOOLS: McpTool[] = [
 			targetRunId: z.string().describe("Comparison run ID (e.g. the change)."),
 		},
 		outputSchema: runComparisonSchema,
-		handler: async (args, ctx) => {
+		handler: async (args, ctx, signal) => {
 			const baseRunId = requireStr(args, "baseRunId");
 			const targetRunId = requireStr(args, "targetRunId");
 			try {
 				const [base, target] = await Promise.all([
-					ctx.client.getRunReport(baseRunId),
-					ctx.client.getRunReport(targetRunId),
+					ctx.client.getRunReport(baseRunId, signal),
+					ctx.client.getRunReport(targetRunId, signal),
 				]);
 				const comparison = compareReports(
 					baseRunId,
@@ -587,7 +594,8 @@ export function toolCatalog(): McpToolInfo[] {
 export async function dispatchTool(
 	name: string,
 	args: Record<string, unknown>,
-	ctx: ToolContext
+	ctx: ToolContext,
+	signal?: AbortSignal
 ): Promise<ToolResult> {
 	const tool = findTool(name);
 	if (!tool) return errorResult(`Unknown tool: ${name}`);
@@ -597,7 +605,7 @@ export async function dispatchTool(
 		return errorResult(`Tool "${name}" is disabled in Vayu Settings → MCP.`);
 	}
 	try {
-		return await tool.handler(args, ctx);
+		return await tool.handler(args, ctx, signal);
 	} catch (err) {
 		if (err instanceof ToolArgError) return errorResult(err.message);
 		return errorResult(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);

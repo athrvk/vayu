@@ -148,6 +148,13 @@ we use:
   stateless JSON HTTP host (no server→client push) the flag fallback is used.
 - **`tools/list_changed`** — advertised by `McpServer` (the capability is on);
   effective for stdio, and a no-op push-wise on the stateless HTTP host.
+- **Cancellation** — each tool call's `AbortSignal` (`extra.signal`) is threaded
+  into the engine `fetch`, so a client cancelling an in-flight `run_request` /
+  `start_load_run` actually aborts the underlying engine call (combined with the
+  client's own per-request timeout via `AbortSignal.any`).
+- **Server identity** — the server's `Implementation` carries `title` ("Vayu"),
+  a one-paragraph `description` of what Vayu is, and `websiteUrl`, alongside the
+  `instructions`, so a connecting agent knows what it's talking to.
 
 Deferred (design doc V3): `resources/*`, `prompts/*`. Not used: sampling, roots,
 logging, sessions, OAuth.

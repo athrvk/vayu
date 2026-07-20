@@ -88,6 +88,17 @@ describe("MCP protocol handshake (in-memory)", () => {
 		await server.close();
 	});
 
+	it("exposes Vayu's identity to the client (title / description / website + instructions)", async () => {
+		const { client, server } = await connectClient();
+		const info = client.getServerVersion();
+		expect(info?.name).toBe("vayu");
+		expect(info?.title).toBe("Vayu");
+		expect(String(info?.description)).toMatch(/load-testing platform/i);
+		expect(info?.websiteUrl).toContain("github.com/athrvk/vayu");
+		expect(client.getInstructions()).toMatch(/API testing and load-testing/i);
+		await server.close();
+	});
+
 	it("exposes tool annotations (read-only / destructive hints + title)", async () => {
 		const { client, server } = await connectClient();
 		const { tools } = await client.listTools();

@@ -101,7 +101,7 @@ describe("engine config tools", () => {
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBeFalsy();
-		expect(client.updateConfig).toHaveBeenCalledWith({ entries: { workers: "16" } });
+		expect(client.updateConfig).toHaveBeenCalledWith({ entries: { workers: "16" } }, undefined);
 	});
 });
 
