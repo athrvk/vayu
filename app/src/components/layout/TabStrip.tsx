@@ -19,7 +19,7 @@ import { useTabsStore, type Tab } from "@/stores";
 import { useRequestQuery, useCollectionsQuery } from "@/queries";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
-import { MethodBadge } from "@/components/shared";
+import { MethodBadge, ScrollOnOverflow } from "@/components/shared";
 
 /**
  * Extract a short display path from a request URL. URLs may contain
@@ -73,15 +73,22 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 	});
 
 	let label: React.ReactNode;
+	// Plain-text form of the label. Used for the native tooltip, so the full
+	// name stays reachable when the text is truncated and nothing animates
+	// (pointer-less input, or reduced motion enabled).
+	let title: string;
 	switch (tab.type) {
 		case "welcome":
 			label = "Vayu";
+			title = "Vayu";
 			break;
 		case "settings":
 			label = "Settings";
+			title = "Settings";
 			break;
 		case "variables":
 			label = "Variables";
+			title = "Variables";
 			break;
 		case "request":
 			label = request ? (
@@ -101,15 +108,21 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 			) : (
 				"Request"
 			);
+			title = request
+				? `${request.method} ${requestTabTitle(request.name, resolveString(request.url))}`
+				: "Request";
 			break;
 		case "collection":
 			label = collections.find((c) => c.id === tab.entityId)?.name ?? "Collection";
+			title = typeof label === "string" ? label : "Collection";
 			break;
 		case "dashboard":
 			label = "Load Test";
+			title = "Load Test";
 			break;
 		case "run":
 			label = "Run";
+			title = "Run";
 			break;
 	}
 
@@ -118,6 +131,7 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 			role="tab"
 			aria-selected={isActive}
 			tabIndex={0}
+			title={title}
 			onClick={() => focusTab(tab.id)}
 			onKeyDown={(e) => {
 				if (e.key === "Enter" || e.key === " ") focusTab(tab.id);
@@ -139,7 +153,7 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 			)}
 		>
 			<TabIcon type={tab.type} />
-			<span className="min-w-0 flex-1 truncate">{label}</span>
+			<ScrollOnOverflow className="min-w-0 flex-1">{label}</ScrollOnOverflow>
 			<span
 				role="button"
 				tabIndex={-1}

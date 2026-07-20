@@ -22,3 +22,6 @@ export * from "./RowActionsMenu";
 
 // HTTP method display (single source of truth)
 export * from "./MethodBadge";
+
+// Truncated text that scrolls on hover
+export * from "./ScrollOnOverflow";

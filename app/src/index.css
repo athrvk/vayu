@@ -527,6 +527,36 @@
 	}
 }
 
+/*
+ * Scroll-on-overflow (see components/shared/ScrollOnOverflow.tsx).
+ *
+ * Only attached when the text actually overflows, so short labels never
+ * animate. Holds at each end before moving, and returns to the start rather
+ * than snapping, so the label is readable at both extremes. The reduced-motion
+ * rule below collapses this like any other animation.
+ */
+@keyframes scroll-overflow {
+	0%,
+	18% {
+		transform: translateX(0);
+	}
+	48%,
+	62% {
+		transform: translateX(var(--scroll-distance, 0));
+	}
+	92%,
+	100% {
+		transform: translateX(0);
+	}
+}
+
+@layer components {
+	.scroll-on-overflow:hover > *,
+	.scroll-on-overflow:focus-within > * {
+		animation: scroll-overflow var(--scroll-duration, 3s) ease-in-out infinite;
+	}
+}
+
 /* Custom scrollbar */
 @layer components {
 	.scrollbar-thin {
