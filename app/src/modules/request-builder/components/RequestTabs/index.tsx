@@ -65,7 +65,7 @@ export default function RequestTabs() {
 			className="flex-1 flex flex-col overflow-hidden"
 		>
 			{/* Tab Headers */}
-			<TabsList className="flex w-full justify-start border-b border-border bg-transparent h-auto p-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-thin">
+			<TabsList className="flex w-full justify-start border-b border-border bg-transparent h-auto p-0 overflow-x-auto overflow-y-hidden flex-nowrap">
 				{tabs.map((tab) => (
 					<TabsTrigger
 						key={tab.id}

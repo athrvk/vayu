@@ -82,7 +82,7 @@ export default function CollectionDetail() {
 				onValueChange={(v) => setTab(v as CollectionTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				<TabsList className="flex justify-start h-auto p-0 bg-panel border-b border-border rounded-none px-5 shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-thin">
+				<TabsList className="flex justify-start h-auto p-0 bg-panel border-b border-border rounded-none px-5 shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap">
 					{TABS.map((t) => {
 						const showBadge = t.id === "variables" && variableCount > 0;
 						return (

@@ -170,17 +170,15 @@ export default function HistoryList() {
 				{/* Runs List */}
 				<div className="flex-1 min-h-0 overflow-hidden">
 					{/*
-					 * scrollbar-thin must be repeated here: `scrollbar-width` is not
-					 * an inherited property, so the one on the DrawerPanel body does
-					 * not reach this nested scroll container — it fell back to the
-					 * platform default, complete with arrow buttons.
+					 * No `-mr-2` here. That trick lets a scrollbar sit in the
+					 * parent's padding, but the parent clips (overflow-hidden), so
+					 * it pushed the scrollbar 8px past the clip edge and cut it off
+					 * lengthwise. Stay inside the parent and pad the content instead.
 					 *
-					 * No `-mr-2` either. That trick lets a scrollbar sit in the
-					 * parent's padding, but the parent here clips (overflow-hidden),
-					 * so it pushed the scrollbar 8px past the clip edge and cut it
-					 * off. Stay inside the parent and pad the content instead.
+					 * Scrollbar styling is a global baseline (index.css) — nothing to
+					 * apply per container, which is what this element was missing.
 					 */}
-					<div className="scrollbar-thin h-full space-y-2 overflow-y-auto pr-1">
+					<div className="h-full space-y-2 overflow-y-auto pr-1">
 						{isLoading && <ListSkeleton rows={4} leading badge />}
 
 						{!isLoading && runs.length === 0 && (

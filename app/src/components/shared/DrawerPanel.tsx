@@ -50,9 +50,7 @@ export function DrawerPanel({ title, actions, children, className }: DrawerPanel
 			 * horizontal scrollbar to the drawer. Rows ellipse instead (see
 			 * TruncatedText) — the drawer never scrolls sideways.
 			 */}
-			<div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-				{children}
-			</div>
+			<div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">{children}</div>
 		</div>
 	);
 }

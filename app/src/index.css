@@ -557,27 +557,52 @@
 	}
 }
 
-/* Custom scrollbar */
-@layer components {
-	.scrollbar-thin {
+/*
+ * Custom scrollbar — a baseline, not a utility.
+ *
+ * This used to be a `.scrollbar-thin` class applied per element, which meant
+ * every new scroll container inherited the platform default until someone
+ * remembered the class. They mostly didn't: 38 of the app's 44 scroll
+ * containers were unstyled, so chunky arrow-button scrollbars turned up in the
+ * middle of the UI. `scrollbar-width` is not an inherited property, so a styled
+ * ancestor does not help a nested scroll container either — that is exactly how
+ * the History run list ended up with a platform scrollbar inside a styled panel.
+ *
+ * Applying it globally makes thin the default and removes the chance to forget.
+ * :where() keeps specificity at zero, so any element that genuinely needs a
+ * different scrollbar can still override with a plain class.
+ */
+@layer base {
+	:where(*) {
 		scrollbar-width: thin;
 		scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
 	}
 
-	.scrollbar-thin::-webkit-scrollbar {
+	/*
+	 * Chromium honours ::-webkit-scrollbar over scrollbar-width, and Electron is
+	 * Chromium, so these rules are the ones that actually render here. Styling
+	 * ::-webkit-scrollbar at all also drops the stepper arrows, which is why the
+	 * default-styled containers showed them and the styled ones did not.
+	 */
+	::-webkit-scrollbar {
 		@apply w-2 h-2;
 	}
 
-	.scrollbar-thin::-webkit-scrollbar-track {
+	::-webkit-scrollbar-track {
 		@apply bg-transparent;
 	}
 
-	.scrollbar-thin::-webkit-scrollbar-thumb {
+	::-webkit-scrollbar-thumb {
 		@apply bg-muted-foreground/30 rounded-full;
 	}
 
-	.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+	::-webkit-scrollbar-thumb:hover {
 		@apply bg-muted-foreground/50;
+	}
+
+	/* The corner where two scrollbars meet; unstyled it renders as a light patch. */
+	::-webkit-scrollbar-corner {
+		@apply bg-transparent;
 	}
 }
 

@@ -983,11 +983,38 @@ Planned / pending implementation. Intended colors for the JSON pretty-printer:
 
 ## Scrollbar
 
-All scrollable panes use `.scrollbar-thin` utility:
+**Thin scrollbars are a global baseline, not a utility.** Every scroll
+container gets them; there is nothing to remember and nothing to apply.
+
 ```css
-scrollbar-width: thin;
-scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+/* index.css, @layer base */
+:where(*) {
+	scrollbar-width: thin;
+	scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+}
+::-webkit-scrollbar {
+	@apply w-2 h-2;
+}
 ```
+
+This was a `.scrollbar-thin` class applied per element, and it drifted badly:
+**38 of the app's 44 scroll containers never got it**, so chunky
+arrow-button scrollbars appeared mid-UI. Two traps made the class approach
+unfixable by discipline alone:
+
+- **`scrollbar-width` is not inherited.** A styled ancestor does nothing for a
+  nested scroll container. This is exactly how the History run list ended up
+  with a platform scrollbar inside an already-styled panel.
+- **Styling `::-webkit-scrollbar` at all is what removes the stepper arrows.**
+  So an unstyled container did not merely look slightly different — it grew
+  arrow buttons, which is a different control, not a different colour.
+
+`:where()` keeps specificity at zero, so an element that genuinely needs a
+different scrollbar can still override with a plain class.
+
+Chromium honours `::-webkit-scrollbar` over `scrollbar-width`, and Electron is
+Chromium, so the webkit rules are the ones that render here; `scrollbar-width`
+is the standards-track fallback.
 
 ---
 

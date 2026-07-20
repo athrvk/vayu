@@ -169,7 +169,7 @@ export default function ResponseViewer() {
 				className="flex-1 flex flex-col overflow-hidden"
 			>
 				<div className="flex items-center justify-between border-b border-border px-4 gap-2">
-					<TabsList className="flex h-auto p-0 bg-transparent justify-start overflow-x-auto overflow-y-hidden flex-nowrap min-w-0 scrollbar-thin">
+					<TabsList className="flex h-auto p-0 bg-transparent justify-start overflow-x-auto overflow-y-hidden flex-nowrap min-w-0">
 						<TabsTrigger
 							value="body"
 							className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
