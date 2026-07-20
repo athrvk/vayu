@@ -207,7 +207,7 @@ describe("resources", () => {
 		const { client, server } = await connectClient();
 		const res = await client.readResource({ uri: "vayu://runs" });
 		expect(res.contents[0].mimeType).toBe("application/json");
-		expect(String(res.contents[0].text)).toContain("run_1");
+		expect(String((res.contents[0] as { text?: string }).text)).toContain("run_1");
 		await server.close();
 	});
 
@@ -224,7 +224,7 @@ describe("resources", () => {
 	it("reads a templated run report", async () => {
 		const { client, server } = await connectClient();
 		const res = await client.readResource({ uri: "vayu://run/run_1/report" });
-		expect(String(res.contents[0].text)).toContain("statusCodes");
+		expect(String((res.contents[0] as { text?: string }).text)).toContain("statusCodes");
 		await server.close();
 	});
 });
