@@ -16,6 +16,7 @@ import { AlertCircle, History, ArrowLeft } from "lucide-react";
 import { useRunReportQuery } from "@/queries";
 import { useTabsStore, useLayoutStore } from "@/stores";
 import { Button, Badge } from "@/components/ui";
+import { TruncatedText } from "@/components/shared";
 import LoadTestDetail from "./LoadTestDetail";
 import DesignRunDetail from "./DesignRunDetail";
 
@@ -90,10 +91,13 @@ export default function HistoryDetail() {
 					</Button>
 					<div className="flex-1 min-w-0">
 						<div className="flex items-center gap-2">
-							<h1 className="text-lg font-semibold text-foreground truncate">
+							<TruncatedText
+								as="h1"
+								className="text-lg font-semibold text-foreground"
+							>
 								{report.metadata?.requestUrl ||
 									(isDesignRun ? "Design Request" : "Load Test Report")}
-							</h1>
+							</TruncatedText>
 							<Badge variant="outline" className="text-xs shrink-0">
 								{isDesignRun ? "Design" : "Load Test"}
 							</Badge>

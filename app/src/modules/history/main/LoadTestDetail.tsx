@@ -15,6 +15,7 @@ import { useState, useMemo, useEffect } from "react";
 import { CheckCircle, Activity, TrendingUp, BarChart3, Settings2 } from "lucide-react";
 import { Badge, Tabs, TabsContent, TabsList, TabsTrigger, ScrollArea } from "@/components/ui";
 import { formatNumber, loadTestTypeToLabel } from "@/utils";
+import { TruncatedText } from "@/components/shared";
 import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
@@ -84,9 +85,9 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 					<Badge variant="outline" className="font-mono font-bold shrink-0">
 						{report.metadata?.requestMethod || "GET"}
 					</Badge>
-					<span className="text-sm font-mono text-foreground truncate flex-1">
+					<TruncatedText className="text-sm font-mono text-foreground flex-1">
 						{report.metadata?.requestUrl || "Unknown URL"}
-					</span>
+					</TruncatedText>
 				</div>
 
 				{/* Load test config used for this run */}

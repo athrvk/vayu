@@ -11,7 +11,7 @@ import RequestItem from "./RequestItem";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
-import { RowActionsMenu, type RowAction } from "@/components/shared";
+import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
 import { INDENT_STEP } from "@/constants/layout";
@@ -247,14 +247,14 @@ export default function CollectionItem({
 							 * long name widens the row and scrolls the whole panel
 							 * sideways instead of ellipsing.
 							 */}
-							<span
+							<TruncatedText
 								className={cn(
-									"truncate text-sm text-foreground cursor-pointer",
+									"text-sm text-foreground cursor-pointer",
 									depth === 0 && "font-medium"
 								)}
 							>
 								{collection.name}
-							</span>
+							</TruncatedText>
 							{/* shrink-0: the count is short and load-bearing — the name
 							    yields first. */}
 							<span className="shrink-0 text-xs text-muted-foreground">

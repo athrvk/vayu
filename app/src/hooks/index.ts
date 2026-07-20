@@ -11,6 +11,7 @@ export { useSaveManager } from "./useSaveManager";
 export { useVariableResolver } from "./useVariableResolver";
 export { useElectronTheme } from "./useElectronTheme";
 export { useResizable } from "./useResizable";
+export { useOverflowTitle } from "./useOverflowTitle";
 
 // Note: useCollections, useRuns, useHealthCheck have been replaced by TanStack Query hooks
 // Import from @/queries instead

@@ -23,8 +23,11 @@ export * from "./RowActionsMenu";
 // HTTP method display (single source of truth)
 export * from "./MethodBadge";
 
-// Truncated text that scrolls on hover
+// Truncated text that scrolls on hover (tab strip)
 export * from "./ScrollOnOverflow";
+
+// Truncated text that reveals the full value on hover, only when clipped
+export * from "./TruncatedText";
 
 // Shared frame for the drawer views
 export * from "./DrawerPanel";

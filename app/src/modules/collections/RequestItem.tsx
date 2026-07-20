@@ -9,7 +9,7 @@ import { useRef } from "react";
 import { Loader2, Trash2, Edit2, Copy } from "lucide-react";
 import type { Request } from "@/types";
 import { Input } from "@/components/ui";
-import { RowActionsMenu, MethodBadge } from "@/components/shared";
+import { RowActionsMenu, MethodBadge, TruncatedText } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
 import { INDENT_STEP } from "@/constants/layout";
@@ -141,9 +141,9 @@ export default function RequestItem({
 						onClick={(e) => e.stopPropagation()}
 					/>
 				) : (
-					<span className="text-sm text-foreground truncate cursor-pointer">
+					<TruncatedText className="text-sm text-foreground cursor-pointer">
 						{request.name}
-					</span>
+					</TruncatedText>
 				)}
 			</button>
 

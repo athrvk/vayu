@@ -22,6 +22,7 @@ import {
 	DialogDescription,
 } from "@/components/ui";
 import type { Collection } from "@/types";
+import { TruncatedText } from "@/components/shared";
 
 interface CollectionPickerProps {
 	open: boolean;
@@ -52,7 +53,7 @@ export function CollectionPicker({
 							className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						>
 							<Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
-							<span className="truncate">{collection.name}</span>
+							<TruncatedText>{collection.name}</TruncatedText>
 						</button>
 					))}
 				</div>

@@ -22,7 +22,7 @@ import {
 	useDeleteEnvironmentMutation,
 	useUpdateEnvironmentMutation,
 } from "@/queries";
-import { RowActionsMenu, DrawerPanel } from "@/components/shared";
+import { RowActionsMenu, DrawerPanel, TruncatedText } from "@/components/shared";
 import type { Collection, Environment } from "@/types";
 import {
 	Globe,
@@ -294,9 +294,9 @@ export default function VariablesCategoryTree({
 														className="h-6 flex-1 text-sm"
 													/>
 												) : (
-													<span className="truncate flex-1">
+													<TruncatedText className="flex-1">
 														{environment.name}
-													</span>
+													</TruncatedText>
 												)}
 												{variableCount > 0 &&
 													renamingEnvId !== environment.id && (
@@ -400,9 +400,9 @@ export default function VariablesCategoryTree({
 												)}
 											>
 												{/* <Folder className="w-4 h-4 text-orange-400" /> */}
-												<span className="truncate flex-1">
+												<TruncatedText className="flex-1">
 													{collection.name}
-												</span>
+												</TruncatedText>
 												{variableCount > 0 && (
 													<Badge
 														variant="secondary"

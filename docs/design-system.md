@@ -600,6 +600,38 @@ an adequate pointer target, and the whole row remains clickable for opening.
 
 ---
 
+## Overflowing Text
+
+User-supplied names — collections, requests, environments, URLs — are unbounded,
+so every surface that shows one needs a defined overflow behaviour. There are
+exactly **two**, and they are not interchangeable:
+
+| Treatment          | Component          | Where                                 |
+| ------------------ | ------------------ | ------------------------------------- |
+| Ellipsis + tooltip | `TruncatedText`    | Rows, headers, pickers — the default. |
+| Marquee on hover   | `ScrollOnOverflow` | Tab strip only.                       |
+
+**`TruncatedText` is the default.** It ellipses, and reveals the full value in a
+native `title` tooltip **only while the text is actually clipped**. An
+unconditional `title={name}` — the obvious version — pops a tooltip on every
+hover, including names that are already fully readable, telling the user
+something they can see. The tooltip appears when the name is cut off and
+disappears when the drawer is widened enough to read it; `useOverflowTitle`
+re-measures on resize via `ResizeObserver`.
+
+Do not hand-write `title={name}` alongside `truncate`. That is the pattern this
+component replaced, and it drifts — some rows get it, some do not, and the ones
+that do show it unconditionally.
+
+**`ScrollOnOverflow` marquees instead**, and is limited to the tab strip, where
+the label is the primary target and there is no way to widen it. Rows must not
+animate under the cursor.
+
+Text that **wraps** (`break-words`, e.g. the run URL in `RunItem`) is neither —
+it never clips, so it needs no tooltip.
+
+---
+
 ## Tree Navigation (roving tabindex)
 
 The collection tree follows the WAI-ARIA treeview pattern: **the whole tree is

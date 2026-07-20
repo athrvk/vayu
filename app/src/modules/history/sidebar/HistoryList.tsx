@@ -10,7 +10,7 @@ import { Search, Clock, Loader2 } from "lucide-react";
 import { useTabsStore, useLayoutStore } from "@/stores";
 import { useHistoryStore, filterRuns } from "@/modules/history/history-store";
 import { useRunsQuery, useDeleteRunMutation } from "@/queries";
-import { DrawerPanel } from "@/components/shared";
+import { DrawerPanel, TruncatedText } from "@/components/shared";
 import {
 	Button,
 	Input,
@@ -209,12 +209,12 @@ export default function HistoryList() {
 						<>
 							This run will be permanently removed. This cannot be undone.
 							{deleteConfirmLabel && (
-								<span
-									className="mt-2 block font-mono text-xs text-muted-foreground truncate"
-									title={deleteConfirmLabel}
+								<TruncatedText
+									as="span"
+									className="mt-2 block font-mono text-xs text-muted-foreground"
 								>
 									{deleteConfirmLabel}
-								</span>
+								</TruncatedText>
 							)}
 						</>
 					}

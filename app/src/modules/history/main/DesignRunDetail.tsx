@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle, Badge, ScrollArea } from "@/c
 import { TimingBreakdown } from "./components";
 import { UnifiedResponseViewer } from "@/components/shared/response-viewer";
 import type { DesignRunDetailProps } from "../types";
-import { MethodBadge } from "@/components/shared";
+import { MethodBadge, TruncatedText } from "@/components/shared";
 
 export default function DesignRunDetail({ report, onBack: _onBack, runId }: DesignRunDetailProps) {
 	// Get the result from the report
@@ -62,9 +62,9 @@ export default function DesignRunDetail({ report, onBack: _onBack, runId }: Desi
 						method={trace?.request?.method || report.metadata?.requestMethod || "GET"}
 						size="md"
 					/>
-					<span className="text-sm font-mono text-foreground truncate flex-1">
+					<TruncatedText className="text-sm font-mono text-foreground flex-1">
 						{trace?.request?.url || report.metadata?.requestUrl || "Unknown URL"}
-					</span>
+					</TruncatedText>
 					<div className="flex items-center gap-3 shrink-0">
 						{result?.statusCode !== undefined && (
 							<Badge
