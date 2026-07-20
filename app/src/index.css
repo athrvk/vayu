@@ -417,6 +417,46 @@
 	}
 }
 
+/*
+ * Interaction baseline.
+ *
+ * :where() keeps specificity at 0, so any component utility (utilities layer)
+ * overrides these without !important. :focus-visible fires only on keyboard or
+ * assistive-tech focus, never a mouse click, so pointer users see no change.
+ *
+ * outline (not box-shadow/ring) is deliberate: it does not participate in
+ * layout, and modern browsers make it follow border-radius, so it tracks the
+ * user-adjustable --radius for free.
+ */
+@layer base {
+	:where(
+			button,
+			[role="button"],
+			a[href],
+			input,
+			select,
+			textarea,
+			summary,
+			[tabindex]:not([tabindex="-1"])
+		):focus-visible {
+		outline: 2px solid hsl(var(--ring));
+		outline-offset: 2px;
+	}
+
+	/*
+	 * Paint properties only — never layout, so this cannot cause reflow jank.
+	 * 150ms is the interaction-state duration; entrances stay at 200ms.
+	 * The reduced-motion rule below collapses this app-wide when enabled.
+	 */
+	:where(button, [role="button"], a[href], summary) {
+		transition:
+			background-color 150ms ease,
+			color 150ms ease,
+			border-color 150ms ease,
+			opacity 150ms ease;
+	}
+}
+
 /* Custom scrollbar */
 @layer components {
 	.scrollbar-thin {
@@ -455,6 +495,12 @@
 
 	.variable-highlight {
 		@apply text-[hsl(var(--variable))] font-medium;
+	}
+
+	/* For focusable elements clipped by an ancestor's overflow, where an
+	   outset ring would be cut off but the ancestor has no .panel-clip. */
+	.focus-ring-inset:focus-visible {
+		outline-offset: -2px;
 	}
 }
 
