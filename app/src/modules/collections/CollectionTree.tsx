@@ -27,11 +27,11 @@ import {
 	TooltipTrigger,
 	TooltipProvider,
 	DeleteConfirmDialog,
-	ScrollArea,
 	Skeleton,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
+import { DrawerPanel } from "@/components/shared";
 import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
@@ -446,11 +446,10 @@ export default function CollectionTree() {
 	}, []);
 
 	return (
-		<div ref={treeRef} className="flex flex-col h-full w-full p-4 space-y-2">
-			{/* Header */}
-			<div className="flex items-center justify-between mb-4">
-				<h2 className="text-sm font-semibold text-foreground">Collections</h2>
-				<div className="flex items-center gap-1">
+		<DrawerPanel
+			title="Collections"
+			actions={
+				<>
 					<TooltipProvider>
 						<Tooltip>
 							<TooltipTrigger asChild>
@@ -507,156 +506,161 @@ export default function CollectionTree() {
 							<TooltipContent>Import collection</TooltipContent>
 						</Tooltip>
 					</TooltipProvider>
-				</div>
-			</div>
-
-			{/* New Collection Form */}
-			{creatingCollection && (
-				<div className="flex gap-2 mb-2">
-					<Input
-						type="text"
-						value={newCollectionName}
-						onChange={(e) => setNewCollectionName(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") handleCreateCollection();
-							if (e.key === "Escape") {
+				</>
+			}
+		>
+			<div ref={treeRef} className="flex h-full flex-col">
+				{/* New Collection Form */}
+				{creatingCollection && (
+					<div className="flex gap-2 mb-2">
+						<Input
+							type="text"
+							value={newCollectionName}
+							onChange={(e) => setNewCollectionName(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") handleCreateCollection();
+								if (e.key === "Escape") {
+									setCreatingCollection(false);
+									setNewCollectionName("");
+								}
+							}}
+							placeholder="Collection name"
+							className="flex-1 h-8 text-sm"
+							disabled={createCollectionMutation.isPending}
+							autoFocus
+						/>
+						<Button
+							size="sm"
+							onClick={handleCreateCollection}
+							disabled={createCollectionMutation.isPending}
+						>
+							{createCollectionMutation.isPending && (
+								<Loader2 className="w-3 h-3 animate-spin mr-1" />
+							)}
+							Add
+						</Button>
+						<Button
+							variant="secondary"
+							size="sm"
+							onClick={() => {
 								setCreatingCollection(false);
 								setNewCollectionName("");
-							}
-						}}
-						placeholder="Collection name"
-						className="flex-1 h-8 text-sm"
-						disabled={createCollectionMutation.isPending}
-						autoFocus
-					/>
-					<Button
-						size="sm"
-						onClick={handleCreateCollection}
-						disabled={createCollectionMutation.isPending}
-					>
-						{createCollectionMutation.isPending && (
-							<Loader2 className="w-3 h-3 animate-spin mr-1" />
-						)}
-						Add
-					</Button>
-					<Button
-						variant="secondary"
-						size="sm"
-						onClick={() => {
-							setCreatingCollection(false);
-							setNewCollectionName("");
-						}}
-						disabled={createCollectionMutation.isPending}
-					>
-						Cancel
-					</Button>
-				</div>
-			)}
+							}}
+							disabled={createCollectionMutation.isPending}
+						>
+							Cancel
+						</Button>
+					</div>
+				)}
 
-			{/* Loading state */}
-			{isLoadingCollections && (
-				<div className="space-y-2 py-2">
-					{[1, 2, 3].map((i) => (
-						<div key={i} className="flex items-center gap-2 px-2 py-1.5">
-							<Skeleton className="h-4 w-4 rounded-md" />
-							<Skeleton className="h-4 w-5 flex-shrink-0 rounded-md" />
-							<Skeleton className="h-4 flex-1 rounded-md" />
-						</div>
-					))}
-				</div>
-			)}
-
-			{/* Zero collections empty state */}
-			{!isLoadingCollections && collections.length === 0 && !creatingCollection && (
-				<div className="text-center py-8 text-sm text-muted-foreground">
-					<Folder className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-					<p className="font-medium text-foreground">No collections yet</p>
-					<p className="mt-1 text-muted-foreground">
-						Collections help you group and organize your requests.
-					</p>
-					<Button
-						variant="link"
-						onClick={handleOpenNewCollectionForm}
-						className="mt-3 text-primary"
-					>
-						Add your first collection
-					</Button>
-				</div>
-			)}
-
-			{/* Root-level collections (no parentId) - sorted by order, scrollable.
-			    role="tree" + roving tabindex: the whole tree is one tab stop and
-			    arrow keys move between rows (see useRovingTreeFocus). */}
-			{!isLoadingCollections && rootCollections.length > 0 && (
-				<ScrollArea className="flex-1 min-h-0 -mx-1 px-1">
-					<div
-						role="tree"
-						aria-label="Collections"
-						onKeyDown={treeFocus.onKeyDown}
-						onFocus={treeFocus.onFocus}
-						className="space-y-0.5 pr-2"
-					>
-						{rootCollections.map((collection) => (
-							<CollectionItem
-								key={collection.id}
-								collection={collection}
-								allCollections={collections}
-								depth={0}
-								expandedCollectionIds={expandedCollectionIds}
-								selectedCollectionId={selectedCollectionId}
-								selectedRequestId={selectedRequestId}
-								renamingId={renamingId}
-								renameValue={renameValue}
-								deletingCollectionId={deletingCollectionId}
-								deletingRequestId={deletingRequestId}
-								creatingSubfolder={creatingSubfolder}
-								newSubCollectionName={newSubCollectionName}
-								isCreatingSubfolder={createCollectionMutation.isPending}
-								getRequestsByCollection={getRequestsByCollection}
-								onCollectionClick={handleCollectionClick}
-								onCollectionToggle={handleCollectionToggle}
-								onRequestClick={handleRequestClick}
-								getCollectionActions={getCollectionActions}
-								onRenameChange={setRenameValue}
-								onRenameSubmit={handleRenameSubmit}
-								onRenameCancel={handleRenameCancel}
-								onStartRename={handleRenameCollection}
-								onDeleteRequest={handleDeleteRequest}
-								onSubCollectionNameChange={setNewSubCollectionName}
-								onCreateSubfolder={handleCreateSubfolder}
-								onCancelSubfolder={handleCancelSubfolder}
-								renamingRequestId={renamingRequestId}
-								renameRequestValue={renameRequestValue}
-								onRequestRenameChange={setRenameRequestValue}
-								onRequestRenameSubmit={handleRequestRenameSubmit}
-								onRequestRenameCancel={handleRequestRenameCancel}
-								onStartRequestRename={handleStartRequestRename}
-								onRequestDeleteClick={handleRequestDeleteClick}
-								onDuplicateRequest={handleDuplicateRequest}
-							/>
+				{/* Loading state */}
+				{isLoadingCollections && (
+					<div className="space-y-2 py-2">
+						{[1, 2, 3].map((i) => (
+							<div key={i} className="flex items-center gap-2 px-2 py-1.5">
+								<Skeleton className="h-4 w-4 rounded-md" />
+								<Skeleton className="h-4 w-5 flex-shrink-0 rounded-md" />
+								<Skeleton className="h-4 flex-1 rounded-md" />
+							</div>
 						))}
 					</div>
-				</ScrollArea>
-			)}
+				)}
 
-			<DeleteConfirmDialog
-				open={!!deleteConfirm}
-				onOpenChange={(open) => !open && setDeleteConfirm(null)}
-				title={
-					deleteConfirm?.type === "collection" ? "Delete collection?" : "Delete request?"
-				}
-				description={
-					deleteConfirm?.type === "collection"
-						? `"${deleteConfirm?.name}" and all its requests will be permanently removed. This cannot be undone.`
-						: `"${deleteConfirm?.name}" will be permanently removed. This cannot be undone.`
-				}
-				onConfirm={handleConfirmDelete}
-				isDeleting={
-					(deleteConfirm?.type === "collection" &&
-						deletingCollectionId === deleteConfirm?.id) ||
-					(deleteConfirm?.type === "request" && deletingRequestId === deleteConfirm?.id)
-				}
-			/>
-		</div>
+				{/* Zero collections empty state */}
+				{!isLoadingCollections && collections.length === 0 && !creatingCollection && (
+					<div className="text-center py-8 text-sm text-muted-foreground">
+						<Folder className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
+						<p className="font-medium text-foreground">No collections yet</p>
+						<p className="mt-1 text-muted-foreground">
+							Collections help you group and organize your requests.
+						</p>
+						<Button
+							variant="link"
+							onClick={handleOpenNewCollectionForm}
+							className="mt-3 text-primary"
+						>
+							Add your first collection
+						</Button>
+					</div>
+				)}
+
+				{/* Root-level collections (no parentId) - sorted by order, scrollable.
+			    role="tree" + roving tabindex: the whole tree is one tab stop and
+			    arrow keys move between rows (see useRovingTreeFocus). */}
+				{!isLoadingCollections && rootCollections.length > 0 && (
+					<div className="flex-1 min-h-0">
+						<div
+							role="tree"
+							aria-label="Collections"
+							onKeyDown={treeFocus.onKeyDown}
+							onFocus={treeFocus.onFocus}
+							className="space-y-0.5"
+						>
+							{rootCollections.map((collection) => (
+								<CollectionItem
+									key={collection.id}
+									collection={collection}
+									allCollections={collections}
+									depth={0}
+									expandedCollectionIds={expandedCollectionIds}
+									selectedCollectionId={selectedCollectionId}
+									selectedRequestId={selectedRequestId}
+									renamingId={renamingId}
+									renameValue={renameValue}
+									deletingCollectionId={deletingCollectionId}
+									deletingRequestId={deletingRequestId}
+									creatingSubfolder={creatingSubfolder}
+									newSubCollectionName={newSubCollectionName}
+									isCreatingSubfolder={createCollectionMutation.isPending}
+									getRequestsByCollection={getRequestsByCollection}
+									onCollectionClick={handleCollectionClick}
+									onCollectionToggle={handleCollectionToggle}
+									onRequestClick={handleRequestClick}
+									getCollectionActions={getCollectionActions}
+									onRenameChange={setRenameValue}
+									onRenameSubmit={handleRenameSubmit}
+									onRenameCancel={handleRenameCancel}
+									onStartRename={handleRenameCollection}
+									onDeleteRequest={handleDeleteRequest}
+									onSubCollectionNameChange={setNewSubCollectionName}
+									onCreateSubfolder={handleCreateSubfolder}
+									onCancelSubfolder={handleCancelSubfolder}
+									renamingRequestId={renamingRequestId}
+									renameRequestValue={renameRequestValue}
+									onRequestRenameChange={setRenameRequestValue}
+									onRequestRenameSubmit={handleRequestRenameSubmit}
+									onRequestRenameCancel={handleRequestRenameCancel}
+									onStartRequestRename={handleStartRequestRename}
+									onRequestDeleteClick={handleRequestDeleteClick}
+									onDuplicateRequest={handleDuplicateRequest}
+								/>
+							))}
+						</div>
+					</div>
+				)}
+
+				<DeleteConfirmDialog
+					open={!!deleteConfirm}
+					onOpenChange={(open) => !open && setDeleteConfirm(null)}
+					title={
+						deleteConfirm?.type === "collection"
+							? "Delete collection?"
+							: "Delete request?"
+					}
+					description={
+						deleteConfirm?.type === "collection"
+							? `"${deleteConfirm?.name}" and all its requests will be permanently removed. This cannot be undone.`
+							: `"${deleteConfirm?.name}" will be permanently removed. This cannot be undone.`
+					}
+					onConfirm={handleConfirmDelete}
+					isDeleting={
+						(deleteConfirm?.type === "collection" &&
+							deletingCollectionId === deleteConfirm?.id) ||
+						(deleteConfirm?.type === "request" &&
+							deletingRequestId === deleteConfirm?.id)
+					}
+				/>
+			</div>
+		</DrawerPanel>
 	);
 }

@@ -546,6 +546,28 @@ for free. Used by request rows and environment rows.
 
 ---
 
+## Drawer Panel Frame
+
+**Every drawer view renders inside `DrawerPanel`** (`components/shared`). It owns
+the header (title + trailing actions) and the scroll region; views supply only
+their content.
+
+The four views had drifted into two different panel designs — Collections and
+History used a 16px padded container with a heading, Variables and Settings were
+flush with no heading at all. Switching views moved the content's vertical start
+*and* made the title appear or vanish. All four now match exactly: heading at
+11px from the panel top, body at 40px.
+
+- **The frame owns header padding; the body is flush.** Rows run edge to edge —
+  the sidebar convention, and it recovers the ~32px of row width the old inset
+  cost. Rows bring their own internal padding.
+- **Full-bleed rows are square.** A rounded corner meeting the panel edge reads
+  as a clipped rectangle, not a rounded row.
+- **The panel owns scrolling.** Views used to differ: some were wrapped in a
+  `ScrollArea` by the Drawer, others managed their own.
+
+---
+
 ## Drawer Row Metric
 
 **Single-line drawer rows are `h-8` (32px).** State the height; do not let it

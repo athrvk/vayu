@@ -167,7 +167,7 @@ export default function CollectionItem({
 					// accident of content — the 28px chevron set it here, padding set
 					// it elsewhere — so sibling drawer views ran 34/36/38/40px and the
 					// rhythm shifted every time you switched view.
-					"focus-row flex h-8 items-center gap-1 pr-2 rounded-md group transition-[color,background-color,border-color] cursor-pointer",
+					"focus-row flex h-8 items-center gap-1 pr-2 group transition-[color,background-color,border-color] cursor-pointer",
 					isSelected
 						? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
 						: "hover:bg-accent"

@@ -8,7 +8,6 @@
 import { useLayoutStore } from "@/stores";
 import { DEFAULT_DRAWER_WIDTH } from "@/constants/layout";
 import { useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
-import { ScrollArea } from "@/components/ui";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
@@ -42,21 +41,15 @@ export function Drawer() {
 	return (
 		<div className="relative flex shrink-0 bg-panel" style={{ width }}>
 			<div className="panel-clip flex-1 overflow-hidden flex flex-col min-w-0">
+				{/* Each view supplies its own DrawerPanel, which owns the header and
+				    the scroll region — the Drawer no longer wraps some views in a
+				    ScrollArea and leaves others to manage their own. */}
 				{drawerView === "collections" && <CollectionTree />}
 				{drawerView === "history" && <HistoryList />}
 				{drawerView === "variables" && (
-					<ScrollArea className="h-full w-full">
-						<VariablesCategoryTree
-							collections={collections}
-							environments={environments}
-						/>
-					</ScrollArea>
+					<VariablesCategoryTree collections={collections} environments={environments} />
 				)}
-				{drawerView === "settings" && (
-					<ScrollArea className="h-full w-full">
-						<SettingsCategoryTree />
-					</ScrollArea>
-				)}
+				{drawerView === "settings" && <SettingsCategoryTree />}
 			</div>
 
 			<div

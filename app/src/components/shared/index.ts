@@ -25,3 +25,6 @@ export * from "./MethodBadge";
 
 // Truncated text that scrolls on hover
 export * from "./ScrollOnOverflow";
+
+// Shared frame for the drawer views
+export * from "./DrawerPanel";

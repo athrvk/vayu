@@ -22,7 +22,7 @@ import {
 	useDeleteEnvironmentMutation,
 	useUpdateEnvironmentMutation,
 } from "@/queries";
-import { RowActionsMenu } from "@/components/shared";
+import { RowActionsMenu, DrawerPanel } from "@/components/shared";
 import type { Collection, Environment } from "@/types";
 import {
 	Globe,
@@ -161,247 +161,265 @@ export default function VariablesCategoryTree({
 	};
 
 	return (
-		<div className="flex flex-col h-full w-full py-2">
-			{/* Globals Section (Lowest Priority) */}
-			<div className="mb-4">
-				<button
-					onClick={() => selectCategory({ type: "globals" })}
-					className={cn(
-						// h-8: shared drawer row height (see CollectionItem).
-						"w-full flex h-8 items-center gap-2 px-8 text-left text-sm hover:bg-accent transition-colors",
-						isSelected({ type: "globals" }) &&
-							"bg-scope-global/10 text-scope-global hover:bg-scope-global/20"
-					)}
-				>
-					<Globe className="w-3 h-3" />
-					<span>Globals</span>
-				</button>
-			</div>
+		<>
+			<DrawerPanel title="Variables">
+				<div className="flex flex-col w-full py-2">
+					{/* Globals Section (Lowest Priority) */}
+					<div className="mb-4">
+						<button
+							onClick={() => selectCategory({ type: "globals" })}
+							className={cn(
+								// h-8: shared drawer row height (see CollectionItem).
+								"w-full flex h-8 items-center gap-2 px-8 text-left text-sm hover:bg-accent transition-colors",
+								isSelected({ type: "globals" }) &&
+									"bg-scope-global/10 text-scope-global hover:bg-scope-global/20"
+							)}
+						>
+							<Globe className="w-3 h-3" />
+							<span>Globals</span>
+						</button>
+					</div>
 
-			{/* Environments Section (Medium Priority) */}
-			<div className="mb-4">
-				<div className="flex items-center">
-					<button
-						onClick={() => setEnvironmentsExpanded(!environmentsExpanded)}
-						className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
-					>
-						{environmentsExpanded ? (
-							<ChevronDown className="w-3 h-3" />
-						) : (
-							<ChevronRight className="w-3 h-3" />
-						)}
-						<Cloud className="w-3 h-3" />
-						<span>Environments</span>
-						<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
-							{environments.length}
-						</Badge>
-					</button>
-					<Button
-						variant="ghost"
-						size="icon"
-						onClick={() => {
-							setEnvironmentsExpanded(true);
-							setCreatingEnvironment(true);
-						}}
-						className="h-6 w-6 mr-2"
-						title="Add Environment"
-					>
-						<Plus className="w-3 h-3" />
-					</Button>
-				</div>
+					{/* Environments Section (Medium Priority) */}
+					<div className="mb-4">
+						<div className="flex items-center">
+							<button
+								onClick={() => setEnvironmentsExpanded(!environmentsExpanded)}
+								className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
+							>
+								{environmentsExpanded ? (
+									<ChevronDown className="w-3 h-3" />
+								) : (
+									<ChevronRight className="w-3 h-3" />
+								)}
+								<Cloud className="w-3 h-3" />
+								<span>Environments</span>
+								<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
+									{environments.length}
+								</Badge>
+							</button>
+							<Button
+								variant="ghost"
+								size="icon"
+								onClick={() => {
+									setEnvironmentsExpanded(true);
+									setCreatingEnvironment(true);
+								}}
+								className="h-6 w-6 mr-2"
+								title="Add Environment"
+							>
+								<Plus className="w-3 h-3" />
+							</Button>
+						</div>
 
-				{environmentsExpanded && (
-					<div className="mt-1">
-						{/* New Environment Input */}
-						{creatingEnvironment && (
-							<div className="px-3 py-1 pl-6">
-								<Input
-									value={newEnvName}
-									onChange={(e) => setNewEnvName(e.target.value)}
-									onKeyDown={(e) => {
-										if (e.key === "Enter") handleCreateEnvironment();
-										if (e.key === "Escape") {
-											setCreatingEnvironment(false);
-											setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
-										}
-									}}
-									onBlur={() => {
-										if (newEnvName.trim()) {
-											handleCreateEnvironment();
-										} else {
-											setCreatingEnvironment(false);
-											setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
-										}
-									}}
-									autoFocus
-									className="h-8 text-sm"
-									placeholder="Environment name"
-								/>
-							</div>
-						)}
-
-						{environments.length === 0 && !creatingEnvironment ? (
-							<div className="px-3 py-2 text-xs text-muted-foreground italic">
-								No environments
-							</div>
-						) : (
-							environments.map((environment) => {
-								const variableCount = environment.variables
-									? Object.keys(environment.variables).length
-									: 0;
-								const isDeleting = deletingEnvId === environment.id;
-								return (
-									<div
-										key={environment.id}
-										className={cn(
-											"group flex h-8 items-center gap-2 px-3 pl-12.5 text-sm hover:bg-accent transition-colors cursor-pointer",
-											isSelected({
-												type: "environment",
-												environmentId: environment.id,
-											}) &&
-												"bg-scope-environment/10 text-scope-environment hover:bg-scope-environment/20"
-										)}
-										onClick={() =>
-											selectCategory({
-												type: "environment",
-												environmentId: environment.id,
-											})
-										}
-									>
-										{/* <Cloud className="w-4 h-4 text-blue-400 shrink-0" /> */}
-										{renamingEnvId === environment.id ? (
-											<Input
-												autoFocus
-												value={renameEnvValue}
-												onChange={(e) => setRenameEnvValue(e.target.value)}
-												onClick={(e) => e.stopPropagation()}
-												onBlur={() =>
-													submitRenameEnvironment(environment.id)
+						{environmentsExpanded && (
+							<div className="mt-1">
+								{/* New Environment Input */}
+								{creatingEnvironment && (
+									<div className="px-3 py-1 pl-6">
+										<Input
+											value={newEnvName}
+											onChange={(e) => setNewEnvName(e.target.value)}
+											onKeyDown={(e) => {
+												if (e.key === "Enter") handleCreateEnvironment();
+												if (e.key === "Escape") {
+													setCreatingEnvironment(false);
+													setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
 												}
-												onKeyDown={(e) => {
-													e.stopPropagation();
-													if (e.key === "Enter")
-														submitRenameEnvironment(environment.id);
-													if (e.key === "Escape")
-														cancelRenameEnvironment();
-												}}
-												className="h-6 flex-1 text-sm"
-											/>
-										) : (
-											<span className="truncate flex-1">
-												{environment.name}
-											</span>
-										)}
-										{variableCount > 0 && renamingEnvId !== environment.id && (
-											<Badge
-												variant="secondary"
-												className="text-xs bg-scope-environment/10 text-scope-environment px-1.5 py-0 shrink-0"
-											>
-												{variableCount}
-											</Badge>
-										)}
-										{isDeleting && (
-											<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive" />
-										)}
-										{!isDeleting && renamingEnvId !== environment.id && (
-											<RowActionsMenu
-												label={`More actions for environment ${environment.name}`}
-												className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-												actions={[
-													{
-														label: "Rename",
-														icon: Edit2,
-														onSelect: () =>
-															startRenameEnvironment(environment),
-													},
-													{
-														label: "Duplicate",
-														icon: Copy,
-														onSelect: () =>
-															void duplicateEnvironment(environment),
-													},
-													{
-														label: "Delete",
-														icon: Trash2,
-														destructive: true,
-														onSelect: () =>
-															setDeleteConfirmEnvId(environment.id),
-													},
-												]}
-											/>
-										)}
+											}}
+											onBlur={() => {
+												if (newEnvName.trim()) {
+													handleCreateEnvironment();
+												} else {
+													setCreatingEnvironment(false);
+													setNewEnvName(DEFAULT_ENVIRONMENT_NAME);
+												}
+											}}
+											autoFocus
+											className="h-8 text-sm"
+											placeholder="Environment name"
+										/>
 									</div>
-								);
-							})
-						)}
-					</div>
-				)}
-			</div>
+								)}
 
-			{/* Collections Section (Highest Priority) */}
-			<div>
-				<button
-					onClick={() => setCollectionsExpanded(!collectionsExpanded)}
-					className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
-				>
-					{collectionsExpanded ? (
-						<ChevronDown className="w-3 h-3" />
-					) : (
-						<ChevronRight className="w-3 h-3" />
-					)}
-					<Layers className="w-3 h-3" />
-					<span>Collections</span>
-					<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
-						{collections.length}
-					</Badge>
-				</button>
-
-				{collectionsExpanded && (
-					<div className="mt-1">
-						{collections.length === 0 ? (
-							<div className="px-3 py-2 text-xs text-muted-foreground italic">
-								No collections
-							</div>
-						) : (
-							collections.map((collection) => {
-								const variableCount = collection.variables
-									? Object.keys(collection.variables).length
-									: 0;
-								return (
-									<button
-										key={collection.id}
-										onClick={() =>
-											selectCategory({
-												type: "collection",
-												collectionId: collection.id,
-											})
-										}
-										className={cn(
-											"w-full flex h-8 items-center gap-2 px-3 pl-12.5 text-left text-sm hover:bg-accent transition-colors",
-											isSelected({
-												type: "collection",
-												collectionId: collection.id,
-											}) &&
-												"bg-scope-collection/10 text-scope-collection hover:bg-scope-collection/20"
-										)}
-									>
-										{/* <Folder className="w-4 h-4 text-orange-400" /> */}
-										<span className="truncate flex-1">{collection.name}</span>
-										{variableCount > 0 && (
-											<Badge
-												variant="secondary"
-												className="text-xs bg-scope-collection/10 text-scope-collection px-1.5 py-0"
+								{environments.length === 0 && !creatingEnvironment ? (
+									<div className="px-3 py-2 text-xs text-muted-foreground italic">
+										No environments
+									</div>
+								) : (
+									environments.map((environment) => {
+										const variableCount = environment.variables
+											? Object.keys(environment.variables).length
+											: 0;
+										const isDeleting = deletingEnvId === environment.id;
+										return (
+											<div
+												key={environment.id}
+												className={cn(
+													"group flex h-8 items-center gap-2 px-3 pl-12.5 text-sm hover:bg-accent transition-colors cursor-pointer",
+													isSelected({
+														type: "environment",
+														environmentId: environment.id,
+													}) &&
+														"bg-scope-environment/10 text-scope-environment hover:bg-scope-environment/20"
+												)}
+												onClick={() =>
+													selectCategory({
+														type: "environment",
+														environmentId: environment.id,
+													})
+												}
 											>
-												{variableCount}
-											</Badge>
-										)}
-									</button>
-								);
-							})
+												{/* <Cloud className="w-4 h-4 text-blue-400 shrink-0" /> */}
+												{renamingEnvId === environment.id ? (
+													<Input
+														autoFocus
+														value={renameEnvValue}
+														onChange={(e) =>
+															setRenameEnvValue(e.target.value)
+														}
+														onClick={(e) => e.stopPropagation()}
+														onBlur={() =>
+															submitRenameEnvironment(environment.id)
+														}
+														onKeyDown={(e) => {
+															e.stopPropagation();
+															if (e.key === "Enter")
+																submitRenameEnvironment(
+																	environment.id
+																);
+															if (e.key === "Escape")
+																cancelRenameEnvironment();
+														}}
+														className="h-6 flex-1 text-sm"
+													/>
+												) : (
+													<span className="truncate flex-1">
+														{environment.name}
+													</span>
+												)}
+												{variableCount > 0 &&
+													renamingEnvId !== environment.id && (
+														<Badge
+															variant="secondary"
+															className="text-xs bg-scope-environment/10 text-scope-environment px-1.5 py-0 shrink-0"
+														>
+															{variableCount}
+														</Badge>
+													)}
+												{isDeleting && (
+													<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive" />
+												)}
+												{!isDeleting &&
+													renamingEnvId !== environment.id && (
+														<RowActionsMenu
+															label={`More actions for environment ${environment.name}`}
+															className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+															actions={[
+																{
+																	label: "Rename",
+																	icon: Edit2,
+																	onSelect: () =>
+																		startRenameEnvironment(
+																			environment
+																		),
+																},
+																{
+																	label: "Duplicate",
+																	icon: Copy,
+																	onSelect: () =>
+																		void duplicateEnvironment(
+																			environment
+																		),
+																},
+																{
+																	label: "Delete",
+																	icon: Trash2,
+																	destructive: true,
+																	onSelect: () =>
+																		setDeleteConfirmEnvId(
+																			environment.id
+																		),
+																},
+															]}
+														/>
+													)}
+											</div>
+										);
+									})
+								)}
+							</div>
 						)}
 					</div>
-				)}
-			</div>
+
+					{/* Collections Section (Highest Priority) */}
+					<div>
+						<button
+							onClick={() => setCollectionsExpanded(!collectionsExpanded)}
+							className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
+						>
+							{collectionsExpanded ? (
+								<ChevronDown className="w-3 h-3" />
+							) : (
+								<ChevronRight className="w-3 h-3" />
+							)}
+							<Layers className="w-3 h-3" />
+							<span>Collections</span>
+							<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
+								{collections.length}
+							</Badge>
+						</button>
+
+						{collectionsExpanded && (
+							<div className="mt-1">
+								{collections.length === 0 ? (
+									<div className="px-3 py-2 text-xs text-muted-foreground italic">
+										No collections
+									</div>
+								) : (
+									collections.map((collection) => {
+										const variableCount = collection.variables
+											? Object.keys(collection.variables).length
+											: 0;
+										return (
+											<button
+												key={collection.id}
+												onClick={() =>
+													selectCategory({
+														type: "collection",
+														collectionId: collection.id,
+													})
+												}
+												className={cn(
+													"w-full flex h-8 items-center gap-2 px-3 pl-12.5 text-left text-sm hover:bg-accent transition-colors",
+													isSelected({
+														type: "collection",
+														collectionId: collection.id,
+													}) &&
+														"bg-scope-collection/10 text-scope-collection hover:bg-scope-collection/20"
+												)}
+											>
+												{/* <Folder className="w-4 h-4 text-orange-400" /> */}
+												<span className="truncate flex-1">
+													{collection.name}
+												</span>
+												{variableCount > 0 && (
+													<Badge
+														variant="secondary"
+														className="text-xs bg-scope-collection/10 text-scope-collection px-1.5 py-0"
+													>
+														{variableCount}
+													</Badge>
+												)}
+											</button>
+										);
+									})
+								)}
+							</div>
+						)}
+					</div>
+				</div>
+			</DrawerPanel>
 
 			<DeleteConfirmDialog
 				open={!!deleteConfirmEnvId}
@@ -415,6 +433,6 @@ export default function VariablesCategoryTree({
 				onConfirm={handleConfirmDelete}
 				isDeleting={!!deletingEnvId && deletingEnvId === deleteConfirmEnvId}
 			/>
-		</div>
+		</>
 	);
 }

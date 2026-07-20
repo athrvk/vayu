@@ -100,7 +100,7 @@ export default function RequestItem({
 				// The transition omits outline-color (see CollectionItem) so the
 				// focus ring appears instantly instead of fading between rows.
 				// h-8: shared drawer row height (see CollectionItem).
-				"focus-row flex h-8 items-center gap-2 px-3 rounded-md group cursor-pointer transition-[color,background-color,border-color]",
+				"focus-row flex h-8 items-center gap-2 px-3 group cursor-pointer transition-[color,background-color,border-color]",
 				isDeleting && "opacity-50",
 				isSelected
 					? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"

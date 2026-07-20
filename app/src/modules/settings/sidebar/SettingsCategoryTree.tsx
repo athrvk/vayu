@@ -18,6 +18,7 @@
 
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useTabsStore } from "@/stores";
+import { DrawerPanel } from "@/components/shared";
 import { useConfigQuery } from "@/queries";
 import type { EngineSettingsCategory, SettingsCategory } from "@/types";
 import type { LucideIcon } from "lucide-react";
@@ -99,44 +100,48 @@ export default function SettingsCategoryTree() {
 	};
 
 	return (
-		<div className="flex flex-col h-full w-full py-2">
-			{/* App Settings Section */}
-			<div className="px-3 py-2 mb-1">
-				<div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-					App Settings
-				</div>
-			</div>
-			<div className="space-y-1 mb-4">
-				{appCategories.map((category) => renderCategory(category, false))}
-			</div>
-
-			{/* Engine Settings Section — depends on the engine `/config` query, so
-			    its loading/error states are scoped here. App Settings above always
-			    render (client-side), so Settings stays usable when the engine is down. */}
-			<div className="px-3 py-2 mb-1">
-				<div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-					<Settings className="w-3 h-3" />
-					Engine Settings
-				</div>
-			</div>
-			{isLoading ? (
-				<div className="space-y-2 px-3">
-					<Skeleton className="h-9 w-full" />
-					<Skeleton className="h-9 w-full" />
-					<Skeleton className="h-9 w-full" />
-				</div>
-			) : error ? (
-				<div className="px-4 py-2">
-					<div className="text-xs text-destructive">Engine settings unavailable</div>
-					<div className="text-xs text-muted-foreground mt-0.5">
-						{error instanceof Error ? error.message : "The engine isn't responding."}
+		<DrawerPanel title="Settings">
+			<div className="flex flex-col w-full py-2">
+				{/* App Settings Section */}
+				<div className="px-3 py-2 mb-1">
+					<div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+						App Settings
 					</div>
 				</div>
-			) : (
-				<div className="space-y-1">
-					{ENGINE_CATEGORIES.map((category) => renderCategory(category))}
+				<div className="space-y-1 mb-4">
+					{appCategories.map((category) => renderCategory(category, false))}
 				</div>
-			)}
-		</div>
+
+				{/* Engine Settings Section — depends on the engine `/config` query, so
+			    its loading/error states are scoped here. App Settings above always
+			    render (client-side), so Settings stays usable when the engine is down. */}
+				<div className="px-3 py-2 mb-1">
+					<div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+						<Settings className="w-3 h-3" />
+						Engine Settings
+					</div>
+				</div>
+				{isLoading ? (
+					<div className="space-y-2 px-3">
+						<Skeleton className="h-9 w-full" />
+						<Skeleton className="h-9 w-full" />
+						<Skeleton className="h-9 w-full" />
+					</div>
+				) : error ? (
+					<div className="px-4 py-2">
+						<div className="text-xs text-destructive">Engine settings unavailable</div>
+						<div className="text-xs text-muted-foreground mt-0.5">
+							{error instanceof Error
+								? error.message
+								: "The engine isn't responding."}
+						</div>
+					</div>
+				) : (
+					<div className="space-y-1">
+						{ENGINE_CATEGORIES.map((category) => renderCategory(category))}
+					</div>
+				)}
+			</div>
+		</DrawerPanel>
 	);
 }
