@@ -23,6 +23,15 @@ import { EngineRequestError } from "./engine-client.js";
 import type { McpSafetyConfig } from "./config.js";
 import { checkAllowlist, checkLoadCaps } from "./safety.js";
 import { compareReports } from "./compare.js";
+import {
+	loadResolutionContext,
+	composeAuth,
+	composeSavedRequest,
+	type AuthRecord,
+	type Resolver,
+	type ResolutionContext,
+	type SavedRequestLike,
+} from "./resolve.js";
 
 // --- Elicitation -------------------------------------------------------------
 
@@ -157,16 +166,34 @@ function requireStr(args: Record<string, unknown>, key: string): string {
 
 class ToolArgError extends Error {}
 
-/** Build the engine `/request` or `/run` body from loose tool arguments. */
-function buildExecutionPayload(args: Record<string, unknown>): Record<string, unknown> {
+/**
+ * Build the engine `/request` or `/run` body from loose tool arguments. When a
+ * `resolver` is supplied, `{{variables}}` are substituted in the URL, header
+ * keys/values, and body content (the app resolves these renderer-side before
+ * the engine ever sees them; MCP must do the same). `opts.url` lets the caller
+ * pass an already-resolved URL (it is resolved once, up front, for the
+ * allowlist check). The body is emitted as `{ mode, content }` — the shape the
+ * engine's `deserialize_request` reads (it keys off `mode`, not `type`).
+ */
+function buildExecutionPayload(
+	args: Record<string, unknown>,
+	opts?: { resolver?: Resolver; url?: string }
+): Record<string, unknown> {
+	const rs = (s: string): string => opts?.resolver?.resolveString(s) ?? s;
 	const payload: Record<string, unknown> = {
 		method: str(args, "method") ?? "GET",
-		url: requireStr(args, "url"),
+		url: opts?.url ?? rs(requireStr(args, "url")),
 	};
-	if (args.headers && typeof args.headers === "object") payload.headers = args.headers;
+	if (args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)) {
+		const headers: Record<string, string> = {};
+		for (const [key, value] of Object.entries(args.headers as Record<string, unknown>)) {
+			headers[rs(key)] = rs(String(value));
+		}
+		payload.headers = headers;
+	}
 	const bodyContent = str(args, "body");
 	if (bodyContent !== undefined) {
-		payload.body = { type: str(args, "bodyType") ?? "text", content: bodyContent };
+		payload.body = { mode: str(args, "bodyType") ?? "text", content: rs(bodyContent) };
 	}
 	for (const key of ["requestId", "environmentId", "preRequestScript", "postRequestScript"]) {
 		const v = str(args, key);
@@ -174,6 +201,70 @@ function buildExecutionPayload(args: Record<string, unknown>): Record<string, un
 	}
 	return payload;
 }
+
+/** Regex used only to *detect* whether resolution is needed (non-global: no lastIndex state). */
+const TEMPLATE_RE = /\{\{[^{}]+\}\}/;
+
+/** Read an optional agent-supplied `auth` block (a `{ mode, … }` object). */
+function readAuthArg(args: Record<string, unknown>): AuthRecord | undefined {
+	const a = args.auth;
+	return a && typeof a === "object" && !Array.isArray(a) ? (a as AuthRecord) : undefined;
+}
+
+/**
+ * Build the resolution scope for an ad-hoc execute/load call. Loading the
+ * variable sources (globals/collection/environment) costs engine round-trips,
+ * so we skip it entirely unless the call actually needs it: some field carries
+ * a `{{template}}`, or the auth is `inherit` (which must walk the collection
+ * chain). When nothing needs resolving, an identity context is returned.
+ */
+async function resolutionScopeFor(
+	args: Record<string, unknown>,
+	client: EngineClient,
+	signal?: AbortSignal
+): Promise<ResolutionContext> {
+	const authArg = readAuthArg(args);
+	const templated = TEMPLATE_RE.test(
+		JSON.stringify([str(args, "url"), args.headers ?? null, str(args, "body"), authArg ?? null])
+	);
+	if (!templated && authArg?.mode !== "inherit") {
+		return { chain: [], resolveString: (s) => s, resolveObject: (v) => v };
+	}
+	return loadResolutionContext(client, {
+		collectionId: str(args, "collectionId"),
+		environmentId: str(args, "environmentId"),
+		signal,
+	});
+}
+
+// --- Shared input schema fragments ------------------------------------------
+
+/** Optional resolution scope shared by the ad-hoc execute/load tools. */
+const collectionIdInput = z
+	.string()
+	.optional()
+	.describe(
+		"Optional collection ID. Scopes variable resolution to that collection's variable chain and lets auth mode 'inherit' resolve against it."
+	);
+
+const environmentIdInput = z
+	.string()
+	.optional()
+	.describe("Optional environment ID whose variables resolve {{templates}} in this request.");
+
+/**
+ * Optional auth block. Callers can copy a saved request's `auth` object verbatim
+ * (read via list_requests). The engine applies it — bearer/basic/apikey and
+ * oauth2 (using its token cache) — after `{{variables}}` inside it are resolved;
+ * `inherit` resolves against the collection chain (supply collectionId).
+ */
+const authInput = z
+	.object({ mode: z.string().describe("bearer | basic | apikey | oauth2 | inherit | none.") })
+	.passthrough()
+	.optional()
+	.describe(
+		"Optional auth block (e.g. { mode: 'bearer', token: '{{apiToken}}' }); the engine resolves and applies it."
+	);
 
 // --- Structured output schemas ----------------------------------------------
 
@@ -378,7 +469,7 @@ export const TOOLS: McpTool[] = [
 		name: "run_request",
 		category: "execute",
 		description:
-			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist.",
+			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.)",
 		readOnly: false,
 		annotations: {
 			title: "Send a request",
@@ -388,7 +479,7 @@ export const TOOLS: McpTool[] = [
 		},
 		inputSchema: {
 			method: z.string().optional().describe("HTTP method (default GET)."),
-			url: z.string().describe("Fully-resolved request URL."),
+			url: z.string().describe("Request URL (may contain {{variables}})."),
 			headers: z.record(z.string()).optional().describe("Request headers as a string map."),
 			body: z.string().optional().describe("Request body content."),
 			bodyType: z
@@ -397,14 +488,23 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					"Body type: json, text, form-data, x-www-form-urlencoded (default text)."
 				),
+			auth: authInput,
 			requestId: z.string().optional().describe("Optional saved request ID to link."),
-			environmentId: z.string().optional().describe("Optional environment ID for variables."),
+			environmentId: environmentIdInput,
+			collectionId: collectionIdInput,
 		},
 		handler: async (args, ctx, signal) => {
-			const url = requireStr(args, "url");
+			const rc = await resolutionScopeFor(args, ctx.client, signal);
+			const url = rc.resolveString(requireStr(args, "url"));
 			const gate = checkAllowlist(url, ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
-			return callEngine(() => ctx.client.executeRequest(buildExecutionPayload(args), signal));
+			const payload = buildExecutionPayload(args, { resolver: rc, url });
+			const authArg = readAuthArg(args);
+			if (authArg) {
+				const auth = composeAuth(authArg, rc.chain, rc);
+				if (auth) payload.auth = auth;
+			}
+			return callEngine(() => ctx.client.executeRequest(payload, signal));
 		},
 	},
 	{
@@ -510,7 +610,10 @@ export const TOOLS: McpTool[] = [
 			const body = str(args, "body");
 			if (body !== undefined) {
 				const bodyType = str(args, "bodyType") ?? "text";
-				payload.body = { type: bodyType, content: body };
+				// The engine stores the body blob verbatim; the canonical shape keys
+				// off `mode` (not `type`), so a `type`-keyed body would not round-trip
+				// in the app. `bodyType` mirrors it into the denormalized column.
+				payload.body = { mode: bodyType, content: body };
 				payload.bodyType = bodyType;
 			}
 			const description = str(args, "description");
@@ -576,7 +679,7 @@ export const TOOLS: McpTool[] = [
 		name: "run_collection_smoke",
 		category: "execute",
 		description:
-			"Execute every saved request in a collection once and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing). Each request's host must be on the allowlist; requests whose host cannot be verified (e.g. unresolved {{variables}} and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
+			"Execute every saved request in a collection once and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing). Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
 		readOnly: false,
 		annotations: {
 			title: "Run collection smoke test",
@@ -596,8 +699,15 @@ export const TOOLS: McpTool[] = [
 			const collectionId = requireStr(args, "collectionId");
 			const environmentId = str(args, "environmentId");
 			let requests: unknown;
+			let rc: ResolutionContext;
 			try {
-				requests = await ctx.client.listRequests(collectionId, signal);
+				// Fetch the requests and the resolution scope (collection chain +
+				// variable sources) concurrently — the scope is shared across every
+				// request in the collection.
+				[requests, rc] = await Promise.all([
+					ctx.client.listRequests(collectionId, signal),
+					loadResolutionContext(ctx.client, { collectionId, environmentId, signal }),
+				]);
 			} catch (err) {
 				return engineErrorResult(err);
 			}
@@ -608,10 +718,13 @@ export const TOOLS: McpTool[] = [
 			let skipped = 0;
 
 			for (const item of list) {
-				const req = (item ?? {}) as Record<string, unknown>;
+				const req = (item ?? {}) as SavedRequestLike;
 				const name = String(req.name ?? req.id ?? "request");
-				const method = String(req.method ?? "GET");
-				const url = String(req.url ?? "");
+				// Compose the request the same way the app's Send does: resolve
+				// variables, apply stored/inherited auth, and compose scripts.
+				const outgoing = composeSavedRequest(req, rc.chain, rc, environmentId);
+				const method = outgoing.method;
+				const url = outgoing.url;
 
 				const gate = checkAllowlist(url, ctx.config);
 				if (!gate.ok) {
@@ -627,12 +740,7 @@ export const TOOLS: McpTool[] = [
 					continue;
 				}
 				try {
-					const payload: Record<string, unknown> = { method, url };
-					if (req.headers) payload.headers = req.headers;
-					if (req.body) payload.body = req.body;
-					if (typeof req.id === "string") payload.requestId = req.id;
-					if (environmentId) payload.environmentId = environmentId;
-					const resp = ((await ctx.client.executeRequest(payload, signal)) ??
+					const resp = ((await ctx.client.executeRequest(outgoing, signal)) ??
 						{}) as Record<string, unknown>;
 					const code =
 						typeof resp.status === "number"
@@ -675,7 +783,7 @@ export const TOOLS: McpTool[] = [
 		name: "start_load_run",
 		category: "load",
 		description:
-			"Start a load test against a URL. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
+			"Start a load test against a URL. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
 		readOnly: false,
 		annotations: {
 			title: "Start load test",
@@ -685,10 +793,11 @@ export const TOOLS: McpTool[] = [
 		},
 		inputSchema: {
 			method: z.string().optional(),
-			url: z.string().describe("Fully-resolved target URL."),
+			url: z.string().describe("Target URL (may contain {{variables}})."),
 			headers: z.record(z.string()).optional(),
 			body: z.string().optional(),
 			bodyType: z.string().optional(),
+			auth: authInput,
 			mode: z
 				.string()
 				.optional()
@@ -704,7 +813,8 @@ export const TOOLS: McpTool[] = [
 			targetRps: z.number().optional().describe("Target RPS (constant_rps)."),
 			maxInFlight: z.number().optional().describe("In-flight cap (constant_rps only)."),
 			requestId: z.string().optional(),
-			environmentId: z.string().optional(),
+			environmentId: environmentIdInput,
+			collectionId: collectionIdInput,
 			tests: z.string().optional().describe("Optional deferred validation script."),
 			confirmed: z
 				.boolean()
@@ -714,7 +824,8 @@ export const TOOLS: McpTool[] = [
 				),
 		},
 		handler: async (args, ctx, signal) => {
-			const url = requireStr(args, "url");
+			const rc = await resolutionScopeFor(args, ctx.client, signal);
+			const url = rc.resolveString(requireStr(args, "url"));
 			const gate = checkAllowlist(url, ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
 
@@ -728,9 +839,14 @@ export const TOOLS: McpTool[] = [
 			if (!caps.ok) return errorResult(caps.error!);
 
 			const payload: Record<string, unknown> = {
-				...buildExecutionPayload(args),
+				...buildExecutionPayload(args, { resolver: rc, url }),
 				mode: str(args, "mode") ?? "constant_concurrency",
 			};
+			const authArg = readAuthArg(args);
+			if (authArg) {
+				const auth = composeAuth(authArg, rc.chain, rc);
+				if (auth) payload.auth = auth;
+			}
 			for (const key of [
 				"concurrency",
 				"startConcurrency",

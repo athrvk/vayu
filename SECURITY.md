@@ -28,9 +28,12 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
 - **DNS-rebinding protection.** `Host` headers are validated (SDK
   `enableDnsRebindingProtection` + `allowedHosts`), so a malicious web page
   cannot drive the endpoint through a forged `Host`.
-- **Target allowlist (empty by default).** `run_request` and `start_load_run`
-  refuse any host that is not explicitly allowlisted. A fresh install cannot be
-  used to send traffic anywhere until the user opts in per host.
+- **Target allowlist (empty by default).** The traffic-sending tools
+  (`run_request`, `run_collection_smoke`, `start_load_run`) refuse any host that
+  is not explicitly allowlisted. The check runs against the **resolved** host
+  (after `{{variable}}` substitution), so a variable-built URL cannot slip past
+  it. A fresh install cannot be used to send traffic anywhere until the user opts
+  in per host.
 - **Hard load caps (enforcement).** `start_load_run` rejects requests whose RPS,
   concurrency, or duration exceed configured ceilings. Together with the
   allowlist, these are the real limits on what load an agent can generate.

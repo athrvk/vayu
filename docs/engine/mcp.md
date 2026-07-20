@@ -153,11 +153,43 @@ Notes:
   variables (the engine's upsert replaces the whole variables blob), so partial
   updates preserve untouched variables and the name.
 - **`run_collection_smoke`** runs each saved request once and returns a structured
-  pass/fail matrix (2xx–3xx status + all tests passing = pass). Requests whose
-  host can't be verified (e.g. unresolved `{{variables}}` with allow-all off) are
-  skipped, not sent.
+  pass/fail matrix (2xx–3xx status + all tests passing = pass). Each request is
+  composed exactly as the app's **Send** would (see *Request composition* below).
+  Requests whose host still can't be verified after resolution (e.g. a variable
+  did not resolve and allow-all is off) are skipped, not sent.
 - **Cancellation:** each tool call's `AbortSignal` is threaded into the engine
   `fetch`, so a client cancelling an in-flight call actually aborts it.
+
+### Request composition
+
+In Vayu the **renderer** — not the engine — prepares a request before sending
+it: it resolves `{{variables}}`, walks the collection ancestor chain to resolve
+`inherit` auth, and composes the collection-chain pre/post scripts with the
+request's own. The engine only *applies* a concrete `auth` block (bearer / basic
+/ apikey / oauth2, incl. its token cache) and *runs* whatever script strings
+arrive in the body; it performs **no** `{{var}}` interpolation and drops
+`{"mode":"inherit"}` as "resolved app-side" (`auth_resolver.cpp::parse_auth`).
+
+Because MCP talks to the engine directly, it must do that preparation itself.
+`resolve.ts` is the main-process port of the renderer pipeline
+(`useVariableResolver.ts` + `request-builder/index.tsx` + `auth-mapping.ts`) and
+is applied so a tool call behaves like the app clicking Send:
+
+- **Variables** — resolved in URL, headers, and body with the app's precedence
+  (environment > collection chain, leaf→root > globals; enabled only; unknown →
+  empty string). The allowlist is checked against the **resolved** host.
+- **Auth** — `run_collection_smoke` applies each saved request's stored auth
+  (`inherit` resolves against the collection chain); `run_request` /
+  `start_load_run` accept an explicit `auth` block. In all cases variables inside
+  the block are resolved and the engine applies it (oauth2 uses its token cache).
+- **Scripts** — `run_collection_smoke` composes the collection-chain pre/post
+  scripts (root→leaf) with the request's own and sends them for the engine to
+  run, so a request's tests and setup actually execute.
+
+Resolution only fetches the variable sources when a call needs them (a field
+carries a `{{template}}`, or auth is `inherit`); a fully-literal call skips the
+extra round-trips. `run_request` / `start_load_run` take optional `environmentId`
+and `collectionId` to scope resolution.
 
 ## Resources
 
@@ -245,6 +277,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                |
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.  |
 | `compare.ts`       | Pure two-report diff for `compare_runs`.                            |
+| `resolve.ts`       | Request composition: `{{var}}` resolution, inherit-auth, scripts.   |
 | `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`.    |
 | `resources.ts`     | Static + templated resource definitions.                            |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).               |

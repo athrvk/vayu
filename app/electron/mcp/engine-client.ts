@@ -111,6 +111,11 @@ export class EngineClient {
 		return this.request("GET", "/environments", undefined, signal);
 	}
 
+	/** Global variables (the lowest-precedence layer of variable resolution). */
+	getGlobals(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/globals", undefined, signal);
+	}
+
 	getEnvironment(id: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", `/environments/${encodeURIComponent(id)}`, undefined, signal);
 	}

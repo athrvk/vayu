@@ -25,6 +25,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		getLiveMetricsSnapshot: vi.fn().mockResolvedValue([{ currentRps: 100 }]),
 		getConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "8" }] }),
 		updateConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "16" }] }),
+		getGlobals: vi.fn().mockResolvedValue({ variables: {} }),
 		createRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "New" }),
 		getEnvironment: vi.fn().mockResolvedValue({
 			id: "env_1",
@@ -182,7 +183,8 @@ describe("data-write tools", () => {
 			method: "POST",
 			url: "https://api.example.com/x",
 			headers: [{ key: "X-A", value: "1", enabled: true }],
-			body: { type: "json", content: '{"a":1}' },
+			// Canonical body shape keys off `mode` (round-trips with the app).
+			body: { mode: "json", content: '{"a":1}' },
 		});
 	});
 
@@ -246,6 +248,58 @@ describe("run_collection_smoke", () => {
 		// The off-allowlist request was never executed.
 		expect((client.executeRequest as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
 	});
+
+	test("composes each request like the app: vars resolved, inherited auth + scripts applied", async () => {
+		const client = fakeClient({
+			listCollections: vi.fn().mockResolvedValue([
+				{
+					id: "c1",
+					parentId: null,
+					variables: { host: { value: "api.example.com", enabled: true } },
+					auth: { mode: "bearer", token: "{{token}}" },
+					preRequestScript: "pm.collectionVariables.set('x', 1)",
+					postRequestScript: "",
+				},
+			]),
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Dev",
+				variables: { token: { value: "abc123", enabled: true } },
+			}),
+			listRequests: vi.fn().mockResolvedValue([
+				{
+					id: "r1",
+					collectionId: "c1",
+					name: "get user",
+					method: "get",
+					url: "https://{{host}}/users",
+					// No auth field on the request → defaults to inherit → collection bearer.
+					headers: [{ key: "Accept", value: "application/json", enabled: true }],
+					postRequestScript: "pm.test('ok', () => pm.response.to.have.status(200))",
+				},
+			]),
+			executeRequest: vi
+				.fn()
+				.mockResolvedValue({ status: 200, testResults: [{ passed: true }] }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1", environmentId: "env_1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const outgoing = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(outgoing).toMatchObject({
+			method: "GET",
+			url: "https://api.example.com/users", // {{host}} resolved
+			headers: { Accept: "application/json" }, // KeyValueEntry[] flattened
+			auth: { mode: "bearer", token: "abc123" }, // inherited from collection, {{token}} resolved
+			// collection pre-script + request post-script composed
+			preRequestScript: "pm.collectionVariables.set('x', 1)",
+			postRequestScript: "pm.test('ok', () => pm.response.to.have.status(200))",
+		});
+		expect((res.structuredContent as { passed: number }).passed).toBe(1);
+	});
 });
 
 describe("dispatchTool", () => {
@@ -298,8 +352,66 @@ describe("dispatchTool", () => {
 		expect(payload).toMatchObject({
 			method: "POST",
 			url: "https://api.example.com/users",
-			body: { type: "json", content: '{"a":1}' },
+			// Body is emitted as { mode, content } — the shape the engine reads.
+			body: { mode: "json", content: '{"a":1}' },
 		});
+	});
+
+	test("run_request resolves {{variables}} in the URL from the environment", async () => {
+		const client = fakeClient({
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Dev",
+				variables: { host: { value: "api.example.com", enabled: true } },
+			}),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://{{host}}/users", environmentId: "env_1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.url).toBe("https://api.example.com/users");
+	});
+
+	test("run_request forwards a resolved auth block for the engine to apply", async () => {
+		const client = fakeClient({
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Dev",
+				variables: { apiToken: { value: "s3cret", enabled: true } },
+			}),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{
+				url: "https://api.example.com/users",
+				environmentId: "env_1",
+				auth: { mode: "bearer", token: "{{apiToken}}" },
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.auth).toEqual({ mode: "bearer", token: "s3cret" });
+	});
+
+	test("run_request off-allowlist check runs against the RESOLVED host", async () => {
+		const client = fakeClient({
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Dev",
+				variables: { host: { value: "evil.test", enabled: true } },
+			}),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://{{host}}/x", environmentId: "env_1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.executeRequest).not.toHaveBeenCalled();
 	});
 
 	test("start_load_run previews (no run) when confirmed is absent", async () => {
