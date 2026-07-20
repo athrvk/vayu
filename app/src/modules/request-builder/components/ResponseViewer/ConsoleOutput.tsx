@@ -111,11 +111,11 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 								</Badge>
 							</CollapsibleTrigger>
 							<CollapsibleContent className="mt-2">
-								<div className="bg-zinc-900 p-3 font-mono text-sm space-y-1 border border-zinc-800">
+								<div className="bg-muted p-3 font-mono text-sm space-y-1 border border-border">
 									{preLogs.map((log, i) => (
 										<div key={i} className="flex items-start gap-2">
 											<Terminal className="w-4 h-4 text-blue-500/70 mt-0.5 flex-shrink-0" />
-											<pre className="text-zinc-300 whitespace-pre-wrap break-words flex-1 min-w-0">
+											<pre className="text-foreground whitespace-pre-wrap break-words flex-1 min-w-0">
 												{log.message}
 											</pre>
 										</div>
@@ -145,11 +145,11 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 								</Badge>
 							</CollapsibleTrigger>
 							<CollapsibleContent className="mt-2">
-								<div className="bg-zinc-900 p-3 font-mono text-sm space-y-1 border border-zinc-800">
+								<div className="bg-muted p-3 font-mono text-sm space-y-1 border border-border">
 									{testLogs.map((log, i) => (
 										<div key={i} className="flex items-start gap-2">
 											<Terminal className="w-4 h-4 text-green-500/70 mt-0.5 flex-shrink-0" />
-											<pre className="text-zinc-300 whitespace-pre-wrap break-words flex-1 min-w-0">
+											<pre className="text-foreground whitespace-pre-wrap break-words flex-1 min-w-0">
 												{log.message}
 											</pre>
 										</div>

@@ -110,12 +110,12 @@ export default function InheritanceChain({ collectionId }: InheritanceChainProps
 						</span>
 
 						{isThis && (
-							<span className="text-[9px] font-bold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
+							<span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
 								THIS
 							</span>
 						)}
 						{isSource && !isThis && (
-							<span className="text-[9px] font-bold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
+							<span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
 								SOURCE
 							</span>
 						)}

@@ -113,7 +113,7 @@ export default function ResponseBody({
 		const imageData = bodyRaw || body;
 		return (
 			<div
-				className={cn("flex-1 flex items-center justify-center p-4 bg-zinc-900", className)}
+				className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}
 			>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
@@ -138,7 +138,7 @@ export default function ResponseBody({
 	if (detectedType === "pdf") {
 		return (
 			<div
-				className={cn("flex-1 flex items-center justify-center p-4 bg-zinc-900", className)}
+				className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}
 			>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
@@ -157,7 +157,7 @@ export default function ResponseBody({
 	if (detectedType === "binary") {
 		return (
 			<div
-				className={cn("flex-1 flex items-center justify-center p-4 bg-zinc-900", className)}
+				className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}
 			>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
