@@ -12,10 +12,13 @@ import { Input } from "@/components/ui";
 import { RowActionsMenu, MethodBadge } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
+import { INDENT_STEP } from "@/constants/layout";
 
 export interface RequestItemProps {
 	request: Request;
 	collectionId: string;
+	/** Tree depth, so the row can indent itself and still span full width. */
+	depth?: number;
 	onSelect: (collectionId: string, requestId: string) => void;
 	onDelete: (requestId: string) => Promise<void>;
 	onBeforeDelete?: (requestId: string, requestName: string) => void;
@@ -33,6 +36,7 @@ export interface RequestItemProps {
 export default function RequestItem({
 	request,
 	collectionId,
+	depth = 1,
 	onSelect,
 	onDelete,
 	onBeforeDelete,
@@ -94,13 +98,16 @@ export default function RequestItem({
 			role="treeitem"
 			tabIndex={-1}
 			aria-selected={isSelected}
+			// Indent inside the row (see CollectionItem) so the fill still
+			// reaches both panel edges.
+			style={{ paddingLeft: 8 + depth * INDENT_STEP }}
 			className={cn(
 				// focus-row: this row is the perceived target, not the narrower
 				// label button inside it — it paints the keyboard focus ring.
 				// The transition omits outline-color (see CollectionItem) so the
 				// focus ring appears instantly instead of fading between rows.
 				// h-8: shared drawer row height (see CollectionItem).
-				"focus-row flex h-8 items-center gap-2 px-3 group cursor-pointer transition-[color,background-color,border-color]",
+				"focus-row flex h-8 items-center gap-2 pr-3 group cursor-pointer transition-[color,background-color,border-color]",
 				isDeleting && "opacity-50",
 				isSelected
 					? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
@@ -112,7 +119,7 @@ export default function RequestItem({
 				onDoubleClick={handleDoubleClick}
 				tabIndex={-1}
 				data-tree-activate
-				className="flex items-center gap-2 flex-1 text-left cursor-pointer"
+				className="flex min-w-0 items-center gap-2 flex-1 text-left cursor-pointer"
 				disabled={isDeleting || isRenaming}
 			>
 				<MethodBadge method={request.method} size="md" />

@@ -22,3 +22,9 @@ export const DEFAULT_DRAWER_WIDTH = 260;
 
 /** Default width of the right context bar (px). */
 export const DEFAULT_CONTEXT_BAR_WIDTH = 252;
+
+/**
+ * Horizontal step per tree depth level (px). Applied as padding *inside* a row
+ * so the row still spans the full panel width — see CollectionItem.
+ */
+export const INDENT_STEP = 12;

@@ -14,6 +14,7 @@ import { Button, Input } from "@/components/ui";
 import { RowActionsMenu, type RowAction } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
+import { INDENT_STEP } from "@/constants/layout";
 
 export interface CollectionItemProps {
 	collection: Collection;
@@ -143,7 +144,14 @@ export default function CollectionItem({
 		onCollectionToggle(collection);
 	};
 
-	const indentPx = 2 + depth;
+	/**
+	 * Indentation is padding *inside* the row, never margin around it. A margin
+	 * would push the row's background in too, so a nested row's hover and
+	 * selection fill would stop short of the panel edge while a top-level row's
+	 * reached it. Depth is shown by where the content sits, not where the row
+	 * starts.
+	 */
+	const indentPx = 8 + depth * INDENT_STEP;
 
 	return (
 		<div className={cn("select-none", isDeleting && "opacity-50")}>
@@ -205,11 +213,14 @@ export default function CollectionItem({
 					onDoubleClick={handleDoubleClick}
 					tabIndex={-1}
 					data-tree-activate
-					className="flex items-center gap-2 flex-1 text-left cursor-pointer"
+					className="flex min-w-0 items-center gap-2 flex-1 text-left cursor-pointer"
 					disabled={isDeleting || isRenaming}
 				>
 					<Folder
-						className={cn("w-4 h-4", depth === 0 ? "text-primary" : "text-primary/70")}
+						className={cn(
+							"w-4 h-4 shrink-0",
+							depth === 0 ? "text-primary" : "text-primary/70"
+						)}
 					/>
 					{isRenaming ? (
 						<Input
@@ -230,15 +241,23 @@ export default function CollectionItem({
 						/>
 					) : (
 						<>
+							{/*
+							 * truncate + min-w-0 on the button: a flex item won't
+							 * shrink below its content by default, so without both a
+							 * long name widens the row and scrolls the whole panel
+							 * sideways instead of ellipsing.
+							 */}
 							<span
 								className={cn(
-									"text-sm text-foreground cursor-pointer",
+									"truncate text-sm text-foreground cursor-pointer",
 									depth === 0 && "font-medium"
 								)}
 							>
 								{collection.name}
 							</span>
-							<span className="text-xs text-muted-foreground">
+							{/* shrink-0: the count is short and load-bearing — the name
+							    yields first. */}
+							<span className="shrink-0 text-xs text-muted-foreground">
 								({requests.length + childCollections.length})
 							</span>
 						</>
@@ -259,7 +278,7 @@ export default function CollectionItem({
 
 			{/* Children (Subfolders + Requests) - indented by depth */}
 			{isExpanded && (
-				<div className="mt-1 space-y-0.5" style={{ marginLeft: indentPx + 16 }}>
+				<div className="mt-1 space-y-0.5">
 					{/* Subfolder Creation Form */}
 					{creatingSubfolder === collection.id && (
 						<div className="flex gap-2 py-1 px-2">
@@ -353,6 +372,7 @@ export default function CollectionItem({
 							key={request.id}
 							request={request}
 							collectionId={collection.id}
+							depth={depth + 1}
 							onSelect={onRequestClick}
 							onDelete={onDeleteRequest}
 							onBeforeDelete={onRequestDeleteClick}

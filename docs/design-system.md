@@ -563,8 +563,20 @@ flush with no heading at all. Switching views moved the content's vertical start
   cost. Rows bring their own internal padding.
 - **Full-bleed rows are square.** A rounded corner meeting the panel edge reads
   as a clipped rectangle, not a rounded row.
-- **The panel owns scrolling.** Views used to differ: some were wrapped in a
-  `ScrollArea` by the Drawer, others managed their own.
+- **The panel owns scrolling** — vertically only. Views used to differ: some were
+  wrapped in a `ScrollArea` by the Drawer, others managed their own.
+- **Indent with padding inside the row, never margin around it.** Margin pushes
+  the row's _background_ in too, so a nested row's hover and selection fill stops
+  short of the panel edge while a top-level row's reaches it. Depth is shown by
+  where the content sits, not where the row starts:
+  `paddingLeft: 8 + depth * INDENT_STEP` (`constants/layout`).
+- **A row must never widen the panel.** Long names ellipse; the drawer has no
+  horizontal scrollbar. `truncate` alone is not enough when the text sits inside
+  a `flex-1` _wrapper_ — a flex item will not shrink below its content width, so
+  the wrapper needs `min-w-0` as well. (A `truncate` element that is itself the
+  flex item is fine: `overflow: hidden` already gives it an automatic minimum
+  size of 0.) Short trailing metadata — counts, badges, spinners — takes
+  `shrink-0`, so the name is what yields.
 
 ---
 
