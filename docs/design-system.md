@@ -570,8 +570,14 @@ flush with no heading at all. Switching views moved the content's vertical start
   short of the panel edge while a top-level row's reaches it. Depth is shown by
   where the content sits, not where the row starts:
   `paddingLeft: 8 + depth * INDENT_STEP` (`constants/layout`).
+- **A control with an outward focus ring needs clearance from the body's top
+  edge.** The body scrolls, so it clips at its own bounds, and a ring drawn
+  outside the border box gets its top cut off when the control sits flush. Rows
+  are exempt — their focus outline is inset (`outline-offset: -2px`). Padded
+  content blocks (the History search field) carry `pt-2`.
 - **A row must never widen the panel.** Long names ellipse; the drawer has no
-  horizontal scrollbar. `truncate` alone is not enough when the text sits inside
+  horizontal scrollbar — `overflow-x-hidden` is set explicitly, because
+  `overflow-y: auto` alone computes overflow-x to `auto` too. `truncate` alone is not enough when the text sits inside
   a `flex-1` _wrapper_ — a flex item will not shrink below its content width, so
   the wrapper needs `min-w-0` as well. (A `truncate` element that is itself the
   flex item is fine: `overflow: hidden` already gives it an automatic minimum

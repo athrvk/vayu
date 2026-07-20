@@ -92,7 +92,13 @@ export default function HistoryList() {
 				) : undefined
 			}
 		>
-			<div className="flex h-full w-full flex-col space-y-4 px-3 pb-3">
+			{/*
+			 * pt-2 is not decorative. The panel body scrolls, so it clips at its
+			 * own edge, and the search field's focus ring is drawn *outside* its
+			 * border box — flush against the top, the ring's upper edge was cut
+			 * off. Matches the 8px top inset the Variables view already uses.
+			 */}
+			<div className="flex h-full w-full flex-col space-y-4 px-3 pt-2 pb-3">
 				{/* Search & Filters */}
 				<div className="space-y-3 shrink-0">
 					<div className="relative">

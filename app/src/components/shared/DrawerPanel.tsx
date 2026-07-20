@@ -44,7 +44,15 @@ export function DrawerPanel({ title, actions, children, className }: DrawerPanel
 			{/* Flush: rows run edge to edge and bring their own padding. The panel
 			    owns scrolling so every view scrolls the same way — views used to
 			    differ, some wrapped by the Drawer and some managing their own. */}
-			<div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">{children}</div>
+			{/*
+			 * overflow-x-hidden is explicit: `overflow-y: auto` alone computes
+			 * overflow-x to `auto` as well, so a single over-wide row would add a
+			 * horizontal scrollbar to the drawer. Rows ellipse instead (see
+			 * TruncatedText) — the drawer never scrolls sideways.
+			 */}
+			<div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+				{children}
+			</div>
 		</div>
 	);
 }
