@@ -12,11 +12,11 @@
  */
 
 import { Activity, Clock, Globe, Calendar, Timer } from "lucide-react";
-import { Badge } from "@/components/ui";
 import type { RunMetadataProps } from "../types";
 import { formatDuration } from "../utils/format";
-import { getMethodColor, loadTestTypeToLabel } from "@/utils";
+import { loadTestTypeToLabel } from "@/utils";
 import { LoadTestConfig } from "@/types";
+import { MethodBadge } from "@/components/shared";
 
 export default function RunMetadata({
 	requestUrl,
@@ -40,15 +40,7 @@ export default function RunMetadata({
 					<div className="flex items-center gap-2">
 						<Globe className="w-4 h-4 text-muted-foreground" />
 						<span className="font-medium text-muted-foreground">Endpoint:</span>
-						{requestMethod && (
-							<Badge
-								variant="outline"
-								className="text-xs font-bold"
-								style={{ color: `hsl(${getMethodColor(requestMethod)})` }}
-							>
-								{requestMethod}
-							</Badge>
-						)}
+						{requestMethod && <MethodBadge method={requestMethod} size="md" />}
 						<span
 							className="text-foreground font-mono text-xs truncate max-w-md"
 							title={requestUrl}

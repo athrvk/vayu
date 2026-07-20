@@ -19,3 +19,6 @@ export * from "./OAuth2Form";
 
 // Row "⋯" actions menu (requests, environments)
 export * from "./RowActionsMenu";
+
+// HTTP method display (single source of truth)
+export * from "./MethodBadge";

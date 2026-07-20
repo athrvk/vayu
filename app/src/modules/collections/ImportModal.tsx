@@ -12,6 +12,7 @@ import { useImportMutation } from "@/queries/import";
 import { apiService } from "@/services/api";
 import { parseImport } from "@/services/importers/factory";
 import { UnrecognisedFormatError, type ImportResult } from "@/services/importers/types";
+import { MethodBadge } from "@/components/shared";
 
 type Tab = "file" | "url" | "paste";
 type Phase = "idle" | "detecting" | "preview" | "error";
@@ -384,7 +385,7 @@ function TreeNode({
 						key={i}
 						className="flex items-center gap-2 py-0.5 text-[11px] text-muted-foreground"
 					>
-						<span className="w-10 font-mono font-semibold">{r.method}</span>
+						<MethodBadge method={r.method} variant="text" className="w-10" />
 						<span>{r.name}</span>
 					</div>
 				))}

@@ -10,6 +10,7 @@ import { formatRelativeTime, loadTestTypeToLabel } from "@/utils";
 import type { Run } from "@/types";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { MethodBadge } from "@/components/shared";
 import {
 	CheckCircle2,
 	XCircle,
@@ -27,15 +28,6 @@ interface RunItemProps {
 	onDelete: (runId: string, event: React.MouseEvent) => void;
 	isDeleting: boolean;
 	isSelected?: boolean;
-}
-
-function methodBadgeStyle(method: string): React.CSSProperties {
-	const c = `var(--method-${method.toLowerCase()})`;
-	return {
-		color: `hsl(${c})`,
-		background: `hsl(${c} / 0.1)`,
-		border: `1px solid hsl(${c} / 0.3)`,
-	};
 }
 
 export default function RunItem({
@@ -153,14 +145,7 @@ export default function RunItem({
 				{/* Request Info */}
 				{requestUrl && (
 					<div className="flex items-start gap-2 mb-1.5 min-w-0 flex-wrap">
-						{method && (
-							<span
-								className="text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded-md"
-								style={methodBadgeStyle(method)}
-							>
-								{method}
-							</span>
-						)}
+						{method && <MethodBadge method={method} className="h-5 items-center" />}
 						<p
 							className="text-xs text-foreground font-medium break-words flex-1 min-w-0 leading-5"
 							title={requestUrl}

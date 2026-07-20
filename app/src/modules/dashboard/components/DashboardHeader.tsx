@@ -14,8 +14,8 @@
 import { ArrowLeft, StopCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { useTabsStore, useDashboardStore } from "@/stores";
-import { getMethodColor } from "@/utils";
 import type { DashboardHeaderProps } from "../types";
+import { MethodBadge } from "@/components/shared";
 
 function formatElapsed(ms: number): string {
 	const totalSeconds = Math.floor(ms / 1000);
@@ -103,18 +103,7 @@ export default function DashboardHeader({
 			) : null}
 
 			{/* Method badge */}
-			{requestMethod && (
-				<span
-					className="text-[11px] font-bold font-mono px-1.5 py-0.5 rounded-md shrink-0"
-					style={{
-						color: `hsl(${getMethodColor(requestMethod)})`,
-						background: `hsl(${getMethodColor(requestMethod)} / 0.094)`,
-						border: `1px solid hsl(${getMethodColor(requestMethod)} / 0.188)`,
-					}}
-				>
-					{requestMethod.toUpperCase()}
-				</span>
-			)}
+			{requestMethod && <MethodBadge method={requestMethod} size="md" />}
 
 			{/* URL */}
 			{requestUrl ? (

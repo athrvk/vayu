@@ -19,6 +19,7 @@ import { useTabsStore, type Tab } from "@/stores";
 import { useRequestQuery, useCollectionsQuery } from "@/queries";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
+import { MethodBadge } from "@/components/shared";
 
 /**
  * Extract a short display path from a request URL. URLs may contain
@@ -85,9 +86,14 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 		case "request":
 			label = request ? (
 				<span className="inline-flex items-baseline gap-1.5 min-w-0">
-					<span className="text-[10px] font-semibold uppercase shrink-0">
-						{request.method}
-					</span>
+					{/*
+					 * Method carries its colour here, as it does in the sidebar —
+					 * the same information should not read two different ways. Colour
+					 * is also what separates it from the tab's label; without it the
+					 * two compete on weight alone. Muted on inactive tabs so a full
+					 * strip does not turn into a row of competing colours.
+					 */}
+					<MethodBadge method={request.method} variant="text" muted={!isActive} />
 					<span className="truncate">
 						{requestTabTitle(request.name, resolveString(request.url))}
 					</span>

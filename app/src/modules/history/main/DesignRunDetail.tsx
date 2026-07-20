@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle, Badge, ScrollArea } from "@/c
 import { TimingBreakdown } from "./components";
 import { UnifiedResponseViewer } from "@/components/shared/response-viewer";
 import type { DesignRunDetailProps } from "../types";
+import { MethodBadge } from "@/components/shared";
 
 export default function DesignRunDetail({ report, onBack: _onBack, runId }: DesignRunDetailProps) {
 	// Get the result from the report
@@ -57,9 +58,10 @@ export default function DesignRunDetail({ report, onBack: _onBack, runId }: Desi
 			<div className="border-b bg-card px-6 py-4">
 				{/* Request Summary */}
 				<div className="flex items-center gap-3 bg-muted/50 p-3">
-					<Badge variant="outline" className="font-mono font-bold shrink-0">
-						{trace?.request?.method || report.metadata?.requestMethod || "GET"}
-					</Badge>
+					<MethodBadge
+						method={trace?.request?.method || report.metadata?.requestMethod || "GET"}
+						size="md"
+					/>
 					<span className="text-sm font-mono text-foreground truncate flex-1">
 						{trace?.request?.url || report.metadata?.requestUrl || "Unknown URL"}
 					</span>

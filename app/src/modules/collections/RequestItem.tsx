@@ -7,10 +7,9 @@
 
 import { useRef } from "react";
 import { Loader2, Trash2, Edit2, Copy } from "lucide-react";
-import { getMethodColor } from "@/utils";
 import type { Request } from "@/types";
-import { Badge, Input } from "@/components/ui";
-import { RowActionsMenu } from "@/components/shared";
+import { Input } from "@/components/ui";
+import { RowActionsMenu, MethodBadge } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
 
@@ -115,17 +114,7 @@ export default function RequestItem({
 				className="flex items-center gap-2 flex-1 text-left cursor-pointer"
 				disabled={isDeleting || isRenaming}
 			>
-				<Badge
-					variant="outline"
-					className="text-xs font-mono font-semibold px-1.5 py-0.5"
-					style={{
-						color: `hsl(${getMethodColor(request.method)})`,
-						borderColor: `hsl(${getMethodColor(request.method)} / 0.3)`,
-						background: `hsl(${getMethodColor(request.method)} / 0.1)`,
-					}}
-				>
-					{request.method}
-				</Badge>
+				<MethodBadge method={request.method} size="md" />
 				{isRenaming ? (
 					<Input
 						type="text"

@@ -220,6 +220,21 @@ Everything else — state, status, scope, semantics — must use tokens.
 
 ### HTTP Method Color Tokens
 
+**Always render methods with `MethodBadge`** (`components/shared`) — never a
+hand-rolled span or `Badge` with inline colours. It previously rendered seven
+different ways (three sizes, two weights, some tinted, two with no colour at
+all), and the history sidebar kept a private copy of the colour logic that
+omitted `getMethodColor`'s fallback, so an unrecognised method silently lost its
+colour.
+
+```tsx
+<MethodBadge method={request.method} />                        // tinted chip, 10px
+<MethodBadge method={request.method} size="md" />              // 11px, beside body text
+<MethodBadge method={request.method} variant="text" />         // colour only, dense rows
+<MethodBadge method={m} variant="text" muted={!isActive} />    // secondary context
+```
+
+
 Method colors are design tokens defined in `:root`, not hardcoded hex values. They are consistent between light and dark mode.
 
 ```css
