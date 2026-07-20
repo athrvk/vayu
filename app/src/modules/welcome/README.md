@@ -45,6 +45,3 @@ Two consequences worth keeping in mind before adding anything here:
 ```tsx
 import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
 ```
-
-Design rationale:
-`docs/superpowers/specs/2026-07-20-welcome-screen-redesign-design.md`

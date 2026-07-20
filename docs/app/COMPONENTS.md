@@ -251,7 +251,7 @@ It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restor
 
 Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel — the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
 
-Design rationale: `docs/superpowers/specs/2026-07-20-welcome-screen-redesign-design.md`
+Design rationale: `app/src/modules/welcome/README.md`
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 

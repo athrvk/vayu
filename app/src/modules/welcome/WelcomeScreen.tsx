@@ -14,7 +14,7 @@
  * on their own tabs. Its job is to start something new.
  *
  * Two states: EmptyState on a fresh workspace, Launcher once there is anything
- * to show. See docs/superpowers/specs/2026-07-20-welcome-screen-redesign-design.md
+ * to show. See app/src/modules/welcome/README.md for what belongs on this screen.
  */
 
 import { useState } from "react";
