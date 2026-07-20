@@ -155,9 +155,17 @@ we use:
 - **Server identity** — the server's `Implementation` carries `title` ("Vayu"),
   a one-paragraph `description` of what Vayu is, and `websiteUrl`, alongside the
   `instructions`, so a connecting agent knows what it's talking to.
+- **Resources** (`resources/*`, `resources.ts`) — read-only Vayu data an agent
+  can attach as context: static `vayu://runs`, `vayu://collections`,
+  `vayu://environments`, `vayu://config`, and a templated
+  `vayu://run/{runId}/report` with a `list` callback (enumerate recent runs) and
+  a `complete` callback (autocomplete run IDs — MCP completions).
+- **Prompts** (`prompts/*`, `prompts.ts`) — server-provided starting points the
+  user picks from their client: `summarize_run`, `compare_runs`,
+  `diagnose_errors` (each embeds the relevant report/comparison inline) and
+  `suggest_load_profile` (guidance, no engine data).
 
-Deferred (design doc V3): `resources/*`, `prompts/*`. Not used: sampling, roots,
-logging, sessions, OAuth.
+Not used: sampling, roots, logging, sessions, OAuth (see "Considered & deferred").
 
 ## Safety model (locked approach)
 
@@ -232,12 +240,15 @@ persists in `disabledTools`.
 
 ### V3 — ergonomics & reach
 
-- MCP `prompts/` ("summarize this run", "suggest a load profile", "diagnose
-  error spike")
-- MCP `resources/` (`vayu://run/{id}/report` as attachable context)
-- `create_request` / `update_environment` (writes, behind settings flag)
-- `run_collection_smoke` (pass/fail matrix over a collection)
-- Hosted MCP for Vayu Cloud, OAuth-gated (someday)
+- ~~MCP `prompts/`~~ — **shipped** (`prompts.ts`): `summarize_run`,
+  `compare_runs`, `diagnose_errors`, `suggest_load_profile`.
+- ~~MCP `resources/`~~ — **shipped** (`resources.ts`): `vayu://run/{runId}/report`
+  (templated, with list + completion) plus static `vayu://runs` /
+  `collections` / `environments` / `config`.
+- `create_request` / `update_environment` (writes, behind settings flag) —
+  deferred.
+- `run_collection_smoke` (pass/fail matrix over a collection) — deferred.
+- Hosted MCP for Vayu Cloud, OAuth-gated (someday).
 
 ## Implementation (as built)
 

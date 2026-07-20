@@ -37,6 +37,9 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		health: async () => ({ status: "ok", version: "9.9.9" }),
 		getConfig: async () => ({ entries: [{ key: "workers", value: "8" }] }),
 		getRunReport: async () => REPORT,
+		listRuns: async () => [{ id: "run_1" }, { id: "run_2" }],
+		listCollections: async () => [{ id: "col_1", name: "API" }],
+		listEnvironments: async () => [],
 		startRun: vi.fn().mockResolvedValue({ runId: "run_1", status: "running" }),
 		...overrides,
 	} as unknown as EngineClient;
@@ -184,6 +187,85 @@ describe("MCP protocol handshake (in-memory)", () => {
 		})) as { content: Array<{ text: string }> };
 		expect(startRun).not.toHaveBeenCalled();
 		expect(res.content[0].text).toMatch(/declined/i);
+		await server.close();
+	});
+});
+
+describe("resources", () => {
+	it("lists the static resources", async () => {
+		const { client, server } = await connectClient();
+		const { resources } = await client.listResources();
+		const uris = resources.map((r) => r.uri);
+		expect(uris).toContain("vayu://runs");
+		expect(uris).toContain("vayu://collections");
+		expect(uris).toContain("vayu://environments");
+		expect(uris).toContain("vayu://config");
+		await server.close();
+	});
+
+	it("reads a static resource (vayu://runs)", async () => {
+		const { client, server } = await connectClient();
+		const res = await client.readResource({ uri: "vayu://runs" });
+		expect(res.contents[0].mimeType).toBe("application/json");
+		expect(String(res.contents[0].text)).toContain("run_1");
+		await server.close();
+	});
+
+	it("exposes the run-report template and enumerates concrete runs", async () => {
+		const { client, server } = await connectClient();
+		const { resourceTemplates } = await client.listResourceTemplates();
+		expect(resourceTemplates.map((t) => t.uriTemplate)).toContain("vayu://run/{runId}/report");
+		// The template's list callback enumerates concrete run reports.
+		const { resources } = await client.listResources();
+		expect(resources.map((r) => r.uri)).toContain("vayu://run/run_1/report");
+		await server.close();
+	});
+
+	it("reads a templated run report", async () => {
+		const { client, server } = await connectClient();
+		const res = await client.readResource({ uri: "vayu://run/run_1/report" });
+		expect(String(res.contents[0].text)).toContain("statusCodes");
+		await server.close();
+	});
+});
+
+describe("prompts", () => {
+	it("lists the server-provided prompts", async () => {
+		const { client, server } = await connectClient();
+		const { prompts } = await client.listPrompts();
+		const names = prompts.map((p) => p.name);
+		expect(names).toEqual(
+			expect.arrayContaining([
+				"summarize_run",
+				"compare_runs",
+				"diagnose_errors",
+				"suggest_load_profile",
+			])
+		);
+		await server.close();
+	});
+
+	it("builds summarize_run with the run report embedded", async () => {
+		const { client, server } = await connectClient();
+		const res = await client.getPrompt({
+			name: "summarize_run",
+			arguments: { runId: "run_1" },
+		});
+		const text = res.messages[0].content.type === "text" ? res.messages[0].content.text : "";
+		expect(text).toMatch(/summarize this vayu run/i);
+		expect(text).toContain("statusCodes");
+		await server.close();
+	});
+
+	it("builds suggest_load_profile without needing engine data", async () => {
+		const { client, server } = await connectClient();
+		const res = await client.getPrompt({
+			name: "suggest_load_profile",
+			arguments: { url: "https://api.example.com", goal: "find the breaking point" },
+		});
+		const text = res.messages[0].content.type === "text" ? res.messages[0].content.text : "";
+		expect(text).toContain("https://api.example.com");
+		expect(text).toMatch(/breaking point/i);
 		await server.close();
 	});
 });

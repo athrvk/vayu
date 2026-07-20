@@ -15,8 +15,10 @@
  *        agnostic: connected to Streamable HTTP (Electron) or stdio (CLI).
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { TOOLS, type ElicitFn, type ToolContext } from "./tools.js";
+import { STATIC_RESOURCES, RUN_REPORT_RESOURCE, extractRunIds } from "./resources.js";
+import { PROMPTS } from "./prompts.js";
 
 /** Provides the per-request tool context (client + current safety config). */
 export type ToolContextProvider = () => ToolContext;
@@ -46,7 +48,10 @@ const INSTRUCTIONS =
 	"the user to confirm (via elicitation when supported, otherwise a confirmed:true " +
 	"flag). update_engine_config requires the user to enable config writes. The user " +
 	"may disable individual tools, so treat tools/list as authoritative and expect " +
-	"some tools to be absent.";
+	"some tools to be absent. Vayu data is also available as resources (vayu://runs, " +
+	"vayu://collections, vayu://environments, vayu://config, and " +
+	"vayu://run/{runId}/report) to attach as context, and prompts (summarize_run, " +
+	"compare_runs, diagnose_errors, suggest_load_profile) provide ready-made starting points.";
 
 /**
  * Create an MCP server exposing the Vayu tools. `contextProvider` is invoked
@@ -111,5 +116,82 @@ export function createMcpServer(
 		);
 	}
 
+	registerResources(mcp, ctx);
+	registerPrompts(mcp, ctx);
+
 	return mcp;
+}
+
+/** Register the read-only Vayu data resources (static lists + run-report template). */
+function registerResources(mcp: McpServer, ctx: ToolContext): void {
+	const meta = (title: string, description: string) => ({
+		title,
+		description,
+		mimeType: "application/json",
+	});
+
+	for (const r of STATIC_RESOURCES) {
+		mcp.registerResource(r.name, r.uri, meta(r.title, r.description), async (uri) => ({
+			contents: [
+				{
+					uri: uri.href,
+					mimeType: "application/json",
+					text: JSON.stringify(await r.read(ctx), null, 2),
+				},
+			],
+		}));
+	}
+
+	mcp.registerResource(
+		RUN_REPORT_RESOURCE.name,
+		new ResourceTemplate(RUN_REPORT_RESOURCE.uriTemplate, {
+			list: async () => {
+				const runs = await RUN_REPORT_RESOURCE.listRuns(ctx);
+				return {
+					resources: extractRunIds(runs).map((id) => ({
+						uri: `vayu://run/${id}/report`,
+						name: `Run ${id} report`,
+						mimeType: "application/json",
+					})),
+				};
+			},
+			complete: {
+				runId: async (value: string) => {
+					const runs = await RUN_REPORT_RESOURCE.listRuns(ctx);
+					return extractRunIds(runs)
+						.filter((id) => id.startsWith(value))
+						.slice(0, 20);
+				},
+			},
+		}),
+		meta(RUN_REPORT_RESOURCE.title, RUN_REPORT_RESOURCE.description),
+		async (uri, variables) => {
+			const raw = variables.runId;
+			const runId = Array.isArray(raw) ? (raw[0] ?? "") : String(raw ?? "");
+			const report = await RUN_REPORT_RESOURCE.read(ctx, runId);
+			return {
+				contents: [
+					{
+						uri: uri.href,
+						mimeType: "application/json",
+						text: JSON.stringify(report, null, 2),
+					},
+				],
+			};
+		}
+	);
+}
+
+/** Register the server-provided prompt templates (summarize / compare / diagnose / plan). */
+function registerPrompts(mcp: McpServer, ctx: ToolContext): void {
+	for (const p of PROMPTS) {
+		mcp.registerPrompt(
+			p.name,
+			{ title: p.title, description: p.description, argsSchema: p.argsSchema },
+			async (args: Record<string, unknown>) => {
+				const result = await p.build((args ?? {}) as Record<string, unknown>, ctx);
+				return result as typeof result & Record<string, unknown>;
+			}
+		);
+	}
 }
