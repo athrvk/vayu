@@ -48,16 +48,31 @@ const DRAWER_BUTTONS: DrawerButton[] = [
 interface DockButtonProps {
 	active: boolean;
 	onClick: () => void;
-	tooltip: string;
+	/** What the button is. Becomes both the accessible name and the tooltip. */
+	label: string;
+	/** Shown after the label in the tooltip; deliberately not in the name. */
+	shortcut?: string;
 	children: React.ReactNode;
 }
 
-function DockButton({ active, onClick, tooltip, children }: DockButtonProps) {
+/**
+ * These buttons are icon-only, so the label is the only thing that names them.
+ * A Radix tooltip is not a substitute: it supplies `aria-describedby` while
+ * open, never an accessible *name*, so the button announced as just "button".
+ * Taking `label` rather than a prebuilt tooltip string means the name is
+ * derived here and cannot be omitted at a call site.
+ *
+ * The shortcut stays out of the accessible name — it is useful on hover but
+ * turns the name into "Collections Control Shift E" when read aloud.
+ */
+function DockButton({ active, onClick, label, shortcut, children }: DockButtonProps) {
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<button
 					onClick={onClick}
+					aria-label={label}
+					aria-pressed={active}
 					className={cn(
 						"flex items-center justify-center w-7 h-7 rounded-md text-xs transition-colors",
 						active
@@ -69,7 +84,7 @@ function DockButton({ active, onClick, tooltip, children }: DockButtonProps) {
 				</button>
 			</TooltipTrigger>
 			<TooltipContent side="top">
-				<p>{tooltip}</p>
+				<p>{shortcut ? `${label} ${shortcut}` : label}</p>
 			</TooltipContent>
 		</Tooltip>
 	);
@@ -91,7 +106,8 @@ export function Dock() {
 							key={view}
 							active={drawerOpen && drawerView === view}
 							onClick={() => activateDrawerView(view)}
-							tooltip={`${label} ${shortcut}`}
+							label={label}
+							shortcut={shortcut}
 						>
 							{icon}
 						</DockButton>
@@ -128,7 +144,8 @@ export function Dock() {
 					<DockButton
 						active={contextBarOpen}
 						onClick={toggleContextBar}
-						tooltip={`Toggle context bar (${formatChord({ mod: true, key: "I" })})`}
+						label="Toggle context bar"
+						shortcut={`(${formatChord({ mod: true, key: "I" })})`}
 					>
 						<PanelRight className="w-4 h-4" />
 					</DockButton>

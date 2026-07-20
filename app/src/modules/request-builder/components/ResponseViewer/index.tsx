@@ -264,7 +264,12 @@ export default function ResponseViewer() {
 						)}
 						<Tooltip>
 							<TooltipTrigger asChild>
-								<Button size="icon" variant="ghost" onClick={handleCopy}>
+								<Button
+									size="icon"
+									variant="ghost"
+									onClick={handleCopy}
+									aria-label="Copy response"
+								>
 									{copied ? (
 										<Check className="w-4 h-4 text-green-500" />
 									) : (
@@ -276,7 +281,12 @@ export default function ResponseViewer() {
 						</Tooltip>
 						<Tooltip>
 							<TooltipTrigger asChild>
-								<Button size="icon" variant="ghost" onClick={handleDownload}>
+								<Button
+									size="icon"
+									variant="ghost"
+									onClick={handleDownload}
+									aria-label="Download response"
+								>
 									<Download className="w-4 h-4" />
 								</Button>
 							</TooltipTrigger>

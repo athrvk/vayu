@@ -230,7 +230,12 @@ export default function UnifiedResponseViewer({
 						<div className="flex items-center gap-1">
 							<Tooltip>
 								<TooltipTrigger asChild>
-									<Button size="icon" variant="ghost" onClick={handleCopy}>
+									<Button
+										size="icon"
+										variant="ghost"
+										onClick={handleCopy}
+										aria-label="Copy response"
+									>
 										{copied ? (
 											<Check className="w-4 h-4 text-status-success" />
 										) : (
@@ -242,7 +247,12 @@ export default function UnifiedResponseViewer({
 							</Tooltip>
 							<Tooltip>
 								<TooltipTrigger asChild>
-									<Button size="icon" variant="ghost" onClick={handleDownload}>
+									<Button
+										size="icon"
+										variant="ghost"
+										onClick={handleDownload}
+										aria-label="Download response"
+									>
 										<Download className="w-4 h-4" />
 									</Button>
 								</TooltipTrigger>

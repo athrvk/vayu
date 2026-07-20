@@ -86,6 +86,7 @@ export default function HistoryDetail() {
 						size="icon"
 						onClick={navigateToHistory}
 						className="shrink-0"
+						aria-label="Back to history"
 					>
 						<ArrowLeft className="w-5 h-5" />
 					</Button>

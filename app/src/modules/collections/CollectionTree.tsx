@@ -458,6 +458,7 @@ export default function CollectionTree() {
 									onClick={handleOpenNewCollectionForm}
 									disabled={createCollectionMutation.isPending}
 									className="h-8 w-8"
+									aria-label="Add collection"
 								>
 									{createCollectionMutation.isPending ? (
 										<Loader2 className="w-4 h-4 animate-spin" />
@@ -476,6 +477,7 @@ export default function CollectionTree() {
 									onClick={handleNewRequestClick}
 									disabled={createRequestMutation.isPending}
 									className="h-8 w-8"
+									aria-label="Add request"
 								>
 									{createRequestMutation.isPending ? (
 										<Loader2 className="w-4 h-4 animate-spin" />
