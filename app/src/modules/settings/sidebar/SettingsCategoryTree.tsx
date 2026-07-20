@@ -80,7 +80,8 @@ export default function SettingsCategoryTree() {
 				key={category}
 				onClick={() => selectCategory(category)}
 				className={cn(
-					"w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors",
+					// h-8: shared drawer row height (see CollectionItem).
+					"w-full flex h-8 items-center gap-3 px-4 text-left text-sm transition-colors",
 					isSelected
 						? "bg-primary/10 text-primary font-medium"
 						: "text-foreground hover:bg-accent"

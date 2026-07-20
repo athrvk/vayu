@@ -167,7 +167,8 @@ export default function VariablesCategoryTree({
 				<button
 					onClick={() => selectCategory({ type: "globals" })}
 					className={cn(
-						"w-full flex items-center gap-2 px-8 py-2 text-left text-sm hover:bg-accent transition-colors",
+						// h-8: shared drawer row height (see CollectionItem).
+						"w-full flex h-8 items-center gap-2 px-8 text-left text-sm hover:bg-accent transition-colors",
 						isSelected({ type: "globals" }) &&
 							"bg-scope-global/10 text-scope-global hover:bg-scope-global/20"
 					)}
@@ -253,7 +254,7 @@ export default function VariablesCategoryTree({
 									<div
 										key={environment.id}
 										className={cn(
-											"group flex items-center gap-2 px-3 py-2 pl-12.5 text-sm hover:bg-accent transition-colors cursor-pointer",
+											"group flex h-8 items-center gap-2 px-3 pl-12.5 text-sm hover:bg-accent transition-colors cursor-pointer",
 											isSelected({
 												type: "environment",
 												environmentId: environment.id,
@@ -376,7 +377,7 @@ export default function VariablesCategoryTree({
 											})
 										}
 										className={cn(
-											"w-full flex items-center gap-2 px-3 py-2 pl-12.5 text-left text-sm hover:bg-accent transition-colors",
+											"w-full flex h-8 items-center gap-2 px-3 pl-12.5 text-left text-sm hover:bg-accent transition-colors",
 											isSelected({
 												type: "collection",
 												collectionId: collection.id,

@@ -163,7 +163,11 @@ export default function CollectionItem({
 					// `transition-colors` includes in Tailwind v4): a focus ring must
 					// appear instantly, otherwise it visibly fades between rows as
 					// Tab moves. Hover may ease; focus may not.
-					"focus-row flex items-center gap-1 py-1.5 pr-2 rounded-md group transition-[color,background-color,border-color] cursor-pointer",
+					// h-8: the shared drawer row height. Row height used to be an
+					// accident of content — the 28px chevron set it here, padding set
+					// it elsewhere — so sibling drawer views ran 34/36/38/40px and the
+					// rhythm shifted every time you switched view.
+					"focus-row flex h-8 items-center gap-1 pr-2 rounded-md group transition-[color,background-color,border-color] cursor-pointer",
 					isSelected
 						? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
 						: "hover:bg-accent"
@@ -178,7 +182,9 @@ export default function CollectionItem({
 						// focus-self: this toggles expansion rather than opening the
 						// collection, so it keeps its own ring instead of lighting
 						// up the whole row.
-						"focus-self flex items-center justify-center w-7 h-7 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+						// w-6 h-6 (24px) so the chevron fits the 32px row. Still an
+						// adequate pointer target, and the row itself remains clickable.
+						"focus-self flex items-center justify-center w-6 h-6 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
 						isSelected
 							? "text-primary/90 hover:text-primary"
 							: "text-muted-foreground hover:text-foreground"

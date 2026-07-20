@@ -546,6 +546,26 @@ for free. Used by request rows and environment rows.
 
 ---
 
+## Drawer Row Metric
+
+**Single-line drawer rows are `h-8` (32px).** State the height; do not let it
+fall out of the content. It previously did — a 28px chevron set the collection
+row, padding set the others — so the four drawer views ran **34 / 36 / 38 / 40px**
+and the rhythm shifted every time the user switched view, one click apart in the
+same panel. Collection and request rows differed by 4px inside a *single* tree.
+
+Applies to `CollectionItem`, `RequestItem`, `SettingsCategoryTree` and
+`VariablesCategoryTree` rows. Put `h-8 items-center` on the row and let content
+centre; do not re-add vertical padding, which is what caused the drift.
+
+Section *headers* (e.g. "Environments") stay shorter on purpose — they are group
+labels, not list items, and the difference carries hierarchy.
+
+The disclosure chevron is `w-6 h-6` (24px) so it fits a 32px row. That is still
+an adequate pointer target, and the whole row remains clickable for opening.
+
+---
+
 ## Tree Navigation (roving tabindex)
 
 The collection tree follows the WAI-ARIA treeview pattern: **the whole tree is

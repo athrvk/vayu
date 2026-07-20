@@ -99,7 +99,8 @@ export default function RequestItem({
 				// label button inside it — it paints the keyboard focus ring.
 				// The transition omits outline-color (see CollectionItem) so the
 				// focus ring appears instantly instead of fading between rows.
-				"focus-row flex items-center gap-2 px-3 py-1.5 rounded-md group cursor-pointer transition-[color,background-color,border-color]",
+				// h-8: shared drawer row height (see CollectionItem).
+				"focus-row flex h-8 items-center gap-2 px-3 rounded-md group cursor-pointer transition-[color,background-color,border-color]",
 				isDeleting && "opacity-50",
 				isSelected
 					? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
