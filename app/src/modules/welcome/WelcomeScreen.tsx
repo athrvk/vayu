@@ -17,7 +17,14 @@
  * to show. See docs/superpowers/specs/2026-07-20-welcome-screen-redesign-design.md
  */
 
-import { useTabsStore, useImportModalStore, useToastStore } from "@/stores";
+import { useState } from "react";
+import {
+	useTabsStore,
+	useImportModalStore,
+	useToastStore,
+	useLayoutStore,
+	useSessionStore,
+} from "@/stores";
 import {
 	useCollectionsQuery,
 	useRunsQuery,
@@ -26,42 +33,67 @@ import {
 } from "@/queries";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME } from "@/constants/collection";
+import { resolveNewRequestTarget } from "./targetCollection";
+import { CollectionPicker } from "./components/CollectionPicker";
 import { EmptyState } from "./EmptyState";
 import { Launcher } from "./Launcher";
+
+const CREATE_FAILED = "Could not create the request. Check that the engine is running.";
 
 export default function WelcomeScreen() {
 	const openImport = useImportModalStore((s) => s.open);
 	const showToast = useToastStore((s) => s.showToast);
 	const { openTab } = useTabsStore();
+	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
+	const lastCollectionId = useSessionStore((s) => s.lastCollectionId);
 	const { data: collections = [], isLoading: collectionsLoading } = useCollectionsQuery();
 	const { data: runs = [], isLoading: runsLoading } = useRunsQuery();
 	const createRequestMutation = useCreateRequestMutation();
 	const createCollectionMutation = useCreateCollectionMutation();
 
-	const handleNewRequest = async () => {
-		try {
-			// Requests always belong to a collection, so make one on a bare workspace.
-			let targetCollectionId = collections[0]?.id;
-			if (!targetCollectionId) {
-				const newCollection = await createCollectionMutation.mutateAsync({
-					name: DEFAULT_COLLECTION_NAME,
-				});
-				targetCollectionId = newCollection.id;
-			}
+	const [pickerOpen, setPickerOpen] = useState(false);
 
+	const createRequestIn = async (collectionId: string) => {
+		try {
 			const newRequest = await createRequestMutation.mutateAsync({
-				collectionId: targetCollectionId,
+				collectionId,
 				name: DEFAULT_REQUEST_NAME,
 				method: "GET",
 				url: "",
 			});
-
 			openTab({ type: "request", entityId: newRequest.id });
 		} catch (error) {
 			// Without this the click looks dead — the old code only logged.
 			console.error("Failed to create new request:", error);
-			showToast("Could not create the request. Check that the engine is running.", "error");
+			showToast(CREATE_FAILED, "error");
 		}
+	};
+
+	const handleNewRequest = async () => {
+		const target = resolveNewRequestTarget(lastCollectionId, collections);
+		if (target.kind === "pick") {
+			setPickerOpen(true);
+			return;
+		}
+		if (target.kind === "collection") {
+			void createRequestIn(target.collectionId);
+			return;
+		}
+		// No collections yet — requests must belong to one, so make it first.
+		try {
+			const newCollection = await createCollectionMutation.mutateAsync({
+				name: DEFAULT_COLLECTION_NAME,
+			});
+			await createRequestIn(newCollection.id);
+		} catch (error) {
+			console.error("Failed to create collection:", error);
+			showToast(CREATE_FAILED, "error");
+		}
+	};
+
+	const handlePick = (collectionId: string) => {
+		setPickerOpen(false);
+		void createRequestIn(collectionId);
 	};
 
 	// Both queries start as [] while loading, which would read as an empty
@@ -80,11 +112,17 @@ export default function WelcomeScreen() {
 						collectionCount={collections.length}
 						onImport={openImport}
 						onNewRequest={handleNewRequest}
-						onLoadTest={() => openTab({ type: "dashboard", entityId: null })}
+						onHistory={() => activateDrawerView("history")}
 						onVariables={() => openTab({ type: "variables", entityId: null })}
 					/>
 				)}
 			</div>
+			<CollectionPicker
+				open={pickerOpen}
+				onOpenChange={setPickerOpen}
+				collections={collections}
+				onSelect={handlePick}
+			/>
 		</div>
 	);
 }

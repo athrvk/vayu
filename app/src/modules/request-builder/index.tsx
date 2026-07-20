@@ -20,7 +20,7 @@
  * - ResponseViewer displays the response
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { RequestBuilderProvider } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
@@ -97,6 +97,14 @@ export default function RequestBuilder() {
 
 	// Fetch request data
 	const { data: fetchedRequest, isLoading } = useRequestQuery(selectedRequestId);
+
+	// Remember the collection the user is working in so the welcome screen can
+	// land a new request here. Set from the loaded request, where collectionId
+	// is authoritative — not from a tab-focus cache peek, which can be stale.
+	const setLastCollectionId = useSessionStore((s) => s.setLastCollectionId);
+	useEffect(() => {
+		if (fetchedRequest?.collectionId) setLastCollectionId(fetchedRequest.collectionId);
+	}, [fetchedRequest?.collectionId, setLastCollectionId]);
 
 	// Ancestor chain for the current request's collection (root-first)
 	const collectionAncestors = useCollectionAncestors(fetchedRequest?.collectionId);

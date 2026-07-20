@@ -12,11 +12,11 @@
  * navigation-store.navigateToCollection(collectionId).
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
 import { Badge, Tabs, TabsList, TabsTrigger } from "@/components/ui";
 import { useCollectionsQuery, useRequestsQuery } from "@/queries/collections";
-import { useTabsStore } from "@/stores";
+import { useTabsStore, useSessionStore } from "@/stores";
 import AuthTab from "./AuthTab";
 import InfoTab from "./InfoTab";
 import ScriptTab from "./ScriptTab";
@@ -38,6 +38,12 @@ export default function CollectionDetail() {
 	// Get selected collection ID from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const selectedCollectionId = activeTab?.type === "collection" ? activeTab.entityId : null;
+
+	// Remember the collection the user is working in (see RequestBuilder).
+	const setLastCollectionId = useSessionStore((s) => s.setLastCollectionId);
+	useEffect(() => {
+		if (selectedCollectionId) setLastCollectionId(selectedCollectionId);
+	}, [selectedCollectionId, setLastCollectionId]);
 
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: requests = [] } = useRequestsQuery(selectedCollectionId);

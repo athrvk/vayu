@@ -13,7 +13,7 @@
  * is open and the logo is in the title bar.
  */
 
-import { Download, Plus, Database, Gauge } from "lucide-react";
+import { Download, Plus, Database, History } from "lucide-react";
 import type { Run } from "@/types";
 import { ActionTile } from "./components/ActionTile";
 import { FooterLinks } from "./components/FooterLinks";
@@ -24,7 +24,7 @@ interface LauncherProps {
 	collectionCount: number;
 	onImport: () => void;
 	onNewRequest: () => void;
-	onLoadTest: () => void;
+	onHistory: () => void;
 	onVariables: () => void;
 }
 
@@ -37,7 +37,7 @@ export function Launcher({
 	collectionCount,
 	onImport,
 	onNewRequest,
-	onLoadTest,
+	onHistory,
 	onVariables,
 }: LauncherProps) {
 	return (
@@ -49,7 +49,7 @@ export function Launcher({
 				<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
 					<ActionTile icon={Plus} label="New request" onClick={onNewRequest} />
 					<ActionTile icon={Download} label="Import" onClick={onImport} />
-					<ActionTile icon={Gauge} label="Load test" onClick={onLoadTest} />
+					<ActionTile icon={History} label="History" onClick={onHistory} />
 					<ActionTile icon={Database} label="Variables" onClick={onVariables} />
 				</div>
 			</section>

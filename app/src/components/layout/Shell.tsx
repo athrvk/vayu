@@ -137,18 +137,15 @@ export default function Shell() {
 		<div className="flex flex-col h-full bg-background overflow-hidden">
 			<ImportModal />
 			<div className="flex flex-1 overflow-hidden relative">
-				{activeTab?.type === "settings" ? (
-					// Settings takes over the whole content row — no drawer or context bar
-					renderTabContent(activeTab)
-				) : (
-					<>
-						<Drawer />
-						<main className="flex-1 overflow-hidden flex flex-col min-w-0">
-							{renderTabContent(activeTab)}
-						</main>
-						<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
-					</>
-				)}
+				{/* Settings renders like any other tab — Drawer + ContextBar stay
+				    mounted. It used to take over the whole row, which left the Dock's
+				    drawer buttons dead (they toggle drawer state with no Drawer to
+				    show). */}
+				<Drawer />
+				<main className="flex-1 overflow-hidden flex flex-col min-w-0">
+					{renderTabContent(activeTab)}
+				</main>
+				<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
 			</div>
 			<Dock />
 		</div>

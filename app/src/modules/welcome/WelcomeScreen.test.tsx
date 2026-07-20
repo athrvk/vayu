@@ -1,20 +1,22 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import WelcomeScreen from "./WelcomeScreen";
-import { useTabsStore } from "@/stores";
+import { useTabsStore, useSessionStore } from "@/stores";
 import type { Run } from "@/types";
 
 const mocks = vi.hoisted(() => ({
-	collections: { data: [] as unknown[], isLoading: false },
+	collections: { data: [] as { id: string; name: string }[], isLoading: false },
 	runs: { data: [] as Run[], isLoading: false },
+	createRequest: vi.fn(),
+	createCollection: vi.fn(),
 }));
 
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => mocks.collections,
 	useRunsQuery: () => mocks.runs,
-	useCreateRequestMutation: () => ({ mutateAsync: vi.fn() }),
-	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn() }),
+	useCreateRequestMutation: () => ({ mutateAsync: mocks.createRequest }),
+	useCreateCollectionMutation: () => ({ mutateAsync: mocks.createCollection }),
 	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map() }),
 }));
 
@@ -42,7 +44,10 @@ describe("WelcomeScreen", () => {
 	beforeEach(() => {
 		mocks.collections = { data: [], isLoading: false };
 		mocks.runs = { data: [], isLoading: false };
+		mocks.createRequest = vi.fn().mockResolvedValue({ id: "new-req" });
+		mocks.createCollection = vi.fn().mockResolvedValue({ id: "new-col" });
 		useTabsStore.setState({ openTabs: [], activeTabId: null });
+		useSessionStore.setState({ lastCollectionId: null });
 	});
 
 	describe("empty workspace", () => {
@@ -71,8 +76,13 @@ describe("WelcomeScreen", () => {
 		it("shows the action row and recent runs", () => {
 			renderScreen();
 			expect(screen.getByRole("button", { name: /New request/i })).toBeInTheDocument();
-			expect(screen.getByRole("button", { name: /Load test/i })).toBeInTheDocument();
+			expect(screen.getByRole("button", { name: /^History$/i })).toBeInTheDocument();
 			expect(screen.getByText(/Recent runs/i)).toBeInTheDocument();
+		});
+
+		it("has no Load test action — a load test needs an existing request", () => {
+			renderScreen();
+			expect(screen.queryByRole("button", { name: /Load test/i })).not.toBeInTheDocument();
 		});
 
 		it("carries no branding — the title bar already has the logo", () => {
@@ -102,6 +112,63 @@ describe("WelcomeScreen", () => {
 			mocks.runs = { data: [older, newer], isLoading: false };
 			renderScreen();
 			expect(mocks.runs.data.map((r) => r.id)).toEqual(["old", "new"]);
+		});
+	});
+
+	describe("new request targeting", () => {
+		const two = [
+			{ id: "c1", name: "First" },
+			{ id: "c2", name: "Second" },
+		];
+
+		it("lands in the remembered collection without asking", async () => {
+			mocks.collections = { data: two, isLoading: false };
+			useSessionStore.setState({ lastCollectionId: "c2" });
+			renderScreen();
+			fireEvent.click(screen.getByRole("button", { name: /New request/i }));
+			await waitFor(() =>
+				expect(mocks.createRequest).toHaveBeenCalledWith(
+					expect.objectContaining({ collectionId: "c2" })
+				)
+			);
+			expect(screen.queryByText(/Add request to/i)).not.toBeInTheDocument();
+		});
+
+		it("uses the only collection without asking", async () => {
+			mocks.collections = { data: [{ id: "solo", name: "Solo" }], isLoading: false };
+			renderScreen();
+			fireEvent.click(screen.getByRole("button", { name: /New request/i }));
+			await waitFor(() =>
+				expect(mocks.createRequest).toHaveBeenCalledWith(
+					expect.objectContaining({ collectionId: "solo" })
+				)
+			);
+		});
+
+		it("asks when there are several collections and no memory", async () => {
+			mocks.collections = { data: two, isLoading: false };
+			renderScreen();
+			fireEvent.click(screen.getByRole("button", { name: /New request/i }));
+			// Picker opens; nothing created yet
+			expect(await screen.findByText(/Add request to/i)).toBeInTheDocument();
+			expect(mocks.createRequest).not.toHaveBeenCalled();
+			// Picking a collection creates the request there
+			fireEvent.click(screen.getByRole("button", { name: /Second/i }));
+			await waitFor(() =>
+				expect(mocks.createRequest).toHaveBeenCalledWith(
+					expect.objectContaining({ collectionId: "c2" })
+				)
+			);
+		});
+
+		it("creates a collection first on a bare workspace", async () => {
+			// empty workspace → EmptyState; its New request button
+			renderScreen();
+			fireEvent.click(screen.getByRole("button", { name: /New request/i }));
+			await waitFor(() => expect(mocks.createCollection).toHaveBeenCalled());
+			expect(mocks.createRequest).toHaveBeenCalledWith(
+				expect.objectContaining({ collectionId: "new-col" })
+			);
 		});
 	});
 
