@@ -176,7 +176,7 @@ Enforced in the TS MCP layer (configurable from app Settings):
   list (still rejects unresolved `{{variables}}`); off by default. **Enforcement.**
 - **Hard caps** — max RPS / concurrency / duration; over-cap requests rejected.
   **Enforcement** — with the allowlist these are the real limits on generated load.
-- **Confirmation gate** on load-run start — prevents an *accidental* start (a
+- **Confirmation gate** on load-run start — prevents an _accidental_ start (a
   stray tool call), but it is agent-side (the same model can send the second
   call), so it is anti-accident, not anti-adversary. The caps/allowlist are the
   enforcement. A stronger version would use MCP elicitation to ask the human.
@@ -342,9 +342,24 @@ host is added). See `SECURITY.md`.
 ## Considered & deferred
 
 - **In-engine C++ over Streamable HTTP** (via `mcp-cpp`) — revisit only if an
-  engine-only/headless deployment becomes a hard requirement.
-- **In-engine C++ over Streamable HTTP** (via `mcp-cpp`) — revisit only if an
   engine-only deployment (no app, no Node) becomes a hard requirement.
+- **Stateful Streamable HTTP (server→client push over HTTP).** `list_changed`
+  and elicitation only work where the server can push to the client. On stdio
+  that channel exists, so both are live; on our **stateless** HTTP host it does
+  not, so tool toggles apply on the client's next `tools/list` and load-run
+  confirmation falls back to the `confirmed` flag. It is technically feasible to
+  make them live over HTTP by running **stateful**: a real `sessionIdGenerator`,
+  SSE responses, a held-open GET stream per session, persistent per-session
+  `McpServer`s, and fanning `RegisteredTool.enable()/.disable()` out to every
+  live session on a Settings toggle (plus making `ToolContext.config` a live
+  reference instead of the current fresh-per-POST snapshot). **Deferred**, for
+  two reasons: (1) the [2026-07-28 spec RC](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
+  **removed the GET stream endpoint and protocol-level sessions** — so this
+  builds on the exact mechanism the spec is deprecating, while our stateless
+  request/response design is aligned with where it's heading; and (2) the payoff
+  is client-dependent (only clients that open the GET stream benefit) and mostly
+  cosmetic — the stateless fallbacks are already _safe_, just not _live_.
+  Revisit once the spec's replacement for server→client messaging settles.
 
 ## Resolved
 
