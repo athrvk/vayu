@@ -46,6 +46,23 @@ const DEFAULT_OPTIONS = {
 	// content (Monaco defaults this on, which would override the preference).
 	detectIndentation: false,
 	automaticLayout: true,
+	scrollbar: {
+		/*
+		 * Monaco defaults this to true, meaning it calls preventDefault() on every
+		 * wheel event over the editor — including when it has nothing to scroll.
+		 * An editor embedded in a scrollable panel therefore swallows the wheel
+		 * and the panel underneath cannot be scrolled past it.
+		 *
+		 * It shows up as "scrolling stops working after resizing", because before
+		 * the resize the panel fits and nothing needs to scroll; enlarge the
+		 * editor and it both creates the overflow and covers the area you would
+		 * otherwise put the cursor to scroll.
+		 *
+		 * false = consume the wheel only when the editor can actually act on it,
+		 * and let it bubble otherwise.
+		 */
+		alwaysConsumeMouseWheel: false,
+	},
 	// Render suggestion/hover/context-menu widgets in a body-level overlay so they
 	// are not clipped by editor containers with `overflow: hidden` + fixed height.
 	fixedOverflowWidgets: true,
@@ -105,7 +122,16 @@ export function CodeEditor({
 			theme={isDark ? "vs-dark" : "vs"}
 			onChange={onChange ? (v) => onChange(v ?? "") : undefined}
 			onMount={onMount}
-			options={{ ...DEFAULT_OPTIONS, ...prefOptions, readOnly, ...options }}
+			options={{
+				...DEFAULT_OPTIONS,
+				...prefOptions,
+				readOnly,
+				...options,
+				// `scrollbar` is a nested object, so a caller passing one of its keys
+				// would otherwise replace the whole thing and silently drop the
+				// wheel-propagation default above. Merge it a level deeper.
+				scrollbar: { ...DEFAULT_OPTIONS.scrollbar, ...options?.scrollbar },
+			}}
 		/>
 	);
 }
