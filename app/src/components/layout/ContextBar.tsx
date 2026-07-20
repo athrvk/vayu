@@ -149,7 +149,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 					className="text-muted-foreground hover:text-foreground"
 					aria-label="Close context bar"
 				>
-					<X size={14} />
+					<X className="w-3.5 h-3.5" />
 				</button>
 			</div>
 

@@ -48,13 +48,13 @@ function requestTabTitle(name: string, resolvedUrl: string): string {
 function TabIcon({ type }: { type: Tab["type"] }) {
 	switch (type) {
 		case "collection":
-			return <Folder size={12} className="shrink-0" />;
+			return <Folder className="w-3 h-3 shrink-0" />;
 		case "dashboard":
-			return <Zap size={12} className="shrink-0" />;
+			return <Zap className="w-3 h-3 shrink-0" />;
 		case "run":
-			return <Clock size={12} className="shrink-0" />;
+			return <Clock className="w-3 h-3 shrink-0" />;
 		case "settings":
-			return <Settings size={12} className="shrink-0" />;
+			return <Settings className="w-3 h-3 shrink-0" />;
 		default:
 			return null;
 	}
@@ -139,7 +139,7 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 				}}
 				className="shrink-0 rounded-md p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
 			>
-				<X size={12} />
+				<X className="w-3 h-3" />
 			</span>
 		</div>
 	);
@@ -164,7 +164,7 @@ export function TabStrip() {
 				aria-label="New tab"
 				className="flex w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground"
 			>
-				<Plus size={14} />
+				<Plus className="w-3.5 h-3.5" />
 			</button>
 		</div>
 	);

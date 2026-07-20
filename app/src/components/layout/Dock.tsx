@@ -21,25 +21,25 @@ interface DrawerButton {
 const DRAWER_BUTTONS: DrawerButton[] = [
 	{
 		view: "collections",
-		icon: <FolderOpen size={15} />,
+		icon: <FolderOpen className="w-4 h-4" />,
 		label: "Collections",
 		shortcut: formatChord({ mod: true, shift: true, key: "E" }),
 	},
 	{
 		view: "history",
-		icon: <Clock size={15} />,
+		icon: <Clock className="w-4 h-4" />,
 		label: "History",
 		shortcut: formatChord({ mod: true, shift: true, key: "H" }),
 	},
 	{
 		view: "variables",
-		icon: <Zap size={15} />,
+		icon: <Zap className="w-4 h-4" />,
 		label: "Variables",
 		shortcut: formatChord({ mod: true, shift: true, key: "U" }),
 	},
 	{
 		view: "settings",
-		icon: <Settings size={15} />,
+		icon: <Settings className="w-4 h-4" />,
 		label: "Settings",
 		shortcut: formatChord({ mod: true, key: "," }),
 	},
@@ -130,7 +130,7 @@ export function Dock() {
 						onClick={toggleContextBar}
 						tooltip={`Toggle context bar (${formatChord({ mod: true, key: "I" })})`}
 					>
-						<PanelRight size={15} />
+						<PanelRight className="w-4 h-4" />
 					</DockButton>
 				</div>
 			</div>

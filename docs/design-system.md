@@ -340,10 +340,22 @@ text stays JetBrains Mono regardless.
 | Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
 | Hero metric value | 34px | bold, tabular | `text-[34px] font-bold leading-none font-mono tabular-nums` |
 | Secondary metric value | 22px | bold | `text-[22px] font-bold font-mono` |
-| Body / default | 13px | regular | `text-[13px]` |
+| Body / default | 13px | regular | `text-sm` |
 | Small label | 12px | medium | `text-[12px] font-medium` |
 | Micro / badge | 10–11px | mono bold | `text-[10px] font-mono font-bold` |
 | URL / path | 12–13px | mono | `text-[12px] font-mono` |
+
+**Use `text-sm` for body, not `text-[13px]`.** Tailwind ships `text-sm` at 14px,
+which left the app running two scales a pixel apart — `text-sm` in ~160 places
+against `text-[13px]` in ~18. Rather than migrate every call site, `--text-sm` is
+redefined in `@theme` (`index.css`) to **13px/18px**, so the utility *is* the
+documented body size. `text-xs` already matches the 12px label, so that was the
+only size that diverged. `text-[13px]` still works but skips the paired
+line-height — prefer `text-sm`.
+
+**Icon sizing goes on `className`, not lucide's `size` prop.** Mixing the two
+hides icons from a scale audit and lets off-grid values (15px) creep in. Use
+`w-3 h-3` (12), `w-3.5 h-3.5` (14), `w-4 h-4` (16), `w-5 h-5` (20).
 
 ---
 

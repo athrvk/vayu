@@ -60,6 +60,17 @@
 	 * regardless of what's in tailwind.config.js. */
 	--font-sans: "Space Grotesk", system-ui, sans-serif;
 	--font-mono: "JetBrains Mono", "Consolas", "Monaco", monospace;
+
+	/*
+	 * Body text is 13px (docs/design-system.md), but Tailwind ships `text-sm`
+	 * at 14px — and `text-sm` is by far the most-used size in the app. Rather
+	 * than migrate hundreds of call sites, or let two scales coexist a pixel
+	 * apart, redefine the token so `text-sm` *is* the documented body size.
+	 * `text-xs` already matches the documented 12px label, so this is the only
+	 * size that diverged.
+	 */
+	--text-sm: 0.8125rem; /* 13px */
+	--text-sm--line-height: calc(1.125 / 0.8125); /* 18px */
 }
 
 /*

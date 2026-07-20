@@ -40,7 +40,7 @@ export default function Toaster() {
 						className="text-muted-foreground hover:text-foreground"
 						aria-label="Dismiss notification"
 					>
-						<X size={14} />
+						<X className="w-3.5 h-3.5" />
 					</button>
 				</div>
 			))}
