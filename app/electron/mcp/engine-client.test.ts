@@ -55,3 +55,37 @@ describe("EngineClient cancellation", () => {
 		await expect(client.health()).resolves.toMatchObject({ status: "ok" });
 	});
 });
+
+describe("EngineClient.getEnvironment", () => {
+	// The engine has no `GET /environments/:id` route (only the list). Hitting a
+	// per-id path 404s, which silently broke variable resolution — so this pins
+	// the client to the list endpoint + client-side filter.
+	function listFetch(payload: unknown) {
+		const calls: string[] = [];
+		const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+			calls.push(String(url));
+			return new Response(JSON.stringify(payload));
+		}) as unknown as typeof fetch;
+		return { fetchImpl, calls };
+	}
+
+	it("resolves a single environment from the list endpoint (not /environments/:id)", async () => {
+		const { fetchImpl, calls } = listFetch([
+			{ id: "env_1", name: "Dev", variables: { a: { value: "1", enabled: true } } },
+			{ id: "env_2", name: "Prod", variables: {} },
+		]);
+		const client = new EngineClient({ baseUrl: "http://127.0.0.1:9876", fetchImpl });
+
+		const env = await client.getEnvironment("env_2");
+
+		expect(calls).toEqual(["http://127.0.0.1:9876/environments"]);
+		expect(calls[0]).not.toContain("/environments/env_2");
+		expect(env).toMatchObject({ id: "env_2", name: "Prod" });
+	});
+
+	it("returns null when no environment matches", async () => {
+		const { fetchImpl } = listFetch([{ id: "env_1", name: "Dev" }]);
+		const client = new EngineClient({ baseUrl: "http://127.0.0.1:9876", fetchImpl });
+		await expect(client.getEnvironment("missing")).resolves.toBeNull();
+	});
+});

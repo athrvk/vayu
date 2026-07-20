@@ -116,8 +116,16 @@ export class EngineClient {
 		return this.request("GET", "/globals", undefined, signal);
 	}
 
-	getEnvironment(id: string, signal?: AbortSignal): Promise<unknown> {
-		return this.request("GET", `/environments/${encodeURIComponent(id)}`, undefined, signal);
+	/**
+	 * Fetch a single environment by id. The engine exposes no `GET
+	 * /environments/:id` route (only the list + `POST`/`DELETE`), so we resolve it
+	 * from the list — which already returns each environment in full, including its
+	 * `variables`. Returns `null` when no environment matches.
+	 */
+	async getEnvironment(id: string, signal?: AbortSignal): Promise<unknown> {
+		const list = await this.request<unknown>("GET", "/environments", undefined, signal);
+		const arr = Array.isArray(list) ? (list as Array<Record<string, unknown>>) : [];
+		return arr.find((e) => e && typeof e === "object" && e.id === id) ?? null;
 	}
 
 	listRuns(signal?: AbortSignal): Promise<unknown> {

@@ -397,6 +397,47 @@ describe("dispatchTool", () => {
 		expect(payload.auth).toEqual({ mode: "bearer", token: "s3cret" });
 	});
 
+	test("run_request forwards a resolved oauth2 block (engine mints the token)", async () => {
+		const client = fakeClient({
+			getEnvironment: vi.fn().mockResolvedValue({
+				id: "env_1",
+				name: "Dev",
+				variables: { apiSecret: { value: "s3cret", enabled: true } },
+			}),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			{
+				url: "https://api.example.com/x",
+				environmentId: "env_1",
+				auth: {
+					mode: "oauth2",
+					config: {
+						grantType: "client_credentials",
+						clientId: "cid",
+						clientSecret: "{{apiSecret}}",
+						tokenUrl: "https://auth.example.com/token",
+						autoFetchToken: true,
+					},
+				},
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// MCP forwards the fully-resolved oauth2 config; the engine acquires the token.
+		expect(payload.auth).toEqual({
+			mode: "oauth2",
+			config: {
+				grantType: "client_credentials",
+				clientId: "cid",
+				clientSecret: "s3cret",
+				tokenUrl: "https://auth.example.com/token",
+				autoFetchToken: true,
+			},
+		});
+	});
+
 	test("run_request off-allowlist check runs against the RESOLVED host", async () => {
 		const client = fakeClient({
 			getEnvironment: vi.fn().mockResolvedValue({

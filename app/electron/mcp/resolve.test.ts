@@ -125,6 +125,58 @@ describe("auth composition", () => {
 		expect(composeAuth({ mode: "none" }, [], resolver)).toBeUndefined();
 		expect(composeAuth({ mode: "inherit" }, [], resolver)).toBeUndefined();
 	});
+
+	test("oauth2: nested config {{vars}} deep-resolve; non-string fields survive", () => {
+		const r = makeResolver(
+			new Map([
+				["cid", "client-1"],
+				["secret", "sh-h-h"],
+				["tokenUrl", "https://auth.example.com/token"],
+			])
+		);
+		// The engine mints the token from this config; MCP's job is only to forward
+		// a fully variable-resolved oauth2 block. Booleans/scopes must pass through.
+		expect(
+			composeAuth(
+				{
+					mode: "oauth2",
+					config: {
+						grantType: "client_credentials",
+						clientId: "{{cid}}",
+						clientSecret: "{{secret}}",
+						tokenUrl: "{{tokenUrl}}",
+						scope: "read {{cid}}",
+						autoFetchToken: true,
+						tokenPlacement: "header",
+					},
+				},
+				[],
+				r
+			)
+		).toEqual({
+			mode: "oauth2",
+			config: {
+				grantType: "client_credentials",
+				clientId: "client-1",
+				clientSecret: "sh-h-h",
+				tokenUrl: "https://auth.example.com/token",
+				scope: "read client-1",
+				autoFetchToken: true,
+				tokenPlacement: "header",
+			},
+		});
+	});
+
+	test("oauth2 via inherit: a collection's oauth2 block is chosen and resolved", () => {
+		const r = makeResolver(new Map([["secret", "sh-h-h"]]));
+		const chain: CollectionLike[] = [
+			{ id: "c1", auth: { mode: "oauth2", config: { clientSecret: "{{secret}}" } } },
+		];
+		expect(composeAuth({ mode: "inherit" }, chain, r)).toEqual({
+			mode: "oauth2",
+			config: { clientSecret: "sh-h-h" },
+		});
+	});
 });
 
 describe("script composition", () => {
