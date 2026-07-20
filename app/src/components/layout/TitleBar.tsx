@@ -26,6 +26,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { TabStrip } from "./TabStrip";
+import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
 
 const isElectron = !!window.electronAPI;
 const isMac = window.electronAPI?.platform === "darwin";
@@ -131,25 +132,22 @@ export default function TitleBar() {
 			{/* macOS: space for native traffic lights */}
 			{isMac && <div className="w-20 shrink-0" />}
 
-			{/* Logo — all platforms */}
+			{/* Logo — all platforms. The icon is imported as a module, not referenced
+			    as "/icon.png": `base: "./"` means a root-absolute path does not
+			    resolve under the packaged file:// build. */}
 			<div
 				className="flex items-center px-3 shrink-0"
 				style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 			>
-				<img
-					src="/icon.png"
-					alt="Vayu"
-					className="w-5 h-5"
-					onError={(e) => {
-						(e.target as HTMLImageElement).style.display = "none";
-					}}
-				/>
+				<img src={iconUrl} alt="Vayu" className="w-5 h-5" />
 			</div>
 
-			{/* TabStrip — fills available width */}
+			{/* TabStrip — fills available width. This wrapper stays a drag region so
+			    the empty space to the right of the last tab moves the window on every
+			    platform; TabStrip marks its own tab row `no-drag`. */}
 			<div
 				className="flex-1 flex overflow-hidden h-full"
-				style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+				style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 			>
 				<TabStrip />
 			</div>

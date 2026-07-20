@@ -51,7 +51,9 @@ Custom window title bar (Electron frameless window, h-[38px]). Platform-specific
 - **Windows:** Native window overlay; no HTML controls in the bar.
 - **Linux:** Custom HTML min/max/close buttons (right); `EnvPill` showing active environment.
 
-The entire bar is marked as a drag region (`WebkitAppRegion: "drag"`) except for interactive elements, which explicitly set `no-drag`.
+The entire bar is marked as a drag region (`WebkitAppRegion: "drag"`) except for interactive elements, which explicitly set `no-drag`. Keep `no-drag` on the interactive elements themselves, never on a layout wrapper: the `TabStrip` wrapper flexes to fill the bar, so marking *it* `no-drag` turns all the empty space right of the last tab into a dead zone the window can't be dragged by. `TabStrip` sets `no-drag` on its own tab row for this reason.
+
+The logo is imported as a module (`@shared/icon_png/...`), not referenced as `/icon.png`. With `base: "./"`, a root-absolute path resolves against the filesystem root under the packaged `file://` build and silently fails to load — it only appears to work in dev, where Vite serves it over HTTP.
 
 ### `TabStrip` (`components/layout/TabStrip.tsx`)
 

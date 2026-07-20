@@ -149,7 +149,13 @@ export function TabStrip() {
 	const { openTabs, activeTabId, openTab } = useTabsStore();
 
 	return (
-		<div role="tablist" className="flex h-full min-w-0 items-stretch overflow-x-auto">
+		<div
+			role="tablist"
+			className="flex h-full min-w-0 items-stretch overflow-x-auto"
+			// Tabs and the "+" button stay clickable; the slack to their right is
+			// left as a drag region by the parent so the window can be moved.
+			style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+		>
 			{openTabs.map((tab) => (
 				<TabItem key={tab.id} tab={tab} isActive={tab.id === activeTabId} />
 			))}

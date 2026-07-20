@@ -28,6 +28,11 @@ export default defineConfig({
 			"@/services": path.resolve(__dirname, "./src/services"),
 			"@/types": path.resolve(__dirname, "./src/types"),
 			"@/utils": path.resolve(__dirname, "./src/utils"),
+			// Repo-level shared assets (icons). The renderer needs its own bundled
+			// copy — the electron-builder / build.py icons are filesystem artifacts
+			// the sandboxed web content cannot reach — but it reads them from the
+			// canonical source here rather than a duplicate under src/.
+			"@shared": path.resolve(__dirname, "../shared"),
 		},
 	},
 	base: "./",

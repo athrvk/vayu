@@ -31,6 +31,7 @@ import {
 	Download,
 } from "lucide-react";
 import { useTabsStore, useLayoutStore, useImportModalStore } from "@/stores";
+import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
 import {
 	useCollectionsQuery,
 	useRunsQuery,
@@ -131,7 +132,8 @@ export default function WelcomeScreen() {
 					<div className="flex items-center justify-center gap-4 mb-6">
 						<div className="relative">
 							<div className="absolute inset-0 bg-primary/20 blur-2xl" />
-							<Zap className="w-16 h-16 text-primary relative z-10" />
+							{/* Decorative: the adjacent <h1> already reads "Vayu" */}
+							<img src={iconUrl} alt="" className="w-16 h-16 relative z-10" />
 						</div>
 						<h1 className="text-5xl font-bold text-foreground">Vayu</h1>
 					</div>
