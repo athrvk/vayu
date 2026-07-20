@@ -63,11 +63,12 @@ export interface ToolResult {
 }
 
 /**
- * Feature grouping surfaced in Settings so the user can enable/disable tools by
- * area: `read` (inspection), `write` (sends a request / mutates config), `load`
- * (generates or observes load tests).
+ * Capability class surfaced in Settings for per-tool control; each maps to a
+ * distinct gate profile: `read` (inspection, ungated), `execute` (sends a
+ * request to a target host — allowlist), `write` (mutates saved data/config —
+ * write toggle), `load` (starts/stops load tests — allowlist + caps + confirm).
  */
-export type ToolCategory = "read" | "write" | "load";
+export type ToolCategory = "read" | "execute" | "write" | "load";
 
 export interface McpTool {
 	name: string;
@@ -217,6 +218,33 @@ const smokeResultSchema = z.object({
 	),
 });
 
+const configUpdateSchema = z
+	.object({
+		changedKeys: z.array(z.string()),
+		restartRequired: z.array(z.string()),
+	})
+	.passthrough();
+
+/**
+ * Of the changed config keys, which require an engine restart to take effect.
+ * The engine flags this in each entry's `label` ("… (Requires Restart)") — or an
+ * explicit `requiresRestart` boolean if present.
+ */
+function restartRequiredAmong(configResponse: unknown, changedKeys: string[]): string[] {
+	const raw = Array.isArray(configResponse)
+		? configResponse
+		: configResponse && typeof configResponse === "object"
+			? ((configResponse as Record<string, unknown>).entries ?? [])
+			: [];
+	const entries = Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
+	const byKey = new Map(entries.map((e) => [String(e.key), e]));
+	return changedKeys.filter((key) => {
+		const e = byKey.get(key);
+		if (!e) return false;
+		return e.requiresRestart === true || /requires restart/i.test(String(e.label ?? ""));
+	});
+}
+
 /** Convert a `{key: value}` header map to the engine's KeyValueEntry[] shape. */
 function toKeyValueEntries(
 	headers: unknown
@@ -348,7 +376,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "run_request",
-		category: "write",
+		category: "execute",
 		description:
 			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist.",
 		readOnly: false,
@@ -383,7 +411,7 @@ export const TOOLS: McpTool[] = [
 		name: "update_engine_config",
 		category: "write",
 		description:
-			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine restart to take effect.",
+			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect — the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (Vayu Settings → restart engine, or relaunch).",
 		readOnly: false,
 		annotations: {
 			title: "Update engine config",
@@ -397,6 +425,7 @@ export const TOOLS: McpTool[] = [
 				.record(z.string())
 				.describe('Map of config key to new value, e.g. { "workers": "8" }.'),
 		},
+		outputSchema: configUpdateSchema,
 		handler: async (args, ctx, signal) => {
 			if (!ctx.config.allowWrites) {
 				return errorResult(
@@ -407,7 +436,38 @@ export const TOOLS: McpTool[] = [
 			if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
 				return errorResult('"entries" must be an object mapping config keys to values.');
 			}
-			return callEngine(() => ctx.client.updateConfig({ entries }, signal));
+			try {
+				const updated = await ctx.client.updateConfig({ entries }, signal);
+				const changedKeys = Object.keys(entries as Record<string, unknown>);
+				// Best-effort: read back to flag restart-required keys. Failure here
+				// must not fail the (already-applied) update.
+				let restartRequired: string[] = [];
+				try {
+					const cfg = await ctx.client.getConfig(signal);
+					restartRequired = restartRequiredAmong(cfg, changedKeys);
+				} catch {
+					/* leave restartRequired empty */
+				}
+				const result: Record<string, unknown> = { changedKeys, restartRequired, updated };
+				if (restartRequired.length > 0) {
+					const note =
+						`Updated ${changedKeys.length} config key(s). ⚠ Restart required for: ` +
+						`${restartRequired.join(", ")}. These are saved, but the running engine keeps ` +
+						`the old values until it is restarted (Vayu Settings → restart engine, or relaunch the app).`;
+					return {
+						content: [
+							{ type: "text", text: `${note}\n\n${JSON.stringify(result, null, 2)}` },
+						],
+						structuredContent: result,
+					};
+				}
+				return {
+					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+					structuredContent: result,
+				};
+			} catch (err) {
+				return engineErrorResult(err);
+			}
 		},
 	},
 	{
@@ -514,7 +574,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "run_collection_smoke",
-		category: "write",
+		category: "execute",
 		description:
 			"Execute every saved request in a collection once and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing). Each request's host must be on the allowlist; requests whose host cannot be verified (e.g. unresolved {{variables}} and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
 		readOnly: false,
@@ -742,7 +802,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "get_live_metrics",
-		category: "load",
+		category: "read",
 		description:
 			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream.",
 		readOnly: true,
@@ -766,7 +826,7 @@ export const TOOLS: McpTool[] = [
 	},
 	{
 		name: "compare_runs",
-		category: "load",
+		category: "read",
 		description:
 			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix. Use to answer 'did this change regress performance?'.",
 		readOnly: true,

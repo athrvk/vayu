@@ -45,8 +45,8 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   enables write access in Settings. Traffic-sending tools (`run_request`,
   `run_collection_smoke`) and load runs are not affected by this toggle — they
   are governed by the allowlist and caps.
-- **Per-tool control.** Any tool (or a whole read/write/load category) can be
-  switched off; a disabled tool is removed from `tools/list` and rejected by
+- **Per-tool control.** Any tool (or a whole read/execute/write/load category) can
+  be switched off; a disabled tool is removed from `tools/list` and rejected by
   `tools/call`.
 - **Server disable.** The MCP server can be turned off entirely from Settings;
   while off the endpoint does not accept connections.

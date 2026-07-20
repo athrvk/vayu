@@ -53,8 +53,18 @@ describe("tool registry", () => {
 
 	test("every tool has a valid category", () => {
 		for (const t of TOOLS) {
-			expect(["read", "write", "load"]).toContain(t.category);
+			expect(["read", "execute", "write", "load"]).toContain(t.category);
 		}
+	});
+
+	test("traffic-sending tools are 'execute', not 'write'", () => {
+		const byName = new Map(TOOLS.map((t) => [t.name, t]));
+		expect(byName.get("run_request")?.category).toBe("execute");
+		expect(byName.get("run_collection_smoke")?.category).toBe("execute");
+		// The 'write' category is reserved for data/config mutation.
+		expect(byName.get("create_request")?.category).toBe("write");
+		expect(byName.get("update_environment")?.category).toBe("write");
+		expect(byName.get("update_engine_config")?.category).toBe("write");
 	});
 
 	test("toolCatalog mirrors the registry as IPC-safe metadata", () => {
@@ -109,6 +119,31 @@ describe("engine config tools", () => {
 		);
 		expect(res.isError).toBeFalsy();
 		expect(client.updateConfig).toHaveBeenCalledWith({ entries: { workers: "16" } }, undefined);
+		const out = res.structuredContent as { changedKeys: string[]; restartRequired: string[] };
+		expect(out.changedKeys).toEqual(["workers"]);
+		expect(out.restartRequired).toEqual([]);
+	});
+
+	test("update_engine_config flags restart-required keys from the engine's read-back", async () => {
+		const client = fakeClient({
+			getConfig: vi.fn().mockResolvedValue({
+				entries: [
+					{ key: "workers", value: "16", label: "Worker threads (Requires Restart)" },
+					{ key: "timeoutMs", value: "5000", label: "Request timeout" },
+				],
+			}),
+		});
+		const res = await dispatchTool(
+			"update_engine_config",
+			{ entries: { workers: "16", timeoutMs: "5000" } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const out = res.structuredContent as { changedKeys: string[]; restartRequired: string[] };
+		expect(out.changedKeys.sort()).toEqual(["timeoutMs", "workers"]);
+		expect(out.restartRequired).toEqual(["workers"]);
+		// The human-readable text warns about the restart.
+		expect(firstText(res)).toMatch(/restart required/i);
 	});
 });
 

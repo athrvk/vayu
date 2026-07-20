@@ -106,14 +106,19 @@ const CLIENT_CLI: Record<McpConnectClient, string> = {
 const TOOL_CATEGORIES: { id: McpToolCategory; label: string; description: string }[] = [
 	{ id: "read", label: "Read", description: "Inspect collections, runs, config, and metrics." },
 	{
+		id: "execute",
+		label: "Execute",
+		description: "Send real requests to a target (single request or a collection smoke test).",
+	},
+	{
 		id: "write",
 		label: "Write",
-		description: "Send requests, run collection smoke tests, and create/change saved data.",
+		description: "Create or change saved requests, environments, and engine config.",
 	},
 	{
 		id: "load",
 		label: "Load testing",
-		description: "Start/stop load runs and read their metrics.",
+		description: "Start and stop load runs.",
 	},
 ];
 

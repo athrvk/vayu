@@ -40,18 +40,24 @@ const VAYU_WEBSITE = "https://github.com/athrvk/vayu";
 const INSTRUCTIONS =
 	"Vayu is a local API testing and load-testing platform (Postman-style requests " +
 	"plus k6-level load tests in one app, backed by a native C++ engine); these " +
-	"tools drive that engine. Call get_engine_health first. Tools are grouped as " +
-	"read (inspect collections, runs, config, metrics), write (run_request, " +
-	"update_engine_config), and load (start_load_run, stop_run, get_live_metrics, " +
-	"compare_runs). Network-touching tools (run_request, start_load_run) are " +
-	"restricted to an allowlist and hard rate/duration caps. start_load_run asks " +
-	"the user to confirm (via elicitation when supported, otherwise a confirmed:true " +
-	"flag). update_engine_config requires the user to enable config writes. The user " +
-	"may disable individual tools, so treat tools/list as authoritative and expect " +
-	"some tools to be absent. Vayu data is also available as resources (vayu://runs, " +
-	"vayu://collections, vayu://environments, vayu://config, and " +
-	"vayu://run/{runId}/report) to attach as context, and prompts (summarize_run, " +
-	"compare_runs, diagnose_errors, suggest_load_profile) provide ready-made starting points.";
+	"tools drive that engine. Call get_engine_health first. Tools are grouped by " +
+	"capability: read (inspect collections, requests, environments, runs, config, " +
+	"and live metrics — always safe), execute (run_request, run_collection_smoke — " +
+	"send real traffic to a target), write (create_request, update_environment, " +
+	"update_engine_config — mutate saved data or engine config), and load " +
+	"(start_load_run, stop_run — start/stop a load test). Traffic-touching tools " +
+	"(run_request, run_collection_smoke, start_load_run) are restricted to an " +
+	"allowlist, and load runs also enforce hard RPS/concurrency/duration caps. " +
+	"start_load_run asks the user to confirm (via elicitation when supported, " +
+	"otherwise a confirmed:true flag). The write tools require the user to enable " +
+	"write access. Some update_engine_config keys need an engine restart to take " +
+	"effect; the result flags those under restartRequired (saved, but the running " +
+	"engine keeps the old value until restarted). The user may disable individual " +
+	"tools, so treat tools/list as authoritative and expect some tools to be absent. " +
+	"Vayu data is also available as resources (vayu://runs, vayu://collections, " +
+	"vayu://environments, vayu://config, and vayu://run/{runId}/report) to attach as " +
+	"context, and prompts (summarize_run, compare_runs, diagnose_errors, " +
+	"suggest_load_profile) provide ready-made starting points.";
 
 /**
  * Create an MCP server exposing the Vayu tools. `contextProvider` is invoked

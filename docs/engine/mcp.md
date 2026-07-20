@@ -114,6 +114,11 @@ Every tool carries a `category` (surfaced in Settings for enable/disable), MCP
 validated by the SDK). A few declare an `outputSchema` and return validated
 `structuredContent` alongside the text rendering.
 
+The four categories partition tools by what they can do — and thus which gate
+applies: **read** (inspection, always safe), **execute** (sends real traffic to
+a target — allowlist), **write** (mutates saved data or engine config — write
+toggle), **load** (starts/stops load tests — allowlist + caps + confirmation).
+
 | Tool                   | Category | Maps to                                      | Gate                       |
 | ---------------------- | -------- | -------------------------------------------- | -------------------------- |
 | `get_engine_health`    | read     | `GET /health` (structured)                   | —                          |
@@ -123,15 +128,15 @@ validated by the SDK). A few declare an `outputSchema` and return validated
 | `list_runs`            | read     | `GET /runs`                                  | —                          |
 | `get_run_report`       | read     | `GET /run/:id/report`                        | —                          |
 | `get_engine_config`    | read     | `GET /config`                                | —                          |
-| `run_request`          | write    | `POST /request`                              | allowlist                  |
+| `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | —                          |
+| `compare_runs`         | read     | 2× `GET /run/:id/report` → diff (structured) | —                          |
+| `run_request`          | execute  | `POST /request`                              | allowlist                  |
+| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /request` (×N)     | allowlist per host         |
 | `create_request`       | write    | `POST /requests`                             | write toggle               |
 | `update_environment`   | write    | `GET`+`POST /environments` (fetch-merge)     | write toggle               |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `run_collection_smoke` | write    | `GET /requests?…` + `POST /request` (×N)     | allowlist per host         |
 | `start_load_run`       | load     | `POST /run`                                  | allowlist + caps + confirm |
 | `stop_run`             | load     | `POST /run/:id/stop`                         | —                          |
-| `get_live_metrics`     | load     | SSE snapshot of last N ticks                 | —                          |
-| `compare_runs`         | load     | 2× `GET /run/:id/report` → diff (structured) | —                          |
 
 Notes:
 
@@ -139,6 +144,11 @@ Notes:
   supports it, otherwise a `confirmed: true` flag — and enforces the RPS /
   concurrency / duration caps. `get_live_metrics` is a **bounded snapshot** (SSE
   read with a time budget), not a stream — `tools/call` stays request/response.
+- **`update_engine_config`** reads the config back after applying and flags any
+  changed key that needs an engine **restart** to take effect under
+  `restartRequired` in its structured result (the engine marks these in each
+  entry's label). Such values are saved, but the running engine keeps the old
+  value until it is restarted, so the tool says so in its text output too.
 - **`update_environment`** fetches the environment and merges the supplied
   variables (the engine's upsert replaces the whole variables blob), so partial
   updates preserve untouched variables and the name.
@@ -192,7 +202,7 @@ never modified. All configurable in **Settings → MCP** and persisted.
 - **Write toggle** (`allowWrites`, default off) — gates the data-mutating tools
   `create_request`, `update_environment`, `update_engine_config`. Does not gate
   `run_request` / `run_collection_smoke` / load runs (allowlist + caps).
-- **Per-tool control** — any tool or whole read/write/load category can be
+- **Per-tool control** — any tool or whole read/execute/write/load category can be
   switched off; a disabled tool is omitted from `tools/list` **and** rejected by
   `tools/call`.
 - **Server on/off** — the whole server can be disabled; while off the endpoint

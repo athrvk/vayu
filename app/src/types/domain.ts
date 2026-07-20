@@ -479,7 +479,7 @@ export interface McpSafetyConfig {
 }
 
 /** Feature grouping for the MCP tool list in Settings. */
-export type McpToolCategory = "read" | "write" | "load";
+export type McpToolCategory = "read" | "execute" | "write" | "load";
 
 /** Metadata for one MCP tool, surfaced in Settings for enable/disable control. */
 export interface McpToolInfo {
