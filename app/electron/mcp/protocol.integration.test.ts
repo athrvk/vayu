@@ -19,6 +19,7 @@ import http from "node:http";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpServer } from "./server.js";
 import { McpHttpServer } from "./http.js";
@@ -380,5 +381,87 @@ describe("Streamable HTTP host", () => {
 		// (status 0); either way it must not succeed.
 		const res = await request({ host: "evil.example.com", body: initBody });
 		expect(res.status).not.toBe(200);
+	});
+});
+
+/**
+ * The production path: a real MCP SDK client driving the stateless Streamable
+ * HTTP host over a real socket — the transport agents (Claude Code / Cursor)
+ * actually use. Proves the full initialize -> tools/list -> tools/call round-trip
+ * works over HTTP (not just the in-memory transport), and that the safety guards
+ * apply on this transport too.
+ */
+describe("Streamable HTTP host — real SDK client end-to-end", () => {
+	const HOST = "127.0.0.1";
+	let nextPort = 9895;
+	let httpServer: McpHttpServer | null = null;
+	let client: Client | null = null;
+
+	afterEach(async () => {
+		await client?.close().catch(() => {});
+		client = null;
+		await httpServer?.stop();
+		httpServer = null;
+	});
+
+	async function connect(
+		opts: { safety?: Partial<McpSafetyConfig>; client?: EngineClient } = {}
+	) {
+		const port = nextPort++;
+		httpServer = new McpHttpServer({
+			host: HOST,
+			port,
+			info: { name: "vayu", version: "test" },
+			contextProvider: contextProvider(opts.safety, opts.client),
+		});
+		await httpServer.start();
+		const c = new Client({ name: "http-e2e", version: "1.0.0" });
+		await c.connect(new StreamableHTTPClientTransport(new URL(`http://${HOST}:${port}/mcp`)));
+		client = c;
+		return c;
+	}
+
+	it("initialize + tools/list + tools/call over real HTTP", async () => {
+		const c = await connect();
+
+		// Identity survives the HTTP handshake.
+		expect(c.getServerVersion()?.name).toBe("vayu");
+
+		const { tools } = await c.listTools();
+		expect(tools.map((t) => t.name)).toContain("get_engine_health");
+
+		// The real payload proves it's not just transport-level: a tool call on a
+		// fresh, stateless per-request server returns the (mock) engine response.
+		const res = (await c.callTool({ name: "get_engine_health", arguments: {} })) as {
+			content: Array<{ text: string }>;
+			isError?: boolean;
+		};
+		expect(res.isError).toBeFalsy();
+		expect(res.content[0].text).toContain("9.9.9");
+	});
+
+	it("returns structured content over HTTP (compare_runs outputSchema)", async () => {
+		const c = await connect();
+		const res = (await c.callTool({
+			name: "compare_runs",
+			arguments: { baseRunId: "a", targetRunId: "b" },
+		})) as { structuredContent?: { baseRunId?: string } };
+		expect(res.structuredContent?.baseRunId).toBe("a");
+	});
+
+	it("enforces the empty-default allowlist over HTTP (run_request blocked)", async () => {
+		const c = await connect();
+		const res = (await c.callTool({
+			name: "run_request",
+			arguments: { url: "https://api.example.com/x" },
+		})) as { content: Array<{ text: string }>; isError?: boolean };
+		expect(res.isError).toBe(true);
+		expect(res.content[0].text).toMatch(/allowlist is empty/i);
+	});
+
+	it("omits a disabled tool from tools/list over HTTP", async () => {
+		const c = await connect({ safety: { disabledTools: ["get_engine_health"] } });
+		const { tools } = await c.listTools();
+		expect(tools.map((t) => t.name)).not.toContain("get_engine_health");
 	});
 });
