@@ -86,7 +86,10 @@ function EnvSwitcher() {
 			<DropdownMenuTrigger asChild>
 				<button
 					className={cn(
-						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-full shrink-0 transition-colors",
+						// rounded-md, not rounded-full: this is an interactive control,
+						// so its corners follow the Appearance → Roundedness setting.
+						// rounded-full is reserved for non-interactive indicators.
+						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-md shrink-0 transition-colors",
 						activeEnv
 							? "bg-accent text-accent-foreground hover:bg-accent/80"
 							: "text-muted-foreground hover:bg-muted/50 hover:text-foreground"

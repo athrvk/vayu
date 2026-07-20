@@ -370,6 +370,12 @@ control). `rounded-full` stays a pill regardless.
 Cards and panels use `rounded-md`. Badges/chips use `rounded-sm`. Status pills
 use `rounded-full`.
 
+**`rounded-full` is for non-interactive indicators only** — status dots, status
+pills, spinners, circular icon wells, colour swatches. Because it ignores
+`--radius` by design, using it on a control (a button, a dropdown trigger) makes
+that control the one thing on screen that does not respond to the Roundedness
+setting. Interactive elements take `rounded-md`/`rounded-sm`.
+
 ---
 
 ## Animations
