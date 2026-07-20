@@ -384,6 +384,7 @@ Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animati
 | `accordion-down/up` | 0.2s | ease-out | `animate-accordion-down/up` | Radix accordion |
 | `fade-in` | 0.2s | ease-out | `animate-fade-in` | General reveal |
 | `slide-in` | 0.2s | ease-out | `animate-slide-in` | Dropdown/panel entry |
+| interaction state | 0.15s | ease | *(baseline in `index.css`)* | Hover/active colour changes on interactive elements |
 
 **Spinner pattern:**
 ```tsx
@@ -394,6 +395,38 @@ Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animati
 ```tsx
 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
 ```
+
+---
+
+## Focus & Interaction States
+
+Interactive elements get a keyboard focus ring and hover transition from a
+baseline in `app/src/index.css` (`@layer base`) — **do not add per-component
+focus classes for the default case.**
+
+```css
+:where(button, [role="button"], a[href], input, select, textarea, summary,
+       [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+```
+
+- `:where()` keeps specificity at **0**, so any component utility overrides it
+  without `!important`. The `components/ui/*` primitives already carry their own
+  `focus-visible:ring` and keep their appearance.
+- `:focus-visible` fires only on keyboard/AT focus — mouse users never see a ring.
+- `outline` (not `box-shadow`) follows `border-radius` automatically, so the ring
+  tracks the user's roundedness setting.
+- Transitions list paint properties explicitly (`background-color`, `color`,
+  `border-color`, `opacity`) at **150ms**. Never `transition: all` — it can
+  animate layout properties. Reduced motion already collapses these app-wide.
+
+**Clipping panels.** An element whose `overflow-*` would cut off an outset ring
+must carry `.panel-clip`; every focusable descendant then gets
+`outline-offset: -2px`. Currently on the `TabStrip` row and the `Drawer` content
+wrapper. Put it on the element carrying the overflow — not on the rows. For a
+one-off outside such a container, use the `.focus-ring-inset` utility.
 
 ---
 
