@@ -6,11 +6,12 @@
  */
 
 import { useRef, useEffect } from "react";
-import { ChevronRight, ChevronDown, Folder, MoreVertical, Loader2 } from "lucide-react";
+import { ChevronRight, ChevronDown, Folder, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
+import { RowActionsMenu, type RowAction } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
 
@@ -34,7 +35,8 @@ export interface CollectionItemProps {
 	onCollectionClick: (collection: Collection) => void;
 	onRequestClick: (collectionId: string, requestId: string) => void;
 	onCollectionToggle: (collection: Collection) => void;
-	onShowContextMenu: (e: React.MouseEvent, collectionId: string) => void;
+	/** Actions for this collection's ⋯ menu; built by CollectionTree. */
+	getCollectionActions: (collection: Collection) => RowAction[];
 	onRenameChange: (value: string) => void;
 	onRenameSubmit: (collectionId: string) => void;
 	onRenameCancel: () => void;
@@ -71,7 +73,7 @@ export default function CollectionItem({
 	onCollectionClick,
 	onRequestClick,
 	onCollectionToggle,
-	onShowContextMenu,
+	getCollectionActions,
 	onRenameChange,
 	onRenameSubmit,
 	onRenameCancel,
@@ -237,27 +239,15 @@ export default function CollectionItem({
 					)}
 				</button>
 
-				{/* Row actions. Also revealed on keyboard focus: they are in the tab
-				    order, so without that a keyboard user lands on an invisible
-				    control. */}
+				{/* Same ⋯ menu component as request and environment rows. Revealed on
+				    keyboard focus as well as hover, so a keyboard user never lands on
+				    an invisible control. */}
 				{!isRenaming && (
-					<div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-						<Button
-							variant="rowAction"
-							size="icon"
-							tabIndex={-1}
-							data-tree-menu
-							className="h-6 w-6"
-							aria-label={`More actions for ${collection.name}`}
-							onClick={(e) => {
-								e.preventDefault();
-								e.stopPropagation();
-								onShowContextMenu(e, collection.id);
-							}}
-						>
-							<MoreVertical className="w-3 h-3" />
-						</Button>
-					</div>
+					<RowActionsMenu
+						label={`More actions for ${collection.name}`}
+						className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+						actions={getCollectionActions(collection)}
+					/>
 				)}
 			</div>
 
@@ -324,7 +314,7 @@ export default function CollectionItem({
 							onCollectionClick={onCollectionClick}
 							onCollectionToggle={onCollectionToggle}
 							onRequestClick={onRequestClick}
-							onShowContextMenu={onShowContextMenu}
+							getCollectionActions={getCollectionActions}
 							onRenameChange={onRenameChange}
 							onRenameSubmit={onRenameSubmit}
 							onRenameCancel={onRenameCancel}

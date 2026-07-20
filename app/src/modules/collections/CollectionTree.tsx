@@ -22,7 +22,6 @@ import {
 import {
 	Button,
 	Input,
-	Separator,
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
@@ -33,6 +32,7 @@ import {
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
+import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
 import { TIMING } from "@/config/timing";
@@ -127,11 +127,6 @@ export default function CollectionTree() {
 	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID
 	const [newCollectionName, setNewCollectionName] = useState(DEFAULT_COLLECTION_NAME);
 	const [newSubCollectionName, setNewSubCollectionName] = useState(DEFAULT_FOLDER_NAME);
-	const [contextMenu, setContextMenu] = useState<{
-		collectionId: string;
-		x: number;
-		y: number;
-	} | null>(null);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState("");
 	const [renamingRequestId, setRenamingRequestId] = useState<string | null>(null);
@@ -143,25 +138,6 @@ export default function CollectionTree() {
 		id: string;
 		name: string;
 	} | null>(null);
-	const contextMenuRef = useRef<HTMLDivElement>(null);
-
-	// Close context menu on outside click
-	useEffect(() => {
-		const handleClickOutside = (e: MouseEvent) => {
-			if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
-				setContextMenu(null);
-			}
-		};
-
-		if (contextMenu) {
-			document.addEventListener("mousedown", handleClickOutside);
-		}
-
-		return () => {
-			document.removeEventListener("mousedown", handleClickOutside);
-		};
-	}, [contextMenu]);
-
 	const handleRenameCancel = useCallback(() => {
 		setRenamingId(null);
 		setRenameValue("");
@@ -256,7 +232,6 @@ export default function CollectionTree() {
 	const handleRenameCollection = (collection: Collection) => {
 		setRenamingId(collection.id);
 		setRenameValue(collection.name);
-		setContextMenu(null);
 	};
 
 	const handleRenameSubmit = async (collectionId: string) => {
@@ -313,20 +288,51 @@ export default function CollectionTree() {
 		[createRequestMutation, openTab]
 	);
 
-	const MENU_WIDTH = 180;
-	const MENU_HEIGHT = 260;
-
-	const handleShowContextMenu = (e: React.MouseEvent, collectionId: string) => {
-		e.preventDefault();
-		e.stopPropagation();
-		const x = Math.max(0, Math.min(e.clientX, window.innerWidth - MENU_WIDTH));
-		const y = Math.max(0, Math.min(e.clientY, window.innerHeight - MENU_HEIGHT));
-		setContextMenu({
-			collectionId,
-			x,
-			y,
-		});
-	};
+	/**
+	 * Actions for a collection's "⋯" menu. Defined here, where the handlers and
+	 * state live, and rendered by the shared RowActionsMenu — the same component
+	 * request and environment rows use, so every row menu looks and behaves
+	 * alike. This replaced a hand-rolled fixed-position popover that had to
+	 * compute its own coordinates and close itself on an outside click, and
+	 * which had no keyboard support.
+	 */
+	const getCollectionActions = useCallback(
+		(collection: Collection): RowAction[] => [
+			{
+				label: "Rename",
+				icon: Edit2,
+				onSelect: () => handleRenameCollection(collection),
+			},
+			{
+				label: "Add Request",
+				icon: Plus,
+				onSelect: () => void handleCreateRequest(collection.id),
+			},
+			{
+				label: "Add Folder",
+				icon: FolderPlus,
+				onSelect: () => {
+					if (!expandedCollectionIds.has(collection.id)) {
+						toggleCollectionExpanded(collection.id);
+					}
+					setCreatingSubfolder(collection.id);
+				},
+			},
+			{
+				label: "Delete",
+				icon: Trash2,
+				destructive: true,
+				onSelect: () =>
+					setDeleteConfirm({
+						type: "collection",
+						id: collection.id,
+						name: collection.name,
+					}),
+			},
+		],
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[expandedCollectionIds, toggleCollectionExpanded]
+	);
 
 	const handleDeleteCollection = useCallback(
 		async (collectionId: string) => {
@@ -610,7 +616,7 @@ export default function CollectionTree() {
 								onCollectionClick={handleCollectionClick}
 								onCollectionToggle={handleCollectionToggle}
 								onRequestClick={handleRequestClick}
-								onShowContextMenu={handleShowContextMenu}
+								getCollectionActions={getCollectionActions}
 								onRenameChange={setRenameValue}
 								onRenameSubmit={handleRenameSubmit}
 								onRenameCancel={handleRenameCancel}
@@ -631,75 +637,6 @@ export default function CollectionTree() {
 						))}
 					</div>
 				</ScrollArea>
-			)}
-
-			{/* Context Menu */}
-			{contextMenu && (
-				<div
-					ref={contextMenuRef}
-					className="fixed bg-popover border rounded-lg shadow-md py-1 z-50 min-w-[180px]"
-					style={{
-						top: contextMenu.y,
-						left: contextMenu.x,
-					}}
-				>
-					<button
-						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
-						onClick={() => {
-							const collection = collections.find(
-								(c) => c.id === contextMenu.collectionId
-							);
-							if (collection) handleRenameCollection(collection);
-						}}
-					>
-						<Edit2 className="w-4 h-4 mr-2 flex-shrink-0" />
-						<span>Rename</span>
-					</button>
-					<button
-						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
-						onClick={async (e) => {
-							e.stopPropagation();
-							const collectionId = contextMenu.collectionId;
-							setContextMenu(null);
-							await handleCreateRequest(collectionId);
-						}}
-					>
-						<Plus className="w-4 h-4 mr-2 flex-shrink-0" />
-						<span>Add Request</span>
-					</button>
-					<button
-						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
-						onClick={() => {
-							const parentId = contextMenu.collectionId;
-							setContextMenu(null);
-							if (!expandedCollectionIds.has(parentId)) {
-								toggleCollectionExpanded(parentId);
-							}
-							setCreatingSubfolder(parentId);
-						}}
-					>
-						<FolderPlus className="w-4 h-4 mr-2 flex-shrink-0" />
-						<span>Add Folder</span>
-					</button>
-					<Separator className="my-1" />
-					<button
-						className="flex items-center w-full px-2 py-1.5 text-sm text-destructive hover:bg-accent cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-						onClick={() => {
-							const collection = collections.find(
-								(c) => c.id === contextMenu.collectionId
-							);
-							setDeleteConfirm({
-								type: "collection",
-								id: contextMenu.collectionId,
-								name: collection?.name ?? "Collection",
-							});
-							setContextMenu(null);
-						}}
-					>
-						<Trash2 className="w-4 h-4 mr-2 flex-shrink-0" />
-						<span>Delete</span>
-					</button>
-				</div>
 			)}
 
 			<DeleteConfirmDialog

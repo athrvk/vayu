@@ -9,9 +9,16 @@
  * DeleteConfirmDialog
  *
  * Reusable confirmation dialog for destructive delete actions.
- * Matches the pattern used in collections and history sidebars.
+ *
+ * Keyboard behaviour is deliberate. `DialogContent` renders a close "X" as its
+ * first focusable child, so Radix's default open-focus lands there and neither
+ * button appears focused — which matters most when the dialog was opened *by*
+ * keyboard (Delete on a tree row). Focus is redirected to Cancel instead: the
+ * safe action, so a reflexive Enter cancels rather than deletes. Left/Right move
+ * between the actions the way native confirmation dialogs behave.
  */
 
+import { useRef } from "react";
 import { Loader2 } from "lucide-react";
 import {
 	Dialog,
@@ -40,19 +47,46 @@ export function DeleteConfirmDialog({
 	onConfirm,
 	isDeleting = false,
 }: DeleteConfirmDialogProps) {
+	const cancelRef = useRef<HTMLButtonElement>(null);
+
 	const handleOpenChange = (next: boolean) => {
 		if (!next) onOpenChange(false);
 	};
 
+	/**
+	 * Roving Left/Right across whatever actions the footer holds, so this keeps
+	 * working if a third button is ever added. Wraps at both ends.
+	 */
+	const handleFooterKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+		if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+		const buttons = Array.from(
+			e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not([disabled])")
+		);
+		if (buttons.length < 2) return;
+		e.preventDefault();
+		const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+		const delta = e.key === "ArrowRight" ? 1 : -1;
+		// From an unfocused state, Right starts at the first action and Left at the last.
+		const next = current === -1 ? (delta === 1 ? 0 : buttons.length - 1) : current + delta;
+		buttons[(next + buttons.length) % buttons.length]?.focus();
+	};
+
 	return (
 		<Dialog open={open} onOpenChange={handleOpenChange}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent
+				className="sm:max-w-md"
+				onOpenAutoFocus={(e) => {
+					e.preventDefault();
+					cancelRef.current?.focus();
+				}}
+			>
 				<DialogHeader>
 					<DialogTitle>{title}</DialogTitle>
 					<DialogDescription>{description}</DialogDescription>
 				</DialogHeader>
-				<DialogFooter className="gap-2 sm:gap-0">
+				<DialogFooter onKeyDown={handleFooterKeyDown} className="gap-2 sm:gap-0">
 					<Button
+						ref={cancelRef}
 						variant="secondary"
 						onClick={() => onOpenChange(false)}
 						disabled={isDeleting}
