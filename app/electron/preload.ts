@@ -86,6 +86,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// Platform info
 	platform: process.platform,
 
+	// Open one of the app's own doc links in the system browser. Keyed, not
+	// URL-taking — see the handler in main.ts.
+	openAppLink: (key: "docs" | "scripting" | "issues"): Promise<void> =>
+		ipcRenderer.invoke("shell:openAppLink", key),
+
 	// OAuth 2.0 interactive flow
 	oauthOpenExternal: (url: string): Promise<void> =>
 		ipcRenderer.invoke("oauth:openExternal", url),

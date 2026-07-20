@@ -231,7 +231,18 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 
 ## Welcome (`modules/welcome/`)
 
-`WelcomeScreen.tsx` - default screen when no request/collection is selected; entry points include opening the import modal.
+Vayu's new-tab surface — rendered for the `welcome` tab (opened by TabStrip's `+`), when no tab is open, and for a request tab with no entity.
+
+It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restored, so returning users land back on their own tabs. Its job is to start something new. Keep marketing content off it — a feature pitch and static perf claims were removed for exactly that reason. Anything already visible in the Collections sidebar or History drawer is a duplicate and does not belong here either.
+
+- `WelcomeScreen.tsx` — container: queries, `handleNewRequest`, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user.
+- `EmptyState.tsx` — fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
+- `Launcher.tsx` — populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
+- `components/` — `ActionTile`, `RecentRuns`, `FooterLinks`.
+
+Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel — the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
+
+Design rationale: `docs/superpowers/specs/2026-07-20-welcome-screen-redesign-design.md`
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 
