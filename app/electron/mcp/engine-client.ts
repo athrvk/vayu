@@ -111,6 +111,10 @@ export class EngineClient {
 		return this.request("GET", "/environments", undefined, signal);
 	}
 
+	getEnvironment(id: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", `/environments/${encodeURIComponent(id)}`, undefined, signal);
+	}
+
 	listRuns(signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", "/runs", undefined, signal);
 	}
@@ -127,6 +131,17 @@ export class EngineClient {
 
 	updateConfig(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/config", payload, signal);
+	}
+
+	// --- Write: saved requests / environments (upserts) ----------------------
+
+	createRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/requests", payload, signal);
+	}
+
+	/** Upsert an environment: `POST /environments` (include `id` to update). */
+	upsertEnvironment(payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("POST", "/environments", payload, signal);
 	}
 
 	// --- Execute -------------------------------------------------------------

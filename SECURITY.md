@@ -40,9 +40,11 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   but it is agent-side: the same model can send the second call. It is not a
   substitute for the caps/allowlist, which are the enforcement. (A future,
   stronger version would route confirmation to the human via MCP elicitation.)
-- **Config writes off by default.** `update_engine_config` is refused unless the
-  user enables config writes in Settings. `run_request` and load runs are not
-  affected by this toggle — they are governed by the allowlist and caps.
+- **Data writes off by default.** The data-mutating tools (`create_request`,
+  `update_environment`, `update_engine_config`) are refused unless the user
+  enables write access in Settings. Traffic-sending tools (`run_request`,
+  `run_collection_smoke`) and load runs are not affected by this toggle — they
+  are governed by the allowlist and caps.
 - **Per-tool control.** Any tool (or a whole read/write/load category) can be
   switched off; a disabled tool is removed from `tools/list` and rejected by
   `tools/call`.

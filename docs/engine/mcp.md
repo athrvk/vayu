@@ -221,6 +221,19 @@ tradeoff is accepted deliberately.
   (`allowWrites`); the engine validates types/ranges and rejects the batch on any
   invalid value.
 
+### Write tools
+
+- `create_request` — `POST /requests` (**write-toggle gated**); saves a request
+  into a collection. Not executed, so no allowlist check.
+- `update_environment` — fetch `GET /environments/:id`, merge the supplied
+  variables, `POST /environments` (**write-toggle gated**). The upsert replaces
+  the variables blob, so the merge preserves untouched variables and the name.
+- `run_collection_smoke` — `GET /requests?collectionId=` then one `POST /request`
+  per saved request; **allowlist-gated per host** (unverifiable hosts, e.g.
+  unresolved `{{variables}}` with allow-all off, are skipped). Returns a
+  structured pass/fail matrix (2xx-3xx status + all tests passing = pass). Sends
+  real traffic; does not modify Vayu data.
+
 ### Tool categories & per-tool control
 
 Every tool carries a `category` (`read` / `write` / `load`). The Settings tool
@@ -245,9 +258,13 @@ persists in `disabledTools`.
 - ~~MCP `resources/`~~ — **shipped** (`resources.ts`): `vayu://run/{runId}/report`
   (templated, with list + completion) plus static `vayu://runs` /
   `collections` / `environments` / `config`.
-- `create_request` / `update_environment` (writes, behind settings flag) —
-  deferred.
-- `run_collection_smoke` (pass/fail matrix over a collection) — deferred.
+- ~~`create_request` / `update_environment` (writes, behind settings flag)~~ —
+  **shipped**: both gated by the write toggle (`allowWrites`);
+  `update_environment` fetches + merges variables so partial updates don't wipe
+  the rest.
+- ~~`run_collection_smoke` (pass/fail matrix over a collection)~~ — **shipped**:
+  executes each saved request once (allowlist-gated per host) and returns a
+  structured pass/fail matrix (2xx-3xx + passing tests = pass).
 - Hosted MCP for Vayu Cloud, OAuth-gated (someday).
 
 ## Implementation (as built)

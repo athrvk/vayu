@@ -105,7 +105,11 @@ const CLIENT_CLI: Record<McpConnectClient, string> = {
 /** Tool categories, in display order, with their sidebar copy. */
 const TOOL_CATEGORIES: { id: McpToolCategory; label: string; description: string }[] = [
 	{ id: "read", label: "Read", description: "Inspect collections, runs, config, and metrics." },
-	{ id: "write", label: "Write", description: "Send a single request or change engine config." },
+	{
+		id: "write",
+		label: "Write",
+		description: "Send requests, run collection smoke tests, and create/change saved data.",
+	},
 	{
 		id: "load",
 		label: "Load testing",
@@ -692,19 +696,21 @@ export default function McpSettingsPanel() {
 				</CardContent>
 			</Card>
 
-			{/* Engine config writes */}
+			{/* Write access */}
 			<Card>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<ShieldCheck className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Engine config writes</CardTitle>
+						<CardTitle className="text-base">Write access</CardTitle>
 					</div>
 					<CardDescription>
-						When off (default), the{" "}
-						<code className="font-mono">update_engine_config</code> tool is disabled —
-						agents can read the engine config but not change it. This does not affect{" "}
-						<code className="font-mono">run_request</code> or load runs, which are
-						governed by the allowlist and caps.
+						When off (default), agents can read but not change saved data: the{" "}
+						<code className="font-mono">create_request</code>,{" "}
+						<code className="font-mono">update_environment</code>, and{" "}
+						<code className="font-mono">update_engine_config</code> tools are disabled.
+						This does not affect <code className="font-mono">run_request</code>,{" "}
+						<code className="font-mono">run_collection_smoke</code>, or load runs, which
+						are governed by the allowlist and caps.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -715,7 +721,7 @@ export default function McpSettingsPanel() {
 							disabled={!config}
 						/>
 						<Label className="text-sm text-muted-foreground">
-							{config?.allowWrites ? "Config writes enabled" : "Config writes off"}
+							{config?.allowWrites ? "Writes enabled" : "Read-only"}
 						</Label>
 					</div>
 				</CardContent>

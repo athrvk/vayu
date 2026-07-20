@@ -197,6 +197,38 @@ const engineHealthSchema = z
 	.object({ status: z.string(), version: z.string().optional() })
 	.passthrough();
 
+const smokeResultSchema = z.object({
+	collectionId: z.string(),
+	total: z.number(),
+	passed: z.number(),
+	failed: z.number(),
+	skipped: z.number(),
+	results: z.array(
+		z.object({
+			name: z.string(),
+			method: z.string(),
+			url: z.string(),
+			ok: z.boolean(),
+			statusCode: z.number().optional(),
+			skipped: z.boolean().optional(),
+			reason: z.string().optional(),
+			error: z.string().optional(),
+		})
+	),
+});
+
+/** Convert a `{key: value}` header map to the engine's KeyValueEntry[] shape. */
+function toKeyValueEntries(
+	headers: unknown
+): Array<{ key: string; value: string; enabled: boolean }> {
+	if (!headers || typeof headers !== "object") return [];
+	return Object.entries(headers as Record<string, unknown>).map(([key, value]) => ({
+		key,
+		value: String(value),
+		enabled: true,
+	}));
+}
+
 // --- Tool definitions --------------------------------------------------------
 
 export const TOOLS: McpTool[] = [
@@ -376,6 +408,207 @@ export const TOOLS: McpTool[] = [
 				return errorResult('"entries" must be an object mapping config keys to values.');
 			}
 			return callEngine(() => ctx.client.updateConfig({ entries }, signal));
+		},
+	},
+	{
+		name: "create_request",
+		category: "write",
+		description:
+			"Create a saved request inside a collection (stores it; does not send it). GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed.",
+		readOnly: false,
+		annotations: {
+			title: "Create saved request",
+			readOnlyHint: false,
+			destructiveHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z.string().describe("Collection to add the request to."),
+			name: z.string().describe("Display name for the saved request."),
+			url: z.string().describe("Request URL (may contain {{variables}})."),
+			method: z.string().optional().describe("HTTP method (default GET)."),
+			headers: z.record(z.string()).optional().describe("Headers as a string map."),
+			body: z.string().optional().describe("Request body content."),
+			bodyType: z.string().optional().describe("Body type: json, text, ... (default text)."),
+			description: z.string().optional(),
+		},
+		handler: async (args, ctx, signal) => {
+			if (!ctx.config.allowWrites) {
+				return errorResult(
+					"Writes are disabled. Turn on write access in Vayu Settings → MCP to allow this."
+				);
+			}
+			const payload: Record<string, unknown> = {
+				collectionId: requireStr(args, "collectionId"),
+				name: requireStr(args, "name"),
+				url: requireStr(args, "url"),
+				method: str(args, "method") ?? "GET",
+			};
+			if (args.headers && typeof args.headers === "object") {
+				payload.headers = toKeyValueEntries(args.headers);
+			}
+			const body = str(args, "body");
+			if (body !== undefined) {
+				const bodyType = str(args, "bodyType") ?? "text";
+				payload.body = { type: bodyType, content: body };
+				payload.bodyType = bodyType;
+			}
+			const description = str(args, "description");
+			if (description !== undefined) payload.description = description;
+			return callEngine(() => ctx.client.createRequest(payload, signal));
+		},
+	},
+	{
+		name: "update_environment",
+		category: "write",
+		description:
+			"Set or overwrite variables on an environment (merges with the existing variables — other variables are preserved). GUARDED: requires write access to be enabled in Vayu Settings.",
+		readOnly: false,
+		annotations: {
+			title: "Update environment",
+			readOnlyHint: false,
+			destructiveHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			environmentId: z.string().describe("Environment ID to update."),
+			variables: z
+				.record(z.string())
+				.describe("Variables to set/overwrite as a key -> value string map."),
+			name: z.string().optional().describe("Optional new name for the environment."),
+		},
+		handler: async (args, ctx, signal) => {
+			if (!ctx.config.allowWrites) {
+				return errorResult(
+					"Writes are disabled. Turn on write access in Vayu Settings → MCP to allow this."
+				);
+			}
+			const environmentId = requireStr(args, "environmentId");
+			const vars = args.variables;
+			if (!vars || typeof vars !== "object" || Array.isArray(vars)) {
+				return errorResult('"variables" must be an object mapping names to values.');
+			}
+			// Fetch the current env so we merge (upsert replaces the whole blob) and
+			// keep the existing name (which the engine requires).
+			let existing: Record<string, unknown>;
+			try {
+				existing = ((await ctx.client.getEnvironment(environmentId, signal)) ??
+					{}) as Record<string, unknown>;
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			const mergedVars: Record<string, unknown> =
+				existing.variables && typeof existing.variables === "object"
+					? { ...(existing.variables as Record<string, unknown>) }
+					: {};
+			for (const [key, value] of Object.entries(vars as Record<string, string>)) {
+				mergedVars[key] = { value: String(value), enabled: true };
+			}
+			const payload: Record<string, unknown> = {
+				id: environmentId,
+				name: str(args, "name") ?? (typeof existing.name === "string" ? existing.name : ""),
+				variables: mergedVars,
+			};
+			return callEngine(() => ctx.client.upsertEnvironment(payload, signal));
+		},
+	},
+	{
+		name: "run_collection_smoke",
+		category: "write",
+		description:
+			"Execute every saved request in a collection once and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing). Each request's host must be on the allowlist; requests whose host cannot be verified (e.g. unresolved {{variables}} and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
+		readOnly: false,
+		annotations: {
+			title: "Run collection smoke test",
+			readOnlyHint: false,
+			destructiveHint: true,
+			openWorldHint: true,
+		},
+		inputSchema: {
+			collectionId: z.string().describe("Collection whose requests to run."),
+			environmentId: z
+				.string()
+				.optional()
+				.describe("Environment for variable resolution during execution."),
+		},
+		outputSchema: smokeResultSchema,
+		handler: async (args, ctx, signal) => {
+			const collectionId = requireStr(args, "collectionId");
+			const environmentId = str(args, "environmentId");
+			let requests: unknown;
+			try {
+				requests = await ctx.client.listRequests(collectionId, signal);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			const list = Array.isArray(requests) ? requests : [];
+			const results: Array<Record<string, unknown>> = [];
+			let passed = 0;
+			let failed = 0;
+			let skipped = 0;
+
+			for (const item of list) {
+				const req = (item ?? {}) as Record<string, unknown>;
+				const name = String(req.name ?? req.id ?? "request");
+				const method = String(req.method ?? "GET");
+				const url = String(req.url ?? "");
+
+				const gate = checkAllowlist(url, ctx.config);
+				if (!gate.ok) {
+					results.push({
+						name,
+						method,
+						url,
+						ok: false,
+						skipped: true,
+						reason: gate.error,
+					});
+					skipped++;
+					continue;
+				}
+				try {
+					const payload: Record<string, unknown> = { method, url };
+					if (req.headers) payload.headers = req.headers;
+					if (req.body) payload.body = req.body;
+					if (typeof req.id === "string") payload.requestId = req.id;
+					if (environmentId) payload.environmentId = environmentId;
+					const resp = ((await ctx.client.executeRequest(payload, signal)) ??
+						{}) as Record<string, unknown>;
+					const code =
+						typeof resp.status === "number"
+							? resp.status
+							: typeof resp.statusCode === "number"
+								? resp.statusCode
+								: 0;
+					const testsOk = Array.isArray(resp.testResults)
+						? (resp.testResults as Array<{ passed?: boolean }>).every(
+								(t) => t.passed !== false
+							)
+						: true;
+					const ok = code >= 200 && code < 400 && testsOk;
+					results.push({ name, method, url, ok, statusCode: code });
+					if (ok) passed++;
+					else failed++;
+				} catch (err) {
+					results.push({
+						name,
+						method,
+						url,
+						ok: false,
+						error: err instanceof Error ? err.message : String(err),
+					});
+					failed++;
+				}
+			}
+
+			return structuredResult({
+				collectionId,
+				total: list.length,
+				passed,
+				failed,
+				skipped,
+				results,
+			});
 		},
 	},
 	{

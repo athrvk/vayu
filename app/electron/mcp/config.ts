@@ -37,10 +37,11 @@ export interface McpSafetyConfig {
 	/** Hard ceiling on a load run's duration, in seconds. */
 	maxDurationSeconds: number;
 	/**
-	 * Gates config-mutating tools (currently `update_engine_config`). When false
-	 * (default), those tools refuse. It does **not** gate `run_request` or load
-	 * runs — those are governed by the allowlist, the hard caps, and the load-run
-	 * confirmation gate independently.
+	 * Gates data-mutating tools (`create_request`, `update_environment`,
+	 * `update_engine_config`). When false (default), those tools refuse. It does
+	 * **not** gate traffic-sending tools (`run_request`, `run_collection_smoke`)
+	 * or load runs — those are governed by the allowlist, the hard caps, and the
+	 * load-run confirmation gate independently.
 	 */
 	allowWrites: boolean;
 	/**

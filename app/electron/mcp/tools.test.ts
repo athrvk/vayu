@@ -25,6 +25,13 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		getLiveMetricsSnapshot: vi.fn().mockResolvedValue([{ currentRps: 100 }]),
 		getConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "8" }] }),
 		updateConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "16" }] }),
+		createRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "New" }),
+		getEnvironment: vi.fn().mockResolvedValue({
+			id: "env_1",
+			name: "Dev",
+			variables: { baseUrl: { value: "x", enabled: true } },
+		}),
+		upsertEnvironment: vi.fn().mockResolvedValue({ id: "env_1", name: "Dev" }),
 		...overrides,
 	} as unknown as EngineClient;
 }
@@ -102,6 +109,107 @@ describe("engine config tools", () => {
 		);
 		expect(res.isError).toBeFalsy();
 		expect(client.updateConfig).toHaveBeenCalledWith({ entries: { workers: "16" } }, undefined);
+	});
+});
+
+describe("data-write tools", () => {
+	test("create_request is refused when writes are disabled", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"create_request",
+			{ collectionId: "c1", name: "New", url: "https://api.example.com" },
+			ctxWith(client, { allowWrites: false })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.createRequest).not.toHaveBeenCalled();
+	});
+
+	test("create_request builds the payload (headers/body) when writes are enabled", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"create_request",
+			{
+				collectionId: "c1",
+				name: "New",
+				url: "https://api.example.com/x",
+				method: "POST",
+				headers: { "X-A": "1" },
+				body: '{"a":1}',
+				bodyType: "json",
+			},
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).toMatchObject({
+			collectionId: "c1",
+			name: "New",
+			method: "POST",
+			url: "https://api.example.com/x",
+			headers: [{ key: "X-A", value: "1", enabled: true }],
+			body: { type: "json", content: '{"a":1}' },
+		});
+	});
+
+	test("update_environment merges variables and preserves the existing name", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", variables: { apiKey: "secret" } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.upsertEnvironment as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).toMatchObject({
+			id: "env_1",
+			name: "Dev",
+			variables: {
+				baseUrl: { value: "x", enabled: true },
+				apiKey: { value: "secret", enabled: true },
+			},
+		});
+	});
+
+	test("update_environment is refused when writes are disabled", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", variables: { a: "b" } },
+			ctxWith(client, { allowWrites: false })
+		);
+		expect(res.isError).toBe(true);
+		expect(client.upsertEnvironment).not.toHaveBeenCalled();
+	});
+});
+
+describe("run_collection_smoke", () => {
+	test("runs each request and reports pass/fail; skips off-allowlist hosts", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{ id: "r1", name: "ok", method: "GET", url: "https://api.example.com/ok" },
+				{ id: "r2", name: "bad", method: "GET", url: "https://api.example.com/bad" },
+				{ id: "r3", name: "offlist", method: "GET", url: "https://evil.test/x" },
+			]),
+			executeRequest: vi
+				.fn()
+				.mockResolvedValueOnce({ status: 200, testResults: [] })
+				.mockResolvedValueOnce({ status: 500, testResults: [] }),
+		});
+		const res = await dispatchTool(
+			"run_collection_smoke",
+			{ collectionId: "c1" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const summary = res.structuredContent as {
+			total: number;
+			passed: number;
+			failed: number;
+			skipped: number;
+		};
+		expect(summary).toMatchObject({ total: 3, passed: 1, failed: 1, skipped: 1 });
+		// The off-allowlist request was never executed.
+		expect((client.executeRequest as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
 	});
 });
 
