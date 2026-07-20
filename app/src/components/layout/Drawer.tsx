@@ -41,7 +41,7 @@ export function Drawer() {
 
 	return (
 		<div className="relative flex shrink-0 bg-panel" style={{ width }}>
-			<div className="flex-1 overflow-hidden flex flex-col min-w-0">
+			<div className="panel-clip flex-1 overflow-hidden flex flex-col min-w-0">
 				{drawerView === "collections" && <CollectionTree />}
 				{drawerView === "history" && <HistoryList />}
 				{drawerView === "variables" && (

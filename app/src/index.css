@@ -455,6 +455,16 @@
 			border-color 150ms ease,
 			opacity 150ms ease;
 	}
+
+	/*
+	 * Rows inside a clipping panel: an outset ring is cut off by the ancestor's
+	 * overflow, so tuck it inward. Put .panel-clip on the element carrying the
+	 * overflow-* and every focusable descendant inherits this.
+	 */
+	:where(.panel-clip)
+		:where(button, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+		outline-offset: -2px;
+	}
 }
 
 /* Custom scrollbar */

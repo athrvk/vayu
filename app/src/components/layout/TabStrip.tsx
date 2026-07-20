@@ -151,7 +151,7 @@ export function TabStrip() {
 	return (
 		<div
 			role="tablist"
-			className="flex h-full min-w-0 items-stretch overflow-x-auto"
+			className="panel-clip flex h-full min-w-0 items-stretch overflow-x-auto"
 			// Tabs and the "+" button stay clickable; the slack to their right is
 			// left as a drag region by the parent so the window can be moved.
 			style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
