@@ -8,13 +8,7 @@
 import { FolderOpen, Clock, Zap, PanelRight, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
-import {
-	useLayoutStore,
-	useEngineStore,
-	useSaveStore,
-	useTabsStore,
-	type DrawerView,
-} from "@/stores";
+import { useLayoutStore, useEngineStore, useSaveStore, type DrawerView } from "@/stores";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui";
 
 interface DrawerButton {
@@ -42,6 +36,12 @@ const DRAWER_BUTTONS: DrawerButton[] = [
 		icon: <Zap size={15} />,
 		label: "Variables",
 		shortcut: formatChord({ mod: true, shift: true, key: "U" }),
+	},
+	{
+		view: "settings",
+		icon: <Settings size={15} />,
+		label: "Settings",
+		shortcut: formatChord({ mod: true, key: "," }),
 	},
 ];
 
@@ -80,7 +80,6 @@ export function Dock() {
 		useLayoutStore();
 	const { isEngineConnected } = useEngineStore();
 	const { status: saveStatus } = useSaveStore();
-	const { openTab } = useTabsStore();
 
 	return (
 		<TooltipProvider>
@@ -132,13 +131,6 @@ export function Dock() {
 						tooltip={`Toggle context bar (${formatChord({ mod: true, key: "I" })})`}
 					>
 						<PanelRight size={15} />
-					</DockButton>
-					<DockButton
-						active={false}
-						onClick={() => openTab({ type: "settings", entityId: null })}
-						tooltip={`Settings (${formatChord({ mod: true, key: "," })})`}
-					>
-						<Settings size={15} />
 					</DockButton>
 				</div>
 			</div>

@@ -20,10 +20,11 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 ├── <UpdateBanner />
 └── <Shell />                            // components/layout/Shell.tsx - tab-centric layout with drawer + context bar
     ├── <ImportModal />                  // modules/collections/ImportModal.tsx - global overlay, open-state in a store
-    ├── <Drawer />                       // components/layout/Drawer.tsx - resizable 220–480px; switches between views
+    ├── <Drawer />                       // components/layout/Drawer.tsx - resizable 220–480px; single left nav; switches views
     │   ├── <CollectionTree />           //   collections view (default)
     │   ├── <HistoryList />              //   history view
-    │   └── <VariablesCategoryTree />    //   variables view
+    │   ├── <VariablesCategoryTree />    //   variables view
+    │   └── <SettingsCategoryTree />     //   settings view
     ├── main content (switched on active tab type)
     │   ├── <WelcomeScreen />            // type="welcome"     modules/welcome/
     │   ├── <RequestBuilder />           // type="request"     modules/request-builder/
@@ -31,7 +32,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
     │   ├── <LoadTestDashboard />        // type="dashboard"   modules/dashboard/
     │   ├── <HistoryDetail />            // type="run"         modules/history/main/
     │   ├── <VariablesMain />            // type="variables"   modules/variables/main/
-    │   └── <SettingsMain />             // type="settings"    modules/settings/main/ (with SettingsCategoryTree sidebar)
+    │   └── <SettingsMain />             // type="settings"    modules/settings/main/ (content pane; tree is in the Drawer)
     ├── <ContextBar />                   // components/layout/ContextBar.tsx - 252px; request tabs only; push ≥1200px / overlay <1200px
     └── <Dock />                         // components/layout/Dock.tsx - drawer view switchers + engine/save status + toggles
 ```
@@ -69,19 +70,25 @@ Horizontal row of open tabs plus a "+" button. Reads from `useTabsStore` (open t
 
 Main layout: tab-centric with resizable drawer, split/overlay context bar, and docked footer.
 
-- **Keyboard handlers:** mounts global key listeners for ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U (drawer views), ⌘I (toggle context bar), ⌘, (settings).
+- **One uniform layout for every tab** — `Drawer` (left) + main content + `ContextBar` (right). No tab type takes over the row. This is deliberate: the Dock's drawer switchers always have a Drawer to act on, so they can never be dead. (Settings used to full-take-over and suppress the Drawer, which left those buttons doing nothing while Settings was open.)
+- **Left navigation is always the Drawer.** Every main view that needs a category/entity list uses the shared Drawer for it — never its own left rail. `SettingsMain` and `VariablesMain` are pure content panes; their category trees live in the Drawer (`settings` / `variables` views). Follow this pattern for any new view — do not add a second sidebar inside the main area.
+- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab).
 - **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
-- **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Renders the appropriate screen module; default is `WelcomeScreen`.
+- **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
+- **Drawer-view sync:** an effect points the Drawer at the view matching the active tab — `variables`→variables, `settings`→settings, `request`/`collection`→collections — and opens it.
 - **ContextBar mode:** picks "push" (≥1200px width) or "overlay" based on window width. Context bar is request-tab–only.
 - **`<ImportModal />`** mounted once as a global overlay; visibility in a dedicated store.
 
 ### `Drawer` (`components/layout/Drawer.tsx`)
 
-Resizable sidebar (220–480px default, per view). One of three views per `useLayoutStore.drawerView`:
+Resizable sidebar (220–480px default, per view). The single left navigation for the whole app — one of four views per `useLayoutStore.drawerView`:
 
 - **`collections`** - `CollectionTree` (hierarchical collections + requests).
 - **`history`** - `HistoryList` (past runs, filtered/sorted).
 - **`variables`** - `VariablesCategoryTree` (variable scopes: globals, collections, environments).
+- **`settings`** - `SettingsCategoryTree` (app + engine setting categories).
+
+Both `variables` and `settings` follow the same nav/content split: the tree lives here in the Drawer, the editor is the corresponding tab (`VariablesMain` / `SettingsMain`), and selecting a category sets the shared store selection **and** opens/focuses that tab.
 
 Resize handle on the right edge (double-click resets to defaults). Visibility toggled by `toggleDrawer()` or ⌘B.
 
@@ -98,9 +105,9 @@ Resize handle on the right edge (double-click resets to defaults). Visibility to
 
 Footer bar (h-8, shrink-0). Horizontal layout:
 
-- **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U). Active state highlights when drawer is open and matching view.
+- **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U), Settings (⌘,). Each activates its Drawer view; active state highlights when the drawer is open on that view. Settings sits here too because it is now a Drawer view like the rest.
 - **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved / error), app version.
-- **Right - toggles:** Context bar toggle (⌘I), Settings (⌘,).
+- **Right - toggles:** Context bar toggle (⌘I).
 
 ## Request Builder (`modules/request-builder/`)
 
@@ -226,7 +233,9 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 
 ## Settings (`modules/settings/`)
 
-- **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** - settings category navigation.
+Same nav/content split as Variables: the category tree renders in the **Drawer** (`settings` view), not inside the settings tab. Selecting a category sets `useSettingsStore.selectedCategory` **and** opens the settings tab, so `SettingsMain` shows that panel. There is no `SettingsLayout` two-pane wrapper anymore — the Drawer is the left pane.
+
+- **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** - settings category navigation; rendered by the Drawer.
 - **Main (`main/`)** - `SettingsMain.tsx` (screen `"settings"`) hosts the app-settings category panels under `main/panels/`: `AppearancePanel.tsx`, `DashboardPanel.tsx`, `GeneralPanel.tsx`, and `EditorPanel.tsx`, plus the shared `ClientSettingsPanel.tsx` wrapper, `FontPicker.tsx`, and `SettingControls.tsx` primitives. `app-panels.ts` is the panel registry/metadata. (The former monolithic `UISettingsPanel.tsx` was split into these panels in PR #55.)
 
 ## Welcome (`modules/welcome/`)

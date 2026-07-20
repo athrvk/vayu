@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
+import { SettingsCategoryTree } from "@/modules/settings";
 
 export function Drawer() {
 	const { drawerOpen, drawerView, drawerWidths, setDrawerWidth } = useLayoutStore();
@@ -49,6 +50,11 @@ export function Drawer() {
 							collections={collections}
 							environments={environments}
 						/>
+					</ScrollArea>
+				)}
+				{drawerView === "settings" && (
+					<ScrollArea className="h-full w-full">
+						<SettingsCategoryTree />
 					</ScrollArea>
 				)}
 			</div>

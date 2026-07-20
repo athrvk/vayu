@@ -15,7 +15,7 @@ import {
 	PANEL_MAX_WIDTH,
 } from "@/constants/layout";
 
-export type DrawerView = "collections" | "history" | "variables";
+export type DrawerView = "collections" | "history" | "variables" | "settings";
 
 interface LayoutState {
 	// Drawer

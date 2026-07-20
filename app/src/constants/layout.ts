@@ -14,6 +14,7 @@ export const DEFAULT_DRAWER_WIDTHS = {
 	collections: 260,
 	history: 320,
 	variables: 260,
+	settings: 260,
 } as const;
 
 /** Default width of the right context bar (px). */
