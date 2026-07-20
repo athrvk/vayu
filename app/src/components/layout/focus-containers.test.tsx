@@ -49,6 +49,13 @@ describe("focus containers", () => {
 		expect(src).toMatch(/["'`]focus-row\s+flex/);
 	});
 
+	// The disclosure chevron toggles expansion rather than opening the
+	// collection, so it keeps its own ring and opts out of lighting the row.
+	// Without focus-self both indicators show at once.
+	it("keeps focus-self on the disclosure chevron", () => {
+		expect(collectionItemSrc).toMatch(/["'`]focus-self\s+flex/);
+	});
+
 	it("keeps tabs reachable by keyboard and close controls out of tab order", () => {
 		useTabsStore.setState({
 			openTabs: [{ id: "t1", type: "welcome", entityId: null }],

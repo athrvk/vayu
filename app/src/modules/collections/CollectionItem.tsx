@@ -158,7 +158,10 @@ export default function CollectionItem({
 				<button
 					onClick={handleToggleClick}
 					className={cn(
-						"flex items-center justify-center w-7 h-7 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+						// focus-self: this toggles expansion rather than opening the
+						// collection, so it keeps its own ring instead of lighting
+						// up the whole row.
+						"focus-self flex items-center justify-center w-7 h-7 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
 						isSelected
 							? "text-primary/90 hover:text-primary"
 							: "text-muted-foreground hover:text-foreground"

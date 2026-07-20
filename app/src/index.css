@@ -480,14 +480,23 @@
 	 * Only needed where control and row genuinely differ. Full-width rows (the
 	 * history, variables and settings trees) are their own target and use the
 	 * baseline above.
+	 *
+	 * The indicator deliberately mirrors the disclosure chevron's own ring
+	 * (ring-2 ring-primary/30) and the selected-row ring (ring-1 ring-inset
+	 * ring-primary/20), so focus, selection and hover speak one language.
+	 * `outline` rather than box-shadow: Tailwind's ring utilities own box-shadow,
+	 * and a selected row already sets one, which would override this.
+	 *
+	 * Auxiliary controls inside the row that are their own target — the chevron
+	 * toggles expansion rather than opening the collection — opt out with
+	 * .focus-self and keep their own ring, so only one indicator ever shows.
 	 */
-	:where(.focus-row):has(:focus-visible) {
-		outline: 1px solid hsl(var(--ring));
-		outline-offset: -1px;
-		background-color: hsl(var(--accent));
+	:where(.focus-row):has(:focus-visible:not(.focus-self)) {
+		outline: 2px solid hsl(var(--primary) / 0.3);
+		outline-offset: -2px;
 	}
 
-	.focus-row :focus-visible {
+	.focus-row :focus-visible:not(.focus-self) {
 		outline: none;
 	}
 }

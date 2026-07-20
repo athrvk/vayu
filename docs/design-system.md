@@ -445,13 +445,23 @@ and adds the same accent fill hover uses, which is how native list selection
 reads. The inner control draws nothing.
 
 ```css
-:where(.focus-row):has(:focus-visible) {
-  outline: 1px solid hsl(var(--ring));
-  outline-offset: -1px;
-  background-color: hsl(var(--accent));
+:where(.focus-row):has(:focus-visible:not(.focus-self)) {
+  outline: 2px solid hsl(var(--primary) / 0.3);
+  outline-offset: -2px;
 }
-.focus-row :focus-visible { outline: none; }
+.focus-row :focus-visible:not(.focus-self) { outline: none; }
 ```
+
+The indicator mirrors the disclosure chevron's own ring (`ring-2
+ring-primary/30`) and the selected-row ring (`ring-1 ring-inset
+ring-primary/20`) so focus, selection and hover speak one language. It uses
+`outline` rather than `box-shadow` because Tailwind's ring utilities own
+`box-shadow` — a selected row already sets one, which would override it.
+
+**Auxiliary controls opt out with `.focus-self`.** A control inside the row that
+is its own target — the chevron toggles expansion rather than opening the
+collection — keeps its own ring and does not light the row, so exactly one
+indicator ever shows.
 
 Currently on `CollectionItem` and `RequestItem` rows. **Only needed where the
 control and the row genuinely differ** — the history, variables and settings
