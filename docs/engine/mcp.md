@@ -1,308 +1,40 @@
-# Vayu MCP Server — Design & Decisions
+# Vayu MCP Server
 
-> **Status:** Implemented (V1 + V2 tools). A TypeScript MCP server is hosted in
-> the Electron main process (`app/electron/mcp/`), exposing Vayu to agents like
-> Claude Code, Codex, and Cursor over Streamable HTTP. This document captures the
-> design and decisions behind it.
+**Endpoint:** `http://127.0.0.1:9877/mcp` (Streamable HTTP) · **Also:** stdio CLI
 
-## Vision (locked)
+Vayu exposes its engine to AI agents (Claude Code, Cursor, VS Code, Codex, Zed)
+through a [Model Context Protocol](https://modelcontextprotocol.io) server. The
+server is TypeScript, hosted in the Electron main process, built on the official
+[`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk),
+and proxies the engine's REST API on `:9876`. The **C++ engine is not modified** —
+the MCP layer is Apache-2.0 like the rest of the app.
 
-**MCP is a capability Vayu hosts, not a separate product to run.** Once Vayu is
-running, any agent (Claude Code, Cursor, Zed, Claude Desktop) opts in with **one
-command** — no install, no extra process to spawn, no lifecycle to manage. If
-Vayu is up, the tools are live; if not, the agent gets a clean "start Vayu"
-error.
+Once Vayu is running, any agent opts in with one command; if Vayu is down, the
+agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`](../../SECURITY.md).
 
-The deliverable is not "an MCP server" users run — it is an **MCP capability the
-app already exposes**, that any agent opts into with a single command.
+## Overview
 
-## Architecture decision (locked): TypeScript sidecar in the Electron main process
+- **Hosted in the app.** MCP is a capability the running app exposes, not a
+  separate process to manage. It is started and stopped alongside the engine
+  sidecar by `app/electron/main.ts`, best-effort (a bind failure logs and the app
+  continues without it).
+- **Proxy, not a second source of truth.** Every tool maps to an existing engine
+  endpoint via a thin `fetch` client (`engine-client.ts`). The main process
+  cannot import the renderer's `@/services`, so this client is standalone.
+- **Local-only.** Binds `127.0.0.1`, with Host-header (DNS-rebinding) validation
+  on `/mcp`.
+- **Configurable from Settings.** Server on/off, the allowlist, caps, the write
+  toggle, and per-tool switches live in **Settings → MCP** and persist across
+  restarts.
 
-MCP is served by a **TypeScript server hosted inside the Electron main process**,
-using the **official [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk)**,
-over **Streamable HTTP** on a fixed local port (`:9877/mcp`). It proxies to the
-engine's existing REST API on `:9876`. The C++ engine is **not modified**.
+## Connecting
 
-| #   | Decision                                                                                                                                                                                                                                                                |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | Build MCP by exposing Vayu's existing engine capabilities as MCP tools.                                                                                                                                                                                                 |
-| D2  | **TypeScript, official `@modelcontextprotocol/sdk`.** First-party and actively maintained — it tracks spec churn for us. No bet on a pre-1.0 community SDK.                                                                                                             |
-| D3  | **Streamable HTTP transport at `/mcp` on a dedicated local port (`:9877`).** Keeps the one-command, connect-to-already-running-Vayu property.                                                                                                                           |
-| D4  | **Hosted in the Electron main process**, managed like the existing `EngineSidecar` (see `app/electron/main.ts`). Node is already the Electron runtime — no new toolchain.                                                                                               |
-| D5  | **Proxies the engine REST API** (`http://127.0.0.1:9876`) via `fetch`. Reuses the engine's REST contract; shares TS request/response types where the main/renderer build boundary allows (main cannot import renderer `@/services`), otherwise a thin main-side client. |
-| D6  | **Local-only, `127.0.0.1`.**                                                                                                                                                                                                                                            |
-| D7  | Safety rails are **MVP-gating, not polish** (an LLM driving a traffic generator is the one real risk). Enforced in the MCP layer.                                                                                                                                       |
-| D8  | **Engine stays untouched** → the MCP layer is Apache-2.0, like the rest of the app. No changes to the AGPL engine surface.                                                                                                                                              |
-| D9  | **Origin/Host header validation on `/mcp` is MVP-gating** — MCP spec-mandated, prevents DNS-rebinding from a browser tab hitting `127.0.0.1:9877`.                                                                                                                      |
-
-### Why TS sidecar over in-engine C++
-
-We seriously considered hosting MCP inside the C++ engine (zero hop, single
-binary). The deciding factor: **there is no official C++ SDK**, so in-engine
-means either owning the protocol in C++ or betting on a pre-1.0, single-org
-community lib — right as the spec is churning fast (the
-[2026-07-28 RC](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
-removed the GET stream endpoint and protocol-level sessions and added
-`Mcp-Method`/`Mcp-Name` routing headers). The official TS SDK absorbs that churn.
-
-|                         | Electron TS sidecar (**chosen**)                | In-engine C++ (considered)                |
-| ----------------------- | ----------------------------------------------- | ----------------------------------------- |
-| Spec-churn maintenance  | Official SDK tracks it                          | We own it, or bet on a beta community lib |
-| Dependency risk         | First-party, battle-tested                      | pre-1.0, single-org                       |
-| Runtime                 | Node already in Electron                        | native                                    |
-| Engine code changes     | **None**                                        | New routes in the AGPL engine             |
-| Type reuse              | Shares app TS types (build boundary permitting) | Calls engine internals directly           |
-| Latency                 | One local hop (same hop the UI makes)           | Zero hop — _marginal_ locally             |
-| "Vayu is running" means | The **app** is open                             | The **engine** is up (works headless)     |
-
-The one real tradeoff accepted: MCP is up when the **app** is open, not
-engine-only. For the target user (desktop Vayu + Claude Code) that is no
-different — the app is the thing they open. In-engine's only edge is a
-headless/engine-only deployment, which is out of V1 scope and is better covered
-later by a standalone `vayu mcp` Node CLI that reuses the _same_ TS server code
-(see "Considered & deferred").
-
-### SDK landscape (as of research)
-
-**No official MCP C++ SDK exists.** Official SDKs: **TypeScript** (chosen),
-Python, Go, C#/.NET, Kotlin, Java, Swift, Ruby, Rust. The C++ community options
-below were surveyed while considering in-engine hosting and are **deferred**, not
-adopted:
-
-| Option                                                              | Transport fit                            | Notes                                                                                                                                                 |
-| ------------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`mcp-cpp`](https://github.com/Neumann-Labs/mcp-cpp) (Neumann-Labs) | Streamable HTTP + stdio                  | Best-fit C++ option: `cpp-httplib` + `nlohmann-json`, Apache-2.0, GTest, C++20. Beta, single-org — kept as the reference if in-engine is ever needed. |
-| [`cpp-mcp`](https://github.com/hkr04/cpp-mcp) (hkr04)               | stdio + **old deprecated** HTTP+SSE only | No Streamable HTTP.                                                                                                                                   |
-| [`gopher-mcp`](https://github.com/GopherSecurity/gopher-mcp)        | HTTP                                     | Own networking/event layer would fight engine internals. Rejected.                                                                                    |
-
-## Onboarding (locked)
+Ensure Vayu is running, then register the endpoint once per machine. In the app,
+**Settings → MCP** offers a one-click **Connect** for Claude Code and VS Code
+(shells out to their CLIs) and copyable snippets for the rest.
 
 ```bash
-# one time, per machine
-claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
-```
-
-- Non-CLI: a **"Connect to Claude Code" button** in the app writes that config
-  and prints the URL for other agents.
-- The same URL works across all Streamable-HTTP clients (see compatibility below).
-- Requires the Vayu app to be running when the client connects.
-
-## Client compatibility & config (researched)
-
-MCP defines three transports: **stdio**, **Streamable HTTP**, and the legacy
-**HTTP+SSE** (deprecated in spec 2025-03-26 — we do **not** build for it).
-Streamable HTTP is the modern remote/multi-client transport and is the right fit
-for our always-running-app model. Support as of mid-2026:
-
-| Client                                         | stdio | Streamable HTTP                      | Legacy SSE    | Config location                                        | `url`-based entry works? |
-| ---------------------------------------------- | ----- | ------------------------------------ | ------------- | ------------------------------------------------------ | ------------------------ |
-| **Claude Code**                                | ✅    | ✅ (`http`, alias `streamable-http`) | ⚠️ deprecated | `.mcp.json`, `~/.claude.json`, `claude mcp add(-json)` | ✅                       |
-| **OpenAI Codex** (CLI / ChatGPT desktop / IDE) | ✅    | ✅                                   | ❌            | `~/.codex/config.toml`, `.codex/config.toml` (TOML)    | ✅                       |
-| **Cursor**                                     | ✅    | ✅                                   | ⚠️            | `.cursor/mcp.json`, `~/.cursor/mcp.json`               | ✅                       |
-| **Zed**                                        | ✅    | ❌ **not yet**                       | ⚠️            | `context_servers` in settings                          | ❌ — stdio only          |
-
-**Takeaway:** our fixed-port Streamable HTTP endpoint covers Claude Code, Codex,
-and Cursor with a single URL — no per-client server variants. **Zed is the lone
-exception** (no Streamable HTTP yet); it needs a stdio entry, which the deferred
-`vayu mcp` Node CLI (stdio mode) covers when we choose to support it.
-
-Concrete entries for the same `:9877/mcp` endpoint:
-
-```bash
-# Claude Code
-claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
-```
-
-```json
-// Claude Code (.mcp.json) / Cursor (.cursor/mcp.json)
-{
-  "mcpServers": {
-    "vayu": { "type": "http", "url": "http://127.0.0.1:9877/mcp" }
-  }
-}
-```
-
-```toml
-# Codex (~/.codex/config.toml) — presence of `url` selects Streamable HTTP
-[mcp_servers.vayu]
-url = "http://127.0.0.1:9877/mcp"
-```
-
-## Protocol surface
-
-Built on the SDK's high-level **`McpServer`** (`server.ts`), so JSON-RPC framing,
-the `initialize` handshake, and capability negotiation are handled for us. What
-we use:
-
-- **`tools/*`** — the tool set below, registered via `registerTool` with **Zod**
-  input schemas (arguments validated by the SDK before the handler runs) and MCP
-  **tool annotations** (`readOnlyHint` / `destructiveHint` / `idempotentHint` /
-  `openWorldHint` + a display `title`) so clients can gate auto-approval.
-- **Structured output** — tools with a natural shape (`get_engine_health`,
-  `compare_runs`) declare an `outputSchema` and return validated
-  `structuredContent` alongside the text rendering.
-- **Elicitation** — `start_load_run` asks the human to confirm via the client
-  (`server.elicitInput`) when the client negotiated the `elicitation` capability;
-  otherwise it falls back to the `confirmed: true` flag. Elicitation needs a
-  bidirectional channel, so it works on stdio and in-memory transports; on the
-  stateless JSON HTTP host (no server→client push) the flag fallback is used.
-- **`tools/list_changed`** — advertised by `McpServer` (the capability is on);
-  effective for stdio, and a no-op push-wise on the stateless HTTP host.
-- **Cancellation** — each tool call's `AbortSignal` (`extra.signal`) is threaded
-  into the engine `fetch`, so a client cancelling an in-flight `run_request` /
-  `start_load_run` actually aborts the underlying engine call (combined with the
-  client's own per-request timeout via `AbortSignal.any`).
-- **Server identity** — the server's `Implementation` carries `title` ("Vayu"),
-  a one-paragraph `description` of what Vayu is, and `websiteUrl`, alongside the
-  `instructions`, so a connecting agent knows what it's talking to.
-- **Resources** (`resources/*`, `resources.ts`) — read-only Vayu data an agent
-  can attach as context: static `vayu://runs`, `vayu://collections`,
-  `vayu://environments`, `vayu://config`, and a templated
-  `vayu://run/{runId}/report` with a `list` callback (enumerate recent runs) and
-  a `complete` callback (autocomplete run IDs — MCP completions).
-- **Prompts** (`prompts/*`, `prompts.ts`) — server-provided starting points the
-  user picks from their client: `summarize_run`, `compare_runs`,
-  `diagnose_errors` (each embeds the relevant report/comparison inline) and
-  `suggest_load_profile` (guidance, no engine data).
-
-Not used: sampling, roots, logging, sessions, OAuth (see "Considered & deferred").
-
-## Safety model (locked approach)
-
-Enforced in the TS MCP layer (configurable from app Settings):
-
-- **Target allowlist** (default empty) — network-touching tools refuse off-list
-  hosts with an actionable error. An **"Allow all hosts"** opt-in bypasses the
-  list (still rejects unresolved `{{variables}}`); off by default. **Enforcement.**
-- **Hard caps** — max RPS / concurrency / duration; over-cap requests rejected.
-  **Enforcement** — with the allowlist these are the real limits on generated load.
-- **Confirmation gate** on load-run start — prevents an _accidental_ start (a
-  stray tool call), but it is agent-side (the same model can send the second
-  call), so it is anti-accident, not anti-adversary. The caps/allowlist are the
-  enforcement. A stronger version would use MCP elicitation to ask the human.
-- **Config writes off by default** — `update_engine_config` is refused unless the
-  user enables config writes. Does **not** gate `run_request` or load runs.
-- **Per-tool control** — any tool or read/write/load category can be switched
-  off; disabled tools are omitted from `tools/list` and rejected by `tools/call`.
-- **Server on/off** — the MCP server can be disabled entirely from Settings; the
-  preference persists, and while off the endpoint is unavailable.
-- MCP-originated runs tagged so the History view shows "started via MCP."
-
-The server toggle, allowlist (incl. allow-all), caps, config-write toggle, and
-per-tool switches are editable in **Settings → MCP** and persisted across
-restarts (see "Resolved: safety-config storage & UI").
-
-**Fixed port, fail-soft.** The endpoint is a fixed `127.0.0.1:9877` so the
-connect snippets/commands are stable across launches. A bind failure (port in
-use) is logged and the app continues without MCP rather than failing startup;
-Settings shows a "Stopped" state with a Retry. This fixed-port + fail-soft
-tradeoff is accepted deliberately.
-
-## Tool scope phasing
-
-### V1 — wedge (validate demand): read + single-shot execute
-
-| Tool                | Maps to                             |
-| ------------------- | ----------------------------------- |
-| `get_engine_health` | `GET /health`                       |
-| `list_collections`  | `GET /collections`                  |
-| `list_requests`     | `GET /requests?collectionId=`       |
-| `list_environments` | `GET /environments`                 |
-| `list_runs`         | `GET /runs`                         |
-| `get_run_report`    | `GET /run/:runId/report`            |
-| `get_engine_config` | `GET /config`                       |
-| `run_request`       | `POST /request` (allowlist applies) |
-
-### Configuration tools
-
-- `get_engine_config` — `GET /config` (read; the engine's tunables with value /
-  default / type / range).
-- `update_engine_config` — `POST /config`, **gated by the write toggle**
-  (`allowWrites`); the engine validates types/ranges and rejects the batch on any
-  invalid value.
-
-### Write tools
-
-- `create_request` — `POST /requests` (**write-toggle gated**); saves a request
-  into a collection. Not executed, so no allowlist check.
-- `update_environment` — fetch `GET /environments/:id`, merge the supplied
-  variables, `POST /environments` (**write-toggle gated**). The upsert replaces
-  the variables blob, so the merge preserves untouched variables and the name.
-- `run_collection_smoke` — `GET /requests?collectionId=` then one `POST /request`
-  per saved request; **allowlist-gated per host** (unverifiable hosts, e.g.
-  unresolved `{{variables}}` with allow-all off, are skipped). Returns a
-  structured pass/fail matrix (2xx-3xx status + all tests passing = pass). Sends
-  real traffic; does not modify Vayu data.
-
-### Tool categories & per-tool control
-
-Every tool carries a `category` (`read` / `write` / `load`). The Settings tool
-list groups them by category and lets the user switch any tool (or a whole
-category) off. A disabled tool is omitted from `tools/list` **and** rejected by
-`tools/call`, so control does not rely on client good behavior. The disabled set
-persists in `disabledTools`.
-
-### V2 — load testing (the real value)
-
-- `start_load_run` — `POST /run`, confirmation-gated, caps-enforced
-- `stop_run` — `POST /run/:runId/stop`
-- `get_live_metrics` — snapshot of last N ticks (not a stream; `tools/call` is
-  request/response)
-- `compare_runs` — server-side p50/p95/p99 / error-rate / status-mix diff
-  ("did my PR regress?" — highest agentic value)
-
-### V3 — ergonomics & reach
-
-- ~~MCP `prompts/`~~ — **shipped** (`prompts.ts`): `summarize_run`,
-  `compare_runs`, `diagnose_errors`, `suggest_load_profile`.
-- ~~MCP `resources/`~~ — **shipped** (`resources.ts`): `vayu://run/{runId}/report`
-  (templated, with list + completion) plus static `vayu://runs` /
-  `collections` / `environments` / `config`.
-- ~~`create_request` / `update_environment` (writes, behind settings flag)~~ —
-  **shipped**: both gated by the write toggle (`allowWrites`);
-  `update_environment` fetches + merges variables so partial updates don't wipe
-  the rest.
-- ~~`run_collection_smoke` (pass/fail matrix over a collection)~~ — **shipped**:
-  executes each saved request once (allowlist-gated per host) and returns a
-  structured pass/fail matrix (2xx-3xx + passing tests = pass).
-- Hosted MCP for Vayu Cloud, OAuth-gated (someday).
-
-## Implementation (as built)
-
-Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
-`EngineSidecar` (started in `app.whenReady()` via `startMcp()`, stopped on quit,
-with an `mcp:status` IPC handler mirroring `engine:status`). `MCP_HOST`/
-`MCP_PORT` (`127.0.0.1:9877`) and `MCP_ENDPOINT_URL` live in
-`app/electron/constants.ts`.
-
-| File               | Responsibility                                                               |
-| ------------------ | ---------------------------------------------------------------------------- |
-| `config.ts`        | `McpSafetyConfig` + safe defaults (empty allowlist, caps, no writes)         |
-| `safety.ts`        | Pure guards: allowlist, load caps, duration parsing (unit-tested)            |
-| `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot            |
-| `compare.ts`       | Pure two-report diff for `compare_runs` (unit-tested)                        |
-| `tools.ts`         | Tool registry + dispatch; applies guards, maps to engine calls (unit-tested) |
-| `server.ts`        | Builds the SDK `Server`, wires `tools/list` + `tools/call`                   |
-| `http.ts`          | Streamable HTTP host (stateless per-request, DNS-rebinding protection on)    |
-| `cli.ts`           | Standalone stdio server reusing the same registry (Zed / headless)           |
-| `index.ts`         | `VayuMcpService` facade consumed by `main.ts`                                |
-
-Notes:
-
-- **Stateless transport:** each POST `/mcp` gets a fresh `Server` + transport;
-  GET/DELETE return `405`. Suits a low-traffic local proxy, no session state.
-- **Engine client:** the Electron main process cannot import the renderer's
-  `@/services`, so `engine-client.ts` is a minimal standalone `fetch` wrapper.
-- **Best-effort startup:** an MCP bind failure logs and continues — it never
-  blocks the app or the engine.
-- **License:** Apache-2.0 (app). Engine untouched.
-
-## Setup
-
-Ensure Vayu is running, then register the endpoint once per machine:
-
-```bash
-# Claude Code
+# Claude Code (or click Connect in Settings → MCP)
 claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
 ```
 
@@ -318,9 +50,7 @@ claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
 ```json
 // VS Code (.vscode/mcp.json) — note the "servers" key
 {
-  "servers": {
-    "vayu": { "type": "http", "url": "http://127.0.0.1:9877/mcp" }
-  }
+  "servers": { "vayu": { "type": "http", "url": "http://127.0.0.1:9877/mcp" } }
 }
 ```
 
@@ -330,86 +60,267 @@ claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
 url = "http://127.0.0.1:9877/mcp"
 ```
 
-**Zed / headless / CI** (stdio, no Streamable HTTP): run the standalone server
-`node dist-electron/mcp/cli.js`. It honours `VAYU_ENGINE_URL` and
-`VAYU_MCP_ALLOWLIST` / `VAYU_MCP_ALLOW_ALL` / `VAYU_MCP_MAX_RPS` /
-`VAYU_MCP_MAX_CONCURRENCY` / `VAYU_MCP_MAX_DURATION_SECONDS` /
-`VAYU_MCP_ALLOW_WRITES` / `VAYU_MCP_DISABLED_TOOLS` (comma-separated tool names).
+### Client compatibility
 
-Safety defaults are conservative (empty allowlist ⇒ no outbound requests until a
-host is added). See `SECURITY.md`.
+MCP defines three transports: **stdio**, **Streamable HTTP**, and the legacy
+**HTTP+SSE** (deprecated; not built for). The fixed-port Streamable HTTP endpoint
+covers most clients with a single URL; Zed (stdio-only) uses the CLI below.
 
-## Considered & deferred
+| Client           | Streamable HTTP    | stdio | Config location                                 |
+| ---------------- | ------------------ | ----- | ----------------------------------------------- |
+| **Claude Code**  | ✅ (`http`)        | ✅    | `.mcp.json`, `~/.claude.json`, `claude mcp add` |
+| **Cursor**       | ✅                 | ✅    | `.cursor/mcp.json`, `~/.cursor/mcp.json`        |
+| **VS Code**      | ✅ (`servers` key) | ✅    | `.vscode/mcp.json`                              |
+| **OpenAI Codex** | ✅                 | ✅    | `~/.codex/config.toml`                          |
+| **Zed**          | ❌ not yet         | ✅    | `context_servers` (stdio CLI)                   |
 
-- **In-engine C++ over Streamable HTTP** (via `mcp-cpp`) — revisit only if an
-  engine-only deployment (no app, no Node) becomes a hard requirement.
-- **Stateful Streamable HTTP (server→client push over HTTP).** `list_changed`
-  and elicitation only work where the server can push to the client. On stdio
-  that channel exists, so both are live; on our **stateless** HTTP host it does
-  not, so tool toggles apply on the client's next `tools/list` and load-run
-  confirmation falls back to the `confirmed` flag. It is technically feasible to
-  make them live over HTTP by running **stateful**: a real `sessionIdGenerator`,
-  SSE responses, a held-open GET stream per session, persistent per-session
-  `McpServer`s, and fanning `RegisteredTool.enable()/.disable()` out to every
-  live session on a Settings toggle (plus making `ToolContext.config` a live
-  reference instead of the current fresh-per-POST snapshot). **Deferred**, for
-  two reasons: (1) the [2026-07-28 spec RC](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
-  **removed the GET stream endpoint and protocol-level sessions** — so this
-  builds on the exact mechanism the spec is deprecating, while our stateless
-  request/response design is aligned with where it's heading; and (2) the payoff
-  is client-dependent (only clients that open the GET stream benefit) and mostly
-  cosmetic — the stateless fallbacks are already _safe_, just not _live_.
-  Revisit once the spec's replacement for server→client messaging settles.
+## Transports
 
-## Resolved
+### Streamable HTTP (primary)
 
-- **V1 + V2 shipped together** in one branch (read, single-request execute, and
-  load tools) rather than a wedge-first split.
-- **Live metrics = bounded snapshot** (last N ticks, SSE read with a time
-  budget) — `tools/call` stays request/response.
-- **Allowlist granularity = per-host** for now.
-- **stdio CLI built** (`cli.ts`) to cover Zed and headless/CI.
+`http.ts` hosts the endpoint on `127.0.0.1:9877/mcp`. It is **stateless**: each
+`POST /mcp` gets a fresh SDK server + transport (`sessionIdGenerator: undefined`,
+`enableJsonResponse: true`); `GET`/`DELETE` return `405`; non-`/mcp` paths `404`.
+DNS-rebinding protection is on (Host must be `127.0.0.1:9877` / `localhost:9877`).
+The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
+take effect on the next request with no extra bookkeeping.
 
-## Open questions (still a call)
+### stdio CLI (Zed / headless / CI)
 
-1. **MCP-originated run tagging** — tag runs started via MCP so History shows
-   provenance (needs a small field on the run payload/metadata).
-2. **Packaging the stdio CLI** — expose it as a `vayu mcp` bin / documented
-   `node` entrypoint in the installer.
+`cli.ts` is a standalone stdio server that reuses the same server factory and
+tool registry. It is for stdio-only clients (Zed) and headless/CI. Run:
 
-### Resolved: safety-config storage & UI
+```bash
+node dist-electron/mcp/cli.js
+```
 
-The server toggle, allowlist (incl. allow-all), caps, and write toggle are now
-editable from **Settings → MCP** and persisted in the Electron main process
-(`electron-store`, `mcp-config.json`), so they survive a restart. The panel is a
-registered app-settings panel and also shows live connection status and the
-connect snippets (Claude Code / VS Code / Cursor / Codex). Flow:
+Configuration comes from environment variables (see [Configuration](#configuration)),
+since there is no Settings UI. It still requires a running engine.
 
-- `electron/mcp/store.ts` persists both the safety override and the
-  enabled/disabled preference. On startup `main.ts` skips `startMcp()` when
-  disabled, and otherwise merges the persisted override onto the safe defaults
-  and passes it to `VayuMcpService`.
-- `mcp:getSafety` / `mcp:updateSafety` read and apply safety changes;
-  `mcp:setEnabled` starts/stops the server live and persists the preference;
-  `mcp:status` reports `{ running, url, enabled }`. Renderer input is sanitized
-  in `main.ts` via `sanitizeSafetyInput` (normalizes + de-dupes hosts, clamps
-  caps, coerces the `allowAll` flag) before it is applied and written to disk.
-- **One-click connect.** For clients with an add-CLI, a **Connect** button
-  registers Vayu automatically: `mcp:connectClient` (`electron/mcp/connect.ts`)
-  shells out to `claude mcp add --transport http --scope user vayu <url>`
-  (Claude Code) or `code --add-mcp <json>` (VS Code). The binary is resolved
-  through a login shell (`command -v`) to survive a GUI app's stripped PATH,
-  then spawned with an argument array. If the CLI isn't installed it returns
-  `cli-not-found` and the UI falls back to the copy snippet. Cursor / Codex have
-  no add-CLI, so they stay copy-only.
-- The panel (`app/src/modules/settings/main/panels/McpSettingsPanel.tsx`) is
-  cards-only and auto-persisting, and talks to `window.electronAPI` directly
-  rather than the engine config query, since MCP config is app-level.
+### What is live on each transport
+
+Elicitation (human confirmation) and `tools/list_changed` (live tool-set updates)
+need a server→client channel, which exists on **stdio** but not on the stateless
+HTTP host. On HTTP they degrade gracefully: load-run confirmation falls back to a
+`confirmed: true` flag, and a tool toggle applies on the client's next
+`tools/list`. Both are safe on HTTP, just not instantaneous. See
+[Design notes](#design-notes).
+
+## Tools
+
+Every tool carries a `category` (surfaced in Settings for enable/disable), MCP
+**annotations** (`readOnlyHint` / `destructiveHint` / `idempotentHint` /
+`openWorldHint` + a display title), and a **Zod** input schema (arguments are
+validated by the SDK). A few declare an `outputSchema` and return validated
+`structuredContent` alongside the text rendering.
+
+| Tool                   | Category | Maps to                                      | Gate                       |
+| ---------------------- | -------- | -------------------------------------------- | -------------------------- |
+| `get_engine_health`    | read     | `GET /health` (structured)                   | —                          |
+| `list_collections`     | read     | `GET /collections`                           | —                          |
+| `list_requests`        | read     | `GET /requests?collectionId=`                | —                          |
+| `list_environments`    | read     | `GET /environments`                          | —                          |
+| `list_runs`            | read     | `GET /runs`                                  | —                          |
+| `get_run_report`       | read     | `GET /run/:id/report`                        | —                          |
+| `get_engine_config`    | read     | `GET /config`                                | —                          |
+| `run_request`          | write    | `POST /request`                              | allowlist                  |
+| `create_request`       | write    | `POST /requests`                             | write toggle               |
+| `update_environment`   | write    | `GET`+`POST /environments` (fetch-merge)     | write toggle               |
+| `update_engine_config` | write    | `POST /config`                               | write toggle               |
+| `run_collection_smoke` | write    | `GET /requests?…` + `POST /request` (×N)     | allowlist per host         |
+| `start_load_run`       | load     | `POST /run`                                  | allowlist + caps + confirm |
+| `stop_run`             | load     | `POST /run/:id/stop`                         | —                          |
+| `get_live_metrics`     | load     | SSE snapshot of last N ticks                 | —                          |
+| `compare_runs`         | load     | 2× `GET /run/:id/report` → diff (structured) | —                          |
+
+Notes:
+
+- **`start_load_run`** requires confirmation — via elicitation when the client
+  supports it, otherwise a `confirmed: true` flag — and enforces the RPS /
+  concurrency / duration caps. `get_live_metrics` is a **bounded snapshot** (SSE
+  read with a time budget), not a stream — `tools/call` stays request/response.
+- **`update_environment`** fetches the environment and merges the supplied
+  variables (the engine's upsert replaces the whole variables blob), so partial
+  updates preserve untouched variables and the name.
+- **`run_collection_smoke`** runs each saved request once and returns a structured
+  pass/fail matrix (2xx–3xx status + all tests passing = pass). Requests whose
+  host can't be verified (e.g. unresolved `{{variables}}` with allow-all off) are
+  skipped, not sent.
+- **Cancellation:** each tool call's `AbortSignal` is threaded into the engine
+  `fetch`, so a client cancelling an in-flight call actually aborts it.
+
+## Resources
+
+Read-only Vayu data an agent can attach as context (`resources.ts`):
+
+| URI                         | Contents                         |
+| --------------------------- | -------------------------------- |
+| `vayu://runs`               | All runs, newest first.          |
+| `vayu://collections`        | All request collections.         |
+| `vayu://environments`       | All environments.                |
+| `vayu://config`             | Engine configuration entries.    |
+| `vayu://run/{runId}/report` | A run's full report (templated). |
+
+The templated report resource has a **list** callback (enumerates recent runs so
+each shows in `resources/list`) and a **completion** callback (autocompletes run
+IDs).
+
+## Prompts
+
+Server-provided starting points a user picks in their client (`prompts.ts`):
+
+| Prompt                 | Arguments                | Produces                                                    |
+| ---------------------- | ------------------------ | ----------------------------------------------------------- |
+| `summarize_run`        | `runId`                  | The run report + a "summarize p50/p95/p99, errors, health". |
+| `compare_runs`         | `baseRunId, targetRunId` | The computed delta + "did this regress?".                   |
+| `diagnose_errors`      | `runId`                  | The report + an error-focused diagnosis prompt.             |
+| `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data).     |
+
+## Safety model
+
+Enforced entirely in the MCP layer (`safety.ts`, `config.ts`); the engine is
+never modified. All configurable in **Settings → MCP** and persisted.
+
+- **Target allowlist** (default empty ⇒ deny all). Network-touching tools refuse
+  off-list hosts with an actionable error. An **"Allow all hosts"** opt-in
+  bypasses the list (still rejects unresolved `{{variables}}`); off by default.
+- **Hard caps** — max RPS / concurrency / duration on `start_load_run`; over-cap
+  requests are rejected. With the allowlist, these are the real limits on load.
+- **Load-run confirmation** — anti-accident, not anti-adversary: it stops a stray
+  tool call from starting load, but on HTTP it is agent-side (the caps/allowlist
+  are the enforcement). Elicitation upgrades it to a human prompt where supported.
+- **Write toggle** (`allowWrites`, default off) — gates the data-mutating tools
+  `create_request`, `update_environment`, `update_engine_config`. Does not gate
+  `run_request` / `run_collection_smoke` / load runs (allowlist + caps).
+- **Per-tool control** — any tool or whole read/write/load category can be
+  switched off; a disabled tool is omitted from `tools/list` **and** rejected by
+  `tools/call`.
+- **Server on/off** — the whole server can be disabled; while off the endpoint
+  does not accept connections. Persists across restarts.
+- **Transport hardening** — loopback bind, Host-header (DNS-rebinding) validation,
+  `POST`-only, 4 MB body cap.
+
+**Why no auth token on the endpoint:** any local process could already reach the
+engine's REST API on `:9876`; the MCP endpoint proxies the same capability behind
+_more_ guards and adds DNS-rebinding protection. It grants no capability a local
+process did not already have.
+
+### Safety config
+
+`McpSafetyConfig` (defaults in parentheses):
+
+| Field                | Default | Meaning                                       |
+| -------------------- | ------- | --------------------------------------------- |
+| `allowlist`          | `[]`    | Permitted hostnames (empty = deny all).       |
+| `allowAll`           | `false` | Bypass the allowlist for any resolvable host. |
+| `maxRps`             | `1000`  | Cap on `targetRps`.                           |
+| `maxConcurrency`     | `200`   | Cap on `concurrency`.                         |
+| `maxDurationSeconds` | `300`   | Cap on load-run duration.                     |
+| `allowWrites`        | `false` | Enable the data-mutating tools.               |
+| `disabledTools`      | `[]`    | Tool names to hide/reject.                    |
+
+The renderer never sets these directly: `main.ts` sanitizes every change
+(`sanitizeSafetyInput` — normalizes/de-dupes hosts, clamps caps to positive
+integers, validates `disabledTools` against the tool catalog) before applying it
+live and writing it to disk.
+
+## Architecture
+
+Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
+`EngineSidecar`.
+
+| File               | Responsibility                                                      |
+| ------------------ | ------------------------------------------------------------------- |
+| `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer. |
+| `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                |
+| `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.  |
+| `compare.ts`       | Pure two-report diff for `compare_runs`.                            |
+| `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`.    |
+| `resources.ts`     | Static + templated resource definitions.                            |
+| `prompts.ts`       | Prompt definitions (build messages from engine data).               |
+| `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts.      |
+| `http.ts`          | Stateless Streamable HTTP host (DNS-rebinding on).                  |
+| `cli.ts`           | Standalone stdio server (env-configured).                           |
+| `connect.ts`       | One-click connect: shells out to `claude` / `code` CLIs.            |
+| `store.ts`         | Persist safety config + enabled preference (`electron-store`).      |
+| `index.ts`         | `VayuMcpService` facade consumed by `main.ts`.                      |
+
+### Lifecycle & IPC
+
+`main.ts` starts the server in `app.whenReady()` (skipped if disabled), stops it
+on quit, and exposes IPC the Settings panel uses:
+
+| IPC handler         | Purpose                                                     |
+| ------------------- | ----------------------------------------------------------- |
+| `mcp:status`        | `{ running, url, enabled }`.                                |
+| `mcp:getSafety`     | Current `McpSafetyConfig`.                                  |
+| `mcp:updateSafety`  | Sanitize, apply live, persist; returns the resolved config. |
+| `mcp:setEnabled`    | Start/stop the server, persist the preference.              |
+| `mcp:getTools`      | IPC-safe tool catalog (name/description/category/readOnly). |
+| `mcp:connectClient` | Run a client's add-CLI (`claude` / `code`).                 |
+
+The panel (`app/src/modules/settings/main/panels/McpSettingsPanel.tsx`) is a
+registered app-settings panel; it talks to `window.electronAPI` directly since
+MCP config is app-level, not engine-level.
+
+## Configuration
+
+The Electron-hosted server reads config from Settings. The **stdio CLI** reads it
+from environment variables:
+
+| Variable                        | Default                 | Meaning                                |
+| ------------------------------- | ----------------------- | -------------------------------------- |
+| `VAYU_ENGINE_URL`               | `http://127.0.0.1:9876` | Engine base URL.                       |
+| `VAYU_VERSION`                  | `0.0.0`                 | Version reported to clients.           |
+| `VAYU_MCP_ALLOWLIST`            | (empty)                 | Comma-separated hostnames.             |
+| `VAYU_MCP_ALLOW_ALL`            | `false`                 | `true` bypasses the allowlist.         |
+| `VAYU_MCP_MAX_RPS`              | `1000`                  | RPS cap.                               |
+| `VAYU_MCP_MAX_CONCURRENCY`      | `200`                   | Concurrency cap.                       |
+| `VAYU_MCP_MAX_DURATION_SECONDS` | `300`                   | Duration cap.                          |
+| `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |
+| `VAYU_MCP_DISABLED_TOOLS`       | (empty)                 | Comma-separated tool names to disable. |
+
+## Design notes
+
+Rationale behind the load-bearing decisions.
+
+### TypeScript sidecar over in-engine C++
+
+MCP could have been hosted inside the C++ engine (zero hop, single binary). The
+deciding factor: **there is no official C++ SDK**, so in-engine would mean owning
+the protocol in C++ or betting on a pre-1.0 community lib — right as the spec
+churns (the
+[2026-07-28 RC](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
+removed the GET stream endpoint and protocol-level sessions). The official TS SDK
+absorbs that churn, Node is already the Electron runtime, and the engine stays
+untouched (keeping it AGPL-clean). The accepted tradeoff: MCP is up when the
+**app** is open, not engine-only — covered later by the stdio CLI for headless use.
+
+### Stateless HTTP, and the server→client push gap
+
+The HTTP host is stateless (fresh server per request), which keeps Settings
+changes live for free and aligns with the spec RC that removed protocol sessions
+and the GET stream. The cost is that `tools/list_changed` and elicitation can't be
+**pushed** over HTTP (no held-open stream), so they fall back as described in
+[Transports](#what-is-live-on-each-transport). Making them live would require a
+stateful server (real `sessionIdGenerator`, SSE responses, a GET stream per
+session, persistent per-session servers mutated on toggle) — deferred, since it
+builds on the mechanism the spec is deprecating and the payoff is client-dependent.
+
+## Deferred
+
+- **MCP-originated run tagging** — tag runs started via MCP so History shows
+  provenance.
+- **`vayu mcp` bin** — package the stdio CLI as a first-class command (backlog M1).
+- **Live push over HTTP** — stateful sessions (see Design notes).
+- **Hosted MCP for Vayu Cloud** — OAuth-gated, remote.
 
 ## References
 
-- [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) · [MCP SDKs](https://modelcontextprotocol.io/docs/sdk)
-- [Streamable HTTP transport spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) · [2026-07-28 RC](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
-- Client MCP docs: [Claude Code](https://code.claude.com/docs/en/mcp) · [Codex](https://developers.openai.com/codex/mcp) · [Cursor](https://cursor.com/docs/mcp) · [Zed streamable-HTTP gap](https://github.com/zed-industries/zed/discussions/29370)
-- C++ libs (deferred): [`mcp-cpp`](https://github.com/Neumann-Labs/mcp-cpp) · [`cpp-mcp`](https://github.com/hkr04/cpp-mcp) · [`gopher-mcp`](https://github.com/GopherSecurity/gopher-mcp)
-- Engine API surface: [`docs/engine/api-reference.md`](./api-reference.md)
+- [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) ·
+  [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+- Client docs: [Claude Code](https://code.claude.com/docs/en/mcp) ·
+  [Codex](https://developers.openai.com/codex/mcp) ·
+  [Cursor](https://cursor.com/docs/mcp)
+- Engine API surface: [`api-reference.md`](./api-reference.md) · Threat model:
+  [`SECURITY.md`](../../SECURITY.md)
