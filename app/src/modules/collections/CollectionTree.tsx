@@ -30,7 +30,7 @@ import {
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
-import { DrawerPanel, EmptyState, ListSkeleton } from "@/components/shared";
+import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
 import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
@@ -59,7 +59,17 @@ export default function CollectionTree() {
 		openTab({ type: "collection", entityId: collectionId });
 
 	// TanStack Query hooks
-	const { data: collections = [], isLoading: isLoadingCollections } = useCollectionsQuery();
+	// isError as well as isLoading. The query is destructured with `= []`, so a
+	// failed fetch is indistinguishable from an empty workspace unless it is
+	// asked about — and the empty state's "Add your first collection" would
+	// invite a duplicate of collections that already exist.
+	const {
+		data: collections = [],
+		isLoading: isLoadingCollections,
+		isError: collectionsFailed,
+		error: collectionsError,
+		refetch: refetchCollections,
+	} = useCollectionsQuery();
 
 	// Fetch requests for ALL collections (prefetched data is already in cache)
 	// This ensures the UI reflects the data immediately on load
@@ -557,23 +567,41 @@ export default function CollectionTree() {
 				{/* Loading state */}
 				{isLoadingCollections && <ListSkeleton rows={3} leading badge />}
 
-				{/* Zero collections empty state */}
-				{!isLoadingCollections && collections.length === 0 && !creatingCollection && (
-					<EmptyState
-						icon={Folder}
-						title="No collections yet"
-						description="Collections group related requests — make one to get started."
-						action={
-							<Button
-								variant="link"
-								onClick={handleOpenNewCollectionForm}
-								className="text-primary"
-							>
-								Add your first collection
-							</Button>
+				{/* Load failed — not the same as having none.
+				    Gated on there being nothing cached: a background refetch can
+				    fail while the tree still holds good data, and replacing a
+				    working tree with an error pane would lose more than it
+				    tells. */}
+				{!isLoadingCollections && collectionsFailed && collections.length === 0 && (
+					<ErrorState
+						title="Couldn't load collections"
+						detail={
+							collectionsError instanceof Error ? collectionsError.message : undefined
 						}
+						onRetry={() => void refetchCollections()}
 					/>
 				)}
+
+				{/* Zero collections empty state */}
+				{!isLoadingCollections &&
+					!collectionsFailed &&
+					collections.length === 0 &&
+					!creatingCollection && (
+						<EmptyState
+							icon={Folder}
+							title="No collections yet"
+							description="Collections group related requests — make one to get started."
+							action={
+								<Button
+									variant="link"
+									onClick={handleOpenNewCollectionForm}
+									className="text-primary"
+								>
+									Add your first collection
+								</Button>
+							}
+						/>
+					)}
 
 				{/* Root-level collections (no parentId) - sorted by order, scrollable.
 			    role="tree" + roving tabindex: the whole tree is one tab stop and

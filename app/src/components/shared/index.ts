@@ -35,6 +35,9 @@ export * from "./DrawerPanel";
 // The one way to say "there is nothing here yet"
 export * from "./EmptyState";
 
+// ...and the one way to say the load failed, which is not the same thing
+export * from "./ErrorState";
+
 // Loading placeholder for the drawer's list views
 export * from "./ListSkeleton";
 
