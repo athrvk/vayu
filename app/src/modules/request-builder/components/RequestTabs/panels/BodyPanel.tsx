@@ -114,20 +114,66 @@ function SchemaStatusBadge({ status }: { status: "idle" | "loading" | "ready" | 
 	);
 }
 
+/** One arrow press. A shade over a text line, so it moves visibly. */
+const RESIZE_STEP = 24;
+
+/**
+ * The editor's drag handle.
+ *
+ * It was `role="separator"` with an `onMouseDown` and nothing else: not
+ * focusable, no key handling, so the editor's height was mouse-only. A
+ * focusable separator is a window splitter, and the keys below are that
+ * pattern — arrows to nudge, Page keys for a coarse jump, Home/End for the
+ * extremes (which `resizeBy` handles via ±Infinity, since it clamps).
+ */
 function ResizeHandle({
 	onMouseDown,
+	onResize,
 	active,
+	size,
+	min,
+	max,
 }: {
 	onMouseDown: (e: React.MouseEvent) => void;
+	onResize: (delta: number) => void;
 	active: boolean;
+	size: number;
+	min: number;
+	max: number;
 }) {
 	return (
 		<div
 			role="separator"
 			aria-orientation="horizontal"
+			aria-label="Resize editor"
+			aria-valuenow={Math.round(size)}
+			aria-valuemin={min}
+			aria-valuemax={max}
+			tabIndex={0}
 			onMouseDown={onMouseDown}
+			onKeyDown={(e) => {
+				const step =
+					e.key === "ArrowUp" || e.key === "PageUp"
+						? -1
+						: e.key === "ArrowDown" || e.key === "PageDown"
+							? 1
+							: 0;
+				if (step !== 0) {
+					// Otherwise the panel scrolls under the handle as it moves.
+					e.preventDefault();
+					const coarse = e.key === "PageUp" || e.key === "PageDown";
+					onResize(step * RESIZE_STEP * (coarse ? 4 : 1));
+					return;
+				}
+				if (e.key === "Home" || e.key === "End") {
+					e.preventDefault();
+					onResize(e.key === "Home" ? -Infinity : Infinity);
+				}
+			}}
 			className={cn(
-				"h-1.5 cursor-row-resize bg-border hover:bg-primary transition-colors",
+				// h-1.5 is a 6px target, so the focus ring is the only thing making
+				// it findable by keyboard — hence focus-visible, not just hover.
+				"h-1.5 cursor-row-resize bg-border transition-colors hover:bg-primary focus-visible:bg-primary",
 				active && "bg-primary"
 			)}
 		/>
@@ -146,6 +192,9 @@ export default function BodyPanel() {
 		size: editorHeight,
 		isResizing,
 		startResizing,
+		resizeBy,
+		min: editorMin,
+		max: editorMax,
 	} = useResizable({ defaultSize: 320, min: 160, max: 800, direction: "vertical" });
 
 	// Monaco's automaticLayout doesn't reliably catch the container shrinking via
@@ -370,7 +419,14 @@ export default function BodyPanel() {
 							</div>
 						)}
 					</div>
-					<ResizeHandle onMouseDown={startResizing} active={isResizing} />
+					<ResizeHandle
+						onMouseDown={startResizing}
+						onResize={resizeBy}
+						active={isResizing}
+						size={editorHeight}
+						min={editorMin}
+						max={editorMax}
+					/>
 				</div>
 			)}
 
@@ -473,7 +529,14 @@ export default function BodyPanel() {
 							</ResizablePanel>
 						</ResizablePanelGroup>
 					</div>
-					<ResizeHandle onMouseDown={startResizing} active={isResizing} />
+					<ResizeHandle
+						onMouseDown={startResizing}
+						onResize={resizeBy}
+						active={isResizing}
+						size={editorHeight}
+						min={editorMin}
+						max={editorMax}
+					/>
 				</div>
 			)}
 
