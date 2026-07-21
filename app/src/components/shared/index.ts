@@ -17,6 +17,10 @@ export * from "./response-viewer";
 // OAuth 2.0 auth form
 export * from "./OAuth2Form";
 
+// One notice treatment: warnings, blockers and confirmations
+export * from "./Callout";
+export * from "./callout-severity";
+
 // Row "⋯" actions menu (requests, environments)
 export * from "./RowActionsMenu";
 

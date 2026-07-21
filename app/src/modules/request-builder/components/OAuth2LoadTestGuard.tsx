@@ -26,7 +26,7 @@ import { useOAuth2TokenStatusQuery, useFetchOAuth2TokenMutation } from "@/querie
 import { useToastStore } from "@/stores";
 import type { OAuth2Config } from "@/types";
 import { coverageState, fmtDuration } from "./oauth2-load-test-coverage";
-import { Callout } from "./LoadTestConfigDialog/Callout";
+import { Callout } from "@/components/shared";
 
 interface OAuth2LoadTestGuardProps {
 	/** Variable-resolved OAuth 2.0 config for the pending request. */

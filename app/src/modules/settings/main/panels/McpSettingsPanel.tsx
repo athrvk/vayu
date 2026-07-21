@@ -35,7 +35,6 @@ import {
 	Loader2,
 	CircleCheck,
 	CircleSlash,
-	AlertTriangle,
 } from "lucide-react";
 import {
 	Button,
@@ -59,6 +58,7 @@ import type {
 } from "@/types";
 import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
+import { Callout } from "@/components/shared";
 
 const DEFAULT_ENDPOINT = "http://127.0.0.1:9877/mcp";
 
@@ -328,15 +328,10 @@ export default function McpSettingsPanel() {
 	return (
 		<>
 			{!hasElectron && (
-				<Card className="border-warning/40 bg-warning/10">
-					<CardContent className="flex items-start gap-3 py-4">
-						<AlertTriangle className="w-5 h-5 text-warning-text shrink-0 mt-0.5" />
-						<p className="text-sm text-muted-foreground">
-							MCP settings are only available in the desktop app. Run Vayu via
-							Electron to configure the MCP server.
-						</p>
-					</CardContent>
-				</Card>
+				<Callout severity="warning" title="Desktop only">
+					MCP settings are only available in the desktop app. Run Vayu via Electron to
+					configure the MCP server.
+				</Callout>
 			)}
 
 			{/* Connection status + onboarding */}
@@ -398,23 +393,22 @@ export default function McpSettingsPanel() {
 
 					{/* Enabled but not listening — usually a port conflict. Offer a retry. */}
 					{!isLoading && enabled && !running && (
-						<div className="flex items-start justify-between gap-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2">
-							<div className="flex items-start gap-2">
-								<AlertTriangle className="w-4 h-4 text-warning-text shrink-0 mt-0.5" />
-								<p className="text-xs text-muted-foreground">
-									The server is enabled but not listening — the port may be in
-									use.
-								</p>
-							</div>
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => void toggleEnabled(true)}
-								className="h-7 px-2 text-xs shrink-0"
-							>
-								Retry
-							</Button>
-						</div>
+						<Callout
+							severity="warning"
+							title="Enabled but not listening"
+							action={
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => void toggleEnabled(true)}
+									className="h-7 px-2 text-xs shrink-0"
+								>
+									Retry
+								</Button>
+							}
+						>
+							the port may be in use.
+						</Callout>
 					)}
 
 					<div className="flex items-center gap-2">
@@ -584,13 +578,9 @@ export default function McpSettingsPanel() {
 					</div>
 
 					{config?.allowAll && (
-						<div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2">
-							<AlertTriangle className="w-4 h-4 text-warning-text shrink-0 mt-0.5" />
-							<p className="text-xs text-muted-foreground">
-								All hosts are allowed. The per-host list below is ignored until you
-								turn this off.
-							</p>
-						</div>
+						<Callout severity="warning" title="All hosts are allowed">
+							the per-host list below is ignored until you turn this off.
+						</Callout>
 					)}
 
 					<div

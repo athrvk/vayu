@@ -11,12 +11,12 @@
  * Displays details for a single design mode request execution.
  */
 
-import { XCircle, Clock } from "lucide-react";
+import { Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, Badge, ScrollArea } from "@/components/ui";
 import { TimingBreakdown } from "./components";
 import { UnifiedResponseViewer } from "@/components/shared/response-viewer";
 import type { DesignRunDetailProps } from "../types";
-import { MethodBadge, TruncatedText } from "@/components/shared";
+import { MethodBadge, TruncatedText, Callout } from "@/components/shared";
 
 export default function DesignRunDetail({ report, onBack: _onBack, runId }: DesignRunDetailProps) {
 	// Get the result from the report
@@ -91,21 +91,9 @@ export default function DesignRunDetail({ report, onBack: _onBack, runId }: Desi
 				<div className="p-6 space-y-4">
 					{/* Error Message */}
 					{result?.error && (
-						<Card className="border-destructive/30 bg-destructive/5">
-							<CardContent className="py-4">
-								<div className="flex items-start gap-3">
-									<XCircle className="w-5 h-5 text-destructive-text shrink-0 mt-0.5" />
-									<div>
-										<p className="text-sm font-medium text-destructive-text mb-1">
-											Request Failed
-										</p>
-										<p className="text-sm text-destructive-text font-mono">
-											{result.error}
-										</p>
-									</div>
-								</div>
-							</CardContent>
-						</Card>
+						<Callout severity="blocking" title="Request failed">
+							<span className="font-mono">{result.error}</span>
+						</Callout>
 					)}
 
 					{/* Timing Breakdown */}

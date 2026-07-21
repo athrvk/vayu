@@ -6,14 +6,17 @@
  */
 
 /**
- * One notice treatment for the load-test dialog.
+ * One notice treatment for the whole app.
  *
- * There were five: two warning styles that did not match each other
- * (`border-warning/30 bg-warning/10` against `border-warning/40 bg-warning/5`),
- * a hardcoded `bg-blue-50 … dark:bg-blue-950` info box, and two neutral panels
- * inside the OAuth guard. Up to four of them can be on screen at once, since
- * the conditions are independent — a ramp error, a pre-request script, an OAuth
- * warning and the summary all stack.
+ * The load-test dialog alone had five, including two warning styles that did
+ * not match each other (`border-warning/30 bg-warning/10` against
+ * `border-warning/40 bg-warning/5`), and the MCP settings panel had the same
+ * two variants again. They are all this shape: an icon, a line of text, and
+ * sometimes an action.
+ *
+ * Up to four can be on screen at once where the conditions are independent —
+ * in the load-test dialog a ramp error, a pre-request script and an OAuth
+ * warning all stack.
  *
  * With that many, the only thing telling the user which notice is *stopping*
  * them is order and weight, so severity is a prop and the caller sorts on it.
@@ -22,7 +25,7 @@
 import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Severity } from "./severity";
+import type { Severity } from "./callout-severity";
 
 const STYLES: Record<Severity, { box: string; icon: string; Icon: typeof AlertTriangle }> = {
 	// Destructive tokens, not warning ones: this is the tier that disables Start,

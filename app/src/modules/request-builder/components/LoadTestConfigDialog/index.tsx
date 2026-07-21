@@ -48,8 +48,7 @@ import {
 	DialogFooter,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { Callout } from "./Callout";
-import { SEVERITY_ORDER, type Severity } from "./severity";
+import { Callout, SEVERITY_ORDER, type Severity } from "@/components/shared";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
 
