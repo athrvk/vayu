@@ -867,3 +867,28 @@ html[data-reduced-motion="true"] *::after {
 	transition-duration: 0.01ms !important;
 	scroll-behavior: auto !important;
 }
+
+/*
+ * The same collapse, for a user whose operating system already asks for it.
+ *
+ * The setting above was the app's only answer to motion sensitivity, which
+ * meant someone who had turned Reduce Motion on in Windows, macOS or GNOME
+ * still got every animation until they found a checkbox in Vayu's settings and
+ * said it a second time. The OS preference is the one place a user states this
+ * once and expects every app to listen.
+ *
+ * Additive to the toggle rather than replacing it: the toggle still forces the
+ * collapse for someone whose OS says nothing. There is deliberately no way to
+ * opt *back into* animation against an OS that asked for less — that is the
+ * one direction where guessing wrong has a cost.
+ */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}

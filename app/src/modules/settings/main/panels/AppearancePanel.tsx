@@ -35,6 +35,7 @@ import {
 } from "@/components/ui";
 import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
 import { useAppearance } from "@/hooks/useAppearance";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useClientSettingsStore } from "@/stores";
 import { COLOR_SCHEMES } from "@/constants/color-schemes";
 import {
@@ -58,6 +59,7 @@ export default function AppearancePanel() {
 	const { font, setFont, fontCustom, setFontCustom, scale, setScale, radius, setRadius } =
 		useAppearance();
 	const reducedMotion = useClientSettingsStore((s) => s.reducedMotion);
+	const osReducesMotion = usePrefersReducedMotion();
 	const setReducedMotion = useClientSettingsStore((s) => s.setReducedMotion);
 
 	const themeOptions: {
@@ -341,6 +343,19 @@ export default function AppearancePanel() {
 							checked={reducedMotion}
 							onChange={setReducedMotion}
 						/>
+						{osReducesMotion && (
+							/*
+							 * Without this the row reads "off" while the app is in
+							 * fact not animating, and the only honest explanation
+							 * lives outside Vayu. The switch stays interactive
+							 * because it still means something: turning it on keeps
+							 * motion reduced if the system preference later changes.
+							 */
+							<p className="mt-2 text-xs text-muted-foreground">
+								Your system already asks for reduced motion, so Vayu is minimizing
+								animations regardless of this setting.
+							</p>
+						)}
 					</div>
 				</CardContent>
 			</Card>

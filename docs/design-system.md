@@ -1127,6 +1127,49 @@ is the standards-track fallback.
 
 ---
 
+## Motion
+
+Motion collapses for two independent reasons, and both must keep working.
+
+```css
+/* index.css — outside @layer, so the !important declarations win */
+
+/* 1. The in-app toggle: Settings → Appearance → Reduced motion */
+html[data-reduced-motion="true"], html[data-reduced-motion="true"] * { … }
+
+/* 2. The system preference, which a user states once for every app */
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { … } }
+```
+
+Both collapse the same four properties — `animation-duration`,
+`animation-iteration-count`, `transition-duration`, `scroll-behavior`. A
+declaration added to one and forgotten in the other leaves the system-preference
+path animating something the toggle stops, which `reduced-motion.test.ts`
+guards.
+
+**The system preference was ignored until it wasn't.** The toggle shipped
+first, and `prefers-reduced-motion` appeared nowhere in the stylesheet — so
+someone who had turned Reduce Motion on in Windows, macOS or GNOME got every
+animation until they found a checkbox in Vayu and said it a second time.
+
+**The two are additive, and deliberately only in one direction.** The toggle
+forces the collapse for a system that asks for nothing. There is no way to opt
+*back into* animation against a system that asked for less; that is the one
+direction where guessing wrong has a cost.
+
+**Which means the switch can read "off" while nothing animates**, so the
+Appearance panel says so when `usePrefersReducedMotion()` is true. Without that
+line the only explanation for the app's behaviour lives in another
+application's settings.
+
+**Nothing animates from JavaScript.** No `element.animate()`, no
+requestAnimationFrame loops, and the single `scrollIntoView` passes no
+`behavior`, so it follows the `scroll-behavior` the rules above set. Keep it
+that way: JS-driven motion is invisible to both rules and would need its own
+opt-out.
+
+---
+
 ## Source Files
 
 | File | Purpose |

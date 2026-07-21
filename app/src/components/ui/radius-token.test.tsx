@@ -31,14 +31,22 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 // .ts as well as .tsx: an inline radius can be set from a plain module —
 // the chart tooltip that started this was one.
-const sources = import.meta.glob("/src/**/*.{ts,tsx,css}", {
+const sources: Record<string, string> = import.meta.glob("/src/**/*.{ts,tsx}", {
 	query: "?raw",
 	import: "default",
 	eager: true,
 });
+
+// The stylesheet is read from disk, not globbed. vitest stubs CSS imports to an
+// empty string unless `test.css` is enabled, so the `css` entries this glob used
+// to include were all "" — the `@apply` half of the scan below was running
+// against nothing and could never have failed.
+sources["/src/index.css"] = readFileSync(resolve(__dirname, "../../index.css"), "utf8");
 
 /** `rounded` (or `rounded-t`, `rounded-l`, …) with no size suffix. */
 const BARE_ROUNDED = /\brounded(-(?:t|r|b|l|tl|tr|br|bl|s|e|ss|se|es|ee))?(?![-\w[])/g;
