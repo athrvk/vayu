@@ -250,6 +250,7 @@ export default function LoadTestConfigDialog({
 								</Label>
 								<Input
 									type="number"
+									aria-label="Max in-flight requests"
 									value={maxInFlight}
 									onChange={(e) => setMaxInFlight(e.target.value)}
 									min={LOAD_TEST_LIMITS.MAX_IN_FLIGHT.MIN}
@@ -272,6 +273,7 @@ export default function LoadTestConfigDialog({
 							<Label>Concurrency (Concurrent connections)</Label>
 							<Input
 								type="number"
+								aria-label="Concurrent connections"
 								value={concurrency}
 								onChange={(e) => setConcurrency(Number(e.target.value))}
 								min={LOAD_TEST_LIMITS.CONCURRENCY.MIN}
@@ -285,6 +287,7 @@ export default function LoadTestConfigDialog({
 							<Label>Total Iterations</Label>
 							<Input
 								type="number"
+								aria-label="Total iterations"
 								value={iterations}
 								onChange={(e) => setIterations(Number(e.target.value))}
 								min={LOAD_TEST_LIMITS.ITERATIONS.MIN}
@@ -321,6 +324,7 @@ export default function LoadTestConfigDialog({
 								</Label>
 								<input
 									type="range"
+									aria-label="Success sample rate, percent of successful responses to save"
 									value={sampleRate}
 									onChange={(e) => setSampleRate(Number(e.target.value))}
 									min={LOAD_TEST_LIMITS.SAMPLE_RATE_PCT.MIN}
@@ -338,6 +342,7 @@ export default function LoadTestConfigDialog({
 								<Label>Slow Request Threshold (ms)</Label>
 								<Input
 									type="number"
+									aria-label="Slow request threshold in milliseconds"
 									value={slowThreshold}
 									onChange={(e) => setSlowThreshold(Number(e.target.value))}
 									min={LOAD_TEST_LIMITS.SLOW_THRESHOLD_MS.MIN}
@@ -366,6 +371,7 @@ export default function LoadTestConfigDialog({
 								<Label>Comment (optional)</Label>
 								<Input
 									type="text"
+									aria-label="Run comment"
 									value={comment}
 									onChange={(e) => setComment(e.target.value)}
 									placeholder="Description for this test run..."
