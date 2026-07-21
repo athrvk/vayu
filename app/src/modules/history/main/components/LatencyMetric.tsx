@@ -23,9 +23,9 @@ interface LatencyMetricProps {
 export default function LatencyMetric({ label, value, variant = "default" }: LatencyMetricProps) {
 	const colorClass = {
 		default: "text-foreground",
-		primary: "text-status-running",
-		warning: "text-status-stopped",
-		danger: "text-status-error",
+		primary: "text-status-running-text",
+		warning: "text-status-stopped-text",
+		danger: "text-status-error-text",
 	}[variant];
 
 	const bgClass = {

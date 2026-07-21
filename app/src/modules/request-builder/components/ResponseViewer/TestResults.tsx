@@ -54,13 +54,15 @@ export default function TestResults({ results }: TestResultsProps) {
 								<p
 									className={cn(
 										"text-sm font-medium",
-										test.passed ? "text-status-success" : "text-status-error"
+										test.passed
+											? "text-status-success-text"
+											: "text-status-error-text"
 									)}
 								>
 									{test.name}
 								</p>
 								{test.error && (
-									<p className="text-sm text-status-error mt-1 font-mono">
+									<p className="text-sm text-status-error-text mt-1 font-mono">
 										{test.error}
 									</p>
 								)}

@@ -95,7 +95,13 @@ export function ToggleRow({ label, description, checked, onChange }: ToggleRowPr
 					<p className="text-xs text-muted-foreground mt-0.5">{description}</p>
 				)}
 			</div>
-			<Switch checked={checked} onCheckedChange={onChange} />
+			{/*
+			 * The visible <Label> is not associated with this control (Radix
+			 * renders a button, not an input), so without aria-label the switch
+			 * announced as an unnamed toggle. Naming it here fixes every
+			 * ToggleRow at once.
+			 */}
+			<Switch checked={checked} onCheckedChange={onChange} aria-label={label} />
 		</div>
 	);
 }

@@ -345,12 +345,12 @@ function ResponseStatusBar({
 }) {
 	const statusColor =
 		status >= 200 && status < 300
-			? "bg-status-success"
+			? "bg-status-success-fill"
 			: status >= 300 && status < 400
-				? "bg-warning"
+				? "bg-status-warning-fill"
 				: status >= 400 && status < 500
-					? "bg-status-stopped"
-					: "bg-status-error";
+					? "bg-status-stopped-fill"
+					: "bg-status-error-fill";
 
 	return (
 		<div className="flex items-center gap-4 px-4 py-3 border-b border-border bg-muted/30">

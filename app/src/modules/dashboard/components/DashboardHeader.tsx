@@ -85,7 +85,7 @@ export default function DashboardHeader({
 
 			{/* Status pill */}
 			{isStreaming ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-status-success/15 text-status-success border border-status-success/25 shrink-0">
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-status-success/15 text-status-success-text border border-status-success/25 shrink-0">
 					<span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
 					LIVE
 				</span>

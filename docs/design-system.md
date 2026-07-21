@@ -163,11 +163,15 @@ Variable scopes use a **categorical** palette (not semantic status): a distinct
 hue per scope, mode-adaptive so it reads on both light and dark surfaces. Used
 as text/icon/border at full strength and as tinted backgrounds via opacity.
 
+Like the method colours, a scope is painted as text on its own 10% tint (the
+count badges), so the light values are solved against that wash — at green-700
+/ orange-700 the badge text measured 4.04 and 3.61.
+
 ```css
 /* Light */
---scope-global:      142 72% 29%;   /* green-700 */
---scope-collection:   21 90% 42%;   /* orange-700 */
---scope-environment: 217 91% 45%;   /* blue-600 */
+--scope-global:      142 72% 26%;
+--scope-collection:   21 90% 35%;
+--scope-environment: 217 91% 45%;   /* blue-600 — already clears it */
 
 /* Dark */
 --scope-global:      142 69% 58%;   /* green-400 */
@@ -203,8 +207,24 @@ same "good / bad / busy" signal on either surface. Distinct from `--success` /
 /* pending → text-muted-foreground / bg-muted-foreground */
 ```
 
-**Utility classes** (`text-`, `bg-`, `border-`): `text-status-success`,
-`bg-status-error`, `border-status-running/25`, etc. Use `--warning` for
+**A status colour has three jobs, and three tokens.** The base value above is
+tuned as an *indicator* — a dot, a bar, an icon — where only 3:1 is required.
+Reuse it as text or as a solid chip and it fails: `status-success` measured
+**2.21:1** as 12px text on the light panel and **2.30:1** as white-on-fill.
+
+| Job                                       | Token                    | Example                        |
+| ----------------------------------------- | ------------------------ | ------------------------------ |
+| Dot, bar, icon, tint, border              | `--status-*`             | `bg-status-success` dot        |
+| The colour **is the text**                | `--status-*-text`        | `text-status-error-text`       |
+| Solid chip under a **white** label        | `--status-*-fill`        | `bg-status-success-fill`       |
+
+Only `-text` is mode-adaptive (light needs a darker value, dark a lighter one).
+The base indicators and the `-fill` chips stay mode-consistent, so a green dot
+and a "200 OK" chip read identically on either theme. This is the same split
+`--primary` / `--primary-fill` already uses.
+
+**Utility classes** (`text-`, `bg-`, `border-`): `text-status-success-text`,
+`bg-status-error-fill`, `border-status-running/25`, etc. Use `--warning` for
 "expiring / caution" indicators (amber) and `--success` for success *banners*.
 
 The same set also colors **HTTP response severity** (2xx → `status-success`,
@@ -243,16 +263,26 @@ colour.
 ```
 
 
-Method colors are design tokens defined in `:root`, not hardcoded hex values. They are consistent between light and dark mode.
+Method colors are design tokens, not hardcoded hex values. **They are
+mode-adaptive** — hue and saturation are identical in both themes, so a method
+always reads as "its" colour; only lightness shifts.
+
+They have to be. `MethodBadge` paints one value three ways at once — as text, as
+a 10% tinted background, and as a 30% border — so the badge text sits on a wash
+of itself and contrast comes down entirely to lightness. As a single
+mode-consistent set, 10px badge text failed AA in **both** themes at once: PUT
+measured 1.97:1 in light, PATCH 2.86:1 in dark. Each value below is solved
+against its own tint over the worst surface of its theme, and clears 4.6:1.
 
 ```css
---method-get:     142 76% 36%;   /* green */
---method-post:    217 91% 60%;   /* blue */
---method-put:      38 92% 50%;   /* amber */
---method-patch:   262 83% 58%;   /* purple */
---method-delete:    0 84% 60%;   /* red */
---method-head:    199 89% 48%;   /* cyan */
---method-options: 240  5% 64%;   /* gray */
+/* light */                      /* dark */
+--method-get:     142 76% 25%;   /* 142 76% 45% — green  */
+--method-post:    217 91% 45%;   /* 217 91% 63% — blue   */
+--method-put:      38 92% 28%;   /*  38 92% 45% — amber  */
+--method-patch:   262 83% 45%;   /* 262 83% 71% — purple */
+--method-delete:    0 84% 42%;   /*   0 84% 65% — red    */
+--method-head:    199 89% 31%;   /* 199 89% 45% — cyan   */
+--method-options: 240  5% 41%;   /* 240  5% 58% — gray   */
 ```
 
 **Utility classes** (defined in `index.css`, available as Tailwind class names):

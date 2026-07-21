@@ -46,6 +46,17 @@
 	--color-status-error: hsl(var(--status-error));
 	--color-status-running: hsl(var(--status-running));
 	--color-status-stopped: hsl(var(--status-stopped));
+	/* Text-safe pairs — use when the status colour is the text itself. */
+	--color-status-success-text: hsl(var(--status-success-text));
+	--color-status-error-text: hsl(var(--status-error-text));
+	--color-status-running-text: hsl(var(--status-running-text));
+	--color-status-stopped-text: hsl(var(--status-stopped-text));
+	/* Solid-chip pairs — use when a status colour is a filled background under
+	 * a white label. */
+	--color-status-success-fill: hsl(var(--status-success-fill));
+	--color-status-error-fill: hsl(var(--status-error-fill));
+	--color-status-warning-fill: hsl(var(--status-warning-fill));
+	--color-status-stopped-fill: hsl(var(--status-stopped-fill));
 	--color-chart-1: hsl(var(--chart-1));
 	--color-chart-2: hsl(var(--chart-2));
 	--color-chart-3: hsl(var(--chart-3));
@@ -118,13 +129,14 @@
 		/* Hover / active states */
 		--muted: 240 5% 93%; /* #ededef — accent-hover */
 		/*
-		 * 44%, not zinc-500's 46%. At 46% this cleared AA on the card (4.83) and
-		 * the panel (4.63) but measured 4.40 on --background, so every piece of
-		 * muted text sitting on the canvas missed 4.5 by a hair. 44% carries all
-		 * three surfaces (4.73 / 4.98 / 5.20); the 2-point darkening is not
-		 * perceptible on its own but moves a whole class of text over the line.
+		 * 42%, not zinc-500's 46%. Solved against the *darkest* light surface,
+		 * which is --muted/--accent at 93% — not --background. At 46% this
+		 * cleared the card (4.83) and panel (4.63) but sat at 4.10 on --muted,
+		 * so muted text on any tinted chip or hovered row missed 4.5. 42% clears
+		 * all five surfaces (min 4.75 on --muted, 5.10 on --background, 5.61 on
+		 * the card). The shift is not perceptible on its own.
 		 */
-		--muted-foreground: 240 4% 44%; /* #6b6b73 */
+		--muted-foreground: 240 4% 42%;
 		--accent: 240 5% 93%; /* #ededef — accent-hover */
 		--accent-foreground: 240 6% 10%;
 		--accent-active: 240 5% 88%; /* #e0e0e4 — accent-active / selected */
@@ -140,7 +152,12 @@
 		--ring: 24 90% 46%;
 
 		/* Destructive */
-		--destructive: 0 84.2% 60.2%;
+		/* 48%, not red-500's 60%. This is the *fill* token, and the destructive
+		 * button paints --destructive-foreground (near-white) on it: at 60% that
+		 * measured 3.76:1, under the 4.5 a 13px label needs. 48% gives 4.87:1.
+		 * Darkening the fill also lifts every `text-destructive` and
+		 * `border-destructive` use on a light surface, so nothing regresses. */
+		--destructive: 0 84% 48%;
 		--destructive-foreground: 0 0% 98%;
 		--destructive-text: 0 60% 48%; /* muted rose — accessible text on light bg, ~4.8:1 */
 
@@ -153,14 +170,25 @@
 		--chart-4: 38 88% 48%; /* amber */
 		--chart-5: 340 72% 50%; /* rose */
 
-		/* HTTP method colors */
-		--method-get: 142 76% 36%;
-		--method-post: 217 91% 60%;
-		--method-put: 38 92% 50%;
-		--method-patch: 262 83% 58%;
-		--method-delete: 0 84% 60%;
-		--method-head: 199 89% 48%;
-		--method-options: 240 5% 64%;
+		/* HTTP method colors (light).
+		 *
+		 * MethodBadge paints the same value as text, as a 10% tinted background
+		 * and as a 30% border, so the text sits on a wash of itself and the
+		 * contrast is entirely down to lightness. These were one mode-consistent
+		 * set, which left 10px badge text failing AA on both themes at once —
+		 * PUT measured 1.97:1 in light, PATCH 2.86:1 in dark.
+		 *
+		 * Hue and saturation are unchanged, so a method reads as the same colour
+		 * it always did; only lightness adapts per theme, the same split
+		 * --primary already uses. Every method now clears 4.6:1 on its own tint
+		 * over the worst surface of its theme. */
+		--method-get: 142 76% 25%;
+		--method-post: 217 91% 45%;
+		--method-put: 38 92% 28%;
+		--method-patch: 262 83% 45%;
+		--method-delete: 0 84% 42%;
+		--method-head: 199 89% 31%;
+		--method-options: 240 5% 41%;
 
 		/* Variable highlight */
 		--variable: 24 90% 46%;
@@ -180,9 +208,13 @@
 		/* Variable scope (categorical) — global / collection / environment.
 		 * Used as text/icon/border at full strength and as tinted backgrounds
 		 * via opacity (e.g. bg-scope-global/10). Mode-adaptive for legibility. */
-		--scope-global: 142 72% 29%; /* green-700 */
-		--scope-collection: 21 90% 42%; /* orange-700 */
-		--scope-environment: 217 91% 45%; /* blue-600 */
+		/* Like the method colours, a scope is painted as text on its own 10%
+		 * tint (the count badges), so these are solved against that wash rather
+		 * than against the panel: at green-700 / orange-700 the badge text
+		 * measured 4.04 and 3.61. */
+		--scope-global: 142 72% 26%;
+		--scope-collection: 21 90% 35%;
+		--scope-environment: 217 91% 45%; /* already clears it at blue-600 */
 
 		/* Run / connection / test status indicators (dots, bars, pills, icons).
 		 * A cohesive, mode-consistent set — deliberately the same in light and
@@ -192,6 +224,29 @@
 		--status-error: 0 84% 60%; /* red-500 — failed / test fail */
 		--status-running: 217 91% 60%; /* blue-500 — running */
 		--status-stopped: 25 95% 53%; /* orange-500 — stopped */
+
+		/* Text-safe pairs. The four above are mode-consistent because a dot
+		 * should read the same on either surface — but that same value used as
+		 * *text* fails AA on a light background (status-success measured 2.21:1,
+		 * status-error 2.30:1). These keep the hue so the signal is unmistakably
+		 * the same, and adjust lightness per mode to clear 4.5:1 on every
+		 * surface. Use these whenever the status colour IS the text; keep the
+		 * base tokens for dots, bars, pills and icons. */
+		--status-success-text: 142 72% 29%;
+		--status-error-text: 0 70% 45%;
+		--status-running-text: 217 80% 45%;
+		--status-stopped-text: 25 85% 38%;
+
+		/* Solid-chip pairs. The response status badge paints a status colour as a
+		 * filled chip with a white label — a third use, needing neither the dot
+		 * value nor the text value: white on --status-success measured 2.30:1.
+		 * These are deep enough for white to clear 4.5:1 and, like the base
+		 * indicators, stay mode-consistent so a "200 OK" chip reads identically
+		 * on either theme. Same bind --primary/--primary-fill already resolves. */
+		--status-success-fill: 142 71% 30%;
+		--status-error-fill: 0 84% 49%;
+		--status-warning-fill: 38 92% 33%;
+		--status-stopped-fill: 25 95% 39%;
 
 		/* Geometry */
 		--radius: 0.375rem;
@@ -329,6 +384,25 @@
 		--scope-global: 142 69% 58%; /* green-400 */
 		--scope-collection: 27 96% 61%; /* orange-400 */
 		--scope-environment: 213 94% 68%; /* blue-400 */
+
+		/* Status text pairs, lightened for dark surfaces. The base --status-*
+		 * indicators stay mode-consistent (see the light block); only the text
+		 * variants adapt. */
+		--status-success-text: 142 60% 55%;
+		--status-error-text: 0 75% 68%;
+		--status-running-text: 217 90% 70%;
+		--status-stopped-text: 25 90% 62%;
+
+		/* HTTP method colors (dark) — lightened so the badge text clears AA on
+		 * its own tint over the dark card. See the light block for why these are
+		 * mode-adaptive rather than one shared set. */
+		--method-get: 142 76% 45%;
+		--method-post: 217 91% 63%;
+		--method-put: 38 92% 45%;
+		--method-patch: 262 83% 71%;
+		--method-delete: 0 84% 65%;
+		--method-head: 199 89% 45%;
+		--method-options: 240 5% 58%;
 	}
 
 	/* ── Accent color schemes (dark mode) ── */

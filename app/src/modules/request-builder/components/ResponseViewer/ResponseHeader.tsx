@@ -27,14 +27,14 @@ export interface ResponseHeaderProps {
 export default function ResponseHeader({ response }: ResponseHeaderProps) {
 	const statusColor =
 		response.status === 0
-			? "bg-status-error" // Client-side error (no server response)
+			? "bg-status-error-fill" // Client-side error (no server response)
 			: response.status >= 200 && response.status < 300
-				? "bg-status-success"
+				? "bg-status-success-fill"
 				: response.status >= 300 && response.status < 400
-					? "bg-warning"
+					? "bg-status-warning-fill"
 					: response.status >= 400 && response.status < 500
-						? "bg-status-stopped"
-						: "bg-status-error";
+						? "bg-status-stopped-fill"
+						: "bg-status-error-fill";
 
 	const formatSize = (bytes: number): string => {
 		if (bytes < 1024) return `${bytes} B`;

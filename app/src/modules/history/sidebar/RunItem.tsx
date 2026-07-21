@@ -100,10 +100,10 @@ export default function RunItem({
 						<span
 							className={cn(
 								"text-xs font-medium capitalize shrink-0",
-								run.status === "completed" && "text-status-success",
-								run.status === "failed" && "text-status-error",
-								run.status === "running" && "text-status-running",
-								run.status === "stopped" && "text-status-stopped",
+								run.status === "completed" && "text-status-success-text",
+								run.status === "failed" && "text-status-error-text",
+								run.status === "running" && "text-status-running-text",
+								run.status === "stopped" && "text-status-stopped-text",
 								run.status === "pending" && "text-muted-foreground"
 							)}
 						>

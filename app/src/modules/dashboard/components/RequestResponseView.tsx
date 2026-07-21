@@ -102,11 +102,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									<span
 										className={cn(
 											"font-mono font-bold text-lg",
-											code === "0" && "text-status-error",
-											code.startsWith("2") && "text-status-success",
-											code.startsWith("3") && "text-status-running",
+											code === "0" && "text-status-error-text",
+											code.startsWith("2") && "text-status-success-text",
+											code.startsWith("3") && "text-status-running-text",
 											code.startsWith("4") && "text-warning-text",
-											code.startsWith("5") && "text-status-error"
+											code.startsWith("5") && "text-status-error-text"
 										)}
 									>
 										{code === "0" ? "Error" : code}
@@ -213,7 +213,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
 							<div>
 								<p className="text-sm text-muted-foreground">Slow Requests</p>
-								<p className="font-bold text-status-stopped">
+								<p className="font-bold text-status-stopped-text">
 									{report.slowRequests.count}
 								</p>
 							</div>
@@ -250,7 +250,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 							</div>
 							<div>
 								<p className="text-sm text-muted-foreground">Passed</p>
-								<p className="font-bold text-status-success">
+								<p className="font-bold text-status-success-text">
 									{report.testValidation.testsPassed}
 								</p>
 							</div>
@@ -335,7 +335,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 													<span
 														className={cn(
 															"text-sm font-mono shrink-0",
-															isSlow && "text-status-stopped"
+															isSlow && "text-status-stopped-text"
 														)}
 													>
 														{result.latencyMs.toFixed(1)}ms

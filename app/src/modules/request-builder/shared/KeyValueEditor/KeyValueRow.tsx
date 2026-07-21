@@ -114,7 +114,7 @@ function KeyValueRow({
 								</span>
 							</>
 						) : (
-							<span className="italic text-muted-foreground/50">—</span>
+							<span className="italic text-muted-foreground">—</span>
 						)}
 					</div>
 				</div>
