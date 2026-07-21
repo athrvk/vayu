@@ -147,6 +147,22 @@ export default function CollectionTree() {
 		id: string;
 		name: string;
 	} | null>(null);
+	/**
+	 * Report a failed mutation through the same channel the rename path already
+	 * uses — `failSave` puts "Save failed" in the Dock.
+	 *
+	 * Rename was the only handler here that caught anything. Create and delete
+	 * called `mutateAsync` bare, so a rejection was an unhandled promise and
+	 * nothing else: a failed delete closed the confirm dialog, un-dimmed the row
+	 * and left the collection sitting there with no explanation, which reads as
+	 * "the click didn't register" rather than "the delete failed".
+	 */
+	const reportFailure = useCallback(
+		(error: unknown, fallback: string) =>
+			failSave(error instanceof Error ? error.message : fallback),
+		[failSave]
+	);
+
 	const handleRenameCancel = useCallback(() => {
 		setRenamingId(null);
 		setRenameValue("");
@@ -199,7 +215,12 @@ export default function CollectionTree() {
 	const handleCreateCollection = async () => {
 		if (!newCollectionName.trim() || createCollectionMutation.isPending) return;
 
-		await createCollectionMutation.mutateAsync({ name: newCollectionName.trim() });
+		try {
+			await createCollectionMutation.mutateAsync({ name: newCollectionName.trim() });
+		} catch (error) {
+			reportFailure(error, "Failed to create collection");
+			return; // Keep the form open with the typed name so it can be retried.
+		}
 		setNewCollectionName("");
 		setCreatingCollection(false);
 	};
@@ -212,10 +233,15 @@ export default function CollectionTree() {
 			toggleCollectionExpanded(parentId);
 		}
 
-		await createCollectionMutation.mutateAsync({
-			name: newSubCollectionName.trim(),
-			parentId: parentId,
-		});
+		try {
+			await createCollectionMutation.mutateAsync({
+				name: newSubCollectionName.trim(),
+				parentId: parentId,
+			});
+		} catch (error) {
+			reportFailure(error, "Failed to create folder");
+			return;
+		}
 		handleCancelSubfolder();
 	};
 
@@ -226,12 +252,18 @@ export default function CollectionTree() {
 			toggleCollectionExpanded(collectionId);
 		}
 
-		const request = await createRequestMutation.mutateAsync({
-			collectionId: collectionId,
-			name: DEFAULT_REQUEST_NAME,
-			method: "GET",
-			url: "",
-		});
+		let request: Request | undefined;
+		try {
+			request = await createRequestMutation.mutateAsync({
+				collectionId: collectionId,
+				name: DEFAULT_REQUEST_NAME,
+				method: "GET",
+				url: "",
+			});
+		} catch (error) {
+			reportFailure(error, "Failed to create request");
+			return;
+		}
 
 		if (request) {
 			navigateToRequest(collectionId, request.id);
@@ -278,23 +310,27 @@ export default function CollectionTree() {
 	const handleDuplicateRequest = useCallback(
 		async (request: Request) => {
 			if (createRequestMutation.isPending) return;
-			const copy = await createRequestMutation.mutateAsync({
-				collectionId: request.collectionId,
-				name: `${request.name} (Copy)`,
-				description: request.description,
-				method: request.method,
-				url: request.url,
-				params: request.params,
-				headers: request.headers,
-				body: request.body,
-				bodyType: request.bodyType,
-				auth: request.auth,
-				preRequestScript: request.preRequestScript,
-				postRequestScript: request.postRequestScript,
-			});
-			openTab({ type: "request", entityId: copy.id });
+			try {
+				const copy = await createRequestMutation.mutateAsync({
+					collectionId: request.collectionId,
+					name: `${request.name} (Copy)`,
+					description: request.description,
+					method: request.method,
+					url: request.url,
+					params: request.params,
+					headers: request.headers,
+					body: request.body,
+					bodyType: request.bodyType,
+					auth: request.auth,
+					preRequestScript: request.preRequestScript,
+					postRequestScript: request.postRequestScript,
+				});
+				openTab({ type: "request", entityId: copy.id });
+			} catch (error) {
+				reportFailure(error, "Failed to duplicate request");
+			}
 		},
-		[createRequestMutation, openTab]
+		[createRequestMutation, openTab, reportFailure]
 	);
 
 	/**
@@ -364,11 +400,19 @@ export default function CollectionTree() {
 			try {
 				await deleteCollectionMutation.mutateAsync(collectionId);
 				closeTabsForEntities(affected);
+			} catch (error) {
+				reportFailure(error, "Failed to delete collection");
 			} finally {
 				setDeletingCollectionId(null);
 			}
 		},
-		[deleteCollectionMutation, closeTabsForEntities, collections, getRequestsByCollection]
+		[
+			deleteCollectionMutation,
+			closeTabsForEntities,
+			collections,
+			getRequestsByCollection,
+			reportFailure,
+		]
 	);
 
 	const handleDeleteRequest = useCallback(
@@ -379,11 +423,13 @@ export default function CollectionTree() {
 				await deleteRequestMutation.mutateAsync(requestId);
 				// Close any open tab pointing at the now-deleted request.
 				closeTabsForEntities([requestId]);
+			} catch (error) {
+				reportFailure(error, "Failed to delete request");
 			} finally {
 				setDeletingRequestId(null);
 			}
 		},
-		[deleteRequestMutation, closeTabsForEntities]
+		[deleteRequestMutation, closeTabsForEntities, reportFailure]
 	);
 
 	const handleRequestDeleteClick = useCallback((requestId: string, requestName: string) => {

@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { Button, Input, Textarea } from "@/components/ui";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
-import { Field, Stat, formatRelative } from "./shared";
+import { Field, SaveFailed, Stat, formatRelative } from "./shared";
 
 interface InfoTabProps {
 	collection: Collection;
@@ -33,6 +33,14 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 		setName(collection.name);
 		setDescription(collection.description ?? "");
 	}, [collection.id, collection.name, collection.description]);
+
+	// The other half of that resync — see AuthTab. This component is reused
+	// across collection switches, and a mutation holds `isError` until the next
+	// mutate, so the failure notice has to be cleared with the drafts.
+	const resetSave = updateCollection.reset;
+	useEffect(() => {
+		resetSave();
+	}, [collection.id, resetSave]);
 
 	const isDirty = name !== collection.name || description !== (collection.description ?? "");
 
@@ -76,6 +84,8 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 				<Stat label="Created" value={formatRelative(collection.createdAt)} />
 				<Stat label="Updated" value={formatRelative(collection.updatedAt)} />
 			</div>
+
+			<SaveFailed mutation={updateCollection} what="this collection" />
 
 			<div className="flex gap-2">
 				<Button

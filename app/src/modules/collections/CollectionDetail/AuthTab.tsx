@@ -25,14 +25,23 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui";
+import { Callout } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
-import { InfoBanner, SectionLabel } from "./shared";
+import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
 import InheritanceChain from "./InheritanceChain";
 
 type CollectionAuthMode = "none" | "bearer" | "basic" | "apikey";
 type CollectionAuth = Collection["auth"];
+
+/** Display names for the modes this tab stores but cannot edit. */
+const UNEDITABLE_LABELS: Record<string, string> = {
+	oauth2: "OAuth 2.0",
+	digest: "Digest",
+	aws: "AWS Signature",
+	ntlm: "NTLM",
+};
 
 const AUTH_OPTIONS: { value: CollectionAuthMode; label: string; hint: string }[] = [
 	{
@@ -58,7 +67,13 @@ const AUTH_OPTIONS: { value: CollectionAuthMode; label: string; hint: string }[]
 ];
 
 // Narrow the broader Collection auth union to the four modes we expose.
-function asEditable(auth: CollectionAuth): CollectionAuthMode {
+// oauth2/digest/aws/ntlm return null: they are stored (an import can produce
+// them — see services/importers/postman.ts `collectionAuth`) but not editable
+// here, and they are emphatically *not* "none". Collapsing them to "none" made
+// this tab state "No authentication for this collection. Requests using
+// 'Inherit from collection' will send no auth." about a collection that does
+// have auth — contradicting the inheritance chain three lines below it.
+function asEditable(auth: CollectionAuth): CollectionAuthMode | null {
 	if (
 		auth.mode === "none" ||
 		auth.mode === "bearer" ||
@@ -67,8 +82,7 @@ function asEditable(auth: CollectionAuth): CollectionAuthMode {
 	) {
 		return auth.mode;
 	}
-	// oauth2/digest/aws/ntlm not yet editable here — treat as none in the UI.
-	return "none";
+	return null;
 }
 
 function defaultsFor(mode: CollectionAuthMode): CollectionAuth {
@@ -104,7 +118,19 @@ export default function AuthTab({ collection }: AuthTabProps) {
 		setAuth(collection.auth);
 	}, [collection.id, collection.auth]);
 
+	// The other half of that resync. Shell renders <CollectionDetail /> with no
+	// key, so switching collection tabs while staying on this inner tab reuses
+	// this component *and its mutation* — and TanStack holds `isError` until the
+	// next mutate. Without this, a save that failed on one collection would keep
+	// claiming to have failed on the next one, which the user never tried to
+	// save. `reset` is bound once in the observer, so it is a stable dep.
+	const resetSave = updateCollection.reset;
+	useEffect(() => {
+		resetSave();
+	}, [collection.id, resetSave]);
+
 	const mode = asEditable(auth);
+	const uneditableLabel = mode === null ? (UNEDITABLE_LABELS[auth.mode] ?? auth.mode) : null;
 	const hint = useMemo(() => AUTH_OPTIONS.find((o) => o.value === mode)?.hint, [mode]);
 
 	const isDirty = useMemo(
@@ -131,15 +157,35 @@ export default function AuthTab({ collection }: AuthTabProps) {
 				. Nested folders take precedence over parent folders.
 			</InfoBanner>
 
+			{uneditableLabel && (
+				<Callout
+					severity="warning"
+					title={`${uneditableLabel} auth is set`}
+					className="mb-5"
+				>
+					It was imported or set elsewhere and can't be edited on this tab yet — it is
+					still what descendant requests inherit. Picking a type below replaces it.
+				</Callout>
+			)}
+
 			<div className="mb-5">
 				<SectionLabel>Authentication type</SectionLabel>
 				<div className="max-w-[280px]">
+					{/*
+					 * `value=""` when the stored mode isn't one of the four below, so
+					 * the trigger shows the placeholder naming the real mode instead
+					 * of falsely reading "No Auth".
+					 */}
 					<Select
-						value={mode}
+						value={mode ?? ""}
 						onValueChange={(v) => handleModeChange(v as CollectionAuthMode)}
 					>
 						<SelectTrigger className="h-9 text-sm">
-							<SelectValue />
+							<SelectValue
+								placeholder={
+									uneditableLabel ? `${uneditableLabel} (not editable here)` : ""
+								}
+							/>
 						</SelectTrigger>
 						<SelectContent>
 							{AUTH_OPTIONS.map((o) => (
@@ -155,7 +201,9 @@ export default function AuthTab({ collection }: AuthTabProps) {
 
 			<AuthConfig auth={auth} onChange={setAuth} />
 
-			{mode !== "none" && (
+			<SaveFailed mutation={updateCollection} what="auth" className="mt-6" />
+
+			{mode !== null && mode !== "none" && (
 				<div className="flex gap-2 mt-6">
 					<Button
 						onClick={handleSave}

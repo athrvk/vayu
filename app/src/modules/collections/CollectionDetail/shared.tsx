@@ -10,6 +10,37 @@
  */
 
 import { Info } from "lucide-react";
+import { Callout } from "@/components/shared";
+
+/**
+ * A failed save on these tabs used to be invisible.
+ *
+ * Every tab calls `updateCollection.mutate(...)`, there is no global
+ * `MutationCache.onError` (see lib/query-client.ts), and no tab read
+ * `isError`/`error` — so a rejected save just flipped the button from "Saving…"
+ * back to "Save Changes" and left the user believing it had gone through. The
+ * mutation *recorded* the failure; nothing rendered it.
+ *
+ * `blocking`, not `warning`: nothing was written, so this is the error tier.
+ */
+export function SaveFailed({
+	mutation,
+	what,
+	className,
+}: {
+	mutation: { isError: boolean; error: unknown };
+	what: string;
+	/** Spacing is the caller's — the three tabs use different layouts. */
+	className?: string;
+}) {
+	if (!mutation.isError) return null;
+	const detail = mutation.error instanceof Error ? mutation.error.message : null;
+	return (
+		<Callout severity="blocking" title={`Couldn't save ${what}`} className={className}>
+			{detail ?? "The change was not saved. Try again."}
+		</Callout>
+	);
+}
 
 interface FieldProps {
 	label: string;

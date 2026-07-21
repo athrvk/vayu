@@ -23,7 +23,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, Button, CodeEditor } from "@/components/ui";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
-import { InfoBanner } from "./shared";
+import { InfoBanner, SaveFailed } from "./shared";
 
 type ScriptKind = "pre" | "post";
 
@@ -58,6 +58,14 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 		// eslint-disable-next-line react-hooks/set-state-in-effect
 		setScript(collection[fieldKey] ?? "");
 	}, [collection.id, collection, fieldKey]);
+
+	// The other half of that resync — see AuthTab. This component is reused
+	// across collection switches, and a mutation holds `isError` until the next
+	// mutate, so the failure notice has to be cleared with the draft.
+	const resetSave = updateCollection.reset;
+	useEffect(() => {
+		resetSave();
+	}, [collection.id, resetSave]);
 
 	const isDirty = script !== (collection[fieldKey] ?? "");
 
@@ -161,6 +169,8 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 					</div>
 				)}
 			</div>
+
+			<SaveFailed mutation={updateCollection} what="the script" />
 
 			<div className="flex gap-2">
 				<Button

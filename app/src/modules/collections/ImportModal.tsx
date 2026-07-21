@@ -101,7 +101,15 @@ export function ImportModal() {
 		reader.readAsText(file);
 	};
 
+	// Fetching a URL is the only asynchronous source, so it is the only one that
+	// can be entered twice. `phase === "detecting"` was set here and in
+	// runDetect and then never read by anything that renders — the button stayed
+	// enabled and unchanged for the whole round-trip, so a second click fired a
+	// second fetch whose result raced the first.
+	const isFetching = phase === "detecting";
+
 	const handleFetchUrl = async () => {
+		if (isFetching) return;
 		setPhase("detecting");
 		try {
 			const { content } = await apiService.importFetch(url);
@@ -205,9 +213,10 @@ export function ImportModal() {
 								}}
 								placeholder="https://petstore.swagger.io/v2/swagger.json"
 								className="flex-1"
+								disabled={isFetching}
 							/>
-							<Button onClick={handleFetchUrl} disabled={!url}>
-								Fetch
+							<Button onClick={handleFetchUrl} disabled={!url || isFetching}>
+								{isFetching ? "Fetching…" : "Fetch"}
 							</Button>
 						</div>
 					)}
@@ -323,24 +332,32 @@ export function ImportModal() {
 
 				{phase === "preview" && (
 					<div className="flex items-center justify-between gap-3 border-t border-border px-5 py-4">
-						<label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
-							<span className="flex items-center gap-1.5">
+						{/*
+						 * One <label> each. These were two checkboxes inside a single
+						 * <label>: a label's control is its *first* labelable
+						 * descendant, so clicking the words "Import pre-request &
+						 * test scripts" toggled Import environments instead — and the
+						 * second checkbox had no label at all, shrinking its hit
+						 * target to the 13px box.
+						 */}
+						<div className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+							<label className="flex w-fit items-center gap-1.5">
 								<input
 									type="checkbox"
 									checked={importEnvironments}
 									onChange={(e) => toggleEnvironments(e.target.checked)}
 								/>
 								Import environments &amp; variables
-							</span>
-							<span className="flex items-center gap-1.5">
+							</label>
+							<label className="flex w-fit items-center gap-1.5">
 								<input
 									type="checkbox"
 									checked={importScripts}
 									onChange={(e) => toggleScripts(e.target.checked)}
 								/>
 								Import pre-request &amp; test scripts
-							</span>
-						</label>
+							</label>
+						</div>
 						<div className="flex gap-2">
 							<Button
 								variant="outline"
