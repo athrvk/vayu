@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useDashboardStore } from "@/stores";
+import { useDashboardStore, useToastStore } from "@/stores";
 import { apiService, loadTestService } from "@/services";
 import { cn } from "@/lib/utils";
 import { EmptyState, Callout } from "@/components/shared";
@@ -30,6 +30,7 @@ import { TIMING } from "@/config/timing";
 import type { DashboardView, DisplayMetrics } from "./types";
 
 export default function LoadTestDashboard() {
+	const showToast = useToastStore((state) => state.showToast);
 	const {
 		currentRunId,
 		mode,
@@ -208,7 +209,15 @@ export default function LoadTestDashboard() {
 				loadTestService.stopMonitoring();
 				stopRun();
 			} catch (error) {
+				// The button re-enables and the run keeps streaming, so without
+				// this the click is indistinguishable from one that did nothing.
+				// A toast rather than the report Callout: this is the outcome of
+				// an action the user just took, not a state of the page.
 				console.error("Failed to stop run:", error);
+				showToast(
+					error instanceof Error ? error.message : "Couldn't stop the run",
+					"error"
+				);
 			} finally {
 				setStopping(false);
 			}
