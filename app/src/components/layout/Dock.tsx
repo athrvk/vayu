@@ -116,10 +116,18 @@ export function Dock() {
 
 				{/* Middle — ambient status */}
 				<div className="flex-1 flex items-center justify-center gap-4">
+					{/*
+					 * success-text, not status-success. The status tokens are tuned as
+					 * fills and indicators; as 12px text `status-success` measures
+					 * 2.21:1 on the light panel, well under the 4.5 AA needs. The
+					 * `-text` variant is the accessible pair (4.57 light / 9.58 dark)
+					 * and the dot inherits it via bg-current, clearing the 3:1 that
+					 * non-text indicators need too.
+					 */}
 					<span
 						className={cn(
 							"flex items-center gap-1 text-xs",
-							isEngineConnected ? "text-status-success" : "text-muted-foreground"
+							isEngineConnected ? "text-success-text" : "text-muted-foreground"
 						)}
 					>
 						<span className="w-1.5 h-1.5 rounded-full bg-current" />
@@ -136,7 +144,15 @@ export function Dock() {
 						<span className="text-xs text-destructive">Save failed</span>
 					)}
 
-					<span className="text-xs text-muted-foreground/50">v{__VAYU_VERSION__}</span>
+					{/*
+					 * Full muted-foreground, not /50. At half opacity the version
+					 * measured 2.71:1 dark and 1.94:1 light — the only element in the
+					 * app failing contrast. `subtle-foreground` would not fix it
+					 * either (3.63 / 3.04); it is the faintest *readable* tier, still
+					 * under AA for 12px text. A version string is information, not
+					 * decoration, so it gets a passing colour.
+					 */}
+					<span className="text-xs text-muted-foreground">v{__VAYU_VERSION__}</span>
 				</div>
 
 				{/* Right — toggles */}

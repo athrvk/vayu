@@ -62,13 +62,21 @@ All tokens live in `app/src/index.css` as HSL channel values (no `hsl()` wrapper
 
 /* Light */
 --foreground:         240  6% 10%;   /* #18181b — primary text */
---muted-foreground:   240  4% 46%;   /* #71717a — secondary / labels */
+--muted-foreground:   240  4% 44%;   /* #6b6b73 — secondary / labels (see note) */
 --subtle-foreground:  240  4% 58%;   /* de-emphasized text — faintest readable tier */
 ```
 
 `subtle-foreground` is the least-prominent text tier (ancillary units, dashes,
 sub-labels), tuned to stay legible (~3:1 on card) while remaining below
-`muted-foreground` in emphasis.
+`muted-foreground` in emphasis. **It does not clear AA for normal-size text**
+(3.63 dark / 3.04 light on panel) — it is for text where a miss is acceptable,
+never for information the user needs to read.
+
+**Light `muted-foreground` is 44%, not zinc-500's 46%.** At 46% it cleared AA on
+the card (4.83) and the panel (4.63) but measured **4.40 on `--background`**, so
+every piece of muted text sitting on the canvas missed 4.5 by a hair. 44%
+carries all three surfaces (4.73 / 4.98 / 5.20). The 2-point darkening is not
+perceptible on its own but moves a whole class of text over the line.
 
 ### Interactive States
 
