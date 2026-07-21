@@ -580,12 +580,13 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							<th className="pb-2 px-2">Variable</th>
 							<th className="pb-2 px-2">Value</th>
 							<th className="pb-2 px-2 w-[110px]">Type</th>
-							<th
-								className="pb-2 w-8 text-center"
-								title="Mark as secret (masks value in UI)"
-							>
-								<KeyRound className="w-3 h-3 inline-block" />
-							</th>
+							{/*
+							 * A word, like every other column. This was a bare key icon
+							 * whose meaning lived in a native `title` — which needs a
+							 * hover to appear, never shows on a touch device, and is
+							 * the only unlabelled column in a table of labelled ones.
+							 */}
+							<th className="pb-2 w-14 px-2">Secret</th>
 							<th className="pb-2 w-10"></th>
 						</tr>
 					</thead>

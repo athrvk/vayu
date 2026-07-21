@@ -152,6 +152,26 @@ export function formatBody(body: any, bodyType?: BodyType): string {
 }
 
 /**
+ * Response time, at a precision anyone can read.
+ *
+ * Both response viewers printed `time.toFixed(4)` — `340.1235 ms`. Four decimal
+ * places of a millisecond sit far below the resolution of what is measured, so
+ * the last three digits are noise that changes every run, and they make the one
+ * number people actually scan longer and harder to compare between runs.
+ *
+ * Sub-millisecond responses are the one range where decimals carry information
+ * (a local mock, a cache hit), so they keep two.
+ *
+ * Lives here because it was fixed once in `ResponseHeader` and the identical
+ * bug survived in `UnifiedResponseViewer` — the duplication was the defect.
+ */
+export function formatResponseTime(ms: number): string {
+	if (ms < 1) return `${ms.toFixed(2)} ms`;
+	if (ms < 1000) return `${Math.round(ms)} ms`;
+	return `${(ms / 1000).toFixed(2)} s`;
+}
+
+/**
  * Format bytes to human readable size
  */
 export function formatSize(bytes: number): string {

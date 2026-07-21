@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
 import { EmptyState } from "../EmptyState";
 import ResponseBody from "./ResponseBody";
 import HeadersViewer, { CompactHeadersViewer } from "./HeadersViewer";
-import { formatSize } from "./utils";
+import { formatSize, formatResponseTime } from "./utils";
 import type { UnifiedResponseViewerProps } from "./types";
 
 type ResponseTab = "body" | "headers" | "request";
@@ -360,7 +360,7 @@ function ResponseStatusBar({
 			{time !== undefined && (
 				<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
 					<Clock className="w-4 h-4" />
-					<span>{time.toFixed(4)} ms</span>
+					<span>{formatResponseTime(time)}</span>
 				</div>
 			)}
 
