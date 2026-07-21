@@ -9,23 +9,23 @@
 
 **3-level elevation** — every surface sits on one of three layers. Nothing floats outside this hierarchy.
 
-| Level                          | Token           | Dark      | Light     |
-| ------------------------------ | --------------- | --------- | --------- |
-| Canvas (outermost)             | `bg-background` | `#09090b` | `#f4f4f5` |
-| Panel (sidebar/header/toolbar) | `bg-panel`      | `#111113` | `#fafafa` |
-| Card (content surface)         | `bg-card`       | `#1a1a1f` | `#ffffff` |
+| Level | Token | Dark | Light |
+|-------|-------|------|-------|
+| Canvas (outermost) | `bg-background` | `#09090b` | `#f4f4f5` |
+| Panel (sidebar/header/toolbar) | `bg-panel` | `#111113` | `#fafafa` |
+| Card (content surface) | `bg-card` | `#1a1a1f` | `#ffffff` |
 
 **`--tab-active`** is a fourth, single-purpose surface for the active tab. It
 exists because the elevation model inverts between themes: in dark, `background`
-is _below_ `panel`, so an active tab matching the content pane reads darker than
-the bar — correct. In light, `background` (96%) is _lighter-adjacent_ to `panel`
+is *below* `panel`, so an active tab matching the content pane reads darker than
+the bar — correct. In light, `background` (96%) is *lighter-adjacent* to `panel`
 (98%), so the same rule gave only ΔL\* 2.06 of separation and put the active tab
 on the wrong side of the convention (active tabs are normally the lightest thing
 in light UIs). `--tab-active` deepens it to ΔL\* 4.82 in light and stays equal to
 `--background` in dark, where nothing needed fixing.
 
 The active tab also carries a `border-t-2 border-t-primary` stripe. That is the
-_primary_ signal, because it reads identically in both themes, where a surface
+*primary* signal, because it reads identically in both themes, where a surface
 shift does not. Inactive tabs carry `border-t-2 border-t-transparent` so the
 stripe does not displace their contents by 2px.
 
@@ -42,28 +42,28 @@ All tokens live in `app/src/index.css` as HSL channel values (no `hsl()` wrapper
 
 ```css
 /* Dark */
---background: 240 10% 4%; /* #09090b — outermost canvas */
---panel: 240 6% 7%; /* #111113 — sidebar / panel bg */
---card: 240 6% 11%; /* #1a1a1f — elevated surface */
+--background: 240 10%  4%;   /* #09090b — outermost canvas */
+--panel:      240  6%  7%;   /* #111113 — sidebar / panel bg */
+--card:       240  6% 11%;   /* #1a1a1f — elevated surface */
 
 /* Light */
---background: 240 6% 96%; /* #f4f4f5 — paper-white canvas */
---panel: 240 5% 98%; /* #fafafa — panel */
---card: 0 0% 100%; /* #ffffff — white card */
+--background: 240  6% 96%;  /* #f4f4f5 — paper-white canvas */
+--panel:      240  5% 98%;  /* #fafafa — panel */
+--card:         0  0% 100%; /* #ffffff — white card */
 ```
 
 ### Foreground Scale
 
 ```css
 /* Dark */
---foreground: 240 5% 96%; /* #f4f4f5 — primary text */
---muted-foreground: 240 5% 65%; /* #a1a1aa — secondary / labels */
---subtle-foreground: 240 4% 44%; /* de-emphasized text — faintest readable tier */
+--foreground:         240  5% 96%;   /* #f4f4f5 — primary text */
+--muted-foreground:   240  5% 65%;   /* #a1a1aa — secondary / labels */
+--subtle-foreground:  240  4% 44%;   /* de-emphasized text — faintest readable tier */
 
 /* Light */
---foreground: 240 6% 10%; /* #18181b — primary text */
---muted-foreground: 240 4% 44%; /* #6b6b73 — secondary / labels (see note) */
---subtle-foreground: 240 4% 58%; /* de-emphasized text — faintest readable tier */
+--foreground:         240  6% 10%;   /* #18181b — primary text */
+--muted-foreground:   240  4% 44%;   /* #6b6b73 — secondary / labels (see note) */
+--subtle-foreground:  240  4% 58%;   /* de-emphasized text — faintest readable tier */
 ```
 
 `subtle-foreground` is the least-prominent text tier, and it is **deliberately
@@ -91,24 +91,24 @@ perceptible on its own but moves a whole class of text over the line.
 
 ```css
 /* Dark */
---accent: 240 7% 16%; /* #26262c — hover background */
---accent-active: 240 6% 21%; /* #323238 — selected / active background */
+--accent:        240  7% 16%;   /* #26262c — hover background */
+--accent-active: 240  6% 21%;   /* #323238 — selected / active background */
 
 /* Light */
---accent: 240 5% 93%; /* #ededef — hover background */
---accent-active: 240 5% 88%; /* #e0e0e4 — selected / active background */
+--accent:        240 5% 93%;   /* #ededef — hover background */
+--accent-active: 240 5% 88%;   /* #e0e0e4 — selected / active background */
 ```
 
 ### Borders
 
 ```css
 /* Dark */
---border: 0 0% 10%; /* ≈ rgba(255,255,255,0.07) — default dividers */
---border-strong: 0 0% 18%; /* ≈ rgba(255,255,255,0.15) — prominent borders */
+--border:        0  0% 10%;   /* ≈ rgba(255,255,255,0.07) — default dividers */
+--border-strong: 0  0% 18%;   /* ≈ rgba(255,255,255,0.15) — prominent borders */
 
 /* Light */
---border: 240 6% 89%; /* #e2e2e5 — default dividers */
---border-strong: 240 5% 82%; /* #cfcfd5 — prominent borders */
+--border:       240  6% 89%;   /* #e2e2e5 — default dividers */
+--border-strong: 240 5% 82%;   /* #cfcfd5 — prominent borders */
 ```
 
 ### Primary (Accent Color)
@@ -140,20 +140,20 @@ These differ between light and dark mode.
 
 ```css
 /* Light */
---success: 142 76% 36%; /* green */
---warning: 38 92% 50%; /* amber */
---info: 199 89% 48%; /* cyan */
---destructive: 0 84% 60%; /* red */
+--success:            142 76% 36%;   /* green */
+--warning:             38 92% 50%;   /* amber */
+--info:               199 89% 48%;   /* cyan */
+--destructive:          0 84% 60%;   /* red */
 
 /* Dark */
---success: 142 70% 45%; /* lighter green */
---warning: 38 92% 50%; /* same */
---info: 199 89% 48%; /* same */
---destructive: 0 62.8% 30.6%; /* darker red */
+--success:            142 70% 45%;   /* lighter green */
+--warning:             38 92% 50%;   /* same */
+--info:               199 89% 48%;   /* same */
+--destructive:          0 62.8% 30.6%;  /* darker red */
 ```
 
 **`-text` variants for legible text.** The base `--success` / `--warning` /
-`--destructive` tokens are tuned as _fills and indicators_; as small text on a
+`--destructive` tokens are tuned as *fills and indicators*; as small text on a
 light surface they fall below AA. Use the darkened (light) / lightened (dark)
 `-text` variant when the color is the text itself — `text-success-text`,
 `text-warning-text`, `text-destructive-text` — keeping `bg-*` / `border-*`
@@ -161,13 +161,9 @@ fills on the base token.
 
 ```css
 /* Light — accessible text on light surfaces */
---success-text: 142 72% 27%;
---warning-text: 38 90% 30%;
---destructive-text: 0 60% 48%;
+--success-text:  142 72% 27%;   --warning-text:  38 90% 30%;   --destructive-text: 0 60% 48%;
 /* Dark — accessible text on dark surfaces */
---success-text: 142 60% 55%;
---warning-text: 40 92% 60%;
---destructive-text: 0 65% 65%;
+--success-text:  142 60% 55%;   --warning-text:  40 92% 60%;   --destructive-text: 0 65% 65%;
 ```
 
 **Every `-text` token is solved against the darkest surface it can land on —
@@ -193,23 +189,23 @@ count badges), so the light values are solved against that wash — at green-700
 
 ```css
 /* Light */
---scope-global: 142 72% 26%;
---scope-collection: 21 90% 35%;
---scope-environment: 217 91% 45%; /* blue-600 — already clears it */
+--scope-global:      142 72% 26%;
+--scope-collection:   21 90% 35%;
+--scope-environment: 217 91% 45%;   /* blue-600 — already clears it */
 
 /* Dark */
---scope-global: 142 69% 58%; /* green-400 */
---scope-collection: 27 96% 61%; /* orange-400 */
---scope-environment: 213 94% 68%; /* blue-400 */
+--scope-global:      142 69% 58%;   /* green-400 */
+--scope-collection:   27 96% 61%;   /* orange-400 */
+--scope-environment: 213 94% 68%;   /* blue-400 */
 ```
 
 **Utility classes** (`text-`, `bg-`, `border-`, `ring-`, `accent-`):
 `text-scope-global`, `bg-scope-collection/10`, `border-scope-environment/20`, …
 
-| Scope       | Token               | Convention                                      |
-| ----------- | ------------------- | ----------------------------------------------- |
-| Global      | `scope-global`      | icon/text solid; `bg-scope-global/10` tint      |
-| Collection  | `scope-collection`  | icon/text solid; `bg-scope-collection/10` tint  |
+| Scope | Token | Convention |
+|-------|-------|-----------|
+| Global | `scope-global` | icon/text solid; `bg-scope-global/10` tint |
+| Collection | `scope-collection` | icon/text solid; `bg-scope-collection/10` tint |
 | Environment | `scope-environment` | icon/text solid; `bg-scope-environment/10` tint |
 
 Never hardcode `bg-green-50 dark:bg-green-950` pairs for scopes — use the token
@@ -224,23 +220,23 @@ same "good / bad / busy" signal on either surface. Distinct from `--success` /
 `--destructive`, which are tuned for banner text and button fills respectively.
 
 ```css
---status-success: 142 71% 45%; /* green-500  — completed / connected / pass */
---status-error: 0 84% 60%; /* red-500    — failed / test fail */
---status-running: 217 91% 60%; /* blue-500   — running */
---status-stopped: 25 95% 53%; /* orange-500 — stopped */
+--status-success: 142 71% 45%;   /* green-500  — completed / connected / pass */
+--status-error:   0 84% 60%;     /* red-500    — failed / test fail */
+--status-running: 217 91% 60%;   /* blue-500   — running */
+--status-stopped: 25 95% 53%;    /* orange-500 — stopped */
 /* pending → text-muted-foreground / bg-muted-foreground */
 ```
 
 **A status colour has three jobs, and three tokens.** The base value above is
-tuned as an _indicator_ — a dot, a bar, an icon — where only 3:1 is required.
+tuned as an *indicator* — a dot, a bar, an icon — where only 3:1 is required.
 Reuse it as text or as a solid chip and it fails: `status-success` measured
 **2.21:1** as 12px text on the light panel and **2.30:1** as white-on-fill.
 
-| Job                                | Token             | Example                  |
-| ---------------------------------- | ----------------- | ------------------------ |
-| Dot, bar, icon, tint, border       | `--status-*`      | `bg-status-success` dot  |
-| The colour **is the text**         | `--status-*-text` | `text-status-error-text` |
-| Solid chip under a **white** label | `--status-*-fill` | `bg-status-success-fill` |
+| Job                                       | Token                    | Example                        |
+| ----------------------------------------- | ------------------------ | ------------------------------ |
+| Dot, bar, icon, tint, border              | `--status-*`             | `bg-status-success` dot        |
+| The colour **is the text**                | `--status-*-text`        | `text-status-error-text`       |
+| Solid chip under a **white** label        | `--status-*-fill`        | `bg-status-success-fill`       |
 
 Only `-text` is mode-adaptive (light needs a darker value, dark a lighter one).
 The base indicators and the `-fill` chips stay mode-consistent, so a green dot
@@ -249,7 +245,7 @@ and a "200 OK" chip read identically on either theme. This is the same split
 
 **Utility classes** (`text-`, `bg-`, `border-`): `text-status-success-text`,
 `bg-status-error-fill`, `border-status-running/25`, etc. Use `--warning` for
-"expiring / caution" indicators (amber) and `--success` for success _banners_.
+"expiring / caution" indicators (amber) and `--success` for success *banners*.
 
 The same set also colors **HTTP response severity** (2xx → `status-success`,
 3xx → `status-running`, 4xx → `warning`, 5xx/0 → `status-error`) and **latency
@@ -286,6 +282,7 @@ colour.
 <MethodBadge method={m} variant="text" muted={!isActive} />    // secondary context
 ```
 
+
 Method colors are design tokens, not hardcoded hex values. **They are
 mode-adaptive** — hue and saturation are identical in both themes, so a method
 always reads as "its" colour; only lightness shifts.
@@ -298,18 +295,17 @@ measured 1.97:1 in light, PATCH 2.86:1 in dark. Each value below is solved
 against its own tint over the worst surface of its theme, and clears 4.6:1.
 
 ```css
-/* light */ /* dark */
---method-get: 142 76% 25%; /* 142 76% 45% — green  */
---method-post: 217 91% 45%; /* 217 91% 63% — blue   */
---method-put: 38 92% 28%; /*  38 92% 45% — amber  */
---method-patch: 262 83% 45%; /* 262 83% 71% — purple */
---method-delete: 0 84% 42%; /*   0 84% 65% — red    */
---method-head: 199 89% 31%; /* 199 89% 45% — cyan   */
---method-options: 240 5% 41%; /* 240  5% 58% — gray   */
+/* light */                      /* dark */
+--method-get:     142 76% 25%;   /* 142 76% 45% — green  */
+--method-post:    217 91% 45%;   /* 217 91% 63% — blue   */
+--method-put:      38 92% 28%;   /*  38 92% 45% — amber  */
+--method-patch:   262 83% 45%;   /* 262 83% 71% — purple */
+--method-delete:    0 84% 42%;   /*   0 84% 65% — red    */
+--method-head:    199 89% 31%;   /* 199 89% 45% — cyan   */
+--method-options: 240  5% 41%;   /* 240  5% 58% — gray   */
 ```
 
 **Utility classes** (defined in `index.css`, available as Tailwind class names):
-
 - Text color: `.method-get`, `.method-post`, `.method-put`, `.method-patch`, `.method-delete`, `.method-head`, `.method-options`
 - Background: `.bg-method-get`, `.bg-method-post`, etc.
 
@@ -319,13 +315,13 @@ against its own tint over the worst surface of its theme, and clears 4.6:1.
 const c = getMethodColor(method); // e.g. "var(--method-get)"
 
 // Solid color (text, stroke):
-color: `hsl(${c})`;
+color: `hsl(${c})`
 
 // Tinted background (~10% opacity):
-background: `hsl(${c} / 0.1)`;
+background: `hsl(${c} / 0.1)`
 
 // Tinted border (~30% opacity):
-borderColor: `hsl(${c} / 0.3)`;
+borderColor: `hsl(${c} / 0.3)`
 ```
 
 **Method badge pattern** (inline `<span>`, not a `<Badge>` component — used in RunItem, DashboardHeader):
@@ -335,26 +331,21 @@ const c = `var(--method-${method.toLowerCase()})`;
 <span
   className="text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded"
   style={{
-    color: `hsl(${c})`,
+    color:      `hsl(${c})`,
     background: `hsl(${c} / 0.1)`,
-    border: `1px solid hsl(${c} / 0.3)`,
+    border:     `1px solid hsl(${c} / 0.3)`,
   }}
 >
   {method}
-</span>;
+</span>
 ```
 
 **MethodSelector** uses the `.method-get` etc. utility classes as Tailwind classNames:
 
 ```tsx
 const METHOD_COLORS: Record<HttpMethod, string> = {
-  GET: "method-get",
-  POST: "method-post",
-  PUT: "method-put",
-  PATCH: "method-patch",
-  DELETE: "method-delete",
-  HEAD: "method-head",
-  OPTIONS: "method-options",
+  GET: "method-get", POST: "method-post", PUT: "method-put",
+  PATCH: "method-patch", DELETE: "method-delete", HEAD: "method-head", OPTIONS: "method-options",
 };
 // Usage: className={cn("font-mono font-semibold", METHOD_COLORS[method])}
 ```
@@ -367,17 +358,17 @@ only in lightness for each ground.
 
 ```css
 /* Light */
---chart-1: <accent>; /* tracks --primary */
---chart-2: 172 66% 38%; /* teal */
---chart-3: 258 55% 55%; /* violet */
---chart-4: 38 88% 48%; /* amber */
---chart-5: 340 72% 50%; /* rose */
+--chart-1: <accent>;         /* tracks --primary */
+--chart-2: 172 66% 38%;   /* teal */
+--chart-3: 258 55% 55%;   /* violet */
+--chart-4:  38 88% 48%;   /* amber */
+--chart-5: 340 72% 50%;   /* rose */
 
 /* Dark — same hues, lifted for the dark ground */
 --chart-1: <accent>;
 --chart-2: 172 60% 52%;
 --chart-3: 258 78% 72%;
---chart-4: 38 90% 60%;
+--chart-4:  38 90% 60%;
 --chart-5: 340 74% 62%;
 ```
 
@@ -390,14 +381,14 @@ Applied via `data-color-scheme` attribute on `<html>`. Each scheme sets
 and `--chart-1`. The authoritative per-scheme values (deep fill + mode-adaptive
 accent) live in `app/src/index.css`; the table below is an approximate guide.
 
-| Scheme             | Light HSL        | Dark HSL      |
-| ------------------ | ---------------- | ------------- |
-| `sunset` (default) | `24.6 95% 53.1%` | same          |
-| `sky`              | `188 94% 43%`    | same          |
-| `ocean`            | `217 91% 60%`    | `217 78% 51%` |
-| `forest`           | `142 76% 36%`    | `142 70% 45%` |
-| `aurora`           | `258 87% 74%`    | same          |
-| `coral`            | `0 72% 65%`      | `0 72% 55%`   |
+| Scheme | Light HSL | Dark HSL |
+|--------|-----------|----------|
+| `sunset` (default) | `24.6 95% 53.1%` | same |
+| `sky` | `188 94% 43%` | same |
+| `ocean` | `217 91% 60%` | `217 78% 51%` |
+| `forest` | `142 76% 36%` | `142 70% 45%` |
+| `aurora` | `258 87% 74%` | same |
+| `coral` | `0 72% 65%` | `0 72% 55%` |
 
 ---
 
@@ -405,23 +396,18 @@ accent) live in `app/src/index.css`; the table below is an approximate guide.
 
 ### Fonts
 
-| Role        | Family         | Import       |
-| ----------- | -------------- | ------------ |
-| UI / body   | Space Grotesk  | Google Fonts |
+| Role | Family | Import |
+|------|--------|--------|
+| UI / body | Space Grotesk | Google Fonts |
 | Code / mono | JetBrains Mono | Google Fonts |
 
 ```html
 <!-- app/index.html -->
-<link
-  href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap"
-  rel="stylesheet"
-/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
 ```
 
 ```css
-body {
-  font-family: var(--font-sans);
-} /* default: "Space Grotesk", system-ui, sans-serif */
+body { font-family: var(--font-sans); } /* default: "Space Grotesk", system-ui, sans-serif */
 /* mono via font-mono Tailwind class, or .font-code utility */
 ```
 
@@ -436,20 +422,20 @@ text stays JetBrains Mono regardless.
 
 ### Type Scale Conventions
 
-| Use                     | Size    | Weight                         | Class                                                                         |
-| ----------------------- | ------- | ------------------------------ | ----------------------------------------------------------------------------- |
-| Section label / eyebrow | 11px    | semibold, uppercase, +tracking | `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
-| Hero metric value       | 34px    | bold, tabular                  | `text-[34px] font-bold leading-none font-mono tabular-nums`                   |
-| Secondary metric value  | 22px    | bold                           | `text-[22px] font-bold font-mono`                                             |
-| Body / default          | 13px    | regular                        | `text-sm`                                                                     |
-| Small label             | 12px    | medium                         | `text-[12px] font-medium`                                                     |
-| Micro / badge           | 10–11px | mono bold                      | `text-[10px] font-mono font-bold`                                             |
-| URL / path              | 12–13px | mono                           | `text-[12px] font-mono`                                                       |
+| Use | Size | Weight | Class |
+|-----|------|--------|-------|
+| Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
+| Hero metric value | 34px | bold, tabular | `text-[34px] font-bold leading-none font-mono tabular-nums` |
+| Secondary metric value | 22px | bold | `text-[22px] font-bold font-mono` |
+| Body / default | 13px | regular | `text-sm` |
+| Small label | 12px | medium | `text-[12px] font-medium` |
+| Micro / badge | 10–11px | mono bold | `text-[10px] font-mono font-bold` |
+| URL / path | 12–13px | mono | `text-[12px] font-mono` |
 
 **Use `text-sm` for body, not `text-[13px]`.** Tailwind ships `text-sm` at 14px,
 which left the app running two scales a pixel apart — `text-sm` in ~160 places
 against `text-[13px]` in ~18. Rather than migrate every call site, `--text-sm` is
-redefined in `@theme` (`index.css`) to **13px/18px**, so the utility _is_ the
+redefined in `@theme` (`index.css`) to **13px/18px**, so the utility *is* the
 documented body size. `text-xs` already matches the 12px label, so that was the
 only size that diverged. `text-[13px]` still works but skips the paired
 line-height — prefer `text-sm`.
@@ -463,17 +449,17 @@ hides icons from a scale audit and lets off-grid values (15px) creep in. Use
 ## Geometry
 
 ```css
---radius: 0.375rem; /* 6px — base border radius (default) */
+--radius: 0.375rem;   /* 6px — base border radius (default) */
 ```
 
-| Class          | Value                       | Follows the setting?    |
-| -------------- | --------------------------- | ----------------------- |
-| `rounded-sm`   | `calc(var(--radius) - 4px)` | yes                     |
-| `rounded-md`   | `calc(var(--radius) - 2px)` | yes                     |
-| `rounded-lg`   | `var(--radius)`             | yes                     |
-| `rounded-full` | pill / circle               | no — deliberately fixed |
-| `rounded-none` | `0`                         | no — deliberately fixed |
-| `rounded`      | Tailwind default            | **no — never use it**   |
+| Class | Value | Follows the setting? |
+|-------|-------|----------------------|
+| `rounded-sm` | `calc(var(--radius) - 4px)` | yes |
+| `rounded-md` | `calc(var(--radius) - 2px)` | yes |
+| `rounded-lg` | `var(--radius)` | yes |
+| `rounded-full` | pill / circle | no — deliberately fixed |
+| `rounded-none` | `0` | no — deliberately fixed |
+| `rounded` | Tailwind default | **no — never use it** |
 
 **Never use bare `rounded`.** It resolves from Tailwind's own default rather
 than `--radius`, so it sits at 4px whatever the user picks — measured 4px at
@@ -501,7 +487,7 @@ control). `rounded-full` stays a pill regardless.
 Cards and panels use `rounded-md`. Badges/chips use `rounded-sm`.
 
 **`rounded-full` is for circles, not for chips.** Status dots, spinners,
-circular icon wells, colour swatches, switch tracks — things whose shape _is_ a
+circular icon wells, colour swatches, switch tracks — things whose shape *is* a
 circle or a capsule. It is not for anything rectangular that merely looked
 nicer with round ends: the dashboard header's LIVE / COMPLETED / STOPPED chips
 were `rounded-full` while the `Badge` primitive they otherwise match is
@@ -522,24 +508,22 @@ Roundedness setting. Interactive elements take `rounded-md`/`rounded-sm`.
 
 Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animations have Tailwind shorthand aliases (`animate-vayu-spin`, `animate-vayu-pulse`, `animate-vayu-fadepulse`) in addition to the verbose arbitrary form.
 
-| Name                | Duration | Curve       | Tailwind class              | Use                                                 |
-| ------------------- | -------- | ----------- | --------------------------- | --------------------------------------------------- |
-| `vayu-spin`         | 0.7s     | linear      | `animate-vayu-spin`         | Loading spinners                                    |
-| `vayu-pulse`        | 1.6s     | ease-in-out | `animate-vayu-pulse`        | Live indicators (100→35% opacity)                   |
-| `vayu-fadepulse`    | 2s       | ease-in-out | `animate-vayu-fadepulse`    | Subtle breathe (90→50% opacity)                     |
-| `accordion-down/up` | 0.2s     | ease-out    | `animate-accordion-down/up` | Radix accordion                                     |
-| `fade-in`           | 0.2s     | ease-out    | `animate-fade-in`           | General reveal                                      |
-| `slide-in`          | 0.2s     | ease-out    | `animate-slide-in`          | Dropdown/panel entry                                |
-| interaction state   | 0.15s    | ease        | _(baseline in `index.css`)_ | Hover/active colour changes on interactive elements |
+| Name | Duration | Curve | Tailwind class | Use |
+|------|----------|-------|----------------|-----|
+| `vayu-spin` | 0.7s | linear | `animate-vayu-spin` | Loading spinners |
+| `vayu-pulse` | 1.6s | ease-in-out | `animate-vayu-pulse` | Live indicators (100→35% opacity) |
+| `vayu-fadepulse` | 2s | ease-in-out | `animate-vayu-fadepulse` | Subtle breathe (90→50% opacity) |
+| `accordion-down/up` | 0.2s | ease-out | `animate-accordion-down/up` | Radix accordion |
+| `fade-in` | 0.2s | ease-out | `animate-fade-in` | General reveal |
+| `slide-in` | 0.2s | ease-out | `animate-slide-in` | Dropdown/panel entry |
+| interaction state | 0.15s | ease | *(baseline in `index.css`)* | Hover/active colour changes on interactive elements |
 
 **Spinner pattern:**
-
 ```tsx
 <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-vayu-spin inline-block" />
 ```
 
 **Live dot pattern:**
-
 ```tsx
 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
 ```
@@ -553,16 +537,8 @@ baseline in `app/src/index.css` (`@layer base`) — **do not add per-component
 focus classes for the default case.**
 
 ```css
-:where(
-  button,
-  [role="button"],
-  a[href],
-  input,
-  select,
-  textarea,
-  summary,
-  [tabindex]:not([tabindex="-1"])
-):focus-visible {
+:where(button, [role="button"], a[href], input, select, textarea, summary,
+       [tabindex]:not([tabindex="-1"])):focus-visible {
   outline: 1px solid hsl(var(--ring));
   outline-offset: 2px;
 }
@@ -590,7 +566,7 @@ wrapper. Put it on the element carrying the overflow — not on the rows. For a
 one-off outside such a container, use the `.focus-ring-inset` utility.
 
 **Composite rows — `.focus-row`.** The baseline attaches the ring to whatever is
-_focusable_, which is only right when the focusable element is also what the user
+*focusable*, which is only right when the focusable element is also what the user
 reads as the target. In a tree row it often isn't: a collection row is 220px with
 a rounded hover fill, but its label button is 150px with square corners, so an
 outline on the button indicates the wrong shape in the wrong place.
@@ -605,9 +581,7 @@ reads. The inner control draws nothing.
   outline: 2px solid hsl(var(--primary) / 0.3);
   outline-offset: -2px;
 }
-.focus-row :focus-visible:not(.focus-self) {
-  outline: none;
-}
+.focus-row :focus-visible:not(.focus-self) { outline: none; }
 ```
 
 The indicator mirrors the disclosure chevron's own ring (`ring-2
@@ -636,10 +610,10 @@ Controls that appear on a row you are already hovering — `⋯`, delete, remove
 what the row underneath already paints, so the button looks like it has no hover
 state at all. Use the dedicated variants, which step up to `accent-active`:
 
-| Variant                | Use                       | Hover                                   |
-| ---------------------- | ------------------------- | --------------------------------------- |
-| `rowAction`            | neutral (`⋯`, edit, copy) | `bg-accent-active` + `text-foreground`  |
-| `rowActionDestructive` | delete / remove           | `bg-accent-active` + `text-destructive` |
+| Variant | Use | Hover |
+|---------|-----|-------|
+| `rowAction` | neutral (`⋯`, edit, copy) | `bg-accent-active` + `text-foreground` |
+| `rowActionDestructive` | delete / remove | `bg-accent-active` + `text-destructive` |
 
 Destructive rows share the neutral shape and differ **only** in glyph colour on
 hover. No red background tint: the row already carries one fill, a second
@@ -666,7 +640,7 @@ their content.
 The four views had drifted into two different panel designs — Collections and
 History used a 16px padded container with a heading, Variables and Settings were
 flush with no heading at all. Switching views moved the content's vertical start
-_and_ made the title appear or vanish. All four now match exactly: heading at
+*and* made the title appear or vanish. All four now match exactly: heading at
 11px from the panel top, body at 40px.
 
 - **The frame owns header padding; the body is flush.** Rows run edge to edge —
@@ -703,13 +677,13 @@ _and_ made the title appear or vanish. All four now match exactly: heading at
 fall out of the content. It previously did — a 28px chevron set the collection
 row, padding set the others — so the four drawer views ran **34 / 36 / 38 / 40px**
 and the rhythm shifted every time the user switched view, one click apart in the
-same panel. Collection and request rows differed by 4px inside a _single_ tree.
+same panel. Collection and request rows differed by 4px inside a *single* tree.
 
 Applies to `CollectionItem`, `RequestItem`, `SettingsCategoryTree` and
 `VariablesCategoryTree` rows. Put `h-8 items-center` on the row and let content
 centre; do not re-add vertical padding, which is what caused the drift.
 
-Section _headers_ (e.g. "Environments") stay shorter on purpose — they are group
+Section *headers* (e.g. "Environments") stay shorter on purpose — they are group
 labels, not list items, and the difference carries hierarchy.
 
 The disclosure chevron is `w-6 h-6` (24px) so it fits a 32px row. That is still
@@ -791,10 +765,10 @@ to shrink below its content.** `flex-1` sets how an item _grows_; it does not
 grant permission to shrink. This has caused two separate bugs in this codebase
 and is worth checking whenever a flex child holds unbounded content.
 
-| Axis       | Add                      | Symptom when missing                                                                                           |
-| ---------- | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| Horizontal | `min-w-0` on the wrapper | `truncate` never engages — a long name widens the row and the panel scrolls sideways.                          |
-| Vertical   | `min-h-0` on the wrapper | The child keeps its old height when the container shrinks — the parent overflows and grows a second scrollbar. |
+| Axis       | Add                        | Symptom when missing                                                                                              |
+| ---------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Horizontal | `min-w-0` on the wrapper   | `truncate` never engages — a long name widens the row and the panel scrolls sideways.                              |
+| Vertical   | `min-h-0` on the wrapper   | The child keeps its old height when the container shrinks — the parent overflows and grows a second scrollbar.     |
 
 The vertical case is the more confusing one, because the visible symptom is a
 _scrollbar_, not a sizing error: a Monaco editor in a resizable pane kept its
@@ -881,7 +855,9 @@ useResizable({ defaultSize, min, max, direction?: "horizontal" | "vertical" })
 ### Cards
 
 ```tsx
-<div className="bg-card border border-border rounded-md p-4">...</div>
+<div className="bg-card border border-border rounded-md p-4">
+  ...
+</div>
 ```
 
 Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-900` for card surfaces. Always `bg-card`.
@@ -897,7 +873,6 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
 ### Status Badges / Pills
 
 **Live (running):**
-
 ```tsx
 <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-green-500/15 text-green-500 border border-green-500/25">
   <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
@@ -906,7 +881,6 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
 ```
 
 **Completed / Stopped:**
-
 ```tsx
 <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border">
   COMPLETED
@@ -914,18 +888,15 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
 ```
 
 **Run status left-bar (RunItem):**
-
 ```tsx
-<div
-  className={cn(
-    "absolute left-0 top-0 bottom-0 w-1",
-    status === "completed" && "bg-green-500",
-    status === "failed" && "bg-red-500",
-    status === "running" && "bg-blue-500",
-    status === "stopped" && "bg-orange-500",
-    status === "pending" && "bg-muted-foreground",
-  )}
-/>
+<div className={cn(
+  "absolute left-0 top-0 bottom-0 w-1",
+  status === "completed" && "bg-green-500",
+  status === "failed"    && "bg-red-500",
+  status === "running"   && "bg-blue-500",
+  status === "stopped"   && "bg-orange-500",
+  status === "pending"   && "bg-muted-foreground"
+)} />
 ```
 
 ### Destructive Actions
@@ -956,20 +927,17 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
 
 ```tsx
 <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel shrink-0">
-  <MethodSelector />{" "}
-  {/* w-[76px] h-[34px] bg-accent font-mono font-bold text-[11px] */}
+  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-bold text-[11px] */}
   <UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-[13px] font-mono focus:border-primary focus:outline-none transition-colors" />
+
   {/* Primary action */}
   <button className="h-[34px] px-4 rounded-md bg-primary text-white text-[13px] font-semibold ...">
-    {isExecuting ? (
-      <>
-        <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-vayu-spin inline-block" />{" "}
-        Sending
-      </>
-    ) : (
-      <>▶ Send</>
-    )}
+    {isExecuting
+      ? <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-vayu-spin inline-block" /> Sending</>
+      : <>▶ Send</>
+    }
   </button>
+
   {/* Secondary action — always token-based (text-primary/border-primary/bg-primary/10), never hardcoded purple */}
   <button className="h-[34px] px-3.5 rounded-md text-[12px] font-semibold text-primary border border-primary bg-primary/10 ...">
     <Zap className="w-3.5 h-3.5" /> Load Test
@@ -996,27 +964,16 @@ The header has a live elapsed timer (`liveTick` state) that resets to 0 at the s
 ```tsx
 function Sparkline({ data, color }: { data: number[]; color: string }) {
   if (!data || data.length < 2) return null;
-  const max = Math.max(...data),
-    min = Math.min(...data),
-    rng = max - min || 1;
-  const w = 108,
-    h = 26;
-  const pts = data.map(
-    (v, i) =>
-      `${(1 + (i / (data.length - 1)) * w).toFixed(1)},${(1 + h * (1 - (v - min) / rng)).toFixed(1)}`,
+  const max = Math.max(...data), min = Math.min(...data), rng = max - min || 1;
+  const w = 108, h = 26;
+  const pts = data.map((v, i) =>
+    `${(1 + (i / (data.length - 1)) * w).toFixed(1)},${(1 + h * (1 - (v - min) / rng)).toFixed(1)}`
   );
   const area = `M1,${h + 1} L${pts.join(" L")} L${w + 1},${h + 1}Z`;
   return (
     <svg width={110} height={28} className="block overflow-visible">
       <path d={area} fill={color} fillOpacity="0.15" />
-      <polyline
-        points={pts.join(" ")}
-        fill="none"
-        stroke={color}
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
+      <polyline points={pts.join(" ")} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }
@@ -1039,9 +996,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
 
 ```tsx
 <div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1">
-  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-    {label}
-  </p>
+  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{label}</p>
   <div className="flex items-baseline gap-1.5 mt-0.5">
     <span
       className="text-[34px] font-bold leading-none font-mono tabular-nums"
@@ -1066,13 +1021,9 @@ Note: sparkline renders **below** the value row, not beside it.
 
 ```tsx
 <div className="bg-card border border-border rounded-md p-3">
-  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-1.5">
-    {label}
-  </p>
+  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-1.5">{label}</p>
   <div className="flex items-baseline gap-1">
-    <span className="text-[22px] font-bold font-mono text-foreground">
-      {value}
-    </span>
+    <span className="text-[22px] font-bold font-mono text-foreground">{value}</span>
     {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
   </div>
 </div>
@@ -1081,7 +1032,6 @@ Note: sparkline renders **below** the value row, not beside it.
 ### Latency Distribution Bar
 
 Gradient track (green→amber→red at 18% opacity), with absolute-positioned needle markers at p50/p95/p99. Each marker consists of:
-
 - A 1px-wide, 16px-tall vertical pin: `w-px h-4 mx-auto opacity-85`
 - A dot below it: `w-2 h-2 rounded-full mx-auto -mt-1` with `boxShadow: "0 0 0 2px hsl(var(--card))"` (creates the ring effect without Tailwind ring classes)
 - Value label + percentile label below
@@ -1090,29 +1040,29 @@ Gradient track (green→amber→red at 18% opacity), with absolute-positioned ne
 
 ## Tailwind Utility Reference
 
-| Token               | Tailwind class                                       |
-| ------------------- | ---------------------------------------------------- |
-| Canvas background   | `bg-background`                                      |
-| Panel background    | `bg-panel`                                           |
-| Card background     | `bg-card`                                            |
-| Primary text        | `text-foreground`                                    |
-| Secondary text      | `text-muted-foreground`                              |
-| De-emphasized text  | `text-subtle-foreground`                             |
-| Primary accent      | `text-primary`, `bg-primary`, `border-primary`       |
-| Default border      | `border-border`                                      |
-| Strong border       | `border-border-strong`                               |
-| Hover state         | `hover:bg-accent`                                    |
-| Selected state      | `bg-accent-active`                                   |
-| Success             | `text-success`, `bg-success/10`                      |
-| Warning             | `text-warning`, `bg-warning/10`                      |
-| Info                | `text-info`, `bg-info/10`                            |
-| Error               | `text-destructive`, `bg-destructive/10`              |
-| Method text (GET)   | `method-get` (and `method-post`, `method-put`, etc.) |
-| Method bg (GET)     | `bg-method-get` (and `bg-method-post`, etc.)         |
-| Mono font           | `font-mono`                                          |
-| Code font (utility) | `font-code`                                          |
-| Thin scrollbar      | `scrollbar-thin`                                     |
-| Variable color      | `text-variable` or `.variable-highlight`             |
+| Token | Tailwind class |
+|-------|---------------|
+| Canvas background | `bg-background` |
+| Panel background | `bg-panel` |
+| Card background | `bg-card` |
+| Primary text | `text-foreground` |
+| Secondary text | `text-muted-foreground` |
+| De-emphasized text | `text-subtle-foreground` |
+| Primary accent | `text-primary`, `bg-primary`, `border-primary` |
+| Default border | `border-border` |
+| Strong border | `border-border-strong` |
+| Hover state | `hover:bg-accent` |
+| Selected state | `bg-accent-active` |
+| Success | `text-success`, `bg-success/10` |
+| Warning | `text-warning`, `bg-warning/10` |
+| Info | `text-info`, `bg-info/10` |
+| Error | `text-destructive`, `bg-destructive/10` |
+| Method text (GET) | `method-get` (and `method-post`, `method-put`, etc.) |
+| Method bg (GET) | `bg-method-get` (and `bg-method-post`, etc.) |
+| Mono font | `font-mono` |
+| Code font (utility) | `font-code` |
+| Thin scrollbar | `scrollbar-thin` |
+| Variable color | `text-variable` or `.variable-highlight` |
 
 ### Never use
 
@@ -1130,13 +1080,13 @@ Gradient track (green→amber→red at 18% opacity), with absolute-positioned ne
 
 Planned / pending implementation. Intended colors for the JSON pretty-printer:
 
-| Token          | Color                  |
-| -------------- | ---------------------- |
-| Object keys    | `#7dd3fc` (sky-300)    |
-| String values  | `#86efac` (green-300)  |
-| Number values  | `#fbbf24` (amber-400)  |
+| Token | Color |
+|-------|-------|
+| Object keys | `#7dd3fc` (sky-300) |
+| String values | `#86efac` (green-300) |
+| Number values | `#fbbf24` (amber-400) |
 | Boolean values | `#a78bfa` (violet-400) |
-| Null           | `#94a3b8` (slate-400)  |
+| Null | `#94a3b8` (slate-400) |
 
 ---
 
@@ -1148,11 +1098,11 @@ container gets them; there is nothing to remember and nothing to apply.
 ```css
 /* index.css, @layer base */
 :where(*) {
-  scrollbar-width: thin;
-  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+	scrollbar-width: thin;
+	scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
 }
 ::-webkit-scrollbar {
-  @apply w-2 h-2;
+	@apply w-2 h-2;
 }
 ```
 
@@ -1179,13 +1129,13 @@ is the standards-track fallback.
 
 ## Source Files
 
-| File                                                   | Purpose                                                    |
-| ------------------------------------------------------ | ---------------------------------------------------------- |
-| `app/src/index.css`                                    | All CSS custom properties, keyframes, utility classes      |
-| `app/tailwind.config.js`                               | Color mapping, font families, keyframes, animation aliases |
-| `app/index.html`                                       | Google Fonts preconnect + link tags                        |
-| `app/src/components/layout/Shell.tsx`                  | Root layout — resizable sidebar + drag handle + main       |
-| `app/src/components/layout/Sidebar.tsx`                | ActivityBar + SidebarPanel                                 |
-| `app/src/hooks/useResizable.ts`                        | Drag-to-resize hook (delta-based, horizontal/vertical)     |
-| `app/src/utils/helpers.ts`                             | `getMethodColor(method)` → `var(--method-xxx)`             |
-| `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard    |
+| File | Purpose |
+|------|---------|
+| `app/src/index.css` | All CSS custom properties, keyframes, utility classes |
+| `app/tailwind.config.js` | Color mapping, font families, keyframes, animation aliases |
+| `app/index.html` | Google Fonts preconnect + link tags |
+| `app/src/components/layout/Shell.tsx` | Root layout — resizable sidebar + drag handle + main |
+| `app/src/components/layout/Sidebar.tsx` | ActivityBar + SidebarPanel |
+| `app/src/hooks/useResizable.ts` | Drag-to-resize hook (delta-based, horizontal/vertical) |
+| `app/src/utils/helpers.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
+| `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |
