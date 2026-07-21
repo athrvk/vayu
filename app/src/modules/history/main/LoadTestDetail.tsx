@@ -150,6 +150,9 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 				<div className="grid grid-cols-3 gap-3">
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
+							{/* Raw palette, and staying. Measured 3.50 light / 3.66 dark on
+						    this tile against the 3.0 icon bar — it clears it in both
+						    themes, and there is no violet semantic token to move it to. */}
 							<TrendingUp className="w-4 h-4 text-purple-500" />
 							<span className="text-xs text-muted-foreground">P99 Latency</span>
 						</div>
@@ -168,7 +171,7 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 					</div>
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
-							<CheckCircle className="w-4 h-4 text-green-500" />
+							<CheckCircle className="w-4 h-4 text-status-success-text" />
 							<span className="text-xs text-muted-foreground">Success Rate</span>
 						</div>
 						<p className="text-xl font-bold text-foreground">

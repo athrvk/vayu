@@ -121,6 +121,10 @@ export default function RunItem({
 					{/* z-10: sits above the stretched activator below, so delete
 					    stays clickable while the rest of the card selects the run. */}
 					<div className="relative z-10 flex items-center gap-1 shrink-0">
+						{/* The purple is raw palette, and stays: measured 3.93 light /
+						    4.59 dark against the panel, so it clears the 3.0 icon bar in
+						    both themes, and there is no violet semantic token to move it
+						    to. Not every raw palette class is a defect. */}
 						{run.type === "load" && (
 							<Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />
 						)}

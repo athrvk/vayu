@@ -57,7 +57,7 @@ export default function SampleRequestCard({
 				{isError ? (
 					<XCircle className="w-4 h-4 text-destructive-text shrink-0" />
 				) : (
-					<CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+					<CheckCircle className="w-4 h-4 text-status-success-text shrink-0" />
 				)}
 
 				<Badge
