@@ -23,6 +23,7 @@ import { useState } from "react";
 import { Copy, Check, Download, Terminal, BarChart3 } from "lucide-react";
 import {
 	Tabs,
+	TabsContent,
 	TabsList,
 	TabsTrigger,
 	Badge,
@@ -295,22 +296,35 @@ export default function ResponseViewer() {
 					</div>
 				</div>
 
-				{/* Tab Content */}
-				<div className="flex-1 overflow-hidden">
-					{activeTab === "body" && (
-						<SharedResponseBody
-							body={response.body}
-							bodyRaw={response.bodyRaw}
-							headers={response.headers}
-							showModeToggle
-						/>
-					)}
-					{activeTab === "headers" && <ResponseHeadersTab response={response} />}
-					{activeTab === "cookies" && <ResponseCookies headers={response.headers} />}
-					{activeTab === "timing" && response.timing && (
+				{/*
+				 * TabsContent per tab, not a plain <div>. Radix derives an
+				 * aria-controls id per trigger from its value, so rendering the
+				 * content outside the Tabs tree left every trigger pointing at a
+				 * panel id that never existed. The conditional panels mirror the
+				 * conditions on their triggers above, so a tab and its panel are
+				 * always rendered together.
+				 */}
+				<TabsContent value="body" className="mt-0 flex-1 overflow-hidden">
+					<SharedResponseBody
+						body={response.body}
+						bodyRaw={response.bodyRaw}
+						headers={response.headers}
+						showModeToggle
+					/>
+				</TabsContent>
+				<TabsContent value="headers" className="mt-0 flex-1 overflow-hidden">
+					<ResponseHeadersTab response={response} />
+				</TabsContent>
+				<TabsContent value="cookies" className="mt-0 flex-1 overflow-hidden">
+					<ResponseCookies headers={response.headers} />
+				</TabsContent>
+				{response.timing && (
+					<TabsContent value="timing" className="mt-0 flex-1 overflow-hidden">
 						<ResponseTimingTab timing={response.timing} />
-					)}
-					{activeTab === "console" && (
+					</TabsContent>
+				)}
+				{response.consoleLogs && response.consoleLogs.length > 0 && (
+					<TabsContent value="console" className="mt-0 flex-1 overflow-hidden">
 						<ConsoleOutput
 							logs={response.consoleLogs || []}
 							errors={{
@@ -318,15 +332,21 @@ export default function ResponseViewer() {
 								post: response.postScriptError,
 							}}
 						/>
-					)}
-					{activeTab === "tests" && <TestResults results={response.testResults || []} />}
-					{activeTab === "raw-request" && (
+					</TabsContent>
+				)}
+				{response.testResults && response.testResults.length > 0 && (
+					<TabsContent value="tests" className="mt-0 flex-1 overflow-hidden">
+						<TestResults results={response.testResults || []} />
+					</TabsContent>
+				)}
+				{response.rawRequest && (
+					<TabsContent value="raw-request" className="mt-0 flex-1 overflow-hidden">
 						<RawRequestResponse
 							rawRequest={response.rawRequest || ""}
 							response={response}
 						/>
-					)}
-				</div>
+					</TabsContent>
+				)}
 			</Tabs>
 		</div>
 	);

@@ -11,7 +11,7 @@
  * Tab navigation and content panels for request configuration
  */
 
-import { Tabs, TabsList, TabsTrigger, Badge } from "@/components/ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger, Badge } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
 import type { RequestTab, TabInfo } from "../../types";
 import ParamsPanel from "./panels/ParamsPanel";
@@ -85,10 +85,23 @@ export default function RequestTabs() {
 				))}
 			</TabsList>
 
-			{/* Tab Content */}
-			<div className="flex-1 overflow-y-auto p-4">
-				<TabContent />
-			</div>
+			{/*
+			 * TabsContent per tab, not a plain <div>. Radix derives an
+			 * aria-controls id per trigger from its value, so rendering the
+			 * content outside the Tabs tree left all six triggers pointing at
+			 * panel ids that never existed — a tablist with no reachable panels.
+			 * Only the active TabsContent mounts, so <TabContent /> still renders
+			 * exactly once and its own switch resolves to that tab.
+			 */}
+			{tabs.map((tab) => (
+				<TabsContent
+					key={tab.id}
+					value={tab.id}
+					className="mt-0 flex-1 overflow-y-auto p-4"
+				>
+					<TabContent />
+				</TabsContent>
+			))}
 		</Tabs>
 	);
 }
