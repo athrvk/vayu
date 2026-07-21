@@ -202,7 +202,7 @@ function MetricsView({
 								send rate
 							</span>
 							{targetRps !== undefined && (
-								<span className="text-subtle-foreground">
+								<span className="text-muted-foreground">
 									<span
 										className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
 										style={{ background: "hsl(var(--subtle-foreground))" }}
@@ -212,7 +212,7 @@ function MetricsView({
 							)}
 							{rampOverlay && (
 								<>
-									<span className="text-subtle-foreground">
+									<span className="text-muted-foreground">
 										<span
 											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
 											style={{ background: "hsl(var(--subtle-foreground))" }}
@@ -241,18 +241,18 @@ function MetricsView({
 					{rampOverlay && (
 						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-[11px] font-mono text-muted-foreground">
 							<span>
-								<span className="text-subtle-foreground">ramp deviation </span>
+								<span className="text-muted-foreground">ramp deviation </span>
 								<span className="text-foreground font-semibold">
 									{rampOverlay.rampDeviationPct.toFixed(1)}%
 								</span>
 								<InfoChip tip={TOOLTIPS.rampDeviation} />
 							</span>
 							<span>
-								<span className="text-subtle-foreground">peak achieved </span>
+								<span className="text-muted-foreground">peak achieved </span>
 								<span className="text-foreground font-semibold">
 									{formatNumber(rampOverlay.peakAchieved)}
 								</span>
-								<span className="text-subtle-foreground"> / target </span>
+								<span className="text-muted-foreground"> / target </span>
 								<span className="text-foreground font-semibold">
 									{formatNumber(rampOverlay.target)}
 								</span>
@@ -430,11 +430,11 @@ function MetricsView({
 						<h3 className="text-[12px] font-semibold text-foreground">
 							Latency distribution
 							<InfoChip tip={TOOLTIPS.latencyDistribution} />
-							<span className="ml-2 text-[11px] font-normal text-subtle-foreground">
+							<span className="ml-2 text-[11px] font-normal text-muted-foreground">
 								HDR percentile plot
 							</span>
 						</h3>
-						<span className="text-[10.5px] font-mono text-subtle-foreground">
+						<span className="text-[10.5px] font-mono text-muted-foreground">
 							{finalReport ? "from HdrHistogram" : "available after completion"}
 						</span>
 					</div>
@@ -463,7 +463,7 @@ function MetricsView({
 							Avg request timing
 							<InfoChip tip={TOOLTIPS.avgRequestTiming} />
 						</h3>
-						<span className="text-[10.5px] font-mono text-subtle-foreground">
+						<span className="text-[10.5px] font-mono text-muted-foreground">
 							{finalReport?.timingBreakdown ? "from timing samples" : "—"}
 						</span>
 					</div>
@@ -480,7 +480,7 @@ function MetricsView({
 function LatencyStat({ k, v }: { k: string; v: number | undefined }) {
 	return (
 		<span>
-			<span className="text-subtle-foreground">{k}</span>{" "}
+			<span className="text-muted-foreground">{k}</span>{" "}
 			<span className="text-foreground font-semibold">{fmt(v, 0)}</span>
 		</span>
 	);

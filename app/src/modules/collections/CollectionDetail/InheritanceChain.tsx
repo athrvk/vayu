@@ -103,7 +103,7 @@ export default function InheritanceChain({ collectionId }: InheritanceChainProps
 						<span
 							className={cn(
 								"text-[10px] font-mono shrink-0",
-								isSource ? "text-primary" : "text-subtle-foreground"
+								isSource ? "text-primary" : "text-muted-foreground"
 							)}
 						>
 							{describeAuth(c)}

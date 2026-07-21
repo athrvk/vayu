@@ -204,7 +204,7 @@ function AuthConfig({ auth, onChange }: AuthConfigProps) {
 				<div className="text-[13px] text-muted-foreground">
 					No authentication for this collection.
 				</div>
-				<div className="text-[11px] text-subtle-foreground mt-1">
+				<div className="text-[11px] text-muted-foreground mt-1">
 					Requests using "Inherit from collection" will send no auth.
 				</div>
 			</div>

@@ -46,7 +46,7 @@ export function ThroughputTwinCard({
 							req/s
 						</span>
 					</div>
-					<div className="text-[10px] uppercase tracking-[0.06em] text-subtle-foreground mt-1.5">
+					<div className="text-[10px] uppercase tracking-[0.06em] text-muted-foreground mt-1.5">
 						dispatched
 						<InfoChip tip={TOOLTIPS.sendThroughputDispatched} />
 					</div>
@@ -58,7 +58,7 @@ export function ThroughputTwinCard({
 							req/s
 						</span>
 					</div>
-					<div className="text-[10px] uppercase tracking-[0.06em] text-subtle-foreground mt-1.5">
+					<div className="text-[10px] uppercase tracking-[0.06em] text-muted-foreground mt-1.5">
 						received
 						<InfoChip tip={TOOLTIPS.sendThroughputReceived} />
 					</div>

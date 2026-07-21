@@ -36,7 +36,7 @@ export function StatCard({
 				{unit && <span className="text-xs text-muted-foreground">{unit}</span>}
 			</div>
 			{sub && (
-				<div className="mt-1.5 font-mono text-[10.5px] text-subtle-foreground">{sub}</div>
+				<div className="mt-1.5 font-mono text-[10.5px] text-muted-foreground">{sub}</div>
 			)}
 		</div>
 	);

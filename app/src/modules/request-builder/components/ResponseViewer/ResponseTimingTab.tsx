@@ -145,7 +145,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 							<span className="text-foreground">{fmtMs(p.value)}</span>
 							<span className="text-subtle-foreground ml-0.5">ms</span>
 						</span>
-						<span className="text-right font-mono tabular-nums text-[11px] text-subtle-foreground">
+						<span className="text-right font-mono tabular-nums text-[11px] text-muted-foreground">
 							{pct(p.value).toFixed(0)}%
 						</span>
 					</div>

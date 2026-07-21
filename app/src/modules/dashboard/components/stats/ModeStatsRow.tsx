@@ -172,7 +172,7 @@ export function P99StatCard({ d }: { d: DashboardDerived }) {
 						)}
 					</>
 				) : (
-					<span className="text-subtle-foreground italic">awaiting samples</span>
+					<span className="text-muted-foreground italic">awaiting samples</span>
 				)
 			}
 			infoTip={TOOLTIPS.p99Latency}

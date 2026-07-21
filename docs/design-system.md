@@ -66,11 +66,20 @@ All tokens live in `app/src/index.css` as HSL channel values (no `hsl()` wrapper
 --subtle-foreground:  240  4% 58%;   /* de-emphasized text — faintest readable tier */
 ```
 
-`subtle-foreground` is the least-prominent text tier (ancillary units, dashes,
-sub-labels), tuned to stay legible (~3:1 on card) while remaining below
-`muted-foreground` in emphasis. **It does not clear AA for normal-size text**
-(3.63 dark / 3.04 light on panel) — it is for text where a miss is acceptable,
-never for information the user needs to read.
+`subtle-foreground` is the least-prominent text tier, and it is **deliberately
+below AA** — 2.69:1 light, 2.89:1 dark against the surfaces it sits on.
+
+**That is structural, not a tuning miss.** For it to clear 4.5 it would have to
+darken to ~42% lightness in light mode, which is exactly `muted-foreground`. The
+tier cannot be both fainter than muted and AA-compliant; there is no room
+between them.
+
+So it is reserved for text where a miss is acceptable and the meaning survives
+without it: **units** (the `ms` after a number), **dashes and em-dash
+placeholders**, and decorative icons. Never for a label, a count, a legend, or
+anything the user has to read — a dashboard sweep once found 20 such misuses
+("dispatched", "4xx 0", "target 10"), all measuring 3.34:1. Those belong on
+`muted-foreground`.
 
 **Light `muted-foreground` is 44%, not zinc-500's 46%.** At 46% it cleared AA on
 the card (4.83) and the panel (4.63) but measured **4.40 on `--background`**, so

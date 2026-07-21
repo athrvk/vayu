@@ -219,6 +219,7 @@ export default function LoadTestConfigDialog({
 						<Label>Duration (seconds)</Label>
 						<Input
 							type="number"
+							aria-label="Duration in seconds"
 							value={duration}
 							onChange={(e) => setDuration(Number(e.target.value))}
 							min={LOAD_TEST_LIMITS.DURATION_S.MIN}
@@ -233,6 +234,7 @@ export default function LoadTestConfigDialog({
 								<Label>Target RPS (Requests per second)</Label>
 								<Input
 									type="number"
+									aria-label="Target requests per second"
 									value={rps}
 									onChange={(e) => setRps(Number(e.target.value))}
 									min={LOAD_TEST_LIMITS.RPS.MIN}
@@ -296,6 +298,7 @@ export default function LoadTestConfigDialog({
 							<Label>Ramp Duration (seconds)</Label>
 							<Input
 								type="number"
+								aria-label="Ramp duration in seconds"
 								value={rampDuration}
 								onChange={(e) => setRampDuration(Number(e.target.value))}
 								min={LOAD_TEST_LIMITS.RAMP_DURATION_S.MIN}
