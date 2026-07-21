@@ -316,6 +316,36 @@
 		--chart-1: 0 68% 54%;
 	}
 
+	/* Magenta and Graphite were placed by measurement rather than by eye, in the
+	   two parts of the wheel the other schemes and the semantic status colours
+	   leave free. Distances are OKLab dE; under ~0.10 two accents read as the
+	   same colour in the picker.
+
+	   magenta   dE 0.153 to Aurora, 0.212 to the nearest status colour
+	   graphite  a near-neutral, distinct because nothing else here is
+	             desaturated — the monochrome option, and the reason its
+	             saturation is 12% rather than a mistake.
+
+	   Both carry a white label at APCA Lc 78 / Lc 80 as `--primary-fill`, which
+	   sits inside the existing Lc 68-84 band. */
+	[data-color-scheme="magenta"] {
+		--primary: 305 72% 45%;
+		--primary-fill: 305 72% 45%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 305 72% 45%;
+		--variable: 305 72% 45%;
+		--chart-1: 305 72% 45%;
+	}
+
+	[data-color-scheme="graphite"] {
+		--primary: 220 12% 46%;
+		--primary-fill: 220 12% 46%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 220 12% 46%;
+		--variable: 220 12% 46%;
+		--chart-1: 220 12% 46%;
+	}
+
 	/* ── Dark mode ── */
 
 	.dark {
@@ -467,6 +497,29 @@
 		--ring: 0 80% 68%;
 		--variable: 0 80% 68%;
 		--chart-1: 0 80% 68%;
+	}
+
+	/* `--primary` lightens here while `--primary-fill` stays put, which is the
+	   split every scheme above uses: `--primary` is text, ring and chart-series
+	   colour on a near-black card and has to be bright to read there, while the
+	   fill keeps a white label. Measured as text on `--card`, these land at APCA
+	   Lc 52 and Lc 60 — inside the Lc 44-69 the other six occupy. */
+	.dark[data-color-scheme="magenta"] {
+		--primary: 305 85% 70%;
+		--primary-fill: 305 72% 45%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 305 85% 70%;
+		--variable: 305 85% 70%;
+		--chart-1: 305 85% 70%;
+	}
+
+	.dark[data-color-scheme="graphite"] {
+		--primary: 220 15% 72%;
+		--primary-fill: 220 12% 46%;
+		--primary-foreground: 0 0% 100%;
+		--ring: 220 15% 72%;
+		--variable: 220 15% 72%;
+		--chart-1: 220 15% 72%;
 	}
 }
 

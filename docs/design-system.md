@@ -454,14 +454,43 @@ Applied via `data-color-scheme` attribute on `<html>`. Each scheme sets
 and `--chart-1`. The authoritative per-scheme values (deep fill + mode-adaptive
 accent) live in `app/src/index.css`; the table below is an approximate guide.
 
-| Scheme | Light HSL | Dark HSL |
-|--------|-----------|----------|
-| `sunset` (default) | `24.6 95% 53.1%` | same |
-| `sky` | `188 94% 43%` | same |
-| `ocean` | `217 91% 60%` | `217 78% 51%` |
-| `forest` | `142 76% 36%` | `142 70% 45%` |
-| `aurora` | `258 87% 74%` | same |
-| `coral` | `0 72% 65%` | `0 72% 55%` |
+**`--primary` and `--primary-fill` are not the same thing, and the split is what
+keeps labels legible.** `--primary-fill` is the solid button background — the
+`Button` default variant, badges, tooltips and the Send button all use it — and
+it holds **one value in both themes**, so the white label on it never changes
+contrast. `--primary` is the accent as *text*, focus ring, `--variable` and
+`--chart-1`; it brightens in dark mode because those all sit on a near-black
+card and have to read there. Every bare `bg-primary` in the app is a translucent
+wash (`/10`, `/15`, `/30`), never a solid fill under white text.
+
+Pinning `--primary` to its light value would look like a contrast fix and is in
+fact a regression: accent *text* on the dark card would fall from APCA Lc 44–69
+to Lc 22–37.
+
+| Scheme | Light (`--primary` = `--primary-fill`) | Dark `--primary` | Dark `--primary-fill` |
+|--------|-----------|----------|----------|
+| `sunset` | `24 90% 46%` | `24 95% 58%` | `24 90% 46%` |
+| `sky` | `192 95% 36%` | `188 90% 52%` | `192 95% 36%` |
+| `ocean` (default) | `217 80% 48%` | `217 90% 66%` | `217 80% 48%` |
+| `forest` | `142 72% 33%` | `142 65% 52%` | `142 72% 33%` |
+| `aurora` | `262 55% 54%` | `258 88% 76%` | `262 55% 54%` |
+| `coral` | `0 68% 54%` | `0 80% 68%` | `0 68% 54%` |
+| `magenta` | `305 72% 45%` | `305 85% 70%` | `305 72% 45%` |
+| `graphite` | `220 12% 46%` | `220 15% 72%` | `220 12% 46%` |
+
+**Adding a scheme.** Edit `constants/color-schemes.ts` and `index.css` — nothing
+else. `color-schemes.test.ts` asserts the two agree, in both themes, because a
+missing block fails silently: the picker offers a swatch that inherits `:root`
+and quietly does nothing.
+
+The value has to clear two bars. As a fill it carries a white label, so aim for
+the band the existing schemes occupy — **APCA Lc 68–84** — and keep the fill at
+**3.0+ against `--card`** so the button still reads as a control. The dark
+`--primary` is text, so it wants **Lc 44–69** against the dark card. Check the
+new hue is more than about **0.10 OKLab ΔE** from every existing scheme *and*
+from the semantic status colours, or it will read as a duplicate in the picker.
+`magenta` sits at ΔE 0.153 from `aurora`; `graphite` is distinct by being the
+only desaturated option.
 
 ---
 

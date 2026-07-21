@@ -16,7 +16,7 @@
  * a scheme means editing this file plus the CSS — nothing else.
  */
 
-import { Cloud, Waves, Trees, Sunset, Sparkles, Heart } from "lucide-react";
+import { Cloud, Waves, Trees, Sunset, Sparkles, Heart, Gem, Contrast } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export interface ColorSchemeOption {
@@ -33,6 +33,8 @@ export const COLOR_SCHEMES = [
 	{ value: "sunset", label: "Sunset", description: "Warm and energetic", icon: Sunset },
 	{ value: "aurora", label: "Aurora", description: "Magical and modern", icon: Sparkles },
 	{ value: "coral", label: "Coral", description: "Vibrant and lively", icon: Heart },
+	{ value: "magenta", label: "Magenta", description: "Bold and electric", icon: Gem },
+	{ value: "graphite", label: "Graphite", description: "Muted and neutral", icon: Contrast },
 ] as const satisfies readonly ColorSchemeOption[];
 
 /** Accent color scheme name, applied via the `data-color-scheme` attribute. */
