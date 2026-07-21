@@ -150,15 +150,19 @@ export default function PerformanceTab({
 								<p className="text-xs text-muted-foreground mb-2">
 									Achievement Rate
 								</p>
+								{/* good / caution / bad is semantics, not decoration, so all
+								    three branches take the semantic -text trio. The third
+								    already did; the first two were raw palette, which made
+								    one expression speak two vocabularies. */}
 								<p
 									className={cn(
 										"text-2xl font-bold",
 										report.rateControl.achievement >= 95 &&
 											report.rateControl.achievement <= 105
-											? "text-green-600 dark:text-green-400"
+											? "text-success-text"
 											: report.rateControl.achievement >= 80 &&
 												  report.rateControl.achievement <= 120
-												? "text-yellow-600 dark:text-yellow-400"
+												? "text-warning-text"
 												: "text-destructive-text"
 									)}
 								>

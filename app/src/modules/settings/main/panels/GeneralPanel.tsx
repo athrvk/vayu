@@ -24,6 +24,7 @@ import {
 	CardTitle,
 	Button,
 	Kbd,
+	DeleteConfirmDialog,
 } from "@/components/ui";
 import { modKey } from "@/lib/platform";
 import { useClientSettingsStore } from "@/stores";
@@ -51,6 +52,7 @@ export default function GeneralPanel() {
 	const invalidateRuns = useInvalidateRuns();
 	const showToast = useToastStore((s) => s.showToast);
 	const [clearing, setClearing] = useState(false);
+	const [confirmClear, setConfirmClear] = useState(false);
 
 	useEffect(() => {
 		window.electronAPI
@@ -59,15 +61,18 @@ export default function GeneralPanel() {
 			.catch(() => {});
 	}, []);
 
+	/*
+	 * Confirmed through the app's own DeleteConfirmDialog rather than
+	 * `window.confirm`. The native dialog ignores the theme, the accent and the
+	 * roundedness setting entirely, and — being modal to the whole renderer —
+	 * it also blocks the JS thread, so the live dashboard stops updating behind
+	 * it. Every other destructive action in the app (deleting a run, a
+	 * collection, a request) already routes through this dialog, which also
+	 * focuses Cancel first so a reflexive Enter does not wipe the history.
+	 */
 	const clearHistory = async () => {
+		setConfirmClear(false);
 		if (runs.length === 0) return;
-		if (
-			!window.confirm(
-				`Delete all ${runs.length} stored run${runs.length === 1 ? "" : "s"}? This cannot be undone.`
-			)
-		) {
-			return;
-		}
 		setClearing(true);
 		try {
 			const results = await Promise.allSettled(runs.map((r) => apiService.deleteRun(r.id)));
@@ -159,7 +164,7 @@ export default function GeneralPanel() {
 						<Button
 							variant="outline"
 							size="sm"
-							onClick={clearHistory}
+							onClick={() => setConfirmClear(true)}
 							disabled={runs.length === 0 || clearing}
 							className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 						>
@@ -238,6 +243,15 @@ export default function GeneralPanel() {
 					</Button>
 				</CardContent>
 			</Card>
+
+			<DeleteConfirmDialog
+				open={confirmClear}
+				onOpenChange={setConfirmClear}
+				title="Clear run history?"
+				description={`All ${runs.length} stored run${runs.length === 1 ? "" : "s"} and their metrics will be permanently removed. This cannot be undone.`}
+				onConfirm={clearHistory}
+				isDeleting={clearing}
+			/>
 		</>
 	);
 }

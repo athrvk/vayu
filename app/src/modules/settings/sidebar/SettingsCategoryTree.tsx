@@ -18,7 +18,7 @@
 
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useTabsStore } from "@/stores";
-import { DrawerPanel } from "@/components/shared";
+import { DrawerPanel, ErrorState } from "@/components/shared";
 import { useConfigQuery } from "@/queries";
 import type { EngineSettingsCategory, SettingsCategory } from "@/types";
 import type { LucideIcon } from "lucide-react";
@@ -51,7 +51,7 @@ function categoryMeta(category: SettingsCategory): CategoryMeta {
 export default function SettingsCategoryTree() {
 	const { selectedCategory, setSelectedCategory } = useSettingsStore();
 	const { openTab } = useTabsStore();
-	const { data: configResponse, isLoading, error } = useConfigQuery();
+	const { data: configResponse, isLoading, error, refetch } = useConfigQuery();
 
 	// Selecting a category shows its panel in the settings tab. The tree now
 	// lives in the Drawer (not inside the settings tab), so it must open/focus
@@ -128,16 +128,21 @@ export default function SettingsCategoryTree() {
 						<Skeleton className="h-9 w-full" />
 					</div>
 				) : error ? (
-					<div className="px-4 py-2">
-						<div className="text-xs text-destructive-text">
-							Engine settings unavailable
-						</div>
-						<div className="text-xs text-muted-foreground mt-0.5">
-							{error instanceof Error
-								? error.message
-								: "The engine isn't responding."}
-						</div>
-					</div>
+					/*
+					 * Was a hand-rolled two-line notice with no way out: the engine
+					 * comes back and nothing in the sidebar re-asks, so the only
+					 * recovery was reloading the app. Same ErrorState + `refetch` the
+					 * Variables tree uses for its own section failures, with that
+					 * tree's inline padding so the failure line sits on the left edge
+					 * like every other row rather than centring in the pane variant's
+					 * p-8.
+					 */
+					<ErrorState
+						variant="inline"
+						className="justify-start px-3 py-2 text-xs"
+						title="Couldn't load engine settings"
+						onRetry={() => void refetch()}
+					/>
 				) : (
 					<div className="space-y-1">
 						{ENGINE_CATEGORIES.map((category) => renderCategory(category))}

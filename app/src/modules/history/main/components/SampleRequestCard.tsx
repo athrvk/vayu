@@ -44,7 +44,8 @@ export default function SampleRequestCard({
 			className={cn(
 				"border overflow-hidden transition-all",
 				isError && "border-destructive/30",
-				isSuccess && "border-green-500/20"
+				// status-success, matching the CheckCircle this border frames.
+				isSuccess && "border-status-success/20"
 			)}
 		>
 			{/* Header - Always Visible */}
