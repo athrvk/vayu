@@ -392,7 +392,9 @@ function MetricsView({
 							{(
 								[
 									["2xx", "hsl(var(--success))"],
-									["3xx", "hsl(var(--primary))"],
+									// Must match StatusCodesOverTimeChart's `categorical`
+									// role, not `--primary` — see the note there.
+									["3xx", "hsl(var(--chart-3))"],
 									["4xx", "hsl(var(--warning))"],
 									["5xx", "hsl(var(--destructive))"],
 									["err", "hsl(var(--destructive) / 0.5)"],

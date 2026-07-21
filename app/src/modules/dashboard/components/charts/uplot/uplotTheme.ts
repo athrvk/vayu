@@ -26,7 +26,17 @@ export type ColorRole =
 	| "info"
 	| "muted"
 	| "subtle"
-	| "accent";
+	| "accent"
+	/**
+	 * A categorical series colour, for data that has no semantic meaning of its
+	 * own and must stay distinct from the semantic roles above.
+	 *
+	 * Deliberately not `--chart-1`: that token tracks the user's accent, so a
+	 * series painted with it changes hue per theme and can land on top of a
+	 * semantic series. `--chart-3` is violet in both themes and is the furthest
+	 * of the categorical palette from success/warning/destructive.
+	 */
+	| "categorical";
 
 const ROLE_TOKEN: Record<ColorRole, string> = {
 	primary: "--primary",
@@ -37,6 +47,7 @@ const ROLE_TOKEN: Record<ColorRole, string> = {
 	muted: "--muted-foreground",
 	subtle: "--subtle-foreground",
 	accent: "--accent",
+	categorical: "--chart-3",
 };
 
 export interface UplotTheme {
