@@ -45,16 +45,17 @@ const srcRoot = join(here, "..", "..", "..", "..");
 const GUARDED = ["modules/request-builder/**/*.tsx", "components/shared/response-viewer/**/*.tsx"];
 
 /**
- * Excluded, named rather than quietly filtered by pattern.
+ * Nothing is excluded any more.
  *
- * LoadTestConfigDialog's palette classes are the bucket this change decided not
- * to touch: an info callout written as an explicit `bg-blue-50 … dark:bg-blue-950`
- * pair, which is theme-aware and so is not the defect above, and a
- * `bg-purple-600` submit button for which no purple semantic token exists. Both
- * want a token that would have to be invented first. Converting them is a design
- * decision; remove this exclusion when that decision is made.
+ * `LoadTestConfigDialog` used to be: it carried a `bg-blue-50 … dark:bg-blue-950`
+ * info box and a hardcoded `bg-purple-600` submit button, and converting them
+ * needed tokens that did not exist. The dialog has since been re-cut — the info
+ * box became a shared `Callout` on semantic tokens, and the button moved to the
+ * accent — so the exemption is gone and the whole tree is guarded.
+ *
+ * If something needs adding back here, say why in the same breath.
  */
-const EXCLUDED = ["modules/request-builder/components/LoadTestConfigDialog.tsx"];
+const EXCLUDED: string[] = [];
 
 const PALETTE = [
 	"red",
