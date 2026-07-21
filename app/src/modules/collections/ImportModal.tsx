@@ -182,7 +182,15 @@ export function ImportModal() {
 					role="tabpanel"
 					id="import-tabpanel"
 					aria-labelledby={`import-tab-${tab}`}
-					className="overflow-y-auto p-5"
+					/*
+					 * min-h holds the three tabs to one height. Their natural
+					 * content differs wildly — the File dropzone is 247px tall, the
+					 * URL row only 76 — and because the dialog is centred, that made
+					 * the whole modal resize by 171px and jump 85px up the screen
+					 * when you switched to URL. Sized to the tallest tab, so the
+					 * shell never moves and only the content inside it changes.
+					 */
+					className="min-h-[248px] overflow-y-auto p-5"
 				>
 					{phase === "preview" && result ? (
 						<PreviewView result={result} onDismiss={reset} />
