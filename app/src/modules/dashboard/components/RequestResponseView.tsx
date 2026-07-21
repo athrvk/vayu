@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
+import { formatPhaseMs } from "@/components/shared/response-viewer/utils";
 
 // Per-phase explanations for the network timing breakdown. Kept in sync with
 // the wording in ResponseTimingTab (request-builder), which explains the same
@@ -163,7 +164,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									DNS <InfoChip tip={PHASE_TIPS.dns} />
 								</p>
 								<p className="font-bold">
-									{report.timingBreakdown.avgDnsMs.toFixed(2)}ms
+									{formatPhaseMs(report.timingBreakdown.avgDnsMs)}ms
 								</p>
 							</div>
 							<div>
@@ -171,7 +172,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									Connect <InfoChip tip={PHASE_TIPS.connect} />
 								</p>
 								<p className="font-bold">
-									{report.timingBreakdown.avgConnectMs.toFixed(2)}ms
+									{formatPhaseMs(report.timingBreakdown.avgConnectMs)}ms
 								</p>
 							</div>
 							<div>
@@ -179,7 +180,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									TLS <InfoChip tip={PHASE_TIPS.tls} />
 								</p>
 								<p className="font-bold">
-									{report.timingBreakdown.avgTlsMs.toFixed(2)}ms
+									{formatPhaseMs(report.timingBreakdown.avgTlsMs)}ms
 								</p>
 							</div>
 							<div>
@@ -187,7 +188,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									First Byte <InfoChip tip={PHASE_TIPS.ttfb} />
 								</p>
 								<p className="font-bold">
-									{report.timingBreakdown.avgFirstByteMs.toFixed(2)}ms
+									{formatPhaseMs(report.timingBreakdown.avgFirstByteMs)}ms
 								</p>
 							</div>
 							<div>
@@ -195,7 +196,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									Download <InfoChip tip={PHASE_TIPS.download} />
 								</p>
 								<p className="font-bold">
-									{report.timingBreakdown.avgDownloadMs.toFixed(2)}ms
+									{formatPhaseMs(report.timingBreakdown.avgDownloadMs)}ms
 								</p>
 							</div>
 						</div>
@@ -224,7 +225,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 							<div>
 								<p className="text-sm text-muted-foreground">Percentage</p>
 								<p className="font-bold">
-									{report.slowRequests.percentage.toFixed(2)}%
+									{report.slowRequests.percentage.toFixed(1)}%
 								</p>
 							</div>
 						</div>

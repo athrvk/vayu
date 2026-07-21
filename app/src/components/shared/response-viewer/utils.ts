@@ -172,6 +172,27 @@ export function formatResponseTime(ms: number): string {
 }
 
 /**
+ * A single timing phase — DNS, connect, TLS, first byte, download — always in ms.
+ *
+ * Significant digits, because these five share a scale reading and their
+ * magnitudes do not: a cached DNS lookup is 0.04ms while first-byte is
+ * routinely 300ms. One fixed precision is wrong for one end or the other, and
+ * the app had three different answers for the same five numbers — the dashboard
+ * showed 2dp, the history breakdown 1dp, and the request-builder timing tab
+ * already did this. This is that implementation, moved somewhere all three can
+ * reach it.
+ *
+ * Distinct from `formatResponseTime`, which describes a whole response and
+ * switches to seconds. A phase is always sub-second in practice and comparing
+ * phases across a row matters more than the unit.
+ */
+export function formatPhaseMs(ms: number): string {
+	if (ms >= 100) return ms.toFixed(0);
+	if (ms >= 10) return ms.toFixed(1);
+	return ms.toFixed(2);
+}
+
+/**
  * Format bytes to human readable size
  */
 export function formatSize(bytes: number): string {

@@ -11,6 +11,8 @@
  * Displays request timing breakdown (DNS, Connect, TLS, TTFB, Download).
  */
 
+import { formatPhaseMs } from "@/components/shared/response-viewer/utils";
+
 interface TimingBreakdownProps {
 	dnsMs?: number;
 	connectMs?: number;
@@ -42,7 +44,7 @@ export default function TimingBreakdown({
 				<div className={`bg-blue-50 dark:bg-blue-950/30 ${padding} rounded-md text-center`}>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>DNS</p>
 					<p className={`${textSize} font-bold text-blue-700 dark:text-blue-300`}>
-						{dnsMs.toFixed(1)}
+						{formatPhaseMs(dnsMs)}
 						<span className="text-xs font-normal">ms</span>
 					</p>
 				</div>
@@ -53,7 +55,7 @@ export default function TimingBreakdown({
 				>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>Connect</p>
 					<p className={`${textSize} font-bold text-purple-700 dark:text-purple-300`}>
-						{connectMs.toFixed(1)}
+						{formatPhaseMs(connectMs)}
 						<span className="text-xs font-normal">ms</span>
 					</p>
 				</div>
@@ -64,16 +66,18 @@ export default function TimingBreakdown({
 				>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>TLS</p>
 					<p className={`${textSize} font-bold text-indigo-700 dark:text-indigo-300`}>
-						{tlsMs.toFixed(1)}
+						{formatPhaseMs(tlsMs)}
 						<span className="text-xs font-normal">ms</span>
 					</p>
 				</div>
 			)}
 			{firstByteMs !== undefined && (
-				<div className={`bg-green-50 dark:bg-green-950/30 ${padding} rounded-md text-center`}>
+				<div
+					className={`bg-green-50 dark:bg-green-950/30 ${padding} rounded-md text-center`}
+				>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>TTFB</p>
 					<p className={`${textSize} font-bold text-green-700 dark:text-green-300`}>
-						{firstByteMs.toFixed(1)}
+						{formatPhaseMs(firstByteMs)}
 						<span className="text-xs font-normal">ms</span>
 					</p>
 				</div>
@@ -84,7 +88,7 @@ export default function TimingBreakdown({
 				>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>Download</p>
 					<p className={`${textSize} font-bold text-yellow-700 dark:text-yellow-300`}>
-						{downloadMs.toFixed(1)}
+						{formatPhaseMs(downloadMs)}
 						<span className="text-xs font-normal">ms</span>
 					</p>
 				</div>
