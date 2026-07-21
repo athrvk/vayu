@@ -17,8 +17,7 @@ import { useVariablesStore } from "@/modules/variables/variables-store";
 import { useCollectionsQuery, useEnvironmentsQuery, useGlobalsQuery } from "@/queries";
 import VariableTableEditor from "./VariableTableEditor";
 import { Variable } from "lucide-react";
-import { Skeleton } from "@/components/ui";
-import { EmptyState } from "@/components/shared";
+import { DetailSkeleton, EmptyState } from "@/components/shared";
 
 export default function VariablesMain() {
 	const { selectedCategory } = useVariablesStore();
@@ -57,10 +56,12 @@ export default function VariablesMain() {
 	if (selectedCategory.type === "collection") {
 		const collection = collections.find((c) => c.id === selectedCategory.collectionId);
 		if (!collection) {
+			// Still in flight is not the same as missing: saying "not found"
+			// here tells the user their collection is gone.
 			return collectionsLoading ? (
-				<LoadingPane label="Loading collection" />
+				<DetailSkeleton label="Loading collection" />
 			) : (
-				<NotFoundPane label="Collection not found" />
+				<EmptyState title="Collection not found" />
 			);
 		}
 		return (
@@ -77,9 +78,9 @@ export default function VariablesMain() {
 		const environment = environments.find((e) => e.id === selectedCategory.environmentId);
 		if (!environment) {
 			return environmentsLoading ? (
-				<LoadingPane label="Loading environment" />
+				<DetailSkeleton label="Loading environment" />
 			) : (
-				<NotFoundPane label="Environment not found" />
+				<EmptyState title="Environment not found" />
 			);
 		}
 		return (
@@ -93,26 +94,4 @@ export default function VariablesMain() {
 	}
 
 	return null;
-}
-
-/** Shown while the owning query is still in flight — never "not found". */
-function LoadingPane({ label }: { label: string }) {
-	return (
-		<div className="flex-1 p-6" role="status" aria-label={label}>
-			<div className="space-y-3" aria-hidden="true">
-				<Skeleton className="h-6 w-48 rounded-md" />
-				<Skeleton className="h-4 w-72 rounded-md" />
-				<div className="space-y-2 pt-4">
-					{Array.from({ length: 4 }, (_, i) => (
-						<Skeleton key={i} className="h-9 w-full rounded-md" />
-					))}
-				</div>
-			</div>
-		</div>
-	);
-}
-
-/** Genuinely missing: the query settled and the entity is not in it. */
-function NotFoundPane({ label }: { label: string }) {
-	return <EmptyState title={label} />;
 }

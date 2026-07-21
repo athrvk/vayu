@@ -37,3 +37,6 @@ export * from "./EmptyState";
 
 // Loading placeholder for the drawer's list views
 export * from "./ListSkeleton";
+
+// Loading placeholder for a detail pane
+export * from "./DetailSkeleton";
