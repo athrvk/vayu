@@ -512,6 +512,10 @@ export default function SettingsMain() {
 						const edited = editedValues[entry.key];
 						const isModified = edited !== undefined;
 						const hasError = edited?.error;
+						// Per entry, so `aria-describedby` never points at another
+						// setting's message — and only rendered when there is one,
+						// so the reference is never dangling.
+						const errorId = `setting-${entry.key}-error`;
 						const needsRestart = isRestartRequired(entry);
 						const isPendingRestart = restartRequiredKeys.includes(entry.key);
 
@@ -609,6 +613,25 @@ export default function SettingsMain() {
 														// the CardTitle, which nothing links to this
 														// input.
 														aria-label={entry.label}
+														/*
+														 * Out-of-range values were signalled by a
+														 * red border and a line of text sitting
+														 * loose beside the field — colour alone,
+														 * and a message the field did not point
+														 * at. `aria-invalid` states it, and
+														 * `aria-describedby` reads the reason out
+														 * with the field instead of leaving it to
+														 * be found.
+														 *
+														 * `|| undefined` so valid fields carry no
+														 * attribute at all, rather than a
+														 * misleading aria-invalid="false" on every
+														 * setting on the screen.
+														 */
+														aria-invalid={hasError ? true : undefined}
+														aria-describedby={
+															hasError ? errorId : undefined
+														}
 														min={entry.min}
 														max={entry.max}
 													/>
@@ -635,7 +658,10 @@ export default function SettingsMain() {
 												)}
 											</div>
 											{hasError && (
-												<p className="text-xs text-destructive">
+												<p
+													id={errorId}
+													className="text-xs text-destructive-text"
+												>
 													{edited.error}
 												</p>
 											)}
