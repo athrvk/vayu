@@ -40,6 +40,20 @@
  * `status-warning` is deliberately absent from the list below: it has no `-text`
  * variant, because bare already measures 17.72 / 15.78 — banning it would only
  * force churn towards a token that does not exist.
+ *
+ * **Known blind spot: inline styles.** This scans for the `text-<family>` class,
+ * so `style={{ color: "hsl(var(--warning))" }}` walks straight past it.
+ * `SaturationCard` carried exactly that for a while — 22px bold on `--warning`,
+ * 2.14 against the card — and a parallel audit, not this guard, is what found it.
+ *
+ * An inline-style rule was tried and removed. A regex for `color:` cannot tell a
+ * CSS declaration from an object property named `color`, and the codebase is full
+ * of the latter feeding a `background` — the ErrorRate legend swatches and the
+ * timing-waterfall bars are both correct uses that it flagged. Worse, it would
+ * not have caught the real case anyway, because the literal was assigned to a
+ * `const` and passed in as `style={{ color }}`. A scan that produces false
+ * positives *and* misses the bug it was written for is worse than none, so the
+ * blind spot is written down here instead of papered over.
  */
 
 import { describe, it, expect } from "vitest";

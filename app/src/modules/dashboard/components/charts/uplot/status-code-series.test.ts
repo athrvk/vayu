@@ -25,6 +25,12 @@
  * This guards the roles, not the pixels: it reads the series specs and asserts
  * none of them resolves to an accent-tracking token, and that no two share a
  * role.
+ *
+ * **Scope widened after this guard missed four.** It originally read only
+ * `StatusCodesOverTimeChart.tsx`, so the same defect sat untouched in the
+ * scatter, HDR, latency and throughput charts until a parallel audit found it.
+ * A guard written around the one instance you happened to find will keep the
+ * rest — it now reads every chart spec in this directory.
  */
 
 import { describe, it, expect } from "vitest";
@@ -41,8 +47,15 @@ function read(file: string): string {
 	return readFileSync(join(here, file), "utf8");
 }
 
-describe("status-code chart series", () => {
-	const source = read("StatusCodesOverTimeChart.tsx");
+/** Every module in this directory that declares chart series. */
+const CHART_FILES = [
+	"StatusCodesOverTimeChart.tsx",
+	"TimeSeriesCharts.tsx",
+	"ScatterAndDistribution.tsx",
+];
+
+describe("chart series colours", () => {
+	const source = CHART_FILES.map(read).join("\n");
 
 	// `role: "x"` and `bandRole: "x"`, ignoring anything inside a comment.
 	const roles = [
@@ -59,12 +72,26 @@ describe("status-code chart series", () => {
 		expect(roles).not.toContain("accent");
 	});
 
-	it("gives each status class its own role, so no two can render alike", () => {
+	/**
+	 * Uniqueness is checked only for the stacked status chart, deliberately.
+	 *
+	 * There, every series shares one plot, so two on the same role render alike —
+	 * which is the bug this file was written for. The other two modules each
+	 * declare *several* charts, and roles legitimately repeat across them:
+	 * `success` is p50 in the latency plot and "achieved" in the rate plot, and
+	 * they are never on screen together. A regex cannot tell which series share a
+	 * plot, so asserting uniqueness per file reports those as collisions.
+	 *
+	 * The accent ban above is what covers those modules, and it is the part that
+	 * matters — it is what four series were violating.
+	 */
+	it("gives each series in the stacked status chart its own role", () => {
 		const lineRoles = [
-			...source
+			...read("StatusCodesOverTimeChart.tsx")
 				.replace(/\/\*[\s\S]*?\*\//g, "")
 				.matchAll(/label:\s*"(\w+)",\s*\n?\s*role:\s*"(\w+)"/g),
 		].map((m) => m[2]);
+		expect(lineRoles.length).toBeGreaterThanOrEqual(4);
 		expect(new Set(lineRoles).size).toBe(lineRoles.length);
 	});
 

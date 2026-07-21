@@ -111,7 +111,7 @@ export function LatencyBreakdownChart({ history, isCompleted, syncKey, height }:
 		const spec: UPlotSeriesSpec[] = [
 			{
 				label: "latency",
-				role: "primary",
+				role: "categorical",
 				width: 1.8,
 				format: fmtMs,
 				bandTo: 2,
@@ -158,7 +158,10 @@ export function RequestRateChart({
 			bucketSeconds
 		);
 		const spec: UPlotSeriesSpec[] = [
-			{ label: "throughput", role: "primary", kind: "area", width: 1.8, format: fmtRate },
+			// `categorical`, not `primary`: `--primary` tracks the user's accent theme,
+			// so this series changed hue per scheme and could land on a neighbouring
+			// semantic one. On `forest` the accent is 3% lightness from `--success`.
+			{ label: "throughput", role: "categorical", kind: "area", width: 1.8, format: fmtRate },
 			{ label: "send rate", role: "info", format: fmtRate },
 		];
 		const columns: number[][] = [cols[0], cols[1]];

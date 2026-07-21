@@ -56,7 +56,10 @@ export function ResponseTimeVsConcurrencyChart({
 	}, [history]);
 
 	const series: UPlotSeriesSpec[] = [
-		{ label: "p99", role: "primary", kind: "scatter", format: fmtMs },
+		// `categorical`, not `primary`: `--primary` tracks the user's accent theme,
+		// so this series changed hue per scheme and could land on a neighbouring
+		// semantic one. On `forest` the accent is 3% lightness from `--success`.
+		{ label: "p99", role: "categorical", kind: "scatter", format: fmtMs },
 	];
 
 	const sloMs = useClientSettingsStore((s) => s.sloThresholdMs);
@@ -134,7 +137,7 @@ export function HdrPercentileChart({
 	}, [report]);
 
 	const series: UPlotSeriesSpec[] = [
-		{ label: "latency", role: "primary", kind: "area", width: 1.8, format: fmtMs },
+		{ label: "latency", role: "categorical", kind: "area", width: 1.8, format: fmtMs },
 	];
 
 	const markers = useMemo<Marker[]>(() => {
