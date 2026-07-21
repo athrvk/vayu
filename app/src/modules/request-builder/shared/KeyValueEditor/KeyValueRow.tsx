@@ -76,6 +76,10 @@ function KeyValueRow({
 					checked={item.enabled}
 					onChange={(e) => onUpdate(item.id, "enabled", e.target.checked)}
 					disabled={isReadOnly || !canDisable}
+					// Named after the row it governs. Without this it announced as
+					// a bare "checkbox", giving no clue which row it enables — and
+					// there is one per row.
+					aria-label={item.key ? `Enable ${item.key}` : "Enable this row"}
 					className="w-4 h-4 rounded-md border-input cursor-pointer disabled:opacity-50"
 				/>
 			) : (
