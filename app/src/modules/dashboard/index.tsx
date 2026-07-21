@@ -46,6 +46,10 @@ export default function LoadTestDashboard() {
 		stopRun,
 		setFinalReport,
 		setStopping,
+		// Written by the SSE layer on a connection failure and, until now, read
+		// by nothing — so a dead metrics stream looked like a run with no data.
+		error: streamError,
+		setError: setStreamError,
 	} = useDashboardStore();
 
 	// Track whether we're loading the report
@@ -352,31 +356,56 @@ export default function LoadTestDashboard() {
 			/>
 
 			{/*
-			 * A failed report used to render as an empty dashboard — the same
-			 * "a failure is not an absence" problem the collection screens had.
-			 * Above the tabs so it shows whichever view is active.
+			 * One notice slot for both failures the dashboard can hit. The stream
+			 * error comes first: without live metrics the page has nothing to show,
+			 * whereas a missing report still leaves whatever was captured.
+			 *
+			 * Both used to be invisible — the report failure retried forever behind
+			 * a `console.error`, and the stream failure was written to the store and
+			 * never read by anything.
 			 */}
-			{reportError && (
+			{(streamError || reportError) && (
 				<div className="px-5 pt-3 shrink-0">
-					<Callout
-						severity="blocking"
-						title="Couldn't load the run report"
-						action={
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => {
-									loadAttemptRef.current = 0;
-									setReportError(null);
-								}}
-							>
-								Retry
-							</Button>
-						}
-					>
-						{reportError} The live metrics below are whatever was captured before the
-						run finished.
-					</Callout>
+					{streamError ? (
+						<Callout
+							severity="blocking"
+							title="Lost the live metrics stream"
+							action={
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => {
+										setStreamError(null);
+										loadTestService.startMonitoring(currentRunId);
+									}}
+								>
+									Reconnect
+								</Button>
+							}
+						>
+							{streamError} Anything already received is still shown below.
+						</Callout>
+					) : (
+						<Callout
+							severity="blocking"
+							title="Couldn't load the run report"
+							action={
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => {
+										loadAttemptRef.current = 0;
+										setReportError(null);
+									}}
+								>
+									Retry
+								</Button>
+							}
+						>
+							{reportError} The live metrics below are whatever was captured before
+							the run finished.
+						</Callout>
+					)}
 				</div>
 			)}
 
