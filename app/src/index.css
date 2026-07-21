@@ -198,10 +198,14 @@
 		 * --destructive vs --destructive-text). */
 		--success: 142 76% 36%;
 		--success-foreground: 0 0% 100%;
-		--success-text: 142 72% 30%; /* accessible green text on light bg (~5:1) */
+		/* Solved against the *darkest* light surface (--muted/--accent at 93%),
+		 * not the card. At 30% these cleared the card but measured 4.04 (green)
+		 * and 3.57 (amber) on --muted, so a warning on a tinted chip failed —
+		 * which is exactly what "ramp off target" did on the dashboard. */
+		--success-text: 142 72% 27%;
 		--warning: 38 92% 50%;
 		--warning-foreground: 0 0% 100%;
-		--warning-text: 38 90% 35%; /* accessible amber text on light bg (~4.6:1) */
+		--warning-text: 38 90% 30%;
 		--info: 199 89% 48%;
 		--info-foreground: 0 0% 100%;
 
@@ -232,10 +236,10 @@
 		 * the same, and adjust lightness per mode to clear 4.5:1 on every
 		 * surface. Use these whenever the status colour IS the text; keep the
 		 * base tokens for dots, bars, pills and icons. */
-		--status-success-text: 142 72% 29%;
+		--status-success-text: 142 72% 27%;
 		--status-error-text: 0 70% 45%;
 		--status-running-text: 217 80% 45%;
-		--status-stopped-text: 25 85% 38%;
+		--status-stopped-text: 25 85% 35%;
 
 		/* Solid-chip pairs. The response status badge paints a status colour as a
 		 * filled chip with a white label — a third use, needing neither the dot
@@ -357,7 +361,7 @@
 		/* Destructive */
 		--destructive: 0 62.8% 30.6%;
 		--destructive-foreground: 0 0% 98%;
-		--destructive-text: 0 65% 63%; /* muted rose — accessible text on dark bg, ~4.5:1 */
+		--destructive-text: 0 65% 65%; /* muted rose — accessible text on dark bg */
 
 		/* Charts — same cohesive hues as light, lifted in lightness for the dark
 		 * ground. chart-1 tracks the active accent. */

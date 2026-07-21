@@ -161,10 +161,21 @@ fills on the base token.
 
 ```css
 /* Light — accessible text on light surfaces */
---success-text:  142 72% 30%;   --warning-text:  38 90% 35%;   --destructive-text: 0 60% 48%;
+--success-text:  142 72% 27%;   --warning-text:  38 90% 30%;   --destructive-text: 0 60% 48%;
 /* Dark — accessible text on dark surfaces */
---success-text:  142 60% 55%;   --warning-text:  40 92% 60%;   --destructive-text: 0 65% 63%;
+--success-text:  142 60% 55%;   --warning-text:  40 92% 60%;   --destructive-text: 0 65% 65%;
 ```
+
+**Every `-text` token is solved against the darkest surface it can land on —
+`--muted`/`--accent` (93%) in light, `--card` (11%) in dark — not against the
+card.** That distinction is not academic: tuned against the card, the light
+green and amber measured 4.04 and 3.57 on `--muted`, so a status message on a
+tinted chip failed while the same colour on a card passed. The dashboard's
+"⚠ ramp off target" is what surfaced it.
+
+The current floor across all four surfaces, both themes, is **4.63** (light
+amber). If you add or retune a text token, measure it against all four
+surfaces, not the one you happen to be looking at.
 
 ### Variable Scope Colors (Categorical)
 
