@@ -13,6 +13,7 @@
  * welcome tab. No unsaved-dot — autosave is the safety net.
  */
 
+import { useRef } from "react";
 import { X, Plus, Folder, Zap, Clock, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTabsStore, type Tab } from "@/stores";
@@ -63,6 +64,10 @@ function TabIcon({ type }: { type: Tab["type"] }) {
 
 function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 	const { focusTab, closeTab } = useTabsStore();
+	// Roving tabindex: the strip is one Tab stop, and Left/Right move within it.
+	// Previously every tab carried tabIndex={0}, so a developer with a dozen tabs
+	// open had to press Tab a dozen times to get past the strip.
+	const rovingTabIndex = isActive ? 0 : -1;
 
 	// Hooks run unconditionally (React rules); they no-op for non-matching types.
 	const { data: request } = useRequestQuery(tab.type === "request" ? tab.entityId : null);
@@ -130,11 +135,23 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 		<div
 			role="tab"
 			aria-selected={isActive}
-			tabIndex={0}
+			tabIndex={rovingTabIndex}
+			data-tab-id={tab.id}
 			title={title}
 			onClick={() => focusTab(tab.id)}
 			onKeyDown={(e) => {
-				if (e.key === "Enter" || e.key === " ") focusTab(tab.id);
+				if (e.key === "Enter" || e.key === " ") {
+					// Space would otherwise scroll the strip's overflow container.
+					e.preventDefault();
+					focusTab(tab.id);
+				}
+				// Closing was mouse-only: the X is `tabIndex={-1}` and only appears
+				// on hover, and no close shortcut existed anywhere in the app. Delete
+				// on the focused tab is the WAI-ARIA pattern for a deletable tab.
+				if (e.key === "Delete") {
+					e.preventDefault();
+					closeTab(tab.id);
+				}
 			}}
 			onAuxClick={(e) => {
 				// Middle-click closes, like browsers
@@ -172,10 +189,51 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 
 export function TabStrip() {
 	const { openTabs, activeTabId, openTab } = useTabsStore();
+	const listRef = useRef<HTMLDivElement>(null);
+
+	/**
+	 * Arrow-key navigation across the strip.
+	 *
+	 * `role="tablist"` is a promise that arrow keys work, and it was not being
+	 * kept — the only key handling was Enter/Space on an individual tab. Handled
+	 * here by delegation rather than per-tab so the tabs stay ignorant of their
+	 * neighbours, and read off the DOM so the order always matches what is
+	 * rendered.
+	 *
+	 * Focus moves without activating (`aria-selected` follows the click, not the
+	 * arrow). With a heavy tab like a dashboard in the strip, activate-on-arrow
+	 * would fire a mount for every tab you skate past.
+	 */
+	const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+		const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+		if (!keys.includes(e.key)) return;
+
+		const tabs = Array.from(
+			listRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []
+		);
+		if (tabs.length === 0) return;
+
+		const current = tabs.findIndex((el) => el === document.activeElement);
+		if (current === -1) return;
+
+		let next = current;
+		if (e.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+		if (e.key === "ArrowRight") next = (current + 1) % tabs.length;
+		if (e.key === "Home") next = 0;
+		if (e.key === "End") next = tabs.length - 1;
+
+		e.preventDefault();
+		// Roving tabindex means the destination is currently -1, which is still
+		// focusable programmatically; the render that follows activation fixes it.
+		tabs[next].tabIndex = 0;
+		tabs[next].focus();
+	};
 
 	return (
 		<div
+			ref={listRef}
 			role="tablist"
+			onKeyDown={onKeyDown}
 			className="panel-clip flex h-full min-w-0 items-stretch overflow-x-auto"
 			// Tabs and the "+" button stay clickable; the slack to their right is
 			// left as a drag region by the parent so the window can be moved.
