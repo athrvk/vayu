@@ -16,7 +16,7 @@ import { AlertCircle, History, ArrowLeft } from "lucide-react";
 import { useRunReportQuery } from "@/queries";
 import { useTabsStore, useLayoutStore } from "@/stores";
 import { Button, Badge } from "@/components/ui";
-import { TruncatedText } from "@/components/shared";
+import { TruncatedText, EmptyState } from "@/components/shared";
 import LoadTestDetail from "./LoadTestDetail";
 import DesignRunDetail from "./DesignRunDetail";
 
@@ -42,13 +42,11 @@ export default function HistoryDetail() {
 	// No run selected
 	if (!selectedRunId) {
 		return (
-			<div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4">
-				<History className="w-12 h-12 opacity-50" />
-				<div className="text-center">
-					<p className="text-lg font-medium">No Run Selected</p>
-					<p className="text-sm mt-1">Select a run from the sidebar to view details</p>
-				</div>
-			</div>
+			<EmptyState
+				icon={History}
+				title="No run selected"
+				description="Pick a run from the sidebar to see its results."
+			/>
 		);
 	}
 

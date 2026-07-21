@@ -11,6 +11,8 @@
  * Displays cookies extracted from Set-Cookie headers.
  */
 
+import { EmptyState } from "@/components/shared";
+
 export interface ResponseCookiesProps {
 	headers: Record<string, string>;
 }
@@ -20,7 +22,7 @@ export default function ResponseCookies({ headers }: ResponseCookiesProps) {
 	const setCookie = headers["set-cookie"] || headers["Set-Cookie"];
 
 	if (!setCookie) {
-		return <div className="p-8 text-center text-muted-foreground">No cookies in response</div>;
+		return <EmptyState variant="inline" title="No cookies in response" />;
 	}
 
 	// Parse cookies (simplified)

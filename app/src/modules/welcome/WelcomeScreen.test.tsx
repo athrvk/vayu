@@ -162,7 +162,7 @@ describe("WelcomeScreen", () => {
 		});
 
 		it("creates a collection first on a bare workspace", async () => {
-			// empty workspace → EmptyState; its New request button
+			// empty workspace → FirstRunWelcome; its New request button
 			renderScreen();
 			fireEvent.click(screen.getByRole("button", { name: /New request/i }));
 			await waitFor(() => expect(mocks.createCollection).toHaveBeenCalled());

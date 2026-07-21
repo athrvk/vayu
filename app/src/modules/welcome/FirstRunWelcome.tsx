@@ -6,7 +6,10 @@
  */
 
 /**
- * EmptyState — first run, no collections and no runs.
+ * FirstRunWelcome — first run, no collections and no runs.
+ *
+ * Distinct from the shared `EmptyState` primitive: this is the one branded
+ * screen in the app, not a "nothing here" placeholder.
  *
  * Import leads. Nobody adopts an API client from zero; they arrive carrying
  * collections from somewhere else, so naming the formats is the useful thing to
@@ -18,12 +21,12 @@ import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
 import { ActionTile } from "./components/ActionTile";
 import { FooterLinks } from "./components/FooterLinks";
 
-interface EmptyStateProps {
+interface FirstRunWelcomeProps {
 	onImport: () => void;
 	onNewRequest: () => void;
 }
 
-export function EmptyState({ onImport, onNewRequest }: EmptyStateProps) {
+export function FirstRunWelcome({ onImport, onNewRequest }: FirstRunWelcomeProps) {
 	return (
 		<div className="flex flex-col gap-8">
 			<div className="flex flex-col gap-2">

@@ -32,5 +32,8 @@ export * from "./TruncatedText";
 // Shared frame for the drawer views
 export * from "./DrawerPanel";
 
+// The one way to say "there is nothing here yet"
+export * from "./EmptyState";
+
 // Loading placeholder for the drawer's list views
 export * from "./ListSkeleton";

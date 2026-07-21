@@ -13,7 +13,7 @@
  * resume screen — tabs are persisted and restored, so returning users land back
  * on their own tabs. Its job is to start something new.
  *
- * Two states: EmptyState on a fresh workspace, Launcher once there is anything
+ * Two states: FirstRunWelcome on a fresh workspace, Launcher once there is anything
  * to show. See app/src/modules/welcome/README.md for what belongs on this screen.
  */
 
@@ -35,7 +35,7 @@ import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME } from "@/constants/collection";
 import { resolveNewRequestTarget } from "./targetCollection";
 import { CollectionPicker } from "./components/CollectionPicker";
-import { EmptyState } from "./EmptyState";
+import { FirstRunWelcome } from "./FirstRunWelcome";
 import { Launcher } from "./Launcher";
 import { LauncherSkeleton } from "./LauncherSkeleton";
 
@@ -109,7 +109,7 @@ export default function WelcomeScreen() {
 				{isLoading ? (
 					<LauncherSkeleton />
 				) : isEmpty ? (
-					<EmptyState onImport={openImport} onNewRequest={handleNewRequest} />
+					<FirstRunWelcome onImport={openImport} onNewRequest={handleNewRequest} />
 				) : (
 					<Launcher
 						runs={runs}
