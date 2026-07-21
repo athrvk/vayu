@@ -174,7 +174,7 @@ describe("WelcomeScreen", () => {
 
 	// Regression: both queries return [] while loading, which read as an empty
 	// workspace and flashed the first-run screen at returning users.
-	it("renders neither state while loading", () => {
+	it("renders neither real state while loading", () => {
 		mocks.collections = { data: [], isLoading: true };
 		mocks.runs = { data: [], isLoading: true };
 		renderScreen();
@@ -182,5 +182,25 @@ describe("WelcomeScreen", () => {
 			screen.queryByRole("button", { name: /Import a collection/i })
 		).not.toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: /New request/i })).not.toBeInTheDocument();
+	});
+
+	// ...but not nothing either. Suppressing both states used to leave the
+	// screen blank for the length of the load, so the fix for the flash traded
+	// a wrong screen for an empty one.
+	it("shows a skeleton while loading, not a blank screen", () => {
+		mocks.collections = { data: [], isLoading: true };
+		mocks.runs = { data: [], isLoading: true };
+		const { container } = renderScreen();
+		expect(screen.getByRole("status", { name: "Loading" })).toBeInTheDocument();
+		// Holds the Launcher shape: four action tiles so the real content lands
+		// in place rather than pushing a blank page around.
+		expect(container.querySelectorAll(".grid > div")).toHaveLength(4);
+	});
+
+	it("drops the skeleton once the queries settle", () => {
+		mocks.collections = { data: [{ id: "c1", name: "demo" }], isLoading: false };
+		mocks.runs = { data: [run()], isLoading: false };
+		renderScreen();
+		expect(screen.queryByRole("status", { name: "Loading" })).not.toBeInTheDocument();
 	});
 });

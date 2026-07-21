@@ -17,11 +17,16 @@ import { useVariablesStore } from "@/modules/variables/variables-store";
 import { useCollectionsQuery, useEnvironmentsQuery, useGlobalsQuery } from "@/queries";
 import VariableTableEditor from "./VariableTableEditor";
 import { Variable } from "lucide-react";
+import { Skeleton } from "@/components/ui";
 
 export default function VariablesMain() {
 	const { selectedCategory } = useVariablesStore();
-	const { data: collections = [] } = useCollectionsQuery();
-	const { data: environments = [] } = useEnvironmentsQuery();
+	// isLoading matters here, not just the data. Both queries default to `[]`,
+	// so a category selected from a previous session resolved to `undefined`
+	// while its query was still in flight and the screen announced "not found"
+	// — an error, for something that simply had not arrived yet.
+	const { data: collections = [], isLoading: collectionsLoading } = useCollectionsQuery();
+	const { data: environments = [], isLoading: environmentsLoading } = useEnvironmentsQuery();
 	const globalsQuery = useGlobalsQuery();
 
 	if (!selectedCategory) {
@@ -55,10 +60,10 @@ export default function VariablesMain() {
 	if (selectedCategory.type === "collection") {
 		const collection = collections.find((c) => c.id === selectedCategory.collectionId);
 		if (!collection) {
-			return (
-				<div className="flex-1 flex items-center justify-center text-muted-foreground">
-					<p className="text-sm">Collection not found</p>
-				</div>
+			return collectionsLoading ? (
+				<LoadingPane label="Loading collection" />
+			) : (
+				<NotFoundPane label="Collection not found" />
 			);
 		}
 		return (
@@ -74,10 +79,10 @@ export default function VariablesMain() {
 	if (selectedCategory.type === "environment") {
 		const environment = environments.find((e) => e.id === selectedCategory.environmentId);
 		if (!environment) {
-			return (
-				<div className="flex-1 flex items-center justify-center text-muted-foreground">
-					<p className="text-sm">Environment not found</p>
-				</div>
+			return environmentsLoading ? (
+				<LoadingPane label="Loading environment" />
+			) : (
+				<NotFoundPane label="Environment not found" />
 			);
 		}
 		return (
@@ -91,4 +96,30 @@ export default function VariablesMain() {
 	}
 
 	return null;
+}
+
+/** Shown while the owning query is still in flight — never "not found". */
+function LoadingPane({ label }: { label: string }) {
+	return (
+		<div className="flex-1 p-6" role="status" aria-label={label}>
+			<div className="space-y-3" aria-hidden="true">
+				<Skeleton className="h-6 w-48 rounded-md" />
+				<Skeleton className="h-4 w-72 rounded-md" />
+				<div className="space-y-2 pt-4">
+					{Array.from({ length: 4 }, (_, i) => (
+						<Skeleton key={i} className="h-9 w-full rounded-md" />
+					))}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+/** Genuinely missing: the query settled and the entity is not in it. */
+function NotFoundPane({ label }: { label: string }) {
+	return (
+		<div className="flex-1 flex items-center justify-center text-muted-foreground">
+			<p className="text-sm">{label}</p>
+		</div>
+	);
 }

@@ -37,6 +37,7 @@ import { resolveNewRequestTarget } from "./targetCollection";
 import { CollectionPicker } from "./components/CollectionPicker";
 import { EmptyState } from "./EmptyState";
 import { Launcher } from "./Launcher";
+import { LauncherSkeleton } from "./LauncherSkeleton";
 
 const CREATE_FAILED = "Could not create the request. Check that the engine is running.";
 
@@ -97,14 +98,17 @@ export default function WelcomeScreen() {
 	};
 
 	// Both queries start as [] while loading, which would read as an empty
-	// workspace and flash the first-run screen at returning users.
+	// workspace and flash the first-run screen at returning users — hence the
+	// skeleton rather than rendering either real state early.
 	const isLoading = collectionsLoading || runsLoading;
 	const isEmpty = collections.length === 0 && runs.length === 0;
 
 	return (
 		<div className="flex-1 overflow-auto bg-background">
 			<div className="max-w-2xl px-8 py-10">
-				{isLoading ? null : isEmpty ? (
+				{isLoading ? (
+					<LauncherSkeleton />
+				) : isEmpty ? (
 					<EmptyState onImport={openImport} onNewRequest={handleNewRequest} />
 				) : (
 					<Launcher
