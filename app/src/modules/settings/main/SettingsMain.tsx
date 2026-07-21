@@ -544,7 +544,21 @@ export default function SettingsMain() {
 													</span>
 												)}
 												{isPendingRestart && (
-													<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-amber-500 text-white">
+													/*
+													 * White on a solid `amber-500` measured 2.14 — the
+													 * worst text contrast in the app, and at 10px. It
+													 * failed in *both* themes, because a raw palette
+													 * fill and white are the same two colours whatever
+													 * the surface underneath.
+													 *
+													 * Now the wash pattern the sibling "Restart
+													 * Required" chip beside it already uses, on warning
+													 * tokens: 4.87 light / 7.45 dark. It keeps a
+													 * stronger border than that sibling so the two stay
+													 * distinguishable — "Pending" is the more urgent of
+													 * the pair and should not read as identical.
+													 */
+													<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-warning/50 bg-warning/15 text-[10px] font-medium text-warning-text">
 														Pending
 													</span>
 												)}
