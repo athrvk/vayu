@@ -14,7 +14,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
-import { Badge, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui";
+import { Badge, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui";
+import { EmptyState } from "@/components/shared";
 import { useCollectionsQuery, useRequestsQuery } from "@/queries/collections";
 import { useTabsStore, useSessionStore } from "@/stores";
 import AuthTab from "./AuthTab";
@@ -45,7 +46,7 @@ export default function CollectionDetail() {
 		if (selectedCollectionId) setLastCollectionId(selectedCollectionId);
 	}, [selectedCollectionId, setLastCollectionId]);
 
-	const { data: collections = [] } = useCollectionsQuery();
+	const { data: collections = [], isLoading: collectionsLoading } = useCollectionsQuery();
 	const { data: requests = [] } = useRequestsQuery(selectedCollectionId);
 
 	const collection = useMemo(
@@ -55,12 +56,28 @@ export default function CollectionDetail() {
 
 	const [tab, setTab] = useState<CollectionTab>("info");
 
-	if (!collection) {
+	// Loading and missing are different answers. `collections` defaults to `[]`,
+	// so a collection tab restored from a previous session resolves to nothing
+	// while its query is still in flight — and telling the user their collection
+	// is gone is worse than telling them nothing yet.
+	if (collectionsLoading) {
 		return (
-			<div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-				Collection not found.
+			<div className="flex-1 p-6" role="status" aria-label="Loading collection">
+				<div className="space-y-3" aria-hidden="true">
+					<Skeleton className="h-6 w-56 rounded-md" />
+					<Skeleton className="h-4 w-72 rounded-md" />
+					<div className="space-y-2 pt-4">
+						{Array.from({ length: 4 }, (_, i) => (
+							<Skeleton key={i} className="h-9 w-full rounded-md" />
+						))}
+					</div>
+				</div>
 			</div>
 		);
+	}
+
+	if (!collection) {
+		return <EmptyState title="Collection not found" />;
 	}
 
 	const variableCount = Object.keys(collection.variables ?? {}).length;
