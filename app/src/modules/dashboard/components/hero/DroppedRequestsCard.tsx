@@ -40,7 +40,7 @@ export function DroppedRequestsCard({
 				of <span className="text-foreground font-semibold">{formatNumber(scheduled)}</span>{" "}
 				scheduled · <span className="text-foreground font-semibold">{pct.toFixed(1)}</span>%
 			</p>
-			<p className="text-[11px] mt-2" style={{ color: "hsl(var(--warning))" }}>
+			<p className="text-[11px] mt-2 text-warning-text">
 				Server saturating — try lowering target RPS
 			</p>
 		</HeroCardShell>

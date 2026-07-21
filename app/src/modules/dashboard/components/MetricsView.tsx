@@ -258,9 +258,7 @@ function MetricsView({
 								</span>
 							</span>
 							{rampOverlay.rampDeviationPct > 5 && (
-								<span style={{ color: "hsl(var(--warning))" }}>
-									⚠ ramp off target
-								</span>
+								<span className="text-warning-text">⚠ ramp off target</span>
 							)}
 						</div>
 					)}

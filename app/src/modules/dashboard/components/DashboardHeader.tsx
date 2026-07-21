@@ -125,7 +125,7 @@ export default function DashboardHeader({
 					variant="ghost"
 					onClick={onStop}
 					disabled={isStopping}
-					className="h-7 px-2.5 text-[12px] text-destructive hover:bg-destructive/10 hover:text-destructive border border-destructive/30 shrink-0"
+					className="h-7 px-2.5 text-[12px] text-destructive-text hover:bg-destructive/10 hover:text-destructive-text border border-destructive/30 shrink-0"
 				>
 					{isStopping ? (
 						<>

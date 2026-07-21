@@ -145,7 +145,7 @@ export function Dock() {
 						<span className="text-xs text-muted-foreground">Saved</span>
 					)}
 					{saveStatus === "error" && (
-						<span className="text-xs text-destructive">Save failed</span>
+						<span className="text-xs text-destructive-text">Save failed</span>
 					)}
 
 					{/*

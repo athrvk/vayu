@@ -71,7 +71,7 @@ export function ThroughputTwinCard({
 							"inline-block px-1.5 py-px rounded-sm font-mono text-[10px] font-bold",
 							deltaOk
 								? "bg-success/10 text-success-text"
-								: "bg-destructive/10 text-destructive"
+								: "bg-destructive/10 text-destructive-text"
 						)}
 					>
 						Δ {delta.toFixed(1)}

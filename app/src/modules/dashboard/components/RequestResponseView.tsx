@@ -135,7 +135,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<div className="space-y-3">
 							<div className="flex justify-between">
 								<span className="text-muted-foreground">Total Errors:</span>
-								<span className="font-semibold text-destructive">
+								<span className="font-semibold text-destructive-text">
 									{report.errors.total}
 								</span>
 							</div>

@@ -79,7 +79,7 @@ export function RowActionsMenu({ label, actions, className }: RowActionsMenuProp
 							onSelect={action.onSelect}
 							className={cn(
 								"gap-2 text-sm",
-								action.destructive && "text-destructive"
+								action.destructive && "text-destructive-text"
 							)}
 						>
 							<action.icon className="h-4 w-4 shrink-0" />

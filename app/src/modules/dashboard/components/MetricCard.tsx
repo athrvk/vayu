@@ -15,11 +15,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { MetricCardProps } from "../types";
 
+/*
+ * Tokens, not palette literals. These were hand-paired Tailwind shades
+ * (`text-green-600 dark:text-green-400`), which is the thing the design system
+ * exists to prevent: they do not track the theme, and each pair was tuned by
+ * eye rather than against a contrast target. The `-text` variants are the
+ * purpose-built accessible pairs for exactly these three states and carry
+ * their own light/dark values, so the `dark:` half is no longer needed.
+ */
 const colorClasses = {
 	default: "",
-	success: "text-green-600 dark:text-green-400",
-	warning: "text-yellow-600 dark:text-yellow-400",
-	danger: "text-red-600 dark:text-red-400",
+	success: "text-success-text",
+	warning: "text-warning-text",
+	danger: "text-destructive-text",
 };
 
 export default function MetricCard({
