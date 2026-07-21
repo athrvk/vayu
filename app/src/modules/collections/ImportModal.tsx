@@ -14,6 +14,10 @@ import {
 	DialogHeader,
 	DialogTitle,
 	Input,
+	Tabs,
+	TabsContent,
+	TabsList,
+	TabsTrigger,
 	Textarea,
 } from "@/components/ui";
 import { useImportModalStore } from "@/stores";
@@ -132,6 +136,106 @@ export function ImportModal() {
 		redetect({ importEnvironments, importScripts: v });
 	};
 
+	// Shared by all three tab panels; the inner conditionals already switch on
+	// the active tab, and only the active panel is mounted.
+	const panelBody = (
+		<>
+			{phase === "preview" && result ? (
+				<PreviewView result={result} onDismiss={reset} />
+			) : (
+				<>
+					{tab === "file" && (
+						/*
+						 * A real <button>, not a clickable div. This was a bare
+						 * div with onClick: not focusable, not in the tab order,
+						 * and not operable by Enter or Space — the only way to
+						 * reach the file picker was a mouse. Drag-and-drop still
+						 * works; the button is the keyboard path to the same
+						 * hidden <input type="file">.
+						 */
+						<button
+							type="button"
+							className="w-full cursor-pointer rounded-lg border-2 border-dashed border-border-strong bg-accent px-6 py-9 text-center"
+							onClick={() => fileInputRef.current?.click()}
+							onDragOver={(e) => e.preventDefault()}
+							onDrop={(e) => {
+								e.preventDefault();
+								const f = e.dataTransfer.files[0];
+								if (f) handleFile(f);
+							}}
+						>
+							<Upload className="mx-auto h-6 w-6 text-muted-foreground" />
+							<span className="mt-2 block text-[13px] font-medium">
+								Drop a file here, or click to browse
+							</span>
+							<span className="block text-[11px] text-muted-foreground">
+								Format is detected automatically
+							</span>
+							<span className="mt-4 flex flex-wrap justify-center gap-1.5">
+								{FORMAT_BADGES.map((b) => (
+									<span
+										key={b}
+										className="rounded-md border border-border bg-card px-2 py-0.5 text-[10px] font-semibold"
+									>
+										{b}
+									</span>
+								))}
+							</span>
+						</button>
+					)}
+					{/*
+					 * Outside the button on purpose. Nested inside it, the
+					 * programmatic .click() would bubble back to the button and
+					 * re-enter this handler, and interactive content inside a
+					 * button is invalid besides.
+					 */}
+					<input
+						ref={fileInputRef}
+						type="file"
+						className="hidden"
+						onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+					/>
+					{tab === "url" && (
+						<div className="flex gap-2">
+							<Input
+								value={url}
+								onChange={(e) => setUrl(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter" && url) handleFetchUrl();
+								}}
+								placeholder="https://petstore.swagger.io/v2/swagger.json"
+								className="flex-1"
+							/>
+							<Button onClick={handleFetchUrl} disabled={!url}>
+								Fetch
+							</Button>
+						</div>
+					)}
+					{tab === "paste" && (
+						<div>
+							<Textarea
+								value={pasteText}
+								onChange={(e) => setPasteText(e.target.value)}
+								placeholder="Paste collection JSON or YAML here"
+								className="h-40 w-full font-mono text-[12px]"
+							/>
+							<Button
+								onClick={() => runDetect(pasteText)}
+								disabled={!pasteText.trim()}
+								className="mt-2"
+							>
+								Detect &amp; Preview
+							</Button>
+						</div>
+					)}
+					{phase === "error" && (
+						<p className="mt-3 text-[12px] text-destructive-text">{error}</p>
+					)}
+				</>
+			)}
+		</>
+	);
+
 	return (
 		/*
 		 * This used to hand-roll its own modal: a fixed backdrop, a bare
@@ -159,135 +263,63 @@ export function ImportModal() {
 					</DialogTitle>
 				</DialogHeader>
 
-				<div role="tablist" className="flex gap-4 border-b border-border px-5">
-					{(["file", "url", "paste"] as Tab[]).map((t) => (
-						<button
-							key={t}
-							role="tab"
-							id={`import-tab-${t}`}
-							aria-selected={tab === t}
-							aria-controls="import-tabpanel"
-							onClick={() => {
-								setTab(t);
-								reset();
-							}}
-							className={`-mb-px border-b-2 py-2 text-[13px] ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`}
-						>
-							{t === "file" ? "File" : t === "url" ? "URL" : "Paste JSON"}
-						</button>
-					))}
-				</div>
-
-				<div
-					role="tabpanel"
-					id="import-tabpanel"
-					aria-labelledby={`import-tab-${tab}`}
-					/*
-					 * min-h holds the three tabs to one height. Their natural
-					 * content differs wildly — the File dropzone is 247px tall, the
-					 * URL row only 76 — and because the dialog is centred, that made
-					 * the whole modal resize by 171px and jump 85px up the screen
-					 * when you switched to URL. Sized to the tallest tab, so the
-					 * shell never moves and only the content inside it changes.
-					 */
-					className="min-h-[248px] overflow-y-auto p-5"
+				{/*
+				 * The app's Tabs primitive, styled like the request builder's
+				 * underline tabs. These were hand-rolled buttons with `py-2` and no
+				 * horizontal padding, which is what made the focus ring look wrong:
+				 * the ring correctly wrapped a 73x38 box around 73px of text, so it
+				 * read as a tall rectangle floating around the label. Every other
+				 * tab in the app is px-4 py-2.5, so the ring wraps a proportioned
+				 * target.
+				 *
+				 * Radix also brings the keyboard model tabs are supposed to have —
+				 * one tab stop for the set, arrow keys to move between them. The
+				 * hand-rolled version made each tab its own tab stop.
+				 */}
+				<Tabs
+					value={tab}
+					onValueChange={(v) => {
+						setTab(v as Tab);
+						reset();
+					}}
+					className="flex min-h-0 flex-1 flex-col"
 				>
-					{phase === "preview" && result ? (
-						<PreviewView result={result} onDismiss={reset} />
-					) : (
-						<>
-							{tab === "file" && (
-								/*
-								 * A real <button>, not a clickable div. This was a bare
-								 * div with onClick: not focusable, not in the tab order,
-								 * and not operable by Enter or Space — the only way to
-								 * reach the file picker was a mouse. Drag-and-drop still
-								 * works; the button is the keyboard path to the same
-								 * hidden <input type="file">.
-								 */
-								<button
-									type="button"
-									className="w-full cursor-pointer rounded-lg border-2 border-dashed border-border-strong bg-accent px-6 py-9 text-center"
-									onClick={() => fileInputRef.current?.click()}
-									onDragOver={(e) => e.preventDefault()}
-									onDrop={(e) => {
-										e.preventDefault();
-										const f = e.dataTransfer.files[0];
-										if (f) handleFile(f);
-									}}
-								>
-									<Upload className="mx-auto h-6 w-6 text-muted-foreground" />
-									<span className="mt-2 block text-[13px] font-medium">
-										Drop a file here, or click to browse
-									</span>
-									<span className="block text-[11px] text-muted-foreground">
-										Format is detected automatically
-									</span>
-									<span className="mt-4 flex flex-wrap justify-center gap-1.5">
-										{FORMAT_BADGES.map((b) => (
-											<span
-												key={b}
-												className="rounded-md border border-border bg-card px-2 py-0.5 text-[10px] font-semibold"
-											>
-												{b}
-											</span>
-										))}
-									</span>
-								</button>
-							)}
-							{/*
-							 * Outside the button on purpose. Nested inside it, the
-							 * programmatic .click() would bubble back to the button and
-							 * re-enter this handler, and interactive content inside a
-							 * button is invalid besides.
-							 */}
-							<input
-								ref={fileInputRef}
-								type="file"
-								className="hidden"
-								onChange={(e) =>
-									e.target.files?.[0] && handleFile(e.target.files[0])
-								}
-							/>
-							{tab === "url" && (
-								<div className="flex gap-2">
-									<Input
-										value={url}
-										onChange={(e) => setUrl(e.target.value)}
-										onKeyDown={(e) => {
-											if (e.key === "Enter" && url) handleFetchUrl();
-										}}
-										placeholder="https://petstore.swagger.io/v2/swagger.json"
-										className="flex-1"
-									/>
-									<Button onClick={handleFetchUrl} disabled={!url}>
-										Fetch
-									</Button>
-								</div>
-							)}
-							{tab === "paste" && (
-								<div>
-									<Textarea
-										value={pasteText}
-										onChange={(e) => setPasteText(e.target.value)}
-										placeholder="Paste collection JSON or YAML here"
-										className="h-40 w-full font-mono text-[12px]"
-									/>
-									<Button
-										onClick={() => runDetect(pasteText)}
-										disabled={!pasteText.trim()}
-										className="mt-2"
-									>
-										Detect &amp; Preview
-									</Button>
-								</div>
-							)}
-							{phase === "error" && (
-								<p className="mt-3 text-[12px] text-destructive-text">{error}</p>
-							)}
-						</>
-					)}
-				</div>
+					<TabsList className="h-auto w-full justify-start rounded-none border-b border-border bg-transparent p-0 px-5">
+						{(["file", "url", "paste"] as Tab[]).map((t) => (
+							<TabsTrigger
+								key={t}
+								value={t}
+								className="shrink-0 rounded-none border-b-2 border-transparent px-4 py-2.5 text-[13px] data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+							>
+								{t === "file" ? "File" : t === "url" ? "URL" : "Paste JSON"}
+							</TabsTrigger>
+						))}
+					</TabsList>
+
+					{/*
+					 * One panel per tab, not a single panel for the active value: Radix
+					 * points each trigger's aria-controls at the panel for its own value,
+					 * so rendering only the active one left the other two referencing ids
+					 * that did not exist. Only the active panel mounts, so the shared body
+					 * below still renders exactly once.
+					 */}
+					{(["file", "url", "paste"] as Tab[]).map((t) => (
+						<TabsContent
+							key={t}
+							value={t}
+							/*
+							 * min-h holds the three tabs to one height. Their natural content
+							 * differs wildly — the File dropzone is 247px tall, the URL row only
+							 * 76 — and because the dialog is centred, that made the whole modal
+							 * resize by 171px and jump 85px up the screen when you switched to
+							 * URL. Sized to the tallest tab, so the shell never moves.
+							 */
+							className="mt-0 min-h-[248px] overflow-y-auto p-5"
+						>
+							{panelBody}
+						</TabsContent>
+					))}
+				</Tabs>
 
 				{phase === "preview" && (
 					<div className="flex items-center justify-between gap-3 border-t border-border px-5 py-4">

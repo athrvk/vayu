@@ -29,12 +29,23 @@ function renderModal() {
 	);
 }
 
+/**
+ * Radix TabsTrigger activates on mousedown (and on focus in its default
+ * automatic mode), not on a bare synthetic click — so fireEvent.click alone
+ * leaves the tab unselected. Fire the sequence a real click produces.
+ */
+function selectTab(name: RegExp) {
+	const tab = screen.getByRole("tab", { name });
+	fireEvent.mouseDown(tab);
+	fireEvent.click(tab);
+}
+
 describe("ImportModal — failed import", () => {
 	beforeEach(() => useImportModalStore.setState({ isOpen: true }));
 
 	it("surfaces the error when the import rejects (modal stays open)", async () => {
 		renderModal();
-		fireEvent.click(screen.getByRole("tab", { name: /Paste JSON/i }));
+		selectTab(/Paste JSON/i);
 		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: postman } });
 		fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
 		await waitFor(() =>
