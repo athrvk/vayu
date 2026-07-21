@@ -254,22 +254,26 @@ export default function VariablesCategoryTree() {
 											: 0;
 										const isDeleting = deletingEnvId === environment.id;
 										return (
+											/*
+											 * Container + inner activator, not a
+											 * <div onClick>. The row carries a
+											 * RowActionsMenu, so it cannot be one
+											 * button (the collection rows below can,
+											 * and are). As a plain div it was not
+											 * focusable and not operable by keyboard
+											 * at all — the ⋯ menu was reachable but
+											 * selecting the environment was not.
+											 */
 											<div
 												key={environment.id}
 												className={cn(
-													"group flex h-8 items-center gap-2 px-3 pl-12.5 text-sm hover:bg-accent transition-colors cursor-pointer",
+													"focus-row group flex h-8 items-center gap-2 px-3 pl-12.5 text-sm hover:bg-accent transition-colors",
 													isSelected({
 														type: "environment",
 														environmentId: environment.id,
 													}) &&
 														"bg-scope-environment/10 text-scope-environment hover:bg-scope-environment/20"
 												)}
-												onClick={() =>
-													selectCategory({
-														type: "environment",
-														environmentId: environment.id,
-													})
-												}
 											>
 												{/* <Cloud className="w-4 h-4 text-blue-400 shrink-0" /> */}
 												{renamingEnvId === environment.id ? (
@@ -295,19 +299,29 @@ export default function VariablesCategoryTree() {
 														className="h-6 flex-1 text-sm"
 													/>
 												) : (
-													<TruncatedText className="flex-1">
-														{environment.name}
-													</TruncatedText>
+													<button
+														type="button"
+														onClick={() =>
+															selectCategory({
+																type: "environment",
+																environmentId: environment.id,
+															})
+														}
+														className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+													>
+														<TruncatedText className="flex-1">
+															{environment.name}
+														</TruncatedText>
+														{variableCount > 0 && (
+															<Badge
+																variant="secondary"
+																className="text-xs bg-scope-environment/10 text-scope-environment px-1.5 py-0 shrink-0"
+															>
+																{variableCount}
+															</Badge>
+														)}
+													</button>
 												)}
-												{variableCount > 0 &&
-													renamingEnvId !== environment.id && (
-														<Badge
-															variant="secondary"
-															className="text-xs bg-scope-environment/10 text-scope-environment px-1.5 py-0 shrink-0"
-														>
-															{variableCount}
-														</Badge>
-													)}
 												{isDeleting && (
 													<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive" />
 												)}

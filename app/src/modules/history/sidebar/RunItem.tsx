@@ -72,9 +72,11 @@ export default function RunItem({
 
 	return (
 		<div
-			onClick={() => onSelect(run.id)}
 			className={cn(
-				"group relative bg-card border cursor-pointer transition-all transition-colors overflow-hidden w-full",
+				// focus-row: the card is the perceived target, so it paints the ring
+				// for the activator inside it. It also has overflow-hidden, which
+				// would clip an outset ring — focus-row's is inset.
+				"focus-row group relative bg-card border cursor-pointer transition-all transition-colors overflow-hidden w-full",
 				isSelected
 					? "bg-primary/10 hover:bg-primary/15 border-primary/50 ring-1 ring-inset ring-primary/20 shadow-sm"
 					: "hover:border-primary/50 hover:shadow-sm"
@@ -116,7 +118,9 @@ export default function RunItem({
 							{formatTime(run.startTime)}
 						</span>
 					</div>
-					<div className="flex items-center gap-1 shrink-0">
+					{/* z-10: sits above the stretched activator below, so delete
+					    stays clickable while the rest of the card selects the run. */}
+					<div className="relative z-10 flex items-center gap-1 shrink-0">
 						{run.type === "load" && (
 							<Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />
 						)}
@@ -186,6 +190,27 @@ export default function RunItem({
 					</p>
 				)}
 			</div>
+
+			{/*
+			 * The card used to be a <div onClick>: clickable by mouse, but not
+			 * focusable, not in the tab order and not operable by Enter or Space.
+			 * A keyboard user could reach "Delete run" inside a card but had no way
+			 * to *open* one — the destructive action was reachable and the primary
+			 * one was not.
+			 *
+			 * A stretched activator keeps the whole card clickable while being a
+			 * real button. It is last in the DOM and absolutely positioned so it
+			 * covers the content without disturbing layout; the actions group above
+			 * carries z-10 to stay on top of it.
+			 */}
+			<button
+				type="button"
+				onClick={() => onSelect(run.id)}
+				aria-label={`Open ${run.type === "load" ? "load test" : "request"} run, ${run.status}${
+					requestUrl ? `, ${requestUrl}` : ""
+				}`}
+				className="absolute inset-0 z-0 cursor-pointer"
+			/>
 		</div>
 	);
 }
