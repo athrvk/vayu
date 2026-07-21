@@ -62,7 +62,7 @@ All tokens live in `app/src/index.css` as HSL channel values (no `hsl()` wrapper
 
 /* Light */
 --foreground:         240  6% 10%;   /* #18181b — primary text */
---muted-foreground:   240  4% 44%;   /* #6b6b73 — secondary / labels (see note) */
+--muted-foreground:   240  4% 42%;   /* secondary / labels (see note) */
 --subtle-foreground:  240  4% 58%;   /* de-emphasized text — faintest readable tier */
 ```
 
@@ -81,11 +81,19 @@ anything the user has to read — a dashboard sweep once found 20 such misuses
 ("dispatched", "4xx 0", "target 10"), all measuring 3.34:1. Those belong on
 `muted-foreground`.
 
-**Light `muted-foreground` is 44%, not zinc-500's 46%.** At 46% it cleared AA on
-the card (4.83) and the panel (4.63) but measured **4.40 on `--background`**, so
-every piece of muted text sitting on the canvas missed 4.5 by a hair. 44%
-carries all three surfaces (4.73 / 4.98 / 5.20). The 2-point darkening is not
-perceptible on its own but moves a whole class of text over the line.
+**Light `muted-foreground` is 42%, not zinc-500's 46%.** It is solved against
+the *darkest* light surface it lands on — `--muted`/`--accent` at 93%, not the
+card. At 46% it cleared the card (4.86) and the panel (4.64) but measured
+**4.13 on `--muted`**, so muted text on any tinted chip or hovered row missed
+4.5. At 42% every one of those surfaces clears: card 5.62, panel 5.37,
+background 5.12, `--muted` 4.77. The darkening is not perceptible on its own but
+moves a whole class of text over the line.
+
+One surface still does not clear it: `--accent-active` (88%), the selected-row
+background, where 42% measures **4.22**. Muted text on a selected row is
+therefore slightly under AA. Darkening further to fix it would collapse the gap
+to `--foreground`, so this is a known limit rather than an oversight — prefer
+`--foreground` for text that must stay readable on a selected row.
 
 ### Interactive States
 
@@ -113,8 +121,9 @@ perceptible on its own but moves a whole class of text over the line.
 
 ### Primary (Accent Color)
 
-Default is Sunset orange. Overridden by `[data-color-scheme]` attribute. The
-accent is **split into two tokens** to resolve a contrast bind:
+Set by the `[data-color-scheme]` attribute; the default is **Ocean**
+(`DEFAULT_COLOR_SCHEME` in `constants/color-schemes.ts` is the source of truth).
+The accent is **split into two tokens** to resolve a contrast bind:
 
 - **`--primary`** — the accent used for text, borders, rings, tints, indicators
   (`text-primary`, `border-primary`, `bg-primary/10`). Mode-adaptive: deep on
@@ -320,10 +329,19 @@ and a "200 OK" chip read identically on either theme. This is the same split
 `bg-status-error-fill`, `border-status-running/25`, etc. Use `--warning` for
 "expiring / caution" indicators (amber) and `--success` for success *banners*.
 
-The same set also colors **HTTP response severity** (2xx → `status-success`,
-3xx → `status-running`, 4xx → `warning`, 5xx/0 → `status-error`) and **latency
-thresholds** (normal → `status-running`, slow → `status-stopped`, danger →
-`status-error`), since those map onto the same hues.
+The same set also colors **HTTP response severity** and **latency thresholds**,
+since those map onto the same hues. The response-status badge
+(`ResponseViewer/ResponseHeader.tsx`) uses the `-fill` chips under a white label:
+
+| Status | Token |
+|--------|-------|
+| 2xx | `status-success-fill` |
+| 3xx | `status-warning-fill` |
+| 4xx | `status-stopped-fill` |
+| 5xx, and `0` (no server response) | `status-error-fill` |
+
+Latency uses `status-running` → `status-stopped` → `status-error` for normal →
+slow → danger (`LatencyMetric.tsx`).
 
 ### Decorative categorical palettes (the one token exception)
 
@@ -332,12 +350,26 @@ identity by color rather than to signal state — the same idea as `--chart-*`.
 These intentionally keep Tailwind hue utilities (with `dark:` variants) instead
 of tokens, because they never respond to theme and don't carry semantics:
 
-- **Settings sections** — per-section accent (pink/blue/amber/cyan/purple/green).
-- **Timing phases** — DNS / connect / TLS / TTFB / download in the breakdown.
-- **Console sections** — Pre-request (blue) vs Test (green) script groups; the
-  console body is a deliberately dark terminal (`zinc-900`) in both modes.
+- **Timing phases** — DNS / connect / TLS / TTFB / download in the breakdown,
+  and the history overview tiles. These are written as explicit
+  `bg-blue-50 dark:bg-blue-950/30` pairs, so they *are* theme-aware; they are
+  categorical identity, not state.
 
 Everything else — state, status, scope, semantics — must use tokens.
+
+**Two entries were removed from this list because they no longer describe the
+code.** The per-section Settings accent palette is gone; there are zero
+`pink/purple/cyan` utilities left under `modules/settings/`. And the console's
+Pre-request and Test script groups now use `status-running-*` and
+`status-success-*` tokens rather than raw `blue-500` / `green-500`, because the
+raw values were theme-blind and measured 3.76 and 2.22 in light mode. The
+console body is `bg-muted`, not a fixed `zinc-900` terminal.
+
+The lesson worth keeping: an entry on this list is a claim about the code, and
+it decays. A raw palette class here is only defensible if it comes with a
+`dark:` counterpart — a single value cannot serve a white card and a near-black
+one, which is why every theme-blind foreground found in this tree failed in
+light mode and passed in dark.
 
 ### HTTP Method Color Tokens
 
@@ -953,6 +985,34 @@ useResizable({ defaultSize, min, max, direction?: "horizontal" | "vertical" })
 ---
 
 ## Component Patterns
+
+### Empty, error and loading — the three states of a data pane
+
+Every pane backed by a query needs all three, and they were each hand-written
+before: casing split two ways ("No Run Selected" vs "No collections yet") and
+structure ranged from icon + heading + description + action down to one bare
+line of muted text. Three shared primitives in `components/shared/` now cover it.
+
+| State | Component | Notes |
+|-------|-----------|-------|
+| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description + optional action |
+| It broke | `ErrorState` | Takes the raw `detail` and an `onRetry` |
+| Still loading | `DetailSkeleton` | `rows` prop, default 4 |
+
+**`ErrorState` is deliberately not a variant of `EmptyState`.** "Nothing here
+yet" and "this failed" are different messages with different affordances, and
+folding them into one component with a flag makes it easy to show the wrong one.
+`ErrorState`'s icon is not a prop, either — one symbol for all failures.
+
+**The bug underneath the inconsistency is worth knowing.** `useQuery` destructured
+as `{ data = [] }` with no `throwOnError` resolves to `[]` when the request
+*fails*, and never reaches an ErrorBoundary — so six screens told the user their
+workspace was empty when the query had simply errored. When adding an error
+pane, gate it on `length === 0`: TanStack keeps last-good data through a failed
+background refetch, and covering still-valid content with a full-pane error is
+its own regression.
+
+Sentence case for titles, everywhere.
 
 ### Cards
 

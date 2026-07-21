@@ -126,6 +126,41 @@ cd app && pnpm format:check        # Prettier
 - Styling: Tailwind CSS v4 - all colors via CSS custom properties; see `docs/design-system.md`
 - **Design system:** `docs/design-system.md` - tokens, elevation, typography, component patterns. Read this before touching any UI file.
 
+## UI rules (enforced by tests — breaking one fails CI)
+
+- **Status colours have three tokens:** `--status-*` (dot/icon/tint),
+  `--status-*-text` (when the colour *is* the text), `--status-*-fill` (solid
+  chip under a white label). Using the bare fill as a foreground is the most
+  common colour bug here. → `status-color-tokens.test.ts`
+- **`--primary` vs `--primary-fill`:** `--primary` is text/ring/chart and
+  brightens in dark; `--primary-fill` is the solid button background and is one
+  value in both themes. Do not unify them — pinning `--primary` drops accent text
+  from APCA Lc 44–69 to 22–37.
+- **No raw Tailwind palette** (`text-green-500`) in the request/response tree
+  → `palette-tokens.test.ts`. Elsewhere only with an explicit `dark:` pair.
+- **No chart series on `--primary`/`--chart-1`** — both track the user's accent
+  and can collide with a semantic series. Use `categorical`.
+  → `status-code-series.test.ts`
+- **No bare `rounded`** — it ignores the Roundedness setting. → `radius-token.test.tsx`
+- **Adding an accent scheme:** `constants/color-schemes.ts` + `index.css`, both
+  themes, nothing else. → `color-schemes.test.ts`
+- **`docs/design-system.md` values are checked against `index.css`**
+  → `design-system-doc.test.ts`. Prose is not — if you change a value, read the
+  sentence around it.
+
+**Before measuring or changing a class, `rg` for it in the components.** Twice a
+conclusion was drawn about a combination the app never renders (`bg-border-strong`
+only existed behind a `data-[state=]` variant; white-on-`--primary` never occurs
+because fills use `--primary-fill`).
+
+**Never run prettier/`eslint --fix` repo-wide, and never format
+`docs/design-system.md`** — most of the tree isn't prettier-clean and formatting
+that file reflows ~480 lines. Format only files you touched that were clean before.
+
+**Mutation-check behavioural tests** (revert the fix, confirm failure, restore).
+Source-scanning guards must assert they scanned something non-empty — one passed
+for weeks reading an empty string, since vitest stubs CSS imports to `""`.
+
 ## Engine HTTP API
 
 The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
