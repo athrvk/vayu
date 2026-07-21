@@ -609,6 +609,98 @@
 }
 
 /*
+ * Dialog presentation.
+ *
+ * This replaces the stock utility stack
+ * (`animate-in fade-in-0 zoom-in-95 slide-in-from-top-[48%]
+ * slide-in-from-left-1/2 duration-200`), which had three problems:
+ *
+ * 1. The 48%/50% "slides" were not motion design. A centred dialog carries
+ *    `translate(-50%, -50%)`, and those values existed to cancel it out —
+ *    leaving an incidental 2% upward drift that fought the scale and read as a
+ *    wobble rather than a clean presentation.
+ * 2. Timing was `ease`, which accelerates before it decelerates. A surface
+ *    arriving on screen should only ever decelerate; `ease` makes the first
+ *    frames feel like lag.
+ * 3. The overlay ran 150ms and the panel 200ms, so the backdrop settled first
+ *    and the two read as separate events instead of one.
+ *
+ * A centred confirmation has no origin to fly in from, so it simply scales up
+ * from its own centre. Dismissal is quicker than presentation — the decision
+ * is already made, so getting out of the way should not cost the user time.
+ *
+ * These keyframes touch `transform` ONLY. Tailwind v4 centres the panel with
+ * the standalone `translate` property (`translate: -50% -50%`), not with
+ * `transform`, and the two compose. An earlier version of this repeated the
+ * centring inside the keyframes; because `translate` was still applying, the
+ * panel was double-shifted and animated in from 256px left / 423px above
+ * centre before snapping into place. `transform: scale()` alone composes
+ * correctly and scales about the panel's own centre.
+ *
+ * The reduced-motion rule near the end of this file collapses all of it.
+ */
+@keyframes dialog-in {
+	from {
+		opacity: 0;
+		transform: scale(0.97);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
+@keyframes dialog-out {
+	from {
+		opacity: 1;
+		transform: scale(1);
+	}
+	to {
+		opacity: 0;
+		transform: scale(0.97);
+	}
+}
+
+@keyframes dialog-overlay-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes dialog-overlay-out {
+	from {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+	}
+}
+
+@layer components {
+	/* Decelerate in, accelerate out — the standard pairing for a surface that
+	   arrives and then leaves. Overlay and panel share a duration so they land
+	   together. */
+	.dialog-panel[data-state="open"] {
+		animation: dialog-in 180ms cubic-bezier(0.2, 0, 0, 1);
+	}
+
+	.dialog-panel[data-state="closed"] {
+		animation: dialog-out 130ms cubic-bezier(0.4, 0, 1, 1);
+	}
+
+	.dialog-overlay[data-state="open"] {
+		animation: dialog-overlay-in 180ms cubic-bezier(0.2, 0, 0, 1);
+	}
+
+	.dialog-overlay[data-state="closed"] {
+		animation: dialog-overlay-out 130ms cubic-bezier(0.4, 0, 1, 1);
+	}
+}
+
+/*
  * Scroll-on-overflow (see components/shared/ScrollOnOverflow.tsx).
  *
  * Only attached when the text actually overflows, so short labels never
