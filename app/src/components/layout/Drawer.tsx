@@ -6,6 +6,7 @@
  */
 
 import { useLayoutStore } from "@/stores";
+import { PanelResizeHandle } from "./PanelResizeHandle";
 import { DEFAULT_DRAWER_WIDTH } from "@/constants/layout";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
@@ -18,22 +19,6 @@ export function Drawer() {
 	if (!drawerOpen) return null;
 
 	const width = drawerWidth;
-
-	const startResize = (e: React.PointerEvent) => {
-		e.currentTarget.setPointerCapture(e.pointerId);
-		const startX = e.clientX;
-		const startWidth = drawerWidth;
-
-		const onMove = (moveEvent: PointerEvent) => {
-			setDrawerWidth(startWidth + moveEvent.clientX - startX);
-		};
-		const onUp = () => {
-			window.removeEventListener("pointermove", onMove);
-			window.removeEventListener("pointerup", onUp);
-		};
-		window.addEventListener("pointermove", onMove);
-		window.addEventListener("pointerup", onUp);
-	};
 
 	return (
 		/* <aside>, so the sidebar is a landmark a screen reader can jump to
@@ -60,13 +45,13 @@ export function Drawer() {
 				{drawerView === "settings" && <SettingsCategoryTree />}
 			</div>
 
-			<div
-				className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-accent/20"
-				onPointerDown={startResize}
-				onDoubleClick={() => setDrawerWidth(DEFAULT_DRAWER_WIDTH)}
-			>
-				<div className="absolute right-0 top-0 bottom-0 w-px bg-border" />
-			</div>
+			<PanelResizeHandle
+				side="right"
+				width={drawerWidth}
+				setWidth={setDrawerWidth}
+				defaultWidth={DEFAULT_DRAWER_WIDTH}
+				label="Resize sidebar"
+			/>
 		</aside>
 	);
 }

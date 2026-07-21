@@ -7,6 +7,7 @@
 
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PanelResizeHandle } from "./PanelResizeHandle";
 import { useLayoutStore, useTabsStore, useSessionStore } from "@/stores";
 import { DEFAULT_CONTEXT_BAR_WIDTH } from "@/constants/layout";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
@@ -64,23 +65,6 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 
 	if (!contextBarOpen || activeTab?.type !== "request") return null;
 
-	const startResize = (e: React.PointerEvent) => {
-		e.currentTarget.setPointerCapture(e.pointerId);
-		const startX = e.clientX;
-		const startWidth = contextBarWidth;
-
-		const onMove = (moveEvent: PointerEvent) => {
-			// Panel sits on the right — dragging left grows it
-			setContextBarWidth(startWidth + startX - moveEvent.clientX);
-		};
-		const onUp = () => {
-			window.removeEventListener("pointermove", onMove);
-			window.removeEventListener("pointerup", onUp);
-		};
-		window.addEventListener("pointermove", onMove);
-		window.addEventListener("pointerup", onUp);
-	};
-
 	// Write the edited value back to the scope the resolved variable came from
 	const commitValue = (name: string, resolved: ResolvedVariable, newValue: string) => {
 		if (newValue === resolved.value) return;
@@ -132,14 +116,13 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 			)}
 			style={{ width: contextBarWidth }}
 		>
-			{/* Resize handle — mirrors the Drawer's right-edge handle */}
-			<div
-				className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-accent/20 z-10"
-				onPointerDown={startResize}
-				onDoubleClick={() => setContextBarWidth(DEFAULT_CONTEXT_BAR_WIDTH)}
-			>
-				<div className="absolute left-0 top-0 bottom-0 w-px bg-border" />
-			</div>
+			<PanelResizeHandle
+				side="left"
+				width={contextBarWidth}
+				setWidth={setContextBarWidth}
+				defaultWidth={DEFAULT_CONTEXT_BAR_WIDTH}
+				label="Resize context bar"
+			/>
 
 			{/* Header */}
 			<div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
