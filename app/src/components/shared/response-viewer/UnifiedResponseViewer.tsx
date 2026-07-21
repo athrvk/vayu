@@ -24,6 +24,7 @@ import { useState } from "react";
 import { Clock, FileText, Copy, Check, Download } from "lucide-react";
 import {
 	Tabs,
+	TabsContent,
 	TabsList,
 	TabsTrigger,
 	Badge,
@@ -262,9 +263,13 @@ export default function UnifiedResponseViewer({
 					)}
 				</div>
 
-				{/* Tab Content */}
-				<div className="flex-1 overflow-hidden">
-					{activeTab === "body" && effectiveResponse?.body && (
+				{/*
+				 * TabsContent per value. Radix builds each trigger's aria-controls
+				 * from its value, so content rendered outside the Tabs tree left all
+				 * three triggers advertising panels that were never rendered.
+				 */}
+				<TabsContent value="body" className="mt-0 flex-1 overflow-hidden">
+					{effectiveResponse?.body && (
 						<ResponseBody
 							body={effectiveResponse.body}
 							bodyRaw={effectiveResponse.bodyRaw}
@@ -272,7 +277,7 @@ export default function UnifiedResponseViewer({
 							showModeToggle
 						/>
 					)}
-					{activeTab === "body" && !effectiveResponse?.body && (
+					{!effectiveResponse?.body && (
 						<div className="flex items-center justify-center h-full text-muted-foreground">
 							<div className="text-center">
 								<FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
@@ -280,7 +285,9 @@ export default function UnifiedResponseViewer({
 							</div>
 						</div>
 					)}
-					{activeTab === "headers" && (
+				</TabsContent>
+				{!hiddenTabs.includes("headers") && (
+					<TabsContent value="headers" className="mt-0 flex-1 overflow-hidden">
 						<div className="p-4 overflow-auto h-full space-y-4">
 							{effectiveRequest?.headers &&
 								Object.keys(effectiveRequest.headers).length > 0 && (
@@ -296,8 +303,10 @@ export default function UnifiedResponseViewer({
 								defaultOpen={true}
 							/>
 						</div>
-					)}
-					{activeTab === "request" && (
+					</TabsContent>
+				)}
+				{!hiddenTabs.includes("request") && effectiveRequest && (
+					<TabsContent value="request" className="mt-0 flex-1 overflow-hidden">
 						<div className="p-4 overflow-auto h-full space-y-4">
 							{effectiveRequest?.headers &&
 								Object.keys(effectiveRequest.headers).length > 0 && (
@@ -324,8 +333,8 @@ export default function UnifiedResponseViewer({
 								</div>
 							)}
 						</div>
-					)}
-				</div>
+					</TabsContent>
+				)}
 			</Tabs>
 		</div>
 	);

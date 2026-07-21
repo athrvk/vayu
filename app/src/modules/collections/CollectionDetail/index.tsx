@@ -14,7 +14,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
-import { Badge, Tabs, TabsList, TabsTrigger } from "@/components/ui";
+import { Badge, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui";
 import { useCollectionsQuery, useRequestsQuery } from "@/queries/collections";
 import { useTabsStore, useSessionStore } from "@/stores";
 import AuthTab from "./AuthTab";
@@ -105,16 +105,31 @@ export default function CollectionDetail() {
 					})}
 				</TabsList>
 
-				{/* Content */}
-				<div className="flex-1 overflow-auto p-6 bg-background">
-					{tab === "info" && (
-						<InfoTab collection={collection} requestCount={requests.length} />
-					)}
-					{tab === "auth" && <AuthTab collection={collection} />}
-					{tab === "pre-script" && <ScriptTab collection={collection} kind="pre" />}
-					{tab === "post-script" && <ScriptTab collection={collection} kind="post" />}
-					{tab === "variables" && <VariablesTab collection={collection} />}
-				</div>
+				{/*
+				 * TabsContent per tab, keyed off the same TABS list as the
+				 * triggers. Radix derives each trigger's aria-controls from its
+				 * value, so content in a plain <div> outside the Tabs tree left
+				 * every trigger pointing at a panel id that was never rendered.
+				 * Only the active panel mounts, so the switch below still resolves
+				 * to exactly one tab.
+				 */}
+				{TABS.map((t) => (
+					<TabsContent
+						key={t.id}
+						value={t.id}
+						className="mt-0 flex-1 overflow-auto p-6 bg-background"
+					>
+						{t.id === "info" && (
+							<InfoTab collection={collection} requestCount={requests.length} />
+						)}
+						{t.id === "auth" && <AuthTab collection={collection} />}
+						{t.id === "pre-script" && <ScriptTab collection={collection} kind="pre" />}
+						{t.id === "post-script" && (
+							<ScriptTab collection={collection} kind="post" />
+						)}
+						{t.id === "variables" && <VariablesTab collection={collection} />}
+					</TabsContent>
+				))}
 			</Tabs>
 		</div>
 	);
