@@ -36,6 +36,24 @@ export default function ResponseHeader({ response }: ResponseHeaderProps) {
 						? "bg-status-stopped-fill"
 						: "bg-status-error-fill";
 
+	/**
+	 * Significant digits, not fixed decimals.
+	 *
+	 * This was `toFixed(4)`, so a request rendered as `340.1235 ms`. Four decimal
+	 * places of a millisecond is below the resolution of anything being measured
+	 * — the last three digits are noise that changes every run, and they made the
+	 * one number a developer actually scans four characters longer and harder to
+	 * compare between runs at a glance.
+	 *
+	 * Sub-millisecond responses (a local mock, a cache hit) are the one case
+	 * where decimals carry information, so they keep two.
+	 */
+	const formatTime = (ms: number): string => {
+		if (ms < 1) return `${ms.toFixed(2)} ms`;
+		if (ms < 1000) return `${Math.round(ms)} ms`;
+		return `${(ms / 1000).toFixed(2)} s`;
+	};
+
 	const formatSize = (bytes: number): string => {
 		if (bytes < 1024) return `${bytes} B`;
 		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -52,7 +70,7 @@ export default function ResponseHeader({ response }: ResponseHeaderProps) {
 			{/* Time */}
 			<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
 				<Clock className="w-4 h-4" />
-				<span>{response.time.toFixed(4)} ms</span>
+				<span>{formatTime(response.time)}</span>
 			</div>
 
 			{/* Size */}
