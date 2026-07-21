@@ -23,7 +23,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useDashboardStore } from "@/stores";
 import { apiService, loadTestService } from "@/services";
 import { cn } from "@/lib/utils";
-import { EmptyState } from "@/components/shared";
+import { EmptyState, Callout } from "@/components/shared";
+import { Button } from "@/components/ui";
 import { DashboardHeader, MetricsView, RequestResponseView } from "./components";
 import { TIMING } from "@/config/timing";
 import type { DashboardView, DisplayMetrics } from "./types";
@@ -48,6 +49,18 @@ export default function LoadTestDashboard() {
 
 	// Track whether we're loading the report
 	const [isLoadingReport, setIsLoadingReport] = useState(false);
+	/**
+	 * Set once the report fetch has failed as many times as it is allowed to.
+	 *
+	 * Before this, a throw was swallowed: the `try`/`finally` below had no
+	 * `catch`, so `isLoadingReport` went back to false, that is an effect
+	 * dependency, the guard `!finalReport && !isLoadingReport` became true again,
+	 * and the fetch re-ran. `loadAttemptRef` was only incremented on the
+	 * zero-data path, never on failure, so the cap never engaged — a persistent
+	 * failure (engine down) retried forever, silently, showing an empty
+	 * dashboard the whole time.
+	 */
+	const [reportError, setReportError] = useState<string | null>(null);
 	const loadAttemptRef = useRef(0);
 	const hasCheckedStatus = useRef(false);
 
@@ -106,8 +119,11 @@ export default function LoadTestDashboard() {
 						setFinalReport(report);
 					}
 				})
-				.catch((err) => {
+				.catch((err: unknown) => {
 					console.error("Failed to fetch final report:", err);
+					setReportError(
+						err instanceof Error ? err.message : "Could not load the run report"
+					);
 				})
 				.finally(() => {
 					setIsLoadingReport(false);
@@ -121,7 +137,8 @@ export default function LoadTestDashboard() {
 			(mode === "completed" || mode === "stopped") &&
 			currentRunId &&
 			!finalReport &&
-			!isLoadingReport
+			!isLoadingReport &&
+			!reportError
 		) {
 			// Longer initial delay to allow database writes to complete
 			// This helps avoid "database is locked" issues
@@ -155,6 +172,17 @@ export default function LoadTestDashboard() {
 							loadAttemptRef.current = 0;
 						}
 					}
+				} catch (err) {
+					// Count failures against the same cap as empty reports, so a
+					// persistent error stops rather than looping.
+					if (loadAttemptRef.current < TIMING.REPORT_MAX_ATTEMPTS) {
+						loadAttemptRef.current++;
+					} else {
+						loadAttemptRef.current = 0;
+						setReportError(
+							err instanceof Error ? err.message : "Could not load the run report"
+						);
+					}
 				} finally {
 					setIsLoadingReport(false);
 				}
@@ -167,6 +195,7 @@ export default function LoadTestDashboard() {
 		currentRunId,
 		finalReport,
 		isLoadingReport,
+		reportError,
 		setFinalReport,
 		historicalMetrics.length,
 	]);
@@ -312,6 +341,35 @@ export default function LoadTestDashboard() {
 				elapsedDuration={elapsedDuration}
 				configuration={displayConfiguration}
 			/>
+
+			{/*
+			 * A failed report used to render as an empty dashboard — the same
+			 * "a failure is not an absence" problem the collection screens had.
+			 * Above the tabs so it shows whichever view is active.
+			 */}
+			{reportError && (
+				<div className="px-5 pt-3 shrink-0">
+					<Callout
+						severity="blocking"
+						title="Couldn't load the run report"
+						action={
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => {
+									loadAttemptRef.current = 0;
+									setReportError(null);
+								}}
+							>
+								Retry
+							</Button>
+						}
+					>
+						{reportError} The live metrics below are whatever was captured before the
+						run finished.
+					</Callout>
+				</div>
+			)}
 
 			{/* Tab bar */}
 			<div className="flex border-b border-border bg-panel px-5 shrink-0">
