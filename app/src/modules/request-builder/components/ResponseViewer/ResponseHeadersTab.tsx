@@ -11,6 +11,7 @@
  * Displays both request and response headers using shared HeadersViewer component.
  */
 
+import { EmptyState } from "@/components/shared";
 import { HeadersViewer } from "@/components/shared/response-viewer";
 
 export interface ResponseHeadersTabProps {
@@ -36,7 +37,7 @@ export default function ResponseHeadersTab({ response }: ResponseHeadersTabProps
 			<HeadersViewer headers={response.headers} variant="response" defaultOpen={true} />
 
 			{Object.keys(response.headers).length === 0 && (
-				<div className="p-8 text-center text-muted-foreground">No headers in response</div>
+				<EmptyState variant="inline" title="No headers in response" />
 			)}
 		</div>
 	);

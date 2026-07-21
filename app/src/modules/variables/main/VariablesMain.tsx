@@ -18,6 +18,7 @@ import { useCollectionsQuery, useEnvironmentsQuery, useGlobalsQuery } from "@/qu
 import VariableTableEditor from "./VariableTableEditor";
 import { Variable } from "lucide-react";
 import { Skeleton } from "@/components/ui";
+import { EmptyState } from "@/components/shared";
 
 export default function VariablesMain() {
 	const { selectedCategory } = useVariablesStore();
@@ -31,15 +32,11 @@ export default function VariablesMain() {
 
 	if (!selectedCategory) {
 		return (
-			<div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4">
-				<Variable className="w-12 h-12 opacity-50" />
-				<div className="text-center">
-					<p className="text-lg font-medium">No Category Selected</p>
-					<p className="text-sm mt-1">
-						Select a category from the sidebar to manage variables
-					</p>
-				</div>
-			</div>
+			<EmptyState
+				icon={Variable}
+				title="No category selected"
+				description="Pick a category from the sidebar to manage its variables."
+			/>
 		);
 	}
 
@@ -117,9 +114,5 @@ function LoadingPane({ label }: { label: string }) {
 
 /** Genuinely missing: the query settled and the entity is not in it. */
 function NotFoundPane({ label }: { label: string }) {
-	return (
-		<div className="flex-1 flex items-center justify-center text-muted-foreground">
-			<p className="text-sm">{label}</p>
-		</div>
-	);
+	return <EmptyState title={label} />;
 }

@@ -41,6 +41,7 @@ import {
 	CardTitle,
 	Skeleton,
 } from "@/components/ui";
+import { EmptyState } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ClientSettingsPanel from "./panels/ClientSettingsPanel";
 import { getAppPanel, isClientCategory } from "./app-panels";
@@ -240,15 +241,11 @@ export default function SettingsMain() {
 
 	if (!selectedCategory) {
 		return (
-			<div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4 p-8">
-				<Settings className="w-16 h-16 opacity-30" />
-				<div className="text-center max-w-md">
-					<p className="text-lg font-medium">No Category Selected</p>
-					<p className="text-sm mt-2">
-						Select a category from the sidebar to view and edit settings
-					</p>
-				</div>
-			</div>
+			<EmptyState
+				icon={Settings}
+				title="No category selected"
+				description="Pick a category from the sidebar to edit its settings."
+			/>
 		);
 	}
 

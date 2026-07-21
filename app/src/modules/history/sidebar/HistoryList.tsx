@@ -10,7 +10,7 @@ import { Search, Clock } from "lucide-react";
 import { useTabsStore, useLayoutStore } from "@/stores";
 import { useHistoryStore, filterRuns } from "@/modules/history/history-store";
 import { useRunsQuery, useDeleteRunMutation } from "@/queries";
-import { DrawerPanel, TruncatedText, ListSkeleton } from "@/components/shared";
+import { DrawerPanel, EmptyState, TruncatedText, ListSkeleton } from "@/components/shared";
 import {
 	Button,
 	Input,
@@ -182,19 +182,15 @@ export default function HistoryList() {
 						{isLoading && <ListSkeleton rows={4} leading badge />}
 
 						{!isLoading && runs.length === 0 && (
-							<div className="text-center py-16">
-								<div className="w-16 h-16 mx-auto mb-4 bg-muted/50 flex items-center justify-center">
-									<Clock className="w-8 h-8 text-muted-foreground/40" />
-								</div>
-								<p className="text-sm font-medium text-foreground">
-									No test runs found
-								</p>
-								<p className="text-xs text-muted-foreground mt-1">
-									{searchQuery || filterType !== "all" || filterStatus !== "all"
-										? "Try adjusting your filters"
-										: "Run your first load test to see results here"}
-								</p>
-							</div>
+							<EmptyState
+								icon={Clock}
+								title="No test runs found"
+								description={
+									searchQuery || filterType !== "all" || filterStatus !== "all"
+										? "Try widening the search or clearing the filters."
+										: "Run your first load test to see its results here."
+								}
+							/>
 						)}
 
 						{!isLoading &&

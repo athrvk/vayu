@@ -32,6 +32,7 @@ import {
 	useCollectionAncestors,
 	queryKeys,
 } from "@/queries";
+import { EmptyState } from "@/components/shared";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
@@ -597,11 +598,7 @@ export default function RequestBuilder() {
 
 	// Loading state
 	if (!selectedRequestId) {
-		return (
-			<div className="flex-1 flex items-center justify-center text-muted-foreground">
-				<p>Select a request to get started</p>
-			</div>
-		);
+		return <EmptyState title="Select a request to get started" />;
 	}
 
 	if (isLoading) {

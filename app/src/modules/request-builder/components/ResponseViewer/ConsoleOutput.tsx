@@ -14,6 +14,7 @@
 import { useState, useMemo } from "react";
 import { Terminal, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
+import { EmptyState } from "@/components/shared";
 
 export interface ConsoleOutputProps {
 	logs: string[];
@@ -86,7 +87,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 
 			{/* Console Logs */}
 			{logs.length === 0 ? (
-				<div className="p-8 text-center text-muted-foreground">No console output</div>
+				<EmptyState variant="inline" title="No console output" />
 			) : (
 				<div className="space-y-3">
 					{/* Pre-request Script Logs */}

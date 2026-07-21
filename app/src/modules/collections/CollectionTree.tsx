@@ -30,7 +30,7 @@ import {
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
-import { DrawerPanel, ListSkeleton } from "@/components/shared";
+import { DrawerPanel, EmptyState, ListSkeleton } from "@/components/shared";
 import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
@@ -559,20 +559,20 @@ export default function CollectionTree() {
 
 				{/* Zero collections empty state */}
 				{!isLoadingCollections && collections.length === 0 && !creatingCollection && (
-					<div className="text-center py-8 text-sm text-muted-foreground">
-						<Folder className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-						<p className="font-medium text-foreground">No collections yet</p>
-						<p className="mt-1 text-muted-foreground">
-							Collections help you group and organize your requests.
-						</p>
-						<Button
-							variant="link"
-							onClick={handleOpenNewCollectionForm}
-							className="mt-3 text-primary"
-						>
-							Add your first collection
-						</Button>
-					</div>
+					<EmptyState
+						icon={Folder}
+						title="No collections yet"
+						description="Collections group related requests — make one to get started."
+						action={
+							<Button
+								variant="link"
+								onClick={handleOpenNewCollectionForm}
+								className="text-primary"
+							>
+								Add your first collection
+							</Button>
+						}
+					/>
 				)}
 
 				{/* Root-level collections (no parentId) - sorted by order, scrollable.

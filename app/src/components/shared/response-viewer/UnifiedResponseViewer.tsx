@@ -34,6 +34,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "../EmptyState";
 import ResponseBody from "./ResponseBody";
 import HeadersViewer, { CompactHeadersViewer } from "./HeadersViewer";
 import { formatSize } from "./utils";
@@ -60,16 +61,12 @@ export default function UnifiedResponseViewer({
 	// Empty state
 	if (!effectiveResponse?.body && !effectiveRequest) {
 		return (
-			<div className={cn("flex-1 flex items-center justify-center bg-card", className)}>
-				<div className="flex flex-col items-center text-center">
-					<FileText className="w-16 h-16 text-muted-foreground mb-5" strokeWidth={1.5} />
-					<p className="text-[15px] font-medium text-foreground mb-1.5">
-						No response captured
-					</p>
-					<p className="text-[12px] text-muted-foreground">
-						This run finished without recording request or response data.
-					</p>
-				</div>
+			<div className={cn("flex-1 flex bg-card", className)}>
+				<EmptyState
+					icon={FileText}
+					title="No response captured"
+					description="This run finished without recording request or response data."
+				/>
 			</div>
 		);
 	}
@@ -137,12 +134,9 @@ export default function UnifiedResponseViewer({
 						/>
 					)}
 					{activeTab === "body" && !effectiveResponse?.body && (
-						<div className="flex items-center justify-center h-full text-muted-foreground">
-							<div className="text-center py-8">
-								<FileText className="w-6 h-6 mx-auto mb-2 opacity-30" />
-								<p className="text-sm">No response body</p>
-							</div>
-						</div>
+						// `h-full` because this scroll container is not a flex column,
+						// so the primitive's `flex-1` has nothing to grow against.
+						<EmptyState icon={FileText} title="No response body" className="h-full" />
 					)}
 					{activeTab === "headers" && (
 						<div className="p-4 space-y-4 overflow-auto h-full">
@@ -164,10 +158,7 @@ export default function UnifiedResponseViewer({
 								Object.keys(effectiveRequest.headers).length === 0) &&
 								(!effectiveResponse?.headers ||
 									Object.keys(effectiveResponse.headers).length === 0) && (
-									<div className="py-8 text-center text-muted-foreground">
-										<FileText className="w-6 h-6 mx-auto mb-2 opacity-30" />
-										<p className="text-sm">No headers available</p>
-									</div>
+									<EmptyState icon={FileText} title="No headers available" />
 								)}
 						</div>
 					)}
@@ -278,12 +269,9 @@ export default function UnifiedResponseViewer({
 						/>
 					)}
 					{!effectiveResponse?.body && (
-						<div className="flex items-center justify-center h-full text-muted-foreground">
-							<div className="text-center">
-								<FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
-								<p className="text-sm">No response body</p>
-							</div>
-						</div>
+						// `h-full` because TabsContent is not a flex column, so the
+						// primitive's `flex-1` has nothing to grow against.
+						<EmptyState icon={FileText} title="No response body" className="h-full" />
 					)}
 				</TabsContent>
 				{!hiddenTabs.includes("headers") && (
