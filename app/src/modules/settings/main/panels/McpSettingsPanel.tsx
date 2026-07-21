@@ -421,7 +421,7 @@ export default function McpSettingsPanel() {
 						<Label className="text-xs font-medium text-muted-foreground w-20 shrink-0">
 							Endpoint
 						</Label>
-						<code className="flex-1 text-xs font-mono bg-muted rounded px-2 py-1.5 break-all">
+						<code className="flex-1 text-xs font-mono bg-muted rounded-md px-2 py-1.5 break-all">
 							{endpoint}
 						</code>
 						<CopyButton text={endpoint} />
@@ -458,7 +458,7 @@ export default function McpSettingsPanel() {
 									<CopyButton text={snippet.code} />
 								</div>
 							</div>
-							<pre className="text-xs font-mono bg-muted rounded px-3 py-2 overflow-x-auto whitespace-pre">
+							<pre className="text-xs font-mono bg-muted rounded-md px-3 py-2 overflow-x-auto whitespace-pre">
 								{snippet.code}
 							</pre>
 						</div>
@@ -638,7 +638,7 @@ export default function McpSettingsPanel() {
 										{host}
 										<button
 											onClick={() => removeHost(host)}
-											className="rounded p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors"
+											className="rounded-md p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors"
 											aria-label={`Remove ${host}`}
 										>
 											<X className="w-3.5 h-3.5" />

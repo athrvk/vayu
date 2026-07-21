@@ -452,12 +452,25 @@ hides icons from a scale audit and lets off-grid values (15px) creep in. Use
 --radius: 0.375rem;   /* 6px — base border radius (default) */
 ```
 
-| Class | Value |
-|-------|-------|
-| `rounded-sm` | `calc(var(--radius) - 4px)` |
-| `rounded-md` | `calc(var(--radius) - 2px)` |
-| `rounded-lg` | `var(--radius)` |
-| `rounded-full` | pill / circle |
+| Class | Value | Follows the setting? |
+|-------|-------|----------------------|
+| `rounded-sm` | `calc(var(--radius) - 4px)` | yes |
+| `rounded-md` | `calc(var(--radius) - 2px)` | yes |
+| `rounded-lg` | `var(--radius)` | yes |
+| `rounded-full` | pill / circle | no — deliberately fixed |
+| `rounded-none` | `0` | no — deliberately fixed |
+| `rounded` | Tailwind default | **no — never use it** |
+
+**Never use bare `rounded`.** It resolves from Tailwind's own default rather
+than `--radius`, so it sits at 4px whatever the user picks — measured 4px at
+`0rem`, `0.375rem` and `0.75rem` alike, while `rounded-md` moved 0 → 4 → 10.
+Three had drifted into the MCP settings panel, staying rounded for anyone who
+had chosen Square. A test (`radius-token.test.tsx`) now fails on any bare
+`rounded` in a class string.
+
+Inline `borderRadius` is legitimate in exactly two places: a chart point marker
+(`50%`) and the Appearance panel's own roundedness swatches, which must show
+each option regardless of the active setting.
 
 **User-adjustable.** Settings → Appearance → Interface → Roundedness sets
 `--radius` (Square `0rem` / Default `0.375rem` / Rounded `0.75rem`), owned by

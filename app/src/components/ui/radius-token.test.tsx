@@ -1,0 +1,63 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * Corner radius must follow the roundedness setting.
+ *
+ * `--radius` is user-controlled (Settings → Appearance → Roundedness), and the
+ * theme derives `--radius-sm/md/lg` from it — so `rounded-sm`, `rounded-md` and
+ * `rounded-lg` all track the setting.
+ *
+ * Bare `rounded` does not. Tailwind resolves it from its own built-in default,
+ * so it stays 4px at every setting: measured 4px at `--radius: 0rem`, `0.375rem`
+ * and `0.75rem` alike, while `rounded-md` moved 0 → 4 → 10. Three of these had
+ * drifted into the MCP settings panel, where they stayed rounded for a user who
+ * had chosen Square.
+ *
+ * `rounded-full` and `rounded-none` are deliberately fixed — pills, dots and
+ * squared-off edges are not meant to follow the setting — so they are allowed.
+ */
+
+import { describe, it, expect } from "vitest";
+
+const sources = import.meta.glob("/src/**/*.{tsx,css}", {
+	query: "?raw",
+	import: "default",
+	eager: true,
+});
+
+/** `rounded` (or `rounded-t`, `rounded-l`, …) with no size suffix. */
+const BARE_ROUNDED = /\brounded(-(?:t|r|b|l|tl|tr|br|bl|s|e|ss|se|es|ee))?(?![-\w[])/g;
+
+describe("corner radius tracks the roundedness setting", () => {
+	it("finds radius utilities to check (guards the scan itself)", () => {
+		const total = Object.values(sources).reduce<number>(
+			(n, src) => n + ((src as string).match(/\brounded-(sm|md|lg)\b/g)?.length ?? 0),
+			0
+		);
+		expect(total).toBeGreaterThan(50);
+	});
+
+	it("uses no bare `rounded`, which ignores --radius", () => {
+		const offenders: string[] = [];
+		for (const [path, src] of Object.entries(sources)) {
+			if (path.includes(".test.")) continue;
+			for (const line of (src as string).split("\n")) {
+				// Only look inside class strings; prose in comments may say "rounded".
+				const classAttrs = line.match(/className=(?:"[^"]*"|\{[^}]*\})|@apply [^;]+/g);
+				if (!classAttrs) continue;
+				for (const attr of classAttrs) {
+					BARE_ROUNDED.lastIndex = 0;
+					if (BARE_ROUNDED.test(attr)) {
+						offenders.push(`${path}: ${line.trim().slice(0, 88)}`);
+					}
+				}
+			}
+		}
+		expect(offenders).toEqual([]);
+	});
+});
