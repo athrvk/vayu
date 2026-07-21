@@ -224,6 +224,32 @@ any `text-<family>` in `app/src` (including `hover:`/`focus:` prefixes and `/NN`
 opacity forms) while allowing `bg-*`, `border-*` and `*-foreground`, which are
 correct uses of the fill token.
 
+**Non-text contrast (WCAG 1.4.11) is a separate 3.0 bar**, and it applies to
+things text contrast never touches: focus rings, control boundaries, and the
+*states* of a control. Measured in the running app:
+
+| what | light | dark | verdict |
+|------|------:|-----:|---------|
+| `--ring` vs every surface | 4.57–5.39 | 5.11–6.75 | passes comfortably |
+| `--border` / `--input` vs card | 1.30 | 1.00 | decorative only — see below |
+| switch **off** track vs card | 1.55 | 1.28 | failed |
+| switch off **thumb** vs its track | 1.41 | 12.35 | failed in light |
+| switch **on** track vs card | 5.39 | 5.89 | passes |
+
+The focus ring needed no work, which is the one that matters most for keyboard
+users — worth knowing so nobody "fixes" it.
+
+`--border` at 1.00–1.30 is deliberate and stays: it is a seam between surfaces,
+not the thing identifying a control. Where a boundary *is* the only identifying
+information, it needs its own colour rather than the border token — which is
+exactly what the switch needed. Its off state now colours the 2px border it had
+already reserved, with `subtle-foreground` (3.17 / 3.34), the faintest tier that
+clears the bar. The fill stays quiet on purpose; `muted-foreground` would pass
+at 5.61 / 6.77 and make an off switch read almost as loudly as an on one.
+
+Measure with transitions frozen. An unchecked switch first measured 13.58 in
+light, which was a `transition-colors` mid-flight reading, not a colour.
+
 ### Variable Scope Colors (Categorical)
 
 Variable scopes use a **categorical** palette (not semantic status): a distinct
