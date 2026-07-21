@@ -1147,6 +1147,21 @@ Gradient track (green→amber→red at 18% opacity), with absolute-positioned ne
 - `${hexColor}18` hex-alpha concatenation — use `hsl(var(--method-xxx) / 0.1)`
 - Hardcoded purple for Load Test / secondary actions — use `text-primary/border-primary/bg-primary/10`
 
+These rules are enforced for the request/response tree by
+`modules/request-builder/components/ResponseViewer/palette-tokens.test.ts`. They
+were documented long before they were enforced, and the tree had drifted: seven
+usages of `text-green-500` / `text-blue-500` and friends, every one of which
+failed its contrast bar in **light** mode (1.63–3.76 against thresholds of 3.0
+and 4.5) while passing in dark. That asymmetry is inherent to a raw palette
+class rather than bad luck — one value cannot suit a white card and a near-black
+one, so the light failure is unfixable without breaking dark. The per-theme
+`-text` tokens clear both.
+
+The guard is scoped to the trees that were measured. Elsewhere the raw palette
+classes appear as explicit `bg-blue-50 dark:bg-blue-950` pairs, which are
+theme-aware and so are not this defect; converting those needs new tokens
+(there is no purple or info `-text` token today) and is a design decision.
+
 ---
 
 ## Response Body Syntax Highlighting

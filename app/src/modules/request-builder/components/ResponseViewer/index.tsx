@@ -256,7 +256,11 @@ export default function ResponseViewer() {
 										<BarChart3 className="w-4 h-4" />
 										<span className="hidden sm:inline">Load Test</span>
 										{dashboardMode === "running" && (
-											<span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+											// Sole indicator that the run is live, so WCAG
+											// 1.4.11 applies at 3.0. bg-green-500 measured
+											// 2.30 on the card in light mode; the fill
+											// token is 4.84 light / 3.57 dark.
+											<span className="w-2 h-2 rounded-full bg-status-success-fill animate-pulse" />
 										)}
 									</Button>
 								</TooltipTrigger>
@@ -272,7 +276,8 @@ export default function ResponseViewer() {
 									aria-label="Copy response"
 								>
 									{copied ? (
-										<Check className="w-4 h-4 text-green-500" />
+										// Only feedback that the copy happened.
+										<Check className="w-4 h-4 text-status-success-text" />
 									) : (
 										<Copy className="w-4 h-4" />
 									)}

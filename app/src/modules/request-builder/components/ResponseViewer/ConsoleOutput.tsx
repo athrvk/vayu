@@ -85,6 +85,19 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 				</div>
 			)}
 
+			{/*
+			 * Colours below are tokens, not raw palette. `text-blue-500` /
+			 * `text-green-500` are theme-blind — one value on both a white card and
+			 * a near-black one — and measured 3.76 and 2.22 in light mode against
+			 * 4.5 for the headings and badge labels. The `-text` tokens are
+			 * per-theme: 5.98/6.76 and 5.68/8.80.
+			 *
+			 * The Terminal icons lost their `/70` rather than carrying it over.
+			 * Even on the corrected token, 70% alpha over `bg-muted` came to 2.87
+			 * in light against the 3.0 icon floor; at full opacity it is 4.83.
+			 * Fading the marker that says which script a log came from was working
+			 * against the point anyway.
+			 */}
 			{/* Console Logs */}
 			{logs.length === 0 ? (
 				<EmptyState variant="inline" title="No console output" />
@@ -94,19 +107,19 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 					{preLogs.length > 0 && (
 						<Collapsible open={preLogsOpen} onOpenChange={setPreLogsOpen}>
 							<CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
-								<div className="flex items-center justify-center w-5 h-5 rounded-md bg-blue-500/20 group-hover:bg-blue-500/30 transition-colors">
+								<div className="flex items-center justify-center w-5 h-5 rounded-md bg-status-running/20 group-hover:bg-status-running/30 transition-colors">
 									{preLogsOpen ? (
-										<ChevronDown className="w-4 h-4 text-blue-500" />
+										<ChevronDown className="w-4 h-4 text-status-running-text" />
 									) : (
-										<ChevronRight className="w-4 h-4 text-blue-500" />
+										<ChevronRight className="w-4 h-4 text-status-running-text" />
 									)}
 								</div>
-								<h3 className="text-sm font-medium text-blue-500">
+								<h3 className="text-sm font-medium text-status-running-text">
 									Pre-request Script
 								</h3>
 								<Badge
 									variant="outline"
-									className="ml-auto text-xs border-blue-500/30 text-blue-500"
+									className="ml-auto text-xs border-status-running/30 text-status-running-text"
 								>
 									{preLogs.length} log{preLogs.length !== 1 ? "s" : ""}
 								</Badge>
@@ -115,7 +128,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 								<div className="bg-muted p-3 font-mono text-sm space-y-1 border border-border">
 									{preLogs.map((log, i) => (
 										<div key={i} className="flex items-start gap-2">
-											<Terminal className="w-4 h-4 text-blue-500/70 mt-0.5 flex-shrink-0" />
+											<Terminal className="w-4 h-4 text-status-running-text mt-0.5 flex-shrink-0" />
 											<pre className="text-foreground whitespace-pre-wrap break-words flex-1 min-w-0">
 												{log.message}
 											</pre>
@@ -130,17 +143,19 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 					{testLogs.length > 0 && (
 						<Collapsible open={testLogsOpen} onOpenChange={setTestLogsOpen}>
 							<CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
-								<div className="flex items-center justify-center w-5 h-5 rounded-md bg-green-500/20 group-hover:bg-green-500/30 transition-colors">
+								<div className="flex items-center justify-center w-5 h-5 rounded-md bg-status-success/20 group-hover:bg-status-success/30 transition-colors">
 									{testLogsOpen ? (
-										<ChevronDown className="w-4 h-4 text-green-500" />
+										<ChevronDown className="w-4 h-4 text-status-success-text" />
 									) : (
-										<ChevronRight className="w-4 h-4 text-green-500" />
+										<ChevronRight className="w-4 h-4 text-status-success-text" />
 									)}
 								</div>
-								<h3 className="text-sm font-medium text-green-500">Test Script</h3>
+								<h3 className="text-sm font-medium text-status-success-text">
+									Test Script
+								</h3>
 								<Badge
 									variant="outline"
-									className="ml-auto text-xs border-green-500/30 text-green-500"
+									className="ml-auto text-xs border-status-success/30 text-status-success-text"
 								>
 									{testLogs.length} log{testLogs.length !== 1 ? "s" : ""}
 								</Badge>
@@ -149,7 +164,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 								<div className="bg-muted p-3 font-mono text-sm space-y-1 border border-border">
 									{testLogs.map((log, i) => (
 										<div key={i} className="flex items-start gap-2">
-											<Terminal className="w-4 h-4 text-green-500/70 mt-0.5 flex-shrink-0" />
+											<Terminal className="w-4 h-4 text-status-success-text mt-0.5 flex-shrink-0" />
 											<pre className="text-foreground whitespace-pre-wrap break-words flex-1 min-w-0">
 												{log.message}
 											</pre>

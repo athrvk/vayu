@@ -57,11 +57,19 @@ export default function UrlBar() {
 				)}
 			</button>
 			{/* Load Test button — while a run is live it becomes a shortcut to the
-			    running dashboard (single-active-run policy). */}
+			    running dashboard (single-active-run policy).
+
+			    The running variant was `text-green-500` on `bg-green-500/10`: a
+			    12px semibold label separated from its background only by alpha,
+			    measuring 1.95 in light mode against a 4.5 requirement. Raw palette
+			    meant it was one value on both themes, so the light failure could
+			    not be fixed without breaking dark (which was fine at 7.40). It now
+			    mirrors the idle variant's `text-primary border-primary bg-primary/10`
+			    shape with status tokens, and measures 4.98 light / 8.36 dark. */}
 			{isLoadTestRunning ? (
 				<button
 					onClick={viewRunningTest}
-					className="h-[34px] px-3.5 rounded-md text-[12px] font-semibold flex items-center gap-1.5 transition-opacity shrink-0 font-[inherit] text-green-500 border border-green-500/40 bg-green-500/10"
+					className="h-[34px] px-3.5 rounded-md text-[12px] font-semibold flex items-center gap-1.5 transition-opacity shrink-0 font-[inherit] text-status-success-text border border-status-success/40 bg-status-success/10"
 				>
 					<Activity className="w-3.5 h-3.5" />
 					View running test
