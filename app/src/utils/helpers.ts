@@ -6,6 +6,7 @@
  */
 
 import { LoadTestConfig } from "@/types";
+import { loadTestModeLabel } from "@/constants/load-test-modes";
 
 // Utility Functions
 
@@ -60,17 +61,12 @@ export function getMethodColor(method: string): string {
 	return known.includes(m) ? `var(--method-${m})` : "var(--method-options)";
 }
 
+/**
+ * @deprecated Prefer `loadTestModeLabel` from `@/constants/load-test-modes`.
+ * Kept as a thin alias so existing call sites keep working; it used to hold its
+ * own copy of the names, which is how "Iterations" and "Fixed Iterations" ended
+ * up on screen for the same run.
+ */
 export function loadTestTypeToLabel(type: LoadTestConfig["mode"] | string): string {
-	switch (type) {
-		case "constant_rps":
-			return "Constant RPS";
-		case "constant_concurrency":
-			return "Constant Concurrency";
-		case "iterations":
-			return "Iterations";
-		case "ramp_up":
-			return "Ramp Up";
-		default:
-			return type;
-	}
+	return loadTestModeLabel(type);
 }

@@ -23,7 +23,8 @@
 
 import { useRef } from "react";
 import { cn } from "@/lib/utils";
-import { PROFILES, type LoadTestMode } from "./profiles";
+import { LOAD_TEST_MODES } from "@/constants/load-test-modes";
+import type { LoadTestMode } from "@/types";
 
 export function ProfilePicker({
 	value,
@@ -37,8 +38,9 @@ export function ProfilePicker({
 	const groupRef = useRef<HTMLDivElement>(null);
 
 	const move = (delta: number) => {
-		const index = PROFILES.findIndex((p) => p.value === value);
-		const next = PROFILES[(index + delta + PROFILES.length) % PROFILES.length];
+		const index = LOAD_TEST_MODES.findIndex((p) => p.value === value);
+		const next =
+			LOAD_TEST_MODES[(index + delta + LOAD_TEST_MODES.length) % LOAD_TEST_MODES.length];
 		onChange(next.value);
 		// Focus follows selection, which is the point of the pattern — the user
 		// is choosing as they arrow, not navigating then committing.
@@ -65,7 +67,7 @@ export function ProfilePicker({
 				move(delta);
 			}}
 		>
-			{PROFILES.map((profile) => {
+			{LOAD_TEST_MODES.map((profile) => {
 				const selected = profile.value === value;
 				return (
 					<button
