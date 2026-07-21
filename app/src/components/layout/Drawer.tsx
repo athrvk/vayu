@@ -36,7 +36,15 @@ export function Drawer() {
 	};
 
 	return (
-		<div className="relative flex shrink-0 bg-panel" style={{ width }}>
+		/* <aside>, so the sidebar is a landmark a screen reader can jump to
+		   instead of an anonymous div. Labelled by the active view because the
+		   drawer hosts four different panels — "Complementary" alone would not
+		   say which one is showing. */
+		<aside
+			className="relative flex shrink-0 bg-panel"
+			style={{ width }}
+			aria-label={`${drawerView.charAt(0).toUpperCase()}${drawerView.slice(1)} sidebar`}
+		>
 			<div className="panel-clip flex-1 overflow-hidden flex flex-col min-w-0">
 				{/* Each view supplies its own DrawerPanel, which owns the header and
 				    the scroll region — the Drawer no longer wraps some views in a
@@ -59,6 +67,6 @@ export function Drawer() {
 			>
 				<div className="absolute right-0 top-0 bottom-0 w-px bg-border" />
 			</div>
-		</div>
+		</aside>
 	);
 }

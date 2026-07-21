@@ -128,7 +128,9 @@ export default function TitleBar() {
 	if (!isElectron) return null;
 
 	return (
-		<div
+		// <header>: the app's banner region, so it is reachable as a landmark
+		// rather than being an unnamed div in the accessibility tree.
+		<header
 			className="titlebar h-[38px] flex items-center bg-panel border-b border-border shrink-0 select-none"
 			style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 		>
@@ -174,6 +176,6 @@ export default function TitleBar() {
 				{/* Linux only — Windows uses native overlay, macOS uses traffic lights */}
 				{isLinux && <WindowControls />}
 			</div>
-		</div>
+		</header>
 	);
 }

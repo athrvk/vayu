@@ -99,8 +99,12 @@ export function Dock() {
 	return (
 		<TooltipProvider>
 			<div className="flex items-center h-8 px-2 gap-2 border-t border-border bg-panel shrink-0">
-				{/* Left — drawer switchers */}
-				<div className="flex items-center gap-0.5">
+				{/* Left — drawer switchers.
+				    <nav>: these four choose what the sidebar shows, which is the
+				    app's primary navigation. Not role="toolbar" — that promises
+				    arrow-key traversal between the buttons, which this does not
+				    implement, and claiming it would mislead a keyboard user. */}
+				<nav className="flex items-center gap-0.5" aria-label="Sidebar views">
 					{DRAWER_BUTTONS.map(({ view, icon, label, shortcut }) => (
 						<DockButton
 							key={view}
@@ -112,7 +116,7 @@ export function Dock() {
 							{icon}
 						</DockButton>
 					))}
-				</div>
+				</nav>
 
 				{/* Middle — ambient status */}
 				<div className="flex-1 flex items-center justify-center gap-4">
