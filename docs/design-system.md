@@ -249,7 +249,19 @@ The focus ring needed no work, which is the one that matters most for keyboard
 users — worth knowing so nobody "fixes" it.
 
 `--border` at 1.00–1.30 is deliberate and stays: it is a seam between surfaces,
-not the thing identifying a control. Where a boundary *is* the only identifying
+not the thing identifying a control.
+
+**`--input` is not in that category, and the note above used to lump it in.**
+For a field with `bg-transparent` — `Input`, `Textarea` and `SelectTrigger` all
+are — the border *is* the thing identifying the control, so 1.4.11 applies to it.
+In dark mode it was `240 6% 11%`, byte-identical to `--card`: a boundary of 1.00,
+absent rather than faint. Light mode masked the same weakness because `shadow-sm`
+gives a light field an edge and a shadow contributes nothing on a dark ground.
+
+It is `240 6% 26%` now — 1.64 on the card, 1.79 on the panel, 1.89 on the
+background. A real boundary, still quiet, and **still short of 3.0**: reaching
+that needs ~42% lightness, which turns every input into a hard outline. Recorded
+as a known gap rather than claimed as a pass. Where a boundary *is* the only identifying
 information, it needs its own colour rather than the border token — which is
 exactly what the switch needed. Its off state now colours the 2px border it had
 already reserved, with `subtle-foreground` (3.17 / 3.34), the faintest tier that

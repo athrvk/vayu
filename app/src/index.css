@@ -385,7 +385,22 @@
 		/* Borders */
 		--border: 0 0% 10%; /* ≈ rgba(255,255,255,0.07) on dark canvas */
 		--border-strong: 0 0% 18%; /* ≈ rgba(255,255,255,0.15) on dark canvas */
-		--input: 240 6% 11%;
+		/*
+		 * 26%, not 11%. At 11% this was byte-identical to --card, so a field with
+		 * `bg-transparent` — which Input, Textarea and SelectTrigger all are — had
+		 * a boundary measuring 1.00 against the card. Not faint: absent.
+		 *
+		 * Light mode hid the same weakness because `shadow-sm` gives a light field
+		 * an edge; on a dark ground a shadow contributes nothing, so dark was the
+		 * only mode where it showed.
+		 *
+		 * 26% measures 1.64 on the card, 1.79 on the panel, 1.89 on the background.
+		 * That is a real boundary and still a quiet one. It does NOT reach the 3.0
+		 * that WCAG 1.4.11 asks for a control boundary — that needs ~42% lightness,
+		 * which turns every input into a hard outline. Recorded as a known gap
+		 * rather than claimed as a pass.
+		 */
+		--input: 240 6% 26%;
 		--ring: 24 95% 58%;
 
 		/* Destructive */
