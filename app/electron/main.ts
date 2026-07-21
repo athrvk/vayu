@@ -178,7 +178,7 @@ function createMenu() {
 							{ type: "separator" as const },
 							{
 								label: "Check for Updates…",
-								click: () => checkForUpdatesNow(),
+								click: () => void checkForUpdatesNow("menu"),
 							},
 							{ type: "separator" as const },
 							{
@@ -300,7 +300,7 @@ function createMenu() {
 							{ type: "separator" as const },
 							{
 								label: "Check for Updates…",
-								click: () => checkForUpdatesNow(),
+								click: () => void checkForUpdatesNow("menu"),
 							},
 							{
 								label: "About Vayu",

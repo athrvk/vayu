@@ -79,6 +79,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("update:downloaded", handler);
 	},
 	restartToInstallUpdate: (): Promise<void> => ipcRenderer.invoke("update:restartToInstall"),
+	// Shape mirrors `UpdateCheckResult` in updater.ts, inlined because this file
+	// is a CommonJS script and must not grow imports.
+	checkForUpdates: (): Promise<
+		| { status: "unavailable"; detail: string }
+		| { status: "up-to-date"; version: string }
+		| {
+				status: "available";
+				version: string;
+				strategy: "silent" | "notify" | "disabled";
+				releaseUrl: string;
+				installCommand?: string;
+		  }
+		| { status: "error"; message: string }
+	> => ipcRenderer.invoke("update:check"),
 	openReleasePage: (url: string): Promise<void> =>
 		ipcRenderer.invoke("update:openReleasePage", url),
 

@@ -8,9 +8,9 @@
 /**
  * GeneralPanel
  *
- * System-level app settings: auto-save behavior, data management (clear stored
- * run history), on-disk storage locations, and a reset-to-defaults for every
- * renderer preference. Client-side; the data actions talk to the engine's run
+ * System-level app settings: the installed version and a manual update check,
+ * auto-save behavior, data management (clear stored run history), on-disk
+ * storage locations, and a reset-to-defaults for every renderer preference. Client-side; the data actions talk to the engine's run
  * store via the existing API.
  */
 
@@ -32,6 +32,7 @@ import { useRunsQuery, useInvalidateRuns } from "@/queries/runs";
 import { apiService } from "@/services";
 import { AUTO_SAVE_DELAY_OPTIONS } from "@/constants/client-settings";
 import { OptionButtons, ToggleRow } from "./SettingControls";
+import { UpdatesCard } from "./UpdatesCard";
 
 interface AppPaths {
 	appDir: string;
@@ -95,6 +96,10 @@ export default function GeneralPanel() {
 
 	return (
 		<>
+			{/* Version + manual update check — the first thing people open
+			    General looking for. */}
+			<UpdatesCard />
+
 			{/* Auto-save */}
 			<Card>
 				<CardHeader className="pb-3">
