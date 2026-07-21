@@ -90,12 +90,8 @@ interface EditedValue {
 
 export default function SettingsMain() {
 	const { selectedCategory } = useSettingsStore();
-	const {
-		pendingRestart,
-		restartRequiredKeys,
-		addRestartRequiredKey,
-		clearRestartRequired,
-	} = useEngineStore();
+	const { pendingRestart, restartRequiredKeys, addRestartRequiredKey, clearRestartRequired } =
+		useEngineStore();
 	const {
 		startSaving,
 		completeSave,
@@ -576,6 +572,12 @@ export default function SettingsMain() {
 												onCheckedChange={(checked) =>
 													handleBooleanToggle(entry, checked)
 												}
+												// The setting's name lives in the CardTitle above
+												// and is not associated with the control, so
+												// without this the switch announced as a bare
+												// "switch" — and every engine setting renders
+												// one of these.
+												aria-label={entry.label}
 											/>
 											<Label className="text-sm text-muted-foreground">
 												{currentValue === "true" ? "Enabled" : "Disabled"}
@@ -606,6 +608,10 @@ export default function SettingsMain() {
 																? "Enter bytes"
 																: undefined
 														}
+														// Same as the Switch above: the name is in
+														// the CardTitle, which nothing links to this
+														// input.
+														aria-label={entry.label}
 														min={entry.min}
 														max={entry.max}
 													/>

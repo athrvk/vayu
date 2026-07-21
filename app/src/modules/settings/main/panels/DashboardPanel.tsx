@@ -83,6 +83,9 @@ export default function DashboardPanel() {
 						<div className="relative">
 							<Input
 								type="number"
+								// Named from the CardTitle above, which nothing links to
+								// this input.
+								aria-label="Capacity SLO threshold in milliseconds"
 								className="max-w-[10rem] pr-9"
 								value={sloThresholdMs}
 								min={SLO_THRESHOLD_MIN_MS}

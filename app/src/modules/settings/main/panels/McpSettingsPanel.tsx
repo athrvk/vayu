@@ -392,6 +392,7 @@ export default function McpSettingsPanel() {
 							checked={enabled}
 							onCheckedChange={(checked) => void toggleEnabled(checked)}
 							disabled={isLoading || !hasElectron}
+							aria-label="Enable MCP server"
 						/>
 					</div>
 
@@ -538,6 +539,7 @@ export default function McpSettingsPanel() {
 															setToolsEnabled([tool.name], checked)
 														}
 														disabled={!config}
+														aria-label={`Enable tool ${tool.name}`}
 													/>
 												</div>
 											);
@@ -577,6 +579,7 @@ export default function McpSettingsPanel() {
 							checked={config?.allowAll ?? false}
 							onCheckedChange={(checked) => void persist({ allowAll: checked })}
 							disabled={!config}
+							aria-label="Allow all hosts"
 						/>
 					</div>
 
@@ -608,6 +611,7 @@ export default function McpSettingsPanel() {
 									}
 								}}
 								placeholder="api.example.com"
+								aria-label="Host to allow"
 								className="max-w-xs"
 								disabled={!config || config.allowAll}
 							/>
@@ -677,6 +681,7 @@ export default function McpSettingsPanel() {
 							) : (
 								<Input
 									type="number"
+									aria-label={field.label}
 									min={1}
 									value={
 										capDrafts[field.key] ??
@@ -724,6 +729,7 @@ export default function McpSettingsPanel() {
 							checked={config?.allowWrites ?? false}
 							onCheckedChange={(checked) => void persist({ allowWrites: checked })}
 							disabled={!config}
+							aria-label="Allow write operations"
 						/>
 						<Label className="text-sm text-muted-foreground">
 							{config?.allowWrites ? "Writes enabled" : "Read-only"}
