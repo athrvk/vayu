@@ -121,7 +121,7 @@ function TotalRequestsStat({ d }: { d: DashboardDerived }) {
 					failed{" "}
 					<span
 						className={cn(
-							d.failedRequests > 0 ? "text-destructive" : "text-muted-foreground"
+							d.failedRequests > 0 ? "text-destructive-text" : "text-muted-foreground"
 						)}
 					>
 						{formatNumber(d.failedRequests)}

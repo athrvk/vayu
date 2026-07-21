@@ -256,7 +256,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 							</div>
 							<div>
 								<p className="text-sm text-muted-foreground">Failed</p>
-								<p className="font-bold text-destructive">
+								<p className="font-bold text-destructive-text">
 									{report.testValidation.testsFailed}
 								</p>
 							</div>
@@ -307,11 +307,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 													{/* Status Icon */}
 													{isError ? (
-														<AlertCircle className="w-4 h-4 text-destructive shrink-0" />
+														<AlertCircle className="w-4 h-4 text-destructive-text shrink-0" />
 													) : isSlow ? (
-														<Clock className="w-4 h-4 text-status-stopped shrink-0" />
+														<Clock className="w-4 h-4 text-status-stopped-text shrink-0" />
 													) : (
-														<CheckCircle2 className="w-4 h-4 text-status-success shrink-0" />
+														<CheckCircle2 className="w-4 h-4 text-status-success-text shrink-0" />
 													)}
 
 													{/* Request Number */}
@@ -348,7 +348,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 													{/* Error preview */}
 													{isError && result.error && (
-														<span className="text-xs text-destructive truncate basis-full sm:basis-auto sm:max-w-[200px]">
+														<span className="text-xs text-destructive-text truncate basis-full sm:basis-auto sm:max-w-[200px]">
 															{result.error.split(":")[0]}
 														</span>
 													)}
@@ -364,7 +364,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 															<p className="text-xs font-medium text-muted-foreground">
 																Error
 															</p>
-															<p className="text-sm bg-destructive/10 text-destructive p-2 rounded-md font-mono text-xs break-all">
+															<p className="text-sm bg-destructive/10 text-destructive-text p-2 rounded-md font-mono text-xs break-all">
 																{result.error}
 															</p>
 														</div>
@@ -500,7 +500,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 															{/* Slow Request Warning */}
 															{result.trace.isSlow && (
-																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive p-2 rounded-md">
+																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive-text p-2 rounded-md">
 																	<Clock className="w-3 h-3" />
 																	<span>
 																		Slow request:{" "}

@@ -105,7 +105,7 @@ function SchemaStatusBadge({ status }: { status: "idle" | "loading" | "ready" | 
 	}
 	return (
 		<span
-			className="flex items-center gap-1 text-[10px] text-destructive"
+			className="flex items-center gap-1 text-[10px] text-destructive-text"
 			title="Schema introspection failed — syntax checking only"
 		>
 			<AlertCircle className="w-3 h-3" />

@@ -94,12 +94,12 @@ export default function DesignRunDetail({ report, onBack: _onBack, runId }: Desi
 						<Card className="border-destructive/30 bg-destructive/5">
 							<CardContent className="py-4">
 								<div className="flex items-start gap-3">
-									<XCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+									<XCircle className="w-5 h-5 text-destructive-text shrink-0 mt-0.5" />
 									<div>
-										<p className="text-sm font-medium text-destructive mb-1">
+										<p className="text-sm font-medium text-destructive-text mb-1">
 											Request Failed
 										</p>
-										<p className="text-sm text-destructive/80 font-mono">
+										<p className="text-sm text-destructive-text font-mono">
 											{result.error}
 										</p>
 									</div>

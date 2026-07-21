@@ -55,7 +55,7 @@ export default function SampleRequestCard({
 				<span className="text-xs font-mono text-muted-foreground w-8">#{index + 1}</span>
 
 				{isError ? (
-					<XCircle className="w-4 h-4 text-destructive shrink-0" />
+					<XCircle className="w-4 h-4 text-destructive-text shrink-0" />
 				) : (
 					<CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
 				)}
@@ -86,8 +86,8 @@ export default function SampleRequestCard({
 					{/* Error Message */}
 					{sample.error && (
 						<div className="p-3 bg-destructive/10 border border-destructive/20">
-							<p className="text-xs font-medium text-destructive mb-1">Error</p>
-							<p className="text-sm text-destructive font-mono break-all">
+							<p className="text-xs font-medium text-destructive-text mb-1">Error</p>
+							<p className="text-sm text-destructive-text font-mono break-all">
 								{sample.error}
 							</p>
 						</div>

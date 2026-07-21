@@ -99,17 +99,17 @@ export default function OverviewTab({ report, derived }: TabProps) {
 			{report.errors && report.errors.total > 0 && (
 				<Card className="border-destructive/30">
 					<CardHeader>
-						<CardTitle className="text-base flex items-center gap-2 text-destructive">
+						<CardTitle className="text-base flex items-center gap-2 text-destructive-text">
 							<AlertCircle className="w-5 h-5" />
 							Error Summary
 						</CardTitle>
 					</CardHeader>
 					<CardContent className="space-y-3">
 						<div className="flex justify-between items-center p-3 bg-destructive/10 border border-destructive/20">
-							<span className="text-sm font-medium text-destructive">
+							<span className="text-sm font-medium text-destructive-text">
 								Total Errors
 							</span>
-							<span className="text-lg font-bold text-destructive">
+							<span className="text-lg font-bold text-destructive-text">
 								{formatNumber(report.errors.total)} (
 								{report.summary.errorRate.toFixed(2)}%)
 							</span>

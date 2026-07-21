@@ -159,7 +159,7 @@ export default function PerformanceTab({
 											: report.rateControl.achievement >= 80 &&
 												  report.rateControl.achievement <= 120
 												? "text-yellow-600 dark:text-yellow-400"
-												: "text-destructive"
+												: "text-destructive-text"
 									)}
 								>
 									{formatNumber(report.rateControl.achievement)}%

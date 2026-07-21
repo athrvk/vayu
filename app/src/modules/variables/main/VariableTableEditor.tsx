@@ -488,7 +488,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 	if (dataError) {
 		return (
-			<div className="flex items-center justify-center h-full text-destructive">
+			<div className="flex items-center justify-center h-full text-destructive-text">
 				<AlertCircle className="w-5 h-5 mr-2" />
 				<span>
 					Failed to load{" "}
@@ -539,7 +539,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 								label="Delete environment"
 								icon={<Trash2 className="w-4 h-4" />}
 								onClick={() => setShowDeleteConfirm(true)}
-								className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+								className="h-8 w-8 text-muted-foreground hover:text-destructive-text hover:bg-destructive/10"
 							/>
 						</div>
 					)}

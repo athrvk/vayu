@@ -58,13 +58,13 @@ export default function RunItem({
 	const getStatusIcon = () => {
 		switch (run.status) {
 			case "completed":
-				return <CheckCircle2 className="w-4 h-4 text-status-success" />;
+				return <CheckCircle2 className="w-4 h-4 text-status-success-text" />;
 			case "failed":
-				return <XCircle className="w-4 h-4 text-status-error" />;
+				return <XCircle className="w-4 h-4 text-status-error-text" />;
 			case "running":
-				return <Activity className="w-4 h-4 text-status-running animate-pulse" />;
+				return <Activity className="w-4 h-4 text-status-running-text animate-pulse" />;
 			case "stopped":
-				return <StopCircle className="w-4 h-4 text-status-stopped" />;
+				return <StopCircle className="w-4 h-4 text-status-stopped-text" />;
 			default:
 				return <Clock className="w-4 h-4 text-muted-foreground" />;
 		}

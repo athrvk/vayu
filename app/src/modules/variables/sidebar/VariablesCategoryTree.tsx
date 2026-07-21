@@ -371,7 +371,7 @@ export default function VariablesCategoryTree() {
 													</button>
 												)}
 												{isDeleting && (
-													<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive" />
+													<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive-text" />
 												)}
 												{!isDeleting &&
 													renamingEnvId !== environment.id && (

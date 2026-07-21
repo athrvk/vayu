@@ -95,7 +95,7 @@ export default function OAuth2LoadTestGuard({
 	if (state.kind === "covered") {
 		return (
 			<div className="flex items-center gap-2 rounded-md border border-border bg-panel px-3 py-2 text-xs text-muted-foreground">
-				<CheckCircle2 className="h-3.5 w-3.5 text-status-success shrink-0" />
+				<CheckCircle2 className="h-3.5 w-3.5 text-status-success-text shrink-0" />
 				{state.nonExpiring
 					? "Access token does not expire — it covers the full test."
 					: "Access token covers the full test duration."}

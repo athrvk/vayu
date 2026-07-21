@@ -63,7 +63,7 @@ export default function HistoryDetail() {
 	if (error || !report) {
 		return (
 			<div className="flex-1 flex flex-col items-center justify-center text-muted-foreground space-y-4">
-				<AlertCircle className="w-12 h-12 text-destructive/50" />
+				<AlertCircle className="w-12 h-12 text-destructive-text" />
 				<p>{error || "Report not found"}</p>
 				<Button onClick={navigateToHistory}>Back to History</Button>
 			</div>

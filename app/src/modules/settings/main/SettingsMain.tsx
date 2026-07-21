@@ -277,7 +277,7 @@ export default function SettingsMain() {
 
 	if (error) {
 		return (
-			<div className="flex-1 flex flex-col items-center justify-center text-destructive gap-4 p-8">
+			<div className="flex-1 flex flex-col items-center justify-center text-destructive-text gap-4 p-8">
 				<AlertCircle className="w-12 h-12" />
 				<div className="text-center">
 					<p className="text-lg font-medium">Failed to load settings</p>

@@ -129,7 +129,9 @@ export default function SettingsCategoryTree() {
 					</div>
 				) : error ? (
 					<div className="px-4 py-2">
-						<div className="text-xs text-destructive">Engine settings unavailable</div>
+						<div className="text-xs text-destructive-text">
+							Engine settings unavailable
+						</div>
 						<div className="text-xs text-muted-foreground mt-0.5">
 							{error instanceof Error
 								? error.message

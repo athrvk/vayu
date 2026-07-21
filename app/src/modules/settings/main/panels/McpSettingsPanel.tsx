@@ -140,7 +140,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 		>
 			{copied ? (
 				<>
-					<Check className="w-3.5 h-3.5 mr-1 text-success" />
+					<Check className="w-3.5 h-3.5 mr-1 text-success-text" />
 					Copied
 				</>
 			) : (
@@ -330,7 +330,7 @@ export default function McpSettingsPanel() {
 			{!hasElectron && (
 				<Card className="border-warning/40 bg-warning/10">
 					<CardContent className="flex items-start gap-3 py-4">
-						<AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+						<AlertTriangle className="w-5 h-5 text-warning-text shrink-0 mt-0.5" />
 						<p className="text-sm text-muted-foreground">
 							MCP settings are only available in the desktop app. Run Vayu via
 							Electron to configure the MCP server.
@@ -400,7 +400,7 @@ export default function McpSettingsPanel() {
 					{!isLoading && enabled && !running && (
 						<div className="flex items-start justify-between gap-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2">
 							<div className="flex items-start gap-2">
-								<AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+								<AlertTriangle className="w-4 h-4 text-warning-text shrink-0 mt-0.5" />
 								<p className="text-xs text-muted-foreground">
 									The server is enabled but not listening — the port may be in
 									use.
@@ -585,7 +585,7 @@ export default function McpSettingsPanel() {
 
 					{config?.allowAll && (
 						<div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2">
-							<AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+							<AlertTriangle className="w-4 h-4 text-warning-text shrink-0 mt-0.5" />
 							<p className="text-xs text-muted-foreground">
 								All hosts are allowed. The per-host list below is ignored until you
 								turn this off.
@@ -638,7 +638,7 @@ export default function McpSettingsPanel() {
 										{host}
 										<button
 											onClick={() => removeHost(host)}
-											className="rounded-md p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors"
+											className="rounded-md p-0.5 hover:bg-destructive/10 hover:text-destructive-text transition-colors"
 											aria-label={`Remove ${host}`}
 										>
 											<X className="w-3.5 h-3.5" />

@@ -55,9 +55,9 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 					{errors.pre && (
 						<div className="p-3 bg-destructive/10 border border-destructive/20">
 							<div className="flex items-start gap-2">
-								<AlertCircle className="w-4 h-4 text-destructive mt-0.5 flex-shrink-0" />
+								<AlertCircle className="w-4 h-4 text-destructive-text mt-0.5 flex-shrink-0" />
 								<div className="flex-1 min-w-0">
-									<p className="text-sm font-semibold text-destructive">
+									<p className="text-sm font-semibold text-destructive-text">
 										Pre-request Script Error
 									</p>
 									<pre className="text-sm text-status-error-text mt-1 font-mono whitespace-pre-wrap break-words overflow-x-auto">
@@ -70,9 +70,9 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 					{errors.post && (
 						<div className="p-3 bg-destructive/10 border border-destructive/20">
 							<div className="flex items-start gap-2">
-								<AlertCircle className="w-4 h-4 text-destructive mt-0.5 flex-shrink-0" />
+								<AlertCircle className="w-4 h-4 text-destructive-text mt-0.5 flex-shrink-0" />
 								<div className="flex-1 min-w-0">
-									<p className="text-sm font-semibold text-destructive">
+									<p className="text-sm font-semibold text-destructive-text">
 										Test Script Error
 									</p>
 									<pre className="text-sm text-status-error-text mt-1 font-mono whitespace-pre-wrap break-words overflow-x-auto">

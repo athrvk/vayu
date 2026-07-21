@@ -78,7 +78,7 @@ export default function ClientErrorView({ errorCode, errorMessage }: ClientError
 		<div className="flex-1 flex items-center justify-center p-8">
 			<div className="max-w-md text-center space-y-4">
 				<div className="w-16 h-16 mx-auto rounded-full bg-destructive/10 flex items-center justify-center">
-					<ErrorIconDisplay icon={ErrorIcon} className="w-8 h-8 text-destructive" />
+					<ErrorIconDisplay icon={ErrorIcon} className="w-8 h-8 text-destructive-text" />
 				</div>
 
 				<div className="space-y-2">

@@ -365,7 +365,7 @@ function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: (
 	return (
 		<div className="space-y-3">
 			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
-				<CheckCircle2 className="h-4 w-4 text-status-success" />
+				<CheckCircle2 className="h-4 w-4 text-status-success-text" />
 				<span className="text-[12px] font-semibold">{meta.format}</span>
 				{meta.fileName && (
 					<span className="font-mono text-[11px] text-muted-foreground">

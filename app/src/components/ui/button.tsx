@@ -37,9 +37,19 @@ const buttonVariants = cva(
 				 * hover. No red background: the row already carries one fill, a
 				 * second competing tint is noise, and the delete confirmation is
 				 * what actually protects the user.
+				 *
+				 * `destructive-text`, not `destructive`. Measured against
+				 * `--accent-active`, the fill token gives 3.66 light / 1.27 dark —
+				 * the dark figure missing even the 3.0 floor for a glyph.
+				 * `destructive-text` gives 4.12 / 3.96.
+				 *
+				 * Those clear 3.0 but not the 4.5 that *text* would need, and this
+				 * variant is icon-only by design (all three call sites render a
+				 * Trash2 at size="icon"). Put a text label in it and it stops
+				 * passing — use a different variant.
 				 */
 				rowActionDestructive:
-					"text-muted-foreground hover:bg-accent-active hover:text-destructive",
+					"text-muted-foreground hover:bg-accent-active hover:text-destructive-text",
 			},
 			size: {
 				default: "h-9 px-4 py-2",

@@ -143,7 +143,7 @@ These differ between light and dark mode.
 --success:            142 76% 36%;   /* green */
 --warning:             38 92% 50%;   /* amber */
 --info:               199 89% 48%;   /* cyan */
---destructive:          0 84% 60%;   /* red */
+--destructive:          0 84% 48%;   /* red */
 
 /* Dark */
 --success:            142 70% 45%;   /* lighter green */
@@ -176,6 +176,53 @@ tinted chip failed while the same colour on a card passed. The dashboard's
 The current floor across all four surfaces, both themes, is **4.63** (light
 amber). If you add or retune a text token, measure it against all four
 surfaces, not the one you happen to be looking at.
+
+**The bare token is the fill; the `-text` token is the foreground.** This is the
+whole of the rule, and it is worth stating separately because the failure mode is
+easy to miss: a bare token used as a foreground still *looks* like the right
+colour, it is just too close in luminance to the surface behind it. Measured on
+`bg-card` in the running app (contrast ratio; **bold fails** the 4.5 floor for
+normal text, and the two worst also fail the 3.0 floor for icons):
+
+| family           | light bare | light `-text` | dark bare | dark `-text` |
+|------------------|-----------:|--------------:|----------:|-------------:|
+| `destructive`    |       4.87 |          5.48 |  **1.73** |         5.40 |
+| `success`        |   **3.33** |          5.71 |      7.46 |         8.81 |
+| `warning`        |   **2.13** |          5.46 |      8.13 |         9.81 |
+| `status-success` |   **2.30** |          5.71 |      7.53 |         8.81 |
+| `status-error`   |   **3.78** |          5.88 |      4.59 |         5.85 |
+| `status-stopped` |   **2.79** |          5.73 |      6.23 |         7.40 |
+| `status-running` |   **3.64** |          5.99 |      4.77 |         6.75 |
+| `status-warning` |      17.72 |         17.72 |     15.78 |        15.78 |
+
+Note the inversion: `destructive` is the only family that fails in **dark**,
+every other family fails in **light**. That rules out "a dark-mode bug" as the
+diagnosis — the single cause is the fill token standing in for the foreground
+one, and which mode it breaks in just depends on where that fill sits relative to
+the surface. `destructive` on `bg-destructive/10` and on `bg-background` measures
+worse still (4.14 / 4.43 light, 1.69 / 1.99 dark), so a tinted error chip is the
+worst case, not the safe one.
+
+`status-warning` is the exception: it has no `-text` variant, because the bare
+token already measures 17.72 / 15.78. Leave it as-is.
+
+Icons count. 1.73 fails the non-text threshold as surely as the text one, so a
+red `AlertCircle` is in scope, not just the sentence next to it. So are opacity
+variants — `text-destructive-text/50` on an error icon is a fainter version of
+the problem, and on an error affordance the fading is working against the point
+anyway. Drop the opacity rather than carrying it over.
+
+One measured surface is worth calling out because it does *not* reach 4.5 even
+after the fix. The row-action delete button (`rowActionDestructive`) hovers on
+`--accent-active`, where the fill token gives 3.66 light / 1.27 dark and
+`destructive-text` gives 4.12 / 3.96. Those clear the 3.0 icon floor but not the
+4.5 text floor, and the variant is icon-only by design — every call site renders
+a `Trash2` at `size="icon"`. Putting a text label in it would stop it passing.
+
+`app/src/components/ui/status-color-tokens.test.ts` enforces this: it fails on
+any `text-<family>` in `app/src` (including `hover:`/`focus:` prefixes and `/NN`
+opacity forms) while allowing `bg-*`, `border-*` and `*-foreground`, which are
+correct uses of the fill token.
 
 ### Variable Scope Colors (Categorical)
 

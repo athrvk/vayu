@@ -46,9 +46,9 @@ export default function TestResults({ results }: TestResultsProps) {
 					>
 						<div className="flex items-start gap-2">
 							{test.passed ? (
-								<CheckCircle className="w-5 h-5 text-status-success mt-0.5 flex-shrink-0" />
+								<CheckCircle className="w-5 h-5 text-status-success-text mt-0.5 flex-shrink-0" />
 							) : (
-								<XCircle className="w-5 h-5 text-status-error mt-0.5 flex-shrink-0" />
+								<XCircle className="w-5 h-5 text-status-error-text mt-0.5 flex-shrink-0" />
 							)}
 							<div className="flex-1">
 								<p

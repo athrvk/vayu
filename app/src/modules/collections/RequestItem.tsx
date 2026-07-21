@@ -147,7 +147,9 @@ export default function RequestItem({
 				)}
 			</button>
 
-			{isDeleting && <Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive" />}
+			{isDeleting && (
+				<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive-text" />
+			)}
 
 			{/*
 			 * Delete moved into the ⋯ menu, but the Delete key still targets a

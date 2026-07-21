@@ -229,7 +229,7 @@ export default function UnifiedResponseViewer({
 										aria-label="Copy response"
 									>
 										{copied ? (
-											<Check className="w-4 h-4 text-status-success" />
+											<Check className="w-4 h-4 text-status-success-text" />
 										) : (
 											<Copy className="w-4 h-4" />
 										)}
