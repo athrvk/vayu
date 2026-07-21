@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
 import { Badge, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui";
-import { DetailSkeleton, EmptyState } from "@/components/shared";
+import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
 import { useCollectionsQuery, useRequestsQuery } from "@/queries/collections";
 import { useTabsStore, useSessionStore } from "@/stores";
 import AuthTab from "./AuthTab";
@@ -46,7 +46,13 @@ export default function CollectionDetail() {
 		if (selectedCollectionId) setLastCollectionId(selectedCollectionId);
 	}, [selectedCollectionId, setLastCollectionId]);
 
-	const { data: collections = [], isLoading: collectionsLoading } = useCollectionsQuery();
+	const {
+		data: collections = [],
+		isLoading: collectionsLoading,
+		isError: collectionsFailed,
+		error: collectionsError,
+		refetch: refetchCollections,
+	} = useCollectionsQuery();
 	const { data: requests = [] } = useRequestsQuery(selectedCollectionId);
 
 	const collection = useMemo(
@@ -62,6 +68,23 @@ export default function CollectionDetail() {
 	// is gone is worse than telling them nothing yet.
 	if (collectionsLoading) {
 		return <DetailSkeleton label="Loading collection" />;
+	}
+
+	// Failed is the third answer, and here the most damaging one to get wrong:
+	// "Collection not found" asserts that the thing the user opened has been
+	// deleted, when all that happened is a fetch failed.
+	//
+	// Gated on there being no collection to show. TanStack keeps the last good
+	// data through a failed background refetch, and swapping a working pane for
+	// an error would take away more than it tells.
+	if (collectionsFailed && !collection) {
+		return (
+			<ErrorState
+				title="Couldn't load the collection"
+				detail={collectionsError instanceof Error ? collectionsError.message : undefined}
+				onRetry={() => void refetchCollections()}
+			/>
+		);
 	}
 
 	if (!collection) {

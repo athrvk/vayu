@@ -17,7 +17,7 @@ import { useVariablesStore } from "@/modules/variables/variables-store";
 import { useCollectionsQuery, useEnvironmentsQuery, useGlobalsQuery } from "@/queries";
 import VariableTableEditor from "./VariableTableEditor";
 import { Variable } from "lucide-react";
-import { DetailSkeleton, EmptyState } from "@/components/shared";
+import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
 
 export default function VariablesMain() {
 	const { selectedCategory } = useVariablesStore();
@@ -25,8 +25,23 @@ export default function VariablesMain() {
 	// so a category selected from a previous session resolved to `undefined`
 	// while its query was still in flight and the screen announced "not found"
 	// — an error, for something that simply had not arrived yet.
-	const { data: collections = [], isLoading: collectionsLoading } = useCollectionsQuery();
-	const { data: environments = [], isLoading: environmentsLoading } = useEnvironmentsQuery();
+	// isError too, and each branch below reads its own query's: the two are
+	// fetched independently, and a collections failure says nothing about
+	// whether the environments arrived.
+	const {
+		data: collections = [],
+		isLoading: collectionsLoading,
+		isError: collectionsFailed,
+		error: collectionsError,
+		refetch: refetchCollections,
+	} = useCollectionsQuery();
+	const {
+		data: environments = [],
+		isLoading: environmentsLoading,
+		isError: environmentsFailed,
+		error: environmentsError,
+		refetch: refetchEnvironments,
+	} = useEnvironmentsQuery();
 	const globalsQuery = useGlobalsQuery();
 
 	if (!selectedCategory) {
@@ -58,11 +73,24 @@ export default function VariablesMain() {
 		if (!collection) {
 			// Still in flight is not the same as missing: saying "not found"
 			// here tells the user their collection is gone.
-			return collectionsLoading ? (
-				<DetailSkeleton label="Loading collection" />
-			) : (
-				<EmptyState title="Collection not found" />
-			);
+			if (collectionsLoading) {
+				return <DetailSkeleton label="Loading collection" />;
+			}
+			// Nor is a failed fetch. Reached only when nothing was found, so a
+			// collection still in cache renders normally through a failed
+			// background refetch.
+			if (collectionsFailed) {
+				return (
+					<ErrorState
+						title="Couldn't load the collection"
+						detail={
+							collectionsError instanceof Error ? collectionsError.message : undefined
+						}
+						onRetry={() => void refetchCollections()}
+					/>
+				);
+			}
+			return <EmptyState title="Collection not found" />;
 		}
 		return (
 			<VariableTableEditor
@@ -77,11 +105,23 @@ export default function VariablesMain() {
 	if (selectedCategory.type === "environment") {
 		const environment = environments.find((e) => e.id === selectedCategory.environmentId);
 		if (!environment) {
-			return environmentsLoading ? (
-				<DetailSkeleton label="Loading environment" />
-			) : (
-				<EmptyState title="Environment not found" />
-			);
+			if (environmentsLoading) {
+				return <DetailSkeleton label="Loading environment" />;
+			}
+			if (environmentsFailed) {
+				return (
+					<ErrorState
+						title="Couldn't load the environment"
+						detail={
+							environmentsError instanceof Error
+								? environmentsError.message
+								: undefined
+						}
+						onRetry={() => void refetchEnvironments()}
+					/>
+				);
+			}
+			return <EmptyState title="Environment not found" />;
 		}
 		return (
 			<VariableTableEditor

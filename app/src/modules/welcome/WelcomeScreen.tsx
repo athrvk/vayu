@@ -31,6 +31,7 @@ import {
 	useCreateRequestMutation,
 	useCreateCollectionMutation,
 } from "@/queries";
+import { ErrorState } from "@/components/shared";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME } from "@/constants/collection";
 import { resolveNewRequestTarget } from "./targetCollection";
@@ -47,8 +48,20 @@ export default function WelcomeScreen() {
 	const { openTab } = useTabsStore();
 	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
 	const lastCollectionId = useSessionStore((s) => s.lastCollectionId);
-	const { data: collections = [], isLoading: collectionsLoading } = useCollectionsQuery();
-	const { data: runs = [], isLoading: runsLoading } = useRunsQuery();
+	const {
+		data: collections = [],
+		isLoading: collectionsLoading,
+		isError: collectionsFailed,
+		error: collectionsError,
+		refetch: refetchCollections,
+	} = useCollectionsQuery();
+	const {
+		data: runs = [],
+		isLoading: runsLoading,
+		isError: runsFailed,
+		error: runsError,
+		refetch: refetchRuns,
+	} = useRunsQuery();
 	const createRequestMutation = useCreateRequestMutation();
 	const createCollectionMutation = useCreateCollectionMutation();
 
@@ -103,13 +116,41 @@ export default function WelcomeScreen() {
 	const isLoading = collectionsLoading || runsLoading;
 	const isEmpty = collections.length === 0 && runs.length === 0;
 
+	// A failed load is not a fresh workspace. Neither query sets `throwOnError`
+	// and both are destructured with `= []`, so a failure used to land in
+	// `isEmpty` and render the branded first-run pitch — telling a user with
+	// collections and runs that they are brand new, and inviting them to import
+	// collections they already have.
+	//
+	// Gated on `isEmpty` on purpose: TanStack keeps the last good data through a
+	// failed background refetch, and swapping a working Launcher for an error
+	// pane would take away more than it tells. If either query returned
+	// anything, the Launcher still has something true to show.
+	const hasFailed = collectionsFailed || runsFailed;
+	// One message is enough; whichever failed first answers "why".
+	const failure = collectionsError ?? runsError;
+	const failureDetail = failure instanceof Error ? failure.message : undefined;
+	// The user is retrying the screen, not one query.
+	const retry = () => {
+		void refetchCollections();
+		void refetchRuns();
+	};
+
 	return (
 		<div className="flex-1 overflow-auto bg-background">
 			<div className="max-w-2xl px-8 py-10">
 				{isLoading ? (
 					<LauncherSkeleton />
 				) : isEmpty ? (
-					<FirstRunWelcome onImport={openImport} onNewRequest={handleNewRequest} />
+					hasFailed ? (
+						<ErrorState
+							title="Couldn't load your workspace"
+							detail={failureDetail}
+							onRetry={retry}
+						/>
+					) : (
+						<FirstRunWelcome onImport={openImport} onNewRequest={handleNewRequest} />
+					)
 				) : (
 					<Launcher
 						runs={runs}

@@ -10,7 +10,13 @@ import { Search, Clock } from "lucide-react";
 import { useTabsStore, useLayoutStore } from "@/stores";
 import { useHistoryStore, filterRuns } from "@/modules/history/history-store";
 import { useRunsQuery, useDeleteRunMutation } from "@/queries";
-import { DrawerPanel, EmptyState, TruncatedText, ListSkeleton } from "@/components/shared";
+import {
+	DrawerPanel,
+	EmptyState,
+	ErrorState,
+	TruncatedText,
+	ListSkeleton,
+} from "@/components/shared";
 import {
 	Button,
 	Input,
@@ -45,7 +51,7 @@ export default function HistoryList() {
 	const navigateToHistory = () => activateDrawerView("history");
 
 	// Use TanStack Query for runs data
-	const { data: allRuns = [], isLoading } = useRunsQuery();
+	const { data: allRuns = [], isLoading, isError, error, refetch } = useRunsQuery();
 	const deleteRunMutation = useDeleteRunMutation();
 
 	const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -53,6 +59,21 @@ export default function HistoryList() {
 
 	// Filter and sort runs using the helper function
 	const runs = filterRuns(allRuns, { searchQuery, filterType, filterStatus, sortBy });
+
+	/*
+	 * The drawer has three sibling views. The collections tree already tells the
+	 * user when its load failed; a history list that answers the same failure
+	 * with "No test runs found" is not just wrong on its own terms, it makes the
+	 * same event look like two different events depending on which view is open.
+	 * Nothing here offers a create CTA, so this is about that symmetry rather
+	 * than about preventing a duplicate.
+	 *
+	 * Gated on `allRuns`, not the filtered `runs`: TanStack keeps the last good
+	 * data through a failed background refetch, and a filter that happens to
+	 * match nothing is still a working list. Only a failure with nothing cached
+	 * earns the error pane.
+	 */
+	const showError = isError && allRuns.length === 0;
 
 	const runToDelete = deleteConfirmRunId
 		? allRuns.find((r) => r.id === deleteConfirmRunId)
@@ -181,7 +202,19 @@ export default function HistoryList() {
 					<div className="h-full space-y-2 overflow-y-auto pr-1">
 						{isLoading && <ListSkeleton rows={4} leading badge />}
 
-						{!isLoading && runs.length === 0 && (
+						{!isLoading && showError && (
+							// `h-full` for the same reason as the empty state below:
+							// the parent is a scroll container, not a flex column, so
+							// the pane variant's `flex-1` has nothing to grow against.
+							<ErrorState
+								className="h-full"
+								title="Couldn't load run history"
+								detail={error instanceof Error ? error.message : undefined}
+								onRetry={() => void refetch()}
+							/>
+						)}
+
+						{!isLoading && !showError && runs.length === 0 && (
 							// `h-full` because this scroll container is not a flex
 							// column, so `flex-1` has nothing to grow against. Without
 							// it the block sits at the top while the collections

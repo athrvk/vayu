@@ -24,7 +24,13 @@ import {
 	useDeleteEnvironmentMutation,
 	useUpdateEnvironmentMutation,
 } from "@/queries";
-import { RowActionsMenu, DrawerPanel, TruncatedText, ListSkeleton } from "@/components/shared";
+import {
+	RowActionsMenu,
+	DrawerPanel,
+	ErrorState,
+	TruncatedText,
+	ListSkeleton,
+} from "@/components/shared";
 import type { Environment } from "@/types";
 import {
 	Globe,
@@ -48,8 +54,41 @@ export default function VariablesCategoryTree() {
 	// defaults and dropped `isLoading` — so an in-flight query rendered as an
 	// empty tree and told the user "No environments" when the truthful answer
 	// was "not loaded yet".
-	const { data: collections = [], isLoading: isLoadingCollections } = useCollectionsQuery();
-	const { data: environments = [], isLoading: isLoadingEnvironments } = useEnvironmentsQuery();
+	const {
+		data: collections = [],
+		isLoading: isLoadingCollections,
+		isError: isCollectionsError,
+		refetch: refetchCollections,
+	} = useCollectionsQuery();
+	const {
+		data: environments = [],
+		isLoading: isLoadingEnvironments,
+		isError: isEnvironmentsError,
+		refetch: refetchEnvironments,
+	} = useEnvironmentsQuery();
+
+	/*
+	 * A failed load is not an empty scope list. The drawer has three sibling
+	 * views, and the collections tree already says so when its query fails —
+	 * this view claiming "No collections" for the very same failure would make
+	 * one event look like two. Neither section here offers a create CTA, so the
+	 * reason to fix it is that symmetry, not a risk of a duplicate.
+	 *
+	 * Gated on `length === 0` per section: TanStack keeps the last good data
+	 * through a failed background refetch, and replacing a populated list with
+	 * an error would take away more than it tells. Each section reads its own
+	 * query — one scope failing says nothing about the other.
+	 */
+	const showCollectionsError = isCollectionsError && collections.length === 0;
+	const showEnvironmentsError = isEnvironmentsError && environments.length === 0;
+
+	/*
+	 * The pane variant centres inside `p-8`, which would break the rhythm of a
+	 * tree of 32px rows. `px-3 py-2` is the padding the italic empty rows above
+	 * already use, so the failure line sits on the tree's left edge like every
+	 * other row; `justify-start` undoes the variant's centring.
+	 */
+	const inlineErrorClass = "justify-start px-3 py-2 text-xs";
 
 	const { selectedCategory, setSelectedCategory } = useVariablesStore();
 	const { openTab } = useTabsStore();
@@ -197,7 +236,9 @@ export default function VariablesCategoryTree() {
 								<Cloud className="w-3 h-3" />
 								<span>Environments</span>
 								<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
-									{isLoadingEnvironments ? "—" : environments.length}
+									{isLoadingEnvironments || showEnvironmentsError
+										? "—"
+										: environments.length}
 								</Badge>
 							</button>
 							<TooltipIconButton
@@ -243,6 +284,13 @@ export default function VariablesCategoryTree() {
 
 								{isLoadingEnvironments ? (
 									<ListSkeleton rows={2} className="px-1" />
+								) : showEnvironmentsError ? (
+									<ErrorState
+										variant="inline"
+										className={inlineErrorClass}
+										title="Couldn't load environments"
+										onRetry={() => void refetchEnvironments()}
+									/>
 								) : environments.length === 0 && !creatingEnvironment ? (
 									<div className="px-3 py-2 text-xs text-muted-foreground italic">
 										No environments
@@ -381,7 +429,12 @@ export default function VariablesCategoryTree() {
 							<Layers className="w-3 h-3" />
 							<span>Collections</span>
 							<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
-								{isLoadingCollections ? "—" : collections.length}
+								{/* A dash while loading *and* while failed: a literal 0 beside
+								    "Couldn't load collections" asserts a count the app does
+								    not have. Same reason loading already shows one. */}
+								{isLoadingCollections || showCollectionsError
+									? "—"
+									: collections.length}
 							</Badge>
 						</button>
 
@@ -389,6 +442,13 @@ export default function VariablesCategoryTree() {
 							<div className="mt-1">
 								{isLoadingCollections ? (
 									<ListSkeleton rows={2} className="px-1" />
+								) : showCollectionsError ? (
+									<ErrorState
+										variant="inline"
+										className={inlineErrorClass}
+										title="Couldn't load collections"
+										onRetry={() => void refetchCollections()}
+									/>
 								) : collections.length === 0 ? (
 									<div className="px-3 py-2 text-xs text-muted-foreground italic">
 										No collections
