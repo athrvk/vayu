@@ -94,7 +94,7 @@ export function Dock() {
 	const { drawerOpen, drawerView, activateDrawerView, contextBarOpen, toggleContextBar } =
 		useLayoutStore();
 	const { isEngineConnected } = useEngineStore();
-	const { status: saveStatus } = useSaveStore();
+	const { status: saveStatus, errorMessage: saveError } = useSaveStore();
 
 	return (
 		<TooltipProvider>
@@ -144,8 +144,24 @@ export function Dock() {
 					{saveStatus === "saved" && (
 						<span className="text-xs text-muted-foreground">Saved</span>
 					)}
+					{/*
+					 * The reason, not just the fact. `save-store` records an
+					 * `errorMessage` on every failure — "database is locked", "disk
+					 * full" — and nothing read it, so every failure looked the same
+					 * and none of them said what to do about it. Same shape as three
+					 * failures found in the dashboard: state written, never read.
+					 *
+					 * `title` carries the full text because the strip is narrow and
+					 * the message comes from the engine, so its length is not ours to
+					 * predict.
+					 */}
 					{saveStatus === "error" && (
-						<span className="text-xs text-destructive-text">Save failed</span>
+						<span
+							className="max-w-60 truncate text-xs text-destructive-text"
+							title={saveError ?? undefined}
+						>
+							{saveError ? `Save failed — ${saveError}` : "Save failed"}
+						</span>
 					)}
 
 					{/*
