@@ -739,11 +739,25 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 													}
 													performSaveRef.current();
 												}}
+												/*
+												 * Always visible, unlike the delete button beside it.
+												 *
+												 * This is a state toggle, not a row action. Hidden at
+												 * rest, "not secret" looked identical to "no control
+												 * here", so masking a value was undiscoverable unless
+												 * you happened to hover the row — and a keyboard user
+												 * tabbed onto something invisible, since it carried no
+												 * `group-focus-within` either.
+												 *
+												 * Quiet rather than absent: `muted-foreground` clears
+												 * the 3.0 non-text bar on every surface here, and the
+												 * on state stays clearly distinct on `warning-text`.
+												 */
 												className={cn(
 													"h-8 w-8 transition-colors",
 													variable.secret
 														? "text-warning-text hover:text-warning-text hover:bg-warning/10"
-														: "text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
+														: "text-muted-foreground hover:text-foreground"
 												)}
 											/>
 										)}

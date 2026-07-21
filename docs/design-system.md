@@ -758,6 +758,17 @@ Reveal them with `opacity-0 group-hover:opacity-100 group-focus-within:opacity-1
 The `focus-within` half is not optional: without it a keyboard user lands on an
 invisible control.
 
+**A state toggle is not a row action, and must not be hover-revealed.** The test
+is whether the control has an *off* state that means something. Delete has none —
+it either fires or it does not — so hiding it costs nothing. The variables
+table's "mark as secret" key does: hidden at rest, "this value is not secret"
+looked exactly like "there is no control here", so the only way to discover you
+could mask a value was to hover the row. It is now always visible on
+`muted-foreground`, stepping to `warning-text` when on.
+
+Same rule for anything that reports state — a pin, a mute, an enable. Quiet is
+fine; absent is not.
+
 **Prefer `RowActionsMenu`** (`components/shared`) over adding another inline icon
 button. It renders the `⋯` trigger plus a `DropdownMenu`, so rows expose actions
 consistently and get focus management, Escape-to-close and arrow-key navigation
