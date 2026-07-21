@@ -7,7 +7,15 @@
 
 import { useRef, useState } from "react";
 import { Upload, CheckCircle2, X, Folder, AlertTriangle } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui";
+import {
+	Button,
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+	Input,
+	Textarea,
+} from "@/components/ui";
 import { useImportModalStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
 import { apiService } from "@/services/api";
@@ -181,8 +189,17 @@ export function ImportModal() {
 					) : (
 						<>
 							{tab === "file" && (
-								<div
-									className="cursor-pointer rounded-lg border-2 border-dashed border-border-strong bg-accent px-6 py-9 text-center"
+								/*
+								 * A real <button>, not a clickable div. This was a bare
+								 * div with onClick: not focusable, not in the tab order,
+								 * and not operable by Enter or Space — the only way to
+								 * reach the file picker was a mouse. Drag-and-drop still
+								 * works; the button is the keyboard path to the same
+								 * hidden <input type="file">.
+								 */
+								<button
+									type="button"
+									className="w-full cursor-pointer rounded-lg border-2 border-dashed border-border-strong bg-accent px-6 py-9 text-center"
 									onClick={() => fileInputRef.current?.click()}
 									onDragOver={(e) => e.preventDefault()}
 									onDrop={(e) => {
@@ -192,21 +209,13 @@ export function ImportModal() {
 									}}
 								>
 									<Upload className="mx-auto h-6 w-6 text-muted-foreground" />
-									<p className="mt-2 text-[13px] font-medium">
+									<span className="mt-2 block text-[13px] font-medium">
 										Drop a file here, or click to browse
-									</p>
-									<p className="text-[11px] text-muted-foreground">
+									</span>
+									<span className="block text-[11px] text-muted-foreground">
 										Format is detected automatically
-									</p>
-									<input
-										ref={fileInputRef}
-										type="file"
-										className="hidden"
-										onChange={(e) =>
-											e.target.files?.[0] && handleFile(e.target.files[0])
-										}
-									/>
-									<div className="mt-4 flex flex-wrap justify-center gap-1.5">
+									</span>
+									<span className="mt-4 flex flex-wrap justify-center gap-1.5">
 										{FORMAT_BADGES.map((b) => (
 											<span
 												key={b}
@@ -215,50 +224,58 @@ export function ImportModal() {
 												{b}
 											</span>
 										))}
-									</div>
-								</div>
+									</span>
+								</button>
 							)}
+							{/*
+							 * Outside the button on purpose. Nested inside it, the
+							 * programmatic .click() would bubble back to the button and
+							 * re-enter this handler, and interactive content inside a
+							 * button is invalid besides.
+							 */}
+							<input
+								ref={fileInputRef}
+								type="file"
+								className="hidden"
+								onChange={(e) =>
+									e.target.files?.[0] && handleFile(e.target.files[0])
+								}
+							/>
 							{tab === "url" && (
 								<div className="flex gap-2">
-									<input
+									<Input
 										value={url}
 										onChange={(e) => setUrl(e.target.value)}
+										onKeyDown={(e) => {
+											if (e.key === "Enter" && url) handleFetchUrl();
+										}}
 										placeholder="https://petstore.swagger.io/v2/swagger.json"
-										className="h-9 flex-1 rounded-md border border-border bg-card px-3 text-[13px]"
+										className="flex-1"
 									/>
-									<button
-										onClick={handleFetchUrl}
-										disabled={!url}
-										className="h-9 rounded-md bg-primary-fill px-4 text-[13px] font-semibold text-white disabled:opacity-50"
-									>
+									<Button onClick={handleFetchUrl} disabled={!url}>
 										Fetch
-									</button>
+									</Button>
 								</div>
 							)}
 							{tab === "paste" && (
 								<div>
-									<textarea
+									<Textarea
 										value={pasteText}
 										onChange={(e) => setPasteText(e.target.value)}
 										placeholder="Paste collection JSON or YAML here"
-										className="h-40 w-full rounded-md border border-border bg-card p-3 font-mono text-[12px]"
+										className="h-40 w-full font-mono text-[12px]"
 									/>
-									<button
+									<Button
 										onClick={() => runDetect(pasteText)}
 										disabled={!pasteText.trim()}
-										className="mt-2 h-9 rounded-md bg-primary-fill px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+										className="mt-2"
 									>
 										Detect &amp; Preview
-									</button>
+									</Button>
 								</div>
 							)}
 							{phase === "error" && (
-								<p
-									className="mt-3 text-[12px]"
-									style={{ color: "var(--destructive-text)" }}
-								>
-									{error}
-								</p>
+								<p className="mt-3 text-[12px] text-destructive-text">{error}</p>
 							)}
 						</>
 					)}
@@ -285,20 +302,16 @@ export function ImportModal() {
 							</span>
 						</label>
 						<div className="flex gap-2">
-							<button
+							<Button
+								variant="outline"
 								onClick={handleClose}
 								disabled={importMutation.isPending}
-								className="h-9 rounded-md border border-border px-4 text-[13px]"
 							>
 								Cancel
-							</button>
-							<button
-								onClick={handleImport}
-								disabled={importMutation.isPending}
-								className="h-9 rounded-md bg-primary-fill px-4 text-[13px] font-semibold text-white disabled:opacity-50"
-							>
+							</Button>
+							<Button onClick={handleImport} disabled={importMutation.isPending}>
 								{importMutation.isPending ? "Importing…" : "Import →"}
-							</button>
+							</Button>
 						</div>
 					</div>
 				)}
@@ -311,10 +324,7 @@ function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: (
 	const { meta, collections } = result;
 	return (
 		<div className="space-y-3">
-			<div
-				className="flex items-center gap-2 rounded-md border px-3 py-2"
-				style={{ background: "rgba(34,197,94,0.08)", borderColor: "rgba(34,197,94,0.22)" }}
-			>
+			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
 				<CheckCircle2 className="h-4 w-4 text-status-success" />
 				<span className="text-[12px] font-semibold">{meta.format}</span>
 				{meta.fileName && (
@@ -340,10 +350,7 @@ function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: (
 				environments
 			</p>
 			{(meta.skipped.length > 0 || meta.nonExecutableAuth > 0) && (
-				<p
-					className="flex items-center gap-1.5 text-[11px]"
-					style={{ color: "var(--destructive-text)" }}
-				>
+				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
 					<AlertTriangle className="h-3.5 w-3.5" />
 					{[
 						...meta.skipped.map((s) => `${s.count} ${s.kind}`),
