@@ -18,13 +18,23 @@
  * drifted into the MCP settings panel, where they stayed rounded for a user who
  * had chosen Square.
  *
- * `rounded-full` and `rounded-none` are deliberately fixed — pills, dots and
- * squared-off edges are not meant to follow the setting — so they are allowed.
+ * `rounded-full` and `rounded-none` are deliberately fixed — circles, switch
+ * tracks and squared-off tab strips are not meant to follow the setting — so
+ * they are allowed as classes.
+ *
+ * The other way to escape the setting is an inline `borderRadius`, which no
+ * class scan catches. The chart tooltip had one (`"6px"`), so it stayed rounded
+ * on Square and stopped short of the app's own tooltip on Rounded. Inline radii
+ * are now allowed only when they are a `var(--radius…)` reference or a
+ * percentage (a circle), plus the roundedness setting's own preview swatches,
+ * which have to show every option regardless of which one is active.
  */
 
 import { describe, it, expect } from "vitest";
 
-const sources = import.meta.glob("/src/**/*.{tsx,css}", {
+// .ts as well as .tsx: an inline radius can be set from a plain module —
+// the chart tooltip that started this was one.
+const sources = import.meta.glob("/src/**/*.{ts,tsx,css}", {
 	query: "?raw",
 	import: "default",
 	eager: true,
@@ -40,6 +50,27 @@ describe("corner radius tracks the roundedness setting", () => {
 			0
 		);
 		expect(total).toBeGreaterThan(50);
+	});
+
+	it("uses no hardcoded inline borderRadius", () => {
+		// `style={{ borderRadius: "6px" }}` is invisible to a class scan and to
+		// the setting alike. Percentages are circles and `var(--radius…)` tracks,
+		// so both are fine.
+		const offenders: string[] = [];
+		for (const [path, src] of Object.entries(sources)) {
+			if (path.includes(".test.")) continue;
+			// The Appearance panel draws one swatch per roundedness option; each
+			// must render its own radius, not the active one.
+			if (path.endsWith("AppearancePanel.tsx")) continue;
+			for (const line of (src as string).split("\n")) {
+				const m = line.match(/borderRadius:\s*("[^"]*"|'[^']*'|`[^`]*`)/);
+				if (!m) continue;
+				const value = m[1].slice(1, -1);
+				if (value.includes("var(--radius") || value.endsWith("%")) continue;
+				offenders.push(`${path}: ${line.trim().slice(0, 88)}`);
+			}
+		}
+		expect(offenders).toEqual([]);
 	});
 
 	it("uses no bare `rounded`, which ignores --radius", () => {

@@ -120,7 +120,8 @@ export function tooltipPlugin(opts: {
 					background: "hsl(var(--card))",
 					color: "hsl(var(--card-foreground))",
 					border: "1px solid hsl(var(--border))",
-					borderRadius: "6px",
+					// Tracks the roundedness setting, like the app's own tooltip.
+					borderRadius: "var(--radius-md)",
 					boxShadow: "0 4px 12px hsl(var(--foreground) / 0.14)",
 					transform: "translate(-50%, calc(-100% - 12px))",
 					whiteSpace: "nowrap",
