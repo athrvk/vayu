@@ -182,7 +182,12 @@ export default function HistoryList() {
 						{isLoading && <ListSkeleton rows={4} leading badge />}
 
 						{!isLoading && runs.length === 0 && (
+							// `h-full` because this scroll container is not a flex
+							// column, so `flex-1` has nothing to grow against. Without
+							// it the block sits at the top while the collections
+							// drawer — whose container *is* a flex column — centres.
 							<EmptyState
+								className="h-full"
 								icon={Clock}
 								title="No test runs found"
 								description={

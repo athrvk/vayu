@@ -23,6 +23,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useDashboardStore } from "@/stores";
 import { apiService, loadTestService } from "@/services";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/shared";
 import { DashboardHeader, MetricsView, RequestResponseView } from "./components";
 import { TIMING } from "@/config/timing";
 import type { DashboardView, DisplayMetrics } from "./types";
@@ -294,11 +295,7 @@ export default function LoadTestDashboard() {
 	// Empty state — placed after all hooks so the hook call order stays stable
 	// across renders (Rules of Hooks); the memos above are null-safe with no run.
 	if (!currentRunId) {
-		return (
-			<div className="flex-1 flex items-center justify-center text-muted-foreground">
-				<p>No active load test</p>
-			</div>
-		);
+		return <EmptyState title="No active load test" />;
 	}
 
 	return (
