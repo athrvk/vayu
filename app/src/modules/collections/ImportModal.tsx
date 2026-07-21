@@ -5,8 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Upload, CheckCircle2, X, Folder, AlertTriangle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui";
 import { useImportModalStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
 import { apiService } from "@/services/api";
@@ -123,40 +124,32 @@ export function ImportModal() {
 		redetect({ importEnvironments, importScripts: v });
 	};
 
-	useEffect(() => {
-		if (!isOpen) return;
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") handleClose();
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isOpen, importMutation.isPending]);
-
-	if (!isOpen) return null;
-
 	return (
-		<div
-			className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-			onClick={handleClose}
-		>
-			<div
-				role="dialog"
-				aria-modal="true"
-				aria-label="Import Collection"
-				className="flex w-[500px] max-h-[82vh] flex-col overflow-hidden rounded-lg border border-border-strong bg-card shadow-2xl"
-				onClick={(e) => e.stopPropagation()}
+		/*
+		 * This used to hand-roll its own modal: a fixed backdrop, a bare
+		 * role="dialog", a window keydown listener for Escape and its own close
+		 * button. That meant no focus trap, no focus restore on close, no portal
+		 * (so it rendered inside the tree that opened it), no scroll lock and no
+		 * inerting of the background — all of which Radix gives for free, and
+		 * none of which the app's other dialogs were missing.
+		 *
+		 * Radix now owns the shell: Escape, the overlay click, focus and the
+		 * shared presentation animation. Only the body below is ImportModal's.
+		 */
+		<Dialog open={isOpen} onOpenChange={(next) => !next && handleClose()}>
+			<DialogContent
+				// Overrides the default padded grid: this dialog manages its own
+				// header/tabs/body/footer bands, each with its own divider.
+				className="flex w-[500px] max-w-[500px] max-h-[82vh] flex-col gap-0 overflow-hidden border-border-strong bg-card p-0"
+				// No prose description; without this Radix logs a missing
+				// aria-describedby warning.
+				aria-describedby={undefined}
 			>
-				<div className="flex items-center justify-between border-b border-border px-5 py-4">
-					<h2 className="text-sm font-bold tracking-tight">Import Collection</h2>
-					<button
-						onClick={handleClose}
-						className="text-muted-foreground hover:text-foreground"
-						aria-label="Close"
-					>
-						<X className="h-4 w-4" />
-					</button>
-				</div>
+				<DialogHeader className="flex-row items-center justify-between space-y-0 border-b border-border px-5 py-4">
+					<DialogTitle className="text-sm font-bold tracking-tight">
+						Import Collection
+					</DialogTitle>
+				</DialogHeader>
 
 				<div role="tablist" className="flex gap-4 border-b border-border px-5">
 					{(["file", "url", "paste"] as Tab[]).map((t) => (
@@ -309,8 +302,8 @@ export function ImportModal() {
 						</div>
 					</div>
 				)}
-			</div>
-		</div>
+			</DialogContent>
+		</Dialog>
 	);
 }
 
