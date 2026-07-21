@@ -44,7 +44,16 @@ export default function UrlBar() {
 						Sending
 					</>
 				) : (
-					<>▶ Send</>
+					<>
+						{/*
+						 * The triangle is decoration, but it is a text node, so it
+						 * lands in the button's accessible name — screen readers
+						 * announce U+25B6 by its Unicode name before the word
+						 * "Send". Hidden rather than removed: it is doing visual
+						 * work in a bar of otherwise identical-looking buttons.
+						 */}
+						<span aria-hidden="true">▶</span> Send
+					</>
 				)}
 			</button>
 			{/* Load Test button — while a run is live it becomes a shortcut to the
