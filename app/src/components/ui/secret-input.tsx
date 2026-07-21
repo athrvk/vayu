@@ -47,8 +47,12 @@ export function SecretInput({
 			/>
 			<TooltipIconButton
 				type="button"
-				// Not a tab stop — it's an affordance on the field, not a form control.
-				tabIndex={-1}
+				// Was `tabIndex={-1}`, on the reasoning that this is an affordance on
+				// the field rather than a form control. True, but the consequence was
+				// that a keyboard-only user had no way at all to reveal a Basic-auth
+				// password or an OAuth client secret to check what they had typed —
+				// the one thing the control exists for. One extra stop per secret
+				// field is a fair price.
 				disabled={disabled}
 				onClick={() => setRevealed((v) => !v)}
 				className="absolute right-0 top-0 h-full w-9 text-muted-foreground hover:text-foreground"

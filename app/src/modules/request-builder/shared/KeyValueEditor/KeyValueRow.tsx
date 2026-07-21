@@ -132,7 +132,12 @@ function KeyValueRow({
 				disabled={isReadOnly || !canRemove}
 				aria-label="Remove row"
 				className={cn(
-					"h-8 w-8 transition-opacity",
+					// `focus-visible:opacity-100` is not decoration. The button was
+					// revealed on hover only, so a keyboard user tabbing through a
+					// headers table landed on a fully transparent control — including
+					// its focus ring — once per row, and Enter there silently deleted
+					// the row they could not see they were on.
+					"h-8 w-8 transition-opacity focus-visible:opacity-100",
 					!canRemove
 						? "opacity-0 cursor-not-allowed"
 						: "opacity-0 group-hover:opacity-100"

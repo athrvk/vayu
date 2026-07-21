@@ -153,11 +153,37 @@ export function VariablePopover({
 		}
 	};
 
-	// Wrap trigger in span with click handler
+	/**
+	 * The trigger is a `<span>`, because a `{{variable}}` token sits inline in the
+	 * middle of a URL or a header value and must not break the text flow.
+	 *
+	 * Radix's `asChild` clones its click handler and `aria-*` onto this span, but
+	 * it does not make a span focusable — it assumes the child is already an
+	 * interactive element. So every variable token in the app was mouse-only: a
+	 * keyboard user could not open the popover to see what a variable resolved
+	 * to, or edit it, anywhere in the URL bar, headers, params or auth fields.
+	 *
+	 * `role="button"` plus `tabIndex` plus Enter/Space is what a `<button>` would
+	 * have given for free, minus the block-level layout that would wreck the
+	 * inline flow. `disabled` tokens leave the tab order rather than sitting in it
+	 * doing nothing.
+	 */
 	const triggerElement = (
 		<span
+			role="button"
+			tabIndex={disabled ? -1 : 0}
 			className={triggerClassName}
 			onClick={handleTriggerClick}
+			onKeyDown={(e) => {
+				if (disabled) return;
+				if (e.key === "Enter" || e.key === " ") {
+					// Space in particular: the token is usually inside a text input,
+					// where it would otherwise type a space.
+					e.preventDefault();
+					e.stopPropagation();
+					setIsOpen(true);
+				}
+			}}
 			style={{ display: "inline" }}
 		>
 			{trigger}
