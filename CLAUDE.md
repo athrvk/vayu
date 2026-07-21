@@ -224,14 +224,42 @@ Release notes live on the [GitHub Releases](https://github.com/athrvk/vayu/relea
 
 **Authoring the notes (Claude's job before tagging).** When preparing a release, write `.github/release-notes/vX.Y.Z.md` in the format above, derived from `git log vPREV..vX.Y.Z`; read a recent entry to match voice. The file *is* the release body, so it needs no tooling to publish — CI handles it. Because the workflow resolves the file from the tagged commit's tree, the notes file must be committed **before** the tag is pushed (i.e., it rides along in the release PR). To correct a published release's notes after the fact, edit the file, then either re-run the release workflow or update the release body by hand.
 
-## Key Docs
+## Docs — keep them in step with the code
 
-- `docs/architecture.md` - sidecar pattern details
-- `docs/building.md` - platform-specific build notes
-- `docs/design-system.md` - UI tokens, elevation, component patterns, typography
-- `docs/app/COMPONENTS.md` - React component architecture (`modules/` + `components/`)
-- `docs/app/import-collections/` - import parser pipeline + per-format mapping (Postman/Insomnia/OpenAPI)
-- `docs/engine/api-reference.md` - engine HTTP API
-- `docs/engine/architecture.md` - engine internals, incl. engine-side auth resolution (bearer/basic/apikey/oauth2)
-- `docs/engine/db-schema.md` - SQLite tables and JSON shapes (runs, metrics, oauth_tokens)
-- `CONTRIBUTING.md` - PR process and code style
+**If you change something a doc describes, update that doc in the same commit.**
+These are reference material future sessions are told to trust, so a stale line
+is worse than a missing one — the design-system doc had drifted five separate
+ways before anyone checked.
+
+| Doc | Covers | Update it when you change… |
+|-----|--------|----------------------------|
+| `docs/architecture.md` | Sidecar pattern, process model | How app and engine talk, lifecycle, ports |
+| `docs/building.md` | Cross-platform build notes | `build.py`, prerequisites, platform quirks |
+| `docs/design-system.md` | UI tokens, elevation, type, component patterns | Any token value, colour rule, radius, or shared UI primitive |
+| `docs/app/COMPONENTS.md` | React structure (`modules/` + `components/`) | Adding or moving a module / shared component |
+| `docs/app/architecture.md` | Renderer architecture | Renderer-side structural decisions |
+| `docs/app/state-management.md` | Zustand stores + TanStack Query | Adding a store, changing query keys or cache policy |
+| `docs/app/api-integration.md` | Renderer ↔ engine calls | Request/response shapes the renderer sends |
+| `docs/app/variable-resolution.md` | `{{var}}` resolution + scope precedence | Resolution order, scopes, the resolver hook |
+| `docs/app/import-collections/` | Import pipeline + per-format mapping | Detectors, drafts, any format mapping |
+| `docs/app/pm-api-compatibility.md` | Postman `pm.*` surface | Which `pm.*` APIs the runtime supports |
+| `docs/app/file-name-conventions.md` | Naming rules | The conventions themselves |
+| `docs/app/building.md` | App build | App build steps or tooling |
+| `docs/engine/architecture.md` | Engine internals, engine-side auth | Core engine structure, auth resolution |
+| `docs/engine/api-reference.md` | Engine HTTP API | **Any** endpoint, payload, or status code |
+| `docs/engine/db-schema.md` | SQLite tables + JSON shapes | Schema, migrations, stored JSON |
+| `docs/engine/scripting.md` | QuickJS runtime + script API | Script globals, hooks, sandbox limits |
+| `docs/engine/mcp.md` | MCP server surface | MCP tools or their schemas |
+| `docs/engine/cli.md` | Engine CLI | Flags or subcommands |
+| `docs/engine/benchmarks.md` | Perf numbers + method | Load generation or measurement |
+| `docs/engine/building.md` | Engine build | CMake presets, vcpkg deps |
+| `docs/lock-file-handling.md` | Lock-file strategy | Lock / concurrency behaviour |
+| `docs/request-storage-design.md` | Request persistence design | How requests are stored |
+| `docs/plans/pending-backlog.md` | Deferred work (e.g. A1) | Deferring something, or picking it up |
+| `CONTRIBUTING.md` | PR process, code style | Process or style rules |
+
+Module READMEs carry the *why* for their feature and are easy to miss:
+`app/src/modules/README.md`, plus one each for `welcome/`, `request-builder/`
+and `dashboard/`.
+
+Release notes live in `.github/release-notes/vX.Y.Z.md` — see **Releasing**.
