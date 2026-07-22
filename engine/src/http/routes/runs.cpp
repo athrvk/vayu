@@ -53,7 +53,13 @@ void register_run_routes (RouteContext& ctx) {
             if (run) {
                 vayu::utils::log_debug ("GET /run/:id - Found run: " + run_id +
                 ", type=" + to_string (run->type) + ", status=" + to_string (run->status));
-                res.set_content (vayu::json::serialize (*run).dump (), "application/json");
+                auto payload = vayu::json::serialize (*run);
+                // A design run is one exchange, so it travels with the run.
+                // Load runs keep theirs in the report, where `results` means
+                // the sampled subset.
+                vayu::json::attach_design_result (
+                payload, *run, ctx.db.get_results (run_id));
+                res.set_content (payload.dump (), "application/json");
             } else {
                 vayu::utils::log_warning ("GET /run/:id - Run not found: " + run_id);
                 send_error (res, 404, "Run not found");

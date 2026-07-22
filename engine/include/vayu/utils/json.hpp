@@ -62,6 +62,20 @@ using Json = nlohmann::json;
 [[nodiscard]] Json serialize (const vayu::db::Metric& metric);
 
 /**
+ * Attach a design run's single exchange to its serialized run object.
+ *
+ * A design run is one request and one response, so the exchange belongs with
+ * the run rather than inside `GET /run/:id/report` - that report is a load-test
+ * aggregate whose summary, for a design run, is computed from one sample.
+ *
+ * Does nothing for a load run, where `results` means the sampled subset and
+ * belongs in the report. Does nothing when there are no results.
+ */
+void attach_design_result (nlohmann::json& json,
+const vayu::db::Run& run,
+const std::vector<vayu::db::Result>& results);
+
+/**
  * @brief Deserialize a Request from JSON
  */
 [[nodiscard]] Result<Request> deserialize_request (const Json& json);

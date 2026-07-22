@@ -129,6 +129,30 @@ Json serialize (const vayu::db::Run& run) {
     return json;
 }
 
+void attach_design_result (nlohmann::json& json,
+const vayu::db::Run& run,
+const std::vector<vayu::db::Result>& results) {
+    if (run.type != vayu::RunType::Design || results.empty ())
+        return;
+
+    const auto& result = results.front ();
+    nlohmann::json out;
+    out["timestamp"]  = result.timestamp;
+    out["statusCode"] = result.status_code;
+    out["statusText"] = result.status_text;
+    out["latencyMs"]  = result.latency_ms;
+    if (!result.error.empty ())
+        out["error"] = result.error;
+    if (!result.trace_data.empty ()) {
+        try {
+            out["trace"] = nlohmann::json::parse (result.trace_data);
+        } catch (...) {
+            out["trace"] = result.trace_data;
+        }
+    }
+    json["result"] = out;
+}
+
 Json serialize (const vayu::db::Collection& c) {
     Json json;
     json["id"] = c.id;

@@ -646,7 +646,35 @@ List all test runs (both design mode and load tests).
 
 Get details for a specific run.
 
-**Response:** Run object with full details.
+**Response:** The run object shown in `GET /runs` (`id`, `requestId`,
+`environmentId`, `type`, `status`, `configSnapshot`, `startTime`, `endTime`).
+
+For a `design` run that has at least one stored result, the response also
+carries a `result` object with that run's single exchange - the only other
+place it appears is `GET /run/:runId/report`, whose `results` array and
+`metadata.configuration` are load-test concepts and are absent for a design
+run.
+
+```json
+{
+  "id": "run_1234567890",
+  "requestId": "req_1234567890",
+  "environmentId": null,
+  "type": "design",
+  "status": "completed",
+  "configSnapshot": { "...": "the raw run payload" },
+  "startTime": 1234567890,
+  "endTime": 1234567891,
+  "result": {
+    "timestamp": 1234567891,
+    "statusCode": 200,
+    "statusText": "OK",
+    "latencyMs": 42.1,
+    "error": "optional, only when the request failed",
+    "trace": { "request": { "...": "..." }, "response": { "...": "..." } }
+  }
+}
+```
 
 ### POST /run/:runId/stop
 
