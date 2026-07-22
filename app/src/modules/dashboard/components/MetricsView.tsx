@@ -28,6 +28,7 @@ import { useDashboardStore } from "@/stores";
 import type { MetricsViewProps, DashboardDerived } from "../types";
 import { InfoChip, fmt } from "./shared";
 import { TOOLTIPS } from "./tooltips";
+import { STATUS_CLASS_SERIES, STATUS_CLASS_CSS_VAR } from "@/constants/http-status";
 import { useMode } from "../hooks/useMode";
 import {
 	isRateLimitedRun,
@@ -388,18 +389,17 @@ function MetricsView({
 							Status codes over time
 							<InfoChip tip={TOOLTIPS.statusCodesOverTime} />
 						</h3>
+						{/*
+						    Driven by `constants/http-status`, not a literal list. These
+						    five were hardcoded `hsl(var(--success))` strings, so when the
+						    chart moved onto the status token family every swatch silently
+						    became a different colour from the band it labels.
+						 */}
 						<div className="flex items-center gap-3.5 text-[11px] font-mono text-muted-foreground">
-							{(
-								[
-									["2xx", "hsl(var(--success))"],
-									// Must match StatusCodesOverTimeChart's `categorical`
-									// role, not `--primary` - see the note there.
-									["3xx", "hsl(var(--chart-3))"],
-									["4xx", "hsl(var(--warning))"],
-									["5xx", "hsl(var(--destructive))"],
-									["err", "hsl(var(--destructive) / 0.5)"],
-								] as const
-							).map(([label, color]) => (
+							{STATUS_CLASS_SERIES.map(({ label, cls }) => ({
+								label,
+								color: `hsl(var(${STATUS_CLASS_CSS_VAR[cls]}))`,
+							})).map(({ label, color }) => (
 								<span key={label}>
 									<span
 										className="inline-block w-2.5 h-2.5 mr-1.5 align-middle rounded-sm"

@@ -214,7 +214,14 @@
 		--warning: 38 92% 50%;
 		--warning-foreground: 0 0% 100%;
 		--warning-text: 38 90% 30%;
-		--info: 199 89% 48%;
+		/* Split per theme, like every other semantic token here. It was
+		 * `199 89% 48%` in both, which measured **2.85** on a light card
+		 * against the 3.0 bar - and it paints three chart series (wire,
+		 * send rate, connections), so it was failing where it is actually
+		 * used. Mode-consistency is deliberate for `--status-*` indicators,
+		 * where one value must read as the same signal on either surface;
+		 * `--info` had no such reason and was never measured. */
+		--info: 199 89% 38%; /* cyan - see the note below */
 		--info-foreground: 0 0% 100%;
 
 		/* Variable scope (categorical) - global / collection / environment.
@@ -456,7 +463,7 @@
 		--warning: 38 92% 50%;
 		--warning-foreground: 0 0% 100%;
 		--warning-text: 40 92% 60%; /* accessible amber text on dark bg */
-		--info: 199 89% 48%;
+		--info: 199 89% 55%; /* brighter on a near-black plot: 7.30 */
 		--info-foreground: 0 0% 100%;
 
 		/* Variable scope (categorical) - lighter tints for dark surfaces. */

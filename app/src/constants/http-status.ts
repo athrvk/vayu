@@ -121,6 +121,37 @@ export const STATUS_CLASS_STYLE: Record<HttpStatusClass, StatusClassStyle> = {
 };
 
 /**
+ * The CSS custom property behind each class, for the places that cannot use a
+ * Tailwind utility: a Canvas chart handing uPlot a colour string, and the
+ * legend swatch beside it that is styled inline.
+ *
+ * This exists because the legend was a sixth copy of the vocabulary. It listed
+ * all five colours as literal `hsl(var(--success))` strings, and when the chart
+ * moved onto the status family every one of them silently became wrong - a
+ * legend disagreeing with the plot it labels, which is worse than either being
+ * off alone. Both now read from here.
+ */
+export const STATUS_CLASS_CSS_VAR: Record<HttpStatusClass, string> = {
+	success: "--status-success",
+	redirect: "--status-redirect",
+	"client-error": "--status-warning",
+	"server-error": "--status-error",
+	"no-response": "--status-no-response",
+};
+
+/**
+ * The status classes in the order a stacked chart and its legend present them,
+ * with the short label each is shown by.
+ */
+export const STATUS_CLASS_SERIES: ReadonlyArray<{ label: string; cls: HttpStatusClass }> = [
+	{ label: "2xx", cls: "success" },
+	{ label: "3xx", cls: "redirect" },
+	{ label: "4xx", cls: "client-error" },
+	{ label: "5xx", cls: "server-error" },
+	{ label: "err", cls: "no-response" },
+];
+
+/**
  * What to print when there is no number to print.
  *
  * Only `no-response` has a label of its own - the others show the code itself.

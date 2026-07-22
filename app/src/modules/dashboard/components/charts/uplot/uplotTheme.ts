@@ -17,16 +17,30 @@
  * every color still comes from the design system, nothing is hard-coded.
  */
 
+import { STATUS_CLASS_CSS_VAR } from "@/constants/http-status";
+
 /** Semantic color roles, mapped to CSS custom properties. */
+/*
+ * There is deliberately no `primary` or `accent` role.
+ *
+ * Both existed, both resolved to accent-tracking tokens, and neither had a
+ * single consumer - four series had used `primary` and were moved off it,
+ * because a series painted with the user's accent changes hue per theme and can
+ * land on top of a semantic neighbour. CLAUDE.md forbids it and
+ * `status-code-series.test.ts` scans for it.
+ *
+ * A scan catches the mistake after it is written; leaving the roles out of the
+ * union means the compiler catches it instead. Nothing is lost: a genuinely
+ * categorical series wants `categorical`, and if the accent is ever wanted
+ * deliberately it should arrive with a name that says so.
+ */
 export type ColorRole =
-	| "primary"
 	| "success"
 	| "warning"
 	| "destructive"
 	| "info"
 	| "muted"
 	| "subtle"
-	| "accent"
 	/**
 	 * A categorical series colour, for data that has no semantic meaning of its
 	 * own and must stay distinct from the semantic roles above.
@@ -60,21 +74,25 @@ export type ColorRole =
 	| "status-server-error"
 	| "status-no-response";
 
-const ROLE_TOKEN: Record<ColorRole, string> = {
-	primary: "--primary",
+/**
+ * Exported for `status-code-series.test.ts`, which asserts the status roles
+ * resolve to the `--status-*` family. That was a source scan and broke the
+ * moment the values stopped being string literals - the object is the truth,
+ * so the test reads the object.
+ */
+export const ROLE_TOKEN: Record<ColorRole, string> = {
 	success: "--success",
 	warning: "--warning",
 	destructive: "--destructive",
 	info: "--info",
 	muted: "--muted-foreground",
 	subtle: "--subtle-foreground",
-	accent: "--accent",
 	categorical: "--chart-3",
-	"status-success": "--status-success",
-	"status-redirect": "--status-redirect",
-	"status-client-error": "--status-warning",
-	"status-server-error": "--status-error",
-	"status-no-response": "--status-no-response",
+	"status-success": STATUS_CLASS_CSS_VAR.success,
+	"status-redirect": STATUS_CLASS_CSS_VAR.redirect,
+	"status-client-error": STATUS_CLASS_CSS_VAR["client-error"],
+	"status-server-error": STATUS_CLASS_CSS_VAR["server-error"],
+	"status-no-response": STATUS_CLASS_CSS_VAR["no-response"],
 };
 
 export interface UplotTheme {

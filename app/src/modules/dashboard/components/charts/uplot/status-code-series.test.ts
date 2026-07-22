@@ -34,6 +34,8 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { ROLE_TOKEN } from "./uplotTheme";
+import { STATUS_CLASS_CSS_VAR } from "@/constants/http-status";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -118,16 +120,18 @@ describe("chart series colours", () => {
 			expect(role, `${role} is not a status role`).toMatch(/^status-/);
 		}
 
-		// Whitespace-normalised substring rather than a built RegExp: the escape
-		// in `\\s` does not survive a template literal cleanly and silently
-		// degraded to matching a literal "s", which made this assertion pass
-		// against a theme file it had never really read.
-		const theme = read("uplotTheme.ts").replace(/\s+/g, " ");
+		// The object, not its source text. The previous version matched on a
+		// literal `"status-redirect": "--status-` and broke as soon as the map
+		// referenced STATUS_CLASS_CSS_VAR instead of inlining the string - a
+		// passing scan says nothing about what the chart actually resolves.
 		for (const role of new Set(used)) {
-			expect(theme, `${role} must resolve to a --status-* token`).toContain(
-				`"${role}": "--status-`
-			);
+			const mapped = ROLE_TOKEN[role as keyof typeof ROLE_TOKEN];
+			expect(mapped, `${role} must resolve to a --status-* token`).toMatch(/^--status-/);
 		}
+
+		// And that those are the same tokens the badges and tiles use.
+		expect(ROLE_TOKEN["status-redirect"]).toBe(STATUS_CLASS_CSS_VAR.redirect);
+		expect(ROLE_TOKEN["status-no-response"]).toBe(STATUS_CLASS_CSS_VAR["no-response"]);
 	});
 
 	it("resolves the categorical role to a token that does not follow the accent", () => {

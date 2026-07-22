@@ -135,6 +135,76 @@ describe("-fill tier carries a white label at 4.5", () => {
 	});
 });
 
+describe("every token a chart series paints clears 3.0 on its own plot", () => {
+	/**
+	 * The plot sits on `--card`, so a series colour has the same job as an icon:
+	 * be distinguishable from the surface behind it.
+	 *
+	 * `--info` failed this. It was `199 89% 48%` in *both* themes - the only
+	 * theme-blind entry in `ROLE_TOKEN` - and measured **2.85** on a light card
+	 * while painting three series (wire, send rate, connections). Mode-consistency
+	 * is deliberate for `--status-*` indicators, where one value must read as the
+	 * same signal on either surface; `--info` had no such reason and had simply
+	 * never been measured.
+	 */
+	const SERIES_TOKENS = [
+		"success",
+		"info",
+		"muted-foreground",
+		"subtle-foreground",
+		"chart-3",
+		"status-redirect",
+		"status-warning",
+		"status-error",
+		"status-no-response",
+	];
+
+	it.each(SERIES_TOKENS)("%s", (name) => {
+		for (const theme of ["light", "dark"] as const) {
+			expect(
+				contrast(token(name, theme), CARD[theme]),
+				`--${name} on ${theme}`
+			).toBeGreaterThanOrEqual(3.0);
+		}
+	});
+
+	/**
+	 * Three tokens paint chart series and do not clear the bar. They are recorded
+	 * with their measured values rather than excluded silently, and asserted so
+	 * the gap cannot widen unnoticed - the same treatment `--input` got when it
+	 * could not reach 3.0 without turning every field into a hard outline.
+	 *
+	 * `--status-success` is deliberate: `index.css` states the four original
+	 * status indicators are mode-consistent so a green dot reads as "good" on
+	 * either surface, trading the icon bar for that. The other two are not
+	 * deliberate, they are untested inheritance:
+	 *
+	 *   --warning      light  2.14   amber-500 is intrinsically light. This is the
+	 *                                same measurement that forced --status-warning
+	 *                                down to 36%; --warning itself was left alone
+	 *                                because it is also a banner and button token.
+	 *   --destructive  dark   1.73   tuned as a button fill (a dark red), and used
+	 *                                as the p99 and error-rate series on a
+	 *                                near-black plot. The worst of the three.
+	 *
+	 * Fixing those two means splitting the chart tier from the button tier, which
+	 * is a larger change than this file should make on its own.
+	 */
+	const KNOWN_GAPS: Array<[string, "light" | "dark", number]> = [
+		["status-success", "light", 2.3],
+		["warning", "light", 2.14],
+		["destructive", "dark", 1.73],
+	];
+
+	it.each(KNOWN_GAPS)("%s is a known gap on %s, still around %d", (name, theme, expected) => {
+		const actual = contrast(token(name, theme), CARD[theme]);
+		expect(actual).toBeCloseTo(expected, 1);
+		// If one of these ever clears the bar, the gap is closed and the entry
+		// should move up into SERIES_TOKENS rather than linger here.
+		expect(actual, `--${name} now clears 3.0 - promote it`).toBeLessThan(3.0);
+	});
+});
+
 describe("the five classes stay visually apart", () => {
 	/**
 	 * OKLab distance, the measure used to place the accent schemes. Under ~0.10

@@ -151,15 +151,29 @@ These differ between light and dark mode.
 /* Light */
 --success:            142 76% 36%;   /* green */
 --warning:             38 92% 50%;   /* amber */
---info:               199 89% 48%;   /* cyan */
+--info:               199 89% 38%;   /* cyan */
 --destructive:          0 84% 48%;   /* red */
 
 /* Dark */
 --success:            142 70% 45%;   /* lighter green */
 --warning:             38 92% 50%;   /* same */
---info:               199 89% 48%;   /* same */
+--info:               199 89% 55%;   /* brighter on a dark plot */
 --destructive:          0 62.8% 30.6%;  /* darker red */
 ```
+
+`--info` used to be one value in both modes, like `--warning` still is. It was
+never measured, and at `199 89% 48%` it scored **2.85** on a light card against
+the 3.0 bar - while painting three chart series (wire, send rate, connections).
+Mode-consistency is deliberate for the `--status-*` indicators, where one value
+must read as the same signal on either surface; `--info` had no such reason, so
+it is split like everything else here.
+
+`--warning` is still one value and still measures 2.14 in light. It is left
+alone because it is a banner and button token as well as a series colour, and
+splitting the chart tier from the button tier is a larger change. It is recorded
+as a known gap in `status-token-contrast.test.ts` alongside `--destructive`,
+which is worse: tuned as a dark button fill, it measures **1.73** as a series on
+a near-black plot.
 
 **`-text` variants for legible text.** The base `--success` / `--warning` /
 `--destructive` tokens are tuned as *fills and indicators*; as small text on a
