@@ -447,7 +447,16 @@ export default function LoadTestConfigDialog({
 								{recordingOpen ? "Hide" : "Show"}
 							</span>
 						</CollapsibleTrigger>
-						<CollapsibleContent className="space-y-4 border-t border-border px-3 py-3">
+						{/*
+						    `border-border-strong`, not `border-border`. This divider sits
+						    *inside* the card, and `--border` is tuned for the canvas: its
+						    dark value is documented as "= rgba(255,255,255,0.07) on dark
+						    canvas", where it measures 1.14. On `--card` it measures
+						    **1.00** - the same colour, so the divider simply is not there
+						    in dark mode. `--border-strong` gives 1.28, which is what
+						    `--border` itself achieves on a card in light mode.
+						 */}
+						<CollapsibleContent className="space-y-4 border-t border-border-strong px-3 py-3">
 							<div className="space-y-1.5">
 								<Label htmlFor="lt-sample" className="text-xs">
 									Success sample rate

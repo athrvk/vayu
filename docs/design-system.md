@@ -281,6 +281,22 @@ things text contrast never touches: focus rings, control boundaries, and the
 |------|------:|-----:|---------|
 | `--ring` vs every surface | 4.57–5.39 | 5.11–6.75 | passes comfortably |
 | `--border` / `--input` vs card | 1.30 | 1.00 | decorative only - see below |
+
+**A divider *inside* a card needs `border-border-strong`.** `--border` is
+tuned for the canvas - its dark value is commented "= rgba(255,255,255,0.07)
+on dark canvas", where it measures 1.14. Measured against the surfaces it is
+actually used on:
+
+| | canvas | panel | card |
+|---|---:|---:|---:|
+| `--border` | 1.14 | 1.08 | **1.00** |
+| `--border-strong` | 1.47 | 1.39 | 1.28 |
+
+At 1.00 the divider is the same colour as the card and simply is not there
+in dark mode. `--border-strong` gives 1.28, which is what `--border` itself
+achieves on a card in light mode - so the strong token on dark reads the way
+the default token reads on light. This is not enforced by a test: whether a
+border sits on a card is an ancestry question a source scan cannot answer.
 | switch **off** track vs card | 1.55 | 1.28 | failed |
 | switch off **thumb** vs its track | 1.41 | 12.35 | failed in light |
 | switch **on** track vs card | 5.39 | 5.89 | passes |
