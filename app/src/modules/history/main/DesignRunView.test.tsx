@@ -26,7 +26,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import DesignRunView from "./DesignRunView";
@@ -41,12 +41,22 @@ vi.mock("@/hooks/useEngine", () => ({
 
 // The live request behind the run. `null` is the "request was deleted" case.
 let liveRequest: Request | null = null;
+/*
+ * Whether the lookup is still in flight. This is the distinction the view has
+ * to make: `undefined` data means "deleted" only once the query has settled,
+ * and there is no `GET /requests/:id` - the lookup fetches every collection's
+ * list and scans, so on a cold cache it is genuinely slow.
+ */
+let isLoadingRequest = false;
 
 vi.mock("@/queries", async () => {
 	const actual = await vi.importActual<typeof import("@/queries")>("@/queries");
 	return {
 		...actual,
-		useRequestQuery: () => ({ data: liveRequest ?? undefined }),
+		useRequestQuery: () => ({
+			data: liveRequest ?? undefined,
+			isLoading: isLoadingRequest,
+		}),
 		useCollectionAncestors: () => [],
 		useUpdateRequestMutation: () => ({ mutateAsync: updateRequest, isPending: false }),
 	};
@@ -123,8 +133,18 @@ function selectTab(name: RegExp) {
 	fireEvent.mouseDown(screen.getByRole("tab", { name }));
 }
 
+/**
+ * The request pane's tablist is the first of the two. Needed for Headers, Body
+ * and Tests, which name a tab in both panes.
+ */
+function selectRequestTab(name: RegExp) {
+	const requestTabs = screen.getAllByRole("tablist")[0];
+	fireEvent.mouseDown(within(requestTabs).getByRole("tab", { name }));
+}
+
 beforeEach(() => {
 	vi.clearAllMocks();
+	isLoadingRequest = false;
 	liveRequest = {
 		id: "req_1",
 		collectionId: "col_1",
@@ -304,5 +324,68 @@ describe("DesignRunView - saving back to the request", () => {
 		// answer about replaying it, and the header is editable to fix that.
 		expect(executeRequest.mock.calls[0][0].headers.Authorization).toBe("Bearer SECRET");
 		expect(executeRequest.mock.calls[0][0].auth).toBeUndefined();
+	});
+});
+
+describe("DesignRunView - the request lookup has to settle first", () => {
+	/*
+	 * The regression this pins: `seedFromRun` reads a falsy `liveRequest` as
+	 * "the request was deleted", and a query in flight is also falsy. Seeding
+	 * before it settles therefore produced the deleted-request seed - trace
+	 * headers carrying the recorded `Authorization`, and `authType: "none"` -
+	 * and the provider never corrected it, because its reset effect keys on
+	 * `initialRequest?.id`, which is null for every detached copy both before
+	 * and after. There is no `GET /requests/:id`, so a cold cache means the
+	 * lookup scans every collection's list: this window is real, not theoretical.
+	 */
+	it("seeds from the snapshot and the request's auth once the lookup resolves", async () => {
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+
+		// First render: cold cache, still looking.
+		isLoadingRequest = true;
+		liveRequest = null;
+		const { rerender } = renderView(designRun());
+
+		// Nothing is seeded yet - the builder must not mount on a guess.
+		expect(screen.queryByRole("textbox", { name: /request url/i })).toBeNull();
+
+		// The lookup lands.
+		isLoadingRequest = false;
+		liveRequest = {
+			id: "req_1",
+			collectionId: "col_1",
+			name: "Create user",
+			auth: { mode: "bearer", token: "FRESH-TOKEN" },
+		} as unknown as Request;
+		rerender(
+			<QueryClientProvider
+				client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+			>
+				<TooltipProvider>
+					<DesignRunView run={designRun()} />
+				</TooltipProvider>
+			</QueryClientProvider>
+		);
+
+		// The editor shows the *snapshot* headers, which carry no credential -
+		// not the wire headers, which carry the recorded bearer token.
+		selectRequestTab(/^headers/i);
+		expect(screen.getByDisplayValue("X-Plain")).toBeTruthy();
+		expect(screen.queryByDisplayValue("Authorization")).toBeNull();
+		expect(screen.queryByDisplayValue("Bearer SECRET")).toBeNull();
+
+		// And auth resolves fresh from the saved request rather than riding along
+		// inside a header, which is what the spec promises.
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
+
+		const payload = executeRequest.mock.calls[0][0];
+		expect(payload.auth).toEqual({ mode: "bearer", token: "FRESH-TOKEN" });
+		expect(payload.headers.Authorization).toBeUndefined();
 	});
 });

@@ -72,10 +72,25 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	 * The live request, when it still exists. It is the only source of
 	 * credentials - `sanitize_config_snapshot` strips auth down to its mode
 	 * before storing a run - so the seed needs it to decide where headers and
-	 * auth come from. A deleted request resolves to `undefined`, which the seed
-	 * reads as "replay the wire headers as they are".
+	 * auth come from.
+	 *
+	 * **Nothing may be seeded until this query has settled.** `seedFromRun`
+	 * branches on a falsy `liveRequest` and reads it as "the request was
+	 * deleted": wire headers including the recorded `Authorization`, and
+	 * `authType: "none"`. While the query is still in flight `data` is also
+	 * falsy, so seeding early produces exactly that deleted-request seed - and
+	 * the provider never takes a correction, because its reset effect is keyed
+	 * on `initialRequest?.id`, which is null before and after. The builder would
+	 * keep replaying the recorded token instead of resolving auth fresh.
+	 *
+	 * `isLoading` is `isPending && isFetching`, so a run with no `requestId`
+	 * disables the query and settles immediately rather than hanging here. A
+	 * deleted request settles as an error after its retries, so "gone" and
+	 * "still looking" stay distinguishable - which is the whole bug.
 	 */
-	const { data: liveRequest } = useRequestQuery(run.requestId ?? null);
+	const { data: liveRequest, isLoading: isResolvingRequest } = useRequestQuery(
+		run.requestId ?? null
+	);
 	const collectionAncestors = useCollectionAncestors(liveRequest?.collectionId);
 	const { resolveString, resolveObject } = useVariableResolver({
 		collectionId: liveRequest?.collectionId || undefined,
@@ -295,6 +310,21 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 			showToast,
 		]
 	);
+
+	/*
+	 * Hold the whole pane until the lookup settles, rather than mounting the
+	 * builder on a seed that says "deleted" and hoping to correct it. There is
+	 * no correction available: the provider seeds once per `initialRequest.id`,
+	 * and that id is null for every detached copy. Same spinner as the request
+	 * builder's own loading state, because this *is* the request builder.
+	 */
+	if (isResolvingRequest) {
+		return (
+			<div className="flex-1 flex items-center justify-center h-full">
+				<div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-[vayu-spin_0.7s_linear_infinite]" />
+			</div>
+		);
+	}
 
 	return (
 		<div className="flex flex-col h-full min-h-0">
