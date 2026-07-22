@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -57,14 +57,14 @@ jobs:
           version: 10
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: app/pnpm-lock.yaml
 
       - name: Cache vcpkg compiled packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
           key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
@@ -301,7 +301,7 @@ jobs:
 
       - name: Upload artifacts to release
         if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/*
