@@ -31,7 +31,16 @@ export default function UrlBar() {
 	return (
 		<div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel shrink-0">
 			<MethodSelector />
-			<UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-sm font-mono focus-within:border-primary focus-within:ring-0 transition-colors shadow-none" />
+			{/*
+			    `border-input`, not `border-border`. This is a text field, and
+			    `--input` was raised on this branch precisely so a field has an edge
+			    - but the URL bar spells its own border rather than inheriting the
+			    `Input` primitive, so that fix passed it by. Measured in the running
+			    app: `--border` on `--card` is **1.003**, meaning the most-used
+			    control in Vayu had no visible boundary in dark mode beyond the
+			    card-on-panel step, which is itself only 1.09.
+			 */}
+			<UrlInput className="flex-1 h-[34px] bg-card border border-input rounded-md px-3 text-sm font-mono focus-within:border-primary focus-within:ring-0 transition-colors shadow-none" />
 			{/* Send button with loading state */}
 			<button
 				onClick={executeRequest}
