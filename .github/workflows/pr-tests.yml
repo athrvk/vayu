@@ -33,12 +33,22 @@ jobs:
         uses: dorny/paths-filter@v3
         id: filter
         with:
-          # Same list the trigger used to carry. Leading `**` then exclusions:
-          # `code` is false only when every changed file matches an exclusion.
+          # `every`, not the default `some`. The default means "include the file
+          # if it matches at least one pattern" - and `**` matches everything,
+          # so every file short-circuits on the first line and the `!` patterns
+          # below never subtract anything. The filter could not return false,
+          # which the first run showed plainly: it listed CONTRIBUTING.md as a
+          # matching file. `every` requires all patterns to hold, so `**` admits
+          # the file and each exclusion can then reject it.
+          predicate-quantifier: every
+          # Same list the trigger used to carry. Both `*.md` and `**/*.md` are
+          # present because the first covers root-level files like README.md and
+          # the second covers nested ones.
           filters: |
             code:
               - '**'
               - '!docs/**'
+              - '!*.md'
               - '!**/*.md'
               - '!LICENSE'
               - '!.gitignore'

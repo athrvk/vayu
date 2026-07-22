@@ -1,0 +1,36 @@
+# GitHub Actions only, on purpose.
+#
+# The repository pulls in ten third-party actions and none are pinned to a
+# commit SHA, so keeping the tags current is the cheapest supply-chain work
+# available. Actions change rarely, so monthly is quiet.
+#
+# npm and vcpkg are deliberately absent. An Electron dependency tree produces a
+# steady stream of pull requests, and with a single code owner every one of them
+# lands on the same reviewer. Worth revisiting when there is more review
+# capacity, not before.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # One pull request for all of them rather than one per action.
+    groups:
+      actions:
+        patterns:
+          - '*'
+    open-pull-requests-limit: 5
+    # Gets a conventional type in front of the title: "ci: Bump the actions
+    # group ..." rather than a bare "Bump ...".
+    #
+    # It does not make the title pass `pr-title.yml`, which an earlier version
+    # of this comment claimed. Dependabot capitalises its subject and has no
+    # setting to stop it, so the `subjectPattern` rule rejects it regardless of
+    # the prefix. That workflow skips bots instead. The prefix is still worth
+    # setting: it is the half that lands in the commit on master after a squash
+    # merge, where the convention is the point.
+    commit-message:
+      prefix: ci
+    # There is deliberately no `labels:` key. Dependabot applies (and creates)
+    # `dependencies` on its own, whereas naming a label that does not exist yet
+    # is a config error, and this repository has no `dependencies` label.

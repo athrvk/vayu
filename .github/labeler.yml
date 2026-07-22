@@ -1,0 +1,42 @@
+# Path-based labels for pull requests, applied by .github/workflows/labeler.yml.
+#
+# Labels are not created on demand: every key here must already exist in the
+# repository or the run fails on it. `ci` and `build` were added alongside this
+# file; `app`, `engine` and `documentation` already existed.
+#
+# Overlap is expected and fine. A change to `.github/release-notes/*.md` is both
+# `ci` and `documentation`, and a release bump touching both trees earns `app`,
+# `engine` and `build` at once. These describe where a change lands, not what
+# kind of change it is, so `bug` and `enhancement` stay manual.
+
+app:
+  - changed-files:
+      - any-glob-to-any-file: 'app/**'
+
+engine:
+  - changed-files:
+      - any-glob-to-any-file: 'engine/**'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: '.github/**'
+
+# The build system spans both trees and the repo root, so this one is a list of
+# specific files rather than a directory: the version manifests, the CMake
+# configuration, the dependency manifests and the build script itself.
+build:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'build.py'
+          - 'VERSION'
+          - 'engine/CMakeLists.txt'
+          - 'engine/CMakePresets.json'
+          - 'engine/vcpkg.json'
+          - 'app/package.json'
+          - 'app/pnpm-lock.yaml'
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - '**/*.md'
