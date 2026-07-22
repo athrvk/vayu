@@ -33,6 +33,7 @@ export {
 	formatBody,
 	formatSize,
 	getMonacoLanguage,
+	buildRawRequest,
 	buildRawResponse,
 } from "./utils";
 

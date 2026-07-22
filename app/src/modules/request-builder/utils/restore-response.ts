@@ -20,6 +20,7 @@
 
 import type { RunReport } from "@/types";
 import type { ResponseState, ResponseTiming } from "../types";
+import { buildRawRequest } from "@/components/shared/response-viewer";
 
 /** One element of `RunReport.results` - the shape `GET /run/:id/report` returns. */
 export type RunResultSample = NonNullable<RunReport["results"]>[number];
@@ -66,15 +67,67 @@ function detectBodyType(body: string): ResponseState["bodyType"] {
 }
 
 /**
+ * The parts of a restored response that are the same whether the run succeeded
+ * or failed: what was sent.
+ */
+function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
+	const request = trace.request;
+	return {
+		requestHeaders: request?.headers || {},
+		rawRequest: request
+			? buildRawRequest(
+					request.method || "GET",
+					request.url || "",
+					request.headers || {},
+					request.body
+				)
+			: undefined,
+	};
+}
+
+/**
  * Reconstruct a `ResponseState` from the last stored design-run result.
  *
- * Returns `null` when the result has no response trace (an error-only run, or
- * a run recorded before the exchange was captured) - the caller then leaves the
- * response pane empty rather than showing a hollow 0-byte response.
+ * Returns `null` when the result carries neither a response trace nor an error
+ * (a run recorded before the exchange was captured) - the caller then leaves
+ * the response pane empty rather than showing a hollow 0-byte response.
  */
-export function responseFromRunResult(result: RunResultSample | undefined): ResponseState | null {
+export function responseFromRunResult(
+	result: RunResultSample | undefined,
+	runId?: string
+): ResponseState | null {
 	const trace = result?.trace;
-	if (!result || !trace?.response) return null;
+	if (!result || !trace) return null;
+
+	const restoredFrom = { runId, at: new Date(result.timestamp).toISOString() };
+
+	/*
+	 * A request that never reached a server stores no `response` node -
+	 * `store_result` writes `error_type`/`error_message` instead. Mapping it to
+	 * the same status-0 shape a live failure produces is what lets the builder's
+	 * `ClientErrorView` render it, icon, hint and code included. `error_type`
+	 * uses the same words as the live `errorCode` (`to_string(ErrorCode)` in
+	 * engine/include/vayu/types.hpp).
+	 */
+	if (!trace.response) {
+		const errorMessage = trace.error_message || result.error;
+		if (!trace.error_type && !errorMessage) return null;
+
+		return {
+			status: 0,
+			statusText: result.statusText || "Error",
+			headers: {},
+			...sentSide(trace),
+			body: errorMessage || "",
+			bodyType: "text",
+			size: 0,
+			time: result.latencyMs || 0,
+			timing: timingFromTrace(trace, result.latencyMs),
+			restoredFrom,
+			errorCode: trace.error_type,
+			errorMessage,
+		};
+	}
 
 	const raw = trace.response.body;
 	const body =
@@ -84,13 +137,12 @@ export function responseFromRunResult(result: RunResultSample | undefined): Resp
 		status: result.statusCode || 0,
 		statusText: result.statusText || "",
 		headers: trace.response.headers || {},
-		requestHeaders: trace.request?.headers || {},
-		rawRequest: trace.request ? `${trace.request.method} ${trace.request.url}` : undefined,
+		...sentSide(trace),
 		body,
 		bodyType: detectBodyType(body),
 		size: body.length,
 		time: result.latencyMs || 0,
 		timing: timingFromTrace(trace, result.latencyMs),
-		timestamp: new Date(result.timestamp).toISOString(),
+		restoredFrom,
 	};
 }
