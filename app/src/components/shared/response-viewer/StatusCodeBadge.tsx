@@ -32,7 +32,19 @@ export interface StatusCodeBadgeProps {
 }
 
 export function StatusCodeBadge({ status, statusText, className }: StatusCodeBadgeProps) {
-	const style = STATUS_CLASS_STYLE[httpStatusClass(status)];
+	const cls = httpStatusClass(status);
+	const style = STATUS_CLASS_STYLE[cls];
+
+	/*
+	 * `no-response` shows its label alone.
+	 *
+	 * Everywhere else the two halves say different things - "404" and "Not
+	 * Found" - so the reason phrase earns its place. When nothing came back
+	 * there is no code to pair with, `statusCodeLabel` already says "ERR", and
+	 * the engine fills `statusText` with "Error", so the chip read "ERR Error".
+	 * Two words for one fact, and the second is the vaguer of them.
+	 */
+	const reason = cls === "no-response" ? null : statusText;
 
 	return (
 		<Badge
@@ -40,7 +52,7 @@ export function StatusCodeBadge({ status, statusText, className }: StatusCodeBad
 			className={cn("font-mono shadow text-primary-foreground", style.fill, className)}
 		>
 			{statusCodeLabel(status)}
-			{statusText ? ` ${statusText}` : ""}
+			{reason ? ` ${reason}` : ""}
 		</Badge>
 	);
 }
