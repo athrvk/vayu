@@ -325,10 +325,17 @@ jobs:
   #      WINGET_TOKEN.
   # Until WINGET_TOKEN exists the submit step is skipped and the job is a green
   # no-op, so landing this ahead of the secret can never fail a release tag.
+  #
+  # `needs: build-and-publish` + `success()` means this only runs after the
+  # GitHub Release is fully published: build-and-publish is the job that both
+  # builds all three platforms AND uploads the assets (incl. Vayu-x64.exe) to
+  # the release, and its fail-fast:false matrix reports success only when every
+  # leg passes. Any failed build - even if another leg already created the
+  # release - leaves the release without the installer and skips this job.
   publish-winget:
     name: Publish to winget
     needs: build-and-publish
-    if: github.event_name == 'push'
+    if: success() && github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
       WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
