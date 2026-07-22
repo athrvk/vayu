@@ -389,3 +389,73 @@ describe("DesignRunView - the request lookup has to settle first", () => {
 		expect(payload.headers.Authorization).toBeUndefined();
 	});
 });
+
+describe("DesignRunView - a run recorded before script parts existed", () => {
+	/*
+	 * Every design run in a user's history on upgrade day. `seedFromRun` cannot
+	 * fill the editor for one, because there is no part list to take the
+	 * request's own half from - so the script text exists only on
+	 * `seed.legacyPreScript`. While nothing read that field the pane showed an
+	 * empty editor with no notice, and the replay sent no script at all.
+	 */
+	const GLUED_PRE = "collectionSetup();\n\nrequestOwnPart();";
+	const GLUED_POST = "chainAssert();\n\nownAssert();";
+
+	function legacyRun() {
+		return designRun({
+			configSnapshot: {
+				method: "POST",
+				url: "https://api.example.test/users?page=2",
+				headers: { "X-Plain": "visible" },
+				preRequestScript: GLUED_PRE,
+				postRequestScript: GLUED_POST,
+				requestId: "req_1",
+			},
+		} as Partial<Run>);
+	}
+
+	it("shows the whole recorded script with a note that its parts cannot be split", () => {
+		renderView(legacyRun());
+
+		selectRequestTab(/^pre-request/i);
+
+		expect(screen.getByText(/cannot be separated/i)).toBeTruthy();
+		// The text itself, not merely an acknowledgement that some exists.
+		expect(screen.getByText(/collectionSetup/)).toBeTruthy();
+		expect(screen.getByText(/requestOwnPart/)).toBeTruthy();
+	});
+
+	it("shows the recorded test script on the Tests tab too", () => {
+		renderView(legacyRun());
+
+		selectRequestTab(/^tests$/i);
+
+		expect(screen.getByText(/ownAssert/)).toBeTruthy();
+	});
+
+	it("replays the recorded script rather than nothing", async () => {
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+
+		renderView(legacyRun());
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
+
+		const payload = executeRequest.mock.calls[0][0];
+		expect(payload.preRequestScripts).toEqual([{ origin: "request", script: GLUED_PRE }]);
+		expect(payload.postRequestScripts).toEqual([{ origin: "request", script: GLUED_POST }]);
+	});
+
+	it("leaves the notice out for a run that has proper script parts", () => {
+		renderView(designRun());
+
+		selectRequestTab(/^pre-request/i);
+
+		expect(screen.queryByText(/cannot be separated/i)).toBeNull();
+	});
+});

@@ -21,9 +21,10 @@ import { useState } from "react";
 import { Button, Badge, CodeEditor, VariableScopeBadge } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import InheritedScriptsNotice from "./InheritedScriptsNotice";
+import LegacyScriptNotice from "./LegacyScriptNotice";
 
 export default function PreScriptPanel() {
-	const { request, updateField, getAllVariables, inheritedPreScripts } =
+	const { request, updateField, getAllVariables, inheritedPreScripts, legacyPreScript } =
 		useRequestBuilderContext();
 	const [showVariables, setShowVariables] = useState(false);
 
@@ -70,6 +71,8 @@ export default function PreScriptPanel() {
 				collectionId={request.collectionId}
 				entries={inheritedPreScripts}
 			/>
+
+			<LegacyScriptNotice variant="pre" script={legacyPreScript} />
 
 			{/*
 			 * The referenced list stays put when the full list opens. "Show

@@ -230,6 +230,14 @@ export interface RequestBuilderContextValue {
 	inheritedPreScripts?: ScriptPart[];
 	inheritedPostScripts?: ScriptPart[];
 
+	/**
+	 * The whole glued script a pre-script-parts run recorded. Set only by the
+	 * History run view; the editor is empty for such a run, so this is the only
+	 * place its script text appears.
+	 */
+	legacyPreScript?: string;
+	legacyPostScript?: string;
+
 	// UI State
 	activeTab: RequestTab;
 	setActiveTab: (tab: RequestTab) => void;

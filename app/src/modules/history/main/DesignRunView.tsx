@@ -113,12 +113,23 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	 *
 	 * The collection parts go out exactly as they were stored, which is the
 	 * point of a snapshot - it runs the collection's scripts as they were then,
-	 * not as they read now. A legacy run has no parts to replay, only the old
-	 * glued string, so its own script goes alone.
+	 * not as they read now.
+	 *
+	 * A run recorded before script parts existed has no parts at all, only the
+	 * one glued string, and `seedFromRun` cannot fill the editor from it - so
+	 * the editor is empty and the string is the only record of what ran. It is
+	 * replayed as a single request-origin part. Dropping it (which is what
+	 * happened while nothing read `legacyPreScript`) meant a resend of any
+	 * pre-existing run silently executed no script at all.
 	 */
 	const replayParts = useCallback(
-		(collectionParts: ScriptPart[], ownScript: string): ScriptPart[] | undefined => {
+		(
+			collectionParts: ScriptPart[],
+			legacyScript: string | undefined,
+			ownScript: string
+		): ScriptPart[] | undefined => {
 			const parts = [...collectionParts];
+			if (legacyScript?.trim()) parts.push({ origin: "request", script: legacyScript });
 			if (ownScript.trim()) parts.push({ origin: "request", script: ownScript });
 			return parts.length > 0 ? parts : undefined;
 		},
@@ -195,9 +206,14 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 
 				const preScriptParts = replayParts(
 					seed.collectionPreScripts,
+					seed.legacyPreScript,
 					request.preRequestScript
 				);
-				const postScriptParts = replayParts(seed.collectionPostScripts, request.testScript);
+				const postScriptParts = replayParts(
+					seed.collectionPostScripts,
+					seed.legacyPostScript,
+					request.testScript
+				);
 
 				const result = await engineExecuteRequest(
 					{
@@ -352,6 +368,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					initialResponse={initialResponse}
 					inheritedPreScripts={seed.collectionPreScripts}
 					inheritedPostScripts={seed.collectionPostScripts}
+					legacyPreScript={seed.legacyPreScript}
+					legacyPostScript={seed.legacyPostScript}
 					collectionId={null}
 					onExecute={handleExecute}
 					/* No `onSave`. See the note at the top of this file - that

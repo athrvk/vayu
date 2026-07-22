@@ -60,6 +60,13 @@ interface RequestBuilderProviderProps {
 	 */
 	inheritedPreScripts?: ScriptPart[];
 	inheritedPostScripts?: ScriptPart[];
+	/**
+	 * The whole glued script a run recorded before script parts existed. Shown
+	 * read-only, because its collection and request halves cannot be separated
+	 * and the editor above is therefore necessarily empty.
+	 */
+	legacyPreScript?: string;
+	legacyPostScript?: string;
 	collectionId?: string | null;
 	onExecute?: (request: RequestState) => Promise<ResponseState | null>;
 	onSave?: (request: RequestState) => Promise<void>;
@@ -72,6 +79,8 @@ export default function RequestBuilderProvider({
 	initialResponse,
 	inheritedPreScripts,
 	inheritedPostScripts,
+	legacyPreScript,
+	legacyPostScript,
 	collectionId,
 	onExecute,
 	onSave,
@@ -363,6 +372,8 @@ export default function RequestBuilderProvider({
 			setResponse,
 			inheritedPreScripts,
 			inheritedPostScripts,
+			legacyPreScript,
+			legacyPostScript,
 			activeTab,
 			setActiveTab,
 			isExecuting,
@@ -386,6 +397,8 @@ export default function RequestBuilderProvider({
 			setResponse,
 			inheritedPreScripts,
 			inheritedPostScripts,
+			legacyPreScript,
+			legacyPostScript,
 			activeTab,
 			isExecuting,
 			isSaving,
