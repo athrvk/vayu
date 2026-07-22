@@ -20,6 +20,8 @@ import BodyPanel from "./panels/BodyPanel";
 import AuthPanel from "./panels/AuthPanel";
 import PreScriptPanel from "./panels/PreScriptPanel";
 import TestScriptPanel from "./panels/TestScriptPanel";
+import SettingsPanel from "./panels/SettingsPanel";
+import { isRedirectPolicyNonDefault } from "../../utils/request-state";
 
 export default function RequestTabs() {
 	const { request, activeTab, setActiveTab } = useRequestBuilderContext();
@@ -55,6 +57,13 @@ export default function RequestTabs() {
 			id: "test-script",
 			label: "Tests",
 			badge: request.testScript.trim() ? 1 : undefined,
+		},
+		{
+			id: "settings",
+			label: "Settings",
+			// Badges only when the request departs from the engine defaults, so
+			// the tab stays quiet for the requests that never touch it.
+			badge: isRedirectPolicyNonDefault(request) ? 1 : undefined,
 		},
 	];
 
@@ -122,6 +131,8 @@ function TabContent() {
 			return <PreScriptPanel />;
 		case "test-script":
 			return <TestScriptPanel />;
+		case "settings":
+			return <SettingsPanel />;
 		default:
 			return null;
 	}

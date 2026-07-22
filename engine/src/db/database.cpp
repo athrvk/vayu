@@ -208,6 +208,11 @@ inline auto make_storage (const std::string& path) {
     make_column ("pre_request_script", &Request::pre_request_script),   // JS
     make_column ("post_request_script", &Request::post_request_script), // JS
     make_column ("order", &Request::order),     // NEW: position within collection
+    // Redirect policy. NOT NULL, so the default_value is what lets sync_schema
+    // ALTER TABLE ADD COLUMN these onto an existing, non-empty requests table -
+    // pre-existing rows backfill to the engine defaults (follow, cap at 10).
+    make_column ("follow_redirects", &Request::follow_redirects, default_value (true)),
+    make_column ("max_redirects", &Request::max_redirects, default_value (10)),
     make_column ("created_at", &Request::created_at),
     make_column ("updated_at", &Request::updated_at)),
 

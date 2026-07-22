@@ -184,6 +184,8 @@ export default function RequestBuilder() {
 			authConfig,
 			preRequestScript: fetchedRequest.preRequestScript,
 			testScript: fetchedRequest.postRequestScript,
+			followRedirects: fetchedRequest.followRedirects,
+			maxRedirects: fetchedRequest.maxRedirects,
 			collectionId: fetchedRequest.collectionId,
 		};
 	}, [fetchedRequest]);
@@ -279,6 +281,11 @@ export default function RequestBuilder() {
 						auth: execAuth,
 						preRequestScript: composedPreScript || undefined,
 						postRequestScript: composedPostScript || undefined,
+						// Always sent, never elided: the engine defaults to
+						// following, so omitting `followRedirects: false` would
+						// silently follow the redirect the user asked to see.
+						followRedirects: request.followRedirects,
+						maxRedirects: request.maxRedirects,
 						requestId: fetchedRequest.id,
 					},
 					activeEnvironmentId || undefined
@@ -421,6 +428,8 @@ export default function RequestBuilder() {
 				auth: authPayload,
 				preRequestScript: request.preRequestScript || undefined,
 				postRequestScript: request.testScript || undefined,
+				followRedirects: request.followRedirects,
+				maxRedirects: request.maxRedirects,
 			});
 		},
 		[fetchedRequest, updateRequestMutation]
@@ -525,6 +534,10 @@ export default function RequestBuilder() {
 					headers: resolvedHeaders,
 					body: bodyPayload,
 					auth: loadTestAuth,
+					// Same redirect policy the single-request Send uses, so a
+					// load test measures the same hops the user sees.
+					followRedirects: pendingLoadTestRequest.followRedirects,
+					maxRedirects: pendingLoadTestRequest.maxRedirects,
 					// Load test config
 					mode: config.mode,
 					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,

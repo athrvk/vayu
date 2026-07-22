@@ -135,6 +135,10 @@ export interface Request {
 	auth: RequestAuth;
 	preRequestScript: string;
 	postRequestScript: string;
+	/** Follow 3xx `Location` responses. Engine default is `true`. */
+	followRedirects: boolean;
+	/** Redirect hops allowed when {@link followRedirects} is on. Engine default is 10. */
+	maxRedirects: number;
 	order: number;
 	createdAt: string;
 	updatedAt: string;

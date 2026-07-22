@@ -134,10 +134,17 @@ List requests in a collection.
     "auth": {},
     "preRequestScript": "",
     "postRequestScript": "",
+    "followRedirects": true,
+    "maxRedirects": 10,
     "updatedAt": 1234567890
   }
 ]
 ```
+
+`followRedirects` / `maxRedirects` are the request's stored redirect policy.
+They are always present in the response: a request saved before these columns
+existed reads back as the engine defaults (`true` / `10`), which is the
+behaviour it already had.
 
 ### POST /requests
 
@@ -157,9 +164,16 @@ Create or update a request. If `id` is provided and exists, performs an update.
   "bodyType": "none",                // Optional: "none", "json", "text", "form-data", "x-www-form-urlencoded"
   "auth": {},                        // Optional, authentication config
   "preRequestScript": "",            // Optional, JavaScript pre-request script
-  "postRequestScript": ""            // Optional, JavaScript test script
+  "postRequestScript": "",           // Optional, JavaScript test script
+  "followRedirects": true,           // Optional, follow 3xx responses. Default true
+  "maxRedirects": 10                 // Optional, hops while following, clamped to 0..100. Default 10
 }
 ```
+
+Omitting `followRedirects` / `maxRedirects` on an **update** leaves the stored
+values untouched; on a **create** they fall back to the column defaults
+(`true` / `10`). A non-boolean `followRedirects` or a non-integer
+`maxRedirects` is ignored rather than rejected.
 
 **Response:** The saved request object.
 
@@ -393,9 +407,20 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
   "requestId": "req_1234567890",      // Optional, links to saved request
   "environmentId": "env_1234567890",  // Optional, uses environment variables
   "preRequestScript": "",              // Optional
-  "postRequestScript": "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));"
+  "postRequestScript": "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));",
+  "followRedirects": true,             // Optional, default true
+  "maxRedirects": 10,                  // Optional, default 10
+  "verifySSL": true                    // Optional, default true
 }
 ```
+
+**Redirect policy.** `followRedirects` defaults to **true**, so omitting it
+follows every 3xx and only the final response is returned - send
+`followRedirects: false` to see the 3xx status and its `Location` header. Both
+clients send these explicitly for exactly that reason (see
+[api-integration](../app/api-integration.md)). `POST /run` accepts the same
+three fields with the same defaults, so a load test can be run under the policy
+the request was configured with.
 
 **Response:**
 ```json
@@ -452,7 +477,9 @@ Start a load test run (Vayu Mode).
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
   "requestId": "req_1234567890",      // Optional, links to saved request
   "environmentId": "env_1234567890",  // Optional
-  "tests": ""                // Optional, deferred validation script
+  "tests": "",               // Optional, deferred validation script
+  "followRedirects": true,   // Optional, default true - see POST /request
+  "maxRedirects": 10         // Optional, default 10
 }
 ```
 

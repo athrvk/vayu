@@ -60,6 +60,8 @@ Stores individual HTTP request definitions.
 | `pre_request_script`  | TEXT    | Default `""`                                         |
 | `post_request_script` | TEXT    | Default `""`                                         |
 | `order`               | INTEGER | Sort order within collection; default 0              |
+| `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
+| `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
 | `created_at`          | INTEGER | Unix ms                                              |
 | `updated_at`          | INTEGER | Unix ms                                              |
 
@@ -91,6 +93,17 @@ The `oauth2` `config` holds the grant type, endpoints, client id/secret,
 placement options, etc. Secret fields (`clientSecret`, `password`) are stored
 **in plaintext** here, same as bearer/basic credentials - the v1 posture. The
 resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
+
+**follow_redirects / max_redirects** - the request's redirect policy, surfaced
+in the request builder's **Settings** tab and serialized as `followRedirects` /
+`maxRedirects`. They mirror the executable `vayu::Request` fields of the same
+name, so the saved policy is what `POST /request` and `POST /run` apply.
+
+Both columns are `NOT NULL` with a `DEFAULT`, which is what lets `sync_schema()`
+add them to an existing, non-empty `requests` table - a `NOT NULL` column with
+no default cannot be added by `ALTER TABLE ADD COLUMN`. Rows written before the
+columns existed backfill to `1` / `10`, i.e. the behaviour they already had.
+`max_redirects` is clamped to `0..100` on write.
 
 ---
 

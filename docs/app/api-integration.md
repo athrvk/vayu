@@ -297,10 +297,21 @@ await apiService.executeRequest({
   headers: { "Authorization": "Bearer {{token}}" },
   preRequestScript: "console.log('Pre-request');",
   postRequestScript: "pm.test('Status 200', () => pm.expect(pm.response.code).to.equal(200));",
+  followRedirects: true,
+  maxRedirects: 10,
   requestId: "req_123",
   environmentId: "env_456"
 });
 ```
+
+**Redirect policy is always sent, never elided.** `followRedirects` and
+`maxRedirects` come from the request's **Settings** tab and are included on
+every execute even when they equal the defaults. The engine defaults
+`follow_redirects` to `true`, so omitting a `false` would follow the 3xx the
+user asked to inspect - a bug the app shipped with for a long time, when nothing
+in the renderer sent these fields at all. The same pair goes out with
+`startLoadTest()`, so a load test exercises the policy the request was
+configured with.
 
 **Example Response:**
 ```typescript
@@ -338,6 +349,8 @@ await apiService.startLoadTest({
     headers: { "Content-Type": "application/json" },
     body: { mode: "json", content: '{"key": "value"}' }
   },
+  followRedirects: true,
+  maxRedirects: 10,
   mode: "constant_rps",
   duration: "30s",
   targetRps: 100,

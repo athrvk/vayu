@@ -40,7 +40,14 @@ export interface KeyValueItem extends KeyValueEntry {
 // Tab Types
 // ============================================================================
 
-export type RequestTab = "params" | "headers" | "body" | "auth" | "pre-script" | "test-script";
+export type RequestTab =
+	| "params"
+	| "headers"
+	| "body"
+	| "auth"
+	| "pre-script"
+	| "test-script"
+	| "settings";
 
 export interface TabInfo {
 	id: RequestTab;
@@ -131,6 +138,10 @@ export interface RequestState {
 	// Scripts
 	preRequestScript: string;
 	testScript: string;
+
+	// Execution settings (Settings tab)
+	followRedirects: boolean;
+	maxRedirects: number;
 }
 
 // ============================================================================

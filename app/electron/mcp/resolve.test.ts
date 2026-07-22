@@ -258,8 +258,72 @@ describe("composeSavedRequest", () => {
 			auth: { mode: "bearer", token: "T" },
 			preRequestScript: "pre",
 			postRequestScript: "post",
+			followRedirects: true,
+			maxRedirects: 10,
 			requestId: "r1",
 			environmentId: "env_1",
 		});
+	});
+});
+
+/*
+ * The renderer sends `followRedirects` / `maxRedirects` on every execute (see
+ * `request-builder/index.tsx` handleExecute). MCP must too: the engine defaults
+ * `follow_redirects` to true, so a request that opted out of following would
+ * have its 3xx followed anyway if the field were merely omitted.
+ */
+describe("redirect policy parity with the renderer", () => {
+	const resolver = makeResolver(new Map());
+
+	test("forwards a stored non-default policy", () => {
+		const out = composeSavedRequest(
+			{ method: "GET", url: "https://x/y", followRedirects: false, maxRedirects: 3 },
+			[],
+			resolver
+		);
+		expect(out.followRedirects).toBe(false);
+		expect(out.maxRedirects).toBe(3);
+	});
+
+	test("a row saved before the columns existed reads as the engine default", () => {
+		const out = composeSavedRequest({ method: "GET", url: "https://x/y" }, [], resolver);
+		expect(out.followRedirects).toBe(true);
+		expect(out.maxRedirects).toBe(10);
+	});
+
+	test("sends the fields even when they match the default", () => {
+		// Omitting them would let the engine default win, which is the same
+		// value today but silently re-couples the app to the engine's choice.
+		const out = composeSavedRequest(
+			{ method: "GET", url: "https://x/y", followRedirects: true, maxRedirects: 10 },
+			[],
+			resolver
+		);
+		expect(Object.keys(out)).toContain("followRedirects");
+		expect(Object.keys(out)).toContain("maxRedirects");
+	});
+
+	test("clamps an out-of-range or non-numeric maxRedirects like the renderer", () => {
+		const high = composeSavedRequest(
+			{ method: "GET", url: "https://x/y", maxRedirects: 5000 },
+			[],
+			resolver
+		);
+		expect(high.maxRedirects).toBe(100);
+
+		const negative = composeSavedRequest(
+			{ method: "GET", url: "https://x/y", maxRedirects: -4 },
+			[],
+			resolver
+		);
+		expect(negative.maxRedirects).toBe(0);
+
+		const junk = composeSavedRequest(
+			// A corrupted row: the field is present but not a number.
+			{ method: "GET", url: "https://x/y", maxRedirects: Number.NaN },
+			[],
+			resolver
+		);
+		expect(junk.maxRedirects).toBe(10);
 	});
 });

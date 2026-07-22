@@ -12,6 +12,7 @@
  */
 
 import type { RequestState } from "../types";
+import { DEFAULT_FOLLOW_REDIRECTS, DEFAULT_MAX_REDIRECTS } from "@/constants/request";
 import { createEmptyKeyValue } from "./key-value";
 import { createDefaultSystemHeaders } from "./system-headers";
 
@@ -36,5 +37,25 @@ export const createDefaultRequestState = (): RequestState => {
 		authConfig: {},
 		preRequestScript: "",
 		testScript: "",
+		followRedirects: DEFAULT_FOLLOW_REDIRECTS,
+		maxRedirects: DEFAULT_MAX_REDIRECTS,
 	};
 };
+
+/**
+ * True when the request's redirect policy departs from the engine defaults -
+ * the rule the Settings tab badges on. It deliberately compares against the
+ * defaults rather than tracking "the user opened the tab", so a request that is
+ * toggled off and back on stops badging again.
+ *
+ * Lives here rather than in `SettingsPanel` so that file only exports its
+ * component (`react-refresh/only-export-components`).
+ */
+export function isRedirectPolicyNonDefault(
+	state: Pick<RequestState, "followRedirects" | "maxRedirects">
+): boolean {
+	return (
+		state.followRedirects !== DEFAULT_FOLLOW_REDIRECTS ||
+		state.maxRedirects !== DEFAULT_MAX_REDIRECTS
+	);
+}

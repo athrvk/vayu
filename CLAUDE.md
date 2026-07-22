@@ -240,10 +240,12 @@ Two gaps worth knowing before you design around them:
   single request is found by fetching collection lists and scanning them
   (`useRequestQuery`). Tabs are persisted, so that path runs on every cold
   start; it must fetch, not just read cache.
-- **`followRedirects` / `maxRedirects` / `verifySSL` are accepted by the engine**
-  (`follow_redirects` defaults to **true**) but nothing in the app sends them, so
-  3xx responses are followed and never reach the response pane. `304` is the
-  only observable 3xx.
+- **`followRedirects` / `maxRedirects` are per-request and stored** (request
+  builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
+  Both clients send them on *every* execute and load test rather than eliding
+  the defaults, because the engine's `follow_redirects` defaults to **true** -
+  an omitted `false` would silently follow the 3xx the user asked to see.
+  **`verifySSL` is still engine-only**; it was deliberately not exposed.
 
 ## Request composition (known duplication - do not add a third copy)
 
