@@ -242,6 +242,62 @@ export interface RunConfigSnapshot {
 	[key: string]: unknown;
 }
 
+/**
+ * One HTTP exchange's trace, as the engine stores it. A design-mode trace
+ * (`POST /request` -> `store_result`, execution.cpp) nests the request and
+ * response; a load-test trace flattens timing and status onto the object
+ * directly. Both writers omit fields freely, so everything here is optional.
+ * Named once and shared by {@link RunResult} and {@link RunReport} rather
+ * than declared inline in both places.
+ */
+export interface RunResultTrace {
+	totalMs?: number;
+	dnsMs?: number;
+	connectMs?: number;
+	tlsMs?: number;
+	firstByteMs?: number;
+	downloadMs?: number;
+	isSlow?: boolean;
+	thresholdMs?: number;
+	request_number?: number;
+	error_code?: number;
+	/** `to_string(ErrorCode)` - the same words a live `errorCode` uses. */
+	error_type?: string;
+	/** The load-test writer's failure text (`load_strategy.cpp`). */
+	message?: string;
+	/** The design-mode writer's failure text (`store_result`, execution.cpp). */
+	error_message?: string;
+	headers?: Record<string, string>;
+	body?: string;
+	// Design-mode traces (`POST /request`) nest the exchange instead of
+	// flattening it - see `store_result` in engine/src/http/routes/execution.cpp.
+	request?: {
+		method?: string;
+		url?: string;
+		headers?: Record<string, string>;
+		body?: string;
+	};
+	response?: {
+		headers?: Record<string, string>;
+		body?: unknown;
+	};
+}
+
+/**
+ * The single exchange for a design run, attached by `GET /run/:id` -
+ * `attach_design_result` in engine/src/utils/json.cpp. Design runs only: a
+ * design run has exactly one result, so the engine embeds it on the run
+ * itself instead of requiring a second `/results` fetch.
+ */
+export interface RunResult {
+	timestamp: number;
+	statusCode: number;
+	statusText: string;
+	latencyMs: number;
+	error?: string;
+	trace?: RunResultTrace;
+}
+
 export interface Run {
 	id: string;
 	type: "load" | "design";
@@ -251,6 +307,8 @@ export interface Run {
 	configSnapshot?: RunConfigSnapshot;
 	requestId?: string | null;
 	environmentId?: string | null;
+	/** The exchange, present only for a design run once it has completed or failed. */
+	result?: RunResult;
 }
 
 /** Load-test execution strategy. Single source of truth for the mode union. */
@@ -425,38 +483,7 @@ export interface RunReport {
 		statusText?: string;
 		latencyMs: number;
 		error?: string;
-		trace?: {
-			totalMs?: number;
-			dnsMs?: number;
-			connectMs?: number;
-			tlsMs?: number;
-			firstByteMs?: number;
-			downloadMs?: number;
-			isSlow?: boolean;
-			thresholdMs?: number;
-			request_number?: number;
-			error_code?: number;
-			/** `to_string(ErrorCode)` - the same words a live `errorCode` uses. */
-			error_type?: string;
-			/** The load-test writer's failure text (`load_strategy.cpp`). */
-			message?: string;
-			/** The design-mode writer's failure text (`store_result`, execution.cpp). */
-			error_message?: string;
-			headers?: Record<string, string>;
-			body?: string;
-			// Design-mode traces (`POST /request`) nest the exchange instead of
-			// flattening it - see `store_result` in engine/src/http/routes/execution.cpp.
-			request?: {
-				method?: string;
-				url?: string;
-				headers?: Record<string, string>;
-				body?: string;
-			};
-			response?: {
-				headers?: Record<string, string>;
-				body?: unknown;
-			};
-		};
+		trace?: RunResultTrace;
 	}>;
 }
 
