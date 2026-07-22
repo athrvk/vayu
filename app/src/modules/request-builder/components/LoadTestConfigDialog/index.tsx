@@ -439,7 +439,7 @@ export default function LoadTestConfigDialog({
 					<Collapsible
 						open={recordingOpen}
 						onOpenChange={setRecordingOpen}
-						className="panel-clip overflow-hidden rounded-md border border-border bg-card"
+						className="panel-clip overflow-hidden rounded-md border border-border surface-card"
 					>
 						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
 							<span>Recording &amp; limits</span>
@@ -448,15 +448,16 @@ export default function LoadTestConfigDialog({
 							</span>
 						</CollapsibleTrigger>
 						{/*
-						    `border-border-strong`, not `border-border`. This divider sits
-						    *inside* the card, and `--border` is tuned for the canvas: its
-						    dark value is documented as "= rgba(255,255,255,0.07) on dark
-						    canvas", where it measures 1.14. On `--card` it measures
-						    **1.00** - the same colour, so the divider simply is not there
-						    in dark mode. `--border-strong` gives 1.28, which is what
-						    `--border` itself achieves on a card in light mode.
+						    `border-rule`: a divider *inside* the card, so the surface
+						    decides its colour rather than this line doing so. `--border`
+						    is tuned for the canvas and is the same colour as `--card` in
+						    dark (1.003), which is why the divider was not there at all;
+						    `surface-card` above resolves it to 1.278 dark / 1.304 light.
+
+						    The card's own outline stays `border-border` - that edge faces
+						    the dialog background, where the canvas token is correct.
 						 */}
-						<CollapsibleContent className="space-y-4 border-t border-border-strong px-3 py-3">
+						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
 							<div className="space-y-1.5">
 								<Label htmlFor="lt-sample" className="text-xs">
 									Success sample rate

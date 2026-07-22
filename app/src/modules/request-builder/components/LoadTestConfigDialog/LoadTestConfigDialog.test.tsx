@@ -159,7 +159,11 @@ describe("recording & limits is one surface", () => {
 		const trigger = screen.getByRole("button", { name: /recording/i });
 		fireEvent.click(trigger);
 
-		const surface = trigger.closest(".bg-card");
+		// `.surface-card`, which declares the card background *and* the `--rule`
+		// its inner divider resolves against. It was `.bg-card` before that
+		// contract existed; the assertion is unchanged - header and fields share
+		// one surface.
+		const surface = trigger.closest(".surface-card");
 		expect(surface).not.toBeNull();
 
 		for (const label of [

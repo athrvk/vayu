@@ -35,11 +35,11 @@ export default function ResponseCookies({ headers }: ResponseCookiesProps) {
 
 	return (
 		/*
-		 * Both rules are `border-border-strong`. The table lives inside
-		 * `ResponseViewer`'s `bg-card`, where `--border` measures 1.003 - and the
-		 * row rule was `border-border/50`, which composites to 1.002. The cookie
-		 * list had no visible structure whatsoever in dark mode: header and rows
-		 * ran together as one block of text.
+		 * Both rules are `border-rule`, resolved by the `surface-card` the
+		 * response pane declares. They were `border-border` and
+		 * `border-border/50`, which on a card measure 1.003 and 1.002 - the
+		 * cookie list had no visible structure whatsoever in dark mode: header
+		 * and rows ran together as one block of text.
 		 *
 		 * The rows are not held one step lighter than the header, because at this
 		 * surface "one step lighter" lands back at invisible. The header is
