@@ -312,3 +312,37 @@ jobs:
           generate_release_notes: ${{ steps.relnotes.outputs.path == '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Submit the Windows installer to the winget community repository
+  # (microsoft/winget-pkgs) as a PR, so `winget install athrvk.Vayu` picks up
+  # each new release automatically. This is a SEPARATE job, not a step inside
+  # the 3-OS matrix above - an inline step would fire three duplicate PRs.
+  #
+  # One-time prerequisites (owner's GitHub account) before this does anything:
+  #   1. Fork microsoft/winget-pkgs to the athrvk account.
+  #   2. Create a *classic* PAT with `public_repo` scope (fine-grained PATs are
+  #      NOT supported by the action) and store it as the repo secret
+  #      WINGET_TOKEN.
+  # Until WINGET_TOKEN exists the submit step is skipped and the job is a green
+  # no-op, so landing this ahead of the secret can never fail a release tag.
+  publish-winget:
+    name: Publish to winget
+    needs: build-and-publish
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Submit manifest to winget-pkgs
+        if: env.WINGET_TOKEN != ''
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: athrvk.Vayu
+          # `version` is intentionally omitted. The action defaults it to the
+          # release tag with the leading `v` stripped (v0.10.0 -> 0.10.0);
+          # passing github.ref_name explicitly would NOT strip the `v` and would
+          # publish a malformed PackageVersion. `fork-user` is likewise omitted
+          # and defaults to the repository owner (athrvk), where the fork lives.
+          installers-regex: 'Vayu-x64\.exe$'
+          release-tag: ${{ github.ref_name }}
+          token: ${{ env.WINGET_TOKEN }}

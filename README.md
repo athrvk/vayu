@@ -101,6 +101,14 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 
 ### Windows
 
+Install with [winget](https://learn.microsoft.com/windows/package-manager/winget/):
+
+```powershell
+winget install athrvk.Vayu
+```
+
+Or download the installer directly:
+
 1. Download [Vayu-x64.exe](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe)
 2. Run the installer and follow the setup wizard
 3. Launch **Vayu** from the Start menu
