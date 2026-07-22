@@ -26,7 +26,15 @@ export interface ResponseHeaderProps {
 
 export default function ResponseHeader({ response }: ResponseHeaderProps) {
 	return (
-		<div className="flex items-center gap-4 px-4 py-3 border-b border-border bg-muted/30">
+		/*
+		 * `border-border-strong`. This bar sits inside `ResponseViewer`'s
+		 * `bg-card`, and design-system.md already states the rule for that case -
+		 * `--border` on `--card` measures 1.003 in dark, the same colour. The
+		 * `bg-muted/30` tint is not carrying it either: over a card that composites
+		 * to 1.04. So the bar that reports status, time and size had no boundary at
+		 * all in dark mode, top or bottom. `--border-strong` gives 1.278.
+		 */
+		<div className="flex items-center gap-4 px-4 py-3 border-b border-border-strong bg-muted/30">
 			{/* Status */}
 			<StatusCodeBadge status={response.status} statusText={response.statusText} />
 

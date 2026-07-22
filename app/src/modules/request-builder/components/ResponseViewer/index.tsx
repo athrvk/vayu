@@ -140,7 +140,12 @@ export default function ResponseViewer() {
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				<div className="flex items-center justify-between border-b border-border px-4 gap-2">
+				{/* `border-border-strong`: this rule is what separates the tab strip
+				    from the response body, and both sit on this component's `bg-card`.
+				    `--border` measures 1.003 there - the tabs floated free of the
+				    content in dark mode. See design-system.md, "a divider inside a
+				    card". */}
+				<div className="flex items-center justify-between border-b border-border-strong px-4 gap-2">
 					<TabsList className="flex h-auto p-0 bg-transparent justify-start overflow-x-auto overflow-y-hidden flex-nowrap min-w-0">
 						<TabsTrigger
 							value="body"

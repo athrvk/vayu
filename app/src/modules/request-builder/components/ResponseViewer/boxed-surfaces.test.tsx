@@ -24,13 +24,18 @@
  * slabs, and every test-result row. A user who chose Rounded got square corners
  * in the one pane they look at after every send.
  *
- * The log slabs also lost `border border-border`. Measured against `--muted`,
- * that border is **1.16** in dark and **1.11** in light - no visible edge.
- * `--border-strong` does not rescue it either: in dark, `--muted` (L 16%) sits
- * *between* `--border` (L 10%) and `--border-strong` (L 18%), so the stronger
- * token is fainter still at 1.107. The `bg-muted` fill separates from the card
- * on its own at 1.149, which is the treatment the script panels' Quick Reference
- * slabs have always used.
+ * The log slabs also lost `border border-border`. Measured in the running app,
+ * no border token outlines a `bg-muted` box in both themes:
+ *
+ *                                  light    dark
+ *     --border       on --muted    1.105    1.157
+ *     --border-strong on --muted   1.317    1.108
+ *
+ * `--border-strong` does not rescue it - in dark it is the fainter of the two,
+ * because `--muted` (L 16%) sits between `--border` (L 10%) and
+ * `--border-strong` (L 18%). The `bg-muted` fill separates from the card on its
+ * own at 1.180 light / 1.153 dark, which is the treatment the script panels'
+ * Quick Reference slabs have always used.
  */
 
 import { describe, it, expect } from "vitest";
@@ -38,6 +43,8 @@ import { render } from "@testing-library/react";
 import ConsoleOutput from "./ConsoleOutput";
 import TestResults from "./TestResults";
 import ClientErrorView from "./ClientErrorView";
+import ResponseHeader from "./ResponseHeader";
+import ResponseCookies from "./ResponseCookies";
 
 /**
  * Every element carrying a background or border class, i.e. the things that read
@@ -121,12 +128,58 @@ describe("test results", () => {
 	});
 });
 
+/**
+ * `ResponseViewer` renders everything below it on `bg-card`, and
+ * design-system.md line 285 already states the rule for that surface: a divider
+ * inside a card needs `border-border-strong`, because `--border` measures 1.003
+ * there - the same colour as the card. Three dividers in this pane had never
+ * been converted, so in dark mode the status bar had no bottom edge, the tab
+ * strip did not separate from the body, and the cookie table ran together as one
+ * block (its row rule was `border-border/50`, which composites to 1.002).
+ *
+ * `--border-strong` gives 1.278 dark / 1.553 light.
+ */
+describe("dividers inside the response card", () => {
+	/** Anything drawing a rule: the elements whose border is their only edge. */
+	const rules = (container: HTMLElement) =>
+		Array.from(container.querySelectorAll<HTMLElement>("*")).filter((el) =>
+			/\bborder-(b|t|y)?-?border/.test(el.className)
+		);
+
+	it("gives the status bar a bottom edge", () => {
+		const { container } = render(
+			<ResponseHeader response={{ status: 200, statusText: "OK", time: 120, size: 2048 }} />
+		);
+		const bar = container.firstElementChild as HTMLElement;
+
+		expect(bar.className).toMatch(/\bborder-b\b/);
+		expect(bar.className).toMatch(/\bborder-border-strong\b/);
+	});
+
+	it("rules the cookie table at a weight that survives dark mode", () => {
+		const { container } = render(
+			<ResponseCookies headers={{ "set-cookie": "session=abc; Path=/" }} />
+		);
+		const ruled = rules(container);
+
+		// A header rule and at least one row rule.
+		expect(ruled.length).toBeGreaterThanOrEqual(2);
+		for (const el of ruled) {
+			expect(el.className).toMatch(/\bborder-border-strong\b/);
+			// `/50` on top of this token lands back at 1.12 in dark.
+			expect(el.className).not.toMatch(/border-border(-strong)?\/\d/);
+		}
+	});
+});
+
 describe("client error view", () => {
 	it("marks its tip with an icon, not an emoji", () => {
 		const { container } = render(<ClientErrorView errorCode="TIMEOUT" />);
 
-		// The 💡 was the only emoji in modules/. It rendered in the OS emoji font
-		// beside 12px muted text, at a size and baseline nothing in the app set.
+		// The light-bulb emoji this replaced was the only one in modules/. It
+		// rendered in the OS emoji font beside 12px muted text, at a size and
+		// baseline nothing in the app controlled. Asserted by category rather
+		// than by that one codepoint, so no emoji creeps back in here.
 		expect(container.textContent).not.toMatch(/\p{Extended_Pictographic}/u);
 		expect(container.querySelector("svg.lucide-lightbulb")).toBeTruthy();
 	});

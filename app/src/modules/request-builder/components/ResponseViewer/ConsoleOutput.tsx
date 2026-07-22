@@ -14,14 +14,22 @@
  * square-corner cluster: no radius class at all, so they stayed sharp at every
  * Roundedness setting while their neighbours followed it.
  *
- * The log slabs also dropped `border border-border`. `--border` is tuned for the
- * canvas, and on `--muted` it measures **1.16** dark / **1.11** light - it drew
- * nothing. `--border-strong` is not the escape hatch it was elsewhere either:
- * `--muted` (L 16%) sits *between* `--border` (L 10%) and `--border-strong`
- * (L 18%) in dark, so strengthening the border makes it fainter still, 1.107. No
- * border token can outline a muted box in this theme. The fill does that job on
- * its own at 1.149 - which is what the Quick Reference slabs in the script
- * panels have always relied on.
+ * The log slabs also dropped `border border-border`. Measured in the running
+ * app, no border token outlines a `bg-muted` box in both themes:
+ *
+ *                                  light    dark
+ *     --border       on --muted    1.105    1.157
+ *     --border-strong on --muted   1.317    1.108
+ *
+ * `--border-strong` is the usual escape hatch on `--card` - it is what fixed the
+ * URL bar and the history rows - and here it is the *worse* of the two in dark,
+ * because `--muted` (L 16%) sits between `--border` (L 10%) and
+ * `--border-strong` (L 18%). Strengthening the border makes it fainter.
+ * Whichever token is picked, one theme gets no edge at all.
+ *
+ * So there is no border to pick. The fill separates from the card on its own at
+ * 1.180 light / 1.153 dark - the same in both - which is what the Quick
+ * Reference slabs in the script panels have always relied on.
  */
 
 import { useState, useMemo } from "react";

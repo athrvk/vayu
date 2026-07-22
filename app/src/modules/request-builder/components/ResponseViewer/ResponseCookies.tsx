@@ -33,10 +33,22 @@ export default function ResponseCookies({ headers }: ResponseCookiesProps) {
 	});
 
 	return (
+		/*
+		 * Both rules are `border-border-strong`. The table lives inside
+		 * `ResponseViewer`'s `bg-card`, where `--border` measures 1.003 - and the
+		 * row rule was `border-border/50`, which composites to 1.002. The cookie
+		 * list had no visible structure whatsoever in dark mode: header and rows
+		 * ran together as one block of text.
+		 *
+		 * The rows are not held one step lighter than the header, because at this
+		 * surface "one step lighter" lands back at invisible. The header is
+		 * distinguished by its label styling instead, and rows still light up on
+		 * hover.
+		 */
 		<div className="p-4 overflow-auto h-full">
 			<table className="w-full text-sm">
 				<thead>
-					<tr className="border-b border-border">
+					<tr className="border-b border-border-strong">
 						<th className="text-left py-2 px-3 font-medium text-muted-foreground">
 							Name
 						</th>
@@ -47,7 +59,7 @@ export default function ResponseCookies({ headers }: ResponseCookiesProps) {
 				</thead>
 				<tbody>
 					{cookies.map((cookie, i) => (
-						<tr key={i} className="border-b border-border/50 hover:bg-muted/50">
+						<tr key={i} className="border-b border-border-strong hover:bg-muted/50">
 							<td className="py-2 px-3 font-mono text-primary">{cookie.name}</td>
 							<td className="py-2 px-3 font-mono break-all">{cookie.value}</td>
 						</tr>
