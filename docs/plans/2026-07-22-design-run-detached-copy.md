@@ -116,9 +116,11 @@ auth {mode: apikey, addTo: query, value: "SECRET-QUERY-KEY"}
   -> the URL stays clean
 ```
 
-So `trace.request.headers` minus `configSnapshot.headers` is exactly the set of
-auth-injected headers. Useful to know; do not build on it, since the engine may inject
-other headers later.
+So `trace.request.headers` minus `configSnapshot.headers` is exactly the set of headers
+added between payload and wire. Safe to rely on for _replay_ fidelity, where "whatever
+the engine added" is precisely what you want to resend. Do **not** use it to identify
+auth headers for Save - the engine may inject others later, and Save's exclusions must
+not depend on a subtraction.
 
 ### Scripts in the snapshot are **composed**
 
@@ -199,23 +201,33 @@ Seed mapping:
 | -------------------------------------------- | -------------------------------------------------------------------- |
 | `method`, `url`                              | `configSnapshot`                                                     |
 | `params`                                     | `parseQueryParams(url)` (`utils/url.ts`, already used by `UrlInput`) |
-| `headers`                                    | `configSnapshot.headers` - declared, no injected credentials         |
+| `headers`                                    | depends on whether the request survives - see **Auth** below         |
 | `body`, `bodyMode`, `formData`, `urlEncoded` | `configSnapshot.body` (already structured)                           |
-| `authType`, `authConfig`                     | the **live request's current auth** - see below                      |
-| `preRequestScript`, `testScript`             | `configSnapshot` - see below                                         |
+| `authType`, `authConfig`                     | depends - see **Auth** below                                         |
+| `preRequestScript`, `testScript`             | `configSnapshot` - see **Scripts** below                             |
 | `followRedirects`, `maxRedirects`            | `configSnapshot`                                                     |
 | `id`, `collectionId`                         | `null`                                                               |
 
-**Auth.** The Auth tab shows the live request's _current_ auth, because that is what a
-replay will actually send - what you see is what goes out. The run's own
-`configSnapshot.auth.mode` is surfaced separately as read-only run metadata ("this run
-used: bearer"), which also makes a divergence visible when the request's auth has changed
-since. When the request is gone, `authType` is `none` and the view states that credentials
-are never stored.
+**Auth, in one sentence:** use the live request's auth when there is one; otherwise replay
+exactly what went out.
 
-**Scripts.** Seeded verbatim and editable, since editing is scratch and a replay should
-send what you see. The script panels carry a read-only note that the text is the composed
-collection-plus-request script, which is why Save excludes it.
+|                  | `headers` seeded from                                            | `authType` / `authConfig`                         |
+| ---------------- | ---------------------------------------------------------------- | ------------------------------------------------- |
+| request survives | `configSnapshot.headers` - declared, no credentials              | the live request's **current** auth               |
+| orphan           | `trace.request.headers` - the wire set, `Authorization` included | `none` (auth is already baked into those headers) |
+
+Both branches keep the same property: **what the editor shows is what the replay sends.**
+In the surviving case that means the request's current auth, since that is what a live
+resolution will produce - and the run's own `configSnapshot.auth.mode` is surfaced beside
+it as read-only metadata ("this run used: bearer"), which makes it visible when the
+request's auth has changed since. In the orphan case it means the frozen credential is a
+visible, editable header row, so a stale token can be replaced by hand and re-fired.
+
+**Scripts.** Seeded verbatim - meaning the whole composed blob, unmodified - and editable,
+since editing is scratch and a replay should send what you see. Note that this makes the
+detached copy's script tab structurally unlike the same request's normal script tab, which
+shows only the request's own script; the panels carry a read-only note saying so, which is
+also why Save excludes them.
 
 ### Replay
 
@@ -224,10 +236,11 @@ new run attributes to the same request. Auth is resolved **live** from the saved
 through the existing helpers - not a copied composition, since `CLAUDE.md` forbids a
 third copy. Firing creates a new run in history, which is correct.
 
-Orphan (no `requestId`, or the request is gone): auth cannot be resolved, and the frozen
-`Authorization` in the trace is deliberately **not** substituted. Replaying a stale
-credential silently is worse than failing honestly. The view says credentials are not
-stored.
+Orphan (no `requestId`, or the request is gone): there is no auth to resolve, so the
+replay sends the trace's headers as seeded - including the `Authorization` that was on the
+wire. The run is replayed exactly as it executed. A token that has since expired returns a
+401, which is a true statement about replaying that request; the header is visible and
+editable, so a fresh one can be pasted in.
 
 ### Save to request
 
@@ -266,7 +279,8 @@ did not exist before and its absence is why the regression shipped.
 - **Detachment** (behavioural): editing fires no save mutation. Mutation-check by
   restoring `onSave` and confirming the test goes red.
 - **Replay**: sends editor state, live-resolved auth, and `requestId`; creates a run.
-- **Orphan**: no Save, no Open request, replay unauthenticated and said so.
+- **Orphan**: no Save, no Open request; headers seed from the trace and the replay sends
+  the recorded `Authorization` verbatim.
 - **Save**: writes the six allowed fields; never writes auth or scripts; requires confirm.
 - **Drawer**: a run tab does not move the drawer (regression cover).
 - **Highlight**: the run row is selected while its tab is active.
