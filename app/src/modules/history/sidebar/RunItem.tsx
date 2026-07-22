@@ -76,7 +76,7 @@ export default function RunItem({
 				// focus-row: the card is the perceived target, so it paints the ring
 				// for the activator inside it. It also has overflow-hidden, which
 				// would clip an outset ring - focus-row's is inset.
-				"focus-row group relative bg-card border cursor-pointer transition-all transition-colors overflow-hidden w-full",
+				"focus-row group relative bg-card border cursor-pointer transition-colors overflow-hidden w-full",
 				isSelected
 					? "bg-primary/10 hover:bg-primary/15 border-primary/50 ring-1 ring-inset ring-primary/20 shadow-sm"
 					: "hover:border-primary/50 hover:shadow-sm"

@@ -42,7 +42,7 @@ export default function SampleRequestCard({
 	return (
 		<div
 			className={cn(
-				"border overflow-hidden transition-all",
+				"border overflow-hidden transition-colors",
 				isError && "border-destructive/30",
 				// status-success, matching the CheckCircle this border frames.
 				isSuccess && "border-status-success/20"

@@ -53,7 +53,7 @@ function FontTile({
 		<button
 			onClick={onClick}
 			className={cn(
-				"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
+				"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-colors",
 				"hover:bg-accent hover:border-accent-foreground/20",
 				selected ? "border-primary bg-primary/5" : "border-border"
 			)}

@@ -56,7 +56,7 @@ export function OptionButtons<T extends string | number>({
 						key={String(option.value)}
 						onClick={() => onChange(option.value)}
 						className={cn(
-							"relative flex flex-col items-center justify-center gap-0.5 p-3 rounded-lg border-2 text-center transition-all",
+							"relative flex flex-col items-center justify-center gap-0.5 p-3 rounded-lg border-2 text-center transition-colors",
 							"hover:bg-accent hover:border-accent-foreground/20",
 							isSelected ? "border-primary bg-primary/5" : "border-border"
 						)}
