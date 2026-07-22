@@ -21,19 +21,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Shell from "./Shell";
 import { useTabsStore, useLayoutStore } from "@/stores";
 
-const mocks = vi.hoisted(() => ({
-	queries: {},
-}));
-
-vi.mock("@/queries", () => ({
-	useRequestQuery: () => ({ data: undefined }),
-	useCollectionsQuery: () => ({ data: [] }),
-	useRunsQuery: () => ({ data: [] }),
-	useCreateRequestMutation: () => ({ mutateAsync: vi.fn() }),
-	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn() }),
-	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map() }),
-}));
-
 vi.mock("./Drawer", () => ({
 	Drawer: () => <div data-testid="drawer" />,
 }));
