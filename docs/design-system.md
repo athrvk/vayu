@@ -386,12 +386,22 @@ convention: amber-500 (`38 92% 50%`) measures **2.14** on a light card. The
 indicator sits at `38 92% 36%`, only 3 points from its own fill - amber is
 squeezed from both ends, which is a property of the hue, not a mistake.
 
-The chart keeps its own palette. `uplotTheme`'s roles resolve to `--success` /
-`--warning` / `--chart-3`, which hold different values from `--status-*`. A
-translucent area fill, a solid chip under a white label and a 10% wash are
-different optical problems. Only the *classification* is shared, so
-`--status-redirect` and `--chart-3` are two tokens for one concept: same hue by
-construction, byte-identical only in the dark `-text` tier, kept in step by hand.
+**The status-code chart uses this family too**, through dedicated
+`status-*` roles in `uplotTheme`. The other charts keep the generic
+`success` / `warning` / `destructive` roles, and must: those are a *series*
+palette wearing semantic names, and the same three also paint p50 / p95 / p99
+and the error-rate area. Repointing them would recolour the latency charts,
+which have nothing to do with HTTP status.
+
+That distinction was got wrong first time round. The status chart borrowed
+`categorical` for 3xx and `muted` for a failed connection, and this document
+claimed the chart therefore "taught the same violet" as the response badge. It
+did not: `categorical` is `--chart-3`, which also paints the p99 scatter, the
+HDR distribution, the latency breakdown and the **throughput area**. So violet
+meant "the categorical series in this plot", not "redirect", and a user could
+not learn the association from a dashboard where violet is throughput one chart
+higher. `muted` had the same problem in reverse - it made "nothing came back"
+read as de-emphasised rather than as an outcome of its own.
 
 Latency uses `status-running` → `status-stopped` → `status-error` for normal →
 slow → danger (`LatencyMetric.tsx`).

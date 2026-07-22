@@ -89,10 +89,45 @@ describe("chart series colours", () => {
 		const lineRoles = [
 			...read("StatusCodesOverTimeChart.tsx")
 				.replace(/\/\*[\s\S]*?\*\//g, "")
-				.matchAll(/label:\s*"(\w+)",\s*\n?\s*role:\s*"(\w+)"/g),
+				.matchAll(/label:\s*"(\w+)",\s*\n?\s*role:\s*"([\w-]+)"/g),
 		].map((m) => m[2]);
 		expect(lineRoles.length).toBeGreaterThanOrEqual(4);
 		expect(new Set(lineRoles).size).toBe(lineRoles.length);
+	});
+
+	/**
+	 * The status chart is the one plot whose subject *is* HTTP status, so it
+	 * resolves through the same `--status-*` family as the response badge and
+	 * the history tiles.
+	 *
+	 * It used to borrow `categorical` for 3xx and `muted` for a failed
+	 * connection. Those are series slots, not status colours: `categorical` also
+	 * paints p99, HDR latency, the latency breakdown and the throughput area, so
+	 * the violet shown for 3xx meant nothing in particular, and `muted` made
+	 * "nothing came back" read as de-emphasised rather than as its own outcome.
+	 *
+	 * The generic roles deliberately stay generic - `success` is also p50 and
+	 * `warning` is also p95 - which is why these are separate role names rather
+	 * than a repointing of `ROLE_TOKEN`.
+	 */
+	it("resolves the status chart through the status token family", () => {
+		const chart = read("StatusCodesOverTimeChart.tsx").replace(/\/\*[\s\S]*?\*\//g, "");
+		const used = [...chart.matchAll(/(?:band)?[Rr]ole:\s*"([\w-]+)"/g)].map((m) => m[1]);
+		expect(used.length).toBeGreaterThanOrEqual(5);
+		for (const role of used) {
+			expect(role, `${role} is not a status role`).toMatch(/^status-/);
+		}
+
+		// Whitespace-normalised substring rather than a built RegExp: the escape
+		// in `\\s` does not survive a template literal cleanly and silently
+		// degraded to matching a literal "s", which made this assertion pass
+		// against a theme file it had never really read.
+		const theme = read("uplotTheme.ts").replace(/\s+/g, " ");
+		for (const role of new Set(used)) {
+			expect(theme, `${role} must resolve to a --status-* token`).toContain(
+				`"${role}": "--status-`
+			);
+		}
 	});
 
 	it("resolves the categorical role to a token that does not follow the accent", () => {

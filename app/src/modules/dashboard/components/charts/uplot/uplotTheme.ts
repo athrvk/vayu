@@ -36,7 +36,29 @@ export type ColorRole =
 	 * semantic series. `--chart-3` is violet in both themes and is the furthest
 	 * of the categorical palette from success/warning/destructive.
 	 */
-	| "categorical";
+	| "categorical"
+	/*
+	 * HTTP status classes, resolving to the same `--status-*` family the badges
+	 * and history tiles use.
+	 *
+	 * Separate from the generic roles above on purpose. `success` / `warning` /
+	 * `destructive` are a *series* palette wearing semantic names: in this file's
+	 * consumers they also paint p50 / p95 / p99 and the error-rate area, which
+	 * have nothing to do with HTTP status. Repointing them at `--status-*` would
+	 * recolour the latency charts.
+	 *
+	 * The status-code chart is the one plot whose subject genuinely is status, so
+	 * it uses these and shares the vocabulary in `constants/http-status.ts`. It
+	 * previously borrowed `categorical` for 3xx and `muted` for a failed
+	 * connection - which meant the violet a user saw for 3xx was the same violet
+	 * used for p99, HDR latency, the latency breakdown and the throughput area,
+	 * so it taught nothing.
+	 */
+	| "status-success"
+	| "status-redirect"
+	| "status-client-error"
+	| "status-server-error"
+	| "status-no-response";
 
 const ROLE_TOKEN: Record<ColorRole, string> = {
 	primary: "--primary",
@@ -48,6 +70,11 @@ const ROLE_TOKEN: Record<ColorRole, string> = {
 	subtle: "--subtle-foreground",
 	accent: "--accent",
 	categorical: "--chart-3",
+	"status-success": "--status-success",
+	"status-redirect": "--status-redirect",
+	"status-client-error": "--status-warning",
+	"status-server-error": "--status-error",
+	"status-no-response": "--status-no-response",
 };
 
 export interface UplotTheme {
