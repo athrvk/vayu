@@ -248,6 +248,7 @@ add_library(vayu_core STATIC
     src/http/thread_pool.cpp
     src/http/rate_limiter.cpp
     src/http/sse.cpp
+    src/http/script_parts.cpp
     src/utils/json.cpp
     src/utils/logger.cpp
     src/utils/metrics_helper.cpp
@@ -387,6 +388,8 @@ if(VAYU_BUILD_TESTS)
         tests/load_strategy_test.cpp
         tests/refill_deficit_test.cpp
         tests/run_manager_test.cpp
+        tests/run_route_test.cpp
+        tests/script_compose_test.cpp
         tests/encoding_test.cpp
         tests/auth_resolver_test.cpp
         tests/request_builder_test.cpp

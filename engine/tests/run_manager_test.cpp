@@ -118,3 +118,32 @@ TEST (RunManagerRetention, SweepEvictsExpiredOnly) {
     EXPECT_EQ (mgr.get_run_or_retained ("a"), nullptr);
     EXPECT_NE (mgr.get_run_or_retained ("b"), nullptr);
 }
+
+// A load run's `tests` may arrive as a list of parts, exactly like the design
+// path's scripts. Before this, only the request's own test script was sent, so
+// a collection-level assertion passed in design mode and was silently never
+// checked under load.
+//
+// This exercises the wiring through RunContext's constructor - not
+// `read_script` in isolation (that coverage lives in script_compose_test.cpp).
+// Reverting run_manager.cpp's call back to `config["tests"].get<std::string>
+// ()` makes the constructor throw for a list payload; verified by temporarily
+// reverting and confirming this test fails, then restoring.
+TEST (RunManager, ConstructorJoinsTestScriptParts) {
+    auto config = nlohmann::json::parse (R"({
+      "tests": [
+        {"origin":"collection","id":"c1","name":"API","script":"pm.test(\"a\",()=>{});"},
+        {"origin":"request","id":"r1","script":"pm.test(\"b\",()=>{});"}
+      ]
+    })");
+
+    RunContext ctx ("r", config);
+    EXPECT_EQ (ctx.test_script, "pm.test(\"a\",()=>{});\n\npm.test(\"b\",()=>{});");
+}
+
+TEST (RunManager, ConstructorStillAcceptsAPlainTestString) {
+    auto config = nlohmann::json::parse (R"({"tests":"pm.test(\"a\",()=>{});"})");
+
+    RunContext ctx ("r", config);
+    EXPECT_EQ (ctx.test_script, "pm.test(\"a\",()=>{});");
+}
