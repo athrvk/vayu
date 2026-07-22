@@ -40,6 +40,7 @@ import type { RequestState, ResponseState } from "./types";
 import { authToEditor, editorToAuth } from "./utils/auth-mapping";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
+import { scriptParts } from "./utils/script-parts";
 import type {
 	HttpMethod,
 	LoadTestConfig,
@@ -258,19 +259,22 @@ export default function RequestBuilder() {
 					execAuth = raw ? (resolveObject(raw) as Record<string, unknown>) : undefined;
 				}
 
-				// Compose pre/post scripts: collection chain root→leaf, then the request's own script
-				const composedPreScript = [
-					...collectionAncestors.map((c) => c.preRequestScript).filter(Boolean),
-					request.preRequestScript,
-				]
-					.filter(Boolean)
-					.join("\n\n");
-				const composedPostScript = [
-					...collectionAncestors.map((c) => c.postRequestScript).filter(Boolean),
-					request.testScript,
-				]
-					.filter(Boolean)
-					.join("\n\n");
+				// Script parts: the collection chain root to leaf, then the
+				// request's own. The engine joins them and runs the result as
+				// one script. Joining here meant a stored run could not say
+				// which part came from where.
+				const preScriptParts = scriptParts(
+					collectionAncestors,
+					(c) => c.preRequestScript,
+					fetchedRequest.id,
+					request.preRequestScript
+				);
+				const postScriptParts = scriptParts(
+					collectionAncestors,
+					(c) => c.postRequestScript,
+					fetchedRequest.id,
+					request.testScript
+				);
 
 				const result = await engineExecuteRequest(
 					{
@@ -279,8 +283,8 @@ export default function RequestBuilder() {
 						headers: resolvedHeaders,
 						body: execBody,
 						auth: execAuth,
-						preRequestScript: composedPreScript || undefined,
-						postRequestScript: composedPostScript || undefined,
+						preRequestScripts: preScriptParts,
+						postRequestScripts: postScriptParts,
 						// Always sent, never elided: the engine defaults to
 						// following, so omitting `followRedirects: false` would
 						// silently follow the redirect the user asked to see.
@@ -306,7 +310,7 @@ export default function RequestBuilder() {
 				}
 
 				// Refresh variables so script-set values (e.g. pm.environment.set) appear in the UI
-				if (composedPreScript) {
+				if (preScriptParts) {
 					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
@@ -558,7 +562,15 @@ export default function RequestBuilder() {
 					success_sample_rate: config.data_sample_rate,
 					slow_threshold_ms: config.slow_threshold_ms,
 					save_timing_breakdown: config.save_timing_breakdown,
-					tests: pendingLoadTestRequest.testScript || undefined,
+					// The collection chain's test scripts too. Load runs only ever
+					// validated the request's own, so a collection-level assertion
+					// passed in design mode and was never checked under load.
+					tests: scriptParts(
+						collectionAncestors,
+						(c) => c.postRequestScript,
+						fetchedRequest.id,
+						pendingLoadTestRequest.testScript
+					),
 				};
 
 				const result = await apiService.startLoadTest(apiRequest);

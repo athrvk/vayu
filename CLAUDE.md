@@ -294,22 +294,33 @@ Two gaps worth knowing before you design around them:
 
 ## Request composition (known duplication - do not add a third copy)
 
-Preparing a request before it executes - resolving `{{variables}}`, resolving
-`inherit` auth via the collection-chain walk, and composing the collection-chain +
-request pre/post scripts - happens **client-side** today, and is therefore
-**duplicated** across the two engine clients:
+Preparing a request before it executes - resolving `{{variables}}` and resolving
+`inherit` auth via the collection-chain walk - happens **client-side** today, and
+is therefore **duplicated** across the two engine clients:
 
 - **Renderer:** `app/src/hooks/useVariableResolver.ts` + inline in
   `app/src/modules/request-builder/index.tsx` + `utils/auth-mapping.ts`.
 - **MCP:** `app/electron/mcp/resolve.ts`.
 
+Composing the collection-chain + request pre/post scripts is **no longer** part
+of that duplication: both clients now collect an ordered list of `ScriptPart`s
+(root-to-leaf chain, then the request's own, each naming its origin) and send
+the list - `preRequestScripts` / `postRequestScripts` on `POST /request`, `tests`
+on `POST /run` - and the **engine** joins them with `"\n\n"` and runs the result.
+Each client still builds that list itself (`scriptParts` in
+`app/src/modules/request-builder/utils/script-parts.ts` and in
+`app/electron/mcp/resolve.ts` - the same intentional duplication, since MCP
+cannot import from `app/src/`), so a change to the list-building rule (e.g. what
+counts as blank) still needs both copies changed together.
+
 The engine does the rest of execution (loads variables for script context, applies
-concrete auth incl. OAuth2, runs scripts) but intentionally does **no** `{{var}}`
-interpolation and drops `{"mode":"inherit"}` as "resolved app-side". If you change
-resolution/auth/script semantics, **change both client copies together** and keep
-them in sync (guarded by `app/electron/mcp/resolve.test.ts`). **Do not add a third
-copy** - a new engine client should reuse `resolve.ts`. The intended long-term fix
-(consolidate composition into the engine) is deferred and documented in
+concrete auth incl. OAuth2, joins and runs the script parts) but intentionally
+does **no** `{{var}}` interpolation and drops `{"mode":"inherit"}` as "resolved
+app-side". If you change resolution/auth/script-list-building semantics, **change
+both client copies together** and keep them in sync (guarded by
+`app/electron/mcp/resolve.test.ts`). **Do not add a third copy** - a new engine
+client should reuse `resolve.ts`. The intended long-term fix (consolidate the
+remaining variable/auth resolution into the engine) is deferred and documented in
 `docs/plans/pending-backlog.md` → **A1**; do not start it without explicit ask.
 
 ## Releasing

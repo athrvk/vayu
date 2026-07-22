@@ -179,25 +179,52 @@ describe("auth composition", () => {
 	});
 });
 
-describe("script composition", () => {
-	test("chain scripts (root→leaf) precede the request's own, blank-line joined", () => {
-		const chain: CollectionLike[] = [
-			{ id: "root", preRequestScript: "root-pre", postRequestScript: "root-post" },
-			{ id: "leaf", preRequestScript: "leaf-pre", postRequestScript: "" },
+describe("script parts", () => {
+	test("chain parts (root to leaf) precede the request's own, each naming its source", () => {
+		const chain = [
+			{
+				id: "c1",
+				name: "root",
+				preRequestScript: "A",
+				postRequestScript: "PA",
+			},
+			{
+				id: "c2",
+				name: "leaf",
+				preRequestScript: "B",
+				postRequestScript: "PB",
+			},
 		];
-		const out = composeScripts(
-			{ preRequestScript: "req-pre", postRequestScript: "req-post" },
-			chain
-		);
-		expect(out.preRequestScript).toBe("root-pre\n\nleaf-pre\n\nreq-pre");
-		expect(out.postRequestScript).toBe("root-post\n\nreq-post");
+		const request = {
+			id: "r1",
+			preRequestScript: "C",
+			postRequestScript: "PC",
+		};
+
+		const out = composeScripts(request as never, chain as never);
+
+		expect(out.preRequestScripts).toEqual([
+			{ origin: "collection", id: "c1", name: "root", script: "A" },
+			{ origin: "collection", id: "c2", name: "leaf", script: "B" },
+			{ origin: "request", id: "r1", script: "C" },
+		]);
+		expect(out.postRequestScripts?.map((p) => p.script)).toEqual(["PA", "PB", "PC"]);
 	});
 
-	test("no scripts anywhere yields undefined (not an empty string)", () => {
-		expect(composeScripts({}, [])).toEqual({
-			preRequestScript: undefined,
-			postRequestScript: undefined,
-		});
+	test("no scripts anywhere yields undefined, not an empty list", () => {
+		const out = composeScripts({ id: "r1" } as never, []);
+
+		expect(out.preRequestScripts).toBeUndefined();
+		expect(out.postRequestScripts).toBeUndefined();
+	});
+
+	test("parts that are empty or only whitespace are dropped", () => {
+		const out = composeScripts(
+			{ id: "r1", preRequestScript: "real" } as never,
+			[{ id: "c1", name: "root", preRequestScript: "   " }] as never
+		);
+
+		expect(out.preRequestScripts).toEqual([{ origin: "request", id: "r1", script: "real" }]);
 	});
 });
 
@@ -256,8 +283,8 @@ describe("composeSavedRequest", () => {
 			headers: { Accept: "application/json" },
 			body: { mode: "json", content: '{"a":1}' },
 			auth: { mode: "bearer", token: "T" },
-			preRequestScript: "pre",
-			postRequestScript: "post",
+			preRequestScripts: [{ origin: "collection", id: "c1", script: "pre" }],
+			postRequestScripts: [{ origin: "request", id: "r1", script: "post" }],
 			followRedirects: true,
 			maxRedirects: 10,
 			requestId: "r1",

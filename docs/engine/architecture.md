@@ -147,20 +147,29 @@ the [API reference](api-reference.md#authentication) for the `/oauth2/*` routes.
 
 The engine composes a request only **partway**. On `POST /request` it loads the
 environment, globals, and the request's collection variables (into the QuickJS
-script context), resolves/applies concrete auth, and runs the pre/post scripts -
-but it does **not**:
+script context), resolves/applies concrete auth, and now also **joins and runs
+the pre/post script parts** - but it does **not**:
 
 - interpolate `{{variables}}` into the URL / headers / body (no `{{}}` handling
-  exists anywhere in `engine/`),
+  exists anywhere in `engine/`), or
 - resolve `inherit` auth by walking the collection ancestor chain (`parse_auth`
-  drops `{"mode":"inherit"}` as "resolved app-side"), or
-- compose the collection-chain pre/post scripts with the request's own.
+  drops `{"mode":"inherit"}` as "resolved app-side").
 
-Those three steps are done **client-side**, so they are duplicated in the app
+Those two steps are done **client-side**, so they are duplicated in the app
 renderer and the MCP layer (`app/electron/mcp/resolve.ts`). Consolidating them
 into the engine - so clients pass a `requestId` + `environmentId` and the engine
 composes - is a deferred maintainability item: see
 `docs/plans/pending-backlog.md` → **A1**. Do not start it without an explicit ask.
+
+Script composition moved partly server-side already: clients send an ordered
+list of parts (`{ origin: "collection" | "request", id?, name?, script }` -
+`preRequestScripts` / `postRequestScripts` on `POST /request`, `tests` on
+`POST /run`; the legacy single-string field still works) built by walking the
+collection chain root-to-leaf then appending the request's own
+(`engine/src/http/script_parts.cpp::read_script`). The engine joins the parts
+with `"\n\n"`, dropping any whose script is empty or only whitespace, and runs
+the result once. Building that ordered list - not joining it - is what remains
+client-side.
 
 ### Database (`SQLite`)
 

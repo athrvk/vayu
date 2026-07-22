@@ -10,13 +10,14 @@
  * @brief Request-composition pipeline for the MCP layer.
  *
  * When the Vayu app sends a request, the **renderer** - not the engine - does
- * the preparation: it resolves `{{variables}}`, walks the collection ancestor
- * chain to resolve `inherit` auth, and composes the collection-chain pre/post
- * scripts with the request's own. The engine only *applies* a concrete `auth`
- * block (bearer/basic/apikey/oauth2, incl. the OAuth2 token cache) and *runs*
- * whatever script strings arrive in the body; it performs **no** `{{var}}`
- * interpolation and explicitly drops `{"mode":"inherit"}` auth as
- * "resolved app-side" (see engine `auth_resolver.cpp::parse_auth`).
+ * the preparation: it resolves `{{variables}}` and walks the collection
+ * ancestor chain to resolve `inherit` auth. It also collects the
+ * collection-chain scripts (root→leaf) and the request's own as an ordered
+ * list of {@link ScriptPart}s; the engine now joins them and runs the result.
+ * The engine *applies* a concrete `auth` block (bearer/basic/apikey/oauth2,
+ * incl. the OAuth2 token cache); it performs **no** `{{var}}` interpolation
+ * and explicitly drops `{"mode":"inherit"}` auth as "resolved app-side" (see
+ * engine `auth_resolver.cpp::parse_auth`).
  *
  * MCP talks to the engine directly, bypassing the renderer, so without this
  * module MCP requests would ship unresolved `{{vars}}`, no auth, and no scripts.
@@ -65,6 +66,7 @@ export type AuthRecord = Record<string, unknown> & { mode?: string };
 /** A collection row (`GET /collections`). Collections never store `inherit`. */
 export interface CollectionLike {
 	id: string;
+	name?: string;
 	parentId?: string | null;
 	variables?: VariableBag;
 	auth?: AuthRecord;
@@ -90,15 +92,29 @@ export interface SavedRequestLike {
 	maxRedirects?: number;
 }
 
-/** The fully-composed body the engine's `POST /request` and `/run` accept. */
+/**
+ * One part of a script that runs for a request, and where it came from.
+ * Mirrors `ScriptPart` in `app/src/types/domain.ts` - restated here because
+ * `resolve.ts` cannot import from `app/src/` (see `app/tsconfig.node.json`).
+ * Keep the two definitions structurally identical.
+ */
+export interface ScriptPart {
+	origin: "collection" | "request";
+	id?: string;
+	/** Collection name, for showing the user where a part came from. */
+	name?: string;
+	script: string;
+}
+
+/** The body the engine's `POST /request` accepts. `POST /run` takes its own shape. */
 export interface OutgoingRequest {
 	method: string;
 	url: string;
 	headers?: Record<string, string>;
 	body?: RequestBodyLike;
 	auth?: AuthRecord;
-	preRequestScript?: string;
-	postRequestScript?: string;
+	preRequestScripts?: ScriptPart[];
+	postRequestScripts?: ScriptPart[];
 	followRedirects?: boolean;
 	maxRedirects?: number;
 	requestId?: string;
@@ -235,29 +251,54 @@ export function composeAuth(
 
 // --- Script composition ------------------------------------------------------
 
-function joinScripts(parts: Array<string | undefined>): string | undefined {
-	const composed = parts.filter((s): s is string => Boolean(s && s.trim())).join("\n\n");
-	return composed.length > 0 ? composed : undefined;
+/**
+ * Collect the script parts that run for a request: the collection chain's,
+ * root to leaf, then the request's own. Each part records where it came from.
+ *
+ * The engine joins them and runs the result as one script. It used to be joined
+ * here, which meant a stored run could not say which part came from where.
+ */
+function scriptParts(
+	chain: CollectionLike[],
+	pick: (c: CollectionLike) => string | undefined,
+	requestId: string | undefined,
+	requestScript: string | undefined
+): ScriptPart[] | undefined {
+	const parts: ScriptPart[] = [];
+	for (const c of chain) {
+		const script = pick(c);
+		if (script && script.trim()) {
+			parts.push({ origin: "collection", id: c.id, name: c.name, script });
+		}
+	}
+	if (requestScript && requestScript.trim()) {
+		parts.push({ origin: "request", id: requestId, script: requestScript });
+	}
+	return parts.length > 0 ? parts : undefined;
 }
 
 /**
- * Compose the effective pre/post scripts: collection-chain scripts (root→leaf)
- * followed by the request's own, joined with blank lines - the same order the
- * renderer sends so parent-collection setup runs before the request's script.
+ * Compose the effective pre/post script parts: collection-chain parts
+ * (root→leaf) followed by the request's own - the same order the renderer
+ * sends so parent-collection setup runs before the request's script.
  */
 export function composeScripts(
 	request: SavedRequestLike,
 	chain: CollectionLike[]
-): { preRequestScript?: string; postRequestScript?: string } {
+): { preRequestScripts?: ScriptPart[]; postRequestScripts?: ScriptPart[] } {
 	return {
-		preRequestScript: joinScripts([
-			...chain.map((c) => c.preRequestScript),
-			request.preRequestScript,
-		]),
-		postRequestScript: joinScripts([
-			...chain.map((c) => c.postRequestScript),
-			request.postRequestScript,
-		]),
+		preRequestScripts: scriptParts(
+			chain,
+			(c) => c.preRequestScript,
+			request.id,
+			request.preRequestScript
+		),
+		postRequestScripts: scriptParts(
+			chain,
+			(c) => c.postRequestScript,
+			request.id,
+			request.postRequestScript
+		),
 	};
 }
 
@@ -341,8 +382,9 @@ export function composeRedirectPolicy(request: SavedRequestLike): {
  * Compose a saved request into the fully-resolved payload the engine executes -
  * the MCP equivalent of the app clicking **Send** on that request. Variables are
  * resolved in the URL, headers, and body; `inherit`/chain auth is resolved to a
- * concrete block; the collection-chain + request scripts are composed; and the
- * request's redirect policy is forwarded.
+ * concrete block; the collection-chain + request script parts are collected
+ * (the engine joins and runs them); and the request's redirect policy is
+ * forwarded.
  */
 export function composeSavedRequest(
 	request: SavedRequestLike,
@@ -361,8 +403,8 @@ export function composeSavedRequest(
 	if (body) out.body = body;
 	const auth = composeAuth(request.auth, chain, resolver);
 	if (auth) out.auth = auth;
-	if (scripts.preRequestScript) out.preRequestScript = scripts.preRequestScript;
-	if (scripts.postRequestScript) out.postRequestScript = scripts.postRequestScript;
+	if (scripts.preRequestScripts) out.preRequestScripts = scripts.preRequestScripts;
+	if (scripts.postRequestScripts) out.postRequestScripts = scripts.postRequestScripts;
 	const redirects = composeRedirectPolicy(request);
 	out.followRedirects = redirects.followRedirects;
 	out.maxRedirects = redirects.maxRedirects;

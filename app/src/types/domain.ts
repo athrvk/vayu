@@ -121,6 +121,22 @@ export function compareCollectionOrder(a: Collection, b: Collection): number {
 	return (a.id ?? "").localeCompare(b.id ?? "");
 }
 
+/**
+ * One part of a script that runs for a request, and where it came from.
+ *
+ * The clients used to join the collection chain's scripts with the request's
+ * own and send a single string, so a stored run could not say which part came
+ * from where - and writing that string back to a request would put the
+ * collection's script inside it permanently. The engine joins them now.
+ */
+export interface ScriptPart {
+	origin: "collection" | "request";
+	id?: string;
+	/** Collection name, for showing the user where a part came from. */
+	name?: string;
+	script: string;
+}
+
 export interface Request {
 	id: string;
 	collectionId: string;
