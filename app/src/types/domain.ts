@@ -414,8 +414,12 @@ export interface RunReport {
 			thresholdMs?: number;
 			request_number?: number;
 			error_code?: number;
+			/** `to_string(ErrorCode)` - the same vocabulary as a live `errorCode`. */
 			error_type?: string;
+			/** Load-test writer's failure text (`load_strategy.cpp`). */
 			message?: string;
+			/** Design-mode writer's failure text (`store_result`, execution.cpp). */
+			error_message?: string;
 			headers?: Record<string, string>;
 			body?: string;
 			// Design-mode traces (`POST /request`) nest the exchange instead of

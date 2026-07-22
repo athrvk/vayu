@@ -21,6 +21,7 @@ export {
 	useRequestsQuery,
 	useMultipleCollectionRequests,
 	useRequestQuery,
+	fetchRequestById,
 	useCollectionAncestors,
 	useCreateCollectionMutation,
 	useUpdateCollectionMutation,
@@ -34,6 +35,7 @@ export {
 export {
 	useRunsQuery,
 	useRunReportQuery,
+	fetchRunReport,
 	useLastDesignRunQuery,
 	useDeleteRunMutation,
 	useAddRunToCache,

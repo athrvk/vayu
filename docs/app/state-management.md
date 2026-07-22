@@ -191,12 +191,14 @@ In-memory storage of responses per request ID, persisted across view/tab switche
 }
 ```
 
-**StoredResponse:** Includes status, headers, body, execution time, script results, and console logs.
+**StoredResponse:** Includes status, headers, body, execution time, script results, console logs, and `restoredFrom` - set only when the response was rebuilt from a stored run rather than executed, and read by the response pane's age chip.
 
 **Key Methods:**
 ```typescript
 const { setResponse, getResponse, clearResponse, clearAll } = useResponseStore();
 ```
+
+`setResponse` stores a **fresh object** on every write. `RequestBuilderProvider` subscribes to the entry for the request it is showing and adopts it when that identity changes, which is how a design run opened from history lands in a tab that is already on screen. Identity, not contents: `executeRequest` clears the pane with `setResponse(null)` and leaves the store untouched, so a contents-keyed sync would put the old response straight back.
 
 **Non-persisted** (responses are reloadable from backend).
 
@@ -549,6 +551,17 @@ const { forceSave, status, isSaving } = useSaveManager({
 5. Response is stored in `useResponseStore()` keyed by request ID
 6. Response viewer component reads the response and displays it
 7. On **request tab switch**, the response persists in `response-store` and is displayed if the user returns
+
+### Opening a Past Response
+
+1. User clicks a **design** run in the history list (`useOpenRun`)
+2. The run's report is fetched (`fetchRunReport`) and its single result row rebuilt into a `ResponseState` (`responseFromRunResult`)
+3. The request is looked up (`fetchRequestById`); if it is gone, the run opens the run tab instead
+4. The response is written to `useResponseStore()` **before** the request tab is opened, so the provider finds it on mount
+5. The pane marks it with an age chip - the request editor beside it shows the request as it is *now*, which may have been edited since
+6. The next Send overwrites it, chip and all
+
+On a **cold start** the same reconstruction runs unprompted for the *last* design run of each restored tab (`useLastDesignRunQuery`), which is why nothing about a response needs to be persisted to disk.
 
 ### Starting a Load Test Run
 

@@ -8,8 +8,13 @@
 /**
  * HistoryDetail Component
  *
- * Main component for displaying run details. Routes to either
- * LoadTestDetail or DesignRunDetail based on run type.
+ * The run tab: a load test's report, or - for a design run that has no request
+ * builder to open - that run's response.
+ *
+ * A design run normally never reaches this pane at all. Clicking one in history
+ * opens the request builder for the request it ran, with the stored response in
+ * the response pane (`useOpenRun`); only an orphan, whose request is missing or
+ * was deleted, lands here.
  */
 
 import { History, ArrowLeft } from "lucide-react";
@@ -18,7 +23,7 @@ import { useTabsStore, useLayoutStore } from "@/stores";
 import { Button, Badge } from "@/components/ui";
 import { TruncatedText, EmptyState, ErrorState, DetailSkeleton } from "@/components/shared";
 import LoadTestDetail from "./LoadTestDetail";
-import DesignRunDetail from "./DesignRunDetail";
+import DesignRunResponse from "./DesignRunResponse";
 
 export default function HistoryDetail() {
 	const { openTabs, activeTabId } = useTabsStore();
@@ -139,11 +144,7 @@ export default function HistoryDetail() {
 			{/* Detail Content */}
 			<div className="flex-1 min-h-0 overflow-hidden">
 				{isDesignRun ? (
-					<DesignRunDetail
-						report={report}
-						onBack={navigateToHistory}
-						runId={selectedRunId}
-					/>
+					<DesignRunResponse report={report} runId={selectedRunId} />
 				) : (
 					<LoadTestDetail
 						report={report}

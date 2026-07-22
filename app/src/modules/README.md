@@ -12,7 +12,8 @@ Some modules have components displayed in both the sidebar and main content area
 
 - **Location:** Both sidebar and main
 - **Sidebar:** `sidebar/HistoryList.tsx` - List of test runs
-- **Main:** `main/HistoryDetail.tsx`, `main/LoadTestDetail.tsx`, `main/DesignRunDetail.tsx` - Run detail views
+- **Main:** `main/HistoryDetail.tsx`, `main/LoadTestDetail.tsx`, `main/DesignRunResponse.tsx` - Run detail views
+- **Click routing:** `useOpenRun.ts` - a design run opens the *request builder* for its request with the stored response injected; only load tests and orphaned design runs open a run tab
 - **Usage:**
 
     ```tsx

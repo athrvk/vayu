@@ -214,7 +214,9 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 
 **Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row - method badge, status, relative time, URL, load-test chips).
 
-**Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunDetail.tsx` (single request execution - reuses the shared response viewer) or `LoadTestDetail.tsx` (load-test report). `LoadTestDetail` is **mode-aware** (header strip + tabs adapt to the run's mode, derived via `reportToDerived` → the same `DashboardDerived` shape the live dashboard uses) and composes the tabbed report under `main/components/`:
+**Click routing (`useOpenRun.ts`):** a **design** run does not open a run tab at all - it opens the request builder for the request it ran, with the stored response injected into the response pane (`responseFromRunResult` -> `useResponseStore` -> `openTab({type:"request"})`, in that order, because the provider reads the store when it mounts). This is the same path the builder already used to rebuild the *last* design run on a cold start, extended to any run. A **load** run, and a design run with no request left to open (`request_id` is optional engine-side, and deleting a request does not cascade to its runs), open the run tab.
+
+**Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunResponse.tsx` (an orphaned design run - a thin stub that feeds the *request builder's* `ResponseViewer` from the trace, deliberately holding no markup of its own) or `LoadTestDetail.tsx` (load-test report). `LoadTestDetail` is **mode-aware** (header strip + tabs adapt to the run's mode, derived via `reportToDerived` → the same `DashboardDerived` shape the live dashboard uses) and composes the tabbed report under `main/components/`:
 
 | Component | Role |
 |---|---|

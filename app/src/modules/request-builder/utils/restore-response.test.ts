@@ -76,10 +76,50 @@ describe("responseFromRunResult", () => {
 		expect(restored?.bodyType).toBe("json");
 		expect(restored?.time).toBe(254.5);
 		expect(restored?.requestHeaders).toEqual({ Accept: "application/json" });
-		expect(restored?.rawRequest).toBe("GET https://api.example.test/users");
 	});
 
-	it("returns null when the run result carries no response trace", () => {
+	/**
+	 * The Raw tab is "what did I actually send", and the request pane beside it
+	 * cannot answer that - it shows the request as it is *now*, possibly edited
+	 * since the run. This used to collapse the whole trace to `GET <url>`, so a
+	 * reopened run showed one line and the sent body was unreachable anywhere in
+	 * the app (the old history viewer computed it and never rendered it either).
+	 */
+	it("rebuilds a real raw request, not a method-and-url one-liner", () => {
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					request: {
+						method: "POST",
+						url: "https://api.example.test/users?dry=1",
+						headers: { "content-type": "application/json" },
+						body: '{"name":"ada"}',
+					},
+					response: { headers: {}, body: "{}" },
+				},
+			})
+		);
+
+		expect(restored?.rawRequest).toBe(
+			"POST /users?dry=1 HTTP/1.1\r\n" +
+				"Host: api.example.test\r\n" +
+				"content-type: application/json\r\n" +
+				"Content-Length: 14\r\n" +
+				"\r\n" +
+				'{"name":"ada"}'
+		);
+	});
+
+	it("records which run it came from, so the pane can say how old it is", () => {
+		const restored = responseFromRunResult(sample(), "run-42");
+
+		expect(restored?.restoredFrom).toEqual({
+			runId: "run-42",
+			at: new Date(1_750_000_000_000).toISOString(),
+		});
+	});
+
+	it("returns null when the run result carries neither an exchange nor an error", () => {
 		expect(responseFromRunResult(undefined)).toBeNull();
 		expect(responseFromRunResult(sample({ trace: { dnsMs: 4.2 } }))).toBeNull();
 	});
@@ -89,6 +129,54 @@ describe("responseFromRunResult", () => {
 
 		expect(restored?.body).toBe("");
 		expect(restored?.bodyType).toBe("text");
+	});
+
+	/**
+	 * A request that never reached a server stores no `response` node at all -
+	 * `store_result` writes `error_type`/`error_message` instead. Returning null
+	 * for those left the response pane blank, which was survivable while a second
+	 * viewer showed the error in its own callout; once the builder is the only
+	 * place a design run is displayed, the failure has to arrive with it.
+	 */
+	describe("a run that failed before reaching the server", () => {
+		const failed = sample({
+			statusCode: 0,
+			statusText: "",
+			trace: {
+				request: { method: "GET", url: "https://nope.example.test/", headers: {} },
+				error_type: "CONNECTION_FAILED",
+				error_message: "Could not connect to host",
+				dnsMs: 12,
+			},
+		});
+
+		it("maps to the status-0 shape the live error path produces", () => {
+			const restored = responseFromRunResult(failed, "run-9");
+
+			// status 0 is what routes the pane to ClientErrorView, and errorCode is
+			// what picks its icon and hint - the engine's `to_string(ErrorCode)`
+			// uses the same vocabulary as a live `errorCode`.
+			expect(restored?.status).toBe(0);
+			expect(restored?.errorCode).toBe("CONNECTION_FAILED");
+			expect(restored?.errorMessage).toBe("Could not connect to host");
+			expect(restored?.restoredFrom?.runId).toBe("run-9");
+		});
+
+		it("still carries what was sent, and the phases that got as far as they did", () => {
+			const restored = responseFromRunResult(failed);
+
+			expect(restored?.rawRequest).toContain("GET / HTTP/1.1");
+			expect(restored?.timing?.dns).toBe(12);
+		});
+
+		it("falls back to the result's own error text", () => {
+			// Older rows, and the load-test writer, do not fill `error_message`.
+			const restored = responseFromRunResult(
+				sample({ error: "Timeout was reached", trace: { error_type: "TIMEOUT" } })
+			);
+
+			expect(restored?.errorMessage).toBe("Timeout was reached");
+		});
 	});
 });
 

@@ -24,9 +24,14 @@ import {
 
 interface RunItemProps {
 	run: Run;
-	onSelect: (runId: string) => void;
+	onSelect: (run: Run) => void;
 	onDelete: (runId: string, event: React.MouseEvent) => void;
 	isDeleting: boolean;
+	/**
+	 * Opening a design run fetches its report, and its request, before it knows
+	 * which tab to open - so the click is not instant and has to say so.
+	 */
+	isOpening?: boolean;
 	isSelected?: boolean;
 }
 
@@ -35,6 +40,7 @@ export default function RunItem({
 	onSelect,
 	onDelete,
 	isDeleting,
+	isOpening = false,
 	isSelected = false,
 }: RunItemProps) {
 	// Format timestamp to relative time
@@ -56,6 +62,9 @@ export default function RunItem({
 
 	// Get status icon and color
 	const getStatusIcon = () => {
+		// While the click is resolving, the status slot carries the progress -
+		// the row the user pressed is where they are looking.
+		if (isOpening) return <Loader2 className="w-4 h-4 text-primary animate-spin" />;
 		switch (run.status) {
 			case "completed":
 				return <CheckCircle2 className="w-4 h-4 text-status-success-text" />;
@@ -215,7 +224,8 @@ export default function RunItem({
 			 */}
 			<button
 				type="button"
-				onClick={() => onSelect(run.id)}
+				onClick={() => onSelect(run)}
+				disabled={isOpening}
 				aria-label={`Open ${run.type === "load" ? "load test" : "request"} run, ${run.status}${
 					requestUrl ? `, ${requestUrl}` : ""
 				}`}

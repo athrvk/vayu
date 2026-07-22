@@ -16,7 +16,7 @@ import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { STATS_PAGE_LIMIT } from "@/config/network";
-import type { Run } from "@/types";
+import type { Run, RunReport } from "@/types";
 import type { TimeSeriesResponse } from "@/modules/history/types";
 
 // ============ Run Queries ============
@@ -29,6 +29,27 @@ export function useRunsQuery() {
 		queryKey: queryKeys.runs.list(),
 		queryFn: () => apiService.listRuns(),
 		refetchInterval: 5000, // 5 seconds
+	});
+}
+
+/**
+ * Fetch a single run's report imperatively, through the same cache entry the
+ * query below uses.
+ *
+ * Opening a design run from history needs the report *before* it can decide
+ * anything - the response it restores comes out of the report's one result row
+ * - and that happens in a click handler, where a hook cannot. `fetchQuery`
+ * dedupes against an in-flight fetch and fills the same key, so a subsequent
+ * `useRunReportQuery` for the same run is served from cache.
+ */
+export async function fetchRunReport(
+	queryClient: ReturnType<typeof useQueryClient>,
+	runId: string
+): Promise<RunReport> {
+	return queryClient.fetchQuery({
+		queryKey: queryKeys.runs.report(runId),
+		queryFn: () => apiService.getRunReport(runId),
+		staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
 	});
 }
 

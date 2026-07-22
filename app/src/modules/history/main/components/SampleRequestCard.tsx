@@ -136,9 +136,6 @@ export default function SampleRequestCard({
 								headers: sample.trace.response.headers || {},
 								status: sample.statusCode,
 							}}
-							compact
-							showActions={false}
-							hiddenTabs={["request"]}
 							className="max-h-[400px]"
 						/>
 					)}

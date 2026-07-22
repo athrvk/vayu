@@ -43,8 +43,8 @@ vi.mock("@/queries", () => ({
 vi.mock("./LoadTestDetail", () => ({
 	default: () => <div data-testid="load-test-detail" />,
 }));
-vi.mock("./DesignRunDetail", () => ({
-	default: () => <div data-testid="design-run-detail" />,
+vi.mock("./DesignRunResponse", () => ({
+	default: () => <div data-testid="design-run-response" />,
 }));
 
 beforeEach(() => {

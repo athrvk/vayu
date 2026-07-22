@@ -137,70 +137,81 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
  * did. Cache first (free), then the collection lists, hydrated through the same
  * query keys the sidebar uses so the work is shared rather than duplicated.
  * Only a request that genuinely no longer exists reaches the throw.
+ *
+ * Exported as a plain function, not only as a hook, because opening a design
+ * run from history has to answer "does this request still exist?" inside a
+ * click handler, before it decides whether to open a builder tab or the
+ * response-only view. That is the same lookup, so it is this function - a
+ * second copy of the collection-list scan is exactly what this file already
+ * exists to prevent.
  */
+export async function fetchRequestById(
+	queryClient: ReturnType<typeof useQueryClient>,
+	id: string
+): Promise<Request> {
+	// Populated by mutations, and by this function on a previous miss.
+	const cached = queryClient.getQueryData<Request>(queryKeys.requests.detail(id));
+	if (cached) return cached;
+
+	const scanCachedLists = () => {
+		for (const [, requests] of queryClient.getQueriesData<Request[]>({
+			queryKey: queryKeys.requests.lists(),
+		})) {
+			const found = requests?.find((r) => r.id === id);
+			if (found) return found;
+		}
+		return undefined;
+	};
+
+	const remember = (found: Request) => {
+		queryClient.setQueryData(queryKeys.requests.detail(id), found);
+		return found;
+	};
+
+	const alreadyLoaded = scanCachedLists();
+	if (alreadyLoaded) return remember(alreadyLoaded);
+
+	/*
+	 * Nothing cached yet. `fetchQuery` rather than `prefetchQuery`: it
+	 * returns the data and, critically, dedupes against an identical
+	 * in-flight request - so racing the prefetch costs no extra traffic,
+	 * it just awaits the same promise.
+	 */
+	const collections = await queryClient.fetchQuery({
+		queryKey: queryKeys.collections.list(),
+		queryFn: () => apiService.listCollections(),
+		staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
+	});
+
+	const lists = await Promise.all(
+		collections.map((collection) =>
+			queryClient
+				.fetchQuery({
+					queryKey: queryKeys.requests.listByCollection(collection.id),
+					queryFn: () => apiService.listRequests({ collectionId: collection.id }),
+					staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
+				})
+				// One unreadable collection must not sink the others - the
+				// request we want is probably in a different one.
+				.catch(() => [] as Request[])
+		)
+	);
+
+	for (const list of lists) {
+		const found = list.find((r) => r.id === id);
+		if (found) return remember(found);
+	}
+
+	throw new Error(`Request ${id} no longer exists`);
+}
+
+/** {@link fetchRequestById} as a query, which is how components consume it. */
 export function useRequestQuery(requestId: string | null) {
 	const queryClient = useQueryClient();
 
 	return useQuery({
 		queryKey: queryKeys.requests.detail(requestId ?? ""),
-		queryFn: async () => {
-			const id = requestId!;
-
-			// Populated by mutations, and by this function on a previous miss.
-			const cached = queryClient.getQueryData<Request>(queryKeys.requests.detail(id));
-			if (cached) return cached;
-
-			const scanCachedLists = () => {
-				for (const [, requests] of queryClient.getQueriesData<Request[]>({
-					queryKey: queryKeys.requests.lists(),
-				})) {
-					const found = requests?.find((r) => r.id === id);
-					if (found) return found;
-				}
-				return undefined;
-			};
-
-			const remember = (found: Request) => {
-				queryClient.setQueryData(queryKeys.requests.detail(id), found);
-				return found;
-			};
-
-			const alreadyLoaded = scanCachedLists();
-			if (alreadyLoaded) return remember(alreadyLoaded);
-
-			/*
-			 * Nothing cached yet. `fetchQuery` rather than `prefetchQuery`: it
-			 * returns the data and, critically, dedupes against an identical
-			 * in-flight request - so racing the prefetch costs no extra traffic,
-			 * it just awaits the same promise.
-			 */
-			const collections = await queryClient.fetchQuery({
-				queryKey: queryKeys.collections.list(),
-				queryFn: () => apiService.listCollections(),
-				staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
-			});
-
-			const lists = await Promise.all(
-				collections.map((collection) =>
-					queryClient
-						.fetchQuery({
-							queryKey: queryKeys.requests.listByCollection(collection.id),
-							queryFn: () => apiService.listRequests({ collectionId: collection.id }),
-							staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
-						})
-						// One unreadable collection must not sink the others - the
-						// request we want is probably in a different one.
-						.catch(() => [] as Request[])
-				)
-			);
-
-			for (const list of lists) {
-				const found = list.find((r) => r.id === id);
-				if (found) return remember(found);
-			}
-
-			throw new Error(`Request ${id} no longer exists`);
-		},
+		queryFn: () => fetchRequestById(queryClient, requestId!),
 		enabled: !!requestId,
 		// The fetch above is authoritative, so a miss is now a real miss. One
 		// retry covers a transient network blip, not a cache that has not filled.

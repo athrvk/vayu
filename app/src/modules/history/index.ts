@@ -12,7 +12,7 @@
  *
  * Structure:
  * - sidebar/     - Components displayed in the sidebar (HistoryList)
- * - main/        - Components displayed in main content area (HistoryDetail, LoadTestDetail, DesignRunDetail)
+ * - main/        - Components displayed in main content area (HistoryDetail, LoadTestDetail, DesignRunResponse)
  * - types.ts     - Shared types for history module
  *
  * Usage:
@@ -30,7 +30,7 @@ export * as main from "./main";
 export { default as HistoryList } from "./sidebar/HistoryList";
 export { default as HistoryDetail } from "./main/HistoryDetail";
 export { default as LoadTestDetail } from "./main/LoadTestDetail";
-export { default as DesignRunDetail } from "./main/DesignRunDetail";
+export { default as DesignRunResponse } from "./main/DesignRunResponse";
 
 // Shared types
 export * from "./types";

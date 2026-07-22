@@ -28,7 +28,7 @@ import {
 	useUpdateEnvironmentMutation,
 	useLastDesignRunQuery,
 } from "@/queries";
-import { useSessionStore, useResponseStore } from "@/stores";
+import { useSessionStore, useResponseStore, type StoredResponse } from "@/stores";
 import type { VariableValue } from "@/types";
 import type {
 	RequestState,
@@ -91,10 +91,39 @@ export default function RequestBuilderProvider({
 		[request.id, storeSetResponse]
 	);
 
-	// Fetch last design run from backend (for app reload scenarios)
-	const { report: lastDesignRunReport, isLoading: isLoadingLastRun } = useLastDesignRunQuery(
-		request.id
+	/*
+	 * Adopt a response the store gains for *this* request while the builder is
+	 * already on screen.
+	 *
+	 * Opening a design run from history writes the restored response into the
+	 * store and then opens the request's tab. Usually that tab is new, or was
+	 * unmounted while another tab was active, so the initialiser above reads it.
+	 * But if the user is already looking at that request, nothing above fires -
+	 * `initialRequest.id` has not changed - and the click would appear to do
+	 * nothing at all.
+	 *
+	 * Keyed on the entry's *identity*, not its contents: `setResponse` stores a
+	 * fresh object on every write, so a new object means a new response. That is
+	 * also why `executeRequest`'s `setResponse(null)` is safe here - it clears
+	 * local state and leaves the store untouched, so the entry is unchanged and
+	 * this does not undo the clear mid-flight.
+	 */
+	const storedForRequest = useResponseStore((s) =>
+		request.id ? s.responses.get(request.id) : undefined
 	);
+	const adoptedStoreEntry = useRef<StoredResponse | undefined>(undefined);
+	useEffect(() => {
+		if (!storedForRequest || storedForRequest === adoptedStoreEntry.current) return;
+		adoptedStoreEntry.current = storedForRequest;
+		setLocalResponse(storedForRequest as ResponseState);
+	}, [storedForRequest]);
+
+	// Fetch last design run from backend (for app reload scenarios)
+	const {
+		run: lastDesignRun,
+		report: lastDesignRunReport,
+		isLoading: isLoadingLastRun,
+	} = useLastDesignRunQuery(request.id);
 	const hasLoadedFromBackend = useRef<string | null>(null);
 
 	// Load response from backend if we don't have one cached and backend has a previous run
@@ -109,7 +138,10 @@ export default function RequestBuilderProvider({
 		if (isLoadingLastRun) return;
 
 		// Try to reconstruct response from last design run
-		const restoredResponse = responseFromRunResult(lastDesignRunReport?.results?.[0]);
+		const restoredResponse = responseFromRunResult(
+			lastDesignRunReport?.results?.[0],
+			lastDesignRun?.id
+		);
 		if (restoredResponse) {
 			setLocalResponse(restoredResponse);
 			storeSetResponse(request.id, restoredResponse);
@@ -118,7 +150,14 @@ export default function RequestBuilderProvider({
 
 		// Mark as loaded even if no response found
 		hasLoadedFromBackend.current = request.id;
-	}, [request.id, response, lastDesignRunReport, isLoadingLastRun, storeSetResponse]);
+	}, [
+		request.id,
+		response,
+		lastDesignRun,
+		lastDesignRunReport,
+		isLoadingLastRun,
+		storeSetResponse,
+	]);
 
 	// UI state
 	const [activeTab, setActiveTab] = useState<RequestTab>("params");

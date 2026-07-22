@@ -46,17 +46,6 @@ export interface RequestData {
 	body?: string;
 }
 
-// Full HTTP trace data
-export interface TraceData {
-	request?: RequestData;
-	response?: ResponseData;
-	dnsMs?: number;
-	connectMs?: number;
-	tlsMs?: number;
-	firstByteMs?: number;
-	downloadMs?: number;
-}
-
 // Props for response body component
 export interface ResponseBodyProps {
 	body: string;
@@ -74,16 +63,16 @@ export interface HeadersViewerProps {
 	className?: string;
 }
 
-// Props for the unified response viewer
+/**
+ * Props for the embedded response viewer.
+ *
+ * `compact`, `showActions`, `hiddenTabs` and `trace` are gone with the full
+ * mode: two of them only ever steered the branch that no longer exists, and the
+ * remaining caller's `hiddenTabs={["request"]}` named a tab the embedded view
+ * never had - it was passed, matched nothing, and hid nothing.
+ */
 export interface UnifiedResponseViewerProps {
 	response?: ResponseData | null;
 	request?: RequestData | null;
-	trace?: TraceData | null;
-	/** Compact mode for embedded views (history cards) */
-	compact?: boolean;
-	/** Show copy/download actions */
-	showActions?: boolean;
-	/** Additional tabs to hide */
-	hiddenTabs?: string[];
 	className?: string;
 }

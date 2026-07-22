@@ -28,9 +28,10 @@ import {
 	DeleteConfirmDialog,
 } from "@/components/ui";
 import RunItem from "./RunItem";
+import { useOpenRun } from "../useOpenRun";
 
 export default function HistoryList() {
-	const { openTab, openTabs, activeTabId } = useTabsStore();
+	const { openTabs, activeTabId } = useTabsStore();
 	const { activateDrawerView } = useLayoutStore();
 	const {
 		searchQuery,
@@ -47,7 +48,9 @@ export default function HistoryList() {
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const selectedRunId = activeTab?.type === "run" ? activeTab.entityId : null;
 
-	const navigateToRunDetail = (runId: string) => openTab({ type: "run", entityId: runId });
+	// A design run opens the builder for its request; a load run opens its
+	// report. See `useOpenRun` for why the decision lives outside this list.
+	const { openRun, openingRunId } = useOpenRun();
 	const navigateToHistory = () => activateDrawerView("history");
 
 	// Use TanStack Query for runs data
@@ -236,9 +239,10 @@ export default function HistoryList() {
 								<RunItem
 									key={run.id}
 									run={run}
-									onSelect={navigateToRunDetail}
+									onSelect={openRun}
 									onDelete={handleDeleteClick}
 									isDeleting={deletingId === run.id}
+									isOpening={openingRunId === run.id}
 									isSelected={selectedRunId === run.id}
 								/>
 							))}

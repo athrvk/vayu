@@ -37,15 +37,13 @@ export interface StoredResponse {
 	bodyType: "json" | "html" | "xml" | "text" | "binary";
 	size: number;
 	time: number;
-	timestamp?: string;
+	/** Set when the response was rebuilt from a stored run - see `ResponseState`. */
+	restoredFrom?: { runId?: string; at: string };
 	// Script execution results
 	consoleLogs?: string[];
 	testResults?: Array<{ name: string; passed: boolean; error?: string }>;
 	preScriptError?: string;
 	postScriptError?: string;
-	// Metadata
-	runId?: string;
-	executedAt?: number;
 }
 
 interface ResponseStoreState {
@@ -62,12 +60,15 @@ interface ResponseStoreState {
 export const useResponseStore = create<ResponseStoreState>((set, get) => ({
 	responses: new Map(),
 
+	/*
+	 * A fresh Map every write, and therefore a fresh entry object. Consumers
+	 * lean on that: the request builder syncs its local response whenever the
+	 * entry for its request changes identity, which is how a run opened from
+	 * history lands in a tab that is already on screen.
+	 */
 	setResponse: (requestId, response) => {
 		const newResponses = new Map(get().responses);
-		newResponses.set(requestId, {
-			...response,
-			executedAt: response.executedAt || Date.now(),
-		});
+		newResponses.set(requestId, { ...response });
 		set({ responses: newResponses });
 	},
 
