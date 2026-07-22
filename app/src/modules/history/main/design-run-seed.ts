@@ -25,6 +25,7 @@ import { authToEditor } from "@/modules/request-builder/utils/auth-mapping";
 import { toKeyValueItems } from "@/modules/request-builder/utils/key-value";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
+import { DEFAULT_FOLLOW_REDIRECTS, DEFAULT_MAX_REDIRECTS } from "@/constants/request";
 
 /** The part of a design run's snapshot this reads. */
 interface DesignSnapshot {
@@ -106,8 +107,8 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			authConfig: auth.authConfig,
 			preRequestScript: ownScript(snapshot.preRequestScripts),
 			testScript: ownScript(snapshot.postRequestScripts),
-			followRedirects: snapshot.followRedirects ?? true,
-			maxRedirects: snapshot.maxRedirects ?? 5,
+			followRedirects: snapshot.followRedirects ?? DEFAULT_FOLLOW_REDIRECTS,
+			maxRedirects: snapshot.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
 		},
 		collectionScripts: [
 			...(snapshot.preRequestScripts ?? []),

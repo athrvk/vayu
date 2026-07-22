@@ -17,6 +17,7 @@
 import { describe, it, expect } from "vitest";
 import { seedFromRun } from "./design-run-seed";
 import type { Run, Request } from "@/types";
+import { DEFAULT_FOLLOW_REDIRECTS, DEFAULT_MAX_REDIRECTS } from "@/constants/request";
 
 function run(overrides: Partial<Run> = {}): Run {
 	return {
@@ -101,6 +102,25 @@ describe("seedFromRun", () => {
 
 		expect(request.followRedirects).toBe(false);
 		expect(request.maxRedirects).toBe(3);
+	});
+
+	it("falls back to the app's own redirect defaults when the run predates those fields", () => {
+		// A run recorded before followRedirects/maxRedirects were captured has
+		// neither field in its snapshot. The fallback must match what
+		// createDefaultRequestState() (and the engine) actually default to, not
+		// a value re-derived here - referenced by name so this cannot drift from
+		// the source of truth the same way the fallback itself once did.
+		const legacy = run({
+			configSnapshot: {
+				method: "GET",
+				url: "https://x.test/",
+			},
+		} as Partial<Run>);
+
+		const { request } = seedFromRun(legacy, liveRequest);
+
+		expect(request.followRedirects).toBe(DEFAULT_FOLLOW_REDIRECTS);
+		expect(request.maxRedirects).toBe(DEFAULT_MAX_REDIRECTS);
 	});
 
 	describe("when the request still exists", () => {
