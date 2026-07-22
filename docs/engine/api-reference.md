@@ -414,6 +414,27 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
 }
 ```
 
+**Script parts.** `preRequestScript` / `postRequestScript` above are the legacy
+single-string form and still work. The engine also accepts `preRequestScripts`
+/ `postRequestScripts`: a list of parts, each recording where it came from, so
+a stored run can say which part is the collection's and which is the
+request's:
+
+```json
+{
+  "preRequestScripts": [
+    { "origin": "collection", "id": "c1", "name": "API", "script": "const base = pm.environment.get('baseUrl');" },
+    { "origin": "request", "id": "r1", "script": "pm.request.headers.add({ key: 'X-Trace', value: base });" }
+  ]
+}
+```
+
+When both forms are sent, the list wins - they are never merged. Parts are
+joined with a blank line and run as a single script in one shared scope (see
+[scripting.md](scripting.md#script-parts)), so a variable declared in an
+earlier part is visible to a later one; parts that are empty or only
+whitespace are dropped.
+
 **Redirect policy.** `followRedirects` defaults to **true**, so omitting it
 follows every 3xx and only the final response is returned - send
 `followRedirects: false` to see the 3xx status and its `Location` header. Both

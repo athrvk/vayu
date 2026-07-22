@@ -21,6 +21,7 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/http/script_parts.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/json.hpp"
@@ -302,9 +303,10 @@ void register_execution_routes (RouteContext& ctx) {
         }
 
         // Extract scripts
-        std::string pre_request_script = json.value ("preRequestScript", std::string{});
+        std::string pre_request_script =
+        vayu::http::read_script (json, "preRequestScripts", "preRequestScript");
         std::string post_request_script =
-        json.value ("postRequestScript", std::string{});
+        vayu::http::read_script (json, "postRequestScripts", "postRequestScript");
 
         // Create Run record
         run_id = "run_" + std::to_string (now_ms ());

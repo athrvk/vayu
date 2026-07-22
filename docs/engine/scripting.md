@@ -237,6 +237,32 @@ QuickJS supports ES2020 features with some limitations:
 - Only a sample of responses are validated (configurable)
 - Results are aggregated and reported in the final report
 
+## Script Parts
+
+A request's effective pre-request script, test script, and (for load runs) its
+`tests` script are each composed of parts: the collection chain's own script,
+then the request's own script, in that order. `POST /request` and `POST /run`
+accept either form:
+
+- The legacy single string (`preRequestScript`, `postRequestScript`, `tests`) -
+  already-joined text, kept because the engine is a standalone binary with a
+  documented HTTP API.
+- A list of parts (`preRequestScripts`, `postRequestScripts`, `tests` as an
+  array), each an object recording where it came from - `{ "origin":
+  "collection" | "request", "id": "...", "name": "...", "script": "..." }` -
+  so a stored run can say which part is whose.
+
+When both are sent, **the list wins**; they are never merged. Parts that are
+empty or only whitespace are dropped.
+
+**The parts are joined with a blank line (`"\n\n"`) and run as a single script
+in one shared JavaScript scope** - not as separate `engine.execute()` calls.
+That means a `const` or `let` declared in the collection's part is visible to
+the request's part, exactly as if one person had typed the whole thing into
+one editor. It also means a syntax error's reported line number is counted
+from the start of the joined text, not from the start of whichever part
+actually has the mistake.
+
 ## Error Handling
 
 Script errors are caught and reported:
