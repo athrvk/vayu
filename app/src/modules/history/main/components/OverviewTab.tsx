@@ -18,6 +18,7 @@ import { formatNumber } from "@/utils";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import type { TabProps } from "../../types";
+import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
 export default function OverviewTab({ report, derived }: TabProps) {
 	return (
@@ -38,50 +39,31 @@ export default function OverviewTab({ report, derived }: TabProps) {
 						<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
 							{Object.entries(report.statusCodes).map(
 								([code, count]: [string, number]) => {
-									const isError = code === "0";
-									const isSuccess = code.startsWith("2");
-									const isRedirect = code.startsWith("3");
-									const isClientError = code.startsWith("4");
-									const isServerError = code.startsWith("5");
+									/*
+									 * One vocabulary, from `constants/http-status`. These tiles
+									 * used raw palette classes and their own branches, which put
+									 * 3xx on blue while the badge said amber and the chart said
+									 * violet - and painted a 5xx and a connection failure the
+									 * same red, so "the server erred" and "there was no server"
+									 * were indistinguishable at a glance.
+									 */
+									const style = STATUS_CLASS_STYLE[httpStatusClass(Number(code))];
 
 									return (
 										<div
 											key={code}
 											className={cn(
-												"p-3 border text-center",
-												isError &&
-													"bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900",
-												isSuccess &&
-													"bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-900",
-												isRedirect &&
-													"bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900",
-												isClientError &&
-													"bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-900",
-												isServerError &&
-													"bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900",
-												!isError &&
-													!isSuccess &&
-													!isRedirect &&
-													!isClientError &&
-													!isServerError &&
-													"bg-muted border-border"
+												"p-3 border border-border text-center",
+												style.tint
 											)}
 										>
 											<p
 												className={cn(
 													"text-lg font-bold font-mono mb-0.5",
-													isError && "text-red-700 dark:text-red-400",
-													isSuccess &&
-														"text-green-700 dark:text-green-400",
-													isRedirect &&
-														"text-blue-700 dark:text-blue-400",
-													isClientError &&
-														"text-yellow-700 dark:text-yellow-400",
-													isServerError &&
-														"text-red-700 dark:text-red-400"
+													style.text
 												)}
 											>
-												{isError ? "ERR" : code}
+												{statusCodeLabel(Number(code))}
 											</p>
 											<p className="text-xs text-muted-foreground">
 												{formatNumber(count)} reqs

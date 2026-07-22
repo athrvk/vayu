@@ -46,17 +46,25 @@
 	--color-status-error: hsl(var(--status-error));
 	--color-status-running: hsl(var(--status-running));
 	--color-status-stopped: hsl(var(--status-stopped));
+	--color-status-redirect: hsl(var(--status-redirect));
+	--color-status-no-response: hsl(var(--status-no-response));
+	--color-status-warning: hsl(var(--status-warning));
 	/* Text-safe pairs - use when the status colour is the text itself. */
 	--color-status-success-text: hsl(var(--status-success-text));
 	--color-status-error-text: hsl(var(--status-error-text));
 	--color-status-running-text: hsl(var(--status-running-text));
 	--color-status-stopped-text: hsl(var(--status-stopped-text));
+	--color-status-redirect-text: hsl(var(--status-redirect-text));
+	--color-status-no-response-text: hsl(var(--status-no-response-text));
+	--color-status-warning-text: hsl(var(--status-warning-text));
 	/* Solid-chip pairs - use when a status colour is a filled background under
 	 * a white label. */
 	--color-status-success-fill: hsl(var(--status-success-fill));
 	--color-status-error-fill: hsl(var(--status-error-fill));
 	--color-status-warning-fill: hsl(var(--status-warning-fill));
 	--color-status-stopped-fill: hsl(var(--status-stopped-fill));
+	--color-status-redirect-fill: hsl(var(--status-redirect-fill));
+	--color-status-no-response-fill: hsl(var(--status-no-response-fill));
 	--color-chart-1: hsl(var(--chart-1));
 	--color-chart-2: hsl(var(--chart-2));
 	--color-chart-3: hsl(var(--chart-3));
@@ -228,6 +236,23 @@
 		--status-error: 0 84% 60%; /* red-500 - failed / test fail */
 		--status-running: 217 91% 60%; /* blue-500 - running */
 		--status-stopped: 25 95% 53%; /* orange-500 - stopped */
+		/* HTTP status classes. 3xx is violet because that is where the wheel has
+		 * room: excluding the hues the four above already own, and requiring 3.0
+		 * on both card surfaces, the best-separated free band is 262-294. Violet
+		 * scores 0.202 in OKLab against its siblings where blue manages 0.134,
+		 * and blue is already --status-running, which appears in the same
+		 * History row. 258 rather than the sweep's 262 to share a hue with
+		 * --chart-3, which is what the dashboard chart paints 3xx with.
+		 *
+		 * --status-warning completes a triad that only ever had a -fill. Amber
+		 * cannot follow the -500 convention of the four above: amber-500
+		 * (38 92% 50%) measures 2.14 on a light card, well under the 3.0 icon
+		 * bar, so the indicator sits much darker. That puts it only 3 points
+		 * from its own -fill, where the other families separate widely - amber
+		 * is squeezed from both ends, which is a property of the hue. */
+		--status-redirect: 258 60% 62%; /* violet - 3xx, redirect */
+		--status-no-response: 240 5% 52%; /* neutral - status 0, nothing came back */
+		--status-warning: 38 92% 36%; /* amber - 4xx, client error */
 
 		/* Text-safe pairs. The four above are mode-consistent because a dot
 		 * should read the same on either surface - but that same value used as
@@ -240,6 +265,9 @@
 		--status-error-text: 0 70% 45%;
 		--status-running-text: 217 80% 45%;
 		--status-stopped-text: 25 85% 35%;
+		--status-redirect-text: 258 62% 48%;
+		--status-no-response-text: 240 6% 38%;
+		--status-warning-text: 38 90% 30%;
 
 		/* Solid-chip pairs. The response status badge paints a status colour as a
 		 * filled chip with a white label - a third use, needing neither the dot
@@ -251,6 +279,8 @@
 		--status-error-fill: 0 84% 49%;
 		--status-warning-fill: 38 92% 33%;
 		--status-stopped-fill: 25 95% 39%;
+		--status-redirect-fill: 258 60% 46%;
+		--status-no-response-fill: 240 6% 40%;
 
 		/* Geometry */
 		--radius: 0.375rem;
@@ -441,6 +471,11 @@
 		--status-error-text: 0 75% 68%;
 		--status-running-text: 217 90% 70%;
 		--status-stopped-text: 25 90% 62%;
+		/* Byte-identical to --chart-3 dark, deliberately: the chart's violet and
+		 * the response pane's violet are the same colour in this tier. */
+		--status-redirect-text: 258 78% 72%;
+		--status-no-response-text: 240 6% 65%;
+		--status-warning-text: 40 92% 60%;
 
 		/* HTTP method colors (dark) - lightened so the badge text clears AA on
 		 * its own tint over the dark card. See the light block for why these are

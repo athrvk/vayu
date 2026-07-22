@@ -38,6 +38,7 @@ import { EmptyState } from "../EmptyState";
 import ResponseBody from "./ResponseBody";
 import HeadersViewer, { CompactHeadersViewer } from "./HeadersViewer";
 import { formatSize, formatResponseTime } from "./utils";
+import { StatusCodeBadge } from "./StatusCodeBadge";
 import type { UnifiedResponseViewerProps } from "./types";
 
 type ResponseTab = "body" | "headers" | "request";
@@ -340,27 +341,10 @@ function ResponseStatusBar({
 	time?: number;
 	size?: number;
 }) {
-	const statusColor =
-		status >= 200 && status < 300
-			? "bg-status-success-fill"
-			: status >= 300 && status < 400
-				? "bg-status-warning-fill"
-				: status >= 400 && status < 500
-					? "bg-status-stopped-fill"
-					: "bg-status-error-fill";
-
 	return (
 		<div className="flex items-center gap-4 px-4 py-3 border-b border-border bg-muted/30">
 			{/* Status */}
-			{/* `chip`, not the default variant - see ResponseHeader.tsx. The
-			    default's `hover:bg-primary-fill/80` outlives the background this
-			    className replaces, repainting the chip with the user's accent. */}
-			<Badge
-				variant="chip"
-				className={cn("font-mono shadow text-primary-foreground", statusColor)}
-			>
-				{status} {statusText}
-			</Badge>
+			<StatusCodeBadge status={status} statusText={statusText} />
 
 			{/* Time */}
 			{time !== undefined && (

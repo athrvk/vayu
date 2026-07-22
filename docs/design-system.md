@@ -341,15 +341,57 @@ and a "200 OK" chip read identically on either theme. This is the same split
 "expiring / caution" indicators (amber) and `--success` for success *banners*.
 
 The same set also colors **HTTP response severity** and **latency thresholds**,
-since those map onto the same hues. The response-status badge
-(`ResponseViewer/ResponseHeader.tsx`) uses the `-fill` chips under a white label:
+since those map onto the same hues.
 
-| Status | Token |
-|--------|-------|
-| 2xx | `status-success-fill` |
-| 3xx | `status-warning-fill` |
-| 4xx | `status-stopped-fill` |
-| 5xx, and `0` (no server response) | `status-error-fill` |
+**HTTP status classes have their own vocabulary**, in
+`constants/http-status.ts`. Never re-derive it: `httpStatusClass(code)` gives
+the class, `STATUS_CLASS_STYLE[class]` gives the utility for the surface role
+you need (`fill` / `text` / `tint` / `indicator`). Guarded by
+`http-status.test.ts`, which fails if a component classifies a code and picks a
+colour inline.
+
+| Class | Codes | Family |
+|-------|-------|--------|
+| `success` | 2xx | `status-success` |
+| `redirect` | 3xx, and 1xx | `status-redirect` (violet) |
+| `client-error` | 4xx | `status-warning` (amber) |
+| `server-error` | 5xx | `status-error` |
+| `no-response` | `0`, and anything not a valid code | `status-no-response` (neutral) |
+
+**This table has now been corrected twice, in opposite directions, so the
+reasoning is recorded rather than the conclusion alone.** It previously
+described the response badge's mapping: 3xx on `status-warning-fill`, 4xx on
+`status-stopped-fill`. That ramp reads as principled - green to amber to orange
+to red - but it packs four classes into 38deg-0deg of hue, and measured as OKLab
+distance three of its ten pairs collide: 3xx/4xx at 0.073, 4xx/5xx at 0.095, and
+5xx against a connection failure at **0.000**, because both used
+`status-error-fill`. The set above has no pair under 0.144.
+
+3xx is violet because that is where the wheel has room. Excluding the hues the
+other classes own and requiring 3.0 on both card surfaces, the best-separated
+free band is 262-294; violet scores 0.202 against its siblings where blue
+manages 0.134, and blue is already `--status-running`, which appears in the same
+History row. Hue 258 rather than 262 so it matches `--chart-3`, which is what
+the dashboard chart paints 3xx with.
+
+A violet accent scheme (Aurora) sits 0.068 from it, which sounds disqualifying
+and is not: *every* existing status indicator already collides with some accent
+(`--status-stopped` is 0.023 from Sunset), and none of those is a defect,
+because a status dot and an accent button are different UI roles. The 0.10 bar
+is a chart-series rule, where colour is the sole encoding within one plot.
+
+`--status-warning` completes a family that only ever had a `-fill`, which is why
+the history tiles used raw `yellow-700`. Amber cannot follow the `-500`
+convention: amber-500 (`38 92% 50%`) measures **2.14** on a light card. The
+indicator sits at `38 92% 36%`, only 3 points from its own fill - amber is
+squeezed from both ends, which is a property of the hue, not a mistake.
+
+The chart keeps its own palette. `uplotTheme`'s roles resolve to `--success` /
+`--warning` / `--chart-3`, which hold different values from `--status-*`. A
+translucent area fill, a solid chip under a white label and a 10% wash are
+different optical problems. Only the *classification* is shared, so
+`--status-redirect` and `--chart-3` are two tokens for one concept: same hue by
+construction, byte-identical only in the dark `-text` tier, kept in step by hand.
 
 Latency uses `status-running` → `status-stopped` → `status-error` for normal →
 slow → danger (`LatencyMetric.tsx`).
@@ -361,10 +403,13 @@ identity by color rather than to signal state - the same idea as `--chart-*`.
 These intentionally keep Tailwind hue utilities (with `dark:` variants) instead
 of tokens, because they never respond to theme and don't carry semantics:
 
-- **Timing phases** - DNS / connect / TLS / TTFB / download in the breakdown,
-  and the history overview tiles. These are written as explicit
-  `bg-blue-50 dark:bg-blue-950/30` pairs, so they *are* theme-aware; they are
-  categorical identity, not state.
+- **Timing phases** - DNS / connect / TLS / TTFB / download in the breakdown.
+  These are written as explicit `bg-blue-50 dark:bg-blue-950/30` pairs, so they
+  *are* theme-aware; they are categorical identity, not state.
+
+  The history overview tiles used to be listed here too, and should not have
+  been: they encode HTTP severity, which is state. They now use
+  `STATUS_CLASS_STYLE`.
 
 Everything else - state, status, scope, semantics - must use tokens.
 

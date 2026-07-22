@@ -26,6 +26,7 @@ import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Clock } from "luc
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
+import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
 // Per-phase explanations for the network timing breakdown. Kept in sync with
 // the wording in ResponseTimingTab (request-builder), which explains the same
@@ -100,17 +101,19 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									key={code}
 									className="p-3 bg-card border border-border rounded-md"
 								>
+									{/*
+									 * `constants/http-status`, not a local ternary. This
+									 * one put 3xx on `status-running` - the blue that
+									 * means "a run is in progress" - which was the
+									 * fourth different answer for 3xx in the app.
+									 */}
 									<span
 										className={cn(
 											"font-mono font-bold text-lg",
-											code === "0" && "text-status-error-text",
-											code.startsWith("2") && "text-status-success-text",
-											code.startsWith("3") && "text-status-running-text",
-											code.startsWith("4") && "text-warning-text",
-											code.startsWith("5") && "text-status-error-text"
+											STATUS_CLASS_STYLE[httpStatusClass(Number(code))].text
 										)}
 									>
-										{code === "0" ? "Error" : code}
+										{statusCodeLabel(Number(code))}
 									</span>
 									<p className="text-sm text-muted-foreground">
 										{String(count)} requests
