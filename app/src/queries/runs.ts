@@ -33,6 +33,20 @@ export function useRunsQuery() {
 }
 
 /**
+ * Fetch one run, including its configSnapshot and - for a design run - the
+ * stored exchange. The report is a load-test aggregate and carries no
+ * configuration for a design run, so this is the only source for it.
+ */
+export function useRunQuery(runId: string | null) {
+	return useQuery({
+		queryKey: queryKeys.runs.detail(runId ?? ""),
+		queryFn: () => apiService.getRun(runId!),
+		enabled: !!runId,
+		staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
+	});
+}
+
+/**
  * Fetch a single run's report
  */
 export function useRunReportQuery(runId: string | null) {

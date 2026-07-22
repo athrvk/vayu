@@ -33,6 +33,7 @@ export {
 // Runs (History)
 export {
 	useRunsQuery,
+	useRunQuery,
 	useRunReportQuery,
 	useLastDesignRunQuery,
 	useDeleteRunMutation,

@@ -30,12 +30,6 @@ export interface PerformanceTabProps extends TabProps {
 	progress?: { loaded: number; total: number };
 }
 
-export interface DesignRunDetailProps {
-	report: RunReport;
-	onBack: () => void;
-	runId: string;
-}
-
 export interface LoadTestDetailProps {
 	report: RunReport;
 	onBack: () => void;
