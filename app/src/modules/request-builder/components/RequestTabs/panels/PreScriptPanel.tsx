@@ -8,11 +8,17 @@
 /**
  * PreScriptPanel Component
  *
- * Pre-request script editor with variable preview
+ * Pre-request script editor with variable preview.
+ *
+ * This and `TestScriptPanel` are the same panel bound to a different field:
+ * only the field name, the opening sentence and the quick-reference block
+ * differ. The duplication is known and deliberately left in place - it is small
+ * and stable, and `script-panels.test.tsx` runs every assertion against both, so
+ * a fix applied to one and not the other fails. Change them together.
  */
 
 import { useState } from "react";
-import { Button, Badge, CodeEditor } from "@/components/ui";
+import { Button, Badge, CodeEditor, VariableScopeBadge } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 
 export default function PreScriptPanel() {
@@ -50,14 +56,21 @@ export default function PreScriptPanel() {
 						variant={showVariables ? "secondary" : "outline"}
 						onClick={() => setShowVariables(!showVariables)}
 					>
-						{showVariables ? "Hide" : "Show"} Variables
+						{showVariables ? "Hide" : "Show"} all variables
 					</Button>
 				)}
 			</div>
 
-			{/* Referenced Variables */}
-			{hasReferencedVars && !showVariables && (
-				<div className="flex flex-wrap gap-2">
+			{/*
+			 * The referenced list stays put when the full list opens. "Show
+			 * Variables" used to replace it, so the button promising more
+			 * information removed the more useful half - the names this script
+			 * actually mentions, and whether each one resolves - and gave back an
+			 * unfiltered dump of everything in scope. The two answer different
+			 * questions, so both are shown and the button names the one it opens.
+			 */}
+			{hasReferencedVars && (
+				<div className="flex flex-wrap items-center gap-2">
 					<span className="text-xs text-muted-foreground">Referenced:</span>
 					{usedVars.slice(0, 5).map((varName) => {
 						const varInfo = allVariables[varName];
@@ -79,15 +92,19 @@ export default function PreScriptPanel() {
 				</div>
 			)}
 
-			{/* All Variables Panel */}
+			{/*
+			 * `VariableScopeBadge`, not a hand-rolled outline badge printing
+			 * `scope[0]`. The primitive is where the scope colours live, and this
+			 * panel bypassed it - so global, collection and environment all read as
+			 * the same colourless chip, in the one place a script author comes to
+			 * tell them apart.
+			 */}
 			{showVariables && (
 				<div className="p-3 bg-muted/50 rounded-md border border-input max-h-40 overflow-y-auto">
 					<div className="grid grid-cols-2 gap-2 text-xs font-mono">
 						{Object.entries(allVariables).map(([name, info]) => (
 							<div key={name} className="flex items-center gap-2">
-								<Badge variant="outline" className="text-[10px] px-1">
-									{info.scope[0].toUpperCase()}
-								</Badge>
+								<VariableScopeBadge scope={info.scope} variant="compact" />
 								<span className="text-muted-foreground">{name}:</span>
 								<span className="truncate">{info.value}</span>
 							</div>
