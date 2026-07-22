@@ -87,6 +87,10 @@ function designRun(overrides: Partial<Run> = {}): Run {
 				{ origin: "collection", id: "col_1", name: "API", script: "const t = 1;" },
 				{ origin: "request", id: "req_1", script: "console.log(t);" },
 			],
+			postRequestScripts: [
+				{ origin: "collection", id: "col_1", name: "API", script: "chainAssert();" },
+				{ origin: "request", id: "req_1", script: "pm.test('ok', () => {});" },
+			],
 			followRedirects: false,
 			maxRedirects: 3,
 			requestId: "req_1",
@@ -283,6 +287,16 @@ describe("DesignRunView - sending it again", () => {
 			{ origin: "collection", id: "col_1", name: "API", script: "const t = 1;" },
 			{ origin: "request", script: "console.log(t);" },
 		]);
+		/*
+		 * The post list too. The brief only ever named `preRequestScripts`, so
+		 * sending the post list is easy to drop - and dropping it silently
+		 * discards the assertions the run was recorded with, which is exactly
+		 * the failure a replay is supposed to reproduce.
+		 */
+		expect(payload.postRequestScripts).toEqual([
+			{ origin: "collection", id: "col_1", name: "API", script: "chainAssert();" },
+			{ origin: "request", script: "pm.test('ok', () => {});" },
+		]);
 		// Filed under the same request, so the new run lands beside the old one.
 		expect(payload.requestId).toBe("req_1");
 	});
@@ -292,7 +306,7 @@ describe("DesignRunView - saving back to the request", () => {
 	it("offers Save while the request still exists", () => {
 		renderView(designRun());
 
-		expect(screen.getByRole("button", { name: /save to request/i })).toBeTruthy();
+		expect(screen.getByRole("button", { name: /save this run to the request/i })).toBeTruthy();
 	});
 
 	it("hides Save when the request has been deleted", () => {
@@ -302,7 +316,7 @@ describe("DesignRunView - saving back to the request", () => {
 
 		renderView(designRun());
 
-		expect(screen.queryByRole("button", { name: /save to request/i })).toBeNull();
+		expect(screen.queryByRole("button", { name: /save this run to the request/i })).toBeNull();
 	});
 
 	it("replays the recorded Authorization when the request is gone", async () => {

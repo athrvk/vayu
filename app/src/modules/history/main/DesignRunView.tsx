@@ -293,7 +293,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					</span>
 					<Button variant="outline" size="sm" onClick={() => setShowSaveDialog(true)}>
 						<Save className="w-3.5 h-3.5 mr-1.5" />
-						Save to request
+						Save this run to the request
 					</Button>
 				</div>
 			)}
