@@ -1,0 +1,4 @@
+# Every path requires the maintainer's review on pull requests.
+# Branch protection on master has "require code owner reviews" enabled;
+# this file is what makes that rule actually fire.
+* @athrvk
