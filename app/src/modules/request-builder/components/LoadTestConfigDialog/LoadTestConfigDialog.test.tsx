@@ -141,6 +141,70 @@ describe("notices", () => {
 	});
 });
 
+describe("recording & limits is one surface", () => {
+	/**
+	 * The card used to be worn by the header alone - `bg-card` sat on the
+	 * trigger - so opening the disclosure dropped the sample rate, the slow
+	 * threshold, the timing switch and the comment onto the bare dialog
+	 * background, reading as fields unrelated to the row that revealed them.
+	 *
+	 * This is keyed on the surface class, not on ancestry, and that is the whole
+	 * point: `CollapsibleContent` has always been a child of the `Collapsible`
+	 * root, so `trigger.parentElement` contained the fields even while the
+	 * layout was broken. Only "the nearest painted surface around the header
+	 * also holds the fields" tells the two apart.
+	 */
+	it("renders the disclosure fields inside the same card as its header", () => {
+		open();
+		const trigger = screen.getByRole("button", { name: /recording/i });
+		fireEvent.click(trigger);
+
+		const surface = trigger.closest(".bg-card");
+		expect(surface).not.toBeNull();
+
+		for (const label of [
+			/success sample rate/i,
+			/slow request threshold/i,
+			/save timing breakdown/i,
+			/^comment/i,
+		]) {
+			expect(surface).toContainElement(screen.getByLabelText(label));
+		}
+
+		// `closest` is ancestor-or-self, and pre-fix it resolved to the trigger,
+		// whose siblings the fields were. Stated separately so the loop above is
+		// what reports the defect.
+		expect(surface).not.toBe(trigger);
+	});
+
+	it("keeps the header above its fields in document, and so in tab, order", () => {
+		open();
+		const trigger = screen.getByRole("button", { name: /recording/i });
+		fireEvent.click(trigger);
+
+		const first = screen.getByLabelText(/success sample rate/i);
+		const last = screen.getByLabelText(/^comment/i);
+		expect(
+			trigger.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		expect(first.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it("leaves the toggle a real button, so Tab reaches it and Enter/Space fire it", () => {
+		open();
+		const trigger = screen.getByRole("button", { name: /recording/i });
+		expect(trigger.tagName).toBe("BUTTON");
+		expect(trigger).not.toHaveAttribute("tabindex", "-1");
+		expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+		trigger.focus();
+		expect(document.activeElement).toBe(trigger);
+
+		fireEvent.click(trigger);
+		expect(trigger).toHaveAttribute("aria-expanded", "true");
+	});
+});
+
 describe("keyboard", () => {
 	it("is a single Tab stop with arrow selection, not four stops", () => {
 		open();

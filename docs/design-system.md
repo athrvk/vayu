@@ -706,9 +706,10 @@ focus classes for the default case.**
 
 **Clipping panels.** An element whose `overflow-*` would cut off an outset ring
 must carry `.panel-clip`; every focusable descendant then gets
-`outline-offset: -1px`. Currently on the `TabStrip` row and the `Drawer` content
-wrapper. Put it on the element carrying the overflow - not on the rows. For a
-one-off outside such a container, use the `.focus-ring-inset` utility.
+`outline-offset: -1px`. Currently on the `TabStrip` row, the `Drawer` content
+wrapper and the load-test dialog's "Recording & limits" card. Put it on the
+element carrying the overflow - not on the rows. For a one-off outside such a
+container, use the `.focus-ring-inset` utility.
 
 **Composite rows - `.focus-row`.** The baseline attaches the ring to whatever is
 *focusable*, which is only right when the focusable element is also what the user

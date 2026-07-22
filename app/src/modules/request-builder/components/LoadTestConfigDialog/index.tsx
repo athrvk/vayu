@@ -423,14 +423,31 @@ export default function LoadTestConfigDialog({
 						)}
 					</p>
 
-					<Collapsible open={recordingOpen} onOpenChange={setRecordingOpen}>
-						<CollapsibleTrigger className="flex w-full items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-left text-[12px] font-medium text-foreground transition-colors hover:bg-accent">
+					{/*
+					 * Header and contents are one card, not a bordered header with
+					 * loose fields under it. The surface used to sit on the trigger,
+					 * so opening the disclosure dropped five controls onto the dialog
+					 * background with nothing tying them to the row that revealed
+					 * them. The card is the design system's panel pattern (`bg-card`
+					 * + `border-border` + `rounded-md`, docs/design-system.md
+					 * "Cards"), at the same `px-3` inset as the summary box above so
+					 * the two read as one column. `panel-clip` is required by the
+					 * `overflow-hidden` that keeps the trigger's hover fill inside the
+					 * rounded corners - it tucks focus rings inward so the clip cannot
+					 * eat them.
+					 */}
+					<Collapsible
+						open={recordingOpen}
+						onOpenChange={setRecordingOpen}
+						className="panel-clip overflow-hidden rounded-md border border-border bg-card"
+					>
+						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-[12px] font-medium text-foreground transition-colors hover:bg-accent">
 							<span>Recording &amp; limits</span>
 							<span className="text-[11px] font-normal text-muted-foreground">
 								{recordingOpen ? "Hide" : "Show"}
 							</span>
 						</CollapsibleTrigger>
-						<CollapsibleContent className="space-y-4 pt-3">
+						<CollapsibleContent className="space-y-4 border-t border-border px-3 py-3">
 							<div className="space-y-1.5">
 								<Label htmlFor="lt-sample" className="text-[12px]">
 									Success sample rate
