@@ -11,7 +11,7 @@
  * Helpers for converting between the domain KeyValueEntry[] (storage) and
  * the UI-layer KeyValueItem[] (adds ephemeral `id` for React keys).
  *
- * There is no conversion to/from Record<string,string> for storage — that was
+ * There is no conversion to/from Record<string,string> for storage - that was
  * the source of silent data loss. Flat headers are only built for HTTP execution.
  */
 
@@ -75,7 +75,7 @@ export const toKeyValueEntries = (items: KeyValueItem[]): KeyValueEntry[] => {
  * Build a flat Record<string,string> from KeyValueItems for HTTP execution.
  * Only enabled rows with non-empty keys are included.
  * Last value wins when duplicate keys exist (allows user headers to override system headers).
- * This is ONLY used for the engine execution endpoint — never for storage.
+ * This is ONLY used for the engine execution endpoint - never for storage.
  */
 export const toFlatHeaders = (items: KeyValueItem[]): Record<string, string> => {
 	const result: Record<string, string> = {};

@@ -126,7 +126,7 @@ cd app && pnpm format:check        # Prettier
 - Styling: Tailwind CSS v4 - all colors via CSS custom properties; see `docs/design-system.md`
 - **Design system:** `docs/design-system.md` - tokens, elevation, typography, component patterns. Read this before touching any UI file.
 
-## UI rules (enforced by tests — breaking one fails CI)
+## UI rules (enforced by tests - breaking one fails CI)
 
 - **Status colours have three tokens:** `--status-*` (dot/icon/tint),
   `--status-*-text` (when the colour *is* the text), `--status-*-fill` (solid
@@ -134,18 +134,18 @@ cd app && pnpm format:check        # Prettier
   common colour bug here. → `status-color-tokens.test.ts`
 - **`--primary` vs `--primary-fill`:** `--primary` is text/ring/chart and
   brightens in dark; `--primary-fill` is the solid button background and is one
-  value in both themes. Do not unify them — pinning `--primary` drops accent text
+  value in both themes. Do not unify them - pinning `--primary` drops accent text
   from APCA Lc 44–69 to 22–37.
 - **No raw Tailwind palette** (`text-green-500`) in the request/response tree
   → `palette-tokens.test.ts`. Elsewhere only with an explicit `dark:` pair.
-- **No chart series on `--primary`/`--chart-1`** — both track the user's accent
+- **No chart series on `--primary`/`--chart-1`** - both track the user's accent
   and can collide with a semantic series. Use `categorical`.
   → `status-code-series.test.ts`
-- **No bare `rounded`** — it ignores the Roundedness setting. → `radius-token.test.tsx`
+- **No bare `rounded`** - it ignores the Roundedness setting. → `radius-token.test.tsx`
 - **Adding an accent scheme:** `constants/color-schemes.ts` + `index.css`, both
   themes, nothing else. → `color-schemes.test.ts`
 - **`docs/design-system.md` values are checked against `index.css`**
-  → `design-system-doc.test.ts`. Prose is not — if you change a value, read the
+  → `design-system-doc.test.ts`. Prose is not - if you change a value, read the
   sentence around it.
 
 **Before measuring or changing a class, `rg` for it in the components.** Twice a
@@ -154,11 +154,11 @@ only existed behind a `data-[state=]` variant; white-on-`--primary` never occurs
 because fills use `--primary-fill`).
 
 **Never run prettier/`eslint --fix` repo-wide, and never format
-`docs/design-system.md`** — most of the tree isn't prettier-clean and formatting
+`docs/design-system.md`** - most of the tree isn't prettier-clean and formatting
 that file reflows ~480 lines. Format only files you touched that were clean before.
 
 **Mutation-check behavioural tests** (revert the fix, confirm failure, restore).
-Source-scanning guards must assert they scanned something non-empty — one passed
+Source-scanning guards must assert they scanned something non-empty - one passed
 for weeks reading an empty string, since vitest stubs CSS imports to `""`.
 
 ## Engine HTTP API
@@ -176,11 +176,11 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 
 See `docs/engine/api-reference.md` for full reference.
 
-## Request composition (known duplication — do not add a third copy)
+## Request composition (known duplication - do not add a third copy)
 
-Preparing a request before it executes — resolving `{{variables}}`, resolving
+Preparing a request before it executes - resolving `{{variables}}`, resolving
 `inherit` auth via the collection-chain walk, and composing the collection-chain +
-request pre/post scripts — happens **client-side** today, and is therefore
+request pre/post scripts - happens **client-side** today, and is therefore
 **duplicated** across the two engine clients:
 
 - **Renderer:** `app/src/hooks/useVariableResolver.ts` + inline in
@@ -192,7 +192,7 @@ concrete auth incl. OAuth2, runs scripts) but intentionally does **no** `{{var}}
 interpolation and drops `{"mode":"inherit"}` as "resolved app-side". If you change
 resolution/auth/script semantics, **change both client copies together** and keep
 them in sync (guarded by `app/electron/mcp/resolve.test.ts`). **Do not add a third
-copy** — a new engine client should reuse `resolve.ts`. The intended long-term fix
+copy** - a new engine client should reuse `resolve.ts`. The intended long-term fix
 (consolidate composition into the engine) is deferred and documented in
 `docs/plans/pending-backlog.md` → **A1**; do not start it without explicit ask.
 
@@ -220,15 +220,15 @@ Release notes live on the [GitHub Releases](https://github.com/athrvk/vayu/relea
 - **Compare link footer:** `[X.Y.Z]: https://github.com/athrvk/vayu/compare/vPREV...vX.Y.Z`.
 - **Version choice:** patch = fixes only; minor = new user-facing feature; major = breaking change (still `0.x`, so reserve major for a stable milestone). See the [prior releases](https://github.com/athrvk/vayu/releases) for worked examples.
 
-**Release notes are published from a file — no manual paste.** Curated notes for each version live in the repo at `.github/release-notes/vX.Y.Z.md`, committed alongside the version bump (Releasing step 2). On tag push, `.github/workflows/release.yml` reads `.github/release-notes/<tag>.md` and sets it as the GitHub Release body via `softprops/action-gh-release`'s `body_path`. If that file is missing for the tag, the workflow falls back to GitHub's automatically generated PR-based notes (`generate_release_notes`) so a release is never published empty.
+**Release notes are published from a file - no manual paste.** Curated notes for each version live in the repo at `.github/release-notes/vX.Y.Z.md`, committed alongside the version bump (Releasing step 2). On tag push, `.github/workflows/release.yml` reads `.github/release-notes/<tag>.md` and sets it as the GitHub Release body via `softprops/action-gh-release`'s `body_path`. If that file is missing for the tag, the workflow falls back to GitHub's automatically generated PR-based notes (`generate_release_notes`) so a release is never published empty.
 
-**Authoring the notes (Claude's job before tagging).** When preparing a release, write `.github/release-notes/vX.Y.Z.md` in the format above, derived from `git log vPREV..vX.Y.Z`; read a recent entry to match voice. The file *is* the release body, so it needs no tooling to publish — CI handles it. Because the workflow resolves the file from the tagged commit's tree, the notes file must be committed **before** the tag is pushed (i.e., it rides along in the release PR). To correct a published release's notes after the fact, edit the file, then either re-run the release workflow or update the release body by hand.
+**Authoring the notes (Claude's job before tagging).** When preparing a release, write `.github/release-notes/vX.Y.Z.md` in the format above, derived from `git log vPREV..vX.Y.Z`; read a recent entry to match voice. The file *is* the release body, so it needs no tooling to publish - CI handles it. Because the workflow resolves the file from the tagged commit's tree, the notes file must be committed **before** the tag is pushed (i.e., it rides along in the release PR). To correct a published release's notes after the fact, edit the file, then either re-run the release workflow or update the release body by hand.
 
-## Docs — keep them in step with the code
+## Docs - keep them in step with the code
 
 **If you change something a doc describes, update that doc in the same commit.**
 These are reference material future sessions are told to trust, so a stale line
-is worse than a missing one — the design-system doc had drifted five separate
+is worse than a missing one - the design-system doc had drifted five separate
 ways before anyone checked.
 
 | Doc | Covers | Update it when you change… |
@@ -262,4 +262,4 @@ Module READMEs carry the *why* for their feature and are easy to miss:
 `app/src/modules/README.md`, plus one each for `welcome/`, `request-builder/`
 and `dashboard/`.
 
-Release notes live in `.github/release-notes/vX.Y.Z.md` — see **Releasing**.
+Release notes live in `.github/release-notes/vX.Y.Z.md` - see **Releasing**.

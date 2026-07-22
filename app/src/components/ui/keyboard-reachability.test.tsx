@@ -9,13 +9,13 @@
  * Controls a keyboard user could not reach.
  *
  * Vayu is a desktop tool for developers, who work from the keyboard, so a
- * control that only responds to a mouse is a broken control — not a
+ * control that only responds to a mouse is a broken control - not a
  * nice-to-have. Three of them, found by auditing the request editor:
  *
  *   1. `{{variable}}` tokens. The popover that shows what a variable resolves to
  *      hangs off a `<span>`, because the token sits inline in a URL or a header
  *      value. Radix's `asChild` clones handlers and `aria-*` onto that span but
- *      does not make it focusable — it assumes an already-interactive child. So
+ *      does not make it focusable - it assumes an already-interactive child. So
  *      every variable token in the app was mouse-only.
  *   2. The secret-reveal eye, deliberately `tabIndex={-1}`, which left a
  *      keyboard user unable to check a password or client secret they had typed.
@@ -136,7 +136,7 @@ describe("key/value row delete button", () => {
 		);
 
 		const remove = screen.getByRole("button", { name: "Remove row" });
-		// Without this the button is opacity-0 while focused — a keyboard user
+		// Without this the button is opacity-0 while focused - a keyboard user
 		// tabs onto an invisible control and Enter silently deletes the row.
 		expect(remove.className).toContain("focus-visible:opacity-100");
 	});

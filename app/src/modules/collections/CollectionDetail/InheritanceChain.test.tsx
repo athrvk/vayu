@@ -6,13 +6,13 @@
  */
 
 /**
- * The chain's right-hand cell is `shrink-0` — it holds a short constant and the
+ * The chain's right-hand cell is `shrink-0` - it holds a short constant and the
  * collection name is what yields. It used to interpolate the credential into
  * that cell (`Bearer ${auth.token}`), so one imported JWT put several hundred
  * unbreakable mono characters into a flex child told not to shrink, and printed
  * a bearer token in a summary panel nobody opened to read a secret.
  *
- * Request-builder's AuthInheritBanner — the same chain, on the request side —
+ * Request-builder's AuthInheritBanner - the same chain, on the request side -
  * already puts a bounded type label in that cell. This is the collection side
  * agreeing with it.
  */

@@ -22,8 +22,8 @@
  * Nothing wearing these classes is clickable, so the hover state was never
  * wanted. The `chip` variant supplies no colour and no `hover:` at all.
  *
- * This is invisible to a render test — jsdom computes no styles and the class
- * string looks plausible either way — so the assertions here are on the merged
+ * This is invisible to a render test - jsdom computes no styles and the class
+ * string looks plausible either way - so the assertions here are on the merged
  * class list, which is where the defect actually lives.
  */
 
@@ -58,7 +58,7 @@ describe("the merge asymmetry that caused this", () => {
 	/**
 	 * Pins the behaviour the fix depends on. If tailwind-merge ever started
 	 * clearing `hover:bg-*` when a bare `bg-*` is overridden, the `chip` variant
-	 * would become unnecessary — and this test would tell us, rather than the
+	 * would become unnecessary - and this test would tell us, rather than the
 	 * variant quietly outliving its reason.
 	 */
 	it("still drops the base background but keeps the hover one", () => {
@@ -76,7 +76,7 @@ describe("the merge asymmetry that caused this", () => {
  *
  * The source scan below cannot see this one: the background arrives via the
  * `statusColor` variable, not a literal `bg-…` in the JSX. Reverting the fix and
- * re-running proved it — the scan stayed green while the chip was broken again.
+ * re-running proved it - the scan stayed green while the chip was broken again.
  * So the real component is asserted here, where the merged class list is
  * whatever the browser would receive.
  */
@@ -98,7 +98,7 @@ describe("the response status chip", () => {
 	});
 
 	it("does not fall back to the accent for any status class", () => {
-		// One per branch of the ternary — 0, 2xx, 3xx, 4xx, 5xx — since the bug
+		// One per branch of the ternary - 0, 2xx, 3xx, 4xx, 5xx - since the bug
 		// was invisible at rest and identical across all of them.
 		for (const [code, text] of [
 			[0, "ERR"],
@@ -128,7 +128,7 @@ describe("no Badge overrides its background while keeping a hover variant", () =
 	});
 
 	/**
-	 * Derived from `badgeVariants`, not hardcoded — `outline` and `chip` set no
+	 * Derived from `badgeVariants`, not hardcoded - `outline` and `chip` set no
 	 * background and no hover, so a caller painting over them is fine. Only the
 	 * variants that actually carry a `hover:bg-*` can produce the defect. A first
 	 * version of this guard hardcoded "must be chip" and reported `outline`
@@ -155,7 +155,7 @@ describe("no Badge overrides its background while keeping a hover variant", () =
 			for (const match of source.matchAll(BADGE_TAG)) {
 				const props = match[1];
 
-				// A *bare* `bg-…`, not `hover:bg-…` or `dark:bg-…` — a caller
+				// A *bare* `bg-…`, not `hover:bg-…` or `dark:bg-…` - a caller
 				// authoring its own hover is deliberate and not this bug.
 				const paintsOwnBackground = props
 					.split(/[\s"'`{}(),]+/)

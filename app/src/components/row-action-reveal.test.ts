@@ -8,14 +8,14 @@
 /**
  * A control revealed on hover must also be revealed on focus.
  *
- * `docs/design-system.md` has said so for a while — "the `focus-within` half is
- * not optional" — and the variables table's "mark as secret" toggle did not
+ * `docs/design-system.md` has said so for a while - "the `focus-within` half is
+ * not optional" - and the variables table's "mark as secret" toggle did not
  * follow it: `opacity-0 group-hover:opacity-100` with no focus counterpart, so
  * a keyboard user tabbed onto an invisible control.
  *
  * The scan is windowed rather than per-line. Class strings here are wrapped by
  * prettier and split across `cn()` arguments, so the reveal and its focus
- * counterpart routinely sit on different lines — a per-line check reported two
+ * counterpart routinely sit on different lines - a per-line check reported two
  * false positives the first time it ran.
  */
 
@@ -33,7 +33,7 @@ const REVEALS_ON_FOCUS = /(group-focus-within:opacity-100|focus-visible:opacity-
 
 /**
  * Deliberately unreachable by Tab, so a focus reveal is meaningless. The tab
- * strip's close button is `tabIndex={-1}` on purpose — Delete on the focused
+ * strip's close button is `tabIndex={-1}` on purpose - Delete on the focused
  * tab is its keyboard path, and making it a second stop per tab would undo the
  * roving-tabindex win.
  */
@@ -54,7 +54,7 @@ describe("hover-revealed controls", () => {
 			const source = readFileSync(join(srcRoot, file), "utf8");
 			// Blank comment bodies, keeping newlines so line numbers stay honest.
 			// Several of these files explain the rule in prose and name the very
-			// class this looks for — without stripping, a comment satisfies the
+			// class this looks for - without stripping, a comment satisfies the
 			// scan and the real class can be deleted unnoticed.
 			const lines = source
 				.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))

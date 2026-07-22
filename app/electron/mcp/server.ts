@@ -42,10 +42,10 @@ const INSTRUCTIONS =
 	"plus k6-level load tests in one app, backed by a native C++ engine); these " +
 	"tools drive that engine. Call get_engine_health first. Tools are grouped by " +
 	"capability: read (inspect collections, requests, environments, runs, config, " +
-	"and live metrics — always safe), execute (run_request, run_collection_smoke — " +
+	"and live metrics - always safe), execute (run_request, run_collection_smoke - " +
 	"send real traffic to a target), write (create_request, update_environment, " +
-	"update_engine_config — mutate saved data or engine config), and load " +
-	"(start_load_run, stop_run — start/stop a load test). Traffic-touching tools " +
+	"update_engine_config - mutate saved data or engine config), and load " +
+	"(start_load_run, stop_run - start/stop a load test). Traffic-touching tools " +
 	"(run_request, run_collection_smoke, start_load_run) are restricted to an " +
 	"allowlist, and load runs also enforce hard RPS/concurrency/duration caps. " +
 	"start_load_run asks the user to confirm (via elicitation when supported, " +
@@ -82,7 +82,7 @@ export function createMcpServer(
 
 	const baseCtx = contextProvider();
 
-	// Bridge a tool's elicitation request to the client — but only if the client
+	// Bridge a tool's elicitation request to the client - but only if the client
 	// negotiated the elicitation capability; otherwise throw so the tool falls
 	// back to its flag-based gate rather than hanging.
 	const elicit: ElicitFn = async (params) => {

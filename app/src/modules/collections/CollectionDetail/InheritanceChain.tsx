@@ -31,7 +31,7 @@ interface InheritanceChainProps {
 /**
  * The auth *type*, never its value.
  *
- * This cell is `shrink-0` — it is meant to hold a short constant, and the row's
+ * This cell is `shrink-0` - it is meant to hold a short constant, and the row's
  * name is what yields. It used to interpolate the credential itself
  * (`Bearer ${auth.token}`), so one imported JWT put several hundred unbreakable
  * mono characters into a flex child that had been told not to shrink: the row
@@ -40,7 +40,7 @@ interface InheritanceChainProps {
  * a secret.
  *
  * The request-side twin of this component (request-builder's
- * AuthInheritBanner) already does it this way — a bounded type label in the
+ * AuthInheritBanner) already does it this way - a bounded type label in the
  * chain row, with the credential shown separately and truncated.
  */
 function describeAuth(c: Collection): string {

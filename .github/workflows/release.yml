@@ -191,7 +191,7 @@ jobs:
           $resourcesDir = "app/build/resources/bin"
           New-Item -ItemType Directory -Force -Path $resourcesDir | Out-Null
           # windows-prod uses the Ninja generator (single-config), so the
-          # binary lands directly under build-release/ — no Release/ subdir
+          # binary lands directly under build-release/ - no Release/ subdir
           # (that's the Visual Studio multi-config layout).
           Copy-Item "engine/build-release/vayu-engine.exe" "$resourcesDir/vayu-engine.exe"
 
@@ -231,16 +231,16 @@ jobs:
           cp app/release/*.AppImage artifacts/ 2>/dev/null || true
           cp app/release/*.deb artifacts/ 2>/dev/null || true
           cp app/release/*.rpm artifacts/ 2>/dev/null || true
-          # electron-updater feed metadata — without this the updater never
+          # electron-updater feed metadata - without this the updater never
           # sees new releases.
           cp app/release/latest-linux.yml artifacts/ 2>/dev/null || true
           # Count installers only (the .yml metadata doesn't count as a build).
           # Use find, not `ls <glob>`: under `set -eo pipefail` a non-matching
-          # glob (e.g. no .rpm — Linux only builds AppImage+deb) makes ls exit
+          # glob (e.g. no .rpm - Linux only builds AppImage+deb) makes ls exit
           # non-zero and aborts the step before the count is ever checked.
           artifact_count=$(find artifacts -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) | wc -l | tr -d ' ')
           if [ "$artifact_count" -eq 0 ]; then
-            echo "::error::No Linux artifacts built — AppImage/deb/rpm all missing." >&2
+            echo "::error::No Linux artifacts built - AppImage/deb/rpm all missing." >&2
             exit 1
           fi
           ls -lh artifacts/

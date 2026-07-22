@@ -6,7 +6,7 @@
  */
 
 /**
- * ErrorState — the load failed, which is not the same as there being nothing.
+ * ErrorState - the load failed, which is not the same as there being nothing.
  *
  * The third answer a data view can give, after `DetailSkeleton` (not yet) and
  * `EmptyState` (nothing to show). Every query in the app is destructured as
@@ -14,7 +14,7 @@
  * an error resolves to `[]` and falls straight through to the empty state.
  * The collections tree then said "No collections yet" and offered "Add your
  * first collection" to a user whose collections exist and simply could not be
- * fetched — an invitation to create a duplicate.
+ * fetched - an invitation to create a duplicate.
  *
  * Deliberately not a variant of `EmptyState`. Folding them together would blur
  * exactly the distinction this exists to draw.
@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
 
 interface ErrorStateProps {
 	/**
-	 * What failed, in sentence case with no trailing period — "Couldn't load
+	 * What failed, in sentence case with no trailing period - "Couldn't load
 	 * collections". Name the thing; "Something went wrong" tells nobody
 	 * anything.
 	 */
@@ -51,7 +51,7 @@ interface ErrorStateProps {
 	/** A query's `refetch`. Renders the "Try again" button. */
 	onRetry?: () => void;
 	/**
-	 * A second way out, rendered beside "Try again" — "Close tab" for a pane
+	 * A second way out, rendered beside "Try again" - "Close tab" for a pane
 	 * whose entity is gone. Retrying is pointless when the thing was deleted,
 	 * and an error state offering only a doomed retry is a dead end.
 	 */

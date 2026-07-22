@@ -9,8 +9,8 @@
  * MethodBadge
  *
  * The single way to display an HTTP method. It previously rendered seven
- * different ways across the app — three sizes, two weights, some tinted, some
- * with no colour at all — and the history sidebar carried its own copy of the
+ * different ways across the app - three sizes, two weights, some tinted, some
+ * with no colour at all - and the history sidebar carried its own copy of the
  * colour logic that omitted `getMethodColor`'s fallback, so an unrecognised
  * method resolved to an undefined custom property and silently lost its colour.
  *
@@ -24,13 +24,13 @@ import { cn } from "@/lib/utils";
 interface MethodBadgeProps {
 	method: string;
 	/**
-	 * `badge` — tinted chip, for list rows and headers where it anchors a line.
-	 * `text` — colour only, for dense places (tabs) where chrome would crowd.
+	 * `badge` - tinted chip, for list rows and headers where it anchors a line.
+	 * `text` - colour only, for dense places (tabs) where chrome would crowd.
 	 */
 	variant?: "badge" | "text";
 	/** 10px for dense rows, 11px where it sits beside body text. */
 	size?: "sm" | "md";
-	/** Dim in secondary contexts — e.g. an inactive tab. */
+	/** Dim in secondary contexts - e.g. an inactive tab. */
 	muted?: boolean;
 	className?: string;
 }

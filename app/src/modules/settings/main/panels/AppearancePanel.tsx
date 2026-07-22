@@ -10,7 +10,7 @@
  *
  * Cosmetic app preferences: theme mode, accent color scheme, and interface
  * (font / scale / roundedness). Client-side only (localStorage-backed), so
- * there's no Save button — changes apply live. Rendered inside
+ * there's no Save button - changes apply live. Rendered inside
  * {@link ClientSettingsPanel} by the app-settings registry.
  */
 
@@ -49,7 +49,7 @@ import { cn } from "@/lib/utils";
 import { ToggleRow } from "./SettingControls";
 import { FontPicker } from "./FontPicker";
 
-// Vayu-flavored preview: an HTTP method, path, status, and latency — mixed case
+// Vayu-flavored preview: an HTTP method, path, status, and latency - mixed case
 // and digits so the face's letterforms still read clearly.
 const UI_FONT_SAMPLE = "GET /users · 200 OK · 45ms";
 
@@ -237,7 +237,7 @@ export default function AppearancePanel() {
 				</CardContent>
 			</Card>
 
-			{/* Interface — font + scale + roundedness */}
+			{/* Interface - font + scale + roundedness */}
 			<Card>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">

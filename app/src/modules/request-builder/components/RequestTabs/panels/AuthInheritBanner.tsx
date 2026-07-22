@@ -84,7 +84,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 			<div className="flex items-start gap-2 p-3 rounded-md border border-border bg-card text-xs text-muted-foreground">
 				<Lock className="w-3.5 h-3.5 shrink-0 mt-px" />
 				<p className="m-0 leading-relaxed">
-					No ancestor collection defines auth — this request will send{" "}
+					No ancestor collection defines auth - this request will send{" "}
 					<span className="text-foreground font-medium">no authentication</span>.
 				</p>
 			</div>

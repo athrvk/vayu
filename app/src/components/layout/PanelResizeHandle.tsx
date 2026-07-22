@@ -8,7 +8,7 @@
 /**
  * The drag handle for the drawer and the context bar.
  *
- * Both panels had their own copy — the context bar's carried a comment saying
+ * Both panels had their own copy - the context bar's carried a comment saying
  * it "mirrors the Drawer's right-edge handle", which is the usual sign that one
  * of them will drift. Both were also mouse-only: a bare `<div>` with
  * `onPointerDown` and `onDoubleClick`, no role, no tabindex, no keys. So the two
@@ -16,7 +16,7 @@
  * keyboard, on a tool whose users work from the keyboard.
  *
  * It is a window splitter now: focusable, arrows nudge, Page keys jump, Home and
- * End go to the bounds, and Enter or Space resets to the default — the keyboard
+ * End go to the bounds, and Enter or Space resets to the default - the keyboard
  * equivalent of the double-click that was already there.
  *
  * `side` matters for direction, not just placement. The drawer's handle sits on

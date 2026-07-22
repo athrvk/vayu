@@ -46,12 +46,12 @@
 	--color-status-error: hsl(var(--status-error));
 	--color-status-running: hsl(var(--status-running));
 	--color-status-stopped: hsl(var(--status-stopped));
-	/* Text-safe pairs — use when the status colour is the text itself. */
+	/* Text-safe pairs - use when the status colour is the text itself. */
 	--color-status-success-text: hsl(var(--status-success-text));
 	--color-status-error-text: hsl(var(--status-error-text));
 	--color-status-running-text: hsl(var(--status-running-text));
 	--color-status-stopped-text: hsl(var(--status-stopped-text));
-	/* Solid-chip pairs — use when a status colour is a filled background under
+	/* Solid-chip pairs - use when a status colour is a filled background under
 	 * a white label. */
 	--color-status-success-fill: hsl(var(--status-success-fill));
 	--color-status-error-fill: hsl(var(--status-error-fill));
@@ -66,7 +66,7 @@
 	--radius-md: calc(var(--radius) - 2px);
 	--radius-sm: calc(var(--radius) - 4px);
 
-	/* Font stacks — Tailwind v4 reads these to build the `font-sans` and
+	/* Font stacks - Tailwind v4 reads these to build the `font-sans` and
 	 * `font-mono` utilities. Without them, v4 uses its default UI stacks
 	 * (system-ui / ui-monospace), which on macOS resolves to SF Pro / Menlo
 	 * regardless of what's in tailwind.config.js. */
@@ -75,7 +75,7 @@
 
 	/*
 	 * Body text is 13px (docs/design-system.md), but Tailwind ships `text-sm`
-	 * at 14px — and `text-sm` is by far the most-used size in the app. Rather
+	 * at 14px - and `text-sm` is by far the most-used size in the app. Rather
 	 * than migrate hundreds of call sites, or let two scales coexist a pixel
 	 * apart, redefine the token so `text-sm` *is* the documented body size.
 	 * `text-xs` already matches the documented 12px label, so this is the only
@@ -97,15 +97,15 @@
 
 @layer base {
 	:root {
-		/* ── Light mode — Paper White ── */
+		/* ── Light mode - Paper White ── */
 
 		/* 3-level elevation (cool near-neutral; higher surfaces are lighter) */
-		--background: 240 6% 96%; /* #f4f4f5 — paper-white canvas */
-		--card: 0 0% 100%; /* #ffffff — white card (floats on bg) */
-		--panel: 240 5% 98%; /* #fafafa — sidebar/panel (between canvas and card) */
+		--background: 240 6% 96%; /* #f4f4f5 - paper-white canvas */
+		--card: 0 0% 100%; /* #ffffff - white card (floats on bg) */
+		--panel: 240 5% 98%; /* #fafafa - sidebar/panel (between canvas and card) */
 		/* Active tab surface. It cannot simply be --background: in light mode
 		 * --background (96%) is *darker* than --panel (98%), so an active tab
-		 * that matches the content pane goes darker than the bar around it —
+		 * that matches the content pane goes darker than the bar around it -
 		 * the opposite of the convention where the active tab is the lightest
 		 * thing, and the reason light mode separated ~40% more weakly than dark
 		 * (dL* 2.1 vs 3.4). Deepened here to dL* ~4.3. */
@@ -115,7 +115,7 @@
 		--popover: 0 0% 100%;
 		--popover-foreground: 240 6% 10%;
 
-		/* Primary — Sunset orange (default). --primary is the accent (text/border/
+		/* Primary - Sunset orange (default). --primary is the accent (text/border/
 		 * tints); --primary-fill is the button-background value (white labels).
 		 * They match in light mode and diverge in dark (see .dark). */
 		--primary: 24 90% 46%;
@@ -127,27 +127,27 @@
 		--secondary-foreground: 240 6% 10%;
 
 		/* Hover / active states */
-		--muted: 240 5% 93%; /* #ededef — accent-hover */
+		--muted: 240 5% 93%; /* #ededef - accent-hover */
 		/*
 		 * 42%, not zinc-500's 46%. Solved against the *darkest* light surface,
-		 * which is --muted/--accent at 93% — not --background. At 46% this
+		 * which is --muted/--accent at 93% - not --background. At 46% this
 		 * cleared the card (4.83) and panel (4.63) but sat at 4.10 on --muted,
 		 * so muted text on any tinted chip or hovered row missed 4.5. 42% clears
 		 * all five surfaces (min 4.75 on --muted, 5.10 on --background, 5.61 on
 		 * the card). The shift is not perceptible on its own.
 		 */
 		--muted-foreground: 240 4% 42%;
-		--accent: 240 5% 93%; /* #ededef — accent-hover */
+		--accent: 240 5% 93%; /* #ededef - accent-hover */
 		--accent-foreground: 240 6% 10%;
-		--accent-active: 240 5% 88%; /* #e0e0e4 — accent-active / selected */
+		--accent-active: 240 5% 88%; /* #e0e0e4 - accent-active / selected */
 
 		/* Foreground scale */
-		--foreground: 240 6% 10%; /* #18181b — zinc-900 */
+		--foreground: 240 6% 10%; /* #18181b - zinc-900 */
 		--subtle-foreground: 240 4% 58%; /* de-emphasized text, still the faintest tier (~3:1 on card) */
 
 		/* Borders */
-		--border: 240 6% 89%; /* #e2e2e5 — default dividers on paper white */
-		--border-strong: 240 5% 82%; /* #cfcfd5 — prominent borders */
+		--border: 240 6% 89%; /* #e2e2e5 - default dividers on paper white */
+		--border-strong: 240 5% 82%; /* #cfcfd5 - prominent borders */
 		--input: 240 6% 89%;
 		--ring: 24 90% 46%;
 
@@ -159,9 +159,9 @@
 		 * `border-destructive` use on a light surface, so nothing regresses. */
 		--destructive: 0 84% 48%;
 		--destructive-foreground: 0 0% 98%;
-		--destructive-text: 0 60% 48%; /* muted rose — accessible text on light bg, ~4.8:1 */
+		--destructive-text: 0 60% 48%; /* muted rose - accessible text on light bg, ~4.8:1 */
 
-		/* Charts — cohesive categorical set: accent + 4 evenly-spaced hues,
+		/* Charts - cohesive categorical set: accent + 4 evenly-spaced hues,
 		 * consistent with dark mode (tuned only in lightness). chart-1 tracks
 		 * the active accent. */
 		--chart-1: 24 90% 46%;
@@ -175,7 +175,7 @@
 		 * MethodBadge paints the same value as text, as a 10% tinted background
 		 * and as a 30% border, so the text sits on a wash of itself and the
 		 * contrast is entirely down to lightness. These were one mode-consistent
-		 * set, which left 10px badge text failing AA on both themes at once —
+		 * set, which left 10px badge text failing AA on both themes at once -
 		 * PUT measured 1.97:1 in light, PATCH 2.86:1 in dark.
 		 *
 		 * Hue and saturation are unchanged, so a method reads as the same colour
@@ -193,14 +193,14 @@
 		/* Variable highlight */
 		--variable: 24 90% 46%;
 
-		/* Semantic — `-text` variants are darkened for legible text on light
+		/* Semantic - `-text` variants are darkened for legible text on light
 		 * surfaces (the base tokens are tuned as fills/indicators, like
 		 * --destructive vs --destructive-text). */
 		--success: 142 76% 36%;
 		--success-foreground: 0 0% 100%;
 		/* Solved against the *darkest* light surface (--muted/--accent at 93%),
 		 * not the card. At 30% these cleared the card but measured 4.04 (green)
-		 * and 3.57 (amber) on --muted, so a warning on a tinted chip failed —
+		 * and 3.57 (amber) on --muted, so a warning on a tinted chip failed -
 		 * which is exactly what "ramp off target" did on the dashboard. */
 		--success-text: 142 72% 27%;
 		--warning: 38 92% 50%;
@@ -209,7 +209,7 @@
 		--info: 199 89% 48%;
 		--info-foreground: 0 0% 100%;
 
-		/* Variable scope (categorical) — global / collection / environment.
+		/* Variable scope (categorical) - global / collection / environment.
 		 * Used as text/icon/border at full strength and as tinted backgrounds
 		 * via opacity (e.g. bg-scope-global/10). Mode-adaptive for legibility. */
 		/* Like the method colours, a scope is painted as text on its own 10%
@@ -221,16 +221,16 @@
 		--scope-environment: 217 91% 45%; /* already clears it at blue-600 */
 
 		/* Run / connection / test status indicators (dots, bars, pills, icons).
-		 * A cohesive, mode-consistent set — deliberately the same in light and
+		 * A cohesive, mode-consistent set - deliberately the same in light and
 		 * dark so a green dot reads as "good" on either surface. Distinct from
 		 * --success/--destructive, which tune for banner text and button fills. */
-		--status-success: 142 71% 45%; /* green-500 — completed / connected / pass */
-		--status-error: 0 84% 60%; /* red-500 — failed / test fail */
-		--status-running: 217 91% 60%; /* blue-500 — running */
-		--status-stopped: 25 95% 53%; /* orange-500 — stopped */
+		--status-success: 142 71% 45%; /* green-500 - completed / connected / pass */
+		--status-error: 0 84% 60%; /* red-500 - failed / test fail */
+		--status-running: 217 91% 60%; /* blue-500 - running */
+		--status-stopped: 25 95% 53%; /* orange-500 - stopped */
 
 		/* Text-safe pairs. The four above are mode-consistent because a dot
-		 * should read the same on either surface — but that same value used as
+		 * should read the same on either surface - but that same value used as
 		 * *text* fails AA on a light background (status-success measured 2.21:1,
 		 * status-error 2.30:1). These keep the hue so the signal is unmistakably
 		 * the same, and adjust lightness per mode to clear 4.5:1 on every
@@ -242,7 +242,7 @@
 		--status-stopped-text: 25 85% 35%;
 
 		/* Solid-chip pairs. The response status badge paints a status colour as a
-		 * filled chip with a white label — a third use, needing neither the dot
+		 * filled chip with a white label - a third use, needing neither the dot
 		 * value nor the text value: white on --status-success measured 2.30:1.
 		 * These are deep enough for white to clear 4.5:1 and, like the base
 		 * indicators, stay mode-consistent so a "200 OK" chip reads identically
@@ -260,7 +260,7 @@
 
 	/* Light: --primary is the accent (used for text/border/ring/tints) and is
 	 * deep enough to read on light surfaces; --primary-fill (button fills) is
-	 * the same deep value here — white labels clear AA-large. In dark mode the
+	 * the same deep value here - white labels clear AA-large. In dark mode the
 	 * two diverge (see the .dark blocks). */
 	[data-color-scheme="sunset"] {
 		--primary: 24 90% 46%;
@@ -323,7 +323,7 @@
 
 	   magenta   dE 0.153 to Aurora, 0.212 to the nearest status colour
 	   graphite  a near-neutral, distinct because nothing else here is
-	             desaturated — the monochrome option, and the reason its
+	             desaturated - the monochrome option, and the reason its
 	             saturation is 12% rather than a mistake.
 
 	   Both carry a white label at APCA Lc 78 / Lc 80 as `--primary-fill`, which
@@ -350,9 +350,9 @@
 
 	.dark {
 		/* 3-level elevation */
-		--background: 240 10% 4%; /* #09090b — outermost canvas */
-		--card: 240 6% 11%; /* #1a1a1f — elevated surface */
-		--panel: 240 6% 7%; /* #111113 — sidebar/panel bg */
+		--background: 240 10% 4%; /* #09090b - outermost canvas */
+		--card: 240 6% 11%; /* #1a1a1f - elevated surface */
+		--panel: 240 6% 7%; /* #111113 - sidebar/panel bg */
 		/* Dark already reads correctly: the active tab matches the content pane
 		 * and is darker than the bar, so this stays equal to --background. */
 		--tab-active: 240 10% 4%;
@@ -361,7 +361,7 @@
 		--popover: 240 6% 11%;
 		--popover-foreground: 240 5% 96%;
 
-		/* Primary — Sunset orange (default). Brightened accent for text on the
+		/* Primary - Sunset orange (default). Brightened accent for text on the
 		 * near-black canvas; --primary-fill stays deep for white-labelled buttons. */
 		--primary: 24 95% 58%;
 		--primary-fill: 24 90% 46%;
@@ -372,14 +372,14 @@
 		--secondary-foreground: 240 5% 96%;
 
 		/* Hover / active states */
-		--muted: 240 7% 16%; /* #26262c — accent-hover */
-		--muted-foreground: 240 5% 65%; /* #a1a1aa — zinc-400 */
-		--accent: 240 7% 16%; /* #26262c — accent-hover */
+		--muted: 240 7% 16%; /* #26262c - accent-hover */
+		--muted-foreground: 240 5% 65%; /* #a1a1aa - zinc-400 */
+		--accent: 240 7% 16%; /* #26262c - accent-hover */
 		--accent-foreground: 240 5% 96%;
-		--accent-active: 240 6% 21%; /* #323238 — accent-active / selected */
+		--accent-active: 240 6% 21%; /* #323238 - accent-active / selected */
 
 		/* Foreground scale */
-		--foreground: 240 5% 96%; /* #f4f4f5 — zinc-100 */
+		--foreground: 240 5% 96%; /* #f4f4f5 - zinc-100 */
 		--subtle-foreground: 240 4% 44%; /* de-emphasized text, still the faintest tier (~3:1 on card) */
 
 		/* Borders */
@@ -387,7 +387,7 @@
 		--border-strong: 0 0% 18%; /* ≈ rgba(255,255,255,0.15) on dark canvas */
 		/*
 		 * 26%, not 11%. At 11% this was byte-identical to --card, so a field with
-		 * `bg-transparent` — which Input, Textarea and SelectTrigger all are — had
+		 * `bg-transparent` - which Input, Textarea and SelectTrigger all are - had
 		 * a boundary measuring 1.00 against the card. Not faint: absent.
 		 *
 		 * Light mode hid the same weakness because `shadow-sm` gives a light field
@@ -396,7 +396,7 @@
 		 *
 		 * 26% measures 1.64 on the card, 1.79 on the panel, 1.89 on the background.
 		 * That is a real boundary and still a quiet one. It does NOT reach the 3.0
-		 * that WCAG 1.4.11 asks for a control boundary — that needs ~42% lightness,
+		 * that WCAG 1.4.11 asks for a control boundary - that needs ~42% lightness,
 		 * which turns every input into a hard outline. Recorded as a known gap
 		 * rather than claimed as a pass.
 		 */
@@ -406,9 +406,9 @@
 		/* Destructive */
 		--destructive: 0 62.8% 30.6%;
 		--destructive-foreground: 0 0% 98%;
-		--destructive-text: 0 65% 65%; /* muted rose — accessible text on dark bg */
+		--destructive-text: 0 65% 65%; /* muted rose - accessible text on dark bg */
 
-		/* Charts — same cohesive hues as light, lifted in lightness for the dark
+		/* Charts - same cohesive hues as light, lifted in lightness for the dark
 		 * ground. chart-1 tracks the active accent. */
 		--chart-1: 24 95% 58%;
 		--chart-2: 172 60% 52%; /* teal */
@@ -419,7 +419,7 @@
 		/* Variable highlight */
 		--variable: 24 95% 58%;
 
-		/* Semantic — `-text` variants tuned lighter for legible text on dark. */
+		/* Semantic - `-text` variants tuned lighter for legible text on dark. */
 		--success: 142 70% 45%;
 		--success-foreground: 0 0% 100%;
 		--success-text: 142 60% 55%; /* accessible green text on dark bg */
@@ -429,7 +429,7 @@
 		--info: 199 89% 48%;
 		--info-foreground: 0 0% 100%;
 
-		/* Variable scope (categorical) — lighter tints for dark surfaces. */
+		/* Variable scope (categorical) - lighter tints for dark surfaces. */
 		--scope-global: 142 69% 58%; /* green-400 */
 		--scope-collection: 27 96% 61%; /* orange-400 */
 		--scope-environment: 213 94% 68%; /* blue-400 */
@@ -442,7 +442,7 @@
 		--status-running-text: 217 90% 70%;
 		--status-stopped-text: 25 90% 62%;
 
-		/* HTTP method colors (dark) — lightened so the badge text clears AA on
+		/* HTTP method colors (dark) - lightened so the badge text clears AA on
 		 * its own tint over the dark card. See the light block for why these are
 		 * mode-adaptive rather than one shared set. */
 		--method-get: 142 76% 45%;
@@ -518,7 +518,7 @@
 	   split every scheme above uses: `--primary` is text, ring and chart-series
 	   colour on a near-black card and has to be bright to read there, while the
 	   fill keeps a white label. Measured as text on `--card`, these land at APCA
-	   Lc 52 and Lc 60 — inside the Lc 44-69 the other six occupy. */
+	   Lc 52 and Lc 60 - inside the Lc 44-69 the other six occupy. */
 	.dark[data-color-scheme="magenta"] {
 		--primary: 305 85% 70%;
 		--primary-fill: 305 72% 45%;
@@ -619,7 +619,7 @@
 	}
 
 	/*
-	 * Paint properties only — never layout, so this cannot cause reflow jank.
+	 * Paint properties only - never layout, so this cannot cause reflow jank.
 	 * 150ms is the interaction-state duration; entrances stay at 200ms.
 	 * The reduced-motion rule below collapses this app-wide when enabled.
 	 */
@@ -643,7 +643,7 @@
 
 	/*
 	 * Composite rows. In a tree row the focusable control is narrower than the
-	 * region the user reads as the target — a collection row is 220px with a
+	 * region the user reads as the target - a collection row is 220px with a
 	 * rounded hover fill, but its label button is 150px with square corners, so
 	 * an outline on the control indicates the wrong shape in the wrong place.
 	 *
@@ -662,8 +662,8 @@
 	 * `outline` rather than box-shadow: Tailwind's ring utilities own box-shadow,
 	 * and a selected row already sets one, which would override this.
 	 *
-	 * Auxiliary controls inside the row that are their own target — the chevron
-	 * toggles expansion rather than opening the collection — opt out with
+	 * Auxiliary controls inside the row that are their own target - the chevron
+	 * toggles expansion rather than opening the collection - opt out with
 	 * .focus-self and keep their own ring, so only one indicator ever shows.
 	 */
 	/* Two cases: the row is itself the focusable element (the tree's roving
@@ -688,7 +688,7 @@
  * slide-in-from-left-1/2 duration-200`), which had three problems:
  *
  * 1. The 48%/50% "slides" were not motion design. A centred dialog carries
- *    `translate(-50%, -50%)`, and those values existed to cancel it out —
+ *    `translate(-50%, -50%)`, and those values existed to cancel it out -
  *    leaving an incidental 2% upward drift that fought the scale and read as a
  *    wobble rather than a clean presentation.
  * 2. Timing was `ease`, which accelerates before it decelerates. A surface
@@ -698,7 +698,7 @@
  *    and the two read as separate events instead of one.
  *
  * A centred confirmation has no origin to fly in from, so it simply scales up
- * from its own centre. Dismissal is quicker than presentation — the decision
+ * from its own centre. Dismissal is quicker than presentation - the decision
  * is already made, so getting out of the way should not cost the user time.
  *
  * These keyframes touch `transform` ONLY. Tailwind v4 centres the panel with
@@ -752,7 +752,7 @@
 }
 
 @layer components {
-	/* Decelerate in, accelerate out — the standard pairing for a surface that
+	/* Decelerate in, accelerate out - the standard pairing for a surface that
 	   arrives and then leaves. Overlay and panel share a duration so they land
 	   together. */
 	.dialog-panel[data-state="open"] {
@@ -803,14 +803,14 @@
 }
 
 /*
- * Custom scrollbar — a baseline, not a utility.
+ * Custom scrollbar - a baseline, not a utility.
  *
  * This used to be a `.scrollbar-thin` class applied per element, which meant
  * every new scroll container inherited the platform default until someone
  * remembered the class. They mostly didn't: 38 of the app's 44 scroll
  * containers were unstyled, so chunky arrow-button scrollbars turned up in the
  * middle of the UI. `scrollbar-width` is not an inherited property, so a styled
- * ancestor does not help a nested scroll container either — that is exactly how
+ * ancestor does not help a nested scroll container either - that is exactly how
  * the History run list ended up with a platform scrollbar inside a styled panel.
  *
  * Applying it globally makes thin the default and removes the chance to forget.
@@ -922,7 +922,7 @@
 }
 
 /*
- * Reduced motion — user preference toggled from Settings → Appearance. When on,
+ * Reduced motion - user preference toggled from Settings → Appearance. When on,
  * the document carries data-reduced-motion="true" and we collapse transitions
  * and animations app-wide. Kept out of @layer so the !important overrides win.
  */
@@ -947,7 +947,7 @@ html[data-reduced-motion="true"] *::after {
  *
  * Additive to the toggle rather than replacing it: the toggle still forces the
  * collapse for someone whose OS says nothing. There is deliberately no way to
- * opt *back into* animation against an OS that asked for less — that is the
+ * opt *back into* animation against an OS that asked for less - that is the
  * one direction where guessing wrong has a cost.
  */
 @media (prefers-reduced-motion: reduce) {

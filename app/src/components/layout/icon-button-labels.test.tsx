@@ -11,17 +11,17 @@
  * An icon-only button has no text node, so without one a screen reader
  * announces nothing but "button". A tooltip does not fix this: Radix supplies
  * `aria-describedby` while the tooltip is open, which is a *description*, not a
- * name — the Dock's four view switchers all had tooltips and still announced as
+ * name - the Dock's four view switchers all had tooltips and still announced as
  * bare buttons.
  *
  * Nine such buttons had drifted in, sitting beside correctly-labelled ones, so
  * this scans the source rather than testing the handful that existed at the
  * time. A new unnamed icon button anywhere in the app fails this test.
  *
- * A name may come from `aria-label`, `aria-labelledby`, or `title` — all three
+ * A name may come from `aria-label`, `aria-labelledby`, or `title` - all three
  * feed the accessible-name computation, and this codebase uses `title` for it
- * in several places. (title-only is weaker — it does not surface on keyboard
- * focus — but it is a name, and forcing a conversion is a separate decision.)
+ * in several places. (title-only is weaker - it does not surface on keyboard
+ * focus - but it is a name, and forcing a conversion is a separate decision.)
  */
 
 import { describe, it, expect } from "vitest";
@@ -35,7 +35,7 @@ const sources = import.meta.glob("/src/**/*.tsx", {
 /**
  * Extract complete `<Button ...>` opening tags. A regex cannot do this: JSX
  * props hold arrow functions (`onClick={(e) => …}`) and object literals whose
- * `>` and `}` would end the match early — which is exactly the bug that made an
+ * `>` and `}` would end the match early - which is exactly the bug that made an
  * earlier version of this test flag already-labelled buttons. So scan with a
  * brace/string-aware cursor and end the tag only at a top-level `>`.
  */

@@ -17,7 +17,7 @@ import { Callout } from "@/components/shared";
  *
  * Every tab calls `updateCollection.mutate(...)`, there is no global
  * `MutationCache.onError` (see lib/query-client.ts), and no tab read
- * `isError`/`error` — so a rejected save just flipped the button from "Saving…"
+ * `isError`/`error` - so a rejected save just flipped the button from "Saving…"
  * back to "Save Changes" and left the user believing it had gone through. The
  * mutation *recorded* the failure; nothing rendered it.
  *
@@ -30,7 +30,7 @@ export function SaveFailed({
 }: {
 	mutation: { isError: boolean; error: unknown };
 	what: string;
-	/** Spacing is the caller's — the three tabs use different layouts. */
+	/** Spacing is the caller's - the three tabs use different layouts. */
 	className?: string;
 }) {
 	if (!mutation.isError) return null;
@@ -98,9 +98,9 @@ export function ComingSoon({ label }: { label: string }) {
 }
 
 export function formatRelative(iso: string | undefined): string {
-	if (!iso) return "—";
+	if (!iso) return "-";
 	const then = new Date(iso).getTime();
-	if (Number.isNaN(then)) return "—";
+	if (Number.isNaN(then)) return "-";
 	const diffMs = Date.now() - then;
 	const sec = Math.floor(diffMs / 1000);
 	if (sec < 60) return "just now";

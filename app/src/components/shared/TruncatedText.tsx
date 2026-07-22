@@ -8,8 +8,8 @@
 /**
  * TruncatedText
  *
- * One line of user-supplied text — a collection, request, environment or tab
- * name — that ellipses when it does not fit and reveals the full value on
+ * One line of user-supplied text - a collection, request, environment or tab
+ * name - that ellipses when it does not fit and reveals the full value on
  * hover, only then.
  *
  * This is the single place that behaviour lives. The alternative was
@@ -38,7 +38,7 @@ export function TruncatedText({ children, className, as: Tag = "span" }: Truncat
 	const ref = useOverflowTitle<HTMLElement>(children);
 
 	return (
-		// `truncate` is not optional — `scrollWidth > clientWidth` only means
+		// `truncate` is not optional - `scrollWidth > clientWidth` only means
 		// "clipped" when the element hides its overflow, so the hook cannot
 		// detect anything without it.
 		<Tag ref={ref as React.Ref<never>} className={cn("truncate", className)}>

@@ -152,7 +152,7 @@ const std::string& trace_data) {
 
     // Transport errors (timeout, connection, DNS, …) carry no HTTP status, so
     // bucket them under code 0. This keeps the status-code distribution summing
-    // to total_requests — the dashboard breakdown reconciles with the headline
+    // to total_requests - the dashboard breakdown reconciles with the headline
     // count, and the report's failed/errorRate tallies (recomputed from the
     // distribution) account for them instead of silently dropping to zero.
     record_status_code (0);
@@ -384,7 +384,7 @@ const Percentiles* window_percentiles) const {
     stats["activeConnections"] = current_active;
     stats["elapsedSeconds"]    = elapsed_seconds;
 
-    // Run progress — feeds the dashboard ETA stat for closed-ended modes
+    // Run progress - feeds the dashboard ETA stat for closed-ended modes
     // (iterations). requests_expected is 0 for open-ended modes (constant_rps).
     stats["requestsSent"]     = requests_sent;
     stats["requestsExpected"] = requests_expected;
@@ -393,7 +393,7 @@ const Percentiles* window_percentiles) const {
     // when provided (the metrics tick takes one snapshot and feeds it to both
     // the SSE builder and the persisted-rows builder), otherwise compute it.
     // Both the class breakdown and the full map below derive from this single
-    // copy — no second scan.
+    // copy - no second scan.
     std::map<int, size_t> local_dist;
     const std::map<int, size_t>& dist = status_snapshot != nullptr ?
     *status_snapshot :
@@ -421,7 +421,7 @@ const Percentiles* window_percentiles) const {
     stats["avgQueueWaitMs"] = average_queue_wait ();
 
     // Per-tick latency percentiles. When the caller supplies windowed (rolling)
-    // percentiles — the live producer samples the interval recorder each tick —
+    // percentiles - the live producer samples the interval recorder each tick -
     // emit those so the "percentiles over time" chart tracks the recent window
     // instead of flattening. When absent (callers/tests that don't drive the
     // interval recorder), fall back to the cumulative-from-start histogram.
@@ -442,7 +442,7 @@ const Percentiles* window_percentiles) const {
         stats["latencyP99Ms"] = 0.0;
     }
 
-    // Wire byte counts (cumulative) — client diffs consecutive ticks for MB/s.
+    // Wire byte counts (cumulative) - client diffs consecutive ticks for MB/s.
     stats["bytesSent"]     = total_bytes_sent ();
     stats["bytesReceived"] = total_bytes_received ();
 

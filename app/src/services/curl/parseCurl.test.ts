@@ -33,7 +33,7 @@ describe("detectCommand", () => {
 	});
 });
 
-describe("parseCommand — curl", () => {
+describe("parseCommand - curl", () => {
 	test("simple GET", () => {
 		const r = parseCommand("curl https://api.example.com/users")!;
 		expect(r.method).toBe("GET");
@@ -261,7 +261,7 @@ describe("parseCommand — curl", () => {
 	});
 });
 
-describe("parseCommand — wget", () => {
+describe("parseCommand - wget", () => {
 	test("simple GET", () => {
 		const r = parseCommand("wget https://x.com")!;
 		expect(r.method).toBe("GET");
@@ -301,7 +301,7 @@ describe("parseCommand — wget", () => {
 	});
 });
 
-describe("parseCommand — failure modes", () => {
+describe("parseCommand - failure modes", () => {
 	test.each(["https://x.com", "", "not a command", `curl -d 'unterminated`])(
 		"returns null for %s",
 		(input) => {

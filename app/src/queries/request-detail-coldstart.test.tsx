@@ -9,7 +9,7 @@
  * A restored tab must find its request on a cold start.
  *
  * `openTabs` is persisted, so on launch every restored request tab calls
- * `useRequestQuery` immediately — before anything has fetched a collection's
+ * `useRequestQuery` immediately - before anything has fetched a collection's
  * request list. The old implementation only *read* the cache: detail cache,
  * then the `requests.lists()` caches, then throw. So on a cold start it threw,
  * retried 3× at 100ms, and gave up.
@@ -19,7 +19,7 @@
  * those lists a second later, nothing re-ran. The tab showed "Request not
  * found" until you clicked the request in the sidebar again.
  *
- * These tests start from a genuinely empty QueryClient — no seeding — because
+ * These tests start from a genuinely empty QueryClient - no seeding - because
  * seeding the cache reproduces the state *after* the race, which is the one
  * case that always worked.
  */

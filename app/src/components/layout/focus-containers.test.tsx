@@ -31,7 +31,7 @@ describe("focus containers", () => {
 
 	// The tab row clips horizontally (overflow-x-auto) and tabs are h-full, so
 	// an outset focus ring would be cut off. .panel-clip tucks it inward for
-	// every focusable descendant — dropping it silently clips the ring.
+	// every focusable descendant - dropping it silently clips the ring.
 	it("marks the tab row as a clipping panel", () => {
 		renderTabStrip();
 		expect(screen.getByRole("tablist")).toHaveClass("panel-clip");

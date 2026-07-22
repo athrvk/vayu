@@ -12,7 +12,7 @@
  *
  * Keyboard behaviour is deliberate. `DialogContent` renders a close "X" as its
  * first focusable child, so Radix's default open-focus lands there and neither
- * button appears focused — which matters most when the dialog was opened *by*
+ * button appears focused - which matters most when the dialog was opened *by*
  * keyboard (Delete on a tree row). Focus is redirected to Cancel instead: the
  * safe action, so a reflexive Enter cancels rather than deletes. Left/Right move
  * between the actions the way native confirmation dialogs behave.
@@ -40,7 +40,7 @@ export interface DeleteConfirmDialogProps {
 	/**
 	 * Word on the confirming button. Defaults to "Delete".
 	 *
-	 * Not every irreversible action is a deletion — "Reset to defaults" is the
+	 * Not every irreversible action is a deletion - "Reset to defaults" is the
 	 * case that forced this. Before it existed the only in-app confirm said
 	 * "Delete", so a reset either lied about what it was doing or fell back to
 	 * `window.confirm`, which ignores the theme, the accent and the roundedness

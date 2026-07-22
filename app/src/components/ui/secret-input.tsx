@@ -6,7 +6,7 @@
  */
 
 /**
- * SecretInput — a masked text field with an eye toggle to reveal the value.
+ * SecretInput - a masked text field with an eye toggle to reveal the value.
  * Modeled on the reveal pattern used by the variables table editor, extracted
  * so any secret field (OAuth 2.0 client secret / password, etc.) shares one
  * implementation. Masking and {{variable}} highlighting are mutually exclusive
@@ -50,7 +50,7 @@ export function SecretInput({
 				// Was `tabIndex={-1}`, on the reasoning that this is an affordance on
 				// the field rather than a form control. True, but the consequence was
 				// that a keyboard-only user had no way at all to reveal a Basic-auth
-				// password or an OAuth client secret to check what they had typed —
+				// password or an OAuth client secret to check what they had typed -
 				// the one thing the control exists for. One extra stop per secret
 				// field is a fair price.
 				disabled={disabled}

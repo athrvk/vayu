@@ -42,7 +42,7 @@ export default function ResponseHeader({ response }: ResponseHeaderProps) {
 			{/* Status */}
 			{/* `chip`, not the default variant: the default carries
 			    `hover:bg-primary-fill/80`, which survives tailwind-merge even
-			    though the fill below replaces its background — so this chip
+			    though the fill below replaces its background - so this chip
 			    faded to the user's accent on hover. It is not clickable. */}
 			<Badge
 				variant="chip"

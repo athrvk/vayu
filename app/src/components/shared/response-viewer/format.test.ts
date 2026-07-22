@@ -9,7 +9,7 @@
  * Response time and size formatting.
  *
  * `formatResponseTime` exists because `time.toFixed(4)` was written twice, in
- * two response viewers. Fixing one left the other rendering `340.1235 ms` — the
+ * two response viewers. Fixing one left the other rendering `340.1235 ms` - the
  * duplication was the defect, so the test lives with the shared function rather
  * than with either caller.
  */

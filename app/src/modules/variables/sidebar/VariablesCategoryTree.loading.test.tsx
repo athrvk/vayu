@@ -10,7 +10,7 @@
  *
  * This view used to take both lists as props from the Drawer, which read them
  * with `= []` defaults and dropped `isLoading`. While the queries were still
- * running the user was told "No environments" and "No collections" — a factual
+ * running the user was told "No environments" and "No collections" - a factual
  * claim about their data, made before any data had arrived.
  *
  * The empty state and the loading state are different answers to different
@@ -89,6 +89,6 @@ describe("VariablesCategoryTree loading state", () => {
 		renderTree();
 
 		// A count of 0 is a claim about the data; an unloaded list has no count.
-		expect(screen.getByText("—")).toBeInTheDocument();
+		expect(screen.getByText("-")).toBeInTheDocument();
 	});
 });

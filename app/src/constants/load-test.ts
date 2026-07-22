@@ -8,7 +8,7 @@
 /**
  * Load test configuration defaults and input limits.
  *
- * Limits mirror what the engine accepts on /run — keep them in sync with the
+ * Limits mirror what the engine accepts on /run - keep them in sync with the
  * engine's validation when it changes.
  */
 

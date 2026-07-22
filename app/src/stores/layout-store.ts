@@ -21,7 +21,7 @@ interface LayoutState {
 	// Drawer
 	drawerOpen: boolean;
 	drawerView: DrawerView;
-	/** One width for every view — see DEFAULT_DRAWER_WIDTH. */
+	/** One width for every view - see DEFAULT_DRAWER_WIDTH. */
 	drawerWidth: number;
 
 	// Context bar (right panel for request tabs)
@@ -85,7 +85,7 @@ export const useLayoutStore = create<LayoutState>()(
 					drawerWidths?: Record<string, number>;
 				};
 				// v1 could persist a skewed split ratio while panel sizes were
-				// misparsed as pixels — reset to an even split
+				// misparsed as pixels - reset to an even split
 				if (version < 2) state.requestSplitRatio = 0.5;
 				// v2 stored a width per drawer view, which made the main content
 				// resize when switching views. Collapse to a single width, keeping

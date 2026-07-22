@@ -218,7 +218,7 @@ export default function McpSettingsPanel() {
 		};
 	}, []);
 
-	// Re-check status when the user returns to the window — the server may have
+	// Re-check status when the user returns to the window - the server may have
 	// died or been toggled elsewhere while the panel sat open.
 	useEffect(() => {
 		if (!window.electronAPI) return;
@@ -264,7 +264,7 @@ export default function McpSettingsPanel() {
 					showToast(`Added Vayu to ${CLIENT_LABEL[client]}.`, "success");
 				} else if (res.reason === "cli-not-found") {
 					showToast(
-						`The ${CLIENT_CLI[client]} CLI wasn't found — copy the snippet below to add Vayu manually.`,
+						`The ${CLIENT_CLI[client]} CLI wasn't found - copy the snippet below to add Vayu manually.`,
 						"error"
 					);
 				} else {
@@ -366,7 +366,7 @@ export default function McpSettingsPanel() {
 						)}
 					</div>
 					<CardDescription>
-						Any agent connects to the already-running app with one command — no extra
+						Any agent connects to the already-running app with one command - no extra
 						process to manage.
 					</CardDescription>
 				</CardHeader>
@@ -388,7 +388,7 @@ export default function McpSettingsPanel() {
 						/>
 					</div>
 
-					{/* Enabled but not listening — usually a port conflict. Offer a retry. */}
+					{/* Enabled but not listening - usually a port conflict. Offer a retry. */}
 					{!isLoading && enabled && !running && (
 						<Callout
 							severity="warning"
@@ -552,7 +552,7 @@ export default function McpSettingsPanel() {
 					</div>
 					<CardDescription>
 						Hosts an agent is permitted to send traffic to. Empty means no outbound
-						requests are allowed — a safe default. Add a host (no scheme or port), e.g.{" "}
+						requests are allowed - a safe default. Add a host (no scheme or port), e.g.{" "}
 						<code className="font-mono">api.example.com</code>.
 					</CardDescription>
 				</CardHeader>
@@ -563,7 +563,7 @@ export default function McpSettingsPanel() {
 							<Label className="text-sm">Allow all hosts</Label>
 							<p className="text-xs text-muted-foreground mt-0.5">
 								Bypass the allowlist and let agents target any host. Reduces safety
-								— leave off unless you trust the agent.
+								- leave off unless you trust the agent.
 							</p>
 						</div>
 						<Switch

@@ -35,7 +35,7 @@ export interface UpdateAvailablePayload {
 /**
  * Outcome of a user-initiated check.
  *
- * The periodic check stays silent, so it produces no result — only a check the
+ * The periodic check stays silent, so it produces no result - only a check the
  * user asked for needs an answer, and "nothing happened" is not one.
  */
 export type UpdateCheckResult =
@@ -44,7 +44,7 @@ export type UpdateCheckResult =
 	| ({ status: "available" } & UpdateAvailablePayload)
 	| { status: "error"; message: string };
 
-/** Where a manual check came from — it decides how the result is delivered. */
+/** Where a manual check came from - it decides how the result is delivered. */
 type CheckSource = "menu" | "renderer";
 
 /**
@@ -61,8 +61,8 @@ interface PendingCheck {
 
 /**
  * How long to wait for an answer before giving up. Without this a check that
- * never gets a reply — a hung connection, a feed that stalls after the TCP
- * handshake — leaves the settings button spinning with no way back.
+ * never gets a reply - a hung connection, a feed that stalls after the TCP
+ * handshake - leaves the settings button spinning with no way back.
  */
 const CHECK_TIMEOUT_MS = 30_000;
 
@@ -94,7 +94,7 @@ export function initAutoUpdater(win: BrowserWindow): void {
 
 	// Registered before the `disabled` bail-out. The renderer calls these
 	// unconditionally, and an unregistered channel rejects with "No handler
-	// registered" — an error that reads like a bug rather than "not in a
+	// registered" - an error that reads like a bug rather than "not in a
 	// packaged build". They no-op safely while `updaterReady` is false.
 	ipcMain.handle("update:restartToInstall", () => {
 		// Only meaningful on the silent path, where an update was downloaded.
@@ -163,7 +163,7 @@ export function initAutoUpdater(win: BrowserWindow): void {
  * Deliver the outcome of the check the user is waiting on, if any.
  *
  * Events fire for the periodic check too, so a result with nothing waiting is
- * dropped — that is the silent path doing its job, not a missed answer.
+ * dropped - that is the silent path doing its job, not a missed answer.
  */
 function settleCheck(result: UpdateCheckResult): void {
 	const pending = pendingCheck;
@@ -190,7 +190,7 @@ function settleCheck(result: UpdateCheckResult): void {
 				buttons: ["OK"],
 			});
 		}
-		// "available" needs no dialog — the update banner is already showing it.
+		// "available" needs no dialog - the update banner is already showing it.
 	}
 
 	pending.settle(result);
@@ -199,7 +199,7 @@ function settleCheck(result: UpdateCheckResult): void {
 /**
  * Trigger a check on demand, from the "Check for Updates…" menu item or from
  * Settings → General. Always resolves with an outcome, so the caller can give
- * the user feedback — unlike the periodic check, which stays silent.
+ * the user feedback - unlike the periodic check, which stays silent.
  */
 export function checkForUpdatesNow(source: CheckSource = "menu"): Promise<UpdateCheckResult> {
 	if (!updaterReady) {
@@ -235,7 +235,7 @@ export function checkForUpdatesNow(source: CheckSource = "menu"): Promise<Update
 	pendingCheck = { source, settle, promise, timer };
 
 	autoUpdater.checkForUpdates().catch((err) => {
-		// The `error` event usually fires too, but not for every rejection —
+		// The `error` event usually fires too, but not for every rejection -
 		// settling here as well is safe because settleCheck is idempotent.
 		console.error("[Updater] manual check failed:", err);
 		settleCheck({ status: "error", message: err instanceof Error ? err.message : String(err) });

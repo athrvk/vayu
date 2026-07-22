@@ -170,7 +170,7 @@ export function useSaveManager({
 	// Reset on entity change; flush pending edits for the *previous* entity in
 	// the cleanup. Cleanups run before the new render's ref-update effects, so
 	// performSave (keyed on the old entityId via useCallback) still sees the
-	// old onSaveRef — edits made <3s before switching are saved, not dropped.
+	// old onSaveRef - edits made <3s before switching are saved, not dropped.
 	useEffect(() => {
 		reset();
 		return () => {
@@ -201,7 +201,7 @@ export function useSaveManager({
 			return;
 		}
 
-		// Mark as pending regardless — the "unsaved changes" state (and manual
+		// Mark as pending regardless - the "unsaved changes" state (and manual
 		// save via Cmd+S) still applies even when auto-save is turned off.
 		markPendingSave(entityId);
 

@@ -65,7 +65,7 @@ export default function GeneralPanel() {
 	/*
 	 * Confirmed through the app's own DeleteConfirmDialog rather than
 	 * `window.confirm`. The native dialog ignores the theme, the accent and the
-	 * roundedness setting entirely, and — being modal to the whole renderer —
+	 * roundedness setting entirely, and - being modal to the whole renderer -
 	 * it also blocks the JS thread, so the live dashboard stops updating behind
 	 * it. Every other destructive action in the app (deleting a run, a
 	 * collection, a request) already routes through this dialog, which also
@@ -82,7 +82,7 @@ export default function GeneralPanel() {
 			showToast(
 				failed === 0
 					? "Run history cleared"
-					: `Cleared history — ${failed} run${failed === 1 ? "" : "s"} could not be deleted`,
+					: `Cleared history - ${failed} run${failed === 1 ? "" : "s"} could not be deleted`,
 				failed === 0 ? "success" : "error"
 			);
 		} finally {
@@ -97,7 +97,7 @@ export default function GeneralPanel() {
 	 * open. It also focuses Cancel first, so a reflexive Enter does not reset.
 	 *
 	 * `confirmVariant="default"` rather than destructive: this is irreversible
-	 * but it removes nothing — a red button would overstate it next to the one
+	 * but it removes nothing - a red button would overstate it next to the one
 	 * that really does delete run history.
 	 */
 	const resetSettings = () => {
@@ -107,7 +107,7 @@ export default function GeneralPanel() {
 
 	return (
 		<>
-			{/* Version + manual update check — the first thing people open
+			{/* Version + manual update check - the first thing people open
 			    General looking for. */}
 			<UpdatesCard />
 

@@ -19,7 +19,7 @@ describe("layout-store drawer width", () => {
 		const { drawerWidth, setDrawerView } = useLayoutStore.getState();
 		expect(drawerWidth).toBe(300);
 
-		// switching view must not change the width — that was the shift
+		// switching view must not change the width - that was the shift
 		setDrawerView("history");
 		expect(useLayoutStore.getState().drawerWidth).toBe(300);
 		setDrawerView("settings");

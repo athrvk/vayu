@@ -8,8 +8,8 @@
 /**
  * A save failure should say why.
  *
- * `save-store` records an `errorMessage` on every failure — "database is
- * locked", "disk full" — and nothing read it, so the status strip showed a bare
+ * `save-store` records an `errorMessage` on every failure - "database is
+ * locked", "disk full" - and nothing read it, so the status strip showed a bare
  * "Save failed" for every cause. This is the fourth instance of the same shape
  * on this branch: state written by one layer, read by none.
  *
@@ -43,7 +43,7 @@ describe("save failure reporting", () => {
 	});
 
 	it("renders the reason alongside the failure", () => {
-		expect(code).toMatch(/Save failed — \$\{saveError\}/);
+		expect(code).toMatch(/Save failed - \$\{saveError\}/);
 	});
 
 	it("falls back to the bare text when there is no message", () => {

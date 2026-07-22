@@ -101,7 +101,7 @@ export default function RequestBuilderLayout() {
 			>
 				{/* Request Editor Panel */}
 				<ResizablePanel
-					// react-resizable-panels v4 treats bare numbers as pixels — percentages must be strings
+					// react-resizable-panels v4 treats bare numbers as pixels - percentages must be strings
 					defaultSize={`${requestSplitRatio * 100}%`}
 					minSize="20%"
 					maxSize="80%"

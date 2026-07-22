@@ -47,7 +47,7 @@ export default function LoadTestDashboard() {
 		setFinalReport,
 		setStopping,
 		// Written by the SSE layer on a connection failure and, until now, read
-		// by nothing — so a dead metrics stream looked like a run with no data.
+		// by nothing - so a dead metrics stream looked like a run with no data.
 		error: streamError,
 		setError: setStreamError,
 	} = useDashboardStore();
@@ -61,7 +61,7 @@ export default function LoadTestDashboard() {
 	 * `catch`, so `isLoadingReport` went back to false, that is an effect
 	 * dependency, the guard `!finalReport && !isLoadingReport` became true again,
 	 * and the fetch re-ran. `loadAttemptRef` was only incremented on the
-	 * zero-data path, never on failure, so the cap never engaged — a persistent
+	 * zero-data path, never on failure, so the cap never engaged - a persistent
 	 * failure (engine down) retried forever, silently, showing an empty
 	 * dashboard the whole time.
 	 */
@@ -274,7 +274,7 @@ export default function LoadTestDashboard() {
 	const displayConfiguration = useMemo(() => {
 		if (runMetadata?.configuration) {
 			// The final report's config omits the ramp fields, so the ramp_up
-			// Current Concurrency card would read "—s ramp" once complete. Backfill
+			// Current Concurrency card would read "-s ramp" once complete. Backfill
 			// them from the run's own loadTestConfig (the config we started with).
 			return {
 				...runMetadata.configuration,
@@ -334,7 +334,7 @@ export default function LoadTestDashboard() {
 		return startTime && endTime ? endTime - startTime : 0;
 	}, [mode, finalReport?.summary?.testDuration, historicalMetrics, startTime, endTime]);
 
-	// Empty state — placed after all hooks so the hook call order stays stable
+	// Empty state - placed after all hooks so the hook call order stays stable
 	// across renders (Rules of Hooks); the memos above are null-safe with no run.
 	if (!currentRunId) {
 		return <EmptyState title="No active load test" />;
@@ -360,7 +360,7 @@ export default function LoadTestDashboard() {
 			 * error comes first: without live metrics the page has nothing to show,
 			 * whereas a missing report still leaves whatever was captured.
 			 *
-			 * Both used to be invisible — the report failure retried forever behind
+			 * Both used to be invisible - the report failure retried forever behind
 			 * a `console.error`, and the stream failure was written to the store and
 			 * never read by anything.
 			 */}

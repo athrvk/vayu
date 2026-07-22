@@ -42,7 +42,7 @@ interface VariableInputProps {
 	/**
 	 * Names the field. Needed because the placeholder is dropped once the value
 	 * contains a variable (it would show through the highlight overlay), and a
-	 * placeholder was the only thing naming these inputs — so typing `{{x}}`
+	 * placeholder was the only thing naming these inputs - so typing `{{x}}`
 	 * silently left the field anonymous to a screen reader.
 	 */
 	"aria-label"?: string;
@@ -371,7 +371,7 @@ export default function VariableInput({
 		<div
 			ref={containerRef}
 			className={cn(
-				// Default chrome — overridable via className. Wrapper owns border/bg/size
+				// Default chrome - overridable via className. Wrapper owns border/bg/size
 				// so the inner input can be borderless and fill it.
 				"relative flex items-center h-9 w-full bg-background rounded-md border border-input px-3 text-sm font-mono shadow-sm transition-colors",
 				"focus-within:outline-none focus-within:ring-1 focus-within:ring-ring",

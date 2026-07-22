@@ -120,14 +120,14 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 /**
  * Fetch a single request by ID.
  *
- * The engine has no `GET /requests/:id` — only `GET /requests?collectionId=` —
+ * The engine has no `GET /requests/:id` - only `GET /requests?collectionId=` -
  * so a single request is found by looking through the collection lists.
  *
  * This used to read the cache and nothing else, which made it a race it usually
  * lost on a cold start. Tabs are persisted and restored, so on launch this runs
  * immediately for every restored request tab while
  * `usePrefetchCollectionsAndRequests` is still two round trips from filling
- * those lists. It threw, retried 3× at 100ms, gave up — and because
+ * those lists. It threw, retried 3× at 100ms, gave up - and because
  * `staleTime: Infinity` keeps the error parked, it never recovered once the
  * lists *did* arrive. The result was a permanent "Request not found" on the
  * restored tab, and a tab strip of anonymous "Request" labels, until you
@@ -171,7 +171,7 @@ export function useRequestQuery(requestId: string | null) {
 			/*
 			 * Nothing cached yet. `fetchQuery` rather than `prefetchQuery`: it
 			 * returns the data and, critically, dedupes against an identical
-			 * in-flight request — so racing the prefetch costs no extra traffic,
+			 * in-flight request - so racing the prefetch costs no extra traffic,
 			 * it just awaits the same promise.
 			 */
 			const collections = await queryClient.fetchQuery({
@@ -188,7 +188,7 @@ export function useRequestQuery(requestId: string | null) {
 							queryFn: () => apiService.listRequests({ collectionId: collection.id }),
 							staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
 						})
-						// One unreadable collection must not sink the others — the
+						// One unreadable collection must not sink the others - the
 						// request we want is probably in a different one.
 						.catch(() => [] as Request[])
 				)

@@ -6,7 +6,7 @@
  */
 
 /**
- * The load-test modes, and the words for them — the single source of truth.
+ * The load-test modes, and the words for them - the single source of truth.
  *
  * This existed in four places, giving four answers. `utils/helpers.ts` said
  * "Iterations" and "Ramp Up"; the config dialog said "Fixed Iterations" and
@@ -61,7 +61,7 @@ const BY_VALUE = new Map<string, LoadTestModeInfo>(LOAD_TEST_MODES.map((m) => [m
  * Takes `string`, not `LoadTestMode`: modes arrive from stored runs and from
  * the engine, so an unrecognised value is a real possibility rather than a type
  * error. Unknown values are humanised (`some_new_mode` → `Some new mode`)
- * instead of being dropped or shown raw — a run from a newer engine should
+ * instead of being dropped or shown raw - a run from a newer engine should
  * still read as a name, not as a snake_case token.
  */
 export function loadTestModeLabel(mode: string | undefined | null): string {

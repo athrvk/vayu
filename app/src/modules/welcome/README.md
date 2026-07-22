@@ -17,15 +17,15 @@ Two consequences worth keeping in mind before adding anything here:
   numbers were removed because they pitch software the user has already
   installed, and the static numbers read as if they were telemetry.
 - **No duplicates.** Anything already visible in the Collections sidebar or the
-  History drawer does not belong here — a "Recent Collections" list was removed
+  History drawer does not belong here - a "Recent Collections" list was removed
   for repeating the sidebar rendered beside it.
 
 ## Structure
 
-- `WelcomeScreen.tsx` — container: queries, `handleNewRequest`, state selection
-- `EmptyState.tsx` — fresh workspace; import leads, and this is the only state
+- `WelcomeScreen.tsx` - container: queries, `handleNewRequest`, state selection
+- `EmptyState.tsx` - fresh workspace; import leads, and this is the only state
   that carries branding
-- `Launcher.tsx` — populated workspace; actions, recent runs, counts
+- `Launcher.tsx` - populated workspace; actions, recent runs, counts
 - `components/ActionTile.tsx`, `components/RecentRuns.tsx`,
   `components/FooterLinks.tsx`
 
@@ -33,11 +33,11 @@ Two consequences worth keeping in mind before adding anything here:
 
 - Both queries return `[]` while loading, so the container holds on `isLoading`.
   Without that the first-run screen flashes at every returning user.
-- `RecentRuns` copies before sorting — the array is the TanStack Query cache.
+- `RecentRuns` copies before sorting - the array is the TanStack Query cache.
 - Doc links use `window.electronAPI.openAppLink(key)`, a keyed IPC channel. The
   renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would
   spawn an unmanaged Electron window.
-- Styling follows `docs/design-system.md` — 11px eyebrows, 13px body, mono
+- Styling follows `docs/design-system.md` - 11px eyebrows, 13px body, mono
   tabular numerals, `rounded-md`. No `text-5xl`/`text-xl`, no gradients.
 
 ## Usage

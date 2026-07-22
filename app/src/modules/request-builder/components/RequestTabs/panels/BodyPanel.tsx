@@ -12,7 +12,7 @@
  * - none: No body
  * - json: Monaco editor with JSON syntax
  * - text: Plain text editor
- * - graphql: Split editor — query (top) + variables JSON (bottom)
+ * - graphql: Split editor - query (top) + variables JSON (bottom)
  * - form-data: Key-value editor
  * - x-www-form-urlencoded: Key-value editor
  */
@@ -69,9 +69,9 @@ function parseGraphQLBody(body: string): { query: string; variables: string } {
 			};
 		}
 	} catch {
-		// Body is not JSON — treat as a raw query string (e.g. Insomnia import)
+		// Body is not JSON - treat as a raw query string (e.g. Insomnia import)
 	}
-	// Raw query string — show as-is, no variables
+	// Raw query string - show as-is, no variables
 	return { query: body, variables: "" };
 }
 
@@ -80,7 +80,7 @@ function serializeGraphQLBody(query: string, variables: string): string {
 		const vars = variables.trim() ? JSON.parse(variables) : undefined;
 		return JSON.stringify({ query, ...(vars !== undefined && { variables: vars }) });
 	} catch {
-		// Variables panel has in-progress invalid JSON — preserve query only
+		// Variables panel has in-progress invalid JSON - preserve query only
 		return JSON.stringify({ query });
 	}
 }
@@ -106,7 +106,7 @@ function SchemaStatusBadge({ status }: { status: "idle" | "loading" | "ready" | 
 	return (
 		<span
 			className="flex items-center gap-1 text-[10px] text-destructive-text"
-			title="Schema introspection failed — syntax checking only"
+			title="Schema introspection failed - syntax checking only"
 		>
 			<AlertCircle className="w-3 h-3" />
 			No schema
@@ -123,7 +123,7 @@ const RESIZE_STEP = 24;
  * It was `role="separator"` with an `onMouseDown` and nothing else: not
  * focusable, no key handling, so the editor's height was mouse-only. A
  * focusable separator is a window splitter, and the keys below are that
- * pattern — arrows to nudge, Page keys for a coarse jump, Home/End for the
+ * pattern - arrows to nudge, Page keys for a coarse jump, Home/End for the
  * extremes (which `resizeBy` handles via ±Infinity, since it clamps).
  */
 function ResizeHandle({
@@ -172,7 +172,7 @@ function ResizeHandle({
 			}}
 			className={cn(
 				// h-1.5 is a 6px target, so the focus ring is the only thing making
-				// it findable by keyboard — hence focus-visible, not just hover.
+				// it findable by keyboard - hence focus-visible, not just hover.
 				"h-1.5 cursor-row-resize bg-border transition-colors hover:bg-primary focus-visible:bg-primary",
 				active && "bg-primary"
 			)}
@@ -307,7 +307,7 @@ export default function BodyPanel() {
 
 	// The variables editor keeps its own raw text as the source of truth: while
 	// the user types an object, intermediate states are invalid JSON which
-	// serializeGraphQLBody drops — so re-deriving the editor value from the body
+	// serializeGraphQLBody drops - so re-deriving the editor value from the body
 	// would wipe their input. Re-sync from the body only on external changes
 	// (request switch, mode switch), tracked via the body value we last wrote.
 	const [gqlVariables, setGqlVariables] = useState("");
@@ -483,7 +483,7 @@ export default function BodyPanel() {
 								 * min-h-0: a flex item will not shrink below its content, so
 								 * without it the editor keeps its old height when the pane is
 								 * dragged smaller. The panel then overflows and grows a native
-								 * scrollbar beside the editor's own — two scrollbars for one
+								 * scrollbar beside the editor's own - two scrollbars for one
 								 * editor. Same trap as min-w-0 on truncating rows.
 								 */}
 								<div className="min-h-0 flex-1">
@@ -511,7 +511,7 @@ export default function BodyPanel() {
 								 * min-h-0: a flex item will not shrink below its content, so
 								 * without it the editor keeps its old height when the pane is
 								 * dragged smaller. The panel then overflows and grows a native
-								 * scrollbar beside the editor's own — two scrollbars for one
+								 * scrollbar beside the editor's own - two scrollbars for one
 								 * editor. Same trap as min-w-0 on truncating rows.
 								 */}
 								<div className="min-h-0 flex-1">

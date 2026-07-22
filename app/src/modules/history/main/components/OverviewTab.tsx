@@ -22,7 +22,7 @@ import type { TabProps } from "../../types";
 export default function OverviewTab({ report, derived }: TabProps) {
 	return (
 		<>
-			{/* Mode-adaptive summary — same hero cards + stat row the live dashboard shows.
+			{/* Mode-adaptive summary - same hero cards + stat row the live dashboard shows.
 			    Config (mode/duration/concurrency/comment) + request URL/method live in the
 			    always-visible header strip, so no separate "Test Configuration" card here. */}
 			<HeroRow d={derived} />

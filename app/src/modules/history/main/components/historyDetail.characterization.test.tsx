@@ -14,8 +14,8 @@ import type { RunReport } from "@/types";
 /**
  * LoadTestDetail now fetches the per-tick time-series (for the breakpoint /
  * percentile surfaces), so it needs a QueryClient. The default (Overview) tab
- * snapshotted here doesn't depend on that data — the query stays in its loading
- * state during the synchronous render — so the locked DOM is unaffected.
+ * snapshotted here doesn't depend on that data - the query stays in its loading
+ * state during the synchronous render - so the locked DOM is unaffected.
  */
 function renderWithClient(ui: ReactElement) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

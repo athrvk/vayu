@@ -9,7 +9,7 @@
  * Roving tabindex for the collection tree (WAI-ARIA treeview pattern).
  *
  * The tree is a single tab stop. Arrow keys move between rows, so tabbing past
- * the tree costs one press instead of one per row — previously a workspace with
+ * the tree costs one press instead of one per row - previously a workspace with
  * 2 collections and 4 requests cost 17.
  *
  * Visible order comes from the DOM (`[role="treeitem"]` in document order):
@@ -34,7 +34,7 @@ const ITEM = '[role="treeitem"]';
 
 /**
  * A row's children are rendered as a *sibling* of that row, both inside a
- * per-collection wrapper — not nested inside the row — so `closest(ITEM)` never
+ * per-collection wrapper - not nested inside the row - so `closest(ITEM)` never
  * finds the parent. Walk up instead, and at each ancestor take the first
  * treeitem it contains: the first wrapper that holds a treeitem other than this
  * one is the parent's wrapper, and that treeitem is the parent row. Stops at the
@@ -69,7 +69,7 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 	);
 
 	// Exactly one row must be tabbable. Rows render with tabIndex -1, so seed
-	// the first one — and re-seed if the row holding it was collapsed away.
+	// the first one - and re-seed if the row holding it was collapsed away.
 	useEffect(() => {
 		const list = items();
 		if (list.length && !list.some((i) => i.tabIndex === 0)) list[0].tabIndex = 0;
@@ -114,7 +114,7 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 				case "ArrowRight":
 					take();
 					// Collapsed: open it. Children mount on the next render, so a
-					// second press steps into them — no flushSync needed.
+					// second press steps into them - no flushSync needed.
 					if (expanded === "false") click("[data-tree-toggle]");
 					else if (expanded === "true") focusItem(list[i + 1]);
 					break;

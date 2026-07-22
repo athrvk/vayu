@@ -10,7 +10,7 @@
  *
  * Both queries here are destructured as `{ data = [] }` and nothing sets
  * `throwOnError`, so a query that settles as an error resolves to `[]`, the
- * lookup finds nothing, and the pane announces "Collection not found" — a
+ * lookup finds nothing, and the pane announces "Collection not found" - a
  * claim that the user's data is gone, for what is only a failed request.
  *
  * The two queries are independent, so each branch reads its own `isError`.
@@ -18,7 +18,7 @@
  * while environments are fine must not put an error pane on the environment
  * branch.
  *
- * Each case asserts both halves — the right pane present *and* the wrong one
+ * Each case asserts both halves - the right pane present *and* the wrong one
  * absent.
  */
 
@@ -84,7 +84,7 @@ beforeEach(() => {
 	state.selectedCategory = null;
 });
 
-describe("VariablesMain — collection branch when its query fails", () => {
+describe("VariablesMain - collection branch when its query fails", () => {
 	beforeEach(() => {
 		state.selectedCategory = { type: "collection", collectionId: "c1" };
 	});
@@ -123,7 +123,7 @@ describe("VariablesMain — collection branch when its query fails", () => {
 	});
 });
 
-describe("VariablesMain — environment branch when its query fails", () => {
+describe("VariablesMain - environment branch when its query fails", () => {
 	beforeEach(() => {
 		state.selectedCategory = { type: "environment", environmentId: "e1" };
 	});
@@ -164,7 +164,7 @@ describe("VariablesMain — environment branch when its query fails", () => {
 	});
 });
 
-describe("VariablesMain — each branch reads its own query", () => {
+describe("VariablesMain - each branch reads its own query", () => {
 	it("does not blame the environment for a collections failure", () => {
 		// Collections errored; environments settled cleanly without e1. The
 		// truthful answer for the environment branch is still "not found".

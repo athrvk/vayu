@@ -59,7 +59,7 @@ export default function HistoryDetail() {
 	}
 
 	// Error state. Previously a hand-rolled pane whose only action was "Back to
-	// History" — it walked the user away from the run instead of offering the
+	// History" - it walked the user away from the run instead of offering the
 	// one thing that might work, a retry. A transient engine hiccup left no way
 	// back in short of re-selecting the run.
 	if (error || !report) {
@@ -120,7 +120,7 @@ export default function HistoryDetail() {
 										}
 										/* "stopped" is a run status, so it takes the
 										   --status-stopped family the sidebar's RunItem
-										   already uses — not a raw orange that happens to
+										   already uses - not a raw orange that happens to
 										   look the same. */
 										className={`text-xs capitalize ${
 											report.metadata.status === "stopped"

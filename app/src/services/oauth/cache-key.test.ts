@@ -19,7 +19,7 @@ const base = (over: Partial<OAuth2Config>): OAuth2Config => ({
 	...over,
 });
 
-describe("computeOAuth2CacheKey — shared vectors", () => {
+describe("computeOAuth2CacheKey - shared vectors", () => {
 	it("vector 1: minimal client_credentials", () => {
 		expect(computeOAuth2CacheKey(base({}))).toBe("https://idp/token\x1fcid\x1fdefault\x1f");
 	});

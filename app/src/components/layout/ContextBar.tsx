@@ -143,7 +143,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 					<p className="text-xs text-muted-foreground">No variables in scope</p>
 				) : (
 					<div className="space-y-1">
-						{/* Column headers — mirrors the key-value editor used for headers */}
+						{/* Column headers - mirrors the key-value editor used for headers */}
 						{/* <div className="grid grid-cols-2 gap-2 px-1 text-xs font-medium text-muted-foreground">
 							<div>Variable</div>
 							<div>Value</div>
@@ -152,7 +152,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 							<div key={name} className="grid grid-cols-2 gap-2 items-center">
 								<span
 									className="text-xs font-mono text-foreground truncate px-1"
-									title={`{{${name}}} — ${resolved.scope} scope`}
+									title={`{{${name}}} - ${resolved.scope} scope`}
 								>
 									{`${name}`}
 								</span>

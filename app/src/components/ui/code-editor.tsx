@@ -49,7 +49,7 @@ const DEFAULT_OPTIONS = {
 	scrollbar: {
 		/*
 		 * Monaco defaults this to true, meaning it calls preventDefault() on every
-		 * wheel event over the editor — including when it has nothing to scroll.
+		 * wheel event over the editor - including when it has nothing to scroll.
 		 * An editor embedded in a scrollable panel therefore swallows the wheel
 		 * and the panel underneath cannot be scrolled past it.
 		 *

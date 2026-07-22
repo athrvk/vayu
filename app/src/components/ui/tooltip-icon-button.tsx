@@ -11,7 +11,7 @@
  * An icon-only button that is named and described from a single `label`: the
  * label becomes the accessible name (`aria-label`) and the visible tooltip.
  *
- * Icon buttons need both, and the two used to be supplied separately — or, more
+ * Icon buttons need both, and the two used to be supplied separately - or, more
  * often, only `title` was set, which is a weak substitute: a `title` tooltip
  * does not appear on keyboard focus, does not work on touch, cannot be styled,
  * and its screen-reader handling is inconsistent. Several buttons relied on it
@@ -37,7 +37,7 @@ export interface TooltipIconButtonProps extends Omit<ButtonProps, "aria-label" |
 	icon: React.ReactNode;
 	/** Tooltip placement. Defaults to top, matching the Dock. */
 	tooltipSide?: React.ComponentProps<typeof TooltipContent>["side"];
-	/** Extra tooltip line — e.g. a keyboard shortcut — shown but not named. */
+	/** Extra tooltip line - e.g. a keyboard shortcut - shown but not named. */
 	tooltipHint?: React.ReactNode;
 }
 

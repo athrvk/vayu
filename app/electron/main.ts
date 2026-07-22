@@ -94,7 +94,7 @@ function createWindow() {
 			process.platform === "darwin"
 				? { x: 12, y: Math.round((TITLEBAR_HEIGHT - 16) / 2) }
 				: undefined,
-		// Windows-only native overlay — Linux uses custom HTML buttons
+		// Windows-only native overlay - Linux uses custom HTML buttons
 		titleBarOverlay:
 			process.platform === "win32"
 				? {
@@ -144,7 +144,7 @@ function createWindow() {
 			themeSource: nativeTheme.themeSource,
 		});
 
-		// Update titlebar overlay color — Windows only
+		// Update titlebar overlay color - Windows only
 		if (process.platform === "win32" && mainWindow) {
 			mainWindow.setTitleBarOverlay({
 				color: nativeTheme.shouldUseDarkColors ? "#111113" : "#f2f0eb",
@@ -201,7 +201,7 @@ function createMenu() {
 		// File menu
 		{
 			label: "File",
-			// CmdOrCtrl+W belongs to the renderer (close tab) — rebind window
+			// CmdOrCtrl+W belongs to the renderer (close tab) - rebind window
 			// close so the menu accelerator doesn't swallow the keydown.
 			submenu: isMac
 				? [{ role: "close" as const, accelerator: "Shift+CmdOrCtrl+W" }]
@@ -242,7 +242,7 @@ function createMenu() {
 		{
 			label: "View",
 			submenu: [
-				// Reload / force-reload / DevTools are developer affordances —
+				// Reload / force-reload / DevTools are developer affordances -
 				// only surfaced in development builds, not in shipped releases.
 				...(isDev
 					? [
@@ -275,7 +275,7 @@ function createMenu() {
 					: [{ role: "close" as const, accelerator: "Shift+CmdOrCtrl+W" }]),
 			],
 		},
-		// Help menu — documentation links on all platforms, plus
+		// Help menu - documentation links on all platforms, plus
 		// "Check for Updates…" on Windows/Linux (macOS keeps that in the app
 		// menu above).
 		{
@@ -348,7 +348,7 @@ async function startMcp() {
 		await mcpService.start();
 		console.log("[Main] MCP server listening at", mcpService.getUrl());
 	} catch (error) {
-		// The MCP server is a non-critical convenience — a bind failure (e.g. port
+		// The MCP server is a non-critical convenience - a bind failure (e.g. port
 		// in use) must not take down the app. Log and continue.
 		console.error("[Main] Failed to start MCP server (continuing without it):", error);
 		mcpService = null;
@@ -427,7 +427,7 @@ function setupIpcHandlers() {
 		};
 	});
 
-	// MCP server status — used by Settings to show the connect URL and state.
+	// MCP server status - used by Settings to show the connect URL and state.
 	ipcMain.handle("mcp:status", () => {
 		return {
 			running: mcpService?.isRunning() ?? false,
@@ -489,7 +489,7 @@ function setupIpcHandlers() {
 			savePersistedSafety(resolved);
 			return resolved;
 		}
-		// MCP server never came up (e.g. port in use) — still persist so the
+		// MCP server never came up (e.g. port in use) - still persist so the
 		// change takes effect on the next launch.
 		const resolved = resolveSafetyConfig({ ...loadPersistedSafety(), ...clean });
 		savePersistedSafety(resolved);

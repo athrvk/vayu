@@ -9,8 +9,8 @@
  * Raw Tailwind palette colours are banned in the request/response tree.
  *
  * They are theme-blind: `text-green-500` is one value on a white card and on a
- * near-black one, so when it fails in light mode — which is where every one of
- * these failed — there is no way to fix it without breaking the other theme.
+ * near-black one, so when it fails in light mode - which is where every one of
+ * these failed - there is no way to fix it without breaking the other theme.
  * Measured before conversion, against `bg-card` unless noted:
  *
  *     usage                                   light   dark   need
@@ -26,7 +26,7 @@
  * 4.83/7.66, 5.68/8.80, 5.68/8.80, and 4.84/3.57 for the dot on the fill token.
  *
  * **Scope is deliberate.** This guards the trees that were measured, not the
- * whole app. Elsewhere — the history tabs, the settings banners — the raw
+ * whole app. Elsewhere - the history tabs, the settings banners - the raw
  * palette classes come in explicit `light dark:` pairs, which are theme-aware
  * and therefore not this defect; converting those is a design decision about
  * introducing new tokens (there is no purple or info `-text` token today), not
@@ -49,9 +49,9 @@ const GUARDED = ["modules/request-builder/**/*.tsx", "components/shared/response
  *
  * `LoadTestConfigDialog` used to be: it carried a `bg-blue-50 … dark:bg-blue-950`
  * info box and a hardcoded `bg-purple-600` submit button, and converting them
- * needed tokens that did not exist. The dialog has since been re-cut — the info
+ * needed tokens that did not exist. The dialog has since been re-cut - the info
  * box became a shared `Callout` on semantic tokens, and the button moved to the
- * accent — so the exemption is gone and the whole tree is guarded.
+ * accent - so the exemption is gone and the whole tree is guarded.
  *
  * If something needs adding back here, say why in the same breath.
  */
@@ -82,7 +82,7 @@ const PALETTE = [
 	"stone",
 ];
 
-// `text-green-500`, `bg-blue-500/20`, `dark:border-amber-200` — any utility
+// `text-green-500`, `bg-blue-500/20`, `dark:border-amber-200` - any utility
 // prefix, any modifier chain, optional opacity suffix.
 const RAW = new RegExp(
 	String.raw`\b(?:[a-z-]+:)*(?:text|bg|border|ring|fill|stroke|from|via|to|outline|decoration|divide|accent|caret|shadow)-(?:${PALETTE.join("|")})-\d{2,3}\b`,
@@ -100,7 +100,7 @@ function guardedFiles(): string[] {
  * Blank out comment bodies, keeping newlines so line numbers still line up.
  *
  * These files quote the classes they replaced, to record what was measured, and
- * the first version of this guard flagged its own documentation — the JSX
+ * the first version of this guard flagged its own documentation - the JSX
  * JSX brace-wrapped block-comment form is neither a `//` line nor a
  * leading-asterisk block line, so per-line stripping missed it entirely.
  */

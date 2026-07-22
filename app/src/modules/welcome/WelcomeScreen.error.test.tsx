@@ -10,14 +10,14 @@
  *
  * Both queries here are destructured as `{ data = [] }` and nothing sets
  * `throwOnError`, so a query that settles as an error never reaches the
- * ErrorBoundary — it resolves to `[]`. `isEmpty` then went true and the screen
+ * ErrorBoundary - it resolves to `[]`. `isEmpty` then went true and the screen
  * rendered the branded first-run pitch: it told a user who already has
  * collections and runs that they are brand new, and invited them to import
  * collections they already have.
  *
  * The error render is gated on there being nothing to show, because TanStack
  * keeps the last good data through a failed background refetch. This file
- * guards both halves — that the failure is named, and that it does not
+ * guards both halves - that the failure is named, and that it does not
  * displace data that is still good.
  */
 
@@ -49,7 +49,7 @@ const queryState = {
 };
 
 // vi.mock replaces the whole module, so the full surface the screen pulls has
-// to be here — a missing hook is `undefined()` at mount.
+// to be here - a missing hook is `undefined()` at mount.
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => queryState.collections,
 	useRunsQuery: () => queryState.runs,

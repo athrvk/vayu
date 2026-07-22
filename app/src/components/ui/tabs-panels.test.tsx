@@ -13,7 +13,7 @@
  * failure is invisible: the tabs still look and click correctly, and only the
  * accessibility tree shows a tablist whose panels are missing.
  *
- * That made it easy to get wrong three separate ways in this codebase — the
+ * That made it easy to get wrong three separate ways in this codebase - the
  * request tabs and the response viewer both rendered their content in a plain
  * <div> outside the Tabs tree (6 and 4 dangling references), and a first pass
  * at ImportModal rendered a single panel for the active value only, leaving the
@@ -21,7 +21,7 @@
  *
  * Matching is per file and on the raw `value` text, so a literal (`value="body"`)
  * matches a literal and an expression (`value={tab.id}`) matches the same
- * expression — which is what a trigger/content pair rendered from one `.map()`
+ * expression - which is what a trigger/content pair rendered from one `.map()`
  * looks like.
  */
 
@@ -62,7 +62,7 @@ function openingTags(src: string, component: string): string[] {
 	return tags;
 }
 
-/** The raw text of a `value=` prop — `"body"` or `{tab.id}`. */
+/** The raw text of a `value=` prop - `"body"` or `{tab.id}`. */
 function valueOf(tag: string): string | null {
 	const literal = tag.match(/\bvalue=("[^"]*"|'[^']*')/);
 	if (literal) return literal[1].slice(1, -1);

@@ -6,19 +6,19 @@
  */
 
 /**
- * MetricsView — mode-adaptive dashboard orchestrator.
+ * MetricsView - mode-adaptive dashboard orchestrator.
  *
  * Reads the run mode (useMode), computes a single memoized {@link DashboardDerived}
  * bundle, and composes the rows:
- *   Row 1   — HeroRow        (mode-adaptive: 2 cards + universal Error Rate)
- *   Row 2   — Throughput over time   (+ ramp overlay for ramp_up)
- *   Row 2.5 — Latency over time      (perceived vs wire, queue-wait gap)
- *   Row 2.7 — Percentiles over time  (ramp_up: Response-time-vs-concurrency scatter)
- *   Row 3   — HDR percentile plot + Avg request timing waterfall
- *   Row 4   — ModeStatsRow   (mode-adaptive: 4 stat cards)
+ *   Row 1   - HeroRow        (mode-adaptive: 2 cards + universal Error Rate)
+ *   Row 2   - Throughput over time   (+ ramp overlay for ramp_up)
+ *   Row 2.5 - Latency over time      (perceived vs wire, queue-wait gap)
+ *   Row 2.7 - Percentiles over time  (ramp_up: Response-time-vs-concurrency scatter)
+ *   Row 3   - HDR percentile plot + Avg request timing waterfall
+ *   Row 4   - ModeStatsRow   (mode-adaptive: 4 stat cards)
  *
  * Card/chart variants live in hero/, charts/, stats/. This file routes and
- * derives — it does not render metric chrome inline.
+ * derives - it does not render metric chrome inline.
  */
 
 import { memo, useMemo } from "react";
@@ -68,7 +68,7 @@ function MetricsView({
 	// 5 min) plus a hard safety cap, so this array already reflects the chosen
 	// window. They share this one array so their x-axes cover identical spans (the
 	// throughput chart and the ramp overlay share an x-axis). The old extra
-	// slice(-2400) chart-level cap existed only to bound SVG/recharts DOM nodes —
+	// slice(-2400) chart-level cap existed only to bound SVG/recharts DOM nodes -
 	// uPlot (Canvas) renders the whole buffer cheaply, so it's gone.
 	const chartWindow = historicalMetrics;
 
@@ -86,13 +86,13 @@ function MetricsView({
 		[loadMode, chartWindow, rampConfig]
 	);
 
-	// Read the monotonic aggregates from the store — they are folded into running
+	// Read the monotonic aggregates from the store - they are folded into running
 	// values on each tick in addMetricsBatch, so this is O(1) per render instead
 	// of an O(n) scan over the full historicalMetrics buffer.
 	const peakConcurrency = useDashboardStore((s) => s.peakConcurrency);
 	const breakpoint = useDashboardStore((s) => s.breakpoint);
 
-	// Only the latest tick's elapsed_seconds is consumed below — depending on the
+	// Only the latest tick's elapsed_seconds is consumed below - depending on the
 	// whole historicalMetrics array would rebuild `derived` every tick (10 Hz) and
 	// defeat the React.memo on HeroRow / ModeStatsRow.
 	const lastElapsedSeconds =
@@ -100,7 +100,7 @@ function MetricsView({
 			? historicalMetrics[historicalMetrics.length - 1].elapsed_seconds
 			: 0;
 
-	// Derived bundle — computed once, consumed by HeroRow + ModeStatsRow.
+	// Derived bundle - computed once, consumed by HeroRow + ModeStatsRow.
 	const derived = useMemo<DashboardDerived | null>(() => {
 		if (!metrics || typeof metrics.requests_completed === "undefined") return null;
 
@@ -175,10 +175,10 @@ function MetricsView({
 
 	return (
 		<div className="p-5 flex flex-col gap-3.5">
-			{/* Row 1 — Hero */}
+			{/* Row 1 - Hero */}
 			<HeroRow d={derived} />
 
-			{/* Row 2 — Throughput over time */}
+			{/* Row 2 - Throughput over time */}
 			{chartWindow.length > 1 && (
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
@@ -265,7 +265,7 @@ function MetricsView({
 				</div>
 			)}
 
-			{/* Row 2.5 — Latency over time (perceived vs wire, queue-wait gap) */}
+			{/* Row 2.5 - Latency over time (perceived vs wire, queue-wait gap) */}
 			{latencyChartData.length > 1 && (
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
@@ -305,7 +305,7 @@ function MetricsView({
 				</div>
 			)}
 
-			{/* Row 2.7 — ramp_up shows Response-time-vs-concurrency scatter (A3);
+			{/* Row 2.7 - ramp_up shows Response-time-vs-concurrency scatter (A3);
 			    every other mode shows Response-time percentiles over time. */}
 			{derived.mode === "ramp_up"
 				? historicalMetrics.length > 1 && (
@@ -380,7 +380,7 @@ function MetricsView({
 						</div>
 					)}
 
-			{/* Status codes over time — stacked per-interval class composition */}
+			{/* Status codes over time - stacked per-interval class composition */}
 			{hasStatusData && (
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
@@ -393,7 +393,7 @@ function MetricsView({
 								[
 									["2xx", "hsl(var(--success))"],
 									// Must match StatusCodesOverTimeChart's `categorical`
-									// role, not `--primary` — see the note there.
+									// role, not `--primary` - see the note there.
 									["3xx", "hsl(var(--chart-3))"],
 									["4xx", "hsl(var(--warning))"],
 									["5xx", "hsl(var(--destructive))"],
@@ -424,7 +424,7 @@ function MetricsView({
 				</div>
 			)}
 
-			{/* Row 3 — HDR plot + Timing waterfall */}
+			{/* Row 3 - HDR plot + Timing waterfall */}
 			<div className="grid grid-cols-[repeat(auto-fit,minmax(380px,1fr))] gap-3">
 				{/* HDR */}
 				<div className="bg-card border border-border rounded-md p-3.5">
@@ -441,7 +441,7 @@ function MetricsView({
 						</span>
 					</div>
 					{/* Render the plot at fixed dimensions whether or not the report is
-					    in yet — keeps the card height stable across the live → completed
+					    in yet - keeps the card height stable across the live → completed
 					    transition. */}
 					{finalReport ? (
 						<HdrPercentileChart report={finalReport} />
@@ -466,14 +466,14 @@ function MetricsView({
 							<InfoChip tip={TOOLTIPS.avgRequestTiming} />
 						</h3>
 						<span className="text-[10.5px] font-mono text-muted-foreground">
-							{finalReport?.timingBreakdown ? "from timing samples" : "—"}
+							{finalReport?.timingBreakdown ? "from timing samples" : "-"}
 						</span>
 					</div>
 					<TimingWaterfall report={finalReport} />
 				</div>
 			</div>
 
-			{/* Row 4 — Bottom stat row */}
+			{/* Row 4 - Bottom stat row */}
 			<ModeStatsRow d={derived} />
 		</div>
 	);

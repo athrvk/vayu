@@ -8,9 +8,9 @@
 /**
  * Custom TitleBar Component
  *
- * h-[38px] — must match TITLEBAR_HEIGHT in electron/constants.ts
+ * h-[38px] - must match TITLEBAR_HEIGHT in electron/constants.ts
  * macOS: traffic lights inset (~80px), no HTML controls
- * Windows: native overlay handles controls — no HTML buttons
+ * Windows: native overlay handles controls - no HTML buttons
  * Linux: custom HTML min/max/close buttons
  */
 
@@ -137,7 +137,7 @@ export default function TitleBar() {
 			{/* macOS: space for native traffic lights */}
 			{isMac && <div className="w-20 shrink-0" />}
 
-			{/* Logo — all platforms. The icon is imported as a module, not referenced
+			{/* Logo - all platforms. The icon is imported as a module, not referenced
 			    as "/icon.png": `base: "./"` means a root-absolute path does not
 			    resolve under the packaged file:// build. */}
 			<div
@@ -147,7 +147,7 @@ export default function TitleBar() {
 				<img src={iconUrl} alt="Vayu" className="w-5 h-5" />
 			</div>
 
-			{/* TabStrip — fills available width. This wrapper stays a drag region so
+			{/* TabStrip - fills available width. This wrapper stays a drag region so
 			    the empty space to the right of the last tab moves the window on every
 			    platform; TabStrip marks its own tab row `no-drag`. */}
 			<div
@@ -173,7 +173,7 @@ export default function TitleBar() {
 				}
 			>
 				<EnvSwitcher />
-				{/* Linux only — Windows uses native overlay, macOS uses traffic lights */}
+				{/* Linux only - Windows uses native overlay, macOS uses traffic lights */}
 				{isLinux && <WindowControls />}
 			</div>
 		</header>

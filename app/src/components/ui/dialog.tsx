@@ -48,7 +48,7 @@ function DialogContent({
 			<DialogPrimitive.Content
 				data-slot="dialog-content"
 				className={cn(
-					// dialog-panel: see index.css. Keep the translate utilities —
+					// dialog-panel: see index.css. Keep the translate utilities -
 					// they centre the panel via the standalone `translate`
 					// property, which the scale-only keyframes compose with
 					// rather than fight.

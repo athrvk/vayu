@@ -44,7 +44,7 @@ struct AuthorizeStatus {
 /**
  * Owns interactive OAuth 2.0 authorization-code attempts. In loopback mode the
  * engine binds a one-shot 127.0.0.1 listener that captures the IdP redirect,
- * validates state, and exchanges the code — all in-process, no browser code in
+ * validates state, and exchanges the code - all in-process, no browser code in
  * the engine. In embedded mode the app captures the redirect URL and hands it
  * back via complete(); the engine still owns state validation and the exchange.
  *

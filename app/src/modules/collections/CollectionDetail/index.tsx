@@ -64,7 +64,7 @@ export default function CollectionDetail() {
 
 	// Loading and missing are different answers. `collections` defaults to `[]`,
 	// so a collection tab restored from a previous session resolves to nothing
-	// while its query is still in flight — and telling the user their collection
+	// while its query is still in flight - and telling the user their collection
 	// is gone is worse than telling them nothing yet.
 	if (collectionsLoading) {
 		return <DetailSkeleton label="Loading collection" />;
@@ -100,7 +100,7 @@ export default function CollectionDetail() {
 				<Folder className="w-[15px] h-[15px] text-primary shrink-0" />
 				<span className="text-[14px] font-semibold text-foreground">{collection.name}</span>
 				<span className="text-xs text-muted-foreground">
-					— {requests.length} request{requests.length !== 1 ? "s" : ""}
+					- {requests.length} request{requests.length !== 1 ? "s" : ""}
 				</span>
 			</div>
 

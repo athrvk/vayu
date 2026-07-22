@@ -9,7 +9,7 @@
  * Shared OAuth 2.0 auth-editor form.
  *
  * Rendered by the request builder's Auth tab (and any host that injects a
- * text input). Public surface only — TokenStatusRow is an internal detail.
+ * text input). Public surface only - TokenStatusRow is an internal detail.
  */
 
 export { default as OAuth2Form } from "./OAuth2Form";

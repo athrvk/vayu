@@ -10,14 +10,14 @@
  *
  * What the welcome screen shows while its two queries are in flight.
  *
- * It used to render `null`. That was a deliberate fix for a worse bug — both
+ * It used to render `null`. That was a deliberate fix for a worse bug - both
  * queries start as `[]`, so rendering normally flashed the first-run empty
  * state ("get started, import a collection") at users who already had a
  * workspace. But trading a wrong screen for a blank one still leaves the app
  * looking broken for the length of the load.
  *
- * This mirrors the Launcher's own structure — section label, four action
- * tiles, a few recent-run rows, a count line — so the real content lands in
+ * This mirrors the Launcher's own structure - section label, four action
+ * tiles, a few recent-run rows, a count line - so the real content lands in
  * place instead of pushing a blank page around.
  */
 
@@ -26,7 +26,7 @@ import { Skeleton } from "@/components/ui";
 export function LauncherSkeleton() {
 	return (
 		<div className="flex flex-col gap-8" role="status" aria-label="Loading">
-			{/* Start — label + the 2x4 action tile grid */}
+			{/* Start - label + the 2x4 action tile grid */}
 			<section aria-hidden="true">
 				<Skeleton className="mb-2 h-3 w-10 rounded-md" />
 				<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -43,7 +43,7 @@ export function LauncherSkeleton() {
 				</div>
 			</section>
 
-			{/* Recent runs — label + rows at the same 30px rhythm as the real list */}
+			{/* Recent runs - label + rows at the same 30px rhythm as the real list */}
 			<section aria-hidden="true">
 				<Skeleton className="mb-2 h-3 w-20 rounded-md" />
 				<div className="flex flex-col">

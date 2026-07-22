@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-const SIMPLE_VAR = /\{\{\s*([\w.$-]+)\s*\}\}/g; // {{ x }} / {{ _.x }} — identifier only
+const SIMPLE_VAR = /\{\{\s*([\w.$-]+)\s*\}\}/g; // {{ x }} / {{ _.x }} - identifier only
 const OPENAPI_PATH = /\{([\w$-]+)\}/g; // {x} single-brace, not already {{x}}
 
 /**

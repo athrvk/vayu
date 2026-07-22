@@ -31,7 +31,7 @@ export interface EngineClientOptions {
 	baseUrl: string;
 	/** Per-request timeout in milliseconds. */
 	timeoutMs?: number;
-	/** Injectable fetch (defaults to global fetch) — used to mock in tests. */
+	/** Injectable fetch (defaults to global fetch) - used to mock in tests. */
 	fetchImpl?: typeof fetch;
 }
 
@@ -119,7 +119,7 @@ export class EngineClient {
 	/**
 	 * Fetch a single environment by id. The engine exposes no `GET
 	 * /environments/:id` route (only the list + `POST`/`DELETE`), so we resolve it
-	 * from the list — which already returns each environment in full, including its
+	 * from the list - which already returns each environment in full, including its
 	 * `variables`. Returns `null` when no environment matches.
 	 */
 	async getEnvironment(id: string, signal?: AbortSignal): Promise<unknown> {
@@ -176,7 +176,7 @@ export class EngineClient {
 	 * Connects to the SSE endpoint (which replays the retained tick buffer from
 	 * offset 0), collects `metrics` ticks until the run completes or `budgetMs`
 	 * elapses, and returns the last `limit` ticks. This keeps `tools/call`
-	 * request/response — MCP tools do not stream.
+	 * request/response - MCP tools do not stream.
 	 */
 	async getLiveMetricsSnapshot(
 		runId: string,
@@ -235,7 +235,7 @@ export class EngineClient {
 			}
 			await reader.cancel().catch(() => {});
 		} catch (err) {
-			// A timeout abort is expected for still-running runs — return what we
+			// A timeout abort is expected for still-running runs - return what we
 			// collected. Re-throw genuine engine errors.
 			if (err instanceof EngineRequestError) throw err;
 			if (!(err instanceof Error) || err.name !== "AbortError") throw err;

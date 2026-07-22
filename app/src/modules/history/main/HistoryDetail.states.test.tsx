@@ -8,7 +8,7 @@
 /**
  * The run-report pane's three non-content answers.
  *
- * Loading was a bare spinner — the only pane in the app still using one after
+ * Loading was a bare spinner - the only pane in the app still using one after
  * `DetailSkeleton` landed, so the report header jumped into place instead of
  * resolving into a shape that was already there.
  *

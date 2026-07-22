@@ -8,7 +8,7 @@
 /**
  * A scope is one colour, in every place it appears.
  *
- * The compact badge — the one in the `{{` autocomplete list — re-derived its
+ * The compact badge - the one in the `{{` autocomplete list - re-derived its
  * colours inline instead of reading `SCOPE_CONFIG`, and special-cased global to
  * `bg-muted`. So a global variable showed a grey `G` in the autocomplete and a
  * green "Global" in the popover, while `VariablesCategoryTree` and
@@ -66,7 +66,7 @@ describe("labels", () => {
 describe("neither variant is interactive", () => {
 	/**
 	 * The full variant was `variant="secondary"`, whose `hover:bg-secondary/80`
-	 * outlives the tint that replaces its background — so it greyed out under
+	 * outlives the tint that replaces its background - so it greyed out under
 	 * the pointer. A source scan cannot catch this one: the background arrives
 	 * through `config.tint`, not a literal in the JSX.
 	 */

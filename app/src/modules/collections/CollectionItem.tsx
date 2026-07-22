@@ -166,14 +166,14 @@ export default function CollectionItem({
 				aria-selected={isSelected}
 				className={cn(
 					// focus-row: this row is the perceived target, not the narrower
-					// label button inside it — it paints the keyboard focus ring.
+					// label button inside it - it paints the keyboard focus ring.
 					// The transition deliberately omits outline-color (which
 					// `transition-colors` includes in Tailwind v4): a focus ring must
 					// appear instantly, otherwise it visibly fades between rows as
 					// Tab moves. Hover may ease; focus may not.
 					// h-8: the shared drawer row height. Row height used to be an
-					// accident of content — the 28px chevron set it here, padding set
-					// it elsewhere — so sibling drawer views ran 34/36/38/40px and the
+					// accident of content - the 28px chevron set it here, padding set
+					// it elsewhere - so sibling drawer views ran 34/36/38/40px and the
 					// rhythm shifted every time you switched view.
 					"focus-row flex h-8 items-center gap-1 pr-2 group transition-[color,background-color,border-color] cursor-pointer",
 					isSelected
@@ -255,7 +255,7 @@ export default function CollectionItem({
 							>
 								{collection.name}
 							</TruncatedText>
-							{/* shrink-0: the count is short and load-bearing — the name
+							{/* shrink-0: the count is short and load-bearing - the name
 							    yields first. */}
 							<span className="shrink-0 text-xs text-muted-foreground">
 								({requests.length + childCollections.length})

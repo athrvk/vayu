@@ -41,7 +41,7 @@ struct OAuth2Auth {
     nlohmann::json config; // opaque until the oauth2 token path lands
 };
 struct UnsupportedAuth {
-    std::string mode; // digest / aws / ntlm — stored but not executed
+    std::string mode; // digest / aws / ntlm - stored but not executed
 };
 
 using Auth = std::variant<NoAuth, BearerAuth, BasicAuth, ApiKeyAuth, OAuth2Auth,
@@ -72,7 +72,7 @@ struct AuthApplyResult {
  * @brief Apply typed auth to a request (mutates headers and/or url).
  *
  * A user-supplied header always wins (injection is skipped when the target
- * header already exists — matched case-insensitively). `db` is reserved for
+ * header already exists - matched case-insensitively). `db` is reserved for
  * oauth2 token lookup and may be null.
  */
 AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Database* db);

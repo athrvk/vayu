@@ -11,7 +11,7 @@
  * Re-cut from a single 450-line scrolling column. Three things drove it:
  *
  *   - **Fields now follow the profile.** Each mode is a different form, and
- *     they used to share one column with Duration pinned second regardless —
+ *     they used to share one column with Duration pinned second regardless -
  *     which hid a field that does nothing (see NumberField "duration" below).
  *   - **Recording options fold away.** Sampling, slow threshold, timing
  *     breakdown, in-flight cap and comment are five controls most runs never
@@ -71,7 +71,7 @@ function loadSavedConfig(): Partial<SavedLoadTestConfig> {
 		const saved = localStorage.getItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG);
 		if (saved) return JSON.parse(saved);
 	} catch {
-		// Corrupt or unavailable storage — fall back to defaults.
+		// Corrupt or unavailable storage - fall back to defaults.
 	}
 	return {};
 }
@@ -80,15 +80,15 @@ function saveConfig(config: SavedLoadTestConfig): void {
 	try {
 		localStorage.setItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG, JSON.stringify(config));
 	} catch {
-		// Quota or private mode — losing the memo is not worth failing the run.
+		// Quota or private mode - losing the memo is not worth failing the run.
 	}
 }
 
 /**
  * A labelled number input with its unit inside the field.
  *
- * The unit used to live in the label — "Duration (seconds)", "Target RPS
- * (Requests per second)" — which made labels long and repeated the mode name
+ * The unit used to live in the label - "Duration (seconds)", "Target RPS
+ * (Requests per second)" - which made labels long and repeated the mode name
  * back at the user. `htmlFor`/`id` are wired because these were bare `<Label>`s
  * next to inputs, associated by proximity only.
  */
@@ -206,7 +206,7 @@ export default function LoadTestConfigDialog({
 	/**
 	 * Duration is meaningless in `iterations`: the engine stops on
 	 * `requests_sent < iterations` and its branch in `load_strategy.cpp` never
-	 * reads duration — `docs/engine/api-reference.md` documents the field as
+	 * reads duration - `docs/engine/api-reference.md` documents the field as
 	 * "constant_rps / constant_concurrency / ramp_up". The old dialog showed it
 	 * anyway, second on screen, and persisted whatever you typed. It already
 	 * half-knew: the OAuth guard is handed `null` in this mode precisely because
@@ -290,7 +290,7 @@ export default function LoadTestConfigDialog({
 			comment: comment || undefined,
 		};
 
-		// Omitted in `iterations` — see `usesDuration`. Sending a value the engine
+		// Omitted in `iterations` - see `usesDuration`. Sending a value the engine
 		// discards makes the stored run config claim something untrue about it.
 		if (usesDuration) config.duration_seconds = duration;
 
@@ -448,8 +448,8 @@ export default function LoadTestConfigDialog({
 									className="w-full accent-primary"
 								/>
 								<div className="flex justify-between text-[11px] text-muted-foreground">
-									<span>0% — errors only</span>
-									<span>100% — everything</span>
+									<span>0% - errors only</span>
+									<span>100% - everything</span>
 								</div>
 							</div>
 

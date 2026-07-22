@@ -89,7 +89,7 @@ export default function RequestTabs() {
 			 * TabsContent per tab, not a plain <div>. Radix derives an
 			 * aria-controls id per trigger from its value, so rendering the
 			 * content outside the Tabs tree left all six triggers pointing at
-			 * panel ids that never existed — a tablist with no reachable panels.
+			 * panel ids that never existed - a tablist with no reachable panels.
 			 * Only the active TabsContent mounts, so <TabContent /> still renders
 			 * exactly once and its own switch resolves to that tab.
 			 */}

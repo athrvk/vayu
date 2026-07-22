@@ -114,7 +114,7 @@ inline std::string url_encode (std::string_view in) {
  *
  * The inverse of url_encode for a single component. A malformed escape (a '%'
  * not followed by two hex digits, including a truncated one at end-of-string)
- * is passed through literally rather than throwing — callers decode
+ * is passed through literally rather than throwing - callers decode
  * attacker-influenced query strings and token bodies, so this must never abort.
  */
 inline std::string url_decode (std::string_view in) {

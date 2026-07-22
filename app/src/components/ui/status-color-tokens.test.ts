@@ -9,7 +9,7 @@
  * Status colours have two tokens, and only one of them is a foreground colour.
  *
  * Every status family ships a bare token and a `-text` token. The bare one is a
- * *fill* — it is what `bg-destructive`, `border-warning` and the run-status dots
+ * *fill* - it is what `bg-destructive`, `border-warning` and the run-status dots
  * paint, and it is tuned to look right as an area of colour. The `-text` one is
  * the readable *foreground*, darkened in light mode and lightened in dark so it
  * clears AA as small text or a small glyph.
@@ -27,28 +27,28 @@
  *   status-running      3.64         5.99         4.77         6.75
  *
  * `destructive` is the only family that fails in dark; the rest fail in light.
- * That inversion is the tell that this is not a dark-mode bug — it is the fill
+ * That inversion is the tell that this is not a dark-mode bug - it is the fill
  * token standing in for the foreground one, which shows up in whichever mode the
  * fill happens to sit closest to the surface behind it.
  *
  * So `text-<family>` is banned, including `hover:`/`focus:` prefixes and the
- * `/NN` opacity forms — a faded `-text` is no safer than a solid bare token, and
+ * `/NN` opacity forms - a faded `-text` is no safer than a solid bare token, and
  * these are error and status affordances where fading works against the point.
  * `bg-*`, `border-*` and `*-foreground` (the paired foreground for a solid fill)
  * are all correct uses of the bare token and are left alone.
  *
  * `status-warning` is deliberately absent from the list below: it has no `-text`
- * variant, because bare already measures 17.72 / 15.78 — banning it would only
+ * variant, because bare already measures 17.72 / 15.78 - banning it would only
  * force churn towards a token that does not exist.
  *
  * **Known blind spot: inline styles.** This scans for the `text-<family>` class,
  * so `style={{ color: "hsl(var(--warning))" }}` walks straight past it.
- * `SaturationCard` carried exactly that for a while — 22px bold on `--warning`,
- * 2.14 against the card — and a parallel audit, not this guard, is what found it.
+ * `SaturationCard` carried exactly that for a while - 22px bold on `--warning`,
+ * 2.14 against the card - and a parallel audit, not this guard, is what found it.
  *
  * An inline-style rule was tried and removed. A regex for `color:` cannot tell a
  * CSS declaration from an object property named `color`, and the codebase is full
- * of the latter feeding a `background` — the ErrorRate legend swatches and the
+ * of the latter feeding a `background` - the ErrorRate legend swatches and the
  * timing-waterfall bars are both correct uses that it flagged. Worse, it would
  * not have caught the real case anyway, because the literal was assigned to a
  * `const` and passed in as `style={{ color }}`. A scan that produces false
@@ -79,7 +79,7 @@ const FAMILIES = [
  * `text-<family>` not followed by `-` or a word character, so `-text` and
  * `-foreground` are excluded while `text-<family>/80` is caught (`/` is
  * neither). Any variant prefix (`hover:`, `focus:`, `dark:`) is allowed to
- * precede it — those are exactly the sneaky cases.
+ * precede it - those are exactly the sneaky cases.
  */
 const bareForeground = (family: string) => new RegExp(`\\btext-${family}(?![-\\w])`);
 
@@ -104,8 +104,8 @@ describe("status colours use the -text token for foreground", () => {
 				if (path.includes(".test.")) continue;
 				(src as string).split("\n").forEach((line, i) => {
 					// Prose in comments may name the class; only code is scanned.
-					// The token can sit far from `className` — a ternary branch on
-					// its own line, a helper returning a class string — so the line
+					// The token can sit far from `className` - a ternary branch on
+					// its own line, a helper returning a class string - so the line
 					// is scanned whole rather than only inside a `className=`.
 					const code = line.replace(/^\s*(\/\/|\/?\*).*$/, "");
 					if (pattern.test(code)) {

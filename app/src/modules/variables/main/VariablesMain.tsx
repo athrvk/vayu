@@ -24,7 +24,7 @@ export default function VariablesMain() {
 	// isLoading matters here, not just the data. Both queries default to `[]`,
 	// so a category selected from a previous session resolved to `undefined`
 	// while its query was still in flight and the screen announced "not found"
-	// — an error, for something that simply had not arrived yet.
+	// - an error, for something that simply had not arrived yet.
 	// isError too, and each branch below reads its own query's: the two are
 	// fetched independently, and a collections failure says nothing about
 	// whether the environments arrived.

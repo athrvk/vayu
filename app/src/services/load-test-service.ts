@@ -17,7 +17,7 @@ import { sseClient } from "./sse-client";
 import { apiService } from "./api";
 import { useDashboardStore, useClientSettingsStore } from "@/stores";
 import type { LoadTestMetrics } from "@/types";
-// Engine emits at 10 Hz (100ms cadence — see engine/src/http/routes/metrics.cpp).
+// Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
 // We throttle UI commits to keep render cost bounded, but BUFFER every tick the
 // engine sends so historicalMetrics keeps the full 10 Hz signal.
 import { METRICS_UI_THROTTLE_MS } from "@/config/metrics";
@@ -51,7 +51,7 @@ class LoadTestService {
 		this.isConnected = true;
 
 		const store = useDashboardStore.getState();
-		// NOTE: do NOT call store.reset() here — the caller invokes store.startRun()
+		// NOTE: do NOT call store.reset() here - the caller invokes store.startRun()
 		// first to register the run (currentRunId, config, "running" mode) and that
 		// already clears the historical series / currentMetrics / finalReport.
 		// reset() would null out currentRunId and the dashboard would show no active
@@ -61,7 +61,7 @@ class LoadTestService {
 
 		// Connect immediately. The engine retains a replayable tick topic per run
 		// (N1), so even a sub-second run that finishes before we attach is fully
-		// replayed from offset 0 — no need to delay and risk missing it.
+		// replayed from offset 0 - no need to delay and risk missing it.
 		sseClient.connect(
 			runId,
 			this.handleMetrics.bind(this),
@@ -143,7 +143,7 @@ class LoadTestService {
 	}
 
 	private async handleClose(): Promise<void> {
-		console.log("[LoadTestService] SSE closed — converging on stored report");
+		console.log("[LoadTestService] SSE closed - converging on stored report");
 		const runId = this.activeRunId;
 		if (this.throttleTimer) {
 			clearTimeout(this.throttleTimer);
@@ -156,7 +156,7 @@ class LoadTestService {
 
 		// Fetch the canonical final report from the engine and store it so the
 		// dashboard shows definitive completed-view data (final percentiles, reconciled
-		// error rate, setup overhead) — one terminal truth, same as the 404-path.
+		// error rate, setup overhead) - one terminal truth, same as the 404-path.
 		if (runId) {
 			try {
 				const report = await apiService.getRunReport(runId);

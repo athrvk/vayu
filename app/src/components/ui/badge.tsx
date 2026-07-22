@@ -23,7 +23,7 @@ const badgeVariants = cva(
 					"border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
 				outline: "text-foreground",
 				/**
-				 * Not interactive; the caller owns the colour — status-code
+				 * Not interactive; the caller owns the colour - status-code
 				 * chips, scope counts. No background, no text colour, and
 				 * crucially no `hover:`.
 				 *

@@ -10,7 +10,7 @@
  *
  * It was the last `window.confirm` in the app. The native box ignores the theme,
  * the accent and the roundedness that this panel exists to configure, and blocks
- * the renderer thread while it is open — visibly wrong sitting on top of the
+ * the renderer thread while it is open - visibly wrong sitting on top of the
  * settings screen whose whole job is those three things.
  *
  * It could not use `DeleteConfirmDialog` before, because that hardcoded a red

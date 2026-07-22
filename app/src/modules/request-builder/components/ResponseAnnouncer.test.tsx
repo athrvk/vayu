@@ -11,7 +11,7 @@
  * They assert that the live region exists before there is anything to announce,
  * that its text is what we want spoken, and that a second identical response
  * still mutates the DOM. jsdom speaks nothing, so none of this proves a screen
- * reader announces — it proves the preconditions for announcement hold, which
+ * reader announces - it proves the preconditions for announcement hold, which
  * is where the Toaster's original bug lived.
  */
 

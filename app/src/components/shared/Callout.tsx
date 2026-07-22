@@ -14,7 +14,7 @@
  * two variants again. They are all this shape: an icon, a line of text, and
  * sometimes an action.
  *
- * Up to four can be on screen at once where the conditions are independent —
+ * Up to four can be on screen at once where the conditions are independent -
  * in the load-test dialog a ramp error, a pre-request script and an OAuth
  * warning all stack.
  *
@@ -48,7 +48,7 @@ export interface CalloutProps {
 	/** Bolded lead-in. The rest of the sentence continues after it. */
 	title?: ReactNode;
 	children?: ReactNode;
-	/** Rendered to the right — a Refresh button, an override switch. */
+	/** Rendered to the right - a Refresh button, an override switch. */
 	action?: ReactNode;
 	/** Swaps the icon for a tick. Only meaningful on `info`. */
 	positive?: boolean;
@@ -76,7 +76,7 @@ export function Callout({ severity, title, children, action, positive, className
 			/>
 			<div className="flex-1 min-w-0 text-foreground">
 				{title && <span className="font-semibold">{title}</span>}
-				{title && children ? " — " : null}
+				{title && children ? " - " : null}
 				{children}
 			</div>
 			{action && <div className="shrink-0">{action}</div>}

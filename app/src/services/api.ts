@@ -62,7 +62,7 @@ import {
 /**
  * Timeout for engine calls that proxy a remote server (/request,
  * /import/fetch). These block for as long as the target takes, bounded by the
- * engine's user-configurable `defaultTimeout` setting — so derive the UI
+ * engine's user-configurable `defaultTimeout` setting - so derive the UI
  * timeout from it instead of the flat default, with enough grace that the
  * engine's own TIMEOUT error (proper error code) arrives before the UI aborts.
  * Falls back to the engine's max when the config cache is cold. If per-request
@@ -248,7 +248,7 @@ export const apiService = {
 		);
 	},
 
-	// OAuth 2.0 — the engine proxies the token endpoint, so use the longer
+	// OAuth 2.0 - the engine proxies the token endpoint, so use the longer
 	// proxied timeout (as with executeRequest / importFetch).
 	async fetchOAuth2Token(data: OAuth2TokenRequest): Promise<OAuth2TokenResponse> {
 		return await httpClient.post<OAuth2TokenResponse>(API_ENDPOINTS.OAUTH2_TOKEN, data, {

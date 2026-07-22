@@ -1,5 +1,5 @@
 /**
- * Tests for ResponseTimingTab — the per-request timing breakdown.
+ * Tests for ResponseTimingTab - the per-request timing breakdown.
  */
 
 import { describe, it, expect } from "vitest";
@@ -75,7 +75,7 @@ describe("ResponseTimingTab", () => {
 			download: 0,
 		};
 		render(<ResponseTimingTab timing={zero} />);
-		// Every phase share is 0% — at least the five legend rows render it.
+		// Every phase share is 0% - at least the five legend rows render it.
 		expect(screen.getAllByText("0%").length).toBeGreaterThanOrEqual(5);
 	});
 });

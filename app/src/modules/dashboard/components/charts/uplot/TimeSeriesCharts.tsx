@@ -6,7 +6,7 @@
  */
 
 /**
- * Centralized time-series charts — the semantic wrappers every UI uses.
+ * Centralized time-series charts - the semantic wrappers every UI uses.
  *
  * Each takes the app's `LoadTestMetrics[]` (or a report) and renders through the
  * single `UPlotChart` primitive, so the live dashboard and the history view show
@@ -56,7 +56,7 @@ function breakpointMarker(breakpoint?: Breakpoint | null): Marker[] {
 	];
 }
 
-/** Response-time percentiles over time — the canonical "latency vs time" chart. */
+/** Response-time percentiles over time - the canonical "latency vs time" chart. */
 export function LatencyPercentilesChart({
 	history,
 	isCompleted,

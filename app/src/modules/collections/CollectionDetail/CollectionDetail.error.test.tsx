@@ -10,7 +10,7 @@
  *
  * `useCollectionsQuery` is destructured as `{ data: collections = [] }` and
  * nothing sets `throwOnError`, so a query that settles as an error never
- * reaches the ErrorBoundary — it resolves to `[]`, the pane finds no
+ * reaches the ErrorBoundary - it resolves to `[]`, the pane finds no
  * collection, and it renders "Collection not found". That copy is a claim
  * about the user's data: it says the thing they opened is gone. The truth is
  * that the request failed and it may well still be there.
@@ -18,8 +18,8 @@
  * Loading, missing and failed are three answers. The loading leg is guarded in
  * CollectionDetail.loading.test.tsx; this file guards the third.
  *
- * Each case asserts both halves — the right pane present *and* the wrong one
- * absent — since asserting only the first would pass if both rendered.
+ * Each case asserts both halves - the right pane present *and* the wrong one
+ * absent - since asserting only the first would pass if both rendered.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

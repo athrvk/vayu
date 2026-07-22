@@ -17,7 +17,7 @@
  *
  * The count is only stated where it is knowable. `constant_concurrency` and
  * `ramp_up` send as many requests as the target can answer, which depends on
- * latency — guessing there would be worse than saying nothing.
+ * latency - guessing there would be worse than saying nothing.
  */
 
 import type { LoadTestConfig } from "@/types";
@@ -59,7 +59,7 @@ export function summarise(input: SummaryInput, blocked = false): string {
 	if (mode === "constant_rps") {
 		const shape = `Holds ${count(rps)} requests/sec for ${count(duration)}s`;
 		if (blocked) return `${shape}.`;
-		return `${shape} — about ${plural(rps * duration, "request")} in total.`;
+		return `${shape} - about ${plural(rps * duration, "request")} in total.`;
 	}
 
 	if (mode === "constant_concurrency") {
@@ -69,7 +69,7 @@ export function summarise(input: SummaryInput, blocked = false): string {
 		)}s. Total requests depend on how fast the target responds.`;
 	}
 
-	// ramp_up — the one case where the old prose was earning its keep.
+	// ramp_up - the one case where the old prose was earning its keep.
 	const atTarget = duration - rampDuration;
 	const tail = atTarget > 0 ? ` then holds it for the remaining ${count(atTarget)}s` : "";
 	return `Climbs from ${count(startConcurrency)} to ${plural(

@@ -31,7 +31,7 @@ export function validateRampDuration(
 /**
  * Ramp-Up climbs from `startConcurrency` to `concurrency`. A start above the
  * target is a ramp *down*, which contradicts the profile the user picked and is
- * almost always a transposed pair rather than an intent — the engine would
+ * almost always a transposed pair rather than an intent - the engine would
  * happily run it, shedding connections over the ramp.
  *
  * Returns a user-facing message when invalid, or null (including for every

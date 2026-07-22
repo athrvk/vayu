@@ -8,7 +8,7 @@
 /**
  * useLiveChartWindow
  *
- * Owns the live dashboard chart retention window preference — how much recent
+ * Owns the live dashboard chart retention window preference - how much recent
  * live history the charts keep, as a time window. Persists to localStorage and
  * keeps the dashboard store's `liveWindowSeconds` in sync (the store seeds itself
  * from the same key at creation, so retention is correct even before this hook

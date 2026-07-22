@@ -37,7 +37,7 @@ interface UpdateAvailableInfo {
  * Outcome of a check the user asked for. Mirrors `UpdateCheckResult` in
  * `electron/updater.ts`; the two are separated only by the process boundary.
  *
- * `unavailable` is not a failure — it is a development or unpackaged build,
+ * `unavailable` is not a failure - it is a development or unpackaged build,
  * where there is no release feed to ask.
  */
 export type UpdateCheckResult =

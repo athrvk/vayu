@@ -6,9 +6,9 @@
  */
 
 /**
- * AuthTab — collection auth source.
+ * AuthTab - collection auth source.
  *
- * Collections never use `inherit` — they ARE the source. Only None / Bearer /
+ * Collections never use `inherit` - they ARE the source. Only None / Bearer /
  * Basic / API Key are exposed here. The bottom shows the inheritance chain so
  * the user can see which ancestor a child request would resolve to.
  */
@@ -42,8 +42,8 @@ type CollectionAuth = Collection["auth"];
  *
  * OAuth 2.0 used to be here. It is editable now: the engine resolves it, an
  * import can produce it, requests inherit it, and `OAuth2Form` was written to be
- * shared — its own contract mentions "the collection editor supplies a plain
- * Input" — so the collection side was anticipated and simply never wired up.
+ * shared - its own contract mentions "the collection editor supplies a plain
+ * Input" - so the collection side was anticipated and simply never wired up.
  *
  * digest/aws/ntlm stay: the engine has no resolution for them, so offering them
  * here would let you configure something that silently does nothing.
@@ -84,11 +84,11 @@ const AUTH_OPTIONS: { value: CollectionAuthMode; label: string; hint: string }[]
 
 // Narrow the broader Collection auth union to the modes we expose.
 // digest/aws/ntlm return null: they are stored (an import can produce
-// them — see services/importers/postman.ts `collectionAuth`) but not editable
+// them - see services/importers/postman.ts `collectionAuth`) but not editable
 // here, and they are emphatically *not* "none". Collapsing them to "none" made
 // this tab state "No authentication for this collection. Requests using
 // 'Inherit from collection' will send no auth." about a collection that does
-// have auth — contradicting the inheritance chain three lines below it.
+// have auth - contradicting the inheritance chain three lines below it.
 function asEditable(auth: CollectionAuth): CollectionAuthMode | null {
 	if (
 		auth.mode === "none" ||
@@ -127,7 +127,7 @@ export default function AuthTab({ collection }: AuthTabProps) {
 	const [auth, setAuth] = useState<CollectionAuth>(collection.auth);
 
 	// Resync the editable draft when the underlying collection changes (the
-	// component is not remounted per-collection — the parent renders it inline,
+	// component is not remounted per-collection - the parent renders it inline,
 	// so a different collection can arrive via props). Can't be derived: `auth`
 	// is a user-editable draft that intentionally diverges from props between
 	// edits and save. Render-phase reset keyed on value would miss switches to a
@@ -139,7 +139,7 @@ export default function AuthTab({ collection }: AuthTabProps) {
 
 	// The other half of that resync. Shell renders <CollectionDetail /> with no
 	// key, so switching collection tabs while staying on this inner tab reuses
-	// this component *and its mutation* — and TanStack holds `isError` until the
+	// this component *and its mutation* - and TanStack holds `isError` until the
 	// next mutate. Without this, a save that failed on one collection would keep
 	// claiming to have failed on the next one, which the user never tried to
 	// save. `reset` is bound once in the observer, so it is a stable dep.
@@ -182,7 +182,7 @@ export default function AuthTab({ collection }: AuthTabProps) {
 					title={`${uneditableLabel} auth is set`}
 					className="mb-5"
 				>
-					It was imported or set elsewhere and can't be edited on this tab yet — it is
+					It was imported or set elsewhere and can't be edited on this tab yet - it is
 					still what descendant requests inherit. Picking a type below replaces it.
 				</Callout>
 			)}
@@ -378,7 +378,7 @@ function AuthConfig({ auth, onChange }: AuthConfigProps) {
 	if (auth.mode === "oauth2") {
 		/*
 		 * The same form the request builder uses. `OAuth2Form` takes an injected
-		 * `TextInput` precisely so the two hosts can differ — the request side
+		 * `TextInput` precisely so the two hosts can differ - the request side
 		 * passes a variable-aware input, and this one takes the default plain
 		 * input, because a collection has no per-request variable scope to
 		 * resolve against at edit time.

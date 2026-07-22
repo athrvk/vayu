@@ -10,7 +10,7 @@ import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
 /**
- * constant_concurrency hero card #1 — the achieved req/s emerging from a fixed
+ * constant_concurrency hero card #1 - the achieved req/s emerging from a fixed
  * pool of concurrent users. In closed-loop testing the rate is an output, not a
  * target, so we also surface the per-user contribution (throughput / VU).
  */

@@ -99,7 +99,7 @@ std::string js_to_string (JSContext* ctx, JSValue val) {
 // ============================================================================
 
 // Convert a stored Variable into a JSValue of its declared type. The on-disk
-// value is always a string — type drives the conversion (mirrors the frontend
+// value is always a string - type drives the conversion (mirrors the frontend
 // castByType in app/src/lib/variable-cast.ts so reads are consistent across
 // both runtimes).
 JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
@@ -839,7 +839,7 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         JS_SetPropertyStr (
         ctx, response, "status", JS_NewInt32 (ctx, data->response->status_code));
 
-        // pm.response.responseTime — perceived latency (submit → completion),
+        // pm.response.responseTime - perceived latency (submit → completion),
         // includes generator-side queue wait. For pure server time, use
         // responseTimeWire. queue_wait_ms is exposed as responseTimeQueueWait.
         JS_SetPropertyStr (ctx, response, "responseTime",

@@ -45,7 +45,7 @@ export default function UrlInput({ className }: UrlInputProps) {
 	const handlePaste = useCallback(
 		(e: React.ClipboardEvent<HTMLInputElement>) => {
 			const text = e.clipboardData.getData("text");
-			if (!detectCommand(text)) return; // not a command — normal paste
+			if (!detectCommand(text)) return; // not a command - normal paste
 
 			// A multi-line command must never land in the single-line input.
 			e.preventDefault();
@@ -65,7 +65,7 @@ export default function UrlInput({ className }: UrlInputProps) {
 			onChange={handleUrlChange}
 			onPaste={handlePaste}
 			placeholder="https://api.example.com/endpoint?key={{variable}}"
-			// Explicit, because the placeholder here is a sample URL — it would
+			// Explicit, because the placeholder here is a sample URL - it would
 			// make a poor spoken name, and it is withheld entirely once the URL
 			// contains a variable.
 			aria-label="Request URL"

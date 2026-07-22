@@ -17,7 +17,7 @@
  * This is the same fix as the Toaster, and it carries the same constraint: a
  * live region has to already be in the DOM for a change to it to be observed.
  * So this component is rendered unconditionally by RequestBuilderLayout and is
- * empty until there is something to say — never mounted alongside its own
+ * empty until there is something to say - never mounted alongside its own
  * message.
  *
  * Polite, including for failures. A response is the end of an action the user
@@ -41,7 +41,7 @@ export default function ResponseAnnouncer() {
 
 	// A live region is announced when its content changes in the DOM. If two
 	// responses produce byte-identical text React never touches the node, and
-	// the second one is silent — resending the same request and hearing nothing
+	// the second one is silent - resending the same request and hearing nothing
 	// reads as the app having failed to send. Bumping a key on each new response
 	// object replaces the text node, so the announcement fires either way.
 	//
@@ -65,7 +65,7 @@ export default function ResponseAnnouncer() {
 		message = "Sending request";
 	} else if (response) {
 		if (response.status === 0) {
-			// No server response — status 0 is the client-side failure sentinel,
+			// No server response - status 0 is the client-side failure sentinel,
 			// and "0" is not a status code worth speaking.
 			message = `Request failed. ${response.errorMessage || response.errorCode || "No response from server"}`;
 		} else {
@@ -91,7 +91,7 @@ export default function ResponseAnnouncer() {
 			{/*
 			 * aria-atomic is set rather than left to the default. `role="status"`
 			 * carries an implicit aria-atomic="true", and here that implicit value
-			 * is the one we want — but the Toaster shipped assuming the default was
+			 * is the one we want - but the Toaster shipped assuming the default was
 			 * false and was wrong, so it is written down at both call sites now.
 			 * One utterance, whole message, is correct for a single-line region.
 			 */}

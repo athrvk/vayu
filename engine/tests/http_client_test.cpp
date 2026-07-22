@@ -25,29 +25,29 @@ namespace {
 class MockHttpBin {
     public:
     MockHttpBin () {
-        // GET /get — echo back a JSON object
+        // GET /get - echo back a JSON object
         svr_.Get ("/get", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content (R"({"origin":"127.0.0.1","url":"/get"})", "application/json");
         });
 
-        // POST /post — echo body back inside a JSON wrapper
+        // POST /post - echo body back inside a JSON wrapper
         svr_.Post ("/post", [] (const httplib::Request& req, httplib::Response& res) {
             std::string body = R"({"data":")" + req.body + R"(","origin":"127.0.0.1"})";
             res.set_content (body, "application/json");
         });
 
-        // GET /delay/:n — sleep n seconds then respond (used for timeout test)
+        // GET /delay/:n - sleep n seconds then respond (used for timeout test)
         svr_.Get ("/delay/10", [] (const httplib::Request&, httplib::Response& res) {
             std::this_thread::sleep_for (std::chrono::seconds (10));
             res.set_content (R"({"delayed":true})", "application/json");
         });
 
-        // GET /redirect/1 — one redirect to /get
+        // GET /redirect/1 - one redirect to /get
         svr_.Get ("/redirect/1", [this] (const httplib::Request&, httplib::Response& res) {
             res.set_redirect ("/get", 302);
         });
 
-        // GET /headers — echo request headers back in the body
+        // GET /headers - echo request headers back in the body
         svr_.Get ("/headers", [] (const httplib::Request& req, httplib::Response& res) {
             std::string body = "{";
             bool first       = true;
@@ -61,22 +61,22 @@ class MockHttpBin {
             res.set_content (body, "application/json");
         });
 
-        // PUT /put — echo back 200
+        // PUT /put - echo back 200
         svr_.Put ("/put", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content (R"({"ok":true})", "application/json");
         });
 
-        // DELETE /delete — echo back 200
+        // DELETE /delete - echo back 200
         svr_.Delete ("/delete", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content (R"({"ok":true})", "application/json");
         });
 
-        // PATCH /patch — echo back 200
+        // PATCH /patch - echo back 200
         svr_.Patch ("/patch", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content (R"({"ok":true})", "application/json");
         });
 
-        // GET /response-headers — return a custom header
+        // GET /response-headers - return a custom header
         svr_.Get ("/response-headers", [] (const httplib::Request&, httplib::Response& res) {
             res.set_header ("X-Custom", "test");
             res.set_content (R"({"X-Custom":"test"})", "application/json");
@@ -132,7 +132,7 @@ TEST_F (HttpClientTest, SendsGetRequest) {
     EXPECT_GT (response.timing.total_ms, 0);
 }
 
-// The mock is plain HTTP (no TLS), so APPCONNECT_TIME is 0 — the case that used
+// The mock is plain HTTP (no TLS), so APPCONNECT_TIME is 0 - the case that used
 // to render the TLS phase as a negative "-0ms". Every phase delta must be
 // non-negative, and TLS specifically must be 0 when no handshake occurred.
 TEST_F (HttpClientTest, TimingPhasesAreNonNegative) {
@@ -145,7 +145,7 @@ TEST_F (HttpClientTest, TimingPhasesAreNonNegative) {
     EXPECT_GE (t.tls_ms, 0.0);
     EXPECT_GE (t.first_byte_ms, 0.0);
     EXPECT_GE (t.download_ms, 0.0);
-    EXPECT_DOUBLE_EQ (t.tls_ms, 0.0); // plain HTTP — no TLS phase
+    EXPECT_DOUBLE_EQ (t.tls_ms, 0.0); // plain HTTP - no TLS phase
 }
 
 TEST_F (HttpClientTest, SendsPostRequest) {
@@ -164,7 +164,7 @@ TEST_F (HttpClientTest, HandlesTimeout) {
     Request request;
     request.method     = HttpMethod::GET;
     request.url        = mock_->url ("/delay/10");
-    request.timeout_ms = 500; // 500 ms — server sleeps 10 s
+    request.timeout_ms = 500; // 500 ms - server sleeps 10 s
 
     auto result = client_->send (request);
 

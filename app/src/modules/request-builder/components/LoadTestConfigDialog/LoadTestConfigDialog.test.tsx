@@ -68,7 +68,7 @@ describe("load profile → fields", () => {
 	it("hides Duration entirely for Fixed Iterations", () => {
 		// The defect this re-cut exists to fix. The engine stops on
 		// `requests_sent < iterations` and never reads duration, so offering the
-		// field invites tuning something inert — and it used to persist.
+		// field invites tuning something inert - and it used to persist.
 		open();
 		pickProfile("Fixed Iterations");
 		expect(screen.getByLabelText(/^requests/i)).toBeInTheDocument();
@@ -179,7 +179,7 @@ describe("ramp start concurrency", () => {
 	it("offers a start field, so a ramp no longer always begins at 1", () => {
 		// The engine reads `startConcurrency` and defaults it to 1. It was
 		// plumbed through the payload, the store and the dashboard's derived
-		// report — and nothing ever set it, so every ramp started from 1
+		// report - and nothing ever set it, so every ramp started from 1
 		// whatever the user wanted.
 		open();
 		pickProfile("Ramp-Up");

@@ -13,8 +13,8 @@ import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
  * Rate-fidelity tier coloring: ≥95% success, ≥80% warning, else destructive.
  *
  * Two variants, because the same tier drives both the number and the MiniBar.
- * The number is text — the fill tokens measured 2.13:1 on the light card, under
- * even the 3:1 large-text bar — while the bar is a solid fill, where the fill
+ * The number is text - the fill tokens measured 2.13:1 on the light card, under
+ * even the 3:1 large-text bar - while the bar is a solid fill, where the fill
  * token is the right, more saturated value.
  */
 function fidelityTextColor(achievement: number | undefined): string {
@@ -31,7 +31,7 @@ function fidelityFillColor(achievement: number | undefined): string {
 	return "hsl(var(--destructive))";
 }
 
-/** constant_rps hero card #1 — how closely throughput tracked the target RPS. */
+/** constant_rps hero card #1 - how closely throughput tracked the target RPS. */
 export function RateFidelityCard({
 	targetRps,
 	actualRps,

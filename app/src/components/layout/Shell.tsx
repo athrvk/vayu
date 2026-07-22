@@ -76,7 +76,7 @@ export default function Shell() {
 			if (!(e.metaKey || e.ctrlKey)) return;
 			const key = e.key.toLowerCase();
 
-			// ⇧⌘E / ⇧⌘H / ⇧⌘U — drawer view switchers (match Dock tooltips)
+			// ⇧⌘E / ⇧⌘H / ⇧⌘U - drawer view switchers (match Dock tooltips)
 			if (e.shiftKey) {
 				const views: Record<string, DrawerView> = {
 					e: "collections",
@@ -140,7 +140,7 @@ export default function Shell() {
 		<div className="flex flex-col h-full bg-background overflow-hidden">
 			<ImportModal />
 			{/* Every tab uses the same shell: one left Drawer (its view switches
-			    with the tab — collections/history/variables/settings), the main
+			    with the tab - collections/history/variables/settings), the main
 			    content, and the request-only ContextBar. No tab type takes over
 			    the row, so the Dock's drawer switchers always have a Drawer to act
 			    on. */}

@@ -11,7 +11,7 @@ import { computeEta } from "../../utils/computeEta";
 import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
 /**
- * iterations hero card #1 — progress through the configured iteration count.
+ * iterations hero card #1 - progress through the configured iteration count.
  * The bar fills as requests complete; ETA is projected from current throughput.
  */
 export function ProgressCard({
@@ -29,7 +29,7 @@ export function ProgressCard({
 
 	return (
 		<HeroCardShell label="Progress" tip={TOOLTIPS.progress}>
-			<HeroValue value={pct !== undefined ? pct.toFixed(0) : "—"} unit="%" />
+			<HeroValue value={pct !== undefined ? pct.toFixed(0) : "-"} unit="%" />
 			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
 				<span className="text-foreground font-semibold">{formatNumber(requestsSent)}</span>{" "}
 				/{" "}
@@ -38,7 +38,7 @@ export function ProgressCard({
 				</span>{" "}
 				complete · ETA{" "}
 				<span className="text-foreground font-semibold">
-					{eta !== null ? eta.toFixed(0) : "—"}
+					{eta !== null ? eta.toFixed(0) : "-"}
 				</span>
 				s
 			</p>

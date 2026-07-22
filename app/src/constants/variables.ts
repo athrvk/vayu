@@ -10,7 +10,7 @@
  *
  * Shared regexes are global; only use them with APIs that reset lastIndex
  * (String.replace / split / matchAll). For boolean checks use
- * `isVariableToken` — `.test()` on a shared global regex is stateful.
+ * `isVariableToken` - `.test()` on a shared global regex is stateful.
  */
 
 /** Matches `{{name}}`, capturing the variable name (without braces). */

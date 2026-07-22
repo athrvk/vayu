@@ -59,7 +59,7 @@ describe("useAppUpdate", () => {
 		act(() => {
 			availableCb?.({ version: "1.2.3", strategy: "silent", releaseUrl: "u" });
 		});
-		// Still downloading in the background — nothing to show yet.
+		// Still downloading in the background - nothing to show yet.
 		expect(result.current.update).toBeNull();
 
 		act(() => {

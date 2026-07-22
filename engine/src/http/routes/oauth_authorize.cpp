@@ -293,7 +293,7 @@ const std::string& attempt_id, const std::string& callback_url) {
         }
         Attempt& attempt = *it->second;
         if (const int s = attempt.result_state.load (); s != 0) {
-            // Already resolved (e.g. a duplicate complete) — return as-is.
+            // Already resolved (e.g. a duplicate complete) - return as-is.
             return { s == 1 ? "completed" : "failed", attempt.error, attempt.cache_key };
         }
         state         = attempt.state;

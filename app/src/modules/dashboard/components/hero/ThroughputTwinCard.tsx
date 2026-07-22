@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { InfoChip, Eyebrow, fmt } from "../shared";
 import { TOOLTIPS } from "../tooltips";
 
-/** constant_rps hero card #2 — twin send/throughput rates from the open model. */
+/** constant_rps hero card #2 - twin send/throughput rates from the open model. */
 export function ThroughputTwinCard({
 	sendRate,
 	throughput,

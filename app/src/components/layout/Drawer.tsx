@@ -23,7 +23,7 @@ export function Drawer() {
 	return (
 		/* <aside>, so the sidebar is a landmark a screen reader can jump to
 		   instead of an anonymous div. Labelled by the active view because the
-		   drawer hosts four different panels — "Complementary" alone would not
+		   drawer hosts four different panels - "Complementary" alone would not
 		   say which one is showing. */
 		<aside
 			className="relative flex shrink-0 bg-panel"
@@ -32,7 +32,7 @@ export function Drawer() {
 		>
 			<div className="panel-clip flex-1 overflow-hidden flex flex-col min-w-0">
 				{/* Each view supplies its own DrawerPanel, which owns the header and
-				    the scroll region — the Drawer no longer wraps some views in a
+				    the scroll region - the Drawer no longer wraps some views in a
 				    ScrollArea and leaves others to manage their own.
 
 				    Views fetch their own data too. The Drawer used to query

@@ -21,7 +21,7 @@ import { pickConcurrency } from "./buildData";
 import { axisMs, fmtMs } from "./formatters";
 
 /**
- * Response time vs concurrency — a scatter of per-tick (concurrency, p99). The
+ * Response time vs concurrency - a scatter of per-tick (concurrency, p99). The
  * flat-left headroom, the elbow (breakpoint) and the steep-right saturation read
  * against the origin. Amber marker at the SLO-crossing concurrency.
  */
@@ -34,7 +34,7 @@ export function ResponseTimeVsConcurrencyChart({
 	history: LoadTestMetrics[];
 	height?: number;
 	breakpoint?: Breakpoint | null;
-	/** Join a chart group's focus channel — hovering a time chart highlights the
+	/** Join a chart group's focus channel - hovering a time chart highlights the
 	 *  dot for that tick, and hovering a dot moves the time charts' cursor. */
 	syncKey?: string;
 }) {
@@ -109,7 +109,7 @@ function pctToX(pct: number): number {
 
 const HDR_MARKS = [0, 50, 90, 95, 99, 99.9];
 
-/** HDR percentile distribution — latency at each percentile, tail-weighted x. */
+/** HDR percentile distribution - latency at each percentile, tail-weighted x. */
 export function HdrPercentileChart({
 	report,
 	height,

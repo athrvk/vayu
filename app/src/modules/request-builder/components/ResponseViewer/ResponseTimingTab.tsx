@@ -86,7 +86,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 			label: "TTFB",
 			value: timing.firstByte,
 			color: "hsl(var(--primary))",
-			tip: "Time to first byte — server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
+			tip: "Time to first byte - server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
 		},
 		{
 			key: "download",
@@ -156,7 +156,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 					<TimingStat
 						label="Wire"
 						value={timing.wire}
-						tip="libcurl transfer time — DNS + connect + TLS + send + receive."
+						tip="libcurl transfer time - DNS + connect + TLS + send + receive."
 					/>
 				)}
 				{timing.queueWait !== undefined && (

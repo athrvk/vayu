@@ -35,7 +35,7 @@ describe("EmptyState", () => {
 
 	it("drops icon, description and action in the inline variant", () => {
 		// The inline variant sits inside a small panel, so it is one muted line
-		// and nothing else — passing the other props must not smuggle them in.
+		// and nothing else - passing the other props must not smuggle them in.
 		const { container } = render(
 			<EmptyState
 				variant="inline"

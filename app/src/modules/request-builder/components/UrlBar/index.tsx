@@ -47,7 +47,7 @@ export default function UrlBar() {
 					<>
 						{/*
 						 * The triangle is decoration, but it is a text node, so it
-						 * lands in the button's accessible name — screen readers
+						 * lands in the button's accessible name - screen readers
 						 * announce U+25B6 by its Unicode name before the word
 						 * "Send". Hidden rather than removed: it is doing visual
 						 * work in a bar of otherwise identical-looking buttons.
@@ -56,7 +56,7 @@ export default function UrlBar() {
 					</>
 				)}
 			</button>
-			{/* Load Test button — while a run is live it becomes a shortcut to the
+			{/* Load Test button - while a run is live it becomes a shortcut to the
 			    running dashboard (single-active-run policy).
 
 			    The running variant was `text-green-500` on `bg-green-500/10`: a

@@ -6,7 +6,7 @@
  */
 
 /**
- * VariablesTab — reuses VariableTableEditor in embedded mode so the inline
+ * VariablesTab - reuses VariableTableEditor in embedded mode so the inline
  * "new row" UX matches the Variables screen, but rendered headless so the
  * Collection Detail screen's own header/banner aren't duplicated.
  */

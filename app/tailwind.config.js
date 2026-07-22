@@ -43,7 +43,7 @@ export default {
 				input: "hsl(var(--input))",
 				ring: "hsl(var(--ring))",
 
-				// Panel — sidebar / panel bg (between background and card)
+				// Panel - sidebar / panel bg (between background and card)
 				panel: "hsl(var(--panel))",
 
 				// Subtle foreground for truly de-emphasized text

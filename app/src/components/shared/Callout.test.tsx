@@ -10,7 +10,7 @@
  *
  * The load-test dialog had five; the MCP settings panel repeated two of the
  * same variants again, with `border-warning/30` in one place and `/40` in
- * another. What matters here is that severity actually changes the treatment —
+ * another. What matters here is that severity actually changes the treatment -
  * a shared component that renders every severity identically would be the same
  * problem with fewer files.
  */
@@ -40,7 +40,7 @@ describe("Callout", () => {
 			seen.add(cls);
 			unmount();
 		}
-		// Three severities, three distinct treatments — otherwise the prop is
+		// Three severities, three distinct treatments - otherwise the prop is
 		// decoration and a blocker looks like a hint.
 		expect(seen.size).toBe(SEVERITY_ORDER.length);
 	});
@@ -61,7 +61,7 @@ describe("Callout", () => {
 		expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
 	});
 
-	it("hides its icon from assistive tech — severity is carried by the words", () => {
+	it("hides its icon from assistive tech - severity is carried by the words", () => {
 		const { container } = render(<Callout severity="warning">body</Callout>);
 		expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
 	});

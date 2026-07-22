@@ -9,7 +9,7 @@
  * ActionTile
  *
  * One action on the welcome screen. `description` is passed only in the
- * first-run state — on the populated launcher the labels stand alone, since a
+ * first-run state - on the populated launcher the labels stand alone, since a
  * returning user does not need "Create your first API request" explained.
  */
 

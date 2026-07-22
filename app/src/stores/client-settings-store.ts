@@ -37,7 +37,7 @@ import {
 	nearestAutoSaveDelay,
 } from "@/constants/client-settings";
 
-/** localStorage keys reset by "Reset app settings" — all renderer preferences,
+/** localStorage keys reset by "Reset app settings" - all renderer preferences,
  *  but NOT workspace/session state (open tabs, layout, active collection). */
 export const SETTINGS_STORAGE_KEYS: readonly string[] = [
 	STORAGE_KEYS.THEME_SOURCE,
@@ -52,7 +52,7 @@ export const SETTINGS_STORAGE_KEYS: readonly string[] = [
 
 interface ClientSettingsState {
 	editor: EditorPrefs;
-	/** Selected code font — a preset or "custom". */
+	/** Selected code font - a preset or "custom". */
 	monoFont: MonoFontChoice;
 	/** User-typed family, used when monoFont === "custom". */
 	monoFontCustom: string;
@@ -79,7 +79,7 @@ function resolveMonoStack(font: MonoFontChoice, custom: string): string {
 	return font === "custom" ? customMonoStack(custom) : monoFontStack(font);
 }
 
-/** Selector: the active code-font stack — used by the Monaco wrapper. */
+/** Selector: the active code-font stack - used by the Monaco wrapper. */
 export function selectMonoStack(s: { monoFont: MonoFontChoice; monoFontCustom: string }): string {
 	return resolveMonoStack(s.monoFont, s.monoFontCustom);
 }

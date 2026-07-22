@@ -10,7 +10,7 @@
  *
  * `useCollectionsQuery` is destructured as `{ data: collections = [] }`, and
  * nothing sets `throwOnError`, so a query that settles as an error never
- * reaches the ErrorBoundary — it just resolves to `[]`. The tree then rendered
+ * reaches the ErrorBoundary - it just resolves to `[]`. The tree then rendered
  * "No collections yet" with an "Add your first collection" button, which is
  * worse than merely wrong: it invites a user whose collections exist but could
  * not be loaded to create a duplicate.

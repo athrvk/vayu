@@ -9,7 +9,7 @@
  * ListSkeleton
  *
  * Loading placeholder for the drawer's list views. The three of them previously
- * handled loading three different ways — skeleton rows, a centred spinner, and
+ * handled loading three different ways - skeleton rows, a centred spinner, and
  * nothing at all. The last case was the worst: with `= []` defaults, an
  * in-flight query renders as a populated-but-empty tree, so the user is told
  * "you have no environments" when the real answer is "not loaded yet".

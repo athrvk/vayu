@@ -34,7 +34,7 @@ const PHASE_TIPS = {
 	dns: "Hostname → IP resolution. Usually a few ms once cached; >50ms suggests slow DNS or a fresh lookup.",
 	connect: "TCP three-way handshake. Zero on connection reuse (HTTP keep-alive / HTTP/2).",
 	tls: "SSL/TLS handshake (HTTPS only). Zero for plain HTTP and on resumed connections.",
-	ttfb: "Time to first byte — server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
+	ttfb: "Time to first byte - server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
 	download:
 		"Response body transfer time. Large for big payloads or slow links; near-zero for small JSON.",
 } as const;

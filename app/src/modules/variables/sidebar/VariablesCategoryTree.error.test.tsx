@@ -10,7 +10,7 @@
  *
  * Both queries here are destructured with `= []` defaults and nothing sets
  * `throwOnError`, so a query that settles as an error resolves to `[]` and the
- * section says "No collections" / "No environments" — a claim about the user's
+ * section says "No collections" / "No environments" - a claim about the user's
  * data, made when no data arrived.
  *
  * The two sections read two different queries, so they are tested as two
@@ -89,7 +89,7 @@ describe("VariablesCategoryTree when a scope query fails", () => {
 		expect(screen.queryByText("No environments")).not.toBeInTheDocument();
 	});
 
-	it("keeps the sections independent — one failing says nothing about the other", () => {
+	it("keeps the sections independent - one failing says nothing about the other", () => {
 		queryState.collections.isError = true;
 		renderTree();
 
@@ -143,7 +143,7 @@ describe("VariablesCategoryTree when a scope query fails", () => {
 
 	it("shows a dash rather than a count it does not have", () => {
 		// A literal 0 beside "Couldn't load collections" asserts that the user
-		// has none — the same lie the body was just fixed to stop telling. The
+		// has none - the same lie the body was just fixed to stop telling. The
 		// environments section is given real data so a stray "0" could only come
 		// from the failed one.
 		queryState.collections = {
@@ -162,6 +162,6 @@ describe("VariablesCategoryTree when a scope query fails", () => {
 
 		expect(screen.getByText("Couldn't load collections")).toBeInTheDocument();
 		expect(screen.queryByText("0")).toBeNull();
-		expect(screen.getByText("—")).toBeInTheDocument();
+		expect(screen.getByText("-")).toBeInTheDocument();
 	});
 });

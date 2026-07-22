@@ -9,8 +9,8 @@
  * "Clear run history" confirms through the app's own dialog.
  *
  * It used to call `window.confirm`. The native dialog ignores the theme, the
- * accent scheme and the roundedness setting — three things this very panel
- * exists to let the user choose — and, being modal to the renderer, it also
+ * accent scheme and the roundedness setting - three things this very panel
+ * exists to let the user choose - and, being modal to the renderer, it also
  * parks the JS thread while it is open. Every other destructive action in Vayu
  * already routes through `DeleteConfirmDialog`, which additionally focuses
  * Cancel first so a reflexive Enter does not wipe the history.
@@ -41,7 +41,7 @@ vi.mock("@/services", () => ({
 	apiService: { deleteRun: (id: string) => deleteRun(id) },
 }));
 
-// The real zustand stores (toast, client settings) are left in place — they are
+// The real zustand stores (toast, client settings) are left in place - they are
 // cheap and behave, and stubbing them would only widen what this test asserts.
 
 // UpdatesCard talks to the Electron updater bridge, which isn't the subject here.
@@ -59,7 +59,7 @@ afterEach(() => {
 	confirmSpy.mockRestore();
 });
 
-describe("GeneralPanel — clear run history", () => {
+describe("GeneralPanel - clear run history", () => {
 	it("confirms in-app and never reaches for window.confirm", async () => {
 		render(<GeneralPanel />);
 

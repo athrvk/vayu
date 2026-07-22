@@ -6,24 +6,24 @@
  */
 
 /**
- * UpdatesCard — the current version, and a way to ask for a newer one.
+ * UpdatesCard - the current version, and a way to ask for a newer one.
  *
  * Vayu already checked for updates on a timer and announced the result through
  * a banner, but there was no way to *ask*. The only manual check lived in the
- * native menu, where it answers with a modal `dialog.showMessageBox` — fine for
+ * native menu, where it answers with a modal `dialog.showMessageBox` - fine for
  * a menu item that has no UI of its own, wrong for a settings panel that does.
  * So this renders the same outcome in place: the result appears under the
  * button and stays there.
  *
  * The four outcomes are all worth distinguishing:
  *
- *   - up to date  — the reassurance the user clicked for.
- *   - available   — with the release notes link, and (macOS) the ad-hoc-signed
+ *   - up to date  - the reassurance the user clicked for.
+ *   - available   - with the release notes link, and (macOS) the ad-hoc-signed
  *                   installer command, because that platform updates
  *                   out-of-band.
- *   - unavailable — a development or unpackaged build has no release feed. Not
+ *   - unavailable - a development or unpackaged build has no release feed. Not
  *                   an error; saying "check failed" here would be a lie.
- *   - error       — the network, or the feed. Shows the reason.
+ *   - error       - the network, or the feed. Shows the reason.
  */
 
 import { useState } from "react";
@@ -84,7 +84,7 @@ export function UpdatesCard() {
 			case "up-to-date":
 				return (
 					<p className="text-sm text-success-text">
-						You&apos;re up to date — {result.version} is the latest version.
+						You&apos;re up to date - {result.version} is the latest version.
 					</p>
 				);
 			case "unavailable":

@@ -65,7 +65,7 @@ export function registerGraphqlProviders(monaco: typeof Monaco): void {
 	});
 
 	// Re-run diagnostics for open graphql models only when the active schema
-	// reference actually changes — the store also mutates on activeUrl/status
+	// reference actually changes - the store also mutates on activeUrl/status
 	// changes, which must not trigger a full re-validation pass.
 	let lastSchema = useSchemaCache.getState().getActiveSchema();
 	useSchemaCache.subscribe((state) => {
@@ -78,7 +78,7 @@ export function registerGraphqlProviders(monaco: typeof Monaco): void {
 	});
 
 	monaco.languages.registerCompletionItemProvider("graphql", {
-		// Structural triggers only — NOT space/newline. Triggering on "\n" popped
+		// Structural triggers only - NOT space/newline. Triggering on "\n" popped
 		// the suggestion widget after every Enter, so a second Enter (meant as a
 		// newline) accepted the first suggestion instead. Typing a field name still
 		// shows suggestions via Monaco's quick-suggest.

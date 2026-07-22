@@ -61,7 +61,7 @@ export default function CollectionTree() {
 	// TanStack Query hooks
 	// isError as well as isLoading. The query is destructured with `= []`, so a
 	// failed fetch is indistinguishable from an empty workspace unless it is
-	// asked about — and the empty state's "Add your first collection" would
+	// asked about - and the empty state's "Add your first collection" would
 	// invite a duplicate of collections that already exist.
 	const {
 		data: collections = [],
@@ -149,7 +149,7 @@ export default function CollectionTree() {
 	} | null>(null);
 	/**
 	 * Report a failed mutation through the same channel the rename path already
-	 * uses — `failSave` puts "Save failed" in the Dock.
+	 * uses - `failSave` puts "Save failed" in the Dock.
 	 *
 	 * Rename was the only handler here that caught anything. Create and delete
 	 * called `mutateAsync` bare, so a rejection was an unhandled promise and
@@ -300,7 +300,7 @@ export default function CollectionTree() {
 	};
 
 	/**
-	 * Duplicate a request, contents and all — method, URL, params, headers,
+	 * Duplicate a request, contents and all - method, URL, params, headers,
 	 * body, auth and both scripts. Collections deliberately have no equivalent:
 	 * copying one means recursing through nested folders and issuing a create
 	 * per request, which is its own feature. The previous collection "Duplicate"
@@ -335,7 +335,7 @@ export default function CollectionTree() {
 
 	/**
 	 * Actions for a collection's "⋯" menu. Defined here, where the handlers and
-	 * state live, and rendered by the shared RowActionsMenu — the same component
+	 * state live, and rendered by the shared RowActionsMenu - the same component
 	 * request and environment rows use, so every row menu looks and behaves
 	 * alike. This replaced a hand-rolled fixed-position popover that had to
 	 * compute its own coordinates and close itself on an outside click, and
@@ -613,7 +613,7 @@ export default function CollectionTree() {
 				{/* Loading state */}
 				{isLoadingCollections && <ListSkeleton rows={3} leading badge />}
 
-				{/* Load failed — not the same as having none.
+				{/* Load failed - not the same as having none.
 				    Gated on there being nothing cached: a background refetch can
 				    fail while the tree still holds good data, and replacing a
 				    working tree with an error pane would lose more than it
@@ -636,7 +636,7 @@ export default function CollectionTree() {
 						<EmptyState
 							icon={Folder}
 							title="No collections yet"
-							description="Collections group related requests — make one to get started."
+							description="Collections group related requests - make one to get started."
 							action={
 								<Button
 									variant="link"

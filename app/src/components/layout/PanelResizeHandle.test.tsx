@@ -8,8 +8,8 @@
 /**
  * The drawer and context-bar handles were mouse-only.
  *
- * Both were a bare `<div>` with `onPointerDown` and `onDoubleClick` — no role,
- * no tabindex, no keys — so the two panels framing the whole app could not be
+ * Both were a bare `<div>` with `onPointerDown` and `onDoubleClick` - no role,
+ * no tabindex, no keys - so the two panels framing the whole app could not be
  * resized or reset from the keyboard. They also had separate copies of the same
  * logic, one of them commented as mirroring the other.
  *
@@ -60,7 +60,7 @@ describe("PanelResizeHandle", () => {
 		expect(setWidth).toHaveBeenLastCalledWith(284);
 	});
 
-	it("widens leftwards for a left-edge handle — the direction is inverted", () => {
+	it("widens leftwards for a left-edge handle - the direction is inverted", () => {
 		const { setWidth, handle } = setup("left");
 		fireEvent.keyDown(handle, { key: "ArrowLeft" });
 		expect(setWidth).toHaveBeenCalledWith(316);
@@ -84,7 +84,7 @@ describe("PanelResizeHandle", () => {
 		expect(setWidth).toHaveBeenLastCalledWith(Infinity);
 	});
 
-	it("resets on Enter and Space — the double-click had no keyboard route", () => {
+	it("resets on Enter and Space - the double-click had no keyboard route", () => {
 		const { setWidth, handle } = setup("right");
 		fireEvent.keyDown(handle, { key: "Enter" });
 		expect(setWidth).toHaveBeenCalledWith(260);
@@ -99,7 +99,7 @@ describe("PanelResizeHandle", () => {
 		expect(setWidth).not.toHaveBeenCalled();
 	});
 
-	it("shows a focus state — an 8px strip with no content is otherwise unfindable", () => {
+	it("shows a focus state - an 8px strip with no content is otherwise unfindable", () => {
 		const { handle } = setup("right");
 		expect(handle.className).toContain("focus-visible:");
 	});

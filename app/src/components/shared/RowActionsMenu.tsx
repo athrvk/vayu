@@ -17,7 +17,7 @@
  *
  * The trigger carries `data-tree-menu`, so inside the collection tree the
  * Shift+F10 / Menu key path opens it (every control in a tree row is
- * tabIndex=-1 — see useRovingTreeFocus).
+ * tabIndex=-1 - see useRovingTreeFocus).
  */
 
 import { MoreVertical, type LucideIcon } from "lucide-react";

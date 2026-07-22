@@ -194,7 +194,7 @@ vayu::db::Database* db) {
 AuthApplyResult preflight_auth (const nlohmann::json& auth, vayu::db::Database& db) {
     const Auth parsed = parse_auth (auth);
     if (const auto* oauth2 = std::get_if<OAuth2Auth> (&parsed)) {
-        // Acquire (cache-aware) without touching any request — warms the token
+        // Acquire (cache-aware) without touching any request - warms the token
         // cache so the run worker's apply_auth is a cache hit.
         return resolve_oauth2 (nullptr, oauth2->config, &db);
     }

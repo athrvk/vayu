@@ -11,7 +11,7 @@ import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
 /**
  * Utilisation tier coloring: ≥95% success, ≥80% warning, else destructive.
- * Split text vs fill for the same reason as RateFidelityCard — the number is
+ * Split text vs fill for the same reason as RateFidelityCard - the number is
  * text and needs the accessible pair; the MiniBar is a fill and keeps the
  * saturated one.
  */
@@ -30,7 +30,7 @@ function utilFillColor(util: number | undefined): string {
 }
 
 /**
- * constant_concurrency hero card #2 — how many of the configured N concurrent
+ * constant_concurrency hero card #2 - how many of the configured N concurrent
  * users were actually in-flight on average. Below 100% means idle VUs.
  */
 export function ConcurrencyUtilCard({

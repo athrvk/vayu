@@ -9,7 +9,7 @@
  * @file resolve.ts
  * @brief Request-composition pipeline for the MCP layer.
  *
- * When the Vayu app sends a request, the **renderer** — not the engine — does
+ * When the Vayu app sends a request, the **renderer** - not the engine - does
  * the preparation: it resolves `{{variables}}`, walks the collection ancestor
  * chain to resolve `inherit` auth, and composes the collection-chain pre/post
  * scripts with the request's own. The engine only *applies* a concrete `auth`
@@ -42,7 +42,7 @@ export interface VariableValue {
 	type?: string;
 }
 
-/** `Record<name, VariableValue>` — the shape of every `variables` field. */
+/** `Record<name, VariableValue>` - the shape of every `variables` field. */
 export type VariableBag = Record<string, VariableValue>;
 
 /** A `params`/`headers` row as the engine serializes it. */
@@ -202,7 +202,7 @@ function isEmptyAuth(auth: AuthRecord | undefined): boolean {
  * The effective auth for a request, resolved to a concrete block the engine can
  * apply, or `undefined` for no auth. `inherit` walks the ancestor chain
  * leaf→root and takes the first collection with concrete auth (collections are
- * always concrete auth sources — they never store `inherit`). Variables inside
+ * always concrete auth sources - they never store `inherit`). Variables inside
  * the chosen block (e.g. `{{token}}`, an OAuth2 `config`) are resolved.
  */
 export function composeAuth(
@@ -237,7 +237,7 @@ function joinScripts(parts: Array<string | undefined>): string | undefined {
 
 /**
  * Compose the effective pre/post scripts: collection-chain scripts (root→leaf)
- * followed by the request's own, joined with blank lines — the same order the
+ * followed by the request's own, joined with blank lines - the same order the
  * renderer sends so parent-collection setup runs before the request's script.
  */
 export function composeScripts(
@@ -297,7 +297,7 @@ export function resolveBody(
 // --- High-level composition --------------------------------------------------
 
 /**
- * Compose a saved request into the fully-resolved payload the engine executes —
+ * Compose a saved request into the fully-resolved payload the engine executes -
  * the MCP equivalent of the app clicking **Send** on that request. Variables are
  * resolved in the URL, headers, and body; `inherit`/chain auth is resolved to a
  * concrete block; and the collection-chain + request scripts are composed.

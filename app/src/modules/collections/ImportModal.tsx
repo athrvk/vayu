@@ -103,7 +103,7 @@ export function ImportModal() {
 
 	// Fetching a URL is the only asynchronous source, so it is the only one that
 	// can be entered twice. `phase === "detecting"` was set here and in
-	// runDetect and then never read by anything that renders — the button stayed
+	// runDetect and then never read by anything that renders - the button stayed
 	// enabled and unchanged for the whole round-trip, so a second click fired a
 	// second fetch whose result raced the first.
 	const isFetching = phase === "detecting";
@@ -129,7 +129,7 @@ export function ImportModal() {
 			});
 			handleClose();
 		} catch (e) {
-			// Import failed (orchestrator rolled back) — surface it instead of silently re-enabling.
+			// Import failed (orchestrator rolled back) - surface it instead of silently re-enabling.
 			setError((e as Error).message || "Import failed");
 			setPhase("error");
 		}
@@ -156,7 +156,7 @@ export function ImportModal() {
 						/*
 						 * A real <button>, not a clickable div. This was a bare
 						 * div with onClick: not focusable, not in the tab order,
-						 * and not operable by Enter or Space — the only way to
+						 * and not operable by Enter or Space - the only way to
 						 * reach the file picker was a mouse. Drag-and-drop still
 						 * works; the button is the keyboard path to the same
 						 * hidden <input type="file">.
@@ -251,7 +251,7 @@ export function ImportModal() {
 		 * role="dialog", a window keydown listener for Escape and its own close
 		 * button. That meant no focus trap, no focus restore on close, no portal
 		 * (so it rendered inside the tree that opened it), no scroll lock and no
-		 * inerting of the background — all of which Radix gives for free, and
+		 * inerting of the background - all of which Radix gives for free, and
 		 * none of which the app's other dialogs were missing.
 		 *
 		 * Radix now owns the shell: Escape, the overlay click, focus and the
@@ -281,7 +281,7 @@ export function ImportModal() {
 				 * tab in the app is px-4 py-2.5, so the ring wraps a proportioned
 				 * target.
 				 *
-				 * Radix also brings the keyboard model tabs are supposed to have —
+				 * Radix also brings the keyboard model tabs are supposed to have -
 				 * one tab stop for the set, arrow keys to move between them. The
 				 * hand-rolled version made each tab its own tab stop.
 				 */}
@@ -318,8 +318,8 @@ export function ImportModal() {
 							value={t}
 							/*
 							 * min-h holds the three tabs to one height. Their natural content
-							 * differs wildly — the File dropzone is 247px tall, the URL row only
-							 * 76 — and because the dialog is centred, that made the whole modal
+							 * differs wildly - the File dropzone is 247px tall, the URL row only
+							 * 76 - and because the dialog is centred, that made the whole modal
 							 * resize by 171px and jump 85px up the screen when you switched to
 							 * URL. Sized to the tallest tab, so the shell never moves.
 							 */
@@ -336,7 +336,7 @@ export function ImportModal() {
 						 * One <label> each. These were two checkboxes inside a single
 						 * <label>: a label's control is its *first* labelable
 						 * descendant, so clicking the words "Import pre-request &
-						 * test scripts" toggled Import environments instead — and the
+						 * test scripts" toggled Import environments instead - and the
 						 * second checkbox had no label at all, shrinking its hit
 						 * target to the 13px box.
 						 */}

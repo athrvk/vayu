@@ -10,13 +10,13 @@
  *
  * Both queries here default to `[]`, so a category restored from a previous
  * session resolved to `undefined` while its query was still in flight, and the
- * screen announced "Collection not found" — an error, for something that had
+ * screen announced "Collection not found" - an error, for something that had
  * simply not arrived yet. The same shape as the sidebar's "No environments"
  * bug, but worse: an empty state is merely wrong, an error state tells the user
  * their data is gone.
  *
- * Each case asserts both halves — that the loading pane is shown *and* that the
- * error copy is absent — since asserting only the first would pass even if both
+ * Each case asserts both halves - that the loading pane is shown *and* that the
+ * error copy is absent - since asserting only the first would pass even if both
  * rendered.
  */
 
@@ -47,7 +47,7 @@ vi.mock("@/modules/variables/variables-store", () => ({
 	}),
 }));
 
-describe("VariablesMain — loading vs not found", () => {
+describe("VariablesMain - loading vs not found", () => {
 	beforeEach(() => {
 		state.collections = { data: [], isLoading: false };
 		state.environments = { data: [], isLoading: false };

@@ -250,7 +250,7 @@ export default function SettingsMain() {
 	}
 
 	// Client (app) categories are rendered by their registered panel, wrapped in
-	// the shared shell (no Save/Reset bar — these prefs auto-persist).
+	// the shared shell (no Save/Reset bar - these prefs auto-persist).
 	const appPanel = getAppPanel(selectedCategory);
 	if (appPanel) {
 		const Panel = appPanel.Component;
@@ -513,7 +513,7 @@ export default function SettingsMain() {
 						const isModified = edited !== undefined;
 						const hasError = edited?.error;
 						// Per entry, so `aria-describedby` never points at another
-						// setting's message — and only rendered when there is one,
+						// setting's message - and only rendered when there is one,
 						// so the reference is never dangling.
 						const errorId = `setting-${entry.key}-error`;
 						const needsRestart = isRestartRequired(entry);
@@ -545,7 +545,7 @@ export default function SettingsMain() {
 												)}
 												{isPendingRestart && (
 													/*
-													 * White on a solid `amber-500` measured 2.14 — the
+													 * White on a solid `amber-500` measured 2.14 - the
 													 * worst text contrast in the app, and at 10px. It
 													 * failed in *both* themes, because a raw palette
 													 * fill and white are the same two colours whatever
@@ -555,7 +555,7 @@ export default function SettingsMain() {
 													 * Required" chip beside it already uses, on warning
 													 * tokens: 4.87 light / 7.45 dark. It keeps a
 													 * stronger border than that sibling so the two stay
-													 * distinguishable — "Pending" is the more urgent of
+													 * distinguishable - "Pending" is the more urgent of
 													 * the pair and should not read as identical.
 													 */
 													<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-warning/50 bg-warning/15 text-[10px] font-medium text-warning-text">
@@ -590,7 +590,7 @@ export default function SettingsMain() {
 												// The setting's name lives in the CardTitle above
 												// and is not associated with the control, so
 												// without this the switch announced as a bare
-												// "switch" — and every engine setting renders
+												// "switch" - and every engine setting renders
 												// one of these.
 												aria-label={entry.label}
 											/>
@@ -630,7 +630,7 @@ export default function SettingsMain() {
 														/*
 														 * Out-of-range values were signalled by a
 														 * red border and a line of text sitting
-														 * loose beside the field — colour alone,
+														 * loose beside the field - colour alone,
 														 * and a message the field did not point
 														 * at. `aria-invalid` states it, and
 														 * `aria-describedby` reads the reason out

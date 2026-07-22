@@ -6,7 +6,7 @@
  */
 
 /**
- * OAuth2LoadTestGuard — warns when a duration-based load test would outlive its
+ * OAuth2LoadTestGuard - warns when a duration-based load test would outlive its
  * OAuth 2.0 access token. The engine acquires the token once at run start and
  * does not refresh mid-run, so a test longer than the token's remaining life
  * starts failing partway through. This is the interim guard for that gap:
@@ -32,7 +32,7 @@ interface OAuth2LoadTestGuardProps {
 	/** Variable-resolved OAuth 2.0 config for the pending request. */
 	config: OAuth2Config;
 	/** Total test duration in seconds, or null when the test has no fixed
-	 *  duration (iterations mode) — in which case the guard is inert. */
+	 *  duration (iterations mode) - in which case the guard is inert. */
 	durationSeconds: number | null;
 	onGateChange: (gated: boolean) => void;
 }
@@ -55,14 +55,14 @@ export default function OAuth2LoadTestGuard({
 
 	const token = statusQuery.data?.found ? statusQuery.data.token : undefined;
 
-	// Compute the coverage state (pure decision — see coverageState).
+	// Compute the coverage state (pure decision - see coverageState).
 	const state = useMemo(
 		() => coverageState(durationSeconds, cacheKey != null, token),
 		[durationSeconds, cacheKey, token]
 	);
 
 	// Reset the override whenever the situation changes. This is the render-phase
-	// "adjust state when a prop changes" pattern — cheaper and more correct than a
+	// "adjust state when a prop changes" pattern - cheaper and more correct than a
 	// reset effect (no extra commit, no stale-frame flash).
 	const situation = `${durationSeconds}${cacheKey ?? ""}${state.kind}`;
 	const [prevSituation, setPrevSituation] = useState(situation);
@@ -97,7 +97,7 @@ export default function OAuth2LoadTestGuard({
 		return (
 			<Callout severity="info" positive>
 				{state.nonExpiring
-					? "Access token does not expire — it covers the full test."
+					? "Access token does not expire - it covers the full test."
 					: "Access token covers the full test duration."}
 			</Callout>
 		);
@@ -175,7 +175,7 @@ export default function OAuth2LoadTestGuard({
 					this provider&apos;s tokens last only{" "}
 					<strong>{fmtDuration(state.lifetimeMs)}</strong>, shorter than the{" "}
 					<strong>{fmtDuration(state.durationMs)}</strong> test. Requests will fail once
-					it expires — mid-run refresh isn&apos;t supported yet, so shorten the run to
+					it expires - mid-run refresh isn&apos;t supported yet, so shorten the run to
 					avoid failures.
 				</>
 			)}

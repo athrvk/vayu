@@ -206,7 +206,7 @@ metrics producer thread writes a batch each tick. Struct is `db::Metric`.
   derivations. `latency_p75/p90/p999/min/max` are **not** persisted per tick.
 - **Final-summary rows** (`latency_p50/p75/p90/p95/p99/p999/min/max`, `labels` =
   `{"percentile":"p50"}` etc.): written once at completion from the cumulative-from-start
-  HdrHistogram — the whole-run numbers the report surfaces. The `/run/:id/report` reader
+  HdrHistogram - the whole-run numbers the report surfaces. The `/run/:id/report` reader
   keys on the non-empty label so the per-tick windowed rows never overwrite these.
 
 ---

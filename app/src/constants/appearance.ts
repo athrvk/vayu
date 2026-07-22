@@ -6,7 +6,7 @@
  */
 
 /**
- * Interface preferences — UI font and interface scale.
+ * Interface preferences - UI font and interface scale.
  *
  * Both are pure renderer preferences (no OS/Electron theme involvement),
  * persisted to localStorage and applied to the document. These arrays are the
@@ -27,7 +27,7 @@ export const UI_FONTS = [
 	{
 		value: "grotesk",
 		label: "Space Grotesk",
-		description: "Default — geometric sans",
+		description: "Default - geometric sans",
 		stack: '"Space Grotesk", system-ui, sans-serif',
 	},
 	{
@@ -54,11 +54,11 @@ export const UI_FONTS = [
 export type UiFont = (typeof UI_FONTS)[number]["value"];
 export const DEFAULT_UI_FONT: UiFont = "inter";
 
-/** A preset UI font, or "custom" — a user-typed family (see {@link customSansStack}). */
+/** A preset UI font, or "custom" - a user-typed family (see {@link customSansStack}). */
 export type UiFontChoice = UiFont | "custom";
 
 /**
- * Monospace (code) font — applied by overriding the `--font-mono` custom
+ * Monospace (code) font - applied by overriding the `--font-mono` custom
  * property (Tailwind's `font-mono` utilities read it) and passed to the Monaco
  * editor's `fontFamily`. Stacks reference faces already loaded by index.html
  * (JetBrains Mono) or system fonts, so switching never triggers a fetch.
@@ -67,7 +67,7 @@ export const MONO_FONTS = [
 	{
 		value: "jetbrains",
 		label: "JetBrains Mono",
-		description: "Default — geometric, wide",
+		description: "Default - geometric, wide",
 		stack: '"JetBrains Mono", "Consolas", "Monaco", monospace',
 	},
 	{
@@ -100,7 +100,7 @@ export const MONO_FONTS = [
 export type MonoFont = (typeof MONO_FONTS)[number]["value"];
 export const DEFAULT_MONO_FONT: MonoFont = "jetbrains";
 
-/** A preset face, or "custom" — a user-typed family (see {@link customMonoStack}). */
+/** A preset face, or "custom" - a user-typed family (see {@link customMonoStack}). */
 export type MonoFontChoice = MonoFont | "custom";
 
 export interface ScaleOption {
@@ -111,12 +111,12 @@ export interface ScaleOption {
 }
 
 export const UI_SCALES = [
-	{ value: "compact", label: "Compact", description: "90% — fit more on screen", factor: 0.9 },
+	{ value: "compact", label: "Compact", description: "90% - fit more on screen", factor: 0.9 },
 	{ value: "default", label: "Default", description: "100%", factor: 1 },
 	{
 		value: "comfortable",
 		label: "Comfortable",
-		description: "110% — larger and easier",
+		description: "110% - larger and easier",
 		factor: 1.1,
 	},
 ] as const satisfies readonly ScaleOption[];

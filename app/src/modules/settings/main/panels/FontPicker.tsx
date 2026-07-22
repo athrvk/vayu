@@ -21,7 +21,7 @@ import type { FontOption } from "@/constants/appearance";
 
 interface FontPickerProps {
 	options: readonly FontOption[];
-	/** Selected value — a preset's `value` or the literal "custom". */
+	/** Selected value - a preset's `value` or the literal "custom". */
 	value: string;
 	onChange: (value: string) => void;
 	/** The user-typed family (shown/edited when "custom" is selected). */

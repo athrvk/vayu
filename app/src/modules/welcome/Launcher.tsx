@@ -6,9 +6,9 @@
  */
 
 /**
- * Launcher — the populated welcome state.
+ * Launcher - the populated welcome state.
  *
- * Reached by pressing "+", which means "start something new" — so actions lead
+ * Reached by pressing "+", which means "start something new" - so actions lead
  * and nothing here repeats what the sidebar already shows. No branding: the app
  * is open and the logo is in the title bar.
  */

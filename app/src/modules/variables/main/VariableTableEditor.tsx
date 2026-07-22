@@ -137,7 +137,7 @@ interface VariableEditorProps {
 	/**
 	 * Embedded mode strips the standalone-screen chrome (title header, info
 	 * banner, count footer) so the editor can be slotted inside another
-	 * container — e.g. the Variables tab of CollectionDetail — without
+	 * container - e.g. the Variables tab of CollectionDetail - without
 	 * duplicating headings or fighting the host layout.
 	 */
 	embedded?: boolean;
@@ -340,7 +340,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		setActiveContext(contextId);
 
 		// Alias the ref object (not .current) so cleanup still reads the live
-		// .current — the timeout handle is scheduled after mount during debounced
+		// .current - the timeout handle is scheduled after mount during debounced
 		// save, so cleanup must clear whatever is actually pending, not a stale copy.
 		const timeoutRef = saveTimeoutRef;
 		return () => {
@@ -423,7 +423,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		setVariables(newVariables);
 		// Keep the ref in sync immediately (not just via the post-render effect):
 		// the secret toggle calls performSaveRef.current() synchronously right
-		// after this, and performSave reads variablesRef.current — a stale ref
+		// after this, and performSave reads variablesRef.current - a stale ref
 		// would persist the pre-edit value and the backend re-sync would then
 		// revert the change. Mirrors removeVariable.
 		variablesRef.current = newVariables;
@@ -582,7 +582,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							<th className="pb-2 px-2 w-[110px]">Type</th>
 							{/*
 							 * A word, like every other column. This was a bare key icon
-							 * whose meaning lived in a native `title` — which needs a
+							 * whose meaning lived in a native `title` - which needs a
 							 * hover to appear, never shows on a touch device, and is
 							 * the only unlabelled column in a table of labelled ones.
 							 */}
@@ -685,7 +685,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 											value={variable.type ?? "string"}
 											onValueChange={(v) => {
 												updateVariable(index, "type", v as VariableType);
-												// Only fire an immediate save if the row is already persisted —
+												// Only fire an immediate save if the row is already persisted -
 												// otherwise let the key/value entry commit it on first edit.
 												if (!variable.isNew) {
 													performSaveRef.current();
@@ -746,7 +746,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												 * This is a state toggle, not a row action. Hidden at
 												 * rest, "not secret" looked identical to "no control
 												 * here", so masking a value was undiscoverable unless
-												 * you happened to hover the row — and a keyboard user
+												 * you happened to hover the row - and a keyboard user
 												 * tabbed onto something invisible, since it carried no
 												 * `group-focus-within` either.
 												 *

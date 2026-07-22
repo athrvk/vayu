@@ -144,7 +144,7 @@ inline void update_peak (const std::shared_ptr<RunContext>& context) {
 
 /**
  * @brief Closed-loop concurrency controller. Seeds target(0), then refills the
- * in-flight deficit toward target(t) — woken per completion via refill_cv with
+ * in-flight deficit toward target(t) - woken per completion via refill_cv with
  * a 50ms safety-net timeout (drives ramp growth + bounds stop latency).
  *
  * @param submit_one   submits exactly one request and increments requests_sent

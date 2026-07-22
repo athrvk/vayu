@@ -77,7 +77,7 @@ function KeyValueRow({
 					onChange={(e) => onUpdate(item.id, "enabled", e.target.checked)}
 					disabled={isReadOnly || !canDisable}
 					// Named after the row it governs. Without this it announced as
-					// a bare "checkbox", giving no clue which row it enables — and
+					// a bare "checkbox", giving no clue which row it enables - and
 					// there is one per row.
 					aria-label={item.key ? `Enable ${item.key}` : "Enable this row"}
 					className="w-4 h-4 rounded-md border-input cursor-pointer disabled:opacity-50"
@@ -118,7 +118,7 @@ function KeyValueRow({
 								</span>
 							</>
 						) : (
-							<span className="italic text-muted-foreground">—</span>
+							<span className="italic text-muted-foreground">-</span>
 						)}
 					</div>
 				</div>
@@ -134,8 +134,8 @@ function KeyValueRow({
 				className={cn(
 					// `focus-visible:opacity-100` is not decoration. The button was
 					// revealed on hover only, so a keyboard user tabbing through a
-					// headers table landed on a fully transparent control — including
-					// its focus ring — once per row, and Enter there silently deleted
+					// headers table landed on a fully transparent control - including
+					// its focus ring - once per row, and Enter there silently deleted
 					// the row they could not see they were on.
 					"h-8 w-8 transition-opacity focus-visible:opacity-100",
 					!canRemove

@@ -251,8 +251,8 @@ class MetricsCollector {
      * feed the recorder concurrently from worker threads while this single-reader
      * sample-and-recycle runs safely alongside them (this is what properly resolves
      * the cumulative-histogram concurrent read/write concern, D8). Unlike
-     * calculate_percentiles() — which reads the cumulative-from-start histogram and
-     * therefore flattens as a run progresses — each call here reflects only the most
+     * calculate_percentiles() - which reads the cumulative-from-start histogram and
+     * therefore flattens as a run progresses - each call here reflects only the most
      * recent window, so the live percentile chart tracks the current load instead of
      * the all-time distribution.
      *
@@ -326,7 +326,7 @@ class MetricsCollector {
      *        `latencyP50Ms`/`latencyP95Ms`/`latencyP99Ms` fields. When non-null the
      *        live tick carries these recent-window values (see
      *        sample_window_percentiles). When null the fields fall back to the
-     *        cumulative-from-start histogram — kept for callers/tests that don't
+     *        cumulative-from-start histogram - kept for callers/tests that don't
      *        drive the interval recorder.
      * @return JSON object with current metrics
      */
@@ -352,8 +352,8 @@ class MetricsCollector {
 
     // Per-code counts, lock-free on the hot path. HTTP status codes (and the
     // synthetic code 0 used for transport errors) live in [0, STATUS_CODE_SLOTS).
-    // record_success/record_error do a single relaxed atomic increment here —
-    // no mutex — so the recorder path scales to the 60k+ RPS target. Class
+    // record_success/record_error do a single relaxed atomic increment here -
+    // no mutex - so the recorder path scales to the 60k+ RPS target. Class
     // breakdowns (2xx..5xx) are derived at read time, not maintained on the hot
     // path. Out-of-range codes (>= STATUS_CODE_SLOTS or < 0) fall back to the
     // rarely-hit overflow map below; real HTTP traffic never takes that lock.
@@ -361,7 +361,7 @@ class MetricsCollector {
     std::array<std::atomic<size_t>, STATUS_CODE_SLOTS> status_code_counts_{};
 
     // Lock-free HdrHistogram for latency recording (thread-safe). Cumulative from
-    // start of run — feeds calculate_percentiles() for the final report.
+    // start of run - feeds calculate_percentiles() for the final report.
     struct hdr_histogram* latency_histogram_{ nullptr };
 
     // Phaser-based interval recorder for the windowed (rolling) percentiles that

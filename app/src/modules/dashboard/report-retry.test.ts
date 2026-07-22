@@ -12,7 +12,7 @@
  * `isLoadingReport`; that is an effect dependency, so the effect re-ran, the
  * guard `!finalReport && !isLoadingReport` was true again, and it refetched.
  * `loadAttemptRef` was only incremented on the zero-data path, never on a
- * failure, so the attempt cap never engaged — a persistent failure retried
+ * failure, so the attempt cap never engaged - a persistent failure retried
  * forever while the dashboard sat empty.
  *
  * Rendering the dashboard needs the SSE stream, the run store and uPlot, so

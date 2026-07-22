@@ -116,7 +116,7 @@ export default function HistoryList() {
 			{/*
 			 * pt-2 is not decorative. The panel body scrolls, so it clips at its
 			 * own edge, and the search field's focus ring is drawn *outside* its
-			 * border box — flush against the top, the ring's upper edge was cut
+			 * border box - flush against the top, the ring's upper edge was cut
 			 * off. Matches the 8px top inset the Variables view already uses.
 			 */}
 			<div className="flex h-full w-full flex-col space-y-4 px-3 pt-2 pb-3">
@@ -196,7 +196,7 @@ export default function HistoryList() {
 					 * it pushed the scrollbar 8px past the clip edge and cut it off
 					 * lengthwise. Stay inside the parent and pad the content instead.
 					 *
-					 * Scrollbar styling is a global baseline (index.css) — nothing to
+					 * Scrollbar styling is a global baseline (index.css) - nothing to
 					 * apply per container, which is what this element was missing.
 					 */}
 					<div className="h-full space-y-2 overflow-y-auto pr-1">
@@ -218,7 +218,7 @@ export default function HistoryList() {
 							// `h-full` because this scroll container is not a flex
 							// column, so `flex-1` has nothing to grow against. Without
 							// it the block sits at the top while the collections
-							// drawer — whose container *is* a flex column — centres.
+							// drawer - whose container *is* a flex column - centres.
 							<EmptyState
 								className="h-full"
 								icon={Clock}

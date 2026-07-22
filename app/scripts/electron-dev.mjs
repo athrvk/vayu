@@ -14,7 +14,7 @@
  * loud `ELIFECYCLE Command failed.` banner on a clean user-initiated stop.
  *
  * Any genuine non-SIGINT failure (compile error, port conflict, crash) is
- * still surfaced — we only swallow the 130 / null cases that come from
+ * still surfaced - we only swallow the 130 / null cases that come from
  * killing children with SIGINT.
  */
 
@@ -85,7 +85,7 @@ function armForceKill() {
 
 process.on("SIGINT", () => {
 	userInterrupted = true;
-	// Still don't exit here — wait for the child's exit event so its cleanup
+	// Still don't exit here - wait for the child's exit event so its cleanup
 	// (engine sidecar graceful shutdown etc.) gets a chance to finish.
 	armForceKill();
 });

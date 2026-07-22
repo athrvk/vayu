@@ -8,12 +8,12 @@
 /**
  * An out-of-range setting has to say so to everyone.
  *
- * The field turned its border red and a line of text appeared beside it —
+ * The field turned its border red and a line of text appeared beside it -
  * colour, plus a message the field did not point at. Nothing marked the input
  * invalid, so `aria-invalid` appeared nowhere in the app and a screen reader
  * user got no signal at all that a save was being blocked.
  *
- * These assert structure — the attributes and the id they resolve to. Whether
+ * These assert structure - the attributes and the id they resolve to. Whether
  * a screen reader speaks them is not something jsdom can answer.
  */
 
@@ -30,7 +30,7 @@ const entry = {
 	value: "10",
 	default: "10",
 	category: "network",
-	// Strings, not numbers — that is the shape ConfigEntry declares and what
+	// Strings, not numbers - that is the shape ConfigEntry declares and what
 	// the engine sends.
 	min: "1",
 	max: "100",
@@ -111,7 +111,7 @@ describe("an invalid engine setting", () => {
 
 		const describedBy = field().getAttribute("aria-describedby");
 		expect(describedBy).toBeTruthy();
-		// The reference has to resolve — an id pointing at nothing is worse than
+		// The reference has to resolve - an id pointing at nothing is worse than
 		// no reference, because assistive tech reports the field as described.
 		const message = document.getElementById(describedBy as string);
 		expect(message).not.toBeNull();

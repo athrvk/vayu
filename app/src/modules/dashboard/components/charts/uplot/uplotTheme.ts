@@ -6,14 +6,14 @@
  */
 
 /**
- * uplotTheme — bridges Vayu's CSS design tokens into uPlot's Canvas world.
+ * uplotTheme - bridges Vayu's CSS design tokens into uPlot's Canvas world.
  *
  * uPlot takes concrete color strings, and our tokens hold raw HSL channels
  * (e.g. `--primary: 222 47% 11%`), so we resolve them at build time via
  * getComputedStyle and hand uPlot real `hsl(...)` strings. Re-resolve whenever
  * the theme flips (light/dark) by re-creating the chart with a new themeKey.
  *
- * This keeps the Canvas charts as token-driven as the SVG charts they replace —
+ * This keeps the Canvas charts as token-driven as the SVG charts they replace -
  * every color still comes from the design system, nothing is hard-coded.
  */
 

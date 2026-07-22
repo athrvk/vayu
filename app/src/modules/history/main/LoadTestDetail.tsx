@@ -30,7 +30,7 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 
 	// Fetch the persisted per-tick time-series once, here, so both the Overview
 	// stat cards (breakpoint / saturation, derived below) and the Performance tab
-	// charts read the same data — one query, shared cache.
+	// charts read the same data - one query, shared cache.
 	const {
 		data: timeSeriesData,
 		isLoading: isLoadingSeries,
@@ -61,7 +61,7 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 	// The report alone can't supply the capacity breakpoint (it needs the per-tick
 	// p99 series, now persisted per W1). Derive it from the time-series and fold it
 	// into the dashboard bundle so the Saturation card / Breakpoint stat light up
-	// for completed ramp_up runs instead of showing the "healthy"/"—" defaults.
+	// for completed ramp_up runs instead of showing the "healthy"/"-" defaults.
 	const sloThresholdMs = useClientSettingsStore((s) => s.sloThresholdMs);
 	const derived = useMemo(() => {
 		const base = reportToDerived(report);
@@ -146,12 +146,12 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 					</div>
 				)}
 
-				{/* Key metrics — p99-led, compact glance (stays visible across tabs) */}
+				{/* Key metrics - p99-led, compact glance (stays visible across tabs) */}
 				<div className="grid grid-cols-3 gap-3">
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
 							{/* Raw palette, and staying. Measured 3.50 light / 3.66 dark on
-						    this tile against the 3.0 icon bar — it clears it in both
+						    this tile against the 3.0 icon bar - it clears it in both
 						    themes, and there is no violet semantic token to move it to. */}
 							<TrendingUp className="w-4 h-4 text-purple-500" />
 							<span className="text-xs text-muted-foreground">P99 Latency</span>

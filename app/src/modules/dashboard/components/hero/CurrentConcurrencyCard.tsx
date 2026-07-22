@@ -10,7 +10,7 @@ import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
 /**
- * ramp_up hero card #1 — in-flight concurrency at this instant. The configured
+ * ramp_up hero card #1 - in-flight concurrency at this instant. The configured
  * ramp climbs linearly toward the target; ramp lag is the share of the planned
  * curve the generator failed to deliver.
  */

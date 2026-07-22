@@ -7,7 +7,7 @@
 
 /**
  * @file http/routes/import.cpp
- * @brief Import URL proxy — fetches a remote collection/spec past browser CORS.
+ * @brief Import URL proxy - fetches a remote collection/spec past browser CORS.
  */
 
 #include "vayu/http/routes.hpp"

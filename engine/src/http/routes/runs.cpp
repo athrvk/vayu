@@ -195,7 +195,7 @@ void register_run_routes (RouteContext& ctx) {
             auto report = vayu::utils::MetricsHelper::calculate_detailed_report (
             results, duration_s);
 
-            // Enrichment fields not carried on the report struct — collected
+            // Enrichment fields not carried on the report struct - collected
             // from the metrics table into locals, injected into the summary JSON.
             double peak_concurrency = 0.0, dropped_total = 0.0, queue_wait_avg = 0.0;
             double bytes_sent = 0.0, bytes_received = 0.0;
@@ -282,7 +282,7 @@ void register_run_routes (RouteContext& ctx) {
             }
 
             // Recompute the error rate from the reconciled successful/failed
-            // split so transport errors (status code 0) are counted — the
+            // split so transport errors (status code 0) are counted - the
             // sampled-results error_rate from calculate_detailed_report omits them.
             report.error_rate =
             report.total_requests > 0 ?

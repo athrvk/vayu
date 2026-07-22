@@ -59,7 +59,7 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		elapsedSeconds: duration,
 		setupOverhead: s.setupOverhead,
 		droppedRequests: s.droppedRequests ?? 0,
-		// Swap in the Dropped Requests card only when drops actually occurred —
+		// Swap in the Dropped Requests card only when drops actually occurred -
 		// matches the live MetricsView gate. A clean rate-limited run keeps the
 		// Rate Fidelity card (otherwise it shows "0 dropped" with a false
 		// "Server saturating" warning).

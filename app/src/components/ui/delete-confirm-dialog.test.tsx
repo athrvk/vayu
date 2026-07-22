@@ -19,7 +19,7 @@ const btn = (name: RegExp) => screen.getByRole("button", { name });
 
 describe("DeleteConfirmDialog", () => {
 	// DialogContent renders a close "X" as its first focusable child, so Radix's
-	// default open-focus lands there and neither action appears focused — most
+	// default open-focus lands there and neither action appears focused - most
 	// visible when the dialog was opened by keyboard (Delete on a tree row).
 	it("focuses Cancel on open, not the close button", async () => {
 		open();
@@ -49,7 +49,7 @@ describe("DeleteConfirmDialog", () => {
 	});
 
 	// Focus starts on the safe action so a reflexive Enter cancels rather than
-	// deletes — the dialog is often reached by pressing Delete in the first place.
+	// deletes - the dialog is often reached by pressing Delete in the first place.
 	it("confirms only when Delete is chosen", async () => {
 		const onConfirm = vi.fn();
 		open({ onConfirm });

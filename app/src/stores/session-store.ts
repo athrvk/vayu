@@ -21,7 +21,7 @@ interface SessionState {
 	activeEnvironmentId: string | null;
 	activeCollectionId: string | null;
 	/**
-	 * The collection the user most recently worked in — updated when a request
+	 * The collection the user most recently worked in - updated when a request
 	 * or collection tab becomes the source of truth (RequestBuilder /
 	 * CollectionDetail). Used by the welcome screen to land a new request where
 	 * the user was working. Deliberately distinct from `activeCollectionId`,

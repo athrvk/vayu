@@ -19,7 +19,7 @@ interface UseResizableReturn {
 	size: number;
 	isResizing: boolean;
 	/** Wire to the drag handle's onMouseDown. Captures the drag origin so size
-	 *  is computed as a delta — works for panels that don't start at x=0. */
+	 *  is computed as a delta - works for panels that don't start at x=0. */
 	startResizing: (e: React.MouseEvent) => void;
 	/**
 	 * Nudge the size by a delta, clamped to the same bounds as a drag.
@@ -105,7 +105,7 @@ export function useResizable({
 	// the last drag, a nudge should move from where the panel actually is. That
 	// part is load-bearing and tested.
 	//
-	// The clamp on the way in is not — `size` re-clamps on every render, so
+	// The clamp on the way in is not - `size` re-clamps on every render, so
 	// removing it changes no observable behaviour (a mutation test confirmed the
 	// suite cannot tell). It stays so the stored value never goes out of range,
 	// which matters because callers pass ±Infinity for jump-to-extreme and

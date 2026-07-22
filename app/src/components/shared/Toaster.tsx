@@ -11,18 +11,18 @@
  * Renders the transient notifications queued in the toast-store as a bottom-right
  * stack. Styled with design tokens so it follows the active theme.
  *
- * Accessibility — the viewport/toast split (mirrors Radix Toast and sonner):
+ * Accessibility - the viewport/toast split (mirrors Radix Toast and sonner):
  *
  * The outer container is a *persistent viewport*. It renders even with zero
  * toasts, because a live region has to already be in the DOM for assistive tech
  * to observe a change to it; a region that appears together with its content is
  * commonly not announced at all. So the live semantics (`role="status"` +
  * `aria-live="polite"`) live on the container, and the individual toasts carry
- * none — a live region nested inside a live region is its own bug.
+ * none - a live region nested inside a live region is its own bug.
  *
  * `aria-atomic="false"` is set explicitly, and has to be. ARIA gives
  * `role="status"` an implicit `aria-atomic="true"`, so leaving the attribute off
- * does not leave it false — Chrome's accessibility tree reported the region as
+ * does not leave it false - Chrome's accessibility tree reported the region as
  * `status atomic live="polite"` with no attribute present, and adding
  * `aria-atomic="false"` was what removed it. Atomic here would re-announce the
  * whole stack every time a single toast arrives.
@@ -31,7 +31,7 @@
  * `role="alert"` region was considered and rejected: a toast auto-dismisses on a
  * timer, so interrupting whatever the user is currently reading is the wrong
  * trade, and every toast here reports the outcome of an action the user just
- * took — they are already waiting for the answer.
+ * took - they are already waiting for the answer.
  *
  * The empty viewport still occupies its fixed bottom-right box, so it is
  * `pointer-events-none` and each toast re-enables `pointer-events-auto`;

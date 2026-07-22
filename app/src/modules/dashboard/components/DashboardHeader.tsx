@@ -53,14 +53,14 @@ export default function DashboardHeader({
 	// authoritative elapsed while running (last SSE tick's elapsed_seconds) and
 	// the final report's testDuration once completed. Both are monotonic, so the
 	// timer never double-counts or jumps backward. (A previous client-side 1s
-	// liveTick was ADDED on top of elapsedDuration — since both advanced on
+	// liveTick was ADDED on top of elapsedDuration - since both advanced on
 	// different clocks, the timer ran ~2x fast and flickered/regressed on desync.)
 	const displayMs = elapsedDuration;
 
 	// Config summary line
 	const configParts: string[] = [];
 	if (configuration?.concurrency != null) configParts.push(`${configuration.concurrency} VUs`);
-	// Was matching on "rps" / "concurrency", which `LoadTestMode` cannot hold —
+	// Was matching on "rps" / "concurrency", which `LoadTestMode` cannot hold -
 	// so every real run fell through and printed a raw `constant_rps` here.
 	if (configuration?.mode) configParts.push(loadTestModeLabel(configuration.mode));
 	if (displayMs > 0) configParts.push(`${formatElapsed(displayMs)} elapsed`);
@@ -68,7 +68,7 @@ export default function DashboardHeader({
 
 	return (
 		<div className="h-[52px] flex items-center gap-3 px-5 bg-panel border-b border-border shrink-0">
-			{/* Back button — returns to the previous screen (typically request builder) */}
+			{/* Back button - returns to the previous screen (typically request builder) */}
 			{canNavigateBack && (
 				<TooltipIconButton
 					label="Back"

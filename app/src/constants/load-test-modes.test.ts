@@ -12,7 +12,7 @@
  * "Iterations" in the history detail, "Fixed Iterations" in the config dialog,
  * and a raw `constant_rps` in the dashboard header, which matched on values
  * `LoadTestMode` cannot hold and fell through. The scan below is the part that
- * keeps it that way — a label copied into a component is exactly how the drift
+ * keeps it that way - a label copied into a component is exactly how the drift
  * started, and it is invisible in review.
  */
 

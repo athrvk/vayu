@@ -1,5 +1,5 @@
 /**
- * chartGeometry.ts — safe SVG y-scale helpers for dashboard charts.
+ * chartGeometry.ts - safe SVG y-scale helpers for dashboard charts.
  *
  * Guards against the NaN SVG coordinate bug that occurs when maxVal=0
  * (e.g. short runs with all-zero latency) causes division by zero in the
@@ -15,7 +15,7 @@
 export const TIME_SERIES_DIMS = { VW: 1080, VH: 240, PL: 56, PR: 12, PT: 16, PB: 28 } as const;
 
 /**
- * Shared SVG geometry for the HDR percentile plot and its live skeleton — they
+ * Shared SVG geometry for the HDR percentile plot and its live skeleton - they
  * must stay dimensionally identical so the card doesn't shift height when the
  * final report arrives.
  */

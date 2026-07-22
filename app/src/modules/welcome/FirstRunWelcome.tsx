@@ -6,7 +6,7 @@
  */
 
 /**
- * FirstRunWelcome — first run, no collections and no runs.
+ * FirstRunWelcome - first run, no collections and no runs.
  *
  * Distinct from the shared `EmptyState` primitive: this is the one branded
  * screen in the app, not a "nothing here" placeholder.

@@ -10,7 +10,7 @@
  * stop it.
  *
  * Vayu shipped with a Reduced motion toggle in Settings → Appearance and
- * nothing else — so someone who had turned Reduce Motion on in Windows, macOS
+ * nothing else - so someone who had turned Reduce Motion on in Windows, macOS
  * or GNOME still got every animation until they found a checkbox in this app
  * and said it a second time. `prefers-reduced-motion` appeared nowhere in the
  * stylesheet.
@@ -22,7 +22,7 @@
  *
  * Read from disk rather than imported: vitest stubs CSS imports to an empty
  * string unless `test.css` is enabled, so `import css from "…?raw"` and the
- * `import.meta.glob` equivalent both hand back "" — and every assertion here
+ * `import.meta.glob` equivalent both hand back "" - and every assertion here
  * would have passed against nothing.
  */
 

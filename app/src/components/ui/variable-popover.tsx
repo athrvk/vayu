@@ -79,7 +79,7 @@ export function VariablePopover({
 		}
 	}, [varInfoValue, isOpen]);
 
-	// Initialize ref when opening — varInfo intentionally excluded so external
+	// Initialize ref when opening - varInfo intentionally excluded so external
 	// reference churn (e.g. inline object creation in parent) doesn't reset
 	// editValue while the user is typing.
 	useEffect(() => {
@@ -158,7 +158,7 @@ export function VariablePopover({
 	 * middle of a URL or a header value and must not break the text flow.
 	 *
 	 * Radix's `asChild` clones its click handler and `aria-*` onto this span, but
-	 * it does not make a span focusable — it assumes the child is already an
+	 * it does not make a span focusable - it assumes the child is already an
 	 * interactive element. So every variable token in the app was mouse-only: a
 	 * keyboard user could not open the popover to see what a variable resolved
 	 * to, or edit it, anywhere in the URL bar, headers, params or auth fields.

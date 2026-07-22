@@ -8,7 +8,7 @@
 /**
  * Local persistence keys (localStorage + zustand persist names).
  *
- * Renaming a key orphans previously persisted data — treat these as part of
+ * Renaming a key orphans previously persisted data - treat these as part of
  * the app's storage schema.
  */
 

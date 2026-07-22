@@ -9,13 +9,13 @@
  * `docs/design-system.md` quotes real token values. They have to still be real.
  *
  * The doc opens with "future sessions must read this before touching any UI
- * file", which makes a stale value worse than no value — it is read as
+ * file", which makes a stale value worse than no value - it is read as
  * authoritative and copied. Nothing connected the two files, so they drifted:
  * the accent table listed `sunset` as `24.6 95% 53.1%` where the CSS had
  * `24 90% 46%`, named a default that had since changed, and quoted
  * `--muted-foreground` at 44% two points after the CSS moved to 42%.
  *
- * This checks the values only. Prose, ratios and rationale still need a human —
+ * This checks the values only. Prose, ratios and rationale still need a human -
  * a number here being right does not make the sentence around it right.
  */
 
@@ -98,7 +98,7 @@ describe("design-system.md token values", () => {
 		const rows = [
 			...doc.matchAll(/^\| `([a-z]+)` \| `([^`]+)` \| `([^`]+)` \| `([^`]+)` \|$/gm),
 		];
-		expect(rows.length, "no accent rows found — has the table moved?").toBeGreaterThanOrEqual(
+		expect(rows.length, "no accent rows found - has the table moved?").toBeGreaterThanOrEqual(
 			6
 		);
 

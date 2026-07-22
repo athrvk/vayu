@@ -8,7 +8,7 @@
 /**
  * CollectionPicker
  *
- * Shown only when a new request can't be placed unambiguously — no remembered
+ * Shown only when a new request can't be placed unambiguously - no remembered
  * collection and more than one to choose from. After the first pick the choice
  * is remembered, so in practice this appears about once per workspace.
  */

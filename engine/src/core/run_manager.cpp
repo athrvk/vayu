@@ -673,14 +673,14 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
     // Windowed (rolling) percentiles sampled by emit_live_tick each tick. Captured
     // here so the 1 Hz DB-gated block below can persist the same window it just
-    // published — sample_window_percentiles() resets the window, so it must only be
+    // published - sample_window_percentiles() resets the window, so it must only be
     // called once per tick (inside emit_live_tick) and reused, not re-sampled.
     double win_p50 = 0.0, win_p95 = 0.0, win_p99 = 0.0;
 
     // Build and append one SSE "metrics" event to the in-memory tick topic.
     // Fields match the SSE handler (metrics.cpp) field-for-field. The wall-clock
     // timestamp is passed in by the caller so that the SSE tick and any
-    // persisted enrichment for the same logical tick share one timestamp —
+    // persisted enrichment for the same logical tick share one timestamp -
     // re-sampling now_ms() inside drifts them into adjacent ms buckets and the
     // dashboard sees status-codes shift left vs throughput on the same x-axis.
     auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot,
@@ -748,14 +748,14 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         while (context->is_running && !context->should_stop) {
             std::this_thread::sleep_for (std::chrono::milliseconds (tick_interval_ms));
 
-            // Single wall-clock sample per tick — shared by the SSE payload
+            // Single wall-clock sample per tick - shared by the SSE payload
             // timestamp, the run-elapsed calc, and (on DB-gated ticks) every
             // persisted metric row below. See #27.
             int64_t tick_wall_ms = now_ms ();
 
             // Snapshot the status-code distribution once per tick and share it
             // with both the SSE builder and (on DB-gated ticks) the persisted
-            // enrichment builder — avoids scanning/copying the map twice.
+            // enrichment builder - avoids scanning/copying the map twice.
             auto status_snapshot = context->metrics_collector->status_code_distribution ();
 
             // Emit a live tick every iteration regardless of the 1 Hz DB gate.
@@ -848,7 +848,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                     context->metrics_collector->average_queue_wait (), "" });
 
                     // Windowed per-tick percentiles (rolling, from the interval
-                    // recorder) — unlabeled to distinguish them from the cumulative
+                    // recorder) - unlabeled to distinguish them from the cumulative
                     // final-summary percentile rows (which carry a {"percentile":..}
                     // label). These power the history percentile chart, the
                     // response-time-vs-concurrency scatter, and the capacity
@@ -872,7 +872,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             }
         }
 
-        // Final settled tick before signalling closed — consumers use this ordering
+        // Final settled tick before signalling closed - consumers use this ordering
         // as the termination contract (last data before closed==true).
         emit_live_tick (nullptr, now_ms ());
     } catch (const std::exception& e) {

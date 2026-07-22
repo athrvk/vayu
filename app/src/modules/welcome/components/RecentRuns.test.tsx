@@ -9,7 +9,7 @@
  * A run row has to say what was run.
  *
  * Without it the list read "Load · Completed · 2 hours ago" five times over,
- * with nothing distinguishing one row from the next — the only way to find out
+ * with nothing distinguishing one row from the next - the only way to find out
  * which run was which was to open it.
  *
  * The identifier is the method and URL from `configSnapshot`, not the request's

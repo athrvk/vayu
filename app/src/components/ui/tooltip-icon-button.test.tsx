@@ -36,7 +36,7 @@ describe("TooltipIconButton", () => {
 			</TooltipProvider>
 		);
 		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-		expect(onClick).toHaveBeenCalledOnce(); // still once — disabled swallowed it
+		expect(onClick).toHaveBeenCalledOnce(); // still once - disabled swallowed it
 	});
 
 	it("forwards arbitrary button props such as aria-pressed", () => {

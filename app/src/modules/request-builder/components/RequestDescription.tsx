@@ -28,7 +28,7 @@ export default function RequestDescription() {
 
 	// Auto-open when the request has description content, and stay open (sticky)
 	// until the user explicitly closes it or blurs an empty field. This can't be
-	// derived from `description.length` without losing stickiness — collapsing the
+	// derived from `description.length` without losing stickiness - collapsing the
 	// editor the instant the field becomes empty would yank the textarea out from
 	// under an active edit. Justified setState-in-effect.
 	useEffect(() => {
@@ -65,7 +65,7 @@ export default function RequestDescription() {
 						void saveRequest();
 						if (description.length === 0) setOpen(false);
 					}}
-					placeholder="Describe this request — what it does, expected response, edge cases…"
+					placeholder="Describe this request - what it does, expected response, edge cases…"
 					className="min-h-[48px] max-h-[160px] text-[13px] leading-relaxed resize-y bg-card"
 				/>
 				{description.length === 0 && (

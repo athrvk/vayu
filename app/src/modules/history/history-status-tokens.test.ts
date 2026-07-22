@@ -22,7 +22,7 @@
  * The discriminator is *what the colour means*, not whether it is paired.
  * Deliberately excluded below: `TimingBreakdown` (DNS/connect/TLS/TTFB/download
  * phases) and `OverviewTab`'s status-code tiles are the documented decorative
- * categorical palettes — fixed identity, no state — and design-system.md names
+ * categorical palettes - fixed identity, no state - and design-system.md names
  * them as the token exception. Scanning them would be a false positive.
  */
 

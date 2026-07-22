@@ -28,7 +28,7 @@ import type {
 
 /**
  * UI-layer extension of KeyValueEntry with a stable React key (`id`).
- * The `id` is ephemeral — it is NOT persisted to the backend.
+ * The `id` is ephemeral - it is NOT persisted to the backend.
  * Strip it with `toKeyValueEntries()` before sending to the API.
  */
 export interface KeyValueItem extends KeyValueEntry {

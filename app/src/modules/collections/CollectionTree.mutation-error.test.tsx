@@ -8,7 +8,7 @@
 /**
  * A failed create or delete used to resolve to nothing at all.
  *
- * Rename was the only handler in the tree that caught anything — it reports
+ * Rename was the only handler in the tree that caught anything - it reports
  * through `useSaveStore.failSave`, which puts "Save failed" in the Dock. Create
  * and delete called `mutateAsync` bare, so a rejection became an unhandled
  * promise: the confirm dialog had already closed, the row un-dimmed, and the

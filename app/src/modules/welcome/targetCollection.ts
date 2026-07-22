@@ -9,13 +9,13 @@
  * Decides where a new request from the welcome screen should land.
  *
  * Hybrid, weighted toward the last-worked-in collection:
- *  - a valid remembered collection (`lastCollectionId`, still present) wins —
+ *  - a valid remembered collection (`lastCollectionId`, still present) wins -
  *    invisible, no friction;
  *  - no collections at all → create one;
  *  - exactly one collection → use it;
  *  - otherwise (no memory, several collections) → ask, rather than guess.
  *
- * The old behavior was `collections[0]` — the topmost by sidebar order, which is
+ * The old behavior was `collections[0]` - the topmost by sidebar order, which is
  * arbitrary relative to what the user is doing. This never guesses silently
  * among several collections.
  */

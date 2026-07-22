@@ -10,7 +10,7 @@
  *
  * Motion now also collapses for a system that asks for it, which means the
  * switch can read "off" while the app is visibly not animating. Saying so is
- * the whole point — the alternative leaves the user hunting for a bug in Vayu
+ * the whole point - the alternative leaves the user hunting for a bug in Vayu
  * that is really a setting in their OS.
  */
 

@@ -22,7 +22,7 @@ function renderModal() {
 
 /**
  * Radix TabsTrigger activates on mousedown (and on focus in its default
- * automatic mode), not on a bare synthetic click — so fireEvent.click alone
+ * automatic mode), not on a bare synthetic click - so fireEvent.click alone
  * leaves the tab unselected. Fire the sequence a real click produces.
  */
 function selectTab(name: RegExp) {

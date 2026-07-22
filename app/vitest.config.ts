@@ -16,7 +16,7 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src"),
-			// Keep in sync with vite.config.ts — this config does not inherit it.
+			// Keep in sync with vite.config.ts - this config does not inherit it.
 			"@shared": path.resolve(__dirname, "../shared"),
 			graphql: path.resolve(__dirname, "./node_modules/graphql/index.js"),
 		},

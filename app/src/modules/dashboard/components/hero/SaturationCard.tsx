@@ -10,7 +10,7 @@ import type { Breakpoint } from "../../utils/computeBreakpoint";
 import { HeroCardShell } from "./HeroCardShell";
 
 /**
- * ramp_up hero card #2 — whether the server has hit its capacity ceiling.
+ * ramp_up hero card #2 - whether the server has hit its capacity ceiling.
  * "Degrading" when p99 has crossed the SLO breakpoint or transport errors have
  * appeared; the call-out names the concurrency at which degradation began.
  *
@@ -29,7 +29,7 @@ export function SaturationCard({
 	 * The `-text` variants, not the bare fill tokens.
 	 *
 	 * This was an inline `style={{ color: "hsl(var(--warning))" }}`. Measured on
-	 * `--card`, `--warning` is 2.14 and `--destructive` 1.73 — this is the same
+	 * `--card`, `--warning` is 2.14 and `--destructive` 1.73 - this is the same
 	 * "fill token used as a foreground" bug swept out of the app earlier, and it
 	 * survived because the guard scans for the `text-<family>` *class* and an
 	 * inline style is invisible to it. The guard now covers both forms.

@@ -9,7 +9,7 @@
  * Corner radius must follow the roundedness setting.
  *
  * `--radius` is user-controlled (Settings → Appearance → Roundedness), and the
- * theme derives `--radius-sm/md/lg` from it — so `rounded-sm`, `rounded-md` and
+ * theme derives `--radius-sm/md/lg` from it - so `rounded-sm`, `rounded-md` and
  * `rounded-lg` all track the setting.
  *
  * Bare `rounded` does not. Tailwind resolves it from its own built-in default,
@@ -18,8 +18,8 @@
  * drifted into the MCP settings panel, where they stayed rounded for a user who
  * had chosen Square.
  *
- * `rounded-full` and `rounded-none` are deliberately fixed — circles, switch
- * tracks and squared-off tab strips are not meant to follow the setting — so
+ * `rounded-full` and `rounded-none` are deliberately fixed - circles, switch
+ * tracks and squared-off tab strips are not meant to follow the setting - so
  * they are allowed as classes.
  *
  * The other way to escape the setting is an inline `borderRadius`, which no
@@ -34,7 +34,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-// .ts as well as .tsx: an inline radius can be set from a plain module —
+// .ts as well as .tsx: an inline radius can be set from a plain module -
 // the chart tooltip that started this was one.
 const sources: Record<string, string> = import.meta.glob("/src/**/*.{ts,tsx}", {
 	query: "?raw",
@@ -44,7 +44,7 @@ const sources: Record<string, string> = import.meta.glob("/src/**/*.{ts,tsx}", {
 
 // The stylesheet is read from disk, not globbed. vitest stubs CSS imports to an
 // empty string unless `test.css` is enabled, so the `css` entries this glob used
-// to include were all "" — the `@apply` half of the scan below was running
+// to include were all "" - the `@apply` half of the scan below was running
 // against nothing and could never have failed.
 sources["/src/index.css"] = readFileSync(resolve(__dirname, "../../index.css"), "utf8");
 

@@ -154,7 +154,7 @@ export function formatBody(body: any, bodyType?: BodyType): string {
 /**
  * Response time, at a precision anyone can read.
  *
- * Both response viewers printed `time.toFixed(4)` — `340.1235 ms`. Four decimal
+ * Both response viewers printed `time.toFixed(4)` - `340.1235 ms`. Four decimal
  * places of a millisecond sit far below the resolution of what is measured, so
  * the last three digits are noise that changes every run, and they make the one
  * number people actually scan longer and harder to compare between runs.
@@ -163,7 +163,7 @@ export function formatBody(body: any, bodyType?: BodyType): string {
  * (a local mock, a cache hit), so they keep two.
  *
  * Lives here because it was fixed once in `ResponseHeader` and the identical
- * bug survived in `UnifiedResponseViewer` — the duplication was the defect.
+ * bug survived in `UnifiedResponseViewer` - the duplication was the defect.
  */
 export function formatResponseTime(ms: number): string {
 	if (ms < 1) return `${ms.toFixed(2)} ms`;
@@ -172,12 +172,12 @@ export function formatResponseTime(ms: number): string {
 }
 
 /**
- * A single timing phase — DNS, connect, TLS, first byte, download — always in ms.
+ * A single timing phase - DNS, connect, TLS, first byte, download - always in ms.
  *
  * Significant digits, because these five share a scale reading and their
  * magnitudes do not: a cached DNS lookup is 0.04ms while first-byte is
  * routinely 300ms. One fixed precision is wrong for one end or the other, and
- * the app had three different answers for the same five numbers — the dashboard
+ * the app had three different answers for the same five numbers - the dashboard
  * showed 2dp, the history breakdown 1dp, and the request-builder timing tab
  * already did this. This is that implementation, moved somewhere all three can
  * reach it.

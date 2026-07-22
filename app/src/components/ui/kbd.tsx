@@ -6,7 +6,7 @@
  */
 
 /**
- * Kbd — keyboard key-cap component.
+ * Kbd - keyboard key-cap component.
  *
  * Use one <Kbd> per key for a Linear/Raycast-style multi-key indicator:
  *
@@ -17,8 +17,8 @@
  * form (one Kbd per key) so each cap has a visible separator.
  *
  * Two sizes:
- *   - default — main UI (empty states, modal hints). 24×24 cap, 12px glyph.
- *   - sm      — menus / inline dense rows. 18×18 cap, 10px glyph.
+ *   - default - main UI (empty states, modal hints). 24×24 cap, 12px glyph.
+ *   - sm      - menus / inline dense rows. 18×18 cap, 10px glyph.
  */
 
 import * as React from "react";

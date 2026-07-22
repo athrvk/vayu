@@ -7,7 +7,7 @@
 
 /**
  * Notice severity, kept out of `Callout.tsx` so that file exports only a
- * component — mixing the two breaks fast refresh, which the linter flags.
+ * component - mixing the two breaks fast refresh, which the linter flags.
  *
  * The array order is the sort order: a notice that stops the run has to render
  * above one that merely warns. With up to four notices stacked, position is the

@@ -8,7 +8,7 @@
 /**
  * DetailSkeleton
  *
- * Loading placeholder for a detail pane — the variables editor, the collection
+ * Loading placeholder for a detail pane - the variables editor, the collection
  * detail screen. `ListSkeleton` is the same idea for the drawer's list views;
  * this one holds the shape of a heading, a subtitle and a stack of rows.
  *
@@ -20,7 +20,7 @@
  * **Loading and not-found have to be different renders.** Every query here
  * defaults to `[]`, so an entity restored from a previous session resolves to
  * `undefined` while its query is still in flight. Rendering the not-found state
- * then does not merely look wrong — it tells the user their collection is gone
+ * then does not merely look wrong - it tells the user their collection is gone
  * when the truthful answer is "not loaded yet". Both call sites reached this
  * component by shipping that bug first.
  */
@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 
 interface DetailSkeletonProps {
 	/**
-	 * Names the pane for assistive tech — "Loading collection", not "Loading".
+	 * Names the pane for assistive tech - "Loading collection", not "Loading".
 	 * The bars carry no information, but which pane is loading does.
 	 */
 	label: string;

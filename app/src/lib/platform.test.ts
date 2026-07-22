@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import { isMac, modKey, formatChord } from "./platform";
 
 // The test environment (jsdom) is not macOS, so these assert the Windows/Linux
-// branch — the same rendering the Dock, tooltips, and empty states get here.
+// branch - the same rendering the Dock, tooltips, and empty states get here.
 describe("platform shortcut helpers", () => {
 	it("detects non-mac in the test environment", () => {
 		expect(isMac).toBe(false);

@@ -17,10 +17,10 @@
  *
  * Two variants, because there are genuinely two shapes:
  *
- * - `pane` — owns a whole region (a detail view with nothing selected, a list
+ * - `pane` - owns a whole region (a detail view with nothing selected, a list
  *   with no items). Centred on both axes, icon-led, and the only variant that
  *   takes an action.
- * - `inline` — a small panel inside something else (a response tab, a card).
+ * - `inline` - a small panel inside something else (a response tab, a card).
  *   One muted line, no icon, no action; an icon here would out-weigh the panel.
  *
  * Copy is sentence case, per the rest of the UI and Apple's HIG. It lives at
@@ -34,7 +34,7 @@ import { cn } from "@/lib/utils";
 
 interface EmptyStateProps {
 	/**
-	 * Sentence case, no trailing period — it is a heading, not a sentence.
+	 * Sentence case, no trailing period - it is a heading, not a sentence.
 	 * "No run selected", not "No Run Selected." Ignored by `inline`, which
 	 * renders it as its single line.
 	 */

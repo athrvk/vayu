@@ -8,7 +8,7 @@
 /**
  * @file connect.ts
  * @brief One-click "connect this agent to Vayu" by shelling out to a client's
- *        own CLI — `claude mcp add` (Claude Code) and `code --add-mcp` (VS Code).
+ *        own CLI - `claude mcp add` (Claude Code) and `code --add-mcp` (VS Code).
  *        Both are designed for exactly this and handle merging into the user's
  *        config. Clients without an add-CLI (Cursor, Codex) are not handled here;
  *        the UI falls back to a copyable snippet for those.
@@ -26,7 +26,7 @@ export type McpConnectClient = "claude" | "vscode";
 
 export interface McpConnectResult {
 	ok: boolean;
-	/** Why it failed — distinguishes "install the CLI" from a real error. */
+	/** Why it failed - distinguishes "install the CLI" from a real error. */
 	reason?: "cli-not-found" | "error" | "unsupported";
 	/** Human-readable detail (command output on success, error text on failure). */
 	message?: string;

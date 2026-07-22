@@ -8,7 +8,7 @@
 /**
  * These assert *structure only*. jsdom announces nothing and does no hit-testing,
  * so nothing here proves a screen reader speaks a toast, and the click test does
- * not prove `pointer-events` is right — the class assertions cover that instead.
+ * not prove `pointer-events` is right - the class assertions cover that instead.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";

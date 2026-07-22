@@ -26,7 +26,7 @@ function setMeasured(el: HTMLElement, scrollWidth: number, clientWidth: number) 
 }
 
 /**
- * Swap in a ResizeObserver whose callback we can fire on demand — the global
+ * Swap in a ResizeObserver whose callback we can fire on demand - the global
  * test stub is a no-op, so a resize would never reach the hook.
  */
 function installControllableResizeObserver() {

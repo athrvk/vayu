@@ -25,7 +25,7 @@ const buttonVariants = cva(
 				ghost: "hover:bg-accent hover:text-accent-foreground",
 				link: "text-primary underline-offset-4 hover:underline",
 				/*
-				 * Row actions — the controls that appear on a row you are already
+				 * Row actions - the controls that appear on a row you are already
 				 * hovering (⋯, delete, copy). `ghost` is wrong for these: it hovers
 				 * to bg-accent, which is exactly what the row underneath already
 				 * paints, so the button appears to have no hover state at all.
@@ -33,20 +33,20 @@ const buttonVariants = cva(
 				 */
 				rowAction: "text-muted-foreground hover:bg-accent-active hover:text-foreground",
 				/*
-				 * Same shape as rowAction — only the glyph turns red, and only on
+				 * Same shape as rowAction - only the glyph turns red, and only on
 				 * hover. No red background: the row already carries one fill, a
 				 * second competing tint is noise, and the delete confirmation is
 				 * what actually protects the user.
 				 *
 				 * `destructive-text`, not `destructive`. Measured against
-				 * `--accent-active`, the fill token gives 3.66 light / 1.27 dark —
+				 * `--accent-active`, the fill token gives 3.66 light / 1.27 dark -
 				 * the dark figure missing even the 3.0 floor for a glyph.
 				 * `destructive-text` gives 4.12 / 3.96.
 				 *
 				 * Those clear 3.0 but not the 4.5 that *text* would need, and this
 				 * variant is icon-only by design (all three call sites render a
 				 * Trash2 at size="icon"). Put a text label in it and it stops
-				 * passing — use a different variant.
+				 * passing - use a different variant.
 				 */
 				rowActionDestructive:
 					"text-muted-foreground hover:bg-accent-active hover:text-destructive-text",

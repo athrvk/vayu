@@ -54,7 +54,7 @@ Custom window title bar (Electron frameless window, h-[38px]). Platform-specific
 
 The entire bar is marked as a drag region (`WebkitAppRegion: "drag"`) except for interactive elements, which explicitly set `no-drag`. Keep `no-drag` on the interactive elements themselves, never on a layout wrapper: the `TabStrip` wrapper flexes to fill the bar, so marking *it* `no-drag` turns all the empty space right of the last tab into a dead zone the window can't be dragged by. `TabStrip` sets `no-drag` on its own tab row for this reason.
 
-The logo is imported as a module (`@shared/icon_png/...`), not referenced as `/icon.png`. With `base: "./"`, a root-absolute path resolves against the filesystem root under the packaged `file://` build and silently fails to load — it only appears to work in dev, where Vite serves it over HTTP.
+The logo is imported as a module (`@shared/icon_png/...`), not referenced as `/icon.png`. With `base: "./"`, a root-absolute path resolves against the filesystem root under the packaged `file://` build and silently fails to load - it only appears to work in dev, where Vite serves it over HTTP.
 
 ### `TabStrip` (`components/layout/TabStrip.tsx`)
 
@@ -70,18 +70,18 @@ Horizontal row of open tabs plus a "+" button. Reads from `useTabsStore` (open t
 
 Main layout: tab-centric with resizable drawer, split/overlay context bar, and docked footer.
 
-- **One uniform layout for every tab** — `Drawer` (left) + main content + `ContextBar` (right). No tab type takes over the row. This is deliberate: the Dock's drawer switchers always have a Drawer to act on, so they can never be dead. (Settings used to full-take-over and suppress the Drawer, which left those buttons doing nothing while Settings was open.)
-- **Left navigation is always the Drawer.** Every main view that needs a category/entity list uses the shared Drawer for it — never its own left rail. `SettingsMain` and `VariablesMain` are pure content panes; their category trees live in the Drawer (`settings` / `variables` views). Follow this pattern for any new view — do not add a second sidebar inside the main area.
+- **One uniform layout for every tab** - `Drawer` (left) + main content + `ContextBar` (right). No tab type takes over the row. This is deliberate: the Dock's drawer switchers always have a Drawer to act on, so they can never be dead. (Settings used to full-take-over and suppress the Drawer, which left those buttons doing nothing while Settings was open.)
+- **Left navigation is always the Drawer.** Every main view that needs a category/entity list uses the shared Drawer for it - never its own left rail. `SettingsMain` and `VariablesMain` are pure content panes; their category trees live in the Drawer (`settings` / `variables` views). Follow this pattern for any new view - do not add a second sidebar inside the main area.
 - **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab).
 - **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
 - **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
-- **Drawer-view sync:** an effect points the Drawer at the view matching the active tab — `variables`→variables, `settings`→settings, `request`/`collection`→collections — and opens it.
+- **Drawer-view sync:** an effect points the Drawer at the view matching the active tab - `variables`→variables, `settings`→settings, `request`/`collection`→collections - and opens it.
 - **ContextBar mode:** picks "push" (≥1200px width) or "overlay" based on window width. Context bar is request-tab–only.
 - **`<ImportModal />`** mounted once as a global overlay; visibility in a dedicated store.
 
 ### `Drawer` (`components/layout/Drawer.tsx`)
 
-Resizable sidebar (220–480px default, per view). The single left navigation for the whole app — one of four views per `useLayoutStore.drawerView`:
+Resizable sidebar (220–480px default, per view). The single left navigation for the whole app - one of four views per `useLayoutStore.drawerView`:
 
 - **`collections`** - `CollectionTree` (hierarchical collections + requests).
 - **`history`** - `HistoryList` (past runs, filtered/sorted).
@@ -233,23 +233,23 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 
 ## Settings (`modules/settings/`)
 
-Same nav/content split as Variables: the category tree renders in the **Drawer** (`settings` view), not inside the settings tab. Selecting a category sets `useSettingsStore.selectedCategory` **and** opens the settings tab, so `SettingsMain` shows that panel. There is no `SettingsLayout` two-pane wrapper anymore — the Drawer is the left pane.
+Same nav/content split as Variables: the category tree renders in the **Drawer** (`settings` view), not inside the settings tab. Selecting a category sets `useSettingsStore.selectedCategory` **and** opens the settings tab, so `SettingsMain` shows that panel. There is no `SettingsLayout` two-pane wrapper anymore - the Drawer is the left pane.
 
 - **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** - settings category navigation; rendered by the Drawer.
 - **Main (`main/`)** - `SettingsMain.tsx` (screen `"settings"`) hosts the app-settings category panels under `main/panels/`: `AppearancePanel.tsx`, `DashboardPanel.tsx`, `GeneralPanel.tsx`, and `EditorPanel.tsx`, plus the shared `ClientSettingsPanel.tsx` wrapper, `FontPicker.tsx`, and `SettingControls.tsx` primitives. `app-panels.ts` is the panel registry/metadata. (The former monolithic `UISettingsPanel.tsx` was split into these panels in PR #55.)
 
 ## Welcome (`modules/welcome/`)
 
-Vayu's new-tab surface — rendered for the `welcome` tab (opened by TabStrip's `+`), when no tab is open, and for a request tab with no entity.
+Vayu's new-tab surface - rendered for the `welcome` tab (opened by TabStrip's `+`), when no tab is open, and for a request tab with no entity.
 
-It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restored, so returning users land back on their own tabs. Its job is to start something new. Keep marketing content off it — a feature pitch and static perf claims were removed for exactly that reason. Anything already visible in the Collections sidebar or History drawer is a duplicate and does not belong here either.
+It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restored, so returning users land back on their own tabs. Its job is to start something new. Keep marketing content off it - a feature pitch and static perf claims were removed for exactly that reason. Anything already visible in the Collections sidebar or History drawer is a duplicate and does not belong here either.
 
-- `WelcomeScreen.tsx` — container: queries, `handleNewRequest`, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user.
-- `EmptyState.tsx` — fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
-- `Launcher.tsx` — populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
-- `components/` — `ActionTile`, `RecentRuns`, `FooterLinks`.
+- `WelcomeScreen.tsx` - container: queries, `handleNewRequest`, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user.
+- `EmptyState.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
+- `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
+- `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`.
 
-Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel — the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
+Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel - the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
 
 Design rationale: `app/src/modules/welcome/README.md`
 

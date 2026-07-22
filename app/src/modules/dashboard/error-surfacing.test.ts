@@ -10,7 +10,7 @@
  *
  * Three did not. The report fetch retried forever behind a `console.error`;
  * stopping a run failed silently; and the SSE layer wrote its error into
- * `useDashboardStore.error`, which no component read — so a dead metrics stream
+ * `useDashboardStore.error`, which no component read - so a dead metrics stream
  * looked exactly like a run that produced no data.
  *
  * The last one is what this guards. It is a wiring bug, not a logic bug: the
@@ -29,7 +29,7 @@ const dashboard = readFileSync(join(here, "index.tsx"), "utf8");
 const store = readFileSync(join(here, "..", "..", "stores", "dashboard-store.ts"), "utf8");
 const service = readFileSync(join(here, "..", "..", "services", "load-test-service.ts"), "utf8");
 
-/** Strip comments — several of these files explain the bug in prose. */
+/** Strip comments - several of these files explain the bug in prose. */
 const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 
 describe("dashboard error surfacing", () => {
@@ -60,7 +60,7 @@ describe("dashboard error surfacing", () => {
 	it("offers a way out of each", () => {
 		// Matched as JSX text nodes, not substrings. `toContain("Reconnect")`
 		// passed against a mutation that renamed the button, because the file
-		// also logs "Reconnecting to run …" — mutation testing caught it.
+		// also logs "Reconnecting to run …" - mutation testing caught it.
 		const body = code(dashboard);
 		expect(body).toMatch(/>\s*Reconnect\s*</);
 		expect(body).toMatch(/>\s*Retry\s*</);

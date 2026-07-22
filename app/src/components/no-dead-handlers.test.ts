@@ -17,7 +17,7 @@
  *     };
  *
  * The comment is the tell. It explains why the button *appears* and says nothing
- * about what clicking it does — someone reached the navigation problem, wrote
+ * about what clicking it does - someone reached the navigation problem, wrote
  * down the gap, and left. Clicking did nothing, and `currentRunId` is never
  * cleared, so both buttons were permanent after the session's first load test.
  *
@@ -33,18 +33,18 @@ import { dirname, join, relative } from "node:path";
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * `const foo = () => {};` — allowing whitespace and comments inside the body,
+ * `const foo = () => {};` - allowing whitespace and comments inside the body,
  * since a comment is exactly what made the original look intentional.
  */
 const EMPTY_ARROW =
 	/const\s+(\w+)\s*=\s*\([^)]*\)\s*(?::\s*\w+\s*)?=>\s*\{\s*(?:\/\/[^\n]*\n\s*|\/\*[\s\S]*?\*\/\s*)*\}/g;
 
 /**
- * `onClick={foo}`, `onSelect={foo}` — any handler prop bound to this name.
+ * `onClick={foo}`, `onSelect={foo}` - any handler prop bound to this name.
  *
  * `String.raw`, deliberately. Written first as a plain template literal with
  * `\\w`, which collapsed to `\w` in the file and then to a bare `w` when the
- * template was evaluated — the pattern became `on[A-Z]w*=…` and matched
+ * template was evaluated - the pattern became `on[A-Z]w*=…` and matched
  * nothing. The guard passed against its own mutation until that was chased
  * down, which is the only reason it is written this way.
  */

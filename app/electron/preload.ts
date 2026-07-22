@@ -103,7 +103,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("menu:open-settings", handler);
 	},
 
-	// Interface scale — real page zoom (reflows the viewport).
+	// Interface scale - real page zoom (reflows the viewport).
 	setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
 	getZoomFactor: (): number => webFrame.getZoomFactor(),
 
@@ -111,7 +111,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	platform: process.platform,
 
 	// Open one of the app's own doc links in the system browser. Keyed, not
-	// URL-taking — see the handler in main.ts.
+	// URL-taking - see the handler in main.ts.
 	openAppLink: (key: "docs" | "scripting" | "issues"): Promise<void> =>
 		ipcRenderer.invoke("shell:openAppLink", key),
 

@@ -159,7 +159,7 @@ void register_request_routes (RouteContext& ctx) {
                 r.url = json["url"].get<std::string> ();
             }
 
-            // Validate and store params — must be an array of KeyValueEntry
+            // Validate and store params - must be an array of KeyValueEntry
             if (json.contains ("params")) {
                 const auto& p = json["params"];
                 if (!p.is_array () && !p.is_null ()) {
@@ -183,7 +183,7 @@ void register_request_routes (RouteContext& ctx) {
                 r.params = p.is_null () ? "[]" : p.dump ();
             }
 
-            // Validate and store headers — must be an array of KeyValueEntry
+            // Validate and store headers - must be an array of KeyValueEntry
             if (json.contains ("headers")) {
                 const auto& h = json["headers"];
                 if (!h.is_array () && !h.is_null ()) {

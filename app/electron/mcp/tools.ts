@@ -12,7 +12,7 @@
  *        result. Schemas are Zod (the SDK validates arguments and generates the
  *        JSON Schema for `tools/list`); tools carry MCP annotations (readOnly /
  *        destructive hints + a display title) and some declare an output schema
- *        for structured results. Transport-agnostic — the same registry backs
+ *        for structured results. Transport-agnostic - the same registry backs
  *        both the Streamable HTTP server (Electron) and the stdio CLI.
  */
 
@@ -74,8 +74,8 @@ export interface ToolResult {
 /**
  * Capability class surfaced in Settings for per-tool control; each maps to a
  * distinct gate profile: `read` (inspection, ungated), `execute` (sends a
- * request to a target host — allowlist), `write` (mutates saved data/config —
- * write toggle), `load` (starts/stops load tests — allowlist + caps + confirm).
+ * request to a target host - allowlist), `write` (mutates saved data/config -
+ * write toggle), `load` (starts/stops load tests - allowlist + caps + confirm).
  */
 export type ToolCategory = "read" | "execute" | "write" | "load";
 
@@ -172,7 +172,7 @@ class ToolArgError extends Error {}
  * keys/values, and body content (the app resolves these renderer-side before
  * the engine ever sees them; MCP must do the same). `opts.url` lets the caller
  * pass an already-resolved URL (it is resolved once, up front, for the
- * allowlist check). The body is emitted as `{ mode, content }` — the shape the
+ * allowlist check). The body is emitted as `{ mode, content }` - the shape the
  * engine's `deserialize_request` reads (it keys off `mode`, not `type`).
  */
 function buildExecutionPayload(
@@ -254,8 +254,8 @@ const environmentIdInput = z
 
 /**
  * Optional auth block. Callers can copy a saved request's `auth` object verbatim
- * (read via list_requests). The engine applies it — bearer/basic/apikey and
- * oauth2 (using its token cache) — after `{{variables}}` inside it are resolved;
+ * (read via list_requests). The engine applies it - bearer/basic/apikey and
+ * oauth2 (using its token cache) - after `{{variables}}` inside it are resolved;
  * `inherit` resolves against the collection chain (supply collectionId).
  */
 const authInput = z
@@ -318,7 +318,7 @@ const configUpdateSchema = z
 
 /**
  * Of the changed config keys, which require an engine restart to take effect.
- * The engine flags this in each entry's `label` ("… (Requires Restart)") — or an
+ * The engine flags this in each entry's `label` ("… (Requires Restart)") - or an
  * explicit `requiresRestart` boolean if present.
  */
 function restartRequiredAmong(configResponse: unknown, changedKeys: string[]): string[] {
@@ -511,7 +511,7 @@ export const TOOLS: McpTool[] = [
 		name: "update_engine_config",
 		category: "write",
 		description:
-			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect — the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (Vayu Settings → restart engine, or relaunch).",
+			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect - the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (Vayu Settings → restart engine, or relaunch).",
 		readOnly: false,
 		annotations: {
 			title: "Update engine config",
@@ -625,7 +625,7 @@ export const TOOLS: McpTool[] = [
 		name: "update_environment",
 		category: "write",
 		description:
-			"Set or overwrite variables on an environment (merges with the existing variables — other variables are preserved). GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Set or overwrite variables on an environment (merges with the existing variables - other variables are preserved). GUARDED: requires write access to be enabled in Vayu Settings.",
 		readOnly: false,
 		annotations: {
 			title: "Update environment",
@@ -702,7 +702,7 @@ export const TOOLS: McpTool[] = [
 			let rc: ResolutionContext;
 			try {
 				// Fetch the requests and the resolution scope (collection chain +
-				// variable sources) concurrently — the scope is shared across every
+				// variable sources) concurrently - the scope is shared across every
 				// request in the collection.
 				[requests, rc] = await Promise.all([
 					ctx.client.listRequests(collectionId, signal),
@@ -881,18 +881,18 @@ export const TOOLS: McpTool[] = [
 						},
 					});
 					if (outcome.action !== "accept" || outcome.content?.proceed === false) {
-						return textResult("Load run not started — the user declined.");
+						return textResult("Load run not started - the user declined.");
 					}
 					return callEngine(() => ctx.client.startRun(payload, signal));
 				} catch {
-					// Client can't elicit — fall through to the flag-based gate.
+					// Client can't elicit - fall through to the flag-based gate.
 				}
 			}
 
 			// Fallback gate: preview unless explicitly confirmed.
 			if (args.confirmed !== true) {
 				return textResult(
-					"AWAITING CONFIRMATION — no run was started.\n\n" +
+					"AWAITING CONFIRMATION - no run was started.\n\n" +
 						"This is a preview. To start the load test, call start_load_run again with confirmed: true and the same arguments.\n\n" +
 						`Planned run:\n${JSON.stringify(payload, null, 2)}`
 				);

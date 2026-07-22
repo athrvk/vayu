@@ -6,7 +6,7 @@
  */
 
 /**
- * UPlotChart — the ONE charting primitive.
+ * UPlotChart - the ONE charting primitive.
  *
  * Every time-series surface in the app (live dashboard + history) renders through
  * this component, so "latency vs time" (or throughput, connections, errors, the
@@ -55,7 +55,7 @@ export interface UPlotSeriesSpec {
 }
 
 export interface UPlotChartProps {
-	/** Aligned data: [xs, series0, series1, …] — every series shares xs. */
+	/** Aligned data: [xs, series0, series1, …] - every series shares xs. */
 	data: uPlot.AlignedData;
 	series: UPlotSeriesSpec[];
 	height?: number;
@@ -70,7 +70,7 @@ export interface UPlotChartProps {
 	/**
 	 * Mark the x axis as elapsed-seconds. Constrains tick increments to whole
 	 * seconds so ticks never land on 0.5 s (which the whole-second axis formatter
-	 * would round to a DUPLICATE/mislabeled tick — e.g. 3.5 s shown as "4s" under
+	 * would round to a DUPLICATE/mislabeled tick - e.g. 3.5 s shown as "4s" under
 	 * the cursor), and defaults the tooltip to 0.5 s resolution.
 	 */
 	xTime?: boolean;
@@ -262,7 +262,7 @@ export function UPlotChart({
 				axes,
 				hooks: {
 					// Broadcast the hovered timestamp to the group's focus channel so
-					// the scatter (different x axis) can highlight the same tick — and
+					// the scatter (different x axis) can highlight the same tick - and
 					// vice versa. Guarded so applying an external focus never re-emits.
 					setCursor: [
 						(u: uPlot) => {
@@ -294,7 +294,7 @@ export function UPlotChart({
 			plotRef.current = plot;
 		} catch {
 			// Canvas unavailable (e.g. jsdom without a 2D context). Degrade to an
-			// empty host rather than throwing — tests mock the context; real runtimes
+			// empty host rather than throwing - tests mock the context; real runtimes
 			// always have one.
 			plotRef.current = null;
 		}

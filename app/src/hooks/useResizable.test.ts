@@ -18,7 +18,7 @@ import { useResizable } from "./useResizable";
 
 const opts = { defaultSize: 320, min: 160, max: 800, direction: "vertical" as const };
 
-describe("useResizable — keyboard resizing", () => {
+describe("useResizable - keyboard resizing", () => {
 	it("nudges by a delta", () => {
 		const { result } = renderHook(() => useResizable(opts));
 		expect(result.current.size).toBe(320);
@@ -32,7 +32,7 @@ describe("useResizable — keyboard resizing", () => {
 
 	// Note: this asserts the *observable* invariant, which the render-time clamp
 	// on `size` already guarantees. Removing the clamp inside `resizeBy` does not
-	// fail it — verified by mutation. The invariant is still worth pinning; just
+	// fail it - verified by mutation. The invariant is still worth pinning; just
 	// do not read a pass here as covering that line.
 	it("clamps to the same bounds a drag would", () => {
 		const { result } = renderHook(() => useResizable(opts));
@@ -61,7 +61,7 @@ describe("useResizable — keyboard resizing", () => {
 	});
 
 	it("nudges from the clamped size when the bounds have tightened", () => {
-		// The panel can be sitting outside the current bounds — a per-context min
+		// The panel can be sitting outside the current bounds - a per-context min
 		// rises when a tab needs more room. A nudge should move from where the
 		// panel actually is, not from the stale raw value.
 		const { result, rerender } = renderHook(({ min }) => useResizable({ ...opts, min }), {

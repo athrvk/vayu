@@ -102,7 +102,7 @@ nlohmann::json get_script_completions () {
     { "detail", "number" },
     { "documentation",
     "Wire-only response time in milliseconds (CURLINFO_TOTAL_TIME). Pre-#19 "
-    "semantics — use for server-only SLA assertions." },
+    "semantics - use for server-only SLA assertions." },
     { "sortText", "1_pm_response_time_wire" } });
 
     completions.push_back ({ { "label", "pm.response.responseTimeQueueWait" },

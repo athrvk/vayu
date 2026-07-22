@@ -10,7 +10,7 @@
  *
  * Two of the old values are gone, so anyone who had chosen them holds a setting
  * the picker no longer offers. Left alone, the control renders with nothing
- * selected while auto-save keeps running on the old interval — the UI and the
+ * selected while auto-save keeps running on the old interval - the UI and the
  * behaviour disagreeing, which is worse than either being wrong alone.
  */
 
@@ -28,7 +28,7 @@ describe("auto-save delay options", () => {
 	});
 
 	it("defaults to a value it actually offers", () => {
-		// The old default was 3s, which is no longer in the list — a default that
+		// The old default was 3s, which is no longer in the list - a default that
 		// is not selectable leaves the picker blank on a fresh install.
 		expect(AUTO_SAVE_DELAY_OPTIONS.map((o) => o.value)).toContain(DEFAULT_AUTO_SAVE_DELAY_MS);
 	});
@@ -54,7 +54,7 @@ describe("auto-save delay options", () => {
 
 	it("breaks an exact tie downwards, towards saving sooner", () => {
 		// 45s is equidistant from 30s and 60s. `reduce` keeps the incumbent on a
-		// tie, so the shorter interval wins — which is the right way round for a
+		// tie, so the shorter interval wins - which is the right way round for a
 		// save setting: erring towards saving sooner cannot lose work.
 		expect(nearestAutoSaveDelay(45_000)).toBe(30_000);
 	});

@@ -9,7 +9,7 @@
  * The four load profiles, as a radio group rather than a `<Select>`.
  *
  * They are four different strategies with four different forms behind them, and
- * a select shows one label at a time — so choosing meant opening a menu and
+ * a select shows one label at a time - so choosing meant opening a menu and
  * reading options you could not compare. As cards, all four are visible with a
  * line of description each, which also retires most of the old "What will
  * happen" prose.
@@ -17,7 +17,7 @@
  * Keyboard follows the WAI-ARIA radio group pattern, which is stricter than it
  * looks: the whole group is **one** Tab stop, arrows move *and* select (wrapping
  * at the ends), and Space selects the focused option. Roving tabindex is what
- * makes the single stop work — anything else would put four stops in the middle
+ * makes the single stop work - anything else would put four stops in the middle
  * of a form.
  */
 
@@ -42,7 +42,7 @@ export function ProfilePicker({
 		const next =
 			LOAD_TEST_MODES[(index + delta + LOAD_TEST_MODES.length) % LOAD_TEST_MODES.length];
 		onChange(next.value);
-		// Focus follows selection, which is the point of the pattern — the user
+		// Focus follows selection, which is the point of the pattern - the user
 		// is choosing as they arrow, not navigating then committing.
 		groupRef.current?.querySelector<HTMLElement>(`[data-profile="${next.value}"]`)?.focus();
 	};

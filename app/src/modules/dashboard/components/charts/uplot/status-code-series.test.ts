@@ -20,7 +20,7 @@
  *
  * Anything below roughly 0.10 reads as the same colour. In the stacked
  * status-code chart that meant 2xx and 3xx rendering identically on Forest, and
- * 3xx and 5xx on Coral — and there, colour is the entire encoding.
+ * 3xx and 5xx on Coral - and there, colour is the entire encoding.
  *
  * This guards the roles, not the pixels: it reads the series specs and asserts
  * none of them resolves to an accent-tracking token, and that no two share a
@@ -30,7 +30,7 @@
  * `StatusCodesOverTimeChart.tsx`, so the same defect sat untouched in the
  * scatter, HDR, latency and throughput charts until a parallel audit found it.
  * A guard written around the one instance you happened to find will keep the
- * rest — it now reads every chart spec in this directory.
+ * rest - it now reads every chart spec in this directory.
  */
 
 import { describe, it, expect } from "vitest";
@@ -75,7 +75,7 @@ describe("chart series colours", () => {
 	/**
 	 * Uniqueness is checked only for the stacked status chart, deliberately.
 	 *
-	 * There, every series shares one plot, so two on the same role render alike —
+	 * There, every series shares one plot, so two on the same role render alike -
 	 * which is the bug this file was written for. The other two modules each
 	 * declare *several* charts, and roles legitimately repeat across them:
 	 * `success` is p50 in the latency plot and "achieved" in the rate plot, and
@@ -83,7 +83,7 @@ describe("chart series colours", () => {
 	 * plot, so asserting uniqueness per file reports those as collisions.
 	 *
 	 * The accent ban above is what covers those modules, and it is the part that
-	 * matters — it is what four series were violating.
+	 * matters - it is what four series were violating.
 	 */
 	it("gives each series in the stacked status chart its own role", () => {
 		const lineRoles = [

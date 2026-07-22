@@ -15,7 +15,7 @@
 /**
  * Live retained metrics are bounded by the user-configurable **time** window
  * (see `constants/live-window.ts`, applied in `dashboard-store.addMetricsBatch`)
- * plus a hard `MAX_RETAINED_TICKS` safety cap — not by a fixed point count.
+ * plus a hard `MAX_RETAINED_TICKS` safety cap - not by a fixed point count.
  */
 
 /** Throttle for committing live SSE metrics into the UI store. */

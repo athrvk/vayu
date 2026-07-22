@@ -58,7 +58,7 @@ const win = {
 	webContents: { send: vi.fn() },
 } as unknown as Parameters<typeof import("./updater.js").initAutoUpdater>[0];
 
-/** Re-import with fresh module state — the updater keeps module-level state. */
+/** Re-import with fresh module state - the updater keeps module-level state. */
 async function loadUpdater(platform: NodeJS.Platform = "win32") {
 	vi.resetModules();
 	listeners.clear();
@@ -111,8 +111,8 @@ describe("checkForUpdatesNow", () => {
 	});
 
 	it("joins an in-flight check instead of starting a second one", async () => {
-		// Two clicks — the menu item and the settings button, or an impatient
-		// double-click — must not race two checks whose events interleave.
+		// Two clicks - the menu item and the settings button, or an impatient
+		// double-click - must not race two checks whose events interleave.
 		const { initAutoUpdater, checkForUpdatesNow } = await loadUpdater();
 		initAutoUpdater(win);
 		checkForUpdates.mockClear();
@@ -198,7 +198,7 @@ describe("where the result is delivered", () => {
 	it("stays silent for the periodic check, which nobody is waiting on", async () => {
 		const { initAutoUpdater } = await loadUpdater();
 		initAutoUpdater(win);
-		// No manual check in flight — the interval's events must not pop a
+		// No manual check in flight - the interval's events must not pop a
 		// dialog over whatever the user is doing.
 		listeners.get("update-not-available")?.({});
 		listeners.get("error")?.(new Error("offline"));

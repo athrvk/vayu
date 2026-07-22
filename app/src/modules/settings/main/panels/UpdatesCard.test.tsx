@@ -7,7 +7,7 @@
 
 /**
  * The card's job is to tell the four outcomes apart. Getting that wrong is not
- * cosmetic — reporting "couldn't check" for a development build, or leaving a
+ * cosmetic - reporting "couldn't check" for a development build, or leaving a
  * stale "you're up to date" on screen while a new check runs, both say
  * something untrue about the user's install.
  */

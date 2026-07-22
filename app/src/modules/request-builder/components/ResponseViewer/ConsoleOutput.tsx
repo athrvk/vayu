@@ -87,8 +87,8 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 
 			{/*
 			 * Colours below are tokens, not raw palette. `text-blue-500` /
-			 * `text-green-500` are theme-blind — one value on both a white card and
-			 * a near-black one — and measured 3.76 and 2.22 in light mode against
+			 * `text-green-500` are theme-blind - one value on both a white card and
+			 * a near-black one - and measured 3.76 and 2.22 in light mode against
 			 * 4.5 for the headings and badge labels. The `-text` tokens are
 			 * per-theme: 5.98/6.76 and 5.68/8.80.
 			 *

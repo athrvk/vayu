@@ -352,7 +352,7 @@ function ResponseStatusBar({
 	return (
 		<div className="flex items-center gap-4 px-4 py-3 border-b border-border bg-muted/30">
 			{/* Status */}
-			{/* `chip`, not the default variant — see ResponseHeader.tsx. The
+			{/* `chip`, not the default variant - see ResponseHeader.tsx. The
 			    default's `hover:bg-primary-fill/80` outlives the background this
 			    className replaces, repainting the chip with the user's accent. */}
 			<Badge

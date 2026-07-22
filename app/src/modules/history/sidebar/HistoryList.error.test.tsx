@@ -10,7 +10,7 @@
  *
  * `useRunsQuery` is destructured as `{ data: allRuns = [] }`, and nothing sets
  * `throwOnError`, so a query that settles as an error never reaches the
- * ErrorBoundary — it resolves to `[]` and falls through to "No test runs
+ * ErrorBoundary - it resolves to `[]` and falls through to "No test runs
  * found", a claim about the user's data made when no data arrived.
  *
  * Unlike the collections tree there is no create CTA here to make things worse.
@@ -18,8 +18,8 @@
  * a failed load while the others say the user has nothing makes a single event
  * look like two.
  *
- * Every case asserts both halves — the right thing present *and* the wrong
- * thing absent — because the empty state lives in a separate `{cond && ...}`
+ * Every case asserts both halves - the right thing present *and* the wrong
+ * thing absent - because the empty state lives in a separate `{cond && ...}`
  * block, so nothing stops both from rendering at once unless the branch says so.
  */
 

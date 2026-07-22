@@ -74,7 +74,7 @@ bool force_refresh, const std::optional<InteractiveExchange>& interactive);
 
 /**
  * @brief Public JSON shape of a cached token (never includes the refresh token
- *        value — only hasRefreshToken).
+ *        value - only hasRefreshToken).
  */
 nlohmann::json serialize_token (const vayu::db::OAuthToken& t);
 

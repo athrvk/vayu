@@ -14,7 +14,7 @@
  * nothing. Nothing in the type system connects the two.
  *
  * The dark block is checked separately from the light one because it is the
- * easier half to forget — and forgetting it is worse than forgetting both. A
+ * easier half to forget - and forgetting it is worse than forgetting both. A
  * scheme with only a light block looks correct until you switch theme, at which
  * point the accent silently reverts to the default while the setting still
  * reads as the chosen one.
@@ -42,7 +42,7 @@ const REQUIRED = [
 
 /**
  * Anchored at the start of the line, because `.dark[data-color-scheme="x"]`
- * *contains* `[data-color-scheme="x"]` as a substring — a plain `indexOf` for
+ * *contains* `[data-color-scheme="x"]` as a substring - a plain `indexOf` for
  * the light selector happily returns the dark block and reports success for a
  * light block that does not exist. Mutation testing caught that; the deleted
  * light block passed.
@@ -60,7 +60,7 @@ function block(selector: string, dark: boolean): string | null {
 
 describe("accent colour schemes", () => {
 	it("reads a stylesheet that is actually populated", () => {
-		// vitest stubs CSS imports to "" — this file is read from disk for that
+		// vitest stubs CSS imports to "" - this file is read from disk for that
 		// reason, and a guard that scans an empty string passes for free.
 		expect(css.length).toBeGreaterThan(1000);
 		expect(css).toContain("data-color-scheme");
@@ -95,7 +95,7 @@ describe("accent colour schemes", () => {
 	it("has no orphan CSS blocks for schemes the registry does not offer", () => {
 		// Widened deliberately: COLOR_SCHEMES is `as const`, so the inferred Set is
 		// of the literal union and will not accept an arbitrary string scraped out
-		// of the stylesheet — which is exactly what this test needs to check.
+		// of the stylesheet - which is exactly what this test needs to check.
 		const declared = new Set<string>(COLOR_SCHEMES.map((s) => s.value));
 		const found = [...css.matchAll(/\[data-color-scheme="([A-Za-z-]+)"\]/g)].map((m) => m[1]);
 		expect([...new Set(found)].filter((v) => !declared.has(v))).toEqual([]);

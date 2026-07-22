@@ -9,7 +9,7 @@ import { type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { InfoChip, EYEBROW_CLASS } from "../shared";
 
-/** Secondary metric pattern (22px values) — one Row 4 stat. */
+/** Secondary metric pattern (22px values) - one Row 4 stat. */
 export function StatCard({
 	label,
 	value,

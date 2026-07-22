@@ -35,7 +35,7 @@ export interface VariableScopeBadgeProps {
  * autocomplete list. `--scope-global` is a real token (green in both themes),
  * `docs/design-system.md` gives it the same "icon/text solid, `/10` tint"
  * convention as the other two, and `VariableTableEditor` and
- * `VariablesCategoryTree` already paint it green — the autocomplete was the
+ * `VariablesCategoryTree` already paint it green - the autocomplete was the
  * only place that disagreed.
  */
 const SCOPE_CONFIG: Record<
@@ -73,7 +73,7 @@ export function VariableScopeBadge({
 	/*
 	 * `chip` for both: every other Badge variant pairs `bg-x` with
 	 * `hover:bg-x/80`, and tailwind-merge files `hover:bg-*` under a different
-	 * key from `bg-*` — so the tint below replaced the background and left the
+	 * key from `bg-*` - so the tint below replaced the background and left the
 	 * hover behind. The full variant was `secondary` and greyed out under the
 	 * pointer. None of these is clickable.
 	 */

@@ -113,7 +113,7 @@ void register_collection_routes (RouteContext& ctx) {
                 c.variables = "{}";
             }
 
-            // Collection auth — never 'inherit'; defaults to {mode: "none"}
+            // Collection auth - never 'inherit'; defaults to {mode: "none"}
             if (json.contains ("auth")) {
                 c.auth = json["auth"].is_null () ? "{\"mode\":\"none\"}" : json["auth"].dump ();
             } else if (!is_update) {

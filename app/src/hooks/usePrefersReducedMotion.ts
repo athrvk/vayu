@@ -8,7 +8,7 @@
 /**
  * Whether the operating system asks for reduced motion.
  *
- * The collapsing itself is CSS — a `@media (prefers-reduced-motion: reduce)`
+ * The collapsing itself is CSS - a `@media (prefers-reduced-motion: reduce)`
  * block in `index.css`, alongside the rule the in-app toggle drives. Nothing
  * needs JavaScript to stop animating.
  *
@@ -19,7 +19,7 @@
  * `useSyncExternalStore` rather than state-plus-effect: the media query is an
  * external source of truth, so React should read it directly. The effect
  * version had to re-read on mount to close the gap between the initial render
- * and the subscription, which is a setState inside an effect — a cascading
+ * and the subscription, which is a setState inside an effect - a cascading
  * render on every mount, and the lint rule that flags it is right.
  */
 

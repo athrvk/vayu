@@ -52,7 +52,7 @@ function classifyCumulative(codes: Record<string, number> | undefined): ClassSum
 /**
  * Build per-interval status-class counts from the cumulative `status_codes`
  * map each tick carries. Buckets to 0.5s, then diffs consecutive buckets so the
- * stacked chart shows how many of each class arrived in each interval — a 5xx
+ * stacked chart shows how many of each class arrived in each interval - a 5xx
  * burst shows up as a band, not a slope change. Diffs are clamped >= 0 (the
  * source is monotonic). Returns [] when no tick carries a status map.
  */
@@ -129,7 +129,7 @@ export interface RampOverlay {
 	// buckets, as a percentage. Computed app-side directly from the plotted
 	// `configured` and `achieved` (= measured current_concurrency) series, so it
 	// is consistent with the curves by construction. Unlike the retired
-	// deficit-only "ramp lag", overshoot (achieved >> configured) is counted —
+	// deficit-only "ramp lag", overshoot (achieved >> configured) is counted -
 	// a 9x overshoot reads as a large deviation, not 0%. Denominator is `target`
 	// (always > 0 here), so it never divides by zero even when configured == 0.
 	rampDeviationPct: number;

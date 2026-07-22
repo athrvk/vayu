@@ -107,7 +107,7 @@ export default function RequestBuilder() {
 
 	// Remember the collection the user is working in so the welcome screen can
 	// land a new request here. Set from the loaded request, where collectionId
-	// is authoritative — not from a tab-focus cache peek, which can be stale.
+	// is authoritative - not from a tab-focus cache peek, which can be stale.
 	const setLastCollectionId = useSessionStore((s) => s.setLastCollectionId);
 	useEffect(() => {
 		if (fetchedRequest?.collectionId) setLastCollectionId(fetchedRequest.collectionId);
@@ -242,7 +242,7 @@ export default function RequestBuilder() {
 					execBody = { mode: request.bodyMode || "text", content: resolvedBody };
 				}
 
-				// Resolve auth — walk collection chain for inherit, resolve variables for concrete
+				// Resolve auth - walk collection chain for inherit, resolve variables for concrete
 				let execAuth: Record<string, unknown> | undefined;
 				if (request.authType === "inherit") {
 					execAuth = resolveInheritedAuth(collectionAncestors);
@@ -287,11 +287,11 @@ export default function RequestBuilder() {
 				if (!result) return null;
 
 				// Surface an OAuth 2.0 authorization requirement (the engine could
-				// not fetch a token non-interactively) — the response still renders
+				// not fetch a token non-interactively) - the response still renders
 				// its error, but the toast points the user at the fix.
 				if (result.errorCode === "AUTH_REQUIRED") {
 					showToast(
-						"OAuth 2.0 token required — open the Auth tab and click Get Token",
+						"OAuth 2.0 token required - open the Auth tab and click Get Token",
 						"error"
 					);
 				} else if (result.errorCode === "AUTH_FAILED") {
@@ -620,7 +620,7 @@ export default function RequestBuilder() {
 	}
 
 	/*
-	 * Reaching here means the request was looked for and is genuinely gone —
+	 * Reaching here means the request was looked for and is genuinely gone -
 	 * `useRequestQuery` now fetches the collection lists rather than reading a
 	 * cache that may not have filled yet, so this is no longer the cold-start
 	 * race it used to be. The tab is therefore dead, and a centred "Request not
@@ -633,7 +633,7 @@ export default function RequestBuilder() {
 		return (
 			<ErrorState
 				title="This request no longer exists"
-				detail="It was deleted, or the collection it lived in was. Nothing here can be recovered — closing the tab is safe."
+				detail="It was deleted, or the collection it lived in was. Nothing here can be recovered - closing the tab is safe."
 				onRetry={() => refetch()}
 				action={
 					activeTab ? (

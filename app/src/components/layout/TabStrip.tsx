@@ -10,7 +10,7 @@
  *
  * The horizontal row of open tabs rendered in the title bar. Reads from
  * tabs-store; one TabItem per open tab plus a "+" button that opens a
- * welcome tab. No unsaved-dot — autosave is the safety net.
+ * welcome tab. No unsaved-dot - autosave is the safety net.
  */
 
 import { useRef } from "react";
@@ -99,7 +99,7 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 			label = request ? (
 				<span className="inline-flex items-baseline gap-1.5 min-w-0">
 					{/*
-					 * Method carries its colour here, as it does in the sidebar —
+					 * Method carries its colour here, as it does in the sidebar -
 					 * the same information should not read two different ways. Colour
 					 * is also what separates it from the tab's label; without it the
 					 * two compete on weight alone. Muted on inactive tabs so a full
@@ -162,7 +162,7 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 				// active tab's accent stripe does not shift its contents by 2px.
 				"group flex h-full min-w-20 max-w-50 shrink cursor-pointer select-none items-center gap-1.5 border-r border-border/40 border-t-2 px-3 text-sm",
 				isActive
-					? // Accent stripe is the primary signal — it reads identically in
+					? // Accent stripe is the primary signal - it reads identically in
 						// both themes, unlike a surface shift, which light mode carries
 						// far more weakly (see --tab-active).
 						"border-t-primary bg-tab-active text-foreground"
@@ -195,7 +195,7 @@ export function TabStrip() {
 	 * Arrow-key navigation across the strip.
 	 *
 	 * `role="tablist"` is a promise that arrow keys work, and it was not being
-	 * kept — the only key handling was Enter/Space on an individual tab. Handled
+	 * kept - the only key handling was Enter/Space on an individual tab. Handled
 	 * here by delegation rather than per-tab so the tabs stay ignorant of their
 	 * neighbours, and read off the DOM so the order always matches what is
 	 * rendered.

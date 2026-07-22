@@ -10,7 +10,7 @@ export const PANEL_MIN_WIDTH = 220;
 export const PANEL_MAX_WIDTH = 480;
 
 /**
- * Default drawer width (px) — one value for every view.
+ * Default drawer width (px) - one value for every view.
  *
  * Width used to be stored per view, with history at 320 and the rest at 260.
  * Switching to History therefore widened the drawer and pushed the main content
@@ -25,6 +25,6 @@ export const DEFAULT_CONTEXT_BAR_WIDTH = 252;
 
 /**
  * Horizontal step per tree depth level (px). Applied as padding *inside* a row
- * so the row still spans the full panel width — see CollectionItem.
+ * so the row still spans the full panel width - see CollectionItem.
  */
 export const INDENT_STEP = 12;

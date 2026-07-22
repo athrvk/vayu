@@ -9,8 +9,8 @@
  * Settings Category Tree
  *
  * Sidebar list of settings categories, split into two sections:
- * - App Settings — client-side panels, declared in the app-panels registry.
- * - Engine Settings — data-driven from the engine `/config` API.
+ * - App Settings - client-side panels, declared in the app-panels registry.
+ * - Engine Settings - data-driven from the engine `/config` API.
  *
  * Category rows share a single selected treatment (the app's `--primary`
  * accent); there is no per-category color.
@@ -55,7 +55,7 @@ export default function SettingsCategoryTree() {
 
 	// Selecting a category shows its panel in the settings tab. The tree now
 	// lives in the Drawer (not inside the settings tab), so it must open/focus
-	// that tab itself — mirroring VariablesCategoryTree.
+	// that tab itself - mirroring VariablesCategoryTree.
 	const selectCategory = (category: SettingsCategory) => {
 		setSelectedCategory(category);
 		openTab({ type: "settings", entityId: null });
@@ -112,7 +112,7 @@ export default function SettingsCategoryTree() {
 					{appCategories.map((category) => renderCategory(category, false))}
 				</div>
 
-				{/* Engine Settings Section — depends on the engine `/config` query, so
+				{/* Engine Settings Section - depends on the engine `/config` query, so
 			    its loading/error states are scoped here. App Settings above always
 			    render (client-side), so Settings stays usable when the engine is down. */}
 				<div className="px-3 py-2 mb-1">

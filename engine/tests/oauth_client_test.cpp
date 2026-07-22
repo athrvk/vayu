@@ -148,7 +148,7 @@ class OAuthClientTest : public ::testing::Test {
 };
 
 // ---------------------------------------------------------------------------
-// cache_key — vectors shared verbatim with app/src/services/oauth/cache-key.ts
+// cache_key - vectors shared verbatim with app/src/services/oauth/cache-key.ts
 // ---------------------------------------------------------------------------
 
 TEST (OAuthCacheKey, SharedVectors) {
@@ -202,7 +202,7 @@ TEST_F (OAuthClientTest, FetchesPersistsAndCaches) {
     EXPECT_EQ (t1.expires_in, 3600);
     EXPECT_EQ (idp.hits (), 1);
 
-    // Second acquisition is a cache hit — no extra IdP call.
+    // Second acquisition is a cache hit - no extra IdP call.
     auto r2 = oauth::acquire_token (*db_, cc_config (idp), false, std::nullopt);
     ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r2));
     EXPECT_EQ (std::get<vayu::db::OAuthToken> (r2).access_token, "AT1");

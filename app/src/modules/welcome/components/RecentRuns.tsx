@@ -8,19 +8,19 @@
 /**
  * RecentRuns
  *
- * Flat rows rather than cards — the card grid is what made the old screen read
+ * Flat rows rather than cards - the card grid is what made the old screen read
  * as a landing page. Carries the app's existing run vocabulary (method badge,
  * type badge, status tokens, mono timestamps) so it matches the dashboard and
  * history views.
  *
  * Each row leads with what was run. Without that the list read "Load ·
  * Completed · 2 hours ago" five times over, with nothing to tell one row from
- * the next — you had to open a run to find out which one it was.
+ * the next - you had to open a run to find out which one it was.
  *
  * The identifier is the method and URL from `configSnapshot`, which is what the
  * history sidebar shows for the same records. Not the request's *name*: a run
- * stores no name, and `requestId` is only set for design runs, so most rows —
- * every load test — would have nothing to look up. The snapshot's URL is
+ * stores no name, and `requestId` is only set for design runs, so most rows -
+ * every load test - would have nothing to look up. The snapshot's URL is
  * always there, and it is the truth about what was actually sent, even if the
  * request has since been renamed, edited or deleted.
  */

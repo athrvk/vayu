@@ -75,7 +75,7 @@ export default function RunItem({
 			className={cn(
 				// focus-row: the card is the perceived target, so it paints the ring
 				// for the activator inside it. It also has overflow-hidden, which
-				// would clip an outset ring — focus-row's is inset.
+				// would clip an outset ring - focus-row's is inset.
 				"focus-row group relative bg-card border cursor-pointer transition-all transition-colors overflow-hidden w-full",
 				isSelected
 					? "bg-primary/10 hover:bg-primary/15 border-primary/50 ring-1 ring-inset ring-primary/20 shadow-sm"
@@ -199,7 +199,7 @@ export default function RunItem({
 			 * The card used to be a <div onClick>: clickable by mouse, but not
 			 * focusable, not in the tab order and not operable by Enter or Space.
 			 * A keyboard user could reach "Delete run" inside a card but had no way
-			 * to *open* one — the destructive action was reachable and the primary
+			 * to *open* one - the destructive action was reachable and the primary
 			 * one was not.
 			 *
 			 * A stretched activator keeps the whole card clickable while being a

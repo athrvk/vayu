@@ -62,7 +62,7 @@ interface DockButtonProps {
  * Taking `label` rather than a prebuilt tooltip string means the name is
  * derived here and cannot be omitted at a call site.
  *
- * The shortcut stays out of the accessible name — it is useful on hover but
+ * The shortcut stays out of the accessible name - it is useful on hover but
  * turns the name into "Collections Control Shift E" when read aloud.
  */
 function DockButton({ active, onClick, label, shortcut, children }: DockButtonProps) {
@@ -99,9 +99,9 @@ export function Dock() {
 	return (
 		<TooltipProvider>
 			<div className="flex items-center h-8 px-2 gap-2 border-t border-border bg-panel shrink-0">
-				{/* Left — drawer switchers.
+				{/* Left - drawer switchers.
 				    <nav>: these four choose what the sidebar shows, which is the
-				    app's primary navigation. Not role="toolbar" — that promises
+				    app's primary navigation. Not role="toolbar" - that promises
 				    arrow-key traversal between the buttons, which this does not
 				    implement, and claiming it would mislead a keyboard user. */}
 				<nav className="flex items-center gap-0.5" aria-label="Sidebar views">
@@ -118,7 +118,7 @@ export function Dock() {
 					))}
 				</nav>
 
-				{/* Middle — ambient status */}
+				{/* Middle - ambient status */}
 				<div className="flex-1 flex items-center justify-center gap-4">
 					{/*
 					 * success-text, not status-success. The status tokens are tuned as
@@ -146,8 +146,8 @@ export function Dock() {
 					)}
 					{/*
 					 * The reason, not just the fact. `save-store` records an
-					 * `errorMessage` on every failure — "database is locked", "disk
-					 * full" — and nothing read it, so every failure looked the same
+					 * `errorMessage` on every failure - "database is locked", "disk
+					 * full" - and nothing read it, so every failure looked the same
 					 * and none of them said what to do about it. Same shape as three
 					 * failures found in the dashboard: state written, never read.
 					 *
@@ -160,13 +160,13 @@ export function Dock() {
 							className="max-w-60 truncate text-xs text-destructive-text"
 							title={saveError ?? undefined}
 						>
-							{saveError ? `Save failed — ${saveError}` : "Save failed"}
+							{saveError ? `Save failed - ${saveError}` : "Save failed"}
 						</span>
 					)}
 
 					{/*
 					 * Full muted-foreground, not /50. At half opacity the version
-					 * measured 2.71:1 dark and 1.94:1 light — the only element in the
+					 * measured 2.71:1 dark and 1.94:1 light - the only element in the
 					 * app failing contrast. `subtle-foreground` would not fix it
 					 * either (3.63 / 3.04); it is the faintest *readable* tier, still
 					 * under AA for 12px text. A version string is information, not
@@ -175,7 +175,7 @@ export function Dock() {
 					<span className="text-xs text-muted-foreground">v{__VAYU_VERSION__}</span>
 				</div>
 
-				{/* Right — toggles */}
+				{/* Right - toggles */}
 				<div className="flex items-center gap-0.5">
 					<DockButton
 						active={contextBarOpen}

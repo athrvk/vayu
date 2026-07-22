@@ -11,7 +11,7 @@
  * 1. A collection whose stored auth is oauth2/digest/aws/ntlm was narrowed to
  *    "none" for display. The tab then said "No authentication for this
  *    collection. Requests using 'Inherit from collection' will send no auth."
- *    about a collection that does have auth — while the inheritance chain three
+ *    about a collection that does have auth - while the inheritance chain three
  *    lines below it said OAUTH2. A Postman import produces exactly this
  *    (services/importers/postman.ts `collectionAuth` passes oauth2 through).
  *
@@ -68,7 +68,7 @@ function renderTab(collection: Collection) {
 
 /**
  * The shared OAuth2Form pulls in `TokenStatusRow`, which queries the cached
- * token — so the oauth2 branch needs a QueryClient as well as the tooltip
+ * token - so the oauth2 branch needs a QueryClient as well as the tooltip
  * provider. Both are mounted at the app root in real use.
  */
 function wrap(collection: Collection) {
@@ -92,7 +92,7 @@ beforeEach(() => {
 
 /*
  * Digest, not OAuth 2.0. This suite originally used oauth2, which was the
- * headline example of a mode the tab stored but refused to edit — it is
+ * headline example of a mode the tab stored but refused to edit - it is
  * editable now, so the case moved to a mode that genuinely still is not:
  * the engine has no resolution for digest/aws/ntlm, so offering them would let
  * someone configure something that silently does nothing.
@@ -154,7 +154,7 @@ describe("AuthTab when the save fails", () => {
 
 	/**
 	 * Shell renders <CollectionDetail /> with no key, and this tab's own comments
-	 * say it is not remounted per collection — that is why the draft resync
+	 * say it is not remounted per collection - that is why the draft resync
 	 * effect exists. The mutation is reused the same way and holds `isError`
 	 * until the next mutate, so without clearing it the notice would follow the
 	 * user to a collection they never tried to save.
@@ -177,7 +177,7 @@ describe("AuthTab when the save fails", () => {
 describe("OAuth 2.0 parity with the request builder", () => {
 	it("offers OAuth 2.0, which the request builder has always offered", () => {
 		// The engine resolves oauth2, importers produce it, and requests inherit
-		// it — but the collection editor could not create or edit it, so a
+		// it - but the collection editor could not create or edit it, so a
 		// collection could hold auth its own UI refused to show.
 		renderTab(makeCollection({ mode: "none" }));
 		fireEvent.click(screen.getByRole("combobox"));
@@ -196,7 +196,7 @@ describe("OAuth 2.0 parity with the request builder", () => {
 			})
 		);
 		// The real string is "OAuth 2.0 (not editable here)". An earlier version of
-		// this line searched for "cannot be edited here", which never existed —
+		// this line searched for "cannot be edited here", which never existed -
 		// so it passed against a mutation that made oauth2 uneditable again.
 		expect(screen.queryByText(/not editable here/i)).not.toBeInTheDocument();
 		expect(screen.queryByText(/OAuth 2\.0 auth is set/i)).not.toBeInTheDocument();
@@ -217,7 +217,7 @@ describe("OAuth 2.0 parity with the request builder", () => {
 		expect(screen.getByPlaceholderText(/https:\/\/.*token/i)).toBeInTheDocument();
 	});
 
-	it("keeps digest, aws and ntlm uneditable — the engine cannot resolve them", () => {
+	it("keeps digest, aws and ntlm uneditable - the engine cannot resolve them", () => {
 		// Offering these would let someone configure something that silently
 		// does nothing, which is the opposite of the bug being fixed.
 		renderTab(makeCollection({ mode: "none" }));

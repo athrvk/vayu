@@ -55,7 +55,7 @@ Vayu uses a **Sidecar Architecture** that decouples the user interface from the 
 
 ## The Manager (Electron + React)
 
-The Manager is the "face" of Vayu—a standard Electron application that provides the graphical interface.
+The Manager is the "face" of Vayu-a standard Electron application that provides the graphical interface.
 
 **Key Responsibilities:**
 - Request building and editing
@@ -77,7 +77,7 @@ See [App Architecture](app/architecture.md) for detailed information.
 
 ## The Engine (C++)
 
-The Engine is the "muscle"—a headless daemon optimized for maximum I/O throughput.
+The Engine is the "muscle"-a headless daemon optimized for maximum I/O throughput.
 
 **Key Responsibilities:**
 - HTTP request execution (libcurl)

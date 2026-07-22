@@ -80,14 +80,14 @@ describe("WelcomeScreen", () => {
 			expect(screen.getByText(/Recent runs/i)).toBeInTheDocument();
 		});
 
-		it("has no Load test action — a load test needs an existing request", () => {
+		it("has no Load test action - a load test needs an existing request", () => {
 			renderScreen();
 			// Anchored: a recent-run row is named "Open load test run, …", which a
 			// loose /Load test/ matches. The claim here is about the action tiles.
 			expect(screen.queryByRole("button", { name: /^Load test$/i })).not.toBeInTheDocument();
 		});
 
-		it("carries no branding — the title bar already has the logo", () => {
+		it("carries no branding - the title bar already has the logo", () => {
 			renderScreen();
 			expect(screen.queryByText("Vayu")).not.toBeInTheDocument();
 		});

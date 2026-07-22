@@ -719,7 +719,7 @@ struct Request {
     std::string auth;      // JSON - RequestAuth (mode + fields, may be 'inherit')
     std::string pre_request_script;  // JS Code
     std::string post_request_script; // JS Code (Tests)
-    int order;             // INTEGER NOT NULL DEFAULT 0 — position within collection
+    int order;             // INTEGER NOT NULL DEFAULT 0 - position within collection
     int64_t created_at;
     int64_t updated_at;
 };

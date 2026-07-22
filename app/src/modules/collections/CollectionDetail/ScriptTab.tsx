@@ -59,7 +59,7 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 		setScript(collection[fieldKey] ?? "");
 	}, [collection.id, collection, fieldKey]);
 
-	// The other half of that resync — see AuthTab. This component is reused
+	// The other half of that resync - see AuthTab. This component is reused
 	// across collection switches, and a mutation holds `isError` until the next
 	// mutate, so the failure notice has to be cleared with the draft.
 	const resetSave = updateCollection.reset;

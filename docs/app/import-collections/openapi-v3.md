@@ -1,6 +1,6 @@
 # OpenAPI 3.0
 
-Parses an OpenAPI 3.0.x specification into the Vayu draft model. OpenAPI is a **specification document, not a request log** — it describes endpoints, parameters, and schemas but carries no concrete values. The parser therefore emits **synthetic request stubs**: a `{{baseUrl}}` from the first server, query/header params with empty values, and a body sampled from the request schema. Users fill in real values after import.
+Parses an OpenAPI 3.0.x specification into the Vayu draft model. OpenAPI is a **specification document, not a request log** - it describes endpoints, parameters, and schemas but carries no concrete values. The parser therefore emits **synthetic request stubs**: a `{{baseUrl}}` from the first server, query/header params with empty values, and a body sampled from the request schema. Users fill in real values after import.
 
 - **Source:** `app/src/services/importers/openapi-v3.ts`
 - **Exports:**
@@ -8,7 +8,7 @@ Parses an OpenAPI 3.0.x specification into the Vayu draft model. OpenAPI is a **
   | Symbol | `formatName` | `formatKey` |
   |--------|--------------|-------------|
   | `OpenApiV3Parser` (class, implements `ImportParser`) | `OpenAPI 3.0` | `openapi-v3` |
-  | `schemeToAuth` (helper) | — | — |
+  | `schemeToAuth` (helper) | - | - |
 
   `OpenApiV3Parser` exposes `formatName` / `formatKey` as readonly fields and implements `detect` + `parse` from `./types`.
 
@@ -21,7 +21,7 @@ detect(parsed) {
 }
 ```
 
-The top-level `openapi` field must be a string beginning with `"3."` (so `3.0.0`, `3.0.3`, and `3.1.x` all match). Swagger 2.0 (`swagger: "2.0"`, no `openapi` field) is handled by a separate parser — see [OpenAPI v2](./openapi-v2.md). The factory (`factory.ts`) parses the raw text once (JSON, then YAML fallback) and runs each parser's `detect` in registration order.
+The top-level `openapi` field must be a string beginning with `"3."` (so `3.0.0`, `3.0.3`, and `3.1.x` all match). Swagger 2.0 (`swagger: "2.0"`, no `openapi` field) is handled by a separate parser - see [OpenAPI v2](./openapi-v2.md). The factory (`factory.ts`) parses the raw text once (JSON, then YAML fallback) and runs each parser's `detect` in registration order.
 
 ## Tree structure
 
@@ -69,7 +69,7 @@ Built by `makeTagCollection(spec, tag)`.
 | `tag` (the string) | `name` | |
 | `tags[].description` where `tags[].name === tag` | `description` | fallback `""` |
 | (none) | `variables` | always `{}` (baseUrl lives only on the root) |
-| (none) | `auth` | always `{ mode: "none" }` — tag collections do not carry security |
+| (none) | `auth` | always `{ mode: "none" }` - tag collections do not carry security |
 | (none) | `children` | always `[]` (tags are flat; no nesting) |
 | (none) | `preRequestScript` / `postRequestScript` | always `""` |
 
@@ -82,12 +82,12 @@ Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
 | `op.summary` → `op.operationId` → `"{METHOD} {path}"` | `name` | precedence in that order; final fallback uses upper-cased method + raw path, e.g. `"GET /users/{id}"` |
 | `op.description` | `description` | fallback `""` |
 | HTTP method | `method` | `method.toUpperCase()` (e.g. `get` → `GET`), cast to `HttpMethod` |
-| `path` | `url` | `` `{{baseUrl}}${normalizeVars(path)}` `` — always prefixed with `{{baseUrl}}`, even if no server was defined (see [URL](#url--path-parameters)) |
-| parameters with `in: "query"` | `params` | `{ key: name, value: "", enabled: true, description? }` — `description` included only when present |
-| parameters with `in: "header"` | `headers` | `{ key: name, value: "", enabled: true }` — **no description carried**; `authorization` and `content-type` headers are dropped (case-insensitive) since Vayu manages those |
-| parameters with `in: "path"` / `in: "cookie"` | — | not emitted as params/headers; path params are represented in the URL via `normalizeVars`. Cookie params are dropped. |
+| `path` | `url` | `` `{{baseUrl}}${normalizeVars(path)}` `` - always prefixed with `{{baseUrl}}`, even if no server was defined (see [URL](#url--path-parameters)) |
+| parameters with `in: "query"` | `params` | `{ key: name, value: "", enabled: true, description? }` - `description` included only when present |
+| parameters with `in: "header"` | `headers` | `{ key: name, value: "", enabled: true }` - **no description carried**; `authorization` and `content-type` headers are dropped (case-insensitive) since Vayu manages those |
+| parameters with `in: "path"` / `in: "cookie"` | - | not emitted as params/headers; path params are represented in the URL via `normalizeVars`. Cookie params are dropped. |
 | `op.requestBody` | `body` | via `buildBody` (see [Request body](#request-body-generation)) |
-| (none) | `auth` | always `{ mode: "inherit" }` — auth is configured once at the collection level |
+| (none) | `auth` | always `{ mode: "inherit" }` - auth is configured once at the collection level |
 | (none) | `preRequestScript` / `postRequestScript` | always `""` |
 
 **Parameter resolution & merge.** `buildOperation` concatenates path-item-level `parameters` with operation-level `op.parameters`, resolving any `$ref` entries via `resolveRef`. Each parameter is keyed by `` `${in}:${name}` `` in a `Map`, so an operation-level parameter **overrides** a path-level one with the same `in`+`name` (later writes win). Entries missing `in` or `name` after resolution are skipped.
@@ -95,7 +95,7 @@ Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
 ## URL & path parameters
 
 - The request `url` is always `` `{{baseUrl}}${normalizeVars(path)}` ``. `{{baseUrl}}` is a Vayu collection variable resolved from `servers[0].url` at import time (defined on the root collection). If the spec has no `servers`, `baseUrl` is absent from the root variables and `{{baseUrl}}` resolves to empty at runtime.
-- OpenAPI path templates `{param}` are converted to Vayu `{{param}}` by `normalizeVars` (`var-normalize.ts`). It rewrites single-brace `{x}` (identifier chars `[\w$-]`) to `{{x}}`, while leaving any existing `{{...}}` pairs intact. So `/users/{userId}/posts/{postId}` becomes `/users/{{userId}}/posts/{{postId}}`. Path parameters are **not** also emitted as `params` entries — they live only in the URL.
+- OpenAPI path templates `{param}` are converted to Vayu `{{param}}` by `normalizeVars` (`var-normalize.ts`). It rewrites single-brace `{x}` (identifier chars `[\w$-]`) to `{{x}}`, while leaving any existing `{{...}}` pairs intact. So `/users/{userId}/posts/{postId}` becomes `/users/{{userId}}/posts/{{postId}}`. Path parameters are **not** also emitted as `params` entries - they live only in the URL.
 
 ## Request body generation
 
@@ -109,16 +109,16 @@ Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
 | `multipart/form-data` | `{ mode: "form-data", fields }` | same as urlencoded; key per `schema.properties` |
 | no `content`, or none of the above | `{ mode: "none" }` | |
 
-JSON is preferred: `findJsonMedia` is checked first and takes precedence over text/form variants. The `x-www-form-urlencoded` / `multipart/form-data` branch only reads property **names** — property schemas, `required`, and nested structure are not sampled into form fields.
+JSON is preferred: `findJsonMedia` is checked first and takes precedence over text/form variants. The `x-www-form-urlencoded` / `multipart/form-data` branch only reads property **names** - property schemas, `required`, and nested structure are not sampled into form fields.
 
 ### `sampleSchema` (schema → stub value)
 
-`sampleSchema(schema, resolveRef)` in `schema-sampler.ts` generates a sample JSON value by walking the schema. It is **bounded and recursive** — materially more capable than a one-level stub:
+`sampleSchema(schema, resolveRef)` in `schema-sampler.ts` generates a sample JSON value by walking the schema. It is **bounded and recursive** - materially more capable than a one-level stub:
 
 - **Depth cap.** `MAX_DEPTH = 6`. Once `depth > 6`, the walker returns `{}`. Non-object / null nodes also return `{}`.
 - **`$ref` resolution + cycle guard.** A node with a string `$ref` is resolved via `resolveRef` and walked (depth +1). A `Set` of already-visited `$ref` strings is threaded down each branch; re-encountering a `$ref` already on the current path returns `{}` (breaks reference cycles). Resolution failures (`throw` or `null` result) also yield `{}`.
 - **`example` preference.** If the schema node has an `example` field, that value is returned verbatim (checked **after** `$ref`, before composition and `type`). This lets authors pin exact sample values.
-- **`allOf` / `oneOf` / `anyOf` — first branch.** If any of these is a non-empty array, the walker recurses into **`branch[0]` only** (precedence `allOf` → `oneOf` → `anyOf`). It does not merge `allOf` members; it just samples the first.
+- **`allOf` / `oneOf` / `anyOf` - first branch.** If any of these is a non-empty array, the walker recurses into **`branch[0]` only** (precedence `allOf` → `oneOf` → `anyOf`). It does not merge `allOf` members; it just samples the first.
 - **Type defaults:**
 
   | `schema.type` | Sample value |
@@ -129,7 +129,7 @@ JSON is preferred: `findJsonMedia` is checked first and takes precedence over te
   | `array` | `[ sample(items) ]` if `items` is present, else `[]` (one element) |
   | `object` (or no/unknown `type`) | walks each entry of `properties`, producing `{ key: sample }`; `{}` if no `properties` |
 
-  The `object`/default branch is the same fallback used for untyped schemas — a node with `properties` but no `type` is still expanded.
+  The `object`/default branch is the same fallback used for untyped schemas - a node with `properties` but no `type` is still expanded.
 
 > Older notes claimed sampling was "one level only" and "`oneOf` → `{}`". That is **not** what the code does: sampling recurses to depth 6, resolves and cycle-guards `$ref`s, honors `example`, and follows the first branch of `oneOf`/`anyOf`/`allOf`.
 
@@ -142,21 +142,21 @@ Auth is applied **only at the root collection**; every request is `{ mode: "inhe
 1. If `spec.security[0]` exists, take its first key (`Object.keys(security[0])[0]`) and use the matching `components.securitySchemes[name]`.
 2. Otherwise fall back to the **first** entry of `components.securitySchemes`.
 
-`schemeToAuth(scheme)` maps that scheme to a concrete collection auth (always with empty secrets — the spec has no real credentials):
+`schemeToAuth(scheme)` maps that scheme to a concrete collection auth (always with empty secrets - the spec has no real credentials):
 
 | `securityScheme` | Vayu `RequestAuth` |
 |------------------|--------------------|
 | `type: "http"`, `scheme: "bearer"` | `{ mode: "bearer", token: "" }` |
 | `type: "http"`, `scheme: "basic"` | `{ mode: "basic", username: "", password: "" }` |
 | `type: "apiKey"` | `{ mode: "apikey", key: scheme.name ?? "", value: "", in: scheme.in === "query" ? "query" : "header" }` |
-| `type: "oauth2"` | `{ mode: "oauth2", config: OAuth2Config }` via `mapOpenApiV3OAuth2` — picks the first usable flow (`clientCredentials` → `authorizationCode`+PKCE → `password` → `implicit`→auth-code+PKCE), fills its `tokenUrl`/`authorizationUrl`/`scope`, and seeds `clientId`/`clientSecret` as `{{clientId}}`/`{{clientSecret}}` placeholders |
+| `type: "oauth2"` | `{ mode: "oauth2", config: OAuth2Config }` via `mapOpenApiV3OAuth2` - picks the first usable flow (`clientCredentials` → `authorizationCode`+PKCE → `password` → `implicit`→auth-code+PKCE), fills its `tokenUrl`/`authorizationUrl`/`scope`, and seeds `clientId`/`clientSecret` as `{{clientId}}`/`{{clientSecret}}` placeholders |
 | missing / any other type (incl. `openIdConnect`, `http` with other schemes) | `{ mode: "none" }` |
 
-**`nonExecutableAuth`:** always `0` — `oauth2` now maps to an executable config, and the other mapped schemes (bearer/basic/apikey) are executable too.
+**`nonExecutableAuth`:** always `0` - `oauth2` now maps to an executable config, and the other mapped schemes (bearer/basic/apikey) are executable too.
 
 ## Options & lossy behavior
 
-This parser is **stub-only**: it materializes the shape of each request but no values. The `ImportOptions` argument (`importEnvironments`, `importScripts`) is **ignored** — the parameter is `_opts` and is never read.
+This parser is **stub-only**: it materializes the shape of each request but no values. The `ImportOptions` argument (`importEnvironments`, `importScripts`) is **ignored** - the parameter is `_opts` and is never read.
 
 Dropped / not represented:
 

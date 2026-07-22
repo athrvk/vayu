@@ -25,7 +25,7 @@ describe("summarise", () => {
 	it("states the exact count for fixed iterations", () => {
 		const s = summarise({ ...base, mode: "iterations" });
 		expect(s).toContain("exactly 1,000 requests");
-		// Duration is not part of this mode at all — mentioning it would be the
+		// Duration is not part of this mode at all - mentioning it would be the
 		// same lie the removed field told.
 		expect(s).not.toMatch(/\b60s\b/);
 	});

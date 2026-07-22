@@ -13,7 +13,7 @@
  *   - opens the authorize URL in the system browser (loopback mode), or
  *   - hosts a hardened window that captures the redirect URL (embedded mode)
  *     for providers that reject 127.0.0.1 redirects.
- * Electron never sees tokens — only the authorization code, which it hands
+ * Electron never sees tokens - only the authorization code, which it hands
  * straight back to the engine.
  */
 
@@ -30,7 +30,7 @@ export type OpenAuthWindowResult = { callbackUrl: string } | { error: string };
 
 /**
  * Open a hardened window at the authorize URL and resolve with the redirect URL
- * the moment the IdP navigates to it — before the (often unresolvable) callback
+ * the moment the IdP navigates to it - before the (often unresolvable) callback
  * host is ever contacted.
  */
 function openAuthWindow(params: OpenAuthWindowParams): Promise<OpenAuthWindowResult> {
@@ -96,7 +96,7 @@ function openAuthWindow(params: OpenAuthWindowParams): Promise<OpenAuthWindowRes
 
 export function setupOAuthIpcHandlers(): void {
 	// Loopback mode: open the system browser (engine hosts the callback listener).
-	// Only http(s) is ever a valid authorize URL — reject anything else so a
+	// Only http(s) is ever a valid authorize URL - reject anything else so a
 	// compromised renderer can't hand arbitrary protocol handlers to the OS.
 	ipcMain.handle("oauth:openExternal", async (_e, url: string) => {
 		let scheme: string;

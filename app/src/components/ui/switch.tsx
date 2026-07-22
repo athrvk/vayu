@@ -16,11 +16,11 @@ import { cn } from "@/lib/utils";
  * The off state needs a visible boundary of its own.
  *
  * Measured against `--card` with transitions frozen, an unchecked switch was
- * 1.55 in light and 1.28 in dark — and in light the thumb was only 1.41 against
+ * 1.55 in light and 1.28 in dark - and in light the thumb was only 1.41 against
  * its own track, so the whole control was close to invisible. WCAG 1.4.11 wants
  * 3.0 for the visual information that identifies a component and its state.
  *
- * The fill stays quiet — an off switch should not shout — and the already
+ * The fill stays quiet - an off switch should not shout - and the already
  * reserved 2px transparent border is coloured instead, so nothing moves or
  * resizes. `subtle-foreground` is the faintest tier that clears the bar (3.17
  * light / 3.34 dark); `muted-foreground` would pass at 5.61/6.77 but reads

@@ -103,7 +103,7 @@ export default function RequestItem({
 			style={{ paddingLeft: 8 + depth * INDENT_STEP }}
 			className={cn(
 				// focus-row: this row is the perceived target, not the narrower
-				// label button inside it — it paints the keyboard focus ring.
+				// label button inside it - it paints the keyboard focus ring.
 				// The transition omits outline-color (see CollectionItem) so the
 				// focus ring appears instantly instead of fading between rows.
 				// h-8: shared drawer row height (see CollectionItem).
@@ -154,7 +154,7 @@ export default function RequestItem({
 			{/*
 			 * Delete moved into the ⋯ menu, but the Delete key still targets a
 			 * data-tree-delete element (see useRovingTreeFocus). This is that
-			 * target: never shown, never announced — a keyboard path only.
+			 * target: never shown, never announced - a keyboard path only.
 			 */}
 			<button
 				type="button"

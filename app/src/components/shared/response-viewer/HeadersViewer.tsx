@@ -33,7 +33,7 @@ export default function HeadersViewer({
 	}
 
 	// Header names are body text on `bg-card`, so they need 4.5. The raw palette
-	// values these used were 2.22 (green-500) and 3.76 (blue-500) in light mode —
+	// values these used were 2.22 (green-500) and 3.76 (blue-500) in light mode -
 	// and being raw palette, they were theme-blind, so the light failure could
 	// not be fixed without breaking dark. The `-text` tokens are per-theme and
 	// measure 5.68/8.80 and 5.98/6.76.

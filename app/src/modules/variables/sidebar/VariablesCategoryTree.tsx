@@ -51,7 +51,7 @@ import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 export default function VariablesCategoryTree() {
 	// Fetches its own data, like the other three drawer views. It used to
 	// receive both lists as props from the Drawer, which read them with `= []`
-	// defaults and dropped `isLoading` — so an in-flight query rendered as an
+	// defaults and dropped `isLoading` - so an in-flight query rendered as an
 	// empty tree and told the user "No environments" when the truthful answer
 	// was "not loaded yet".
 	const {
@@ -69,7 +69,7 @@ export default function VariablesCategoryTree() {
 
 	/*
 	 * A failed load is not an empty scope list. The drawer has three sibling
-	 * views, and the collections tree already says so when its query fails —
+	 * views, and the collections tree already says so when its query fails -
 	 * this view claiming "No collections" for the very same failure would make
 	 * one event look like two. Neither section here offers a create CTA, so the
 	 * reason to fix it is that symmetry, not a risk of a duplicate.
@@ -77,7 +77,7 @@ export default function VariablesCategoryTree() {
 	 * Gated on `length === 0` per section: TanStack keeps the last good data
 	 * through a failed background refetch, and replacing a populated list with
 	 * an error would take away more than it tells. Each section reads its own
-	 * query — one scope failing says nothing about the other.
+	 * query - one scope failing says nothing about the other.
 	 */
 	const showCollectionsError = isCollectionsError && collections.length === 0;
 	const showEnvironmentsError = isEnvironmentsError && environments.length === 0;
@@ -133,7 +133,7 @@ export default function VariablesCategoryTree() {
 	};
 
 	/**
-	 * A complete copy — name plus every variable — in a single call. Unlike a
+	 * A complete copy - name plus every variable - in a single call. Unlike a
 	 * collection, an environment has no nested children, so nothing is silently
 	 * left behind.
 	 */
@@ -237,7 +237,7 @@ export default function VariablesCategoryTree() {
 								<span>Environments</span>
 								<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
 									{isLoadingEnvironments || showEnvironmentsError
-										? "—"
+										? "-"
 										: environments.length}
 								</Badge>
 							</button>
@@ -309,7 +309,7 @@ export default function VariablesCategoryTree() {
 											 * button (the collection rows below can,
 											 * and are). As a plain div it was not
 											 * focusable and not operable by keyboard
-											 * at all — the ⋯ menu was reachable but
+											 * at all - the ⋯ menu was reachable but
 											 * selecting the environment was not.
 											 */
 											<div
@@ -437,7 +437,7 @@ export default function VariablesCategoryTree() {
 								    "Couldn't load collections" asserts a count the app does
 								    not have. Same reason loading already shows one. */}
 								{isLoadingCollections || showCollectionsError
-									? "—"
+									? "-"
 									: collections.length}
 							</Badge>
 						</button>
@@ -484,7 +484,7 @@ export default function VariablesCategoryTree() {
 												<TruncatedText className="flex-1">
 													{collection.name}
 												</TruncatedText>
-												{/* `chip` — same reason as the environment
+												{/* `chip` - same reason as the environment
 												    badge above. */}
 												{variableCount > 0 && (
 													<Badge

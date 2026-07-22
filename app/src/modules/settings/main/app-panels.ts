@@ -8,7 +8,7 @@
 /**
  * App settings registry
  *
- * The client-side (app) settings panels, declared as data — mirroring how the
+ * The client-side (app) settings panels, declared as data - mirroring how the
  * engine settings side is driven by the `/config` API. The sidebar tree renders
  * `label`/`icon` from here, and `SettingsMain` looks up `Component` instead of
  * branching on a category string. Adding an app category is one entry + one

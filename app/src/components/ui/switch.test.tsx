@@ -10,7 +10,7 @@
  *
  * Measured against `--card` with transitions frozen, the unchecked track was
  * 1.55 in light and 1.28 in dark, and in light the thumb was only 1.41 against
- * its own track — so the control was very close to invisible until you knew
+ * its own track - so the control was very close to invisible until you knew
  * where to look. WCAG 1.4.11 asks for 3.0 on the visual information that
  * identifies a component and its state.
  *

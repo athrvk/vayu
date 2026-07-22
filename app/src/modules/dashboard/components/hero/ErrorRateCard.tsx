@@ -34,7 +34,7 @@ const STATUS_SEGMENTS: readonly StatusSegment[] = [
 ];
 
 /**
- * Universal hero card #3 — transport-layer error rate + status-code stack.
+ * Universal hero card #3 - transport-layer error rate + status-code stack.
  * Bespoke body (gap-2 value row with a right-aligned count + stack + legend).
  */
 export function ErrorRateCard({
@@ -48,7 +48,7 @@ export function ErrorRateCard({
 }) {
 	const errorRate = totalRequests > 0 ? (failedRequests / totalRequests) * 100 : 0;
 	// -text variants: this is the card's large number. The STATUS entries above
-	// keep the fill tokens — those paint legend swatches, not text.
+	// keep the fill tokens - those paint legend swatches, not text.
 	const valueColor =
 		errorRate === 0 ? "hsl(var(--success-text))" : "hsl(var(--destructive-text))";
 
@@ -60,7 +60,7 @@ export function ErrorRateCard({
 			if (code >= 200 && code < 300) out.s2 += count;
 			else if (code >= 400 && code < 500) out.s4 += count;
 			else if (code >= 500 && code < 600) out.s5 += count;
-			else out.err += count; // 0 / unknown — transport errors
+			else out.err += count; // 0 / unknown - transport errors
 		}
 		const total = out.s2 + out.s4 + out.s5 + out.err;
 		return { ...out, total };

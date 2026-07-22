@@ -11,11 +11,11 @@
  * `useCollectionsQuery` defaults to `[]`, so a collection tab restored from a
  * previous session found nothing while its query was still in flight, and the
  * screen said the collection was missing. That is the same defect already
- * fixed in the variables editor — an error state claiming the user's data is
+ * fixed in the variables editor - an error state claiming the user's data is
  * gone, when the truthful answer is "not loaded yet".
  *
- * Each case asserts both halves — the loading pane present *and* the missing
- * copy absent — since asserting only the first would pass if both rendered.
+ * Each case asserts both halves - the loading pane present *and* the missing
+ * copy absent - since asserting only the first would pass if both rendered.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

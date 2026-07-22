@@ -53,7 +53,7 @@ const report: RunReport = {
 	latency: { min: 5, avg: 25, p50: 20, p75: 30, p90: 45, p95: 60, p99: 120, p999: 200, max: 240 },
 } as RunReport;
 
-describe("centralized uPlot charts — smoke", () => {
+describe("centralized uPlot charts - smoke", () => {
 	it("renders every chart without throwing", () => {
 		const cases = [
 			<LatencyPercentilesChart key="a" history={history} />,

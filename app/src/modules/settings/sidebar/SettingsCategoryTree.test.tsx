@@ -13,8 +13,8 @@ const configQuery = {
 	refetch,
 };
 
-// The engine /config query is irrelevant to the App Settings rows below — those
-// render client-side — but the Engine Settings section is driven entirely by it.
+// The engine /config query is irrelevant to the App Settings rows below - those
+// render client-side - but the Engine Settings section is driven entirely by it.
 vi.mock("@/queries", () => ({
 	useConfigQuery: () => configQuery,
 }));
@@ -52,7 +52,7 @@ describe("SettingsCategoryTree", () => {
 
 	/*
 	 * The engine section used to fail into a static two-line notice. The engine
-	 * is a sidecar that restarts, so "unavailable" is routinely temporary — but
+	 * is a sidecar that restarts, so "unavailable" is routinely temporary - but
 	 * nothing in the sidebar re-asked, leaving app relaunch as the only recovery.
 	 */
 	it("offers a retry when the engine settings fail to load", () => {

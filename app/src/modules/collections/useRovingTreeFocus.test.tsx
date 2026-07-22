@@ -134,7 +134,7 @@ describe("useRovingTreeFocus", () => {
 		expect(document.activeElement).toBe(byName("test"));
 	});
 
-	// Focus moves without opening anything — selection is a separate concept.
+	// Focus moves without opening anything - selection is a separate concept.
 	it("does not activate a row merely by moving focus", () => {
 		render(<Tree expanded />);
 		byName("demo").focus();
@@ -152,7 +152,7 @@ describe("useRovingTreeFocus", () => {
 	});
 
 	// C makes every row control tabIndex=-1, so these keys are the replacement
-	// path — without them delete and row actions become mouse-only.
+	// path - without them delete and row actions become mouse-only.
 	it("reaches row actions with Delete and Shift+F10 / ContextMenu", () => {
 		render(<Tree expanded />);
 		byName("req-1").focus();

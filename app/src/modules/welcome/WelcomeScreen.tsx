@@ -10,7 +10,7 @@
  *
  * Vayu's new-tab surface: rendered for the "welcome" tab (opened by "+"), when
  * no tab is open at all, and for a request tab with no entity. It is not a
- * resume screen — tabs are persisted and restored, so returning users land back
+ * resume screen - tabs are persisted and restored, so returning users land back
  * on their own tabs. Its job is to start something new.
  *
  * Two states: FirstRunWelcome on a fresh workspace, Launcher once there is anything
@@ -77,7 +77,7 @@ export default function WelcomeScreen() {
 			});
 			openTab({ type: "request", entityId: newRequest.id });
 		} catch (error) {
-			// Without this the click looks dead — the old code only logged.
+			// Without this the click looks dead - the old code only logged.
 			console.error("Failed to create new request:", error);
 			showToast(CREATE_FAILED, "error");
 		}
@@ -93,7 +93,7 @@ export default function WelcomeScreen() {
 			void createRequestIn(target.collectionId);
 			return;
 		}
-		// No collections yet — requests must belong to one, so make it first.
+		// No collections yet - requests must belong to one, so make it first.
 		try {
 			const newCollection = await createCollectionMutation.mutateAsync({
 				name: DEFAULT_COLLECTION_NAME,
@@ -111,14 +111,14 @@ export default function WelcomeScreen() {
 	};
 
 	// Both queries start as [] while loading, which would read as an empty
-	// workspace and flash the first-run screen at returning users — hence the
+	// workspace and flash the first-run screen at returning users - hence the
 	// skeleton rather than rendering either real state early.
 	const isLoading = collectionsLoading || runsLoading;
 	const isEmpty = collections.length === 0 && runs.length === 0;
 
 	// A failed load is not a fresh workspace. Neither query sets `throwOnError`
 	// and both are destructured with `= []`, so a failure used to land in
-	// `isEmpty` and render the branded first-run pitch — telling a user with
+	// `isEmpty` and render the branded first-run pitch - telling a user with
 	// collections and runs that they are brand new, and inviting them to import
 	// collections they already have.
 	//

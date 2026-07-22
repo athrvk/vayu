@@ -8,8 +8,8 @@
 /**
  * The body editor's splitter has to stay keyboard-operable.
  *
- * It shipped as a `role="separator"` with an `onMouseDown` and nothing else —
- * not focusable, no key handling — so the editor height was mouse-only. The
+ * It shipped as a `role="separator"` with an `onMouseDown` and nothing else -
+ * not focusable, no key handling - so the editor height was mouse-only. The
  * resize logic itself is covered by `useResizable.test.ts`; this guards the
  * wiring, which has no unit test because rendering BodyPanel drags in Monaco.
  */
@@ -48,7 +48,7 @@ describe("body editor splitter", () => {
 		}
 	});
 
-	it("shows a focus state — the bar is 6px and otherwise invisible to find", () => {
+	it("shows a focus state - the bar is 6px and otherwise invisible to find", () => {
 		expect(handle).toContain("focus-visible:");
 	});
 });

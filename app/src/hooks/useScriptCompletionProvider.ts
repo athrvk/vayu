@@ -39,7 +39,7 @@ export function useScriptCompletionProvider() {
 			provideCompletionItems(model, position) {
 				// Replace the entire dotted identifier chain before the cursor
 				// (e.g. "pm.", "pm.res") rather than just the word after the last
-				// dot — Monaco treats "." as a word separator, so replacing only
+				// dot - Monaco treats "." as a word separator, so replacing only
 				// the word would leave "pm." in place and duplicate it.
 				const linePrefix = model
 					.getLineContent(position.lineNumber)
