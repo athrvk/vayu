@@ -29,7 +29,7 @@ import {
 	useLastDesignRunQuery,
 } from "@/queries";
 import { useSessionStore, useResponseStore } from "@/stores";
-import type { VariableValue } from "@/types";
+import type { ScriptPart, VariableValue } from "@/types";
 import type {
 	RequestState,
 	ResponseState,
@@ -44,6 +44,29 @@ import { responseFromRunResult } from "../utils/restore-response";
 interface RequestBuilderProviderProps {
 	children: ReactNode;
 	initialRequest?: Partial<RequestState>;
+	/**
+	 * Starting response for a builder with no id, which cannot read the store.
+	 * Used by the History run view, where the response comes from the run.
+	 *
+	 * Keep the reference stable (memoize it): it is read by the reset effect
+	 * below, not only by the `useState` initialiser.
+	 */
+	initialResponse?: ResponseState | null;
+	/**
+	 * Script parts to show as "runs before your own" instead of the live
+	 * collection chain. The History run view passes what the run recorded, so a
+	 * copy of a past run lists the scripts that actually ran, not the ones the
+	 * collection carries today.
+	 */
+	inheritedPreScripts?: ScriptPart[];
+	inheritedPostScripts?: ScriptPart[];
+	/**
+	 * The whole glued script a run recorded before script parts existed. Shown
+	 * read-only, because its collection and request halves cannot be separated
+	 * and the editor above is therefore necessarily empty.
+	 */
+	legacyPreScript?: string;
+	legacyPostScript?: string;
 	collectionId?: string | null;
 	onExecute?: (request: RequestState) => Promise<ResponseState | null>;
 	onSave?: (request: RequestState) => Promise<void>;
@@ -53,6 +76,11 @@ interface RequestBuilderProviderProps {
 export default function RequestBuilderProvider({
 	children,
 	initialRequest,
+	initialResponse,
+	inheritedPreScripts,
+	inheritedPostScripts,
+	legacyPreScript,
+	legacyPostScript,
 	collectionId,
 	onExecute,
 	onSave,
@@ -76,7 +104,9 @@ export default function RequestBuilderProvider({
 				return stored as ResponseState;
 			}
 		}
-		return null;
+		// Nothing stored - a detached copy has no id to look one up by, so it
+		// hands its response in directly.
+		return initialResponse ?? null;
 	});
 
 	// Wrapper to update both local state and store
@@ -175,14 +205,21 @@ export default function RequestBuilderProvider({
 				// Reset backend loading flag to allow reloading from backend if needed
 				hasLoadedFromBackend.current = null;
 			} else {
-				setLocalResponse(null);
+				/*
+				 * No id, so there is no stored response to restore - fall back to
+				 * the one handed in. This runs on mount as well as on a change of
+				 * request, so clearing it unconditionally (as it used to) threw
+				 * away `initialResponse` immediately after the initialiser above
+				 * had set it, and a detached copy opened showing "No response yet".
+				 */
+				setLocalResponse(initialResponse ?? null);
 			}
 		}
 		// initialRequest intentionally keyed by .id only: depending on the full
 		// object would reset local state (discarding unsaved edits) on every
 		// parent re-render that passes a new object reference.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [initialRequest?.id, collectionId, getResponse]);
+	}, [initialRequest?.id, collectionId, getResponse, initialResponse]);
 
 	// Centralized save manager - handles auto-save, keyboard shortcut, and status
 	const handleSave = useCallback(async () => {
@@ -333,6 +370,10 @@ export default function RequestBuilderProvider({
 			updateField,
 			response,
 			setResponse,
+			inheritedPreScripts,
+			inheritedPostScripts,
+			legacyPreScript,
+			legacyPostScript,
 			activeTab,
 			setActiveTab,
 			isExecuting,
@@ -354,6 +395,10 @@ export default function RequestBuilderProvider({
 			updateField,
 			response,
 			setResponse,
+			inheritedPreScripts,
+			inheritedPostScripts,
+			legacyPreScript,
+			legacyPostScript,
 			activeTab,
 			isExecuting,
 			isSaving,

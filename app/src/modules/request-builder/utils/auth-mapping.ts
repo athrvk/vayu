@@ -14,7 +14,7 @@
  * Note the field rename: domain apikey uses `in`, the editor uses `addTo`.
  */
 
-import type { RequestAuth } from "@/types";
+import type { Collection, RequestAuth } from "@/types";
 import { defaultOAuth2Config } from "@/services/oauth/defaults";
 import type { AuthType, AuthConfigState } from "../types";
 
@@ -71,4 +71,33 @@ export function editorToAuth(authType: AuthType, authConfig: AuthConfigState): R
 		default:
 			return { mode: "none" };
 	}
+}
+
+/**
+ * Walk the ancestor chain leaf-first and return the first non-none auth.
+ * Collections are always concrete auth sources (never inherit), so the first
+ * non-none one found is the effective inherited auth for the request.
+ *
+ * Lives here rather than in the builder's `index.tsx`, where it started, because
+ * the History run view resolves auth the same way when it replays a run.
+ * `CLAUDE.md` forbids a third copy of the resolution rules, and a second one was
+ * already one too many.
+ */
+export function resolveInheritedAuth(ancestors: Collection[]): Record<string, unknown> | undefined {
+	for (let i = ancestors.length - 1; i >= 0; i--) {
+		const auth = ancestors[i].auth;
+		if (auth.mode !== "none") {
+			// Spread the discriminated union into a plain record for the engine
+			return { ...auth } as Record<string, unknown>;
+		}
+	}
+	return undefined;
+}
+
+/** Convert a concrete RequestAuth (non-inherit) to the flat record the engine expects. */
+export function authToRecord(
+	auth: Exclude<RequestAuth, { mode: "inherit" }>
+): Record<string, unknown> | undefined {
+	if (auth.mode === "none") return undefined;
+	return { ...auth } as Record<string, unknown>;
 }

@@ -45,8 +45,17 @@ interface DesignSnapshot {
 export interface DesignRunSeed {
 	/** Starting values. `id` is null, and that is what detaches the copy. */
 	request: Partial<RequestState>;
-	/** Collection parts, to show read-only next to the request's own. */
-	collectionScripts: ScriptPart[];
+	/**
+	 * Collection parts, to show read-only next to the request's own and to
+	 * replay unchanged.
+	 *
+	 * Split by which hook they run on, not merged: `ScriptPart` records where a
+	 * part came from but not when it runs, so a single list cannot be filtered
+	 * back apart. Merging them would replay the collection's *test* scripts as
+	 * *pre-request* scripts, and would show every part under both labels.
+	 */
+	collectionPreScripts: ScriptPart[];
+	collectionPostScripts: ScriptPart[];
 	/** Set only for a run stored before script parts existed. */
 	legacyPreScript?: string;
 	legacyPostScript?: string;
@@ -65,6 +74,11 @@ function toHeaderItems(headers: Record<string, string> | undefined) {
 /** The request's own part, or "" when the run predates script parts. */
 function ownScript(parts: ScriptPart[] | undefined): string {
 	return parts?.find((p) => p.origin === "request")?.script ?? "";
+}
+
+/** The chain's parts, in recorded order, without the request's own. */
+function collectionParts(parts: ScriptPart[] | undefined): ScriptPart[] {
+	return (parts ?? []).filter((p) => p.origin === "collection");
 }
 
 export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSeed {
@@ -110,10 +124,8 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			followRedirects: snapshot.followRedirects ?? DEFAULT_FOLLOW_REDIRECTS,
 			maxRedirects: snapshot.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
 		},
-		collectionScripts: [
-			...(snapshot.preRequestScripts ?? []),
-			...(snapshot.postRequestScripts ?? []),
-		].filter((p) => p.origin === "collection"),
+		collectionPreScripts: collectionParts(snapshot.preRequestScripts),
+		collectionPostScripts: collectionParts(snapshot.postRequestScripts),
 		legacyPreScript: snapshot.preRequestScripts ? undefined : snapshot.preRequestScript,
 		legacyPostScript: snapshot.postRequestScripts ? undefined : snapshot.postRequestScript,
 	};

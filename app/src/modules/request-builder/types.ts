@@ -19,6 +19,7 @@ import type {
 	KeyValueEntry,
 	OAuth2Config,
 	ResolvedVariable,
+	ScriptPart,
 	VariableScope,
 } from "@/types";
 
@@ -219,6 +220,23 @@ export interface RequestBuilderContextValue {
 	// Response State
 	response: ResponseState | null;
 	setResponse: (response: ResponseState | null) => void;
+
+	/**
+	 * Collection script parts to list as "runs before your own", overriding the
+	 * live collection chain. Set only by the History run view, which shows what
+	 * a stored run recorded; undefined everywhere else, where the script panels
+	 * walk the chain themselves.
+	 */
+	inheritedPreScripts?: ScriptPart[];
+	inheritedPostScripts?: ScriptPart[];
+
+	/**
+	 * The whole glued script a pre-script-parts run recorded. Set only by the
+	 * History run view; the editor is empty for such a run, so this is the only
+	 * place its script text appears.
+	 */
+	legacyPreScript?: string;
+	legacyPostScript?: string;
 
 	// UI State
 	activeTab: RequestTab;

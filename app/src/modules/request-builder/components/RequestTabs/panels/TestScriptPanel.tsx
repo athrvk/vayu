@@ -21,9 +21,11 @@ import { useState } from "react";
 import { Button, Badge, CodeEditor, VariableScopeBadge } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import InheritedScriptsNotice from "./InheritedScriptsNotice";
+import LegacyScriptNotice from "./LegacyScriptNotice";
 
 export default function TestScriptPanel() {
-	const { request, updateField, getAllVariables } = useRequestBuilderContext();
+	const { request, updateField, getAllVariables, inheritedPostScripts, legacyPostScript } =
+		useRequestBuilderContext();
 	const [showVariables, setShowVariables] = useState(false);
 
 	// Find variables referenced in script
@@ -60,7 +62,15 @@ export default function TestScriptPanel() {
 				)}
 			</div>
 
-			<InheritedScriptsNotice variant="post" collectionId={request.collectionId} />
+			{/* `entries` wins when the caller supplied them - a copy of a past run
+			    lists what that run recorded, not what the collection reads now. */}
+			<InheritedScriptsNotice
+				variant="post"
+				collectionId={request.collectionId}
+				entries={inheritedPostScripts}
+			/>
+
+			<LegacyScriptNotice variant="post" script={legacyPostScript} />
 
 			{/*
 			 * The referenced list stays put when the full list opens. "Show
