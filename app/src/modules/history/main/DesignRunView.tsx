@@ -1,0 +1,313 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * DesignRunView
+ *
+ * A past design run, opened as an editable copy of the request that was sent.
+ * Read it, change it, send it again. Nothing typed here reaches the saved
+ * request unless the Save button below is used, and that asks first.
+ *
+ * ## Two things detach the copy, and neither is decoration
+ *
+ * **`id: null`** (set by `seedFromRun`) and **no `onSave`** below. Either alone
+ * is sufficient today, which is deliberate belt-and-braces, so do not read one
+ * as redundant and delete it:
+ *
+ * - `useSaveManager` early-returns on `!entityId` in both its autosave effect
+ *   and `performSave`, so a null id stops the write even if an `onSave` exists.
+ * - `RequestBuilderProvider` passes `enabled: !!onSave`, so no `onSave` stops it
+ *   even if an id appears.
+ *
+ * A null id also keeps the response store - which is keyed by request id - from
+ * being written to, and stops `useLastDesignRunQuery` from running.
+ *
+ * The absent prop looks like an oversight in the JSX below. It is not. The bug
+ * this view exists to remove was opening the *saved request* in the builder:
+ * that has both an id and an `onSave`, so changing a header to compare against
+ * an old run rewrote the saved request seconds later.
+ *
+ * Guarded by "does not save when the URL is edited" in `DesignRunView.test.tsx`,
+ * which fails when both gates are removed together.
+ */
+
+import { useCallback, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { RequestBuilderProvider } from "@/modules/request-builder/context";
+import RequestBuilderLayout from "@/modules/request-builder/components/RequestBuilderLayout";
+import { useRequestQuery, useCollectionAncestors, queryKeys } from "@/queries";
+import { useEngine, useVariableResolver } from "@/hooks";
+import { useSessionStore, useToastStore } from "@/stores";
+import type { RequestState, ResponseState } from "@/modules/request-builder/types";
+import {
+	editorToAuth,
+	resolveInheritedAuth,
+	authToRecord,
+} from "@/modules/request-builder/utils/auth-mapping";
+import { toKeyValueEntries, toFlatHeaders } from "@/modules/request-builder/utils/key-value";
+import { generateUUID } from "@/modules/request-builder/utils/id";
+import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
+import { seedFromRun } from "./design-run-seed";
+import type { Run, RequestAuth, ScriptPart } from "@/types";
+
+interface DesignRunViewProps {
+	run: Run;
+}
+
+export default function DesignRunView({ run }: DesignRunViewProps) {
+	const { executeRequest: engineExecuteRequest } = useEngine();
+	const { activeEnvironmentId } = useSessionStore();
+	const showToast = useToastStore((s) => s.showToast);
+	const queryClient = useQueryClient();
+
+	/*
+	 * The live request, when it still exists. It is the only source of
+	 * credentials - `sanitize_config_snapshot` strips auth down to its mode
+	 * before storing a run - so the seed needs it to decide where headers and
+	 * auth come from. A deleted request resolves to `undefined`, which the seed
+	 * reads as "replay the wire headers as they are".
+	 */
+	const { data: liveRequest } = useRequestQuery(run.requestId ?? null);
+	const collectionAncestors = useCollectionAncestors(liveRequest?.collectionId);
+	const { resolveString, resolveObject } = useVariableResolver({
+		collectionId: liveRequest?.collectionId || undefined,
+	});
+
+	const seed = useMemo(() => seedFromRun(run, liveRequest ?? null), [run, liveRequest]);
+
+	/*
+	 * Memoized because the provider reads it in an effect, not only in a
+	 * `useState` initialiser - a fresh object each render would re-run that
+	 * effect and reset the pane.
+	 */
+	const initialResponse = useMemo<ResponseState | null>(
+		() => responseFromRunResult(run.result, run.id),
+		[run]
+	);
+
+	/**
+	 * Replay: the recorded collection parts, then the editor's own part.
+	 *
+	 * The collection parts go out exactly as they were stored, which is the
+	 * point of a snapshot - it runs the collection's scripts as they were then,
+	 * not as they read now. A legacy run has no parts to replay, only the old
+	 * glued string, so its own script goes alone.
+	 */
+	const replayParts = useCallback(
+		(collectionParts: ScriptPart[], ownScript: string): ScriptPart[] | undefined => {
+			const parts = [...collectionParts];
+			if (ownScript.trim()) parts.push({ origin: "request", script: ownScript });
+			return parts.length > 0 ? parts : undefined;
+		},
+		[]
+	);
+
+	const handleExecute = useCallback(
+		async (request: RequestState): Promise<ResponseState | null> => {
+			try {
+				const resolvedUrl = resolveString(request.url);
+
+				const headersRecord = toFlatHeaders(request.headers);
+				headersRecord["X-Request-ID"] = generateUUID();
+				const version =
+					typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.1.1";
+				headersRecord["X-Vayu-Version"] = version;
+
+				const resolvedHeaders = Object.fromEntries(
+					Object.entries(headersRecord).map(([key, value]) => [
+						resolveString(key),
+						resolveString(value),
+					])
+				);
+				const resolvedBody = request.body ? resolveString(request.body) : request.body;
+
+				let execBody:
+					| {
+							mode: string;
+							content?: string;
+							fields?: Array<{ key: string; value: string; enabled: boolean }>;
+					  }
+					| undefined;
+				if (request.bodyMode === "form-data") {
+					execBody = {
+						mode: "form-data",
+						fields: toKeyValueEntries(request.formData).map((e) => ({
+							key: resolveString(e.key),
+							value: resolveString(e.value),
+							enabled: e.enabled,
+						})),
+					};
+				} else if (request.bodyMode === "x-www-form-urlencoded") {
+					execBody = {
+						mode: "x-www-form-urlencoded",
+						fields: toKeyValueEntries(request.urlEncoded).map((e) => ({
+							key: resolveString(e.key),
+							value: resolveString(e.value),
+							enabled: e.enabled,
+						})),
+					};
+				} else if (request.bodyMode !== "none" && resolvedBody) {
+					execBody = { mode: request.bodyMode || "text", content: resolvedBody };
+				}
+
+				/*
+				 * Auth is resolved fresh from the saved request, using the same
+				 * helpers the builder uses - not a third copy of the rules.
+				 * When the request is gone there is nothing to resolve: the seed
+				 * put the recorded `Authorization` into the headers above, so the
+				 * replay goes out exactly as it ran.
+				 */
+				let execAuth: Record<string, unknown> | undefined;
+				if (request.authType === "inherit") {
+					execAuth = resolveInheritedAuth(collectionAncestors);
+					if (execAuth) execAuth = resolveObject(execAuth) as Record<string, unknown>;
+				} else if (request.authType !== "none") {
+					const concreteAuth = editorToAuth(
+						request.authType,
+						request.authConfig
+					) as Exclude<RequestAuth, { mode: "inherit" }>;
+					const raw = authToRecord(concreteAuth);
+					execAuth = raw ? (resolveObject(raw) as Record<string, unknown>) : undefined;
+				}
+
+				const preScriptParts = replayParts(
+					seed.collectionPreScripts,
+					request.preRequestScript
+				);
+				const postScriptParts = replayParts(seed.collectionPostScripts, request.testScript);
+
+				const result = await engineExecuteRequest(
+					{
+						method: request.method,
+						url: resolvedUrl,
+						headers: resolvedHeaders,
+						body: execBody,
+						auth: execAuth,
+						preRequestScripts: preScriptParts,
+						postRequestScripts: postScriptParts,
+						// Always sent, never elided - the engine defaults to
+						// following, so an omitted `false` would follow the
+						// redirect the run was recorded not following.
+						followRedirects: request.followRedirects,
+						maxRedirects: request.maxRedirects,
+						// Files the new run under the same request, so a resend
+						// lands beside the run it came from.
+						...(run.requestId ? { requestId: run.requestId } : {}),
+					},
+					activeEnvironmentId || undefined
+				);
+
+				if (!result) return null;
+
+				if (result.errorCode === "AUTH_REQUIRED") {
+					showToast(
+						"OAuth 2.0 token required - open the Auth tab and click Get Token",
+						"error"
+					);
+				} else if (result.errorCode === "AUTH_FAILED") {
+					showToast(result.errorMessage || "OAuth 2.0 token request failed", "error");
+				}
+
+				// A resend is a new run, so History has to hear about it.
+				queryClient.invalidateQueries({ queryKey: queryKeys.runs.list() });
+				if (preScriptParts) {
+					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
+					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
+					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+				}
+
+				const contentType = (result.headers?.["content-type"] || "").toLowerCase();
+				const bodyType: ResponseState["bodyType"] = contentType.includes("json")
+					? "json"
+					: contentType.includes("html")
+						? "html"
+						: contentType.includes("xml")
+							? "xml"
+							: "text";
+
+				const bodyRaw =
+					result.bodyRaw ||
+					(typeof result.body === "object" && result.body !== null
+						? JSON.stringify(result.body, null, 2)
+						: String(result.body || ""));
+
+				const body =
+					typeof result.body === "object" && result.body !== null
+						? JSON.stringify(result.body, null, 2)
+						: result.body !== null && result.body !== undefined
+							? String(result.body)
+							: bodyRaw || "";
+
+				return {
+					status:
+						result.status !== undefined && result.status !== null ? result.status : 200,
+					statusText: result.statusText || "",
+					headers: result.headers || {},
+					requestHeaders: result.requestHeaders,
+					rawRequest: result.rawRequest,
+					body,
+					bodyRaw,
+					bodyType,
+					time: result.timing?.total || 0,
+					timing: result.timing,
+					size: result.bodySize || 0,
+					errorCode: result.errorCode,
+					errorMessage: result.errorMessage,
+					consoleLogs: result.consoleLogs,
+					testResults: result.testResults,
+					preScriptError: result.preScriptError,
+					postScriptError: result.postScriptError,
+				};
+			} catch (error) {
+				console.error("Replaying the run failed:", error);
+				const errorMsg = error instanceof Error ? error.message : String(error);
+				return {
+					status: 0,
+					statusText: "Error",
+					headers: {},
+					body: errorMsg,
+					bodyType: "text",
+					time: 0,
+					size: 0,
+					errorCode: "INTERNAL_ERROR",
+					errorMessage: errorMsg,
+				};
+			}
+		},
+		[
+			seed,
+			run.requestId,
+			replayParts,
+			engineExecuteRequest,
+			activeEnvironmentId,
+			resolveString,
+			resolveObject,
+			collectionAncestors,
+			queryClient,
+			showToast,
+		]
+	);
+
+	return (
+		<div className="flex flex-col h-full min-h-0">
+			<div className="flex-1 min-h-0">
+				<RequestBuilderProvider
+					initialRequest={seed.request}
+					initialResponse={initialResponse}
+					inheritedPreScripts={seed.collectionPreScripts}
+					inheritedPostScripts={seed.collectionPostScripts}
+					collectionId={null}
+					onExecute={handleExecute}
+					/* No `onSave`. See the note at the top of this file - that
+					   absence is one of the two things detaching the copy. */
+				>
+					<RequestBuilderLayout />
+				</RequestBuilderProvider>
+			</div>
+		</div>
+	);
+}

@@ -23,7 +23,8 @@ import { useRequestBuilderContext } from "../../../context";
 import InheritedScriptsNotice from "./InheritedScriptsNotice";
 
 export default function PreScriptPanel() {
-	const { request, updateField, getAllVariables } = useRequestBuilderContext();
+	const { request, updateField, getAllVariables, inheritedPreScripts } =
+		useRequestBuilderContext();
 	const [showVariables, setShowVariables] = useState(false);
 
 	// Find variables referenced in script
@@ -62,7 +63,13 @@ export default function PreScriptPanel() {
 				)}
 			</div>
 
-			<InheritedScriptsNotice variant="pre" collectionId={request.collectionId} />
+			{/* `entries` wins when the caller supplied them - a copy of a past run
+			    lists what that run recorded, not what the collection reads now. */}
+			<InheritedScriptsNotice
+				variant="pre"
+				collectionId={request.collectionId}
+				entries={inheritedPreScripts}
+			/>
 
 			{/*
 			 * The referenced list stays put when the full list opens. "Show

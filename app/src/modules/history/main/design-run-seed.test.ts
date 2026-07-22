@@ -163,9 +163,9 @@ describe("seedFromRun", () => {
 		});
 
 		it("returns the collection parts separately, to show read-only", () => {
-			const { collectionScripts } = seedFromRun(run(), liveRequest);
+			const { collectionPreScripts } = seedFromRun(run(), liveRequest);
 
-			expect(collectionScripts).toEqual([
+			expect(collectionPreScripts).toEqual([
 				{
 					origin: "collection",
 					id: "col_1",
@@ -173,6 +173,32 @@ describe("seedFromRun", () => {
 					script: "const t = 1;",
 				},
 			]);
+		});
+
+		it("keeps the pre and post collection parts apart", () => {
+			// `ScriptPart` says where a part came from, not when it runs. Merged
+			// into one list they cannot be told apart again - and replaying that
+			// list as `preRequestScripts` would run the collection's assertions
+			// before the request instead of after it.
+			const both = run({
+				configSnapshot: {
+					method: "GET",
+					url: "https://x.test/",
+					preRequestScripts: [
+						{ origin: "collection", id: "col_1", name: "API", script: "pre();" },
+						{ origin: "request", id: "req_1", script: "ownPre();" },
+					],
+					postRequestScripts: [
+						{ origin: "collection", id: "col_1", name: "API", script: "post();" },
+						{ origin: "request", id: "req_1", script: "ownPost();" },
+					],
+				},
+			} as Partial<Run>);
+
+			const seed = seedFromRun(both, liveRequest);
+
+			expect(seed.collectionPreScripts.map((p) => p.script)).toEqual(["pre();"]);
+			expect(seed.collectionPostScripts.map((p) => p.script)).toEqual(["post();"]);
 		});
 
 		it("returns a run stored before script parts as a legacy string", () => {
@@ -189,7 +215,8 @@ describe("seedFromRun", () => {
 			const seed = seedFromRun(legacy, liveRequest);
 
 			expect(seed.legacyPreScript).toBe("collectionPart\n\nrequestPart");
-			expect(seed.collectionScripts).toEqual([]);
+			expect(seed.collectionPreScripts).toEqual([]);
+			expect(seed.collectionPostScripts).toEqual([]);
 			expect(seed.request.preRequestScript).toBe("");
 		});
 	});
