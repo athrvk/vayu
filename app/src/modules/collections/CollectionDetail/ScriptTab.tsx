@@ -10,10 +10,14 @@
  *
  * Monaco-backed editor for a collection's pre- or post-request script.
  *
- * Composition order:
- *   - pre:  outer → inner → request (parent collection first, then child folders,
- *           then the request's own script)
- *   - post: request → inner → outer (request first, unwinding outward)
+ * Composition order is the same for both kinds: outer → inner → request. The
+ * collection chain runs root-first, then the request's own script last
+ * (`scriptParts` in request-builder/utils, and its MCP twin in resolve.ts;
+ * the engine joins the parts and runs them as one script).
+ *
+ * This used to claim post ran request-first and unwound outward. It never did -
+ * both paths have always built the chain root-first and appended the request's
+ * own. The banner below said so to users, which is worse than saying it here.
  *
  * Used by both the Pre-request and Post-request tabs in CollectionDetail.
  */
@@ -91,11 +95,8 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 		<div className="max-w-[680px] flex flex-col gap-3.5">
 			<InfoBanner>
 				This script runs <strong>{isPre ? "before" : "after"} every request</strong> in this
-				collection.{" "}
-				{isPre
-					? "Scripts compose outer→inner: the parent collection runs first, then child folders, then the request's own script."
-					: "Scripts compose inner→outer: the request's script runs first, then its folder, then parent collections."}{" "}
-				This enables centralized{" "}
+				collection. Scripts compose outer→inner: the parent collection runs first, then
+				child folders, then the request&apos;s own script. This enables centralized{" "}
 				{isPre
 					? "auth refresh and pre-flight setup"
 					: "shared test assertions and teardown"}
