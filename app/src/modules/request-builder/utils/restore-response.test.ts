@@ -76,7 +76,38 @@ describe("responseFromRunResult", () => {
 		expect(restored?.bodyType).toBe("json");
 		expect(restored?.time).toBe(254.5);
 		expect(restored?.requestHeaders).toEqual({ Accept: "application/json" });
-		expect(restored?.rawRequest).toBe("GET https://api.example.test/users");
+	});
+
+	/**
+	 * The Raw tab answers "what did I actually send", and the request pane
+	 * beside it cannot - it shows the request as it is now, possibly edited
+	 * since the run. This used to collapse the whole trace to `GET <url>`, so
+	 * a reopened run showed one line and the body that was sent was not
+	 * reachable anywhere in the app.
+	 */
+	it("rebuilds a real raw request, not a method-and-url line", () => {
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					request: {
+						method: "POST",
+						url: "https://api.example.test/users?dry=1",
+						headers: { "content-type": "application/json" },
+						body: '{"name":"ada"}',
+					},
+					response: { headers: {}, body: "{}" },
+				},
+			})
+		);
+
+		expect(restored?.rawRequest).toBe(
+			"POST /users?dry=1 HTTP/1.1\r\n" +
+				"Host: api.example.test\r\n" +
+				"content-type: application/json\r\n" +
+				"Content-Length: 14\r\n" +
+				"\r\n" +
+				'{"name":"ada"}'
+		);
 	});
 
 	it("returns null when the run result carries no response trace", () => {

@@ -20,6 +20,7 @@
 
 import type { RunReport } from "@/types";
 import type { ResponseState, ResponseTiming } from "../types";
+import { buildRawRequest } from "@/components/shared/response-viewer";
 
 /** One element of `RunReport.results` - the shape `GET /run/:id/report` returns. */
 export type RunResultSample = NonNullable<RunReport["results"]>[number];
@@ -85,7 +86,14 @@ export function responseFromRunResult(result: RunResultSample | undefined): Resp
 		statusText: result.statusText || "",
 		headers: trace.response.headers || {},
 		requestHeaders: trace.request?.headers || {},
-		rawRequest: trace.request ? `${trace.request.method} ${trace.request.url}` : undefined,
+		rawRequest: trace.request
+			? buildRawRequest(
+					trace.request.method || "GET",
+					trace.request.url || "",
+					trace.request.headers || {},
+					trace.request.body
+				)
+			: undefined,
 		body,
 		bodyType: detectBodyType(body),
 		size: body.length,
