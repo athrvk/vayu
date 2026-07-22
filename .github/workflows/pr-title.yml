@@ -22,7 +22,18 @@ jobs:
     name: Conventional title
     runs-on: ubuntu-latest
     steps:
+      # Skipped for bots, and the `if` is on the step rather than the job on
+      # purpose. Skipping the job means the check never reports, and a required
+      # check that never reports blocks the pull request permanently - the same
+      # deadlock `paths-ignore` caused in pr-tests.yml. On the step, the job
+      # still completes and reports green.
+      #
+      # Dependabot needs the exemption because it capitalises its subject
+      # ("ci: Bump the actions group...") and offers no setting to change that.
+      # `commit-message.prefix` in dependabot.yml gets the type in front, which
+      # is as far as configuration reaches; the capital B is not negotiable.
       - uses: amannn/action-semantic-pull-request@v6
+        if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
