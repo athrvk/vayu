@@ -1,60 +1,54 @@
 # Design runs open as a detached copy
 
-**Status:** approved, not yet implemented
-**Supersedes:** the "open the request builder with the response injected" approach on
-branch `history-opens-request-builder` (issue #65)
+**Status:** approved, not implemented
+**Replaces:** the approach in issue #65
 
-## The idea in one line
+## What this changes
 
-A design run is a **snapshot**, not a document and not the request. Opening one gives
-you a detached copy of what was sent: fireable, editable as scratch, written back only
-by an explicit confirmed action.
+Today, clicking a design run in History opens a read-only viewer.
+
+After this change, it opens a **copy of the request that was sent**. You can read it, edit
+it, and send it again. Editing the copy does not touch your saved request.
+
+"Detached" means the copy is not linked to the saved request. Nothing you type in it is
+saved anywhere. There is a separate button to write changes back, and it asks first.
 
 ## Why the first attempt was wrong
 
-Issue #65 proposed opening the run's **request** in the builder and injecting the run's
-response into the pane. That was implemented and it works, but it is wrong on its own
-terms, for a reason the issue did not anticipate:
+Issue #65 said: open the run's **saved request** in the builder, and put the run's response
+in the response pane. That was built. It works. It is still wrong.
 
-- The left pane shows the request **as it is now**. The response beside it is from the
-  run. The two halves of the screen describe different things, and an age chip on the
-  response is a label for the problem rather than a fix.
-- The builder autosaves (`DEFAULT_AUTO_SAVE_ENABLED = true`, 5s). So inspecting an old
-  run and tweaking a header to compare **silently rewrites the saved request**. Before
-  #65, clicking a design run opened a read-only viewer where that was impossible. The
-  change converted a read-only inspection action into a live editing surface, which was
-  never the intent.
-- Because the run then opened a `request` tab, `Shell`'s drawer effect - which infers a
-  drawer view from tab _type_ - fired on the main history path and ejected the user from
-  the run list on the first click. That was patched with a `drawerView !== "history"`
-  literal, which is an exception encoded in a file that has no idea History exists.
-- `HistoryList` derives "which run am I looking at" from `activeTab.type === "run"`, so
-  no design run could ever highlight.
-- `RecentRuns.tsx:74` opens design runs with `openTab({type:"run"})` and never went
-  through `useOpenRun`, so the same click produced two different results depending on
-  where you made it.
+- The left side shows the request **as it is today**. The right side shows a response from
+  the past. They describe two different things.
+- The builder saves automatically after 5 seconds. So opening an old run and changing a
+  header to compare **rewrites your saved request**. Before #65 that was impossible,
+  because the run opened a read-only viewer.
+- Opening a request tab made `Shell` switch the sidebar to Collections. That threw you out
+  of the History list on the first click.
+- `HistoryList` decides which row to highlight from `activeTab.type === "run"`. A design run
+  no longer opened a run tab, so no row ever highlighted.
+- `RecentRuns.tsx:74` opens design runs a different way. The same click did two different
+  things depending on where you clicked it.
 
-Four symptoms, one cause: **a request tab gained a second origin, and the tab carries no
-record of which.** The fix is not to record the origin. It is to stop opening a request
+All four come from one cause. A request tab could now be opened from two places, and the
+tab did not record which. The fix is not to record it. The fix is to stop opening a request
 tab at all.
 
-## Verified facts this design rests on
+## Facts this design depends on
 
-Everything below was checked against a live engine (a design run and a load run), not
-inferred. Re-verify before changing any of it.
+Each of these was checked against a running engine. Check them again before changing
+anything here.
 
-### `GET /run/:id` already carries the configuration
+### `GET /run/:id` already returns the run's configuration
 
-Identical shape for both run types; only `configSnapshot` differs. For a design run it is
-the **raw run payload**:
+The shape is the same for both run types. Only `configSnapshot` differs. For a design run
+it holds the exact payload that was sent:
 
 ```json
 {
   "id": "...",
   "type": "design",
   "status": "completed",
-  "startTime": 0,
-  "endTime": 0,
   "requestId": "req_abc",
   "environmentId": null,
   "configSnapshot": {
@@ -72,115 +66,112 @@ the **raw run payload**:
 }
 ```
 
-`apiService.getRun()` (`services/api.ts:205`) already wraps this endpoint and **has no
-caller** - one more instance of the codebase's most repeated defect.
+`apiService.getRun()` (`services/api.ts:205`) already calls this endpoint. Nothing in the
+app uses it.
 
-### The report is load-shaped, and gives a design run no configuration
+### The report is built for load tests, and gives a design run no configuration
 
-`GET /run/:id/report` is documented as the final report for a completed run, reconstructed
-from `runs` + `metrics` + `results`. Its body is a load-test aggregate. Measured on a
-design run, computed from its single sample:
+`GET /run/:id/report` returns a load-test summary. Run it against a design run and the
+numbers are meaningless, because they come from one sample:
 
 ```
-summary : { totalRequests: 1, avgRps: 24.39, throughput: 0.0,
-            peakConcurrency: 0, sendRate: 0.0 }
+summary : { totalRequests: 1, avgRps: 24.39, peakConcurrency: 0 }
 latency : { p50 = p90 = p95 = p99 = p999 = 2.1268 }
 ```
 
-Decisively: **`metadata.configuration` is present for a load run and absent for a design
-run.** The report cannot supply a design run's auth mode, scripts or redirect policy.
-Only `GET /run/:id` can. This is not a preference - the design view must call it.
+More importantly: `metadata.configuration` is present for a load run and **absent for a
+design run**. The report cannot tell you a design run's auth mode, scripts, or redirect
+settings. Only `GET /run/:id` can. So the design view has to call it.
 
-Note also that `results` means different things per type: for a design run it is the one
-exchange, for a load run it is the _sampled_ subset (it came back empty on a small run).
+One more difference. `results` means different things per run type. For a design run it is
+the single exchange. For a load run it is the sampled subset, and it came back empty on a
+small run.
 
-### `config_snapshot` holds no credentials, by construction
+### Stored runs never contain credentials
 
-`sanitize_config_snapshot` (`utils/json.cpp:625`) reduces the top-level `auth` object to
-`{"mode": ...}` - an **allowlist**, so no present or future credential field can leak
-into a stored run. Consequence: credentials can only ever come from the live request.
-That is not an arbitrary rule; it falls out of the sanitiser.
+`sanitize_config_snapshot` (`utils/json.cpp:625`) strips the `auth` object down to
+`{"mode": ...}` before saving. It keeps one named field and drops everything else, so no
+future credential field can leak in either.
 
-### The trace holds the post-auth wire request, credentials included
+This has a consequence the design leans on: **credentials can only come from the live
+request.** That is not a rule we chose. It falls out of the sanitiser.
 
-`store_result` is called with the request _after_ auth resolution
-(`execution.cpp:380`, "auth already resolved into headers/url"). Verified:
+### The trace holds the request as it went on the wire, credentials included
+
+`store_result` is called after auth is applied (`execution.cpp:380`). Verified:
 
 ```
 auth {mode: bearer, token: "SECRET-TOKEN-12345"}
-  -> trace.request.headers = { "Authorization": "Bearer SECRET-TOKEN-12345", ... }
-  -> configSnapshot.headers = { }                          (declared only)
+  -> trace.request.headers   = { "Authorization": "Bearer SECRET-TOKEN-12345", ... }
+  -> configSnapshot.headers  = { }                       (declared headers only)
 
 auth {mode: apikey, addTo: query, value: "SECRET-QUERY-KEY"}
-  -> trace.request.headers = { "api_key": "SECRET-QUERY-KEY" }
-  -> the URL stays clean
+  -> trace.request.headers   = { "api_key": "SECRET-QUERY-KEY" }
+  -> the URL is left clean
 ```
 
-So `trace.request.headers` minus `configSnapshot.headers` is exactly the set of headers
-added between payload and wire. Safe to rely on for _replay_ fidelity, where "whatever
-the engine added" is precisely what you want to resend. Do **not** use it to identify
-auth headers for Save - the engine may inject others later, and Save's exclusions must
-not depend on a subtraction.
+So the trace minus the snapshot is exactly the set of headers the engine added. That is
+safe to use when **replaying**, where you want to resend whatever the engine added. Do not
+use it to decide which headers are auth headers when saving. The engine may add others
+later.
 
-### Scripts are composed client-side into one opaque string - and this design changes that
+### Scripts are glued into one string, and this design changes that
 
-`RequestBuilder.handleExecute` builds `composedPreScript` from the collection chain plus
-the request's own script and sends one string, so `configSnapshot.preRequestScript`
-contains the collection's scripts inlined with no markers. Writing that back to a request
-would inline them permanently, and the next execute would compose again and run the
-collection script twice.
+`RequestBuilder.handleExecute` builds one string from the collection chain's scripts plus
+the request's own script, joined by blank lines. It sends that string. So
+`configSnapshot.preRequestScript` contains the collection's scripts inside it, with nothing
+marking where each part starts.
 
-Rather than work around that, this design **makes composition structured** - see
-_Engine change 2_. The consequences below (script tab, Save) assume structured scripts,
-with a legacy path for runs stored before it.
+Writing that string back into a request would put the collection's script inside the
+request permanently. The next send would glue it on again and run it twice.
+
+This design fixes the cause. See **Engine change 2**.
 
 Two related facts, both verified:
 
-- **The two clients already disagree.** The renderer filters parts with `.filter(Boolean)`;
-  MCP's `joinScripts` (`resolve.ts:238`) filters with `s.trim()`. A whitespace-only
-  collection script is kept by one and dropped by the other.
-- **Load runs never see the chain.** `POST /run` reads only `config["tests"]`
-  (`run_manager.cpp:193`), and the renderer sends `tests: request.testScript` - the
-  request's own test script alone. A collection-level assertion is validated in design
-  mode and silently never evaluated under load. The dialog warns that pre-request scripts
-  do not run; nothing warns about this.
+- **The two clients disagree already.** The renderer drops empty parts with
+  `.filter(Boolean)`. MCP's `joinScripts` (`resolve.ts:238`) drops them with `s.trim()`. A
+  script that is only whitespace is kept by one and dropped by the other.
+- **Load runs never run the collection's scripts.** `POST /run` reads only
+  `config["tests"]` (`run_manager.cpp:193`), and the app sends only the request's own test
+  script. So a collection-level assertion passes in design mode and is silently never
+  checked under load. The load dialog warns that pre-request scripts do not run. Nothing
+  warns about this.
 
 ## Design
 
-### Three sources, each for what only it can supply
+### Where each piece of the copy comes from
 
-| Source           | Supplies                                                                                | Why it and not the others       |
-| ---------------- | --------------------------------------------------------------------------------------- | ------------------------------- |
-| `configSnapshot` | method, url, declared headers, structured body, auth **mode**, scripts, redirect policy | it is the run payload           |
-| `result.trace`   | response, timings, and the Raw tab                                                      | it is the post-auth wire record |
-| the live request | **credentials**                                                                         | the sanitiser is an allowlist   |
+| Source           | Gives us                                                                   | Why this source                   |
+| ---------------- | -------------------------------------------------------------------------- | --------------------------------- |
+| `configSnapshot` | method, url, declared headers, body, auth mode, scripts, redirect settings | it is the payload that was sent   |
+| `result.trace`   | the response, the timings, the Raw tab                                     | it is the wire record, after auth |
+| the live request | credentials                                                                | they are never stored, see above  |
 
-### Engine change
+### Engine change 1: `GET /run/:id` returns the exchange
 
-`GET /run/:id` gains a `result` field **for design runs only**:
+For design runs only, add a `result` field:
 
 ```json
 "result": {
   "timestamp": 0, "statusCode": 200, "statusText": "OK", "latencyMs": 2.1,
   "error": "...",
-  "trace": { "request": {...}, "response": {...}, "dnsMs": 0, "connectMs": 0, ... }
+  "trace": { "request": {...}, "response": {...}, "dnsMs": 0, "connectMs": 0 }
 }
 ```
 
-Load runs are unchanged and carry no `result`. A payload that varies by run type is the
-endpoint's **existing** contract, not a new one - `configSnapshot` is already completely
-different per type.
+Load runs are unchanged and get no `result`.
 
-The design view then never touches `/run/:id/report`, which stays a load-test artifact.
-Update `docs/engine/api-reference.md` and `docs/engine/db-schema.md` in the same commit.
+The payload already differs by run type on this endpoint, because `configSnapshot` is
+completely different for each. So this is not a new kind of contract.
 
-### Engine change 2: structured script composition
+The design view then never calls `/run/:id/report`. The report stays a load-test thing.
 
-Script composition moves into the engine. This is a **deliberate slice of A1**
-(`pending-backlog.md`) - scripts only. `{{var}}` interpolation and inherit-auth
-resolution stay client-side and A1 stays open for them.
+Update `docs/engine/api-reference.md` and `docs/engine/db-schema.md`.
 
-Both execution paths take an ordered array instead of a pre-joined string:
+### Engine change 2: the engine glues scripts together, not the clients
+
+Both send paths take a list of script parts instead of one pre-glued string:
 
 ```jsonc
 // POST /request
@@ -192,252 +183,253 @@ Both execution paths take an ordered array instead of a pre-joined string:
 "tests":              [ { "origin": "collection", ... }, { "origin": "request", ... } ]
 ```
 
-The engine joins with `"
+The engine joins them with `"\n\n"` and runs the result **once**, exactly as the clients do
+now. Execution is byte for byte the same.
 
-"` and executes **once**, exactly as the clients do today, so
-execution is byte-identical. The legacy string form stays accepted - not as skew
-protection, but because the engine is a standalone binary with a documented HTTP API.
-When both forms arrive, the array wins.
+The old string form still works. That is about the engine being a standalone binary with a
+documented API, not about version mismatches. If both forms arrive, the list wins.
 
-`config_snapshot` needs no work: it is the raw payload, so the array persists
-automatically and a stored run becomes reconstructable.
+`config_snapshot` needs no work. It stores the whole payload, so the list is saved
+automatically. That is what makes a stored run readable later.
 
-**`/run` also gains the composition it never had.** Today load runs validate only the
-request's own test script. With the array they receive the collection chain's too, so a
-collection-level assertion is finally evaluated under load. Cost is small and off the hot
-path: `validate_scripts` (`run_manager.cpp:35`) runs **after** the run, over the bounded
-set of sampled responses, against a reconstructed `dummy_request`.
+This is a deliberate piece of backlog item A1, and only that piece. Scripts move to the
+engine. Variable substitution and inherited auth stay in the clients. A1 stays open for
+them.
 
-**Pre-request scripts remain absent from the load path.** There is no per-request script
-hook there, by design - adding one puts QuickJS on the throughput hot path. The dialog's
-existing warning stays true.
+**`/run` gets the scripts it never had.** Load runs will now check the collection chain's
+test scripts as well as the request's own. The cost is small and not on the hot path.
+`validate_scripts` (`run_manager.cpp:35`) runs after the test finishes, over the sampled
+responses only.
 
-### Tab and routing
+**Pre-request scripts still do not run in load tests.** There is no place in the load path
+to run them. `validate_scripts` runs after the fact, against a rebuilt dummy request, so a
+script that modifies the outgoing request has nothing to modify. Adding that would mean
+running JavaScript per request at full throughput. The dialog's existing warning stays true.
 
-The tab stays `{ type: "run", entityId: run.id }` - the existing type, so no tabs-store
-change and no persist version bump. Every run, design or load, opens its own run tab.
+### Which tab opens
 
-Consequences, all of which delete code rather than add it:
+The tab stays `{ type: "run", entityId: run.id }`. That is the existing type, so the tabs
+store does not change and stored tabs do not need migrating. Every run opens its own run
+tab, design or load.
 
-- `useOpenRun` is **deleted**. No report prefetch, no request lookup, no async, no
-  spinner, no ordering constraint between store write and tab open.
-- `HistoryList` returns to `openTab({ type: "run", entityId: runId })`, and `RecentRuns`
-  already does exactly that - the split behaviour disappears with no shared helper.
-- `Shell`'s drawer patch is **reverted**. A run tab never triggered the effect.
-- `HistoryList`'s existing `activeTab.type === "run"` selection derivation works again,
-  so the run row highlights with no change.
-- The `RequestBuilderProvider` store subscription is **reverted**; nothing injects into
-  the response store any more.
+Four things follow, and all of them delete code:
 
-`HistoryDetail` routes a design run to a new `DesignRunView`. Its header shrinks to run
-identity, status and actions - the URL comes from the builder, so there are not two URL
-bars.
+- `useOpenRun` goes away. No pre-fetching a report, no looking up a request, nothing async,
+  no spinner.
+- `HistoryList` goes back to one line: `openTab({ type: "run", entityId: runId })`.
+  `RecentRuns` already does exactly that, so the two paths stop disagreeing on their own.
+- `Shell` needs no change. A run tab never moved the sidebar.
+- `HistoryList`'s existing highlight rule works again, because the tab is a run tab.
+
+`HistoryDetail` sends design runs to a new `DesignRunView`. Its header shrinks to the run's
+identity, status, and buttons. The URL comes from the builder below it, so there are not two
+URL bars.
 
 ### The detached builder
 
-`DesignRunView` mounts `RequestBuilderProvider` with:
+`DesignRunView` renders `RequestBuilderProvider` with:
 
-- `initialRequest` = the seed below, with **`id: null`**
-- `initialResponse` = `responseFromRunResult(run.result)` (**new prop**; the provider
-  currently seeds its response from the store by id)
-- `onExecute` = replay
-- **`onSave` omitted**
+- `initialRequest` = the values below, with **`id: null`**
+- `initialResponse` = `responseFromRunResult(run.result)` (a new prop; today the provider
+  reads the response from the store using the id)
+- `onExecute` = send again
+- **no `onSave`**
 
-`id: null` is load-bearing and needs no new machinery: `useSaveManager` returns early on
-a null `entityId`, the response store is keyed by id so nothing is written, and
-`useLastDesignRunQuery(null)` never fires. The existing provider is already correct for a
-detached request.
+`id: null` does the detaching, and needs no new code. `useSaveManager` stops early when
+`entityId` is null. The response store is keyed by id, so nothing is written to it.
+`useLastDesignRunQuery(null)` never runs. The provider is already correct for a request with
+no id.
 
-Seed mapping:
+Starting values:
 
 | `RequestState`                               | From                                                                 |
 | -------------------------------------------- | -------------------------------------------------------------------- |
 | `method`, `url`                              | `configSnapshot`                                                     |
 | `params`                                     | `parseQueryParams(url)` (`utils/url.ts`, already used by `UrlInput`) |
-| `headers`                                    | depends on whether the request survives - see **Auth** below         |
-| `body`, `bodyMode`, `formData`, `urlEncoded` | `configSnapshot.body` (already structured)                           |
-| `authType`, `authConfig`                     | depends - see **Auth** below                                         |
-| `preRequestScript`, `testScript`             | `configSnapshot` - see **Scripts** below                             |
+| `headers`                                    | depends on whether the request still exists, see **Auth**            |
+| `body`, `bodyMode`, `formData`, `urlEncoded` | `configSnapshot.body`, already structured                            |
+| `authType`, `authConfig`                     | depends, see **Auth**                                                |
+| `preRequestScript`, `testScript`             | see **Scripts**                                                      |
 | `followRedirects`, `maxRedirects`            | `configSnapshot`                                                     |
 | `id`, `collectionId`                         | `null`                                                               |
 
-**Auth, in one sentence:** use the live request's auth when there is one; otherwise replay
-exactly what went out.
+**Auth, in one sentence:** use the live request's auth if the request still exists,
+otherwise resend exactly what went out.
 
-|                  | `headers` seeded from                                            | `authType` / `authConfig`                         |
-| ---------------- | ---------------------------------------------------------------- | ------------------------------------------------- |
-| request survives | `configSnapshot.headers` - declared, no credentials              | the live request's **current** auth               |
-| orphan           | `trace.request.headers` - the wire set, `Authorization` included | `none` (auth is already baked into those headers) |
+|                      | `headers` from                                     | `authType` / `authConfig`                            |
+| -------------------- | -------------------------------------------------- | ---------------------------------------------------- |
+| request still exists | `configSnapshot.headers`, no credentials in them   | the request's current auth                           |
+| request is gone      | `trace.request.headers`, including `Authorization` | `none`, because auth is already inside those headers |
 
-Both branches keep the same property: **what the editor shows is what the replay sends.**
-In the surviving case that means the request's current auth, since that is what a live
-resolution will produce - and the run's own `configSnapshot.auth.mode` is surfaced beside
-it as read-only metadata ("this run used: bearer"), which makes it visible when the
-request's auth has changed since. In the orphan case it means the frozen credential is a
-visible, editable header row, so a stale token can be replaced by hand and re-fired.
+Both cases keep the same promise: **what you see in the editor is what gets sent.**
 
-**Scripts.** With structured composition the run records each part and its origin, so the
-script tab shows **only the `origin: "request"` entry** - structurally identical to the
-same request's normal script tab. The collection entries render beside it as read-only,
-labelled by the collection they came from, mirroring what `AuthInheritBanner` already does
-for inherited auth. That banner is the precedent: the builder surfaces inherited auth today
-and surfaces inherited scripts nowhere, so this closes a gap that has nothing to do with
-history.
+When the request exists, that means its current auth, because that is what a fresh
+resolution will produce. The run's own recorded mode is shown next to it as read-only
+information, which also makes it obvious when the request's auth has changed since.
 
-Editing affects the request entry only; a replay resends the recorded collection entries
-untouched, which is correct for a snapshot - it replays the collection scripts **as they
-were**, not as the collection reads now.
+When the request is gone, the old token is a normal header row. You can see it and edit it,
+so a dead token can be replaced by hand.
 
-**Legacy runs** stored before structured composition have only the opaque string. They fall
-back to showing the whole composed blob with a read-only note explaining that its parts
-cannot be separated, and Save excludes scripts for those runs only.
+**Scripts.** The run records each part and where it came from, so the script tab shows
+**only the request's own part**. That looks exactly like the same request's normal script
+tab. The collection's parts appear next to it, read-only, labelled with the collection they
+came from.
 
-### Replay
+`AuthInheritBanner` already does this for inherited auth. Nothing does it for scripts, so
+today you cannot see what runs before your own pre-request script. This closes that gap, and
+that gap has nothing to do with History.
 
-Send the current editor state to `POST /request` with `requestId: run.requestId`, so the
-new run attributes to the same request. Auth is resolved **live** from the saved request
-through the existing helpers - not a copied composition, since `CLAUDE.md` forbids a
-third copy. Firing creates a new run in history, which is correct.
+Editing changes the request's part only. Sending again resends the recorded collection parts
+unchanged. That is correct for a snapshot: it runs the collection scripts **as they were**,
+not as they read now.
 
-Orphan (no `requestId`, or the request is gone): there is no auth to resolve, so the
-replay sends the trace's headers as seeded - including the `Authorization` that was on the
-wire. The run is replayed exactly as it executed. A token that has since expired returns a
-401, which is a true statement about replaying that request; the header is visible and
-editable, so a fresh one can be pasted in.
+**Runs saved before Engine change 2** only have the old glued string. There is no way to
+split it back apart, because nothing marks the boundaries. Those runs show the whole string
+with a note saying its parts cannot be separated, and Save leaves scripts alone for them.
+
+### Sending it again
+
+Send the current contents of the editor to `POST /request`, with `requestId: run.requestId`
+so the new run is filed under the same request. Auth is resolved fresh from the saved
+request using the existing helpers. Do not copy that logic; `CLAUDE.md` forbids a third copy
+of it.
+
+Sending creates a new run in History, which is what should happen.
+
+If the request is gone, there is no auth to resolve. The trace's headers were used as the
+starting values, so the old `Authorization` goes out as-is and the run is replayed exactly
+as it ran. If the token has expired you get a 401. That is a true answer about replaying
+that request, and the header is editable so you can paste a fresh one.
 
 ### Save to request
 
-An explicit action behind a confirm showing what will change, because overwriting a live
-request from a days-old snapshot is irreversible.
+A button that copies values from the run back onto the saved request. It asks first, showing
+what will change, because it cannot be undone.
 
-**Save writes only fields the snapshot holds in the same shape the request stores them:**
-method, url, params, headers, body, redirect policy, **and the request's own script** -
-the `origin: "request"` entry, which maps exactly onto `request.preRequestScript` with no
-collection text in it. Structured composition is what makes that safe; before it, scripts
-had to be excluded.
+**It writes:** method, url, params, headers, body, redirect settings, and **the request's
+own script part**. That part maps straight onto `request.preRequestScript` and has no
+collection text in it. Engine change 2 is what makes that safe. Without it, scripts had to
+be left out.
 
-It does **not** write **auth**: only the mode survives sanitisation, and writing a bare
-mode would discard the request's credentials.
+**It does not write auth.** Only the mode is stored, and writing a bare mode would wipe out
+the request's credentials.
 
-For a **legacy run** (opaque composed string) scripts are excluded too, since the request's
-own part cannot be recovered.
+**For a run saved before Engine change 2**, scripts are left out too, because the request's
+own part cannot be recovered from the glued string.
 
-Exclusions appear in the confirm as explicitly unchanged, so the rule is visible rather
-than silent - including the fact that a legacy run writes fewer fields than a new one. The
-action is hidden entirely when `run.requestId` no longer resolves.
+Everything left out is listed in the confirmation as unchanged. That includes the fact that
+an older run writes fewer fields than a new one, so it is visible rather than surprising.
+
+The button is hidden when the request no longer exists.
 
 ## Build order
 
-Built fresh from master on `design-run-detached-copy`. The abandoned branch
-`history-opens-request-builder` produced roughly 770 lines - `useOpenRun`, the
-`RequestBuilderProvider` store subscription, the `Shell` drawer patch and their tests -
-that this design never needs. Three pieces of it are worth carrying over, and they are
-Phase 0 because each stands on its own.
+Built fresh from master on `design-run-detached-copy`. The abandoned branch produced about
+770 lines this design never needs: `useOpenRun`, the provider store subscription, the
+`Shell` patch, and their tests. Three pieces are worth keeping.
 
-**Phase 0 - independently useful.** Would be worth doing even if this feature did not
-exist: `buildRawRequest` + tests (the restore path collapsing a trace to
-`` `${method} ${url}` `` is a bug in itself); the error-run mapping in
-`responseFromRunResult` (failed design runs currently restore as nothing); `restoredFrom`
+**Phase 0. Useful on their own.** Worth doing even without this feature.
 
-- the age chip (the builder's cold-start restore is dishonest without it).
+- `buildRawRequest` and its tests. Today the restore path turns a whole trace into
+  `` `${method} ${url}` ``, which is a bug by itself.
+- Error runs in `responseFromRunResult`. A failed design run currently restores as nothing.
+- `restoredFrom` and the age chip. The builder restores an old response on startup and does
+  not say so.
 
-**Phase 1 - engine.** `GET /run/:id` carries `result` for design runs. Structured script
-composition on `POST /request` and `POST /run`. gtests, `api-reference.md`,
-`db-schema.md`, `scripting.md`.
+**Phase 1. Engine.** `GET /run/:id` returns `result`. Scripts become a list on both send
+paths. gtests. `api-reference.md`, `db-schema.md`, `scripting.md`.
 
-**Phase 2 - clients stop composing.** Renderer `index.tsx` and MCP `resolve.ts` together,
-guarded by `resolve.test.ts`. `CLAUDE.md` and `mcp.md` / `architecture.md` updated, and
-`pending-backlog.md` records the A1 slice as taken.
+**Phase 2. Clients stop gluing scripts.** Renderer `index.tsx` and MCP `resolve.ts` change
+together, guarded by `resolve.test.ts`. Update `CLAUDE.md`, `mcp.md`, `architecture.md`, and
+record the A1 piece in `pending-backlog.md`.
 
-**Phase 3 - the feature.** `DesignRunView` + seed mapping; `HistoryDetail` routes design
-runs to it and its header shrinks; delete `DesignRunDetail`.
+**Phase 3. The feature.** `DesignRunView` and its starting values. `HistoryDetail` routes
+design runs to it and its header shrinks. Delete `DesignRunDetail`.
 
-**Phase 4 - what the feature unlocks.** `UnifiedResponseViewer` down to the embedded
-sample view; the inherited-scripts banner in the builder; a test for `Shell`'s drawer
-effect, which has none today and whose absence is why the earlier regression shipped.
+**Phase 4. What the feature makes possible.** `UnifiedResponseViewer` shrinks to the
+embedded sample view. The inherited-scripts panel in the builder. A test for `Shell`'s
+sidebar effect, which has none, and whose absence is why the earlier bug shipped.
 
-## Edge cases and hard constraints
+## Things that will break this if ignored
 
-**The engine must join and execute once.** `execution.cpp:146` runs the composed string
-through a single `engine.execute()`, so all parts share one JS scope - a `const` in a
-collection script is visible to the request's. Iterating the array and executing per entry
-would silently break that. Join, then execute once.
+**Join the parts, then run once.** `execution.cpp:146` runs the joined string through a
+single `engine.execute()`. All parts share one JavaScript scope, so a `const` declared in a
+collection script is visible to the request's script. Running each part separately would
+break that quietly.
 
-**Do not change the separator.** A syntax error reports a line number relative to the
-joined blob. Any change to separator, filtering or order shifts every reported line.
-`"
+**Do not change the separator.** A syntax error reports a line number counted from the start
+of the joined string. Change the separator, the filtering, or the order, and every reported
+line number moves. Keep `"\n\n"` exactly.
 
-"`, byte-exact.
+**Pick one rule for empty parts.** The renderer keeps whitespace-only parts, MCP drops them.
+Use MCP's `trim()` rule. This changes renderer behaviour for that case.
 
-**Pick one filter rule.** The renderer keeps whitespace-only parts, MCP drops them. Adopt
-MCP's `trim()` rule; it is obviously right, and it means the renderer's behaviour changes
-for that edge.
+**Do not try to say which script failed.** `preScriptError` still cannot name the part that
+failed. Doing that needs character offsets. It is out of scope, and it will grow this change
+a lot if allowed in.
 
-**Error attribution is enabled, not delivered.** `preScriptError` still will not say
-_whose_ script failed - that needs offsets. Explicitly out of scope.
+**Load-test results will change.** Collection-level assertions that were never checked under
+load will start being checked. `testValidation` counts will move, and some runs will report
+failures they did not before. That is the fix working, but it belongs in the release notes
+or it reads as a regression.
 
-**Composing test scripts into load runs is a visible behaviour change.** A collection-level
-assertion never evaluated under load starts being evaluated, so `testValidation` numbers
-move and some runs may newly report failures. That is the point of the fix, but it should
-be called out in the release notes.
+**When both script forms are sent**, the list wins and the string is ignored. They are never
+merged.
 
-**Precedence.** Array wins when both forms are sent; the string is ignored, not merged.
-
-**Empty input.** An omitted field, `[]`, and an array of empty scripts all mean "no
+**Empty input.** A missing field, an empty list, and a list of empty scripts all mean "no
 script".
 
-## Blast radius
+## What this touches
 
-| Area      | Files                                                                                                                                         |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Engine    | `execution.cpp:305` parse + join; `run_manager.cpp:193` same for `tests`; `runs.cpp:47` result field; gtests                                  |
-| Renderer  | `index.tsx` `handleExecute` and `handleConfirmLoadTest` stop composing                                                                        |
-| MCP       | `resolve.ts` `joinScripts` / `composeScripts` / `OutgoingRequest`; `resolve.test.ts` composition block                                        |
-| Types     | `ExecuteRequestPayload`, `StartLoadTestRequest`, MCP `OutgoingRequest`                                                                        |
-| Docs      | `api-reference.md`, `scripting.md`, `mcp.md`, `architecture.md`, `db-schema.md`, `pending-backlog.md`                                         |
-| CLAUDE.md | its _Request composition (known duplication)_ section states scripts are composed client-side in both copies - that becomes false for scripts |
+| Area        | Files                                                                                                                  |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Engine      | `execution.cpp:305` parse and join; `run_manager.cpp:193` the same for `tests`; `runs.cpp:47` the new `result`; gtests |
+| Renderer    | `index.tsx`, both `handleExecute` and `handleConfirmLoadTest`                                                          |
+| MCP         | `resolve.ts` (`joinScripts`, `composeScripts`, `OutgoingRequest`); `resolve.test.ts`                                   |
+| Types       | `ExecuteRequestPayload`, `StartLoadTestRequest`, MCP `OutgoingRequest`                                                 |
+| Docs        | `api-reference.md`, `scripting.md`, `mcp.md`, `architecture.md`, `db-schema.md`, `pending-backlog.md`                  |
+| `CLAUDE.md` | its _Request composition_ section says both clients glue scripts. That stops being true.                               |
 
-`config_snapshot` needs no work: it is the raw payload, so the array persists automatically.
+`config_snapshot` needs no work. It saves the whole payload, so the list is stored for free.
 
-Absorbed rather than filed separately: the silent drop of collection test scripts under
-load is what _Engine change 2_ fixes, and `resolve.ts:93`'s comment - which claims
-`OutgoingRequest` is "the fully-composed body the engine's `POST /request` and `/run`
-accept", though `/run` reads neither script field - is corrected in Phase 2.
+Two problems found along the way are fixed here rather than filed separately. Collection test
+scripts being dropped under load is what Engine change 2 fixes. And `resolve.ts:93` describes
+`OutgoingRequest` as the body that `POST /request` and `POST /run` both accept, though
+`/run` reads neither script field; that comment is corrected in Phase 2.
 
 ## Testing
 
-- **Seed mapping** (unit): auth mode, script parts by origin, redirect policy, structured
-  body, declared headers, `id: null`.
-- **Detachment** (behavioural): editing fires no save mutation. Mutation-check by restoring
-  `onSave` and confirming the test goes red.
-- **Replay**: sends editor state, live-resolved auth, `requestId`, and the recorded
-  collection script entries unmodified; creates a run.
-- **Orphan**: no Save, no Open request; headers seed from the trace and the replay sends
-  the recorded `Authorization` verbatim.
-- **Save**: writes the allowed fields including the request's own script; never writes
-  auth; excludes scripts for a legacy run; requires confirm.
-- **Legacy run**: opaque composed string renders with its note, and Save drops scripts.
-- **Drawer**: a run tab does not move the drawer (regression cover).
-- **Highlight**: the run row is selected while its tab is active.
-- **Engine - result**: `GET /run/:id` carries `result` for a design run, not for a load run.
-- **Engine - composition**: array and legacy string produce byte-identical joined output;
-  array wins when both are sent; parts share one JS scope (a `const` in the first is
-  visible to the second); whitespace-only parts are dropped; `/run` validates the
-  collection chain's test scripts as well as the request's.
-- **MCP parity**: `resolve.test.ts` covers the same composition cases as the renderer.
+- **Starting values** (unit): auth mode, script parts by origin, redirect settings, body,
+  declared headers, `id: null`.
+- **Detachment**: typing in the copy triggers no save. Check the test really works by
+  putting `onSave` back and confirming it fails.
+- **Send again**: sends the editor contents, freshly resolved auth, `requestId`, and the
+  recorded collection script parts unchanged. A new run appears.
+- **Request deleted**: no Save, no Open request. Headers come from the trace and the old
+  `Authorization` is sent as-is.
+- **Save**: writes the allowed fields including the request's own script. Never writes auth.
+  Leaves scripts alone for an older run. Asks first.
+- **Older run**: the glued string renders with its note, and Save drops scripts.
+- **Sidebar**: a run tab does not change the sidebar view.
+- **Highlight**: the run's row is highlighted while its tab is open.
+- **Engine, result**: `GET /run/:id` has `result` for a design run and not for a load run.
+- **Engine, scripts**: the list and the old string produce the same joined output; the list
+  wins when both are sent; parts share one scope (a `const` in the first is visible to the
+  second); whitespace-only parts are dropped; `/run` checks the collection's test scripts as
+  well as the request's.
+- **MCP**: `resolve.test.ts` covers the same cases as the renderer.
 
-## Risks and accepted limitations
+## Known limits
 
-- **Replay fidelity.** A replay resends the recorded script parts, so it runs the
-  collection scripts as they were at run time rather than as they read now. Test results
-  are produced by the replay, not restored from the original run.
-- **A1 is now partially taken.** Script composition is engine-side; variable interpolation
-  and inherit-auth are not. `pending-backlog.md` must say so, or the next reader will
-  assume all three still live in the clients.
-- **Type-varying payload** on `GET /run/:id`. Accepted: `configSnapshot` already varies
-  completely by type on the same endpoint.
-- **Secrets remain visible** in the Raw and Headers tabs, sourced from the trace. This
-  predates the change - the restore path already passed `trace.request.headers` into
-  `requestHeaders`. Not addressed here.
-- **`GET /requests/:id` still does not exist**, so resolving `run.requestId` to a request
-  goes through the collection-list scan in `fetchRequestById`.
+- **Sending again is not identical to the original.** It resends the script parts as they
+  were recorded, so it runs the collection scripts as they were then, not as they read now.
+  Test results come from the new send, not from the old run.
+- **`GET /run/:id` returns a different shape per run type.** Accepted, because
+  `configSnapshot` on that same endpoint already does.
+- **Credentials stay visible** in the Raw and Headers tabs, read from the trace. That is
+  already true today and is not addressed here.
+- **A1 is now partly done.** Scripts are handled by the engine; variable substitution and
+  inherited auth are not. `pending-backlog.md` has to say so, or the next reader will assume
+  all three are still in the clients.
+- **There is still no `GET /requests/:id`**, so finding a request by id still scans the
+  collection lists in `fetchRequestById`.
