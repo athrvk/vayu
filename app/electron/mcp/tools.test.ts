@@ -294,9 +294,21 @@ describe("run_collection_smoke", () => {
 			url: "https://api.example.com/users", // {{host}} resolved
 			headers: { Accept: "application/json" }, // KeyValueEntry[] flattened
 			auth: { mode: "bearer", token: "abc123" }, // inherited from collection, {{token}} resolved
-			// collection pre-script + request post-script composed
-			preRequestScript: "pm.collectionVariables.set('x', 1)",
-			postRequestScript: "pm.test('ok', () => pm.response.to.have.status(200))",
+			// collection pre-script part + request post-script part, engine joins them
+			preRequestScripts: [
+				{
+					origin: "collection",
+					id: "c1",
+					script: "pm.collectionVariables.set('x', 1)",
+				},
+			],
+			postRequestScripts: [
+				{
+					origin: "request",
+					id: "r1",
+					script: "pm.test('ok', () => pm.response.to.have.status(200))",
+				},
+			],
 		});
 		expect((res.structuredContent as { passed: number }).passed).toBe(1);
 	});

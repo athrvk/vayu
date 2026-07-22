@@ -163,17 +163,31 @@ Notes:
 ### Request composition
 
 In Vayu the **renderer** - not the engine - prepares a request before sending
-it: it resolves `{{variables}}`, walks the collection ancestor chain to resolve
-`inherit` auth, and composes the collection-chain pre/post scripts with the
-request's own. The engine only *applies* a concrete `auth` block (bearer / basic
-/ apikey / oauth2, incl. its token cache) and *runs* whatever script strings
-arrive in the body; it performs **no** `{{var}}` interpolation and drops
-`{"mode":"inherit"}` as "resolved app-side" (`auth_resolver.cpp::parse_auth`).
+it: it resolves `{{variables}}` and walks the collection ancestor chain to
+resolve `inherit` auth. The engine *applies* a concrete `auth` block (bearer /
+basic / apikey / oauth2, incl. its token cache); it performs **no** `{{var}}`
+interpolation and drops `{"mode":"inherit"}` as "resolved app-side"
+(`auth_resolver.cpp::parse_auth`).
+
+Scripts are handled differently: both clients collect the collection-chain
+pre/post scripts (root→leaf) and the request's own as an ordered list of parts,
+each naming where it came from (`{ origin, id, name?, script }`), and send the
+list as `preRequestScripts` / `postRequestScripts` on `POST /request` - the
+**engine** joins the parts with `"\n\n"` and runs the result (parts whose
+script is blank are dropped). The renderer's load path builds the same kind of
+list for its `tests` field on `POST /run`; MCP's only `POST /run` caller
+(`start_load_run`) has no collection to chain-compose from - it forwards an
+agent-supplied ad-hoc `tests` string as-is, the same as its ad-hoc
+`preRequestScript`/`postRequestScript` (`tools.ts::buildExecutionPayload`), not
+a chain-built list. Composing the *content* of a script list is engine-side
+now; building the ordered *list* is still client-side, so it still needs both
+clients to agree.
 
 Because MCP talks to the engine directly, it must do that preparation itself.
 `resolve.ts` is the main-process port of the renderer pipeline
-(`useVariableResolver.ts` + `request-builder/index.tsx` + `auth-mapping.ts`) and
-is applied so a tool call behaves like the app clicking Send:
+(`useVariableResolver.ts` + `request-builder/index.tsx` + `auth-mapping.ts` +
+`utils/script-parts.ts`) and is applied so a tool call behaves like the app
+clicking Send:
 
 - **Variables** - resolved in URL, headers, and body with the app's precedence
   (environment > collection chain, leaf→root > globals; enabled only; unknown →
@@ -182,9 +196,9 @@ is applied so a tool call behaves like the app clicking Send:
   (`inherit` resolves against the collection chain); `run_request` /
   `start_load_run` accept an explicit `auth` block. In all cases variables inside
   the block are resolved and the engine applies it (oauth2 uses its token cache).
-- **Scripts** - `run_collection_smoke` composes the collection-chain pre/post
-  scripts (root→leaf) with the request's own and sends them for the engine to
-  run, so a request's tests and setup actually execute.
+- **Scripts** - `run_collection_smoke` collects the collection-chain pre/post
+  script parts (root→leaf) and the request's own, and sends the list for the
+  engine to join and run, so a request's tests and setup actually execute.
 
 Resolution only fetches the variable sources when a call needs them (a field
 carries a `{{template}}`, or auth is `inherit`); a fully-literal call skips the
@@ -193,12 +207,12 @@ and `collectionId` to scope resolution.
 
 > **Known duplication (deferred).** `resolve.ts` is a deliberate port of the
 > renderer's composition pipeline, so the same semantics now live in two places
-> (renderer + MCP). This is because the engine only does composition halfway (it
-> loads variables and applies auth/scripts, but does not interpolate `{{var}}`,
-> resolve `inherit`, or compose chain scripts). The intended fix is to finish
-> composition in the engine and let clients go thin. Until then, **keep the two
-> copies in sync and don't add a third.** See `docs/plans/pending-backlog.md` →
-> **A1**.
+> (renderer + MCP). This is because the engine only does composition partway (it
+> loads variables, applies auth, and joins/runs script parts, but does not
+> interpolate `{{var}}`, resolve `inherit`, or build the ordered script-part
+> list). The intended fix is to finish composition in the engine and let clients
+> go thin. Until then, **keep the two copies in sync and don't add a third.**
+> See `docs/plans/pending-backlog.md` → **A1**.
 
 ## Resources
 
@@ -280,22 +294,22 @@ live and writing it to disk.
 Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 `EngineSidecar`.
 
-| File               | Responsibility                                                      |
-| ------------------ | ------------------------------------------------------------------- |
-| `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer. |
-| `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                |
-| `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.  |
-| `compare.ts`       | Pure two-report diff for `compare_runs`.                            |
-| `resolve.ts`       | Request composition: `{{var}}` resolution, inherit-auth, scripts.   |
-| `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`.    |
-| `resources.ts`     | Static + templated resource definitions.                            |
-| `prompts.ts`       | Prompt definitions (build messages from engine data).               |
-| `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts.      |
-| `http.ts`          | Stateless Streamable HTTP host (DNS-rebinding on).                  |
-| `cli.ts`           | Standalone stdio server (env-configured).                           |
-| `connect.ts`       | One-click connect: shells out to `claude` / `code` CLIs.            |
-| `store.ts`         | Persist safety config + enabled preference (`electron-store`).      |
-| `index.ts`         | `VayuMcpService` facade consumed by `main.ts`.                      |
+| File               | Responsibility                                                              |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer.          |
+| `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                        |
+| `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
+| `compare.ts`       | Pure two-report diff for `compare_runs`.                                    |
+| `resolve.ts`       | Request composition: `{{var}}` resolution, inherit-auth, script-part lists. |
+| `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`.            |
+| `resources.ts`     | Static + templated resource definitions.                                    |
+| `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
+| `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts.              |
+| `http.ts`          | Stateless Streamable HTTP host (DNS-rebinding on).                          |
+| `cli.ts`           | Standalone stdio server (env-configured).                                   |
+| `connect.ts`       | One-click connect: shells out to `claude` / `code` CLIs.                    |
+| `store.ts`         | Persist safety config + enabled preference (`electron-store`).              |
+| `index.ts`         | `VayuMcpService` facade consumed by `main.ts`.                              |
 
 ### Lifecycle & IPC
 

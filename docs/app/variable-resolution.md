@@ -95,8 +95,8 @@ variable map before the value is sent to the engine.
 
 ## Script composition
 
-Pre-request and post-request scripts are composed from the collection chain plus the
-request's own script before execution. Scripts run **root → leaf → request**:
+Pre-request and post-request scripts run as one script assembled from the
+collection chain plus the request's own, in order **root → leaf → request**:
 
 ```
 Root.preRequestScript
@@ -108,7 +108,10 @@ request.preRequestScript    ←  runs last
 This lets a parent collection set up shared variables or auth tokens that child
 requests and their own scripts can rely on.
 
-Empty scripts are omitted; non-empty scripts are joined with a blank line between them.
+The app builds the ordered list of script parts (empty or whitespace-only
+scripts are dropped); the **engine** joins the surviving parts with a blank
+line and runs the result. See `docs/engine/architecture.md` → *Request
+composition boundary* for the wire shape.
 
 ---
 
