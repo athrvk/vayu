@@ -37,6 +37,21 @@ export interface DeleteConfirmDialogProps {
 	description: React.ReactNode;
 	onConfirm: () => void | Promise<void>;
 	isDeleting?: boolean;
+	/**
+	 * Word on the confirming button. Defaults to "Delete".
+	 *
+	 * Not every irreversible action is a deletion — "Reset to defaults" is the
+	 * case that forced this. Before it existed the only in-app confirm said
+	 * "Delete", so a reset either lied about what it was doing or fell back to
+	 * `window.confirm`, which ignores the theme, the accent and the roundedness
+	 * that the very panel it appears over exists to configure.
+	 */
+	confirmLabel?: string;
+	/**
+	 * `destructive` (default) for anything that removes data. `primary` for an
+	 * irreversible-but-not-destructive action, where a red button overstates it.
+	 */
+	confirmVariant?: "destructive" | "default";
 }
 
 export function DeleteConfirmDialog({
@@ -46,6 +61,8 @@ export function DeleteConfirmDialog({
 	description,
 	onConfirm,
 	isDeleting = false,
+	confirmLabel = "Delete",
+	confirmVariant = "destructive",
 }: DeleteConfirmDialogProps) {
 	const cancelRef = useRef<HTMLButtonElement>(null);
 
@@ -93,8 +110,8 @@ export function DeleteConfirmDialog({
 					>
 						Cancel
 					</Button>
-					<Button variant="destructive" onClick={onConfirm} disabled={isDeleting}>
-						{isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete"}
+					<Button variant={confirmVariant} onClick={onConfirm} disabled={isDeleting}>
+						{isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : confirmLabel}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

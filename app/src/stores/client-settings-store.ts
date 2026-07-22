@@ -34,6 +34,7 @@ import {
 	clampSloThresholdMs,
 	type EditorPrefs,
 	type AutoSavePrefs,
+	nearestAutoSaveDelay,
 } from "@/constants/client-settings";
 
 /** localStorage keys reset by "Reset app settings" — all renderer preferences,
@@ -151,6 +152,15 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				if (state) {
 					applyMonoStack(resolveMonoStack(state.monoFont, state.monoFontCustom));
 					applyReducedMotion(state.reducedMotion);
+
+					// The auto-save options changed from 1s/3s/5s to 5s/30s/1m, so a
+					// stored 1s or 3s is no longer offered. Snap it to the nearest
+					// one that is, otherwise the picker shows nothing selected while
+					// auto-save keeps running on the old interval.
+					const snapped = nearestAutoSaveDelay(state.autoSave.delayMs);
+					if (snapped !== state.autoSave.delayMs) {
+						state.autoSave = { ...state.autoSave, delayMs: snapped };
+					}
 				}
 			},
 		}

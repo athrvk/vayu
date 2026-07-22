@@ -20,7 +20,7 @@
  */
 
 import { useState } from "react";
-import { Copy, Check, Download, Terminal, BarChart3 } from "lucide-react";
+import { Copy, Check, Download, Terminal } from "lucide-react";
 import {
 	Tabs,
 	TabsContent,
@@ -35,7 +35,6 @@ import {
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
 import { modKey } from "@/lib/platform";
-import { useDashboardStore } from "@/stores";
 import { ResponseBody as SharedResponseBody } from "@/components/shared/response-viewer";
 import { TIMING } from "@/config/timing";
 import ResponseHeader from "./ResponseHeader";
@@ -51,17 +50,8 @@ type ResponseTab = "body" | "headers" | "cookies" | "timing" | "console" | "test
 
 export default function ResponseViewer() {
 	const { response, isExecuting } = useRequestBuilderContext();
-	const { currentRunId, mode: dashboardMode } = useDashboardStore();
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
 	const [copied, setCopied] = useState(false);
-
-	// Check if there's a load test dashboard available
-	const hasLoadTestDashboard = !!currentRunId;
-
-	const handleViewLoadTest = () => {
-		// View dashboard: would require navigating to dashboard tab
-		// This is handled by dashboardMode being "running" which shows the button
-	};
 
 	// Loading state
 	if (isExecuting) {
@@ -104,23 +94,6 @@ export default function ResponseViewer() {
 						<Kbd>↵</Kbd>
 						<span>or click Send</span>
 					</div>
-
-					{hasLoadTestDashboard && (
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={handleViewLoadTest}
-							className="mt-6"
-						>
-							<BarChart3 className="w-4 h-4 mr-2" />
-							View Load Test Dashboard
-							{dashboardMode === "running" && (
-								<Badge variant="default" className="ml-2 text-xs">
-									Live
-								</Badge>
-							)}
-						</Button>
-					)}
 				</div>
 			</div>
 		);
@@ -243,30 +216,6 @@ export default function ResponseViewer() {
 
 					{/* Actions */}
 					<div className="flex items-center gap-1 shrink-0">
-						{/* View Load Test Dashboard button */}
-						{hasLoadTestDashboard && (
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button
-										size="sm"
-										variant="outline"
-										onClick={handleViewLoadTest}
-										className="gap-1.5"
-									>
-										<BarChart3 className="w-4 h-4" />
-										<span className="hidden sm:inline">Load Test</span>
-										{dashboardMode === "running" && (
-											// Sole indicator that the run is live, so WCAG
-											// 1.4.11 applies at 3.0. bg-green-500 measured
-											// 2.30 on the card in light mode; the fill
-											// token is 4.84 light / 3.57 dark.
-											<span className="w-2 h-2 rounded-full bg-status-success-fill animate-pulse" />
-										)}
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent>View Load Test Dashboard</TooltipContent>
-							</Tooltip>
-						)}
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button

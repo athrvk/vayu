@@ -53,6 +53,7 @@ export default function GeneralPanel() {
 	const showToast = useToastStore((s) => s.showToast);
 	const [clearing, setClearing] = useState(false);
 	const [confirmClear, setConfirmClear] = useState(false);
+	const [confirmReset, setConfirmReset] = useState(false);
 
 	useEffect(() => {
 		window.electronAPI
@@ -89,14 +90,19 @@ export default function GeneralPanel() {
 		}
 	};
 
+	/*
+	 * Same in-app dialog as Clear run history, for the same reason: the native
+	 * `window.confirm` ignores the theme, the accent and the roundedness that
+	 * this panel exists to configure, and blocks the renderer thread while it is
+	 * open. It also focuses Cancel first, so a reflexive Enter does not reset.
+	 *
+	 * `confirmVariant="default"` rather than destructive: this is irreversible
+	 * but it removes nothing — a red button would overstate it next to the one
+	 * that really does delete run history.
+	 */
 	const resetSettings = () => {
-		if (
-			window.confirm(
-				"Reset all appearance, editor, and dashboard settings to their defaults? The app will reload. Your collections, requests, and run history are not affected."
-			)
-		) {
-			resetAll();
-		}
+		setConfirmReset(false);
+		resetAll();
 	};
 
 	return (
@@ -235,7 +241,7 @@ export default function GeneralPanel() {
 					<Button
 						variant="outline"
 						size="sm"
-						onClick={resetSettings}
+						onClick={() => setConfirmReset(true)}
 						className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 					>
 						<RotateCcw className="w-4 h-4 mr-1.5" />
@@ -243,6 +249,16 @@ export default function GeneralPanel() {
 					</Button>
 				</CardContent>
 			</Card>
+
+			<DeleteConfirmDialog
+				open={confirmReset}
+				onOpenChange={setConfirmReset}
+				title="Reset app settings?"
+				description="Appearance, editor and dashboard preferences go back to their defaults and the app reloads. Collections, requests and run history are not affected."
+				onConfirm={resetSettings}
+				confirmLabel="Reset"
+				confirmVariant="default"
+			/>
 
 			<DeleteConfirmDialog
 				open={confirmClear}
