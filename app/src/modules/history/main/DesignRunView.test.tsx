@@ -267,3 +267,42 @@ describe("DesignRunView - sending it again", () => {
 		expect(payload.requestId).toBe("req_1");
 	});
 });
+
+describe("DesignRunView - saving back to the request", () => {
+	it("offers Save while the request still exists", () => {
+		renderView(designRun());
+
+		expect(screen.getByRole("button", { name: /save to request/i })).toBeTruthy();
+	});
+
+	it("hides Save when the request has been deleted", () => {
+		// Nothing to write back to. Absent rather than disabled - a disabled
+		// button invites a hunt for the condition that would enable it.
+		liveRequest = null;
+
+		renderView(designRun());
+
+		expect(screen.queryByRole("button", { name: /save to request/i })).toBeNull();
+	});
+
+	it("replays the recorded Authorization when the request is gone", async () => {
+		liveRequest = null;
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+
+		renderView(designRun());
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
+
+		// The seed put the wire headers in the editor, so the old token goes out
+		// as-is and the run is replayed exactly as it ran. A 401 is then a true
+		// answer about replaying it, and the header is editable to fix that.
+		expect(executeRequest.mock.calls[0][0].headers.Authorization).toBe("Bearer SECRET");
+		expect(executeRequest.mock.calls[0][0].auth).toBeUndefined();
+	});
+});

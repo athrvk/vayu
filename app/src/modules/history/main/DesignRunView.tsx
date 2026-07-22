@@ -35,13 +35,15 @@
  * which fails when both gates are removed together.
  */
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Save } from "lucide-react";
 import { RequestBuilderProvider } from "@/modules/request-builder/context";
 import RequestBuilderLayout from "@/modules/request-builder/components/RequestBuilderLayout";
 import { useRequestQuery, useCollectionAncestors, queryKeys } from "@/queries";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { useSessionStore, useToastStore } from "@/stores";
+import { Button } from "@/components/ui";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
 import {
 	editorToAuth,
@@ -52,6 +54,7 @@ import { toKeyValueEntries, toFlatHeaders } from "@/modules/request-builder/util
 import { generateUUID } from "@/modules/request-builder/utils/id";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { seedFromRun } from "./design-run-seed";
+import SaveRunToRequestDialog from "./SaveRunToRequestDialog";
 import type { Run, RequestAuth, ScriptPart } from "@/types";
 
 interface DesignRunViewProps {
@@ -63,6 +66,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	const { activeEnvironmentId } = useSessionStore();
 	const showToast = useToastStore((s) => s.showToast);
 	const queryClient = useQueryClient();
+	const [showSaveDialog, setShowSaveDialog] = useState(false);
 
 	/*
 	 * The live request, when it still exists. It is the only source of
@@ -294,6 +298,24 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 
 	return (
 		<div className="flex flex-col h-full min-h-0">
+			{/*
+			 * The Save button exists only while the request does. When it has been
+			 * deleted there is nothing to write back to, so the row is absent
+			 * rather than disabled - a disabled button invites a hunt for the
+			 * condition that would enable it, and none can be met here.
+			 */}
+			{liveRequest && (
+				<div className="flex items-center gap-2 px-4 py-2 border-b border-rule surface-card shrink-0">
+					<span className="text-xs text-muted-foreground mr-auto">
+						You are editing a copy - nothing here is saved.
+					</span>
+					<Button variant="outline" size="sm" onClick={() => setShowSaveDialog(true)}>
+						<Save className="w-3.5 h-3.5 mr-1.5" />
+						Save to request
+					</Button>
+				</div>
+			)}
+
 			<div className="flex-1 min-h-0">
 				<RequestBuilderProvider
 					initialRequest={seed.request}
@@ -308,6 +330,18 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					<RequestBuilderLayout />
 				</RequestBuilderProvider>
 			</div>
+
+			{/* Mounted only while open: the dialog computes the diff on render,
+			    and there is no reason to diff a run nobody is saving. */}
+			{liveRequest && showSaveDialog && (
+				<SaveRunToRequestDialog
+					open={showSaveDialog}
+					onOpenChange={setShowSaveDialog}
+					seed={seed}
+					run={run}
+					liveRequest={liveRequest}
+				/>
+			)}
 		</div>
 	);
 }
