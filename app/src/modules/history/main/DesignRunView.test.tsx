@@ -360,10 +360,37 @@ describe("DesignRunView - the request lookup has to settle first", () => {
 			body: "{}",
 		});
 
+		/*
+		 * One run object and one client across both renders, so the *only*
+		 * thing that changes is the query's state.
+		 *
+		 * This is load-bearing. Handing `rerender` a fresh `designRun()` gives
+		 * the provider a new `initialResponse` identity, which re-fires its
+		 * reset effect and re-seeds the builder - so the pane recovers by a
+		 * route that does not exist in production, where `run` comes from
+		 * `useRunQuery` and TanStack keeps the reference stable. With a fresh
+		 * object this test passed even with the settled-state gate removed:
+		 * four of its five assertions were inert, including the two that read
+		 * most directly on the bug.
+		 */
+		const theRun = designRun();
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+		});
+		// A new element each time (React can bail out on an identical one), but
+		// the same `run` and `client` references inside it.
+		const tree = () => (
+			<QueryClientProvider client={client}>
+				<TooltipProvider>
+					<DesignRunView run={theRun} />
+				</TooltipProvider>
+			</QueryClientProvider>
+		);
+
 		// First render: cold cache, still looking.
 		isLoadingRequest = true;
 		liveRequest = null;
-		const { rerender } = renderView(designRun());
+		const { rerender } = render(tree());
 
 		// Nothing is seeded yet - the builder must not mount on a guess.
 		expect(screen.queryByRole("textbox", { name: /request url/i })).toBeNull();
@@ -376,15 +403,7 @@ describe("DesignRunView - the request lookup has to settle first", () => {
 			name: "Create user",
 			auth: { mode: "bearer", token: "FRESH-TOKEN" },
 		} as unknown as Request;
-		rerender(
-			<QueryClientProvider
-				client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-			>
-				<TooltipProvider>
-					<DesignRunView run={designRun()} />
-				</TooltipProvider>
-			</QueryClientProvider>
-		);
+		rerender(tree());
 
 		// The editor shows the *snapshot* headers, which carry no credential -
 		// not the wire headers, which carry the recorded bearer token.
