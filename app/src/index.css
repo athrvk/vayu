@@ -287,6 +287,23 @@
 		--status-warning-fill: 38 92% 33%;
 		--status-stopped-fill: 25 95% 39%;
 		--status-redirect-fill: 258 60% 46%;
+
+		/* Chart series tier.
+		 *
+		 * A series is a stroke or fill on a plot that sits on --card, so its job
+		 * is the same as an icon's: be distinguishable from the surface behind
+		 * it. The banner/button tokens are tuned for a different job and two of
+		 * them failed at this one - --warning measured 2.14 on a light plot
+		 * (amber is intrinsically light) and --destructive 1.73 on a dark one,
+		 * because in dark it is a deep red chosen to carry a white button label,
+		 * which is close to invisible on a near-black plot.
+		 *
+		 * Split per theme rather than mode-consistent: charts re-read their
+		 * tokens on a light/dark flip (see `currentThemeKey`), so there is no
+		 * reason to compromise either end. */
+		--series-success: 142 76% 36%;
+		--series-warning: 38 92% 36%;
+		--series-danger: 0 84% 48%;
 		--status-no-response-fill: 240 6% 40%;
 
 		/* Geometry */
@@ -480,6 +497,9 @@
 		--status-stopped-text: 25 90% 62%;
 		/* Byte-identical to --chart-3 dark, deliberately: the chart's violet and
 		 * the response pane's violet are the same colour in this tier. */
+		--series-success: 142 70% 45%;
+		--series-warning: 38 92% 50%;
+		--series-danger: 0 84% 60%;
 		--status-redirect-text: 258 78% 72%;
 		--status-no-response-text: 240 6% 65%;
 		--status-warning-text: 40 92% 60%;

@@ -168,12 +168,38 @@ Mode-consistency is deliberate for the `--status-*` indicators, where one value
 must read as the same signal on either surface; `--info` had no such reason, so
 it is split like everything else here.
 
-`--warning` is still one value and still measures 2.14 in light. It is left
-alone because it is a banner and button token as well as a series colour, and
-splitting the chart tier from the button tier is a larger change. It is recorded
-as a known gap in `status-token-contrast.test.ts` alongside `--destructive`,
-which is worse: tuned as a dark button fill, it measures **1.73** as a series on
-a near-black plot.
+### Chart series tier
+
+A chart series is a stroke or fill on a plot that sits on `--card`, so its job
+is an icon's: be distinguishable from the surface behind it. That is not the job
+`--warning` and `--destructive` are tuned for, and asking them to do both failed
+in opposite directions - `--warning` measured **2.14** on a light plot (amber is
+intrinsically light) and `--destructive` **1.73** on a dark one, because in dark
+it is a deep red chosen to carry a white button label, which all but vanishes on
+near-black.
+
+```css
+/* Light */
+--series-success:  142 76% 36%;   /* 3.35 on card */
+--series-warning:   38 92% 36%;   /* 3.98 */
+--series-danger:     0 84% 48%;   /* 4.87 */
+
+/* Dark */
+--series-success:  142 70% 45%;   /* 7.45 */
+--series-warning:   38 92% 50%;   /* 8.09 */
+--series-danger:     0 84% 60%;   /* 4.57 */
+```
+
+Split per theme rather than mode-consistent, because charts re-read their tokens
+on a light/dark flip (`currentThemeKey`), so neither end has to compromise.
+`--warning` and `--destructive` keep their banner and button values and are no
+longer painted onto a plot.
+
+`status-token-contrast.test.ts` derives what it checks from `ROLE_TOKEN` itself,
+so repointing a chart role at a token that fails is caught. A first version
+listed the token names by hand and was decorative: pointing the roles back at the
+button tokens left it green, since it went on checking the `--series-*` values
+that still existed.
 
 **`-text` variants for legible text.** The base `--success` / `--warning` /
 `--destructive` tokens are tuned as *fills and indicators*; as small text on a

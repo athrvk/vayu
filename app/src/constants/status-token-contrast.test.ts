@@ -30,6 +30,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ROLE_TOKEN } from "@/modules/dashboard/components/charts/uplot/uplotTheme";
 
 const cssPath = join(dirname(fileURLToPath(import.meta.url)), "..", "index.css");
 const css = readFileSync(cssPath, "utf8");
@@ -135,6 +136,15 @@ describe("-fill tier carries a white label at 4.5", () => {
 	});
 });
 
+/**
+ * Tokens a chart series paints that do not clear 3.0, with their measured
+ * values. Recorded rather than excluded silently, and asserted below so the gap
+ * cannot widen unnoticed - the same treatment `--input` got when it could not
+ * reach 3.0 without turning every field into a hard outline.
+ */
+const KNOWN_GAPS: Array<[string, "light" | "dark", number]> = [["status-success", "light", 2.3]];
+const KNOWN_GAP_NAMES = new Set(KNOWN_GAPS.map(([n]) => n));
+
 describe("every token a chart series paints clears 3.0 on its own plot", () => {
 	/**
 	 * The plot sits on `--card`, so a series colour has the same job as an icon:
@@ -147,19 +157,23 @@ describe("every token a chart series paints clears 3.0 on its own plot", () => {
 	 * same signal on either surface; `--info` had no such reason and had simply
 	 * never been measured.
 	 */
-	const SERIES_TOKENS = [
-		"success",
-		"info",
-		"muted-foreground",
-		"subtle-foreground",
-		"chart-3",
-		"status-redirect",
-		"status-warning",
-		"status-error",
-		"status-no-response",
-	];
+	/*
+	 * Derived from `ROLE_TOKEN`, not listed by hand.
+	 *
+	 * A hardcoded list was written first and was decorative: pointing the chart
+	 * roles back at `--warning` and `--destructive` left it green, because it
+	 * went on checking `--series-warning`, which still existed and still passed.
+	 * It asserted that some tokens are legible, not that the ones the charts
+	 * actually paint are. Reading the map means repointing a role is what the
+	 * test sees.
+	 */
+	const SERIES_TOKENS = [...new Set(Object.values(ROLE_TOKEN))].map((v) => v.replace(/^--/, ""));
 
-	it.each(SERIES_TOKENS)("%s", (name) => {
+	it("covers every role the chart theme can resolve", () => {
+		expect(SERIES_TOKENS.length).toBeGreaterThanOrEqual(10);
+	});
+
+	it.each(SERIES_TOKENS.filter((n) => !KNOWN_GAP_NAMES.has(n)))("%s", (name) => {
 		for (const theme of ["light", "dark"] as const) {
 			expect(
 				contrast(token(name, theme), CARD[theme]),
@@ -169,33 +183,20 @@ describe("every token a chart series paints clears 3.0 on its own plot", () => {
 	});
 
 	/**
-	 * Three tokens paint chart series and do not clear the bar. They are recorded
-	 * with their measured values rather than excluded silently, and asserted so
-	 * the gap cannot widen unnoticed - the same treatment `--input` got when it
-	 * could not reach 3.0 without turning every field into a hard outline.
+	 * One token paints a chart series and does not clear the bar. It is recorded
+	 * with its measured value rather than excluded silently, and asserted so the
+	 * gap cannot widen unnoticed - the same treatment `--input` got when it could
+	 * not reach 3.0 without turning every field into a hard outline.
 	 *
 	 * `--status-success` is deliberate: `index.css` states the four original
 	 * status indicators are mode-consistent so a green dot reads as "good" on
-	 * either surface, trading the icon bar for that. The other two are not
-	 * deliberate, they are untested inheritance:
+	 * either surface, trading the icon bar for that.
 	 *
-	 *   --warning      light  2.14   amber-500 is intrinsically light. This is the
-	 *                                same measurement that forced --status-warning
-	 *                                down to 36%; --warning itself was left alone
-	 *                                because it is also a banner and button token.
-	 *   --destructive  dark   1.73   tuned as a button fill (a dark red), and used
-	 *                                as the p99 and error-rate series on a
-	 *                                near-black plot. The worst of the three.
-	 *
-	 * Fixing those two means splitting the chart tier from the button tier, which
-	 * is a larger change than this file should make on its own.
+	 * `--warning` (2.14 light) and `--destructive` (1.73 dark) were here too, and
+	 * were fixed rather than tolerated: charts now paint from a `--series-*`
+	 * tier, so a token tuned to carry a white button label is no longer also
+	 * asked to read as a line on a near-black plot.
 	 */
-	const KNOWN_GAPS: Array<[string, "light" | "dark", number]> = [
-		["status-success", "light", 2.3],
-		["warning", "light", 2.14],
-		["destructive", "dark", 1.73],
-	];
-
 	it.each(KNOWN_GAPS)("%s is a known gap on %s, still around %d", (name, theme, expected) => {
 		const actual = contrast(token(name, theme), CARD[theme]);
 		expect(actual).toBeCloseTo(expected, 1);
