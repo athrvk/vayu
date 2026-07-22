@@ -43,7 +43,7 @@ import RequestBuilderLayout from "@/modules/request-builder/components/RequestBu
 import { useRequestQuery, useCollectionAncestors, isRequestNotFound, queryKeys } from "@/queries";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { useSessionStore, useToastStore } from "@/stores";
-import { Button } from "@/components/ui";
+import { Button, Badge } from "@/components/ui";
 import { ErrorState } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
 import {
@@ -318,23 +318,40 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 
 	return (
 		<div className="flex flex-col h-full min-h-0">
-			{/*
-			 * The Save button exists only while the request does. When it has been
-			 * deleted there is nothing to write back to, so the row is absent
-			 * rather than disabled - a disabled button invites a hunt for the
-			 * condition that would enable it, and none can be met here.
-			 */}
-			{liveRequest && (
-				<div className="flex items-center gap-2 px-4 py-2 border-b border-rule surface-card shrink-0">
-					<span className="text-xs text-muted-foreground mr-auto">
-						You are editing a copy - nothing here is saved.
-					</span>
-					<Button variant="outline" size="sm" onClick={() => setShowSaveDialog(true)}>
+			<div className="flex items-center gap-2 px-4 py-2 border-b border-rule surface-card shrink-0">
+				<span className="text-xs text-muted-foreground">
+					You are editing a copy - nothing here is saved.
+				</span>
+				{/*
+				 * The mode this run actually sent, read-only. The Auth tab shows the
+				 * request's *current* mode, so seeing both side by side is the only
+				 * way to notice the request's auth changed since this ran. Only the
+				 * mode survives storage, so there is nothing more to show. Absent
+				 * when the run sent no auth.
+				 */}
+				{seed.recordedAuthMode && (
+					<Badge variant="outline" className="text-xs shrink-0 font-normal">
+						Run sent auth: {seed.recordedAuthMode}
+					</Badge>
+				)}
+				{/*
+				 * The Save button exists only while the request does. When it has
+				 * been deleted there is nothing to write back to, so it is absent
+				 * rather than disabled - a disabled button invites a hunt for the
+				 * condition that would enable it, and none can be met here.
+				 */}
+				{liveRequest && (
+					<Button
+						variant="outline"
+						size="sm"
+						className="ml-auto"
+						onClick={() => setShowSaveDialog(true)}
+					>
 						<Save className="w-3.5 h-3.5 mr-1.5" />
 						Save this run to the request
 					</Button>
-				</div>
-			)}
+				)}
+			</div>
 
 			<div className="flex-1 min-h-0">
 				<RequestBuilderProvider

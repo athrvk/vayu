@@ -321,6 +321,30 @@ describe("DesignRunView - saving back to the request", () => {
 		expect(screen.getByRole("button", { name: /save this run to the request/i })).toBeTruthy();
 	});
 
+	it("shows the auth mode the run recorded, read-only", () => {
+		// So a user can see the run sent bearer even when the request's current
+		// auth (in the Auth tab) has since changed. The design asked for this and
+		// nothing read `snapshot.auth` before.
+		renderView(designRun());
+
+		expect(screen.getByText(/run sent auth:\s*bearer/i)).toBeTruthy();
+	});
+
+	it("omits the recorded-auth chip when the run sent no auth", () => {
+		renderView(
+			designRun({
+				configSnapshot: {
+					method: "GET",
+					url: "https://api.example.test/x",
+					auth: { mode: "none" },
+					requestId: "req_1",
+				},
+			} as Partial<Run>)
+		);
+
+		expect(screen.queryByText(/run sent auth:/i)).toBeNull();
+	});
+
 	it("hides Save when the request has been deleted", () => {
 		// A genuine deletion settles as the sentinel, not as bare null data -
 		// that is what production produces, and what seeds the orphan copy.
