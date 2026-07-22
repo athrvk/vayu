@@ -183,7 +183,7 @@ function MetricsView({
 			{chartWindow.length > 1 && (
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-[12px] font-semibold text-foreground">
+						<h3 className="text-xs font-semibold text-foreground">
 							Throughput over time
 							<InfoChip tip={TOOLTIPS.throughputOverTime} />
 						</h3>
@@ -270,7 +270,7 @@ function MetricsView({
 			{latencyChartData.length > 1 && (
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-[12px] font-semibold text-foreground">
+						<h3 className="text-xs font-semibold text-foreground">
 							Latency over time
 							<InfoChip tip={TOOLTIPS.latencyOverTime} />
 						</h3>
@@ -312,7 +312,7 @@ function MetricsView({
 				? historicalMetrics.length > 1 && (
 						<div className="bg-card border border-border rounded-md p-3.5">
 							<div className="flex items-baseline justify-between mb-3">
-								<h3 className="text-[12px] font-semibold text-foreground">
+								<h3 className="text-xs font-semibold text-foreground">
 									Response time vs concurrency
 									<InfoChip tip={TOOLTIPS.responseTimeVsConcurrency} />
 								</h3>
@@ -344,7 +344,7 @@ function MetricsView({
 					hasPercentileData && (
 						<div className="bg-card border border-border rounded-md p-3.5">
 							<div className="flex items-baseline justify-between mb-3">
-								<h3 className="text-[12px] font-semibold text-foreground">
+								<h3 className="text-xs font-semibold text-foreground">
 									Response time percentiles over time
 									<InfoChip tip={TOOLTIPS.percentilesOverTime} />
 								</h3>
@@ -385,7 +385,7 @@ function MetricsView({
 			{hasStatusData && (
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-[12px] font-semibold text-foreground">
+						<h3 className="text-xs font-semibold text-foreground">
 							Status codes over time
 							<InfoChip tip={TOOLTIPS.statusCodesOverTime} />
 						</h3>
@@ -429,14 +429,14 @@ function MetricsView({
 				{/* HDR */}
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-[12px] font-semibold text-foreground">
+						<h3 className="text-xs font-semibold text-foreground">
 							Latency distribution
 							<InfoChip tip={TOOLTIPS.latencyDistribution} />
 							<span className="ml-2 text-[11px] font-normal text-muted-foreground">
 								HDR percentile plot
 							</span>
 						</h3>
-						<span className="text-[10.5px] font-mono text-muted-foreground">
+						<span className="text-[10px] font-mono text-muted-foreground">
 							{finalReport ? "from HdrHistogram" : "available after completion"}
 						</span>
 					</div>
@@ -461,11 +461,11 @@ function MetricsView({
 				{/* Timing waterfall */}
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-[12px] font-semibold text-foreground">
+						<h3 className="text-xs font-semibold text-foreground">
 							Avg request timing
 							<InfoChip tip={TOOLTIPS.avgRequestTiming} />
 						</h3>
-						<span className="text-[10.5px] font-mono text-muted-foreground">
+						<span className="text-[10px] font-mono text-muted-foreground">
 							{finalReport?.timingBreakdown ? "from timing samples" : "-"}
 						</span>
 					</div>

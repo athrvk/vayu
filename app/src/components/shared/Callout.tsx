@@ -62,7 +62,7 @@ export function Callout({ severity, title, children, action, positive, className
 	return (
 		<div
 			className={cn(
-				"flex items-start gap-2.5 rounded-md border px-3 py-2.5 text-[12px] leading-relaxed",
+				"flex items-start gap-2.5 rounded-md border px-3 py-2.5 text-xs leading-relaxed",
 				style.box,
 				className
 			)}

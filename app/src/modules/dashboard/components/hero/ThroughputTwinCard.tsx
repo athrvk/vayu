@@ -40,7 +40,7 @@ export function ThroughputTwinCard({
 			</Eyebrow>
 			<div className="grid grid-cols-2 gap-4 items-end mt-1">
 				<div>
-					<div className="text-[24px] leading-none font-bold font-mono tabular-nums text-foreground">
+					<div className="text-2xl leading-none font-bold font-mono tabular-nums text-foreground">
 						{fmt(sendRate, 1)}
 						<span className="text-xs text-muted-foreground font-sans font-normal ml-1">
 							req/s
@@ -52,7 +52,7 @@ export function ThroughputTwinCard({
 					</div>
 				</div>
 				<div>
-					<div className="text-[24px] leading-none font-bold font-mono tabular-nums text-foreground">
+					<div className="text-2xl leading-none font-bold font-mono tabular-nums text-foreground">
 						{fmt(throughput, 1)}
 						<span className="text-xs text-muted-foreground font-sans font-normal ml-1">
 							req/s

@@ -17,7 +17,7 @@
 import { useTabsStore } from "@/stores";
 
 const linkClass =
-	"text-[12px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm";
+	"text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm";
 
 export function FooterLinks() {
 	const { openTab } = useTabsStore();

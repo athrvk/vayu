@@ -419,7 +419,7 @@ export default function LoadTestDashboard() {
 						key={tab.id}
 						onClick={() => setActiveView(tab.id)}
 						className={cn(
-							"px-3.5 py-2.5 text-[13px] border-b-2 -mb-px transition-colors font-[inherit]",
+							"px-3.5 py-2.5 text-sm border-b-2 -mb-px transition-colors font-[inherit]",
 							activeView === tab.id
 								? "border-primary text-foreground font-semibold"
 								: "border-transparent text-muted-foreground hover:text-foreground"

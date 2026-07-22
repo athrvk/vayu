@@ -99,7 +99,7 @@ export default function DashboardHeader({
 
 			{/* URL */}
 			{requestUrl ? (
-				<span className="text-[12px] font-mono text-foreground flex-1 truncate min-w-0">
+				<span className="text-xs font-mono text-foreground flex-1 truncate min-w-0">
 					{requestUrl}
 				</span>
 			) : (
@@ -108,7 +108,7 @@ export default function DashboardHeader({
 
 			{/* Config summary */}
 			{configSummary && (
-				<span className="text-[12px] text-muted-foreground shrink-0 hidden sm:block">
+				<span className="text-xs text-muted-foreground shrink-0 hidden sm:block">
 					{configSummary}
 				</span>
 			)}
@@ -120,7 +120,7 @@ export default function DashboardHeader({
 					variant="ghost"
 					onClick={onStop}
 					disabled={isStopping}
-					className="h-7 px-2.5 text-[12px] text-destructive-text hover:bg-destructive/10 hover:text-destructive-text border border-destructive/30 shrink-0"
+					className="h-7 px-2.5 text-xs text-destructive-text hover:bg-destructive/10 hover:text-destructive-text border border-destructive/30 shrink-0"
 				>
 					{isStopping ? (
 						<>

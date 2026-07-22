@@ -64,7 +64,7 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 				<Input
 					value={name}
 					onChange={(e) => setName(e.target.value)}
-					className="text-[13px] font-medium"
+					className="text-sm font-medium"
 				/>
 			</Field>
 
@@ -73,7 +73,7 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 					value={description}
 					onChange={(e) => setDescription(e.target.value)}
 					placeholder="Document this collection - what it covers, base URL, usage notes…"
-					className="min-h-[100px] text-[13px] leading-relaxed resize-y"
+					className="min-h-[100px] text-sm leading-relaxed resize-y"
 				/>
 			</Field>
 

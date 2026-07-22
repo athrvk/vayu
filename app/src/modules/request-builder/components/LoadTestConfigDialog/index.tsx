@@ -118,7 +118,7 @@ function NumberField({
 	const hintId = hint ? `${id}-hint` : undefined;
 	return (
 		<div className="space-y-1.5">
-			<Label htmlFor={id} className="text-[12px]">
+			<Label htmlFor={id} className="text-xs">
 				{label}
 				{optional && (
 					<span className="ml-1 font-normal text-muted-foreground">(optional)</span>
@@ -135,7 +135,7 @@ function NumberField({
 					max={max}
 					placeholder={placeholder}
 					aria-describedby={hintId}
-					className={cn("h-9 text-[13px]", unit && "pr-14")}
+					className={cn("h-9 text-sm", unit && "pr-14")}
 				/>
 				{unit && (
 					<span
@@ -331,7 +331,7 @@ export default function LoadTestConfigDialog({
 					))}
 
 					<div className="space-y-1.5">
-						<Label className="text-[12px]">Load profile</Label>
+						<Label className="text-xs">Load profile</Label>
 						<ProfilePicker value={mode} onChange={setMode} disabled={isStarting} />
 					</div>
 
@@ -408,7 +408,7 @@ export default function LoadTestConfigDialog({
 						)}
 					</div>
 
-					<p className="rounded-md border border-border bg-panel px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
+					<p className="rounded-md border border-border bg-panel px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
 						{summarise(
 							{
 								mode,
@@ -441,7 +441,7 @@ export default function LoadTestConfigDialog({
 						onOpenChange={setRecordingOpen}
 						className="panel-clip overflow-hidden rounded-md border border-border bg-card"
 					>
-						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-[12px] font-medium text-foreground transition-colors hover:bg-accent">
+						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
 							<span>Recording &amp; limits</span>
 							<span className="text-[11px] font-normal text-muted-foreground">
 								{recordingOpen ? "Hide" : "Show"}
@@ -449,7 +449,7 @@ export default function LoadTestConfigDialog({
 						</CollapsibleTrigger>
 						<CollapsibleContent className="space-y-4 border-t border-border px-3 py-3">
 							<div className="space-y-1.5">
-								<Label htmlFor="lt-sample" className="text-[12px]">
+								<Label htmlFor="lt-sample" className="text-xs">
 									Success sample rate
 									<span className="ml-1.5 font-normal text-muted-foreground">
 										keeping {sampleRate}% of successful responses
@@ -498,7 +498,7 @@ export default function LoadTestConfigDialog({
 							<div className="flex items-start justify-between gap-3">
 								<Label
 									htmlFor="lt-timing"
-									className="text-[12px] font-normal leading-snug"
+									className="text-xs font-normal leading-snug"
 								>
 									Save timing breakdown
 									<span className="block text-[11px] text-muted-foreground">
@@ -513,7 +513,7 @@ export default function LoadTestConfigDialog({
 							</div>
 
 							<div className="space-y-1.5">
-								<Label htmlFor="lt-comment" className="text-[12px]">
+								<Label htmlFor="lt-comment" className="text-xs">
 									Comment
 									<span className="ml-1 font-normal text-muted-foreground">
 										(optional)
@@ -525,7 +525,7 @@ export default function LoadTestConfigDialog({
 									value={comment}
 									onChange={(e) => setComment(e.target.value)}
 									placeholder="What are you testing?"
-									className="h-9 text-[13px]"
+									className="h-9 text-sm"
 								/>
 							</div>
 						</CollapsibleContent>

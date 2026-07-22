@@ -98,7 +98,7 @@ export default function CollectionDetail() {
 			{/* Header */}
 			<div className="flex items-center gap-2.5 h-[52px] px-5 bg-panel border-b border-border shrink-0">
 				<Folder className="w-[15px] h-[15px] text-primary shrink-0" />
-				<span className="text-[14px] font-semibold text-foreground">{collection.name}</span>
+				<span className="text-sm font-semibold text-foreground">{collection.name}</span>
 				<span className="text-xs text-muted-foreground">
 					- {requests.length} request{requests.length !== 1 ? "s" : ""}
 				</span>

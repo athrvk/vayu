@@ -85,26 +85,26 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 								{url ? (
 									// `min-w-0` on the flex parent as well, or the URL
 									// refuses to shrink and pushes the timestamp out.
-									<TruncatedText className="text-[12px] text-foreground">
+									<TruncatedText className="text-xs text-foreground">
 										{url}
 									</TruncatedText>
 								) : (
 									// Pre-snapshot runs, and anything the engine stored
 									// without a URL. Say so rather than leaving the row
 									// looking like it failed to render.
-									<span className="truncate text-[12px] text-muted-foreground italic">
+									<span className="truncate text-xs text-muted-foreground italic">
 										No URL recorded
 									</span>
 								)}
 							</span>
 							<span className="flex shrink-0 items-center gap-2">
 								{status && (
-									<span className={`text-[12px] ${status.className}`}>
+									<span className={`text-xs ${status.className}`}>
 										{status.text}
 									</span>
 								)}
 								{run.startTime > 0 && (
-									<span className="text-[12px] font-mono tabular-nums text-muted-foreground">
+									<span className="text-xs font-mono tabular-nums text-muted-foreground">
 										{formatDistanceToNow(run.startTime, { addSuffix: true })}
 									</span>
 								)}

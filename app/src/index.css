@@ -91,6 +91,17 @@
 	 */
 	--text-sm: 0.8125rem; /* 13px */
 	--text-sm--line-height: calc(1.125 / 0.8125); /* 18px */
+
+	/*
+	 * 15px, the title step. Six surfaces reached for `text-[15px]` independently
+	 * - the empty and error state titles, a collection name, the response
+	 * heading, the font picker and the brand mark - which is a missing step in
+	 * the scale rather than six mistakes: 13px is body and 16px is noticeably
+	 * heavy for a small heading in a dense tool. Named so it carries a paired
+	 * line-height like every other step.
+	 */
+	--text-md: 0.9375rem; /* 15px */
+	--text-md--line-height: calc(1.25 / 0.9375); /* 20px */
 }
 
 /*

@@ -100,7 +100,7 @@ export default function SettingsPanel() {
 					onChange={(e) => handleMaxRedirectsChange(e.target.value)}
 					disabled={!followRedirects}
 					aria-describedby="setting-max-redirects-hint"
-					className="h-9 w-32 text-[13px]"
+					className="h-9 w-32 text-sm"
 				/>
 				<p id="setting-max-redirects-hint" className="text-xs text-muted-foreground">
 					{followRedirects

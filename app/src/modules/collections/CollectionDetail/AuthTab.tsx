@@ -268,7 +268,7 @@ function AuthConfig({ auth, onChange }: AuthConfigProps) {
 		return (
 			<div className="p-6 text-center bg-card border border-border rounded-md">
 				<Lock className="w-3.5 h-3.5 mx-auto text-subtle-foreground mb-2" />
-				<div className="text-[13px] text-muted-foreground">
+				<div className="text-sm text-muted-foreground">
 					No authentication for this collection.
 				</div>
 				<div className="text-[11px] text-muted-foreground mt-1">

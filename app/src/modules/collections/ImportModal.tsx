@@ -173,7 +173,7 @@ export function ImportModal() {
 							}}
 						>
 							<Upload className="mx-auto h-6 w-6 text-muted-foreground" />
-							<span className="mt-2 block text-[13px] font-medium">
+							<span className="mt-2 block text-sm font-medium">
 								Drop a file here, or click to browse
 							</span>
 							<span className="block text-[11px] text-muted-foreground">
@@ -226,7 +226,7 @@ export function ImportModal() {
 								value={pasteText}
 								onChange={(e) => setPasteText(e.target.value)}
 								placeholder="Paste collection JSON or YAML here"
-								className="h-40 w-full font-mono text-[12px]"
+								className="h-40 w-full font-mono text-xs"
 							/>
 							<Button
 								onClick={() => runDetect(pasteText)}
@@ -238,7 +238,7 @@ export function ImportModal() {
 						</div>
 					)}
 					{phase === "error" && (
-						<p className="mt-3 text-[12px] text-destructive-text">{error}</p>
+						<p className="mt-3 text-xs text-destructive-text">{error}</p>
 					)}
 				</>
 			)}
@@ -298,7 +298,7 @@ export function ImportModal() {
 							<TabsTrigger
 								key={t}
 								value={t}
-								className="shrink-0 rounded-none border-b-2 border-transparent px-4 py-2.5 text-[13px] data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+								className="shrink-0 rounded-none border-b-2 border-transparent px-4 py-2.5 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
 							>
 								{t === "file" ? "File" : t === "url" ? "URL" : "Paste JSON"}
 							</TabsTrigger>
@@ -383,7 +383,7 @@ function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: (
 		<div className="space-y-3">
 			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
 				<CheckCircle2 className="h-4 w-4 text-status-success-text" />
-				<span className="text-[12px] font-semibold">{meta.format}</span>
+				<span className="text-xs font-semibold">{meta.format}</span>
 				{meta.fileName && (
 					<span className="font-mono text-[11px] text-muted-foreground">
 						{meta.fileName}
@@ -432,7 +432,7 @@ function TreeNode({
 }) {
 	return (
 		<div className="pl-1">
-			<div className="flex items-center gap-1.5 py-0.5 text-[12px] font-medium">
+			<div className="flex items-center gap-1.5 py-0.5 text-xs font-medium">
 				<Folder className="h-3.5 w-3.5 text-primary" />
 				{name}
 			</div>

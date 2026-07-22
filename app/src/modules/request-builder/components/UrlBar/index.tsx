@@ -31,12 +31,12 @@ export default function UrlBar() {
 	return (
 		<div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel shrink-0">
 			<MethodSelector />
-			<UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-[13px] font-mono focus-within:border-primary focus-within:ring-0 transition-colors shadow-none" />
+			<UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-sm font-mono focus-within:border-primary focus-within:ring-0 transition-colors shadow-none" />
 			{/* Send button with loading state */}
 			<button
 				onClick={executeRequest}
 				disabled={!canExecute}
-				className="h-[34px] px-4 rounded-md bg-primary-fill text-white text-[13px] font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-opacity shrink-0 font-[inherit]"
+				className="h-[34px] px-4 rounded-md bg-primary-fill text-white text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-opacity shrink-0 font-[inherit]"
 			>
 				{isExecuting ? (
 					<>
@@ -69,7 +69,7 @@ export default function UrlBar() {
 			{isLoadTestRunning ? (
 				<button
 					onClick={viewRunningTest}
-					className="h-[34px] px-3.5 rounded-md text-[12px] font-semibold flex items-center gap-1.5 transition-opacity shrink-0 font-[inherit] text-status-success-text border border-status-success/40 bg-status-success/10"
+					className="h-[34px] px-3.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-opacity shrink-0 font-[inherit] text-status-success-text border border-status-success/40 bg-status-success/10"
 				>
 					<Activity className="w-3.5 h-3.5" />
 					View running test
@@ -78,7 +78,7 @@ export default function UrlBar() {
 				<button
 					onClick={startLoadTest}
 					disabled={!canExecute}
-					className="h-[34px] px-3.5 rounded-md text-[12px] font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-opacity shrink-0 font-[inherit] text-primary border border-primary bg-primary/10"
+					className="h-[34px] px-3.5 rounded-md text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-opacity shrink-0 font-[inherit] text-primary border border-primary bg-primary/10"
 				>
 					<Zap className="w-3.5 h-3.5" />
 					Load Test

@@ -61,7 +61,7 @@ function FontTile({
 			<span className="text-sm font-medium">{label}</span>
 			<span className="text-xs text-muted-foreground">{description}</span>
 			<span
-				className="mt-1.5 text-[15px] leading-tight text-foreground"
+				className="mt-1.5 text-md leading-tight text-foreground"
 				style={{ fontFamily: stack }}
 			>
 				{sample}

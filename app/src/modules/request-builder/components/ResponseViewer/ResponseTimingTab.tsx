@@ -46,7 +46,7 @@ function InfoTip({ tip }: { tip: ReactNode }) {
 						<Info className="h-2.5 w-2.5" />
 					</button>
 				</TooltipTrigger>
-				<TooltipContent className="max-w-[260px] text-[11.5px] leading-relaxed">
+				<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
 					{tip}
 				</TooltipContent>
 			</Tooltip>
@@ -135,11 +135,11 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 							style={{ background: p.color }}
 							aria-hidden
 						/>
-						<span className="text-[12px] text-muted-foreground inline-flex items-center">
+						<span className="text-xs text-muted-foreground inline-flex items-center">
 							{p.label}
 							<InfoTip tip={p.tip} />
 						</span>
-						<span className="text-right font-mono tabular-nums text-[12px]">
+						<span className="text-right font-mono tabular-nums text-xs">
 							<span className="text-foreground">
 								{formatPhaseDuration(p.value).value}
 							</span>

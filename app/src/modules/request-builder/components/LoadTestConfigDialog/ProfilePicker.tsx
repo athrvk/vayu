@@ -90,7 +90,7 @@ export function ProfilePicker({
 					>
 						<span
 							className={cn(
-								"text-[12px] font-semibold",
+								"text-xs font-semibold",
 								selected ? "text-primary" : "text-foreground"
 							)}
 						>

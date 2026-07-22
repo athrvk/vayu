@@ -45,7 +45,7 @@ export default function RequestDescription() {
 						setOpen(true);
 						setTimeout(() => textareaRef.current?.focus(), 0);
 					}}
-					className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+					className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
 				>
 					<Pencil className="w-3.5 h-3.5" />
 					Add description…
@@ -66,7 +66,7 @@ export default function RequestDescription() {
 						if (description.length === 0) setOpen(false);
 					}}
 					placeholder="Describe this request - what it does, expected response, edge cases…"
-					className="min-h-[48px] max-h-[160px] text-[13px] leading-relaxed resize-y bg-card"
+					className="min-h-[48px] max-h-[160px] text-sm leading-relaxed resize-y bg-card"
 				/>
 				{description.length === 0 && (
 					<button

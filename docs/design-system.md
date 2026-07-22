@@ -667,10 +667,29 @@ text stays JetBrains Mono regardless.
 | Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
 | Hero metric value | 34px | bold, tabular | `text-[34px] font-bold leading-none font-mono tabular-nums` |
 | Secondary metric value | 22px | bold | `text-[22px] font-bold font-mono` |
+| Title / small heading | 15px | semibold | `text-md font-semibold` |
 | Body / default | 13px | regular | `text-sm` |
-| Small label | 12px | medium | `text-[12px] font-medium` |
+| Small label | 12px | medium | `text-xs font-medium` |
 | Micro / badge | 10–11px | mono bold | `text-[10px] font-mono font-bold` |
-| URL / path | 12–13px | mono | `text-[12px] font-mono` |
+| URL / path | 12–13px | mono | `text-xs font-mono` |
+
+**Only `text-[10px]`, `text-[11px]`, `text-[22px]` and `text-[34px]` may be
+written as arbitrary values.** Everything else has a named step, and
+`type-scale.test.ts` fails on anything outside that set.
+
+The app had drifted to **182 arbitrary sizes across 11 distinct values**. Half
+duplicated a step that already existed - `text-[12px]` *is* `text-xs`,
+`text-[13px]` *is* `text-sm` - and in doing so skipped the paired line-height:
+34 of 36 and 13 of 16 set no `leading-*`, so they inherited the parent's while
+their `text-sm` siblings got 18px. Same size, two rhythms, chosen by nobody.
+Seven were half-pixel (`text-[10.5px]`, `text-[11.5px]`), which no scale
+contains and which render soft on a non-retina display.
+
+`--text-md` (15px/20px) was added rather than removed: six surfaces reached for
+`text-[15px]` independently - the empty and error state titles, a collection
+name, the response heading, the font picker and the brand mark - which is a
+missing step, not six mistakes. 13px is body and 16px is heavy for a small
+heading in a dense tool.
 
 **Use `text-sm` for body, not `text-[13px]`.** Tailwind ships `text-sm` at 14px,
 which left the app running two scales a pixel apart - `text-sm` in ~160 places

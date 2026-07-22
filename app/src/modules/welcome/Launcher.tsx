@@ -60,7 +60,7 @@ export function Launcher({
 			<RecentRuns runs={runs} />
 
 			<div className="flex flex-col gap-3">
-				<p className="text-[12px] font-mono tabular-nums text-muted-foreground">
+				<p className="text-xs font-mono tabular-nums text-muted-foreground">
 					{plural(collectionCount, "collection")} · {plural(runs.length, "run")}
 				</p>
 				<FooterLinks />

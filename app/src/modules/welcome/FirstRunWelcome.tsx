@@ -32,9 +32,9 @@ export function FirstRunWelcome({ onImport, onNewRequest }: FirstRunWelcomeProps
 			<div className="flex flex-col gap-2">
 				<div className="flex items-center gap-2">
 					<img src={iconUrl} alt="" className="h-6 w-6" />
-					<span className="text-[15px] font-semibold text-foreground">Vayu</span>
+					<span className="text-md font-semibold text-foreground">Vayu</span>
 				</div>
-				<p className="text-[13px] text-muted-foreground">
+				<p className="text-sm text-muted-foreground">
 					Send API requests, script them, and load test them from one place.
 				</p>
 			</div>

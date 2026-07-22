@@ -50,7 +50,7 @@ export function CollectionPicker({
 							key={collection.id}
 							type="button"
 							onClick={() => onSelect(collection.id)}
-							className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						>
 							<Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
 							<TruncatedText>{collection.name}</TruncatedText>

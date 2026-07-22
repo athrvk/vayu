@@ -27,7 +27,7 @@ export function InfoChip({ tip }: { tip: ReactNode }) {
 						<Info className="h-2.5 w-2.5" />
 					</button>
 				</TooltipTrigger>
-				<TooltipContent className="max-w-[260px] text-[11.5px] leading-relaxed">
+				<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
 					{tip}
 				</TooltipContent>
 			</Tooltip>

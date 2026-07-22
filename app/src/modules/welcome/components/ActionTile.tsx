@@ -30,11 +30,9 @@ export function ActionTile({ icon: Icon, label, description, onClick }: ActionTi
 			className="group flex flex-col items-start gap-2 rounded-md border border-border bg-card p-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		>
 			<Icon className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary" />
-			<span className="text-[13px] font-medium text-foreground">{label}</span>
+			<span className="text-sm font-medium text-foreground">{label}</span>
 			{description && (
-				<span className="text-[13px] leading-snug text-muted-foreground">
-					{description}
-				</span>
+				<span className="text-sm leading-snug text-muted-foreground">{description}</span>
 			)}
 		</button>
 	);

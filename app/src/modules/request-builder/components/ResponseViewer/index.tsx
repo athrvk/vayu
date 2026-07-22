@@ -59,7 +59,7 @@ export default function ResponseViewer() {
 			<div className="flex-1 flex items-center justify-center bg-panel">
 				<div className="text-center space-y-4">
 					<div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-[vayu-spin_0.7s_linear_infinite] mx-auto" />
-					<p className="text-[12px] text-muted-foreground">Sending request…</p>
+					<p className="text-xs text-muted-foreground">Sending request…</p>
 				</div>
 			</div>
 		);
@@ -85,10 +85,8 @@ export default function ResponseViewer() {
 						<polygon points="22 2 15 22 11 13 2 9 22 2" />
 					</svg>
 
-					<p className="text-[15px] font-medium text-foreground mb-1.5">
-						No response yet
-					</p>
-					<div className="flex items-center justify-center gap-1.5 text-[12px] text-muted-foreground">
+					<p className="text-md font-medium text-foreground mb-1.5">No response yet</p>
+					<div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
 						<span>Press</span>
 						<Kbd>{modKey}</Kbd>
 						<Kbd>↵</Kbd>

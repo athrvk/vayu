@@ -69,7 +69,7 @@ export function TimingWaterfall({ report }: { report: RunReport | null }) {
 							style={{ width: widthFor(s.v), background: s.color }}
 						/>
 					</div>
-					<span className="text-right font-mono tabular-nums text-[11.5px] font-medium">
+					<span className="text-right font-mono tabular-nums text-[11px] font-medium">
 						{hasData && s.v !== undefined ? (
 							<>
 								<span className="text-foreground">{s.v.toFixed(0)}</span>

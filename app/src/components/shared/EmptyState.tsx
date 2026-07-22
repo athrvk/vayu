@@ -78,7 +78,7 @@ export function EmptyState({
 			    a swap of the icon set. */}
 			{Icon && <Icon className="h-12 w-12 text-muted-foreground/40" aria-hidden="true" />}
 			<div className="max-w-sm">
-				<p className="text-[15px] font-semibold text-foreground">{title}</p>
+				<p className="text-md font-semibold text-foreground">{title}</p>
 				{description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
 			</div>
 			{action}
