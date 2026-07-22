@@ -1,24 +1,54 @@
 name: PR CI - run tests
 
+# No `paths-ignore` here on purpose. `CI gate` below is a required check, and a
+# workflow that never starts never reports one - GitHub leaves the check
+# "Expected" forever and the pull request can only be merged by an admin
+# bypassing the rule. A docs-only change would be blocked outright.
+#
+# The filtering happens at the job level instead: `changes` always runs, `test`
+# is skipped when nothing outside docs was touched, and `ci-gate` still reports.
+# That is the case its "or skipped" branch was always written for.
 on:
   pull_request:
     branches:
       - master
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - 'scripts/install-git-hooks.sh'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    # The filter reads the PR's file list from the API rather than cloning, so
+    # this is all it needs. Stated explicitly rather than inherited, since a
+    # fork PR's token is read-only regardless and this job must work for those.
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Check whether anything outside docs changed
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # Same list the trigger used to carry. Leading `**` then exclusions:
+          # `code` is false only when every changed file matches an exclusion.
+          filters: |
+            code:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+              - '!LICENSE'
+              - '!.gitignore'
+              - '!scripts/install-git-hooks.sh'
+
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     permissions:
       contents: read
       checks: write
@@ -149,12 +179,20 @@ jobs:
   ci-gate:
     name: CI gate
     runs-on: ubuntu-latest
-    needs: [test]
+    # `changes` is a dependency as well as `test`, so a failure in the filter
+    # cannot be read as "nothing to test". Without it, a broken `changes` job
+    # skips `test`, and "skipped" would pass this gate on a change nobody ran.
+    needs: [changes, test]
     if: always()
     steps:
       - name: Pass if tests succeeded or were skipped
         run: |
+          changes="${{ needs.changes.result }}"
           result="${{ needs.test.result }}"
+          if [[ "$changes" != "success" ]]; then
+            echo "CI failed (change detection: $changes)"
+            exit 1
+          fi
           if [[ "$result" == "success" || "$result" == "skipped" ]]; then
             echo "CI passed (tests: $result)"
           else
