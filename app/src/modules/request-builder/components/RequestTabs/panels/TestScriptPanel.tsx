@@ -20,6 +20,7 @@
 import { useState } from "react";
 import { Button, Badge, CodeEditor, VariableScopeBadge } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
+import InheritedScriptsNotice from "./InheritedScriptsNotice";
 
 export default function TestScriptPanel() {
 	const { request, updateField, getAllVariables } = useRequestBuilderContext();
@@ -58,6 +59,8 @@ export default function TestScriptPanel() {
 					</Button>
 				)}
 			</div>
+
+			<InheritedScriptsNotice variant="post" collectionId={request.collectionId} />
 
 			{/*
 			 * The referenced list stays put when the full list opens. "Show

@@ -53,10 +53,20 @@ const ALL_VARIABLES = {
 
 vi.mock("../../../context", () => ({
 	useRequestBuilderContext: () => ({
-		request: { preRequestScript: SCRIPT, testScript: SCRIPT },
+		request: { preRequestScript: SCRIPT, testScript: SCRIPT, collectionId: null },
 		updateField: () => {},
 		getAllVariables: () => ALL_VARIABLES,
 	}),
+}));
+
+/**
+ * `collectionId: null` above means InheritedScriptsNotice has nothing to
+ * inherit, but it still calls `useCollectionAncestors`, which needs a
+ * QueryClient this test never sets up. Mocked here, not tested here -
+ * InheritedScriptsNotice.test.tsx covers its own behaviour.
+ */
+vi.mock("@/queries/collections", () => ({
+	useCollectionAncestors: () => [],
 }));
 
 /** Both panels, so a one-sided fix cannot pass. */
