@@ -8,19 +8,15 @@
 /**
  * The underline-on-active look shared by every response tab.
  *
- * This exact string was written out ten times - seven in `ResponseViewer`,
- * three in `UnifiedResponseViewer` - which is ten chances for one of them to
- * lose the `data-[state=active]` half and stop showing which tab is selected.
+ * This exact string was written out ten times across `ResponseViewer` (seven)
+ * and `UnifiedResponseViewer`'s now-deleted full mode (three), which was ten
+ * chances for one of them to lose the `data-[state=active]` half and stop
+ * showing which tab is selected. `UnifiedResponseViewer` is compact-only now
+ * and renders plain `Button`s instead of `Tabs`, so it no longer uses this
+ * constant - `ResponseViewer` is the sole consumer.
  *
- * Only the string is shared. Which tabs exist, what their badges count and what
- * they render genuinely differ between the two viewers (seven tabs against
- * three, live context against stored props), so there is deliberately no
- * `tabs={[...]}` config here - that would trade a duplicated class name for a
- * component driven by flags, which is the worse of the two.
- *
- * `shrink-0` is not included: the request builder needs it, because its seven
- * tabs scroll horizontally in a narrow pane, and adds it via `cn()`. The three
- * tabs in a compact history card are better off allowed to shrink.
+ * `shrink-0` is not included here: the request builder needs it, because its
+ * seven tabs scroll horizontally in a narrow pane, and adds it via `cn()`.
  */
 export const RESPONSE_TAB_TRIGGER =
 	"border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent";

@@ -43,7 +43,6 @@ export type {
 	ViewMode,
 	ResponseData,
 	RequestData,
-	TraceData,
 	ResponseBodyProps,
 	HeadersViewerProps,
 	UnifiedResponseViewerProps,
