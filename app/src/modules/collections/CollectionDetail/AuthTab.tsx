@@ -31,13 +31,24 @@ import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
 import InheritanceChain from "./InheritanceChain";
+import OAuth2Form from "@/components/shared/OAuth2Form/OAuth2Form";
+import { defaultOAuth2Config } from "@/services/oauth/defaults";
 
-type CollectionAuthMode = "none" | "bearer" | "basic" | "apikey";
+type CollectionAuthMode = "none" | "bearer" | "basic" | "apikey" | "oauth2";
 type CollectionAuth = Collection["auth"];
 
-/** Display names for the modes this tab stores but cannot edit. */
+/**
+ * Display names for the modes this tab stores but cannot edit.
+ *
+ * OAuth 2.0 used to be here. It is editable now: the engine resolves it, an
+ * import can produce it, requests inherit it, and `OAuth2Form` was written to be
+ * shared — its own contract mentions "the collection editor supplies a plain
+ * Input" — so the collection side was anticipated and simply never wired up.
+ *
+ * digest/aws/ntlm stay: the engine has no resolution for them, so offering them
+ * here would let you configure something that silently does nothing.
+ */
 const UNEDITABLE_LABELS: Record<string, string> = {
-	oauth2: "OAuth 2.0",
 	digest: "Digest",
 	aws: "AWS Signature",
 	ntlm: "NTLM",
@@ -64,10 +75,15 @@ const AUTH_OPTIONS: { value: CollectionAuthMode; label: string; hint: string }[]
 		label: "API Key",
 		hint: 'API key is inherited by requests that use "Inherit from collection".',
 	},
+	{
+		value: "oauth2",
+		label: "OAuth 2.0",
+		hint: 'Token is fetched once and inherited by requests that use "Inherit from collection".',
+	},
 ];
 
-// Narrow the broader Collection auth union to the four modes we expose.
-// oauth2/digest/aws/ntlm return null: they are stored (an import can produce
+// Narrow the broader Collection auth union to the modes we expose.
+// digest/aws/ntlm return null: they are stored (an import can produce
 // them — see services/importers/postman.ts `collectionAuth`) but not editable
 // here, and they are emphatically *not* "none". Collapsing them to "none" made
 // this tab state "No authentication for this collection. Requests using
@@ -78,7 +94,8 @@ function asEditable(auth: CollectionAuth): CollectionAuthMode | null {
 		auth.mode === "none" ||
 		auth.mode === "bearer" ||
 		auth.mode === "basic" ||
-		auth.mode === "apikey"
+		auth.mode === "apikey" ||
+		auth.mode === "oauth2"
 	) {
 		return auth.mode;
 	}
@@ -95,6 +112,8 @@ function defaultsFor(mode: CollectionAuthMode): CollectionAuth {
 			return { mode: "basic", username: "", password: "" };
 		case "apikey":
 			return { mode: "apikey", key: "", value: "", in: "header" };
+		case "oauth2":
+			return { mode: "oauth2", config: defaultOAuth2Config() };
 	}
 }
 
@@ -353,6 +372,19 @@ function AuthConfig({ auth, onChange }: AuthConfigProps) {
 					</div>
 				</div>
 			</div>
+		);
+	}
+
+	if (auth.mode === "oauth2") {
+		/*
+		 * The same form the request builder uses. `OAuth2Form` takes an injected
+		 * `TextInput` precisely so the two hosts can differ — the request side
+		 * passes a variable-aware input, and this one takes the default plain
+		 * input, because a collection has no per-request variable scope to
+		 * resolve against at edit time.
+		 */
+		return (
+			<OAuth2Form value={auth.config} onChange={(config) => onChange({ ...auth, config })} />
 		);
 	}
 
