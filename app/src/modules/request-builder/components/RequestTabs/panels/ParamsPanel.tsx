@@ -131,9 +131,14 @@ export default function ParamsPanel() {
 						placeholder="page=1&#10;limit=10&#10;sort=name"
 						className="font-mono text-sm min-h-[400px]"
 					/>
+					{/* Params keep `=` alone - a query string is written `k=v`, and a
+					    value routinely contains a colon (`redirect=https://…`). Only
+					    the Headers editor accepts both separators. The override claim
+					    was wrong here too: repeated keys are all sent, joined with
+					    `&`, which is how an array parameter is expressed. */}
 					<p className="text-xs text-muted-foreground">
 						Format: <code className="bg-muted px-1 rounded-md">key=value</code> (one per
-						line). Duplicate keys will override previous values.
+						line). Repeated keys are kept and all sent.
 					</p>
 				</div>
 			) : (
@@ -155,7 +160,11 @@ export default function ParamsPanel() {
 						<label className="text-sm font-medium text-muted-foreground">
 							Full Resolved URL
 						</label>
-						<div className="p-3 bg-muted font-mono text-sm break-all">
+						{/* `rounded-md` to match the Quick Reference blocks in the
+						    script panels, which are the same `bg-muted` code slab.
+						    Without a radius class this one stayed square at every
+						    Roundedness setting. */}
+						<div className="p-3 rounded-md bg-muted font-mono text-sm break-all">
 							{resolvedUrl || (
 								<span className="text-muted-foreground italic">No URL</span>
 							)}

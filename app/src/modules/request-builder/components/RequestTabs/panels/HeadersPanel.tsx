@@ -92,9 +92,21 @@ export default function HeadersPanel() {
 						placeholder="User-Agent: MyApp/1.0&#10;Authorization: Bearer token&#10;Content-Type: application/json"
 						className="font-mono text-sm min-h-[400px]"
 					/>
+					{/*
+					 * The format shown here now matches the placeholder above it and
+					 * the parser below it - all three disagreed. It advertised
+					 * `Header-Name=value` while the placeholder demonstrated
+					 * `Authorization: Bearer token`, and the parser accepted only the
+					 * first, discarding every line written in the second.
+					 *
+					 * "Duplicate keys will override previous values" was also untrue:
+					 * nothing dedupes, so both rows survive and both are sent - which
+					 * is what HTTP allows and what a user pasting a real header block
+					 * would want.
+					 */}
 					<p className="text-xs text-muted-foreground">
-						Format: <code className="bg-muted px-1 rounded-md">Header-Name=value</code>{" "}
-						(one per line). Duplicate keys will override previous values.
+						Format: <code className="bg-muted px-1 rounded-md">Header-Name: value</code>{" "}
+						(one per line). Repeated names are kept as separate headers.
 					</p>
 				</div>
 			) : (

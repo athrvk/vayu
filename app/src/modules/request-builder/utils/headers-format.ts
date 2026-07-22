@@ -8,7 +8,24 @@
 /**
  * Headers Format Utilities
  *
- * Utilities for converting between headers array and text format
+ * Text form for the Headers tab's Bulk Edit mode.
+ *
+ * The canonical separator is a colon - `Header-Name: value` - because that is
+ * how HTTP itself writes a header, how every tool the user copies from prints
+ * one, and what the panel's own placeholder has always shown.
+ *
+ * It was not what the parser accepted. `parseHeadersFromText` matched
+ * `/^([^=]+)=\s*(.*)$/` and nothing else, so the three lines the placeholder
+ * offered as an example - `Authorization: Bearer token` and friends - matched no
+ * line at all. A user who followed the placeholder, or pasted real headers from
+ * curl or devtools, switched back to Table View and found every header gone.
+ * There was no error: unmatched lines are skipped, and skipping all of them
+ * produces an empty array, which the panel wrote over the previous headers.
+ *
+ * Both separators are accepted now, and the *earlier* one in the line wins. That
+ * resolves the ambiguous cases the way a reader would: `Authorization: Bearer
+ * a=b` splits at the colon (the `=` belongs to the value), `X-Legacy=a:b` splits
+ * at the equals, so anything already typed in the old form still round-trips.
  */
 
 import type { KeyValueItem } from "../types";
@@ -17,7 +34,7 @@ import { VERSION_HEADER_KEY } from "./system-headers";
 
 /**
  * Format headers array to text format for bulk edit
- * Format: "Header-Name=value" (one per line)
+ * Format: "Header-Name: value" (one per line)
  * Excludes version header since it's protected and can't be edited
  */
 export const formatHeadersToText = (headers: KeyValueItem[]): string => {
@@ -28,13 +45,38 @@ export const formatHeadersToText = (headers: KeyValueItem[]): string => {
 			const isVersion = h.key.toLowerCase() === VERSION_HEADER_KEY;
 			return hasContent && !isVersion;
 		})
-		.map((h) => `${h.key}=${h.value}`)
+		.map((h) => `${h.key}: ${h.value}`)
 		.join("\n");
 };
 
 /**
+ * Split one line at whichever of `:` or `=` comes first.
+ *
+ * Returns null when the line carries neither, or when the separator is the first
+ * character - `: value` names no header, and writing an empty key into the table
+ * would produce a row the user cannot identify.
+ */
+const splitHeaderLine = (line: string): { key: string; value: string } | null => {
+	const colon = line.indexOf(":");
+	const equals = line.indexOf("=");
+
+	// -1 means absent; pick the smaller of the two positions that exist.
+	let at: number;
+	if (colon === -1) at = equals;
+	else if (equals === -1) at = colon;
+	else at = Math.min(colon, equals);
+
+	if (at <= 0) return null;
+
+	const key = line.slice(0, at).trim();
+	if (!key) return null;
+
+	return { key, value: line.slice(at + 1).trim() };
+};
+
+/**
  * Parse text format to headers array
- * Format: "Header-Name: value" (one per line)
+ * Format: "Header-Name: value" (one per line); "Header-Name=value" also accepted
  *
  * @param text - Headers in text format
  * @param skipVersion - Whether to skip version header (protected)
@@ -45,24 +87,20 @@ export const parseHeadersFromText = (text: string, skipVersion: boolean = true):
 	const headers: KeyValueItem[] = [];
 
 	lines.forEach((line) => {
-		const match = line.match(/^([^=]+)=\s*(.*)$/);
-		if (match) {
-			const key = match[1].trim();
-			const value = match[2].trim();
-			const keyLower = key.toLowerCase();
+		const parsed = splitHeaderLine(line);
+		if (!parsed) return;
 
-			// Skip version header if protected
-			if (skipVersion && keyLower === VERSION_HEADER_KEY) {
-				return;
-			}
-
-			headers.push({
-				id: generateId(),
-				key,
-				value,
-				enabled: true,
-			});
+		// Skip version header if protected
+		if (skipVersion && parsed.key.toLowerCase() === VERSION_HEADER_KEY) {
+			return;
 		}
+
+		headers.push({
+			id: generateId(),
+			key: parsed.key,
+			value: parsed.value,
+			enabled: true,
+		});
 	});
 
 	return headers;
