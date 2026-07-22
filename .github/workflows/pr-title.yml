@@ -1,0 +1,49 @@
+# A squash merge writes the pull request title onto master:
+# `squash_merge_commit_title` is `COMMIT_OR_PR_TITLE`, so a title that ignores
+# the convention in CONTRIBUTING.md becomes a commit message that ignores it
+# too. Nothing checked that until this workflow.
+name: PR title
+
+# `edited` matters more than it looks. Without it the check never re-runs when a
+# contributor fixes their title, so it stays red with no way to clear it.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+# `pull_request`, not `pull_request_target`. The action's README suggests the
+# latter so it can comment on fork pull requests, but that trigger runs with a
+# privileged token against the base repository. Reading a title does not need
+# one: the check simply fails and the reason is in the job log.
+permissions:
+  pull-requests: read
+
+jobs:
+  lint:
+    name: Conventional title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Kept in step with the table in CONTRIBUTING.md. `ci` and `build` are
+          # in the history 24 times between them and were missing from that
+          # table, so a list copied from the doc would have rejected the
+          # repository's own convention.
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            chore
+            ci
+            build
+          # Both forms are in use: `fix(app):` and a bare `ci:`.
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: >
+            The subject "{subject}" should start with a lowercase letter, as in
+            `fix(app): resolve memory leak in response viewer`.
