@@ -92,9 +92,11 @@ export default function RequestBuilderProvider({
 	);
 
 	// Fetch last design run from backend (for app reload scenarios)
-	const { report: lastDesignRunReport, isLoading: isLoadingLastRun } = useLastDesignRunQuery(
-		request.id
-	);
+	const {
+		run: lastDesignRun,
+		report: lastDesignRunReport,
+		isLoading: isLoadingLastRun,
+	} = useLastDesignRunQuery(request.id);
 	const hasLoadedFromBackend = useRef<string | null>(null);
 
 	// Load response from backend if we don't have one cached and backend has a previous run
@@ -109,7 +111,10 @@ export default function RequestBuilderProvider({
 		if (isLoadingLastRun) return;
 
 		// Try to reconstruct response from last design run
-		const restoredResponse = responseFromRunResult(lastDesignRunReport?.results?.[0]);
+		const restoredResponse = responseFromRunResult(
+			lastDesignRunReport?.results?.[0],
+			lastDesignRun?.id
+		);
 		if (restoredResponse) {
 			setLocalResponse(restoredResponse);
 			storeSetResponse(request.id, restoredResponse);
@@ -118,7 +123,14 @@ export default function RequestBuilderProvider({
 
 		// Mark as loaded even if no response found
 		hasLoadedFromBackend.current = request.id;
-	}, [request.id, response, lastDesignRunReport, isLoadingLastRun, storeSetResponse]);
+	}, [
+		request.id,
+		response,
+		lastDesignRun,
+		lastDesignRunReport,
+		isLoadingLastRun,
+		storeSetResponse,
+	]);
 
 	// UI state
 	const [activeTab, setActiveTab] = useState<RequestTab>("params");

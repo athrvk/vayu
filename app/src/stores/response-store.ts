@@ -37,7 +37,8 @@ export interface StoredResponse {
 	bodyType: "json" | "html" | "xml" | "text" | "binary";
 	size: number;
 	time: number;
-	timestamp?: string;
+	/** Set when the response was rebuilt from a stored run - see `ResponseState`. */
+	restoredFrom?: { runId?: string; at: string };
 	// Script execution results
 	consoleLogs?: string[];
 	testResults?: Array<{ name: string; passed: boolean; error?: string }>;

@@ -19,8 +19,9 @@
  * the reason the invisible-divider fix had to be applied to this bar twice.
  */
 
-import { Clock, FileText } from "lucide-react";
+import { Clock, FileText, History } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatRelativeTime } from "@/utils";
 import { formatResponseTime, formatSize } from "./utils";
 import { StatusCodeBadge } from "./StatusCodeBadge";
 
@@ -31,6 +32,11 @@ export interface ResponseStatusBarProps {
 	time?: number;
 	/** Omitted by callers that have no size. */
 	size?: number;
+	/**
+	 * Set when this response was rebuilt from a stored run rather than sent just
+	 * now. See the age chip below for why the difference is shown.
+	 */
+	restoredFrom?: { runId?: string; at: string };
 	className?: string;
 }
 
@@ -39,6 +45,7 @@ export function ResponseStatusBar({
 	statusText,
 	time,
 	size,
+	restoredFrom,
 	className,
 }: ResponseStatusBarProps) {
 	return (
@@ -68,6 +75,33 @@ export function ResponseStatusBar({
 				<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
 					<FileText className="w-4 h-4" />
 					<span>{formatSize(size)}</span>
+				</div>
+			)}
+
+			{/*
+			 * Response age.
+			 *
+			 * Without it, a response restored from a stored run reads exactly
+			 * like one that just came back, while the request editor beside it
+			 * shows the request as it is now, possibly edited since. The
+			 * relative form is what the History sidebar says about the same run;
+			 * the exact time and the run id go in the tooltip.
+			 *
+			 * No `bg-`, so no Badge - see the variant="chip" rule in
+			 * badge-hover.test.tsx. It is text, and it sits at the far end
+			 * rather than among status/time/size, which describe the exchange
+			 * itself.
+			 */}
+			{restoredFrom && (
+				<div
+					className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground"
+					title={
+						`Restored from a stored run - ${new Date(restoredFrom.at).toLocaleString()}` +
+						(restoredFrom.runId ? `\nRun ${restoredFrom.runId}` : "")
+					}
+				>
+					<History className="h-3.5 w-3.5" />
+					<span>from run - {formatRelativeTime(restoredFrom.at)}</span>
 				</div>
 			)}
 		</div>

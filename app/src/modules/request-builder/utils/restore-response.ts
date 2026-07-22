@@ -92,9 +92,14 @@ function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
  * (a run recorded before the exchange was captured) - the caller then leaves
  * the response pane empty rather than showing a hollow 0-byte response.
  */
-export function responseFromRunResult(result: RunResultSample | undefined): ResponseState | null {
+export function responseFromRunResult(
+	result: RunResultSample | undefined,
+	runId?: string
+): ResponseState | null {
 	const trace = result?.trace;
 	if (!result || !trace) return null;
+
+	const restoredFrom = { runId, at: new Date(result.timestamp).toISOString() };
 
 	/*
 	 * A request that never reached a server stores no `response` node -
@@ -118,6 +123,7 @@ export function responseFromRunResult(result: RunResultSample | undefined): Resp
 			size: 0,
 			time: result.latencyMs || 0,
 			timing: timingFromTrace(trace, result.latencyMs),
+			restoredFrom,
 			errorCode: trace.error_type,
 			errorMessage,
 		};
@@ -137,6 +143,6 @@ export function responseFromRunResult(result: RunResultSample | undefined): Resp
 		size: body.length,
 		time: result.latencyMs || 0,
 		timing: timingFromTrace(trace, result.latencyMs),
-		timestamp: new Date(result.timestamp).toISOString(),
+		restoredFrom,
 	};
 }

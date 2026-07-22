@@ -170,6 +170,13 @@ export interface ResponseTiming {
 	download: number;
 }
 
+/** Which stored run a response was rebuilt from, and when that run happened. */
+export interface RestoredFrom {
+	runId?: string;
+	/** ISO timestamp of the run result. */
+	at: string;
+}
+
 export interface ResponseState {
 	status: number;
 	statusText: string;
@@ -182,7 +189,15 @@ export interface ResponseState {
 	size: number;
 	time: number;
 	timing?: ResponseTiming;
-	timestamp?: string;
+	/**
+	 * Set only when this response was rebuilt from a stored run rather than sent
+	 * just now - a cold start, or a run opened from History. Drives the pane's
+	 * age chip, which is the only thing that tells the two apart: the request
+	 * beside it may have been edited since. Gone after the next send.
+	 *
+	 * This replaced a bare `timestamp` that had one writer and no reader.
+	 */
+	restoredFrom?: RestoredFrom;
 	errorCode?: string;
 	errorMessage?: string;
 	consoleLogs?: string[];
