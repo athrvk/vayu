@@ -627,7 +627,14 @@ export default function RequestBuilder() {
 	if (isLoading) {
 		return (
 			<div className="flex-1 flex items-center justify-center">
-				<div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+				{/*
+				 * Same ring as the response pane's loading state: `border-2` at
+				 * `vayu-spin 0.7s`. This one was `border-4` at Tailwind's
+				 * `animate-spin` (1s), so the two halves of the request builder
+				 * showed visibly different spinners - a thicker ring turning more
+				 * slowly on the left than on the right - whenever both were loading.
+				 */}
+				<div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-[vayu-spin_0.7s_linear_infinite]" />
 			</div>
 		);
 	}
