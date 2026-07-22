@@ -79,6 +79,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("update:downloaded", handler);
 	},
 	restartToInstallUpdate: (): Promise<void> => ipcRenderer.invoke("update:restartToInstall"),
+	// Shape mirrors `UpdateCheckResult` in updater.ts, inlined because this file
+	// is a CommonJS script and must not grow imports.
+	checkForUpdates: (): Promise<
+		| { status: "unavailable"; detail: string }
+		| { status: "up-to-date"; version: string }
+		| {
+				status: "available";
+				version: string;
+				strategy: "silent" | "notify" | "disabled";
+				releaseUrl: string;
+				installCommand?: string;
+		  }
+		| { status: "error"; message: string }
+	> => ipcRenderer.invoke("update:check"),
 	openReleasePage: (url: string): Promise<void> =>
 		ipcRenderer.invoke("update:openReleasePage", url),
 
@@ -89,12 +103,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("menu:open-settings", handler);
 	},
 
-	// Interface scale — real page zoom (reflows the viewport).
+	// Interface scale - real page zoom (reflows the viewport).
 	setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
 	getZoomFactor: (): number => webFrame.getZoomFactor(),
 
 	// Platform info
 	platform: process.platform,
+
+	// Open one of the app's own doc links in the system browser. Keyed, not
+	// URL-taking - see the handler in main.ts.
+	openAppLink: (key: "docs" | "scripting" | "issues"): Promise<void> =>
+		ipcRenderer.invoke("shell:openAppLink", key),
 
 	// OAuth 2.0 interactive flow
 	oauthOpenExternal: (url: string): Promise<void> =>

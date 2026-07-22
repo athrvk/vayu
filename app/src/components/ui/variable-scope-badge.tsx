@@ -27,21 +27,38 @@ export interface VariableScopeBadgeProps {
 	className?: string;
 }
 
-const SCOPE_CONFIG: Record<VariableScope, { compact: string; full: string; className: string }> = {
+/**
+ * One colour per scope, read by both variants.
+ *
+ * The compact branch used to re-derive these inline and special-cased global to
+ * `bg-muted`, so the same scope rendered green in a popover and grey in the
+ * autocomplete list. `--scope-global` is a real token (green in both themes),
+ * `docs/design-system.md` gives it the same "icon/text solid, `/10` tint"
+ * convention as the other two, and `VariableTableEditor` and
+ * `VariablesCategoryTree` already paint it green - the autocomplete was the
+ * only place that disagreed.
+ */
+const SCOPE_CONFIG: Record<
+	VariableScope,
+	{ compact: string; full: string; tint: string; border: string }
+> = {
 	global: {
 		compact: "G",
 		full: "Global",
-		className: "bg-scope-global/10 text-scope-global",
+		tint: "bg-scope-global/10 text-scope-global",
+		border: "border-scope-global/30",
 	},
 	collection: {
 		compact: "C",
 		full: "Collection",
-		className: "bg-scope-collection/10 text-scope-collection",
+		tint: "bg-scope-collection/10 text-scope-collection",
+		border: "border-scope-collection/30",
 	},
 	environment: {
 		compact: "E",
 		full: "Environment",
-		className: "bg-scope-environment/10 text-scope-environment",
+		tint: "bg-scope-environment/10 text-scope-environment",
+		border: "border-scope-environment/30",
 	},
 };
 
@@ -53,22 +70,21 @@ export function VariableScopeBadge({
 	const config = SCOPE_CONFIG[scope];
 	const label = variant === "compact" ? config.compact : config.full;
 
-	// For compact variant, use outline style (for autocomplete lists)
-	// For full variant, use secondary style (for popover details)
+	/*
+	 * `chip` for both: every other Badge variant pairs `bg-x` with
+	 * `hover:bg-x/80`, and tailwind-merge files `hover:bg-*` under a different
+	 * key from `bg-*` - so the tint below replaced the background and left the
+	 * hover behind. The full variant was `secondary` and greyed out under the
+	 * pointer. None of these is clickable.
+	 */
 	if (variant === "compact") {
 		return (
 			<Badge
-				variant="outline"
+				variant="chip"
 				className={cn(
-					"h-5 px-1.5 text-[10px] font-medium",
-					// global stays neutral; collection/environment carry their scope
-					// hue (previously these two were swapped — collection showed blue,
-					// environment green).
-					scope === "global"
-						? "bg-muted"
-						: scope === "collection"
-							? "bg-scope-collection/10 text-scope-collection border-scope-collection/30"
-							: "bg-scope-environment/10 text-scope-environment border-scope-environment/30",
+					"h-5 px-1.5 text-[10px] font-medium border",
+					config.tint,
+					config.border,
 					className
 				)}
 			>
@@ -78,10 +94,7 @@ export function VariableScopeBadge({
 	}
 
 	return (
-		<Badge
-			variant="secondary"
-			className={cn("text-[10px] px-1.5 py-0", config.className, className)}
-		>
+		<Badge variant="chip" className={cn("text-[10px] px-1.5 py-0", config.tint, className)}>
 			{label}
 		</Badge>
 	);

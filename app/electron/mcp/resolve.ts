@@ -9,7 +9,7 @@
  * @file resolve.ts
  * @brief Request-composition pipeline for the MCP layer.
  *
- * When the Vayu app sends a request, the **renderer** — not the engine — does
+ * When the Vayu app sends a request, the **renderer** - not the engine - does
  * the preparation: it resolves `{{variables}}`, walks the collection ancestor
  * chain to resolve `inherit` auth, and composes the collection-chain pre/post
  * scripts with the request's own. The engine only *applies* a concrete `auth`
@@ -42,7 +42,7 @@ export interface VariableValue {
 	type?: string;
 }
 
-/** `Record<name, VariableValue>` — the shape of every `variables` field. */
+/** `Record<name, VariableValue>` - the shape of every `variables` field. */
 export type VariableBag = Record<string, VariableValue>;
 
 /** A `params`/`headers` row as the engine serializes it. */
@@ -85,6 +85,9 @@ export interface SavedRequestLike {
 	auth?: AuthRecord;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	/** Redirect policy. Absent on rows saved before the columns existed. */
+	followRedirects?: boolean;
+	maxRedirects?: number;
 }
 
 /** The fully-composed body the engine's `POST /request` and `/run` accept. */
@@ -96,6 +99,8 @@ export interface OutgoingRequest {
 	auth?: AuthRecord;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	followRedirects?: boolean;
+	maxRedirects?: number;
 	requestId?: string;
 	environmentId?: string;
 }
@@ -202,7 +207,7 @@ function isEmptyAuth(auth: AuthRecord | undefined): boolean {
  * The effective auth for a request, resolved to a concrete block the engine can
  * apply, or `undefined` for no auth. `inherit` walks the ancestor chain
  * leaf→root and takes the first collection with concrete auth (collections are
- * always concrete auth sources — they never store `inherit`). Variables inside
+ * always concrete auth sources - they never store `inherit`). Variables inside
  * the chosen block (e.g. `{{token}}`, an OAuth2 `config`) are resolved.
  */
 export function composeAuth(
@@ -237,7 +242,7 @@ function joinScripts(parts: Array<string | undefined>): string | undefined {
 
 /**
  * Compose the effective pre/post scripts: collection-chain scripts (root→leaf)
- * followed by the request's own, joined with blank lines — the same order the
+ * followed by the request's own, joined with blank lines - the same order the
  * renderer sends so parent-collection setup runs before the request's script.
  */
 export function composeScripts(
@@ -294,13 +299,50 @@ export function resolveBody(
 	return out;
 }
 
+// --- Redirect policy ---------------------------------------------------------
+
+/**
+ * Engine defaults for the redirect policy, restated here because the main
+ * process shares no module graph with the renderer (`electron/` has no `@/`
+ * alias). Keep in step with `src/constants/request.ts` and with
+ * `vayu::Request` in `engine/include/vayu/types.hpp`.
+ */
+const DEFAULT_FOLLOW_REDIRECTS = true;
+const DEFAULT_MAX_REDIRECTS = 10;
+const MIN_MAX_REDIRECTS = 0;
+const MAX_MAX_REDIRECTS = 100;
+
+/**
+ * The redirect policy to forward for a saved request. Both fields are always
+ * sent - the engine defaults to following, so eliding a stored
+ * `followRedirects: false` would quietly follow the redirect the request opted
+ * out of. Missing or out-of-range values fall back the same way the renderer's
+ * `RequestTransformer` does, so MCP and the UI execute a row identically.
+ */
+export function composeRedirectPolicy(request: SavedRequestLike): {
+	followRedirects: boolean;
+	maxRedirects: number;
+} {
+	const followRedirects =
+		typeof request.followRedirects === "boolean"
+			? request.followRedirects
+			: DEFAULT_FOLLOW_REDIRECTS;
+	const raw = request.maxRedirects;
+	const maxRedirects =
+		typeof raw === "number" && Number.isFinite(raw)
+			? Math.min(MAX_MAX_REDIRECTS, Math.max(MIN_MAX_REDIRECTS, Math.trunc(raw)))
+			: DEFAULT_MAX_REDIRECTS;
+	return { followRedirects, maxRedirects };
+}
+
 // --- High-level composition --------------------------------------------------
 
 /**
- * Compose a saved request into the fully-resolved payload the engine executes —
+ * Compose a saved request into the fully-resolved payload the engine executes -
  * the MCP equivalent of the app clicking **Send** on that request. Variables are
  * resolved in the URL, headers, and body; `inherit`/chain auth is resolved to a
- * concrete block; and the collection-chain + request scripts are composed.
+ * concrete block; the collection-chain + request scripts are composed; and the
+ * request's redirect policy is forwarded.
  */
 export function composeSavedRequest(
 	request: SavedRequestLike,
@@ -321,6 +363,9 @@ export function composeSavedRequest(
 	if (auth) out.auth = auth;
 	if (scripts.preRequestScript) out.preRequestScript = scripts.preRequestScript;
 	if (scripts.postRequestScript) out.postRequestScript = scripts.postRequestScript;
+	const redirects = composeRedirectPolicy(request);
+	out.followRedirects = redirects.followRedirects;
+	out.maxRedirects = redirects.maxRedirects;
 	if (typeof request.id === "string") out.requestId = request.id;
 	if (environmentId) out.environmentId = environmentId;
 	return out;

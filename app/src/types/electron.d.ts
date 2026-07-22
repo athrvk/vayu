@@ -33,6 +33,19 @@ interface UpdateAvailableInfo {
 	installCommand?: string;
 }
 
+/**
+ * Outcome of a check the user asked for. Mirrors `UpdateCheckResult` in
+ * `electron/updater.ts`; the two are separated only by the process boundary.
+ *
+ * `unavailable` is not a failure - it is a development or unpackaged build,
+ * where there is no release feed to ask.
+ */
+export type UpdateCheckResult =
+	| { status: "unavailable"; detail: string }
+	| { status: "up-to-date"; version: string }
+	| ({ status: "available" } & UpdateAvailableInfo)
+	| { status: "error"; message: string };
+
 interface ElectronAPI {
 	// Engine management
 	restartEngine: () => Promise<{ success: boolean; error?: string }>;
@@ -62,6 +75,7 @@ interface ElectronAPI {
 	onUpdateAvailable: (callback: (info: UpdateAvailableInfo) => void) => () => void;
 	onUpdateDownloaded: (callback: (info: { version: string }) => void) => () => void;
 	restartToInstallUpdate: () => Promise<void>;
+	checkForUpdates: () => Promise<UpdateCheckResult>;
 	openReleasePage: (url: string) => Promise<void>;
 
 	// Menu-driven navigation
@@ -70,6 +84,9 @@ interface ElectronAPI {
 	// Interface scale (page zoom)
 	setZoomFactor: (factor: number) => void;
 	getZoomFactor: () => number;
+
+	// Open one of the app's own doc links in the system browser
+	openAppLink: (key: "docs" | "scripting" | "issues") => Promise<void>;
 
 	// OAuth 2.0 interactive flow
 	oauthOpenExternal: (url: string) => Promise<void>;

@@ -7,7 +7,7 @@
 
 /**
  * @file config.ts
- * @brief MCP safety configuration — the guardrails that keep an LLM-driven
+ * @brief MCP safety configuration - the guardrails that keep an LLM-driven
  *        client from generating unbounded real traffic. See docs/engine/mcp.md
  *        ("Safety model"). Enforced entirely in this MCP layer; the engine is
  *        never modified.
@@ -17,7 +17,7 @@
 export interface McpSafetyConfig {
 	/**
 	 * Hosts an agent is permitted to send traffic to (hostnames, no scheme or
-	 * port), e.g. `["api.example.com", "localhost"]`. **Empty by default** — an
+	 * port), e.g. `["api.example.com", "localhost"]`. **Empty by default** - an
 	 * empty allowlist denies all outbound requests, so a fresh install cannot be
 	 * used to hit arbitrary targets. The agent receives an actionable error and
 	 * asks the user to add the host.
@@ -25,7 +25,7 @@ export interface McpSafetyConfig {
 	allowlist: string[];
 	/**
 	 * When true, the allowlist is bypassed and an agent may target **any**
-	 * resolvable host. Off by default — this trades the safe-by-default posture
+	 * resolvable host. Off by default - this trades the safe-by-default posture
 	 * for convenience, so it is an explicit opt-in. Unresolved `{{variables}}` are
 	 * still rejected.
 	 */
@@ -40,7 +40,7 @@ export interface McpSafetyConfig {
 	 * Gates data-mutating tools (`create_request`, `update_environment`,
 	 * `update_engine_config`). When false (default), those tools refuse. It does
 	 * **not** gate traffic-sending tools (`run_request`, `run_collection_smoke`)
-	 * or load runs — those are governed by the allowlist, the hard caps, and the
+	 * or load runs - those are governed by the allowlist, the hard caps, and the
 	 * load-run confirmation gate independently.
 	 */
 	allowWrites: boolean;
@@ -94,7 +94,7 @@ function isFiniteNumber(v: unknown): v is number {
  * Sanitize a partial safety override arriving from the (untrusted) renderer
  * before it is applied or persisted: normalize + de-duplicate allowlist hosts,
  * clamp caps to positive integers, and drop anything malformed. Only recognized,
- * well-formed fields survive — every other input is ignored rather than trusted.
+ * well-formed fields survive - every other input is ignored rather than trusted.
  */
 export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<McpSafetyConfig> {
 	const out: Partial<McpSafetyConfig> = {};

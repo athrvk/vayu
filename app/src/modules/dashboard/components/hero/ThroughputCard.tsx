@@ -10,7 +10,7 @@ import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
 /**
- * iterations hero card #2 — average req/s across the run. In iterations mode
+ * iterations hero card #2 - average req/s across the run. In iterations mode
  * throughput is an output of how fast the server responds (no rate target).
  */
 export function ThroughputCard({

@@ -20,7 +20,7 @@
 namespace vayu::http::pkce {
 
 /**
- * @brief base64url(SHA-256(verifier)) — the S256 code challenge.
+ * @brief base64url(SHA-256(verifier)) - the S256 code challenge.
  */
 inline std::string code_challenge (const std::string& verifier) {
     const auto hash = vayu::utils::sha256 (verifier);

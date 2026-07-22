@@ -46,7 +46,7 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
 - **Data writes off by default.** The data-mutating tools (`create_request`,
   `update_environment`, `update_engine_config`) are refused unless the user
   enables write access in Settings. Traffic-sending tools (`run_request`,
-  `run_collection_smoke`) and load runs are not affected by this toggle — they
+  `run_collection_smoke`) and load runs are not affected by this toggle - they
   are governed by the allowlist and caps.
 - **Per-tool control.** Any tool (or a whole read/execute/write/load category) can
   be switched off; a disabled tool is removed from `tools/list` and rejected by
@@ -67,7 +67,7 @@ test.
 
 **"Allow all hosts" removes the allowlist guard.** Enabling it (off by default)
 lets an agent target any resolvable host, so the per-host safety check no longer
-applies — the load caps and confirmation gate still do. Turn it on only when you
+applies - the load caps and confirmation gate still do. Turn it on only when you
 trust the connected agent and understand it can reach arbitrary endpoints.
 
 ## Supported versions

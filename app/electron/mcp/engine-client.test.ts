@@ -58,7 +58,7 @@ describe("EngineClient cancellation", () => {
 
 describe("EngineClient.getEnvironment", () => {
 	// The engine has no `GET /environments/:id` route (only the list). Hitting a
-	// per-id path 404s, which silently broke variable resolution — so this pins
+	// per-id path 404s, which silently broke variable resolution - so this pins
 	// the client to the list endpoint + client-side filter.
 	function listFetch(payload: unknown) {
 		const calls: string[] = [];

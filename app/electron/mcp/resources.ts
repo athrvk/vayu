@@ -7,7 +7,7 @@
 
 /**
  * @file resources.ts
- * @brief MCP resources — read-only Vayu data an agent can read and attach as
+ * @brief MCP resources - read-only Vayu data an agent can read and attach as
  *        context. Static resources expose the current lists (runs, collections,
  *        environments, engine config); a templated resource
  *        `vayu://run/{runId}/report` exposes any run's full report, with a list
@@ -25,7 +25,7 @@ export interface StaticResourceDef {
 	read: (ctx: ToolContext, signal?: AbortSignal) => Promise<unknown>;
 }
 
-/** Current-state resources — attach "what's in Vayu right now" as context. */
+/** Current-state resources - attach "what's in Vayu right now" as context. */
 export const STATIC_RESOURCES: StaticResourceDef[] = [
 	{
 		name: "runs",

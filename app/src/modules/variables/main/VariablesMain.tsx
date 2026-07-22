@@ -16,25 +16,44 @@
 import { useVariablesStore } from "@/modules/variables/variables-store";
 import { useCollectionsQuery, useEnvironmentsQuery, useGlobalsQuery } from "@/queries";
 import VariableTableEditor from "./VariableTableEditor";
-import { Variable } from "lucide-react";
+// `Braces` is the app-wide mark for variables - see the note in
+// `components/layout/Dock.tsx`. It was `Variable` here, `Database` on the
+// welcome Launcher and `Zap` in the Dock: three glyphs for one concept.
+import { Braces } from "lucide-react";
+import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
 
 export default function VariablesMain() {
 	const { selectedCategory } = useVariablesStore();
-	const { data: collections = [] } = useCollectionsQuery();
-	const { data: environments = [] } = useEnvironmentsQuery();
+	// isLoading matters here, not just the data. Both queries default to `[]`,
+	// so a category selected from a previous session resolved to `undefined`
+	// while its query was still in flight and the screen announced "not found"
+	// - an error, for something that simply had not arrived yet.
+	// isError too, and each branch below reads its own query's: the two are
+	// fetched independently, and a collections failure says nothing about
+	// whether the environments arrived.
+	const {
+		data: collections = [],
+		isLoading: collectionsLoading,
+		isError: collectionsFailed,
+		error: collectionsError,
+		refetch: refetchCollections,
+	} = useCollectionsQuery();
+	const {
+		data: environments = [],
+		isLoading: environmentsLoading,
+		isError: environmentsFailed,
+		error: environmentsError,
+		refetch: refetchEnvironments,
+	} = useEnvironmentsQuery();
 	const globalsQuery = useGlobalsQuery();
 
 	if (!selectedCategory) {
 		return (
-			<div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4">
-				<Variable className="w-12 h-12 opacity-50" />
-				<div className="text-center">
-					<p className="text-lg font-medium">No Category Selected</p>
-					<p className="text-sm mt-1">
-						Select a category from the sidebar to manage variables
-					</p>
-				</div>
-			</div>
+			<EmptyState
+				icon={Braces}
+				title="No category selected"
+				description="Pick a category from the sidebar to manage its variables."
+			/>
 		);
 	}
 
@@ -55,11 +74,26 @@ export default function VariablesMain() {
 	if (selectedCategory.type === "collection") {
 		const collection = collections.find((c) => c.id === selectedCategory.collectionId);
 		if (!collection) {
-			return (
-				<div className="flex-1 flex items-center justify-center text-muted-foreground">
-					<p className="text-sm">Collection not found</p>
-				</div>
-			);
+			// Still in flight is not the same as missing: saying "not found"
+			// here tells the user their collection is gone.
+			if (collectionsLoading) {
+				return <DetailSkeleton label="Loading collection" />;
+			}
+			// Nor is a failed fetch. Reached only when nothing was found, so a
+			// collection still in cache renders normally through a failed
+			// background refetch.
+			if (collectionsFailed) {
+				return (
+					<ErrorState
+						title="Couldn't load the collection"
+						detail={
+							collectionsError instanceof Error ? collectionsError.message : undefined
+						}
+						onRetry={() => void refetchCollections()}
+					/>
+				);
+			}
+			return <EmptyState title="Collection not found" />;
 		}
 		return (
 			<VariableTableEditor
@@ -74,11 +108,23 @@ export default function VariablesMain() {
 	if (selectedCategory.type === "environment") {
 		const environment = environments.find((e) => e.id === selectedCategory.environmentId);
 		if (!environment) {
-			return (
-				<div className="flex-1 flex items-center justify-center text-muted-foreground">
-					<p className="text-sm">Environment not found</p>
-				</div>
-			);
+			if (environmentsLoading) {
+				return <DetailSkeleton label="Loading environment" />;
+			}
+			if (environmentsFailed) {
+				return (
+					<ErrorState
+						title="Couldn't load the environment"
+						detail={
+							environmentsError instanceof Error
+								? environmentsError.message
+								: undefined
+						}
+						onRetry={() => void refetchEnvironments()}
+					/>
+				);
+			}
+			return <EmptyState title="Environment not found" />;
 		}
 		return (
 			<VariableTableEditor

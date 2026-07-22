@@ -9,8 +9,20 @@ import { fmt } from "../shared";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
-/** Utilisation tier coloring: ≥95% success, ≥80% warning, else destructive. */
-function utilColor(util: number | undefined): string {
+/**
+ * Utilisation tier coloring: ≥95% success, ≥80% warning, else destructive.
+ * Split text vs fill for the same reason as RateFidelityCard - the number is
+ * text and needs the accessible pair; the MiniBar is a fill and keeps the
+ * saturated one.
+ */
+function utilTextColor(util: number | undefined): string {
+	if (util === undefined) return "hsl(var(--muted-foreground))";
+	if (util >= 95) return "hsl(var(--success-text))";
+	if (util >= 80) return "hsl(var(--warning-text))";
+	return "hsl(var(--destructive-text))";
+}
+
+function utilFillColor(util: number | undefined): string {
 	if (util === undefined) return "hsl(var(--muted-foreground))";
 	if (util >= 95) return "hsl(var(--success))";
 	if (util >= 80) return "hsl(var(--warning))";
@@ -18,7 +30,7 @@ function utilColor(util: number | undefined): string {
 }
 
 /**
- * constant_concurrency hero card #2 — how many of the configured N concurrent
+ * constant_concurrency hero card #2 - how many of the configured N concurrent
  * users were actually in-flight on average. Below 100% means idle VUs.
  */
 export function ConcurrencyUtilCard({
@@ -32,13 +44,14 @@ export function ConcurrencyUtilCard({
 		configuredConcurrency && configuredConcurrency > 0
 			? (currentConcurrency / configuredConcurrency) * 100
 			: undefined;
-	const color = utilColor(util);
+	const textColor = utilTextColor(util);
+	const fillColor = utilFillColor(util);
 
 	return (
 		<HeroCardShell label="Concurrency Utilisation" tip={TOOLTIPS.concurrencyUtil}>
 			<HeroValue
 				value={currentConcurrency}
-				color={color}
+				color={textColor}
 				unit={
 					<>
 						of{" "}
@@ -52,7 +65,9 @@ export function ConcurrencyUtilCard({
 			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
 				<span className="text-foreground font-semibold">{fmt(util, 0)}</span>% utilisation
 			</p>
-			{util !== undefined && <MiniBar pct={Math.min(100, util)} color={color} showTarget />}
+			{util !== undefined && (
+				<MiniBar pct={Math.min(100, util)} color={fillColor} showTarget />
+			)}
 		</HeroCardShell>
 	);
 }

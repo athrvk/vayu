@@ -719,7 +719,13 @@ struct Request {
     std::string auth;      // JSON - RequestAuth (mode + fields, may be 'inherit')
     std::string pre_request_script;  // JS Code
     std::string post_request_script; // JS Code (Tests)
-    int order;             // INTEGER NOT NULL DEFAULT 0 — position within collection
+    int order;             // INTEGER NOT NULL DEFAULT 0 - position within collection
+    // Execution options. Mirror the fields of the executable vayu::Request so a
+    // saved request keeps the redirect policy the user chose. The in-struct
+    // defaults match the column defaults, so a default-constructed row and a row
+    // written before these columns existed agree.
+    bool follow_redirects = true; // INTEGER NOT NULL DEFAULT 1
+    int max_redirects     = 10;   // INTEGER NOT NULL DEFAULT 10
     int64_t created_at;
     int64_t updated_at;
 };

@@ -11,7 +11,7 @@
  * Tab navigation and content panels for request configuration
  */
 
-import { Tabs, TabsList, TabsTrigger, Badge } from "@/components/ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger, Badge } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
 import type { RequestTab, TabInfo } from "../../types";
 import ParamsPanel from "./panels/ParamsPanel";
@@ -20,6 +20,8 @@ import BodyPanel from "./panels/BodyPanel";
 import AuthPanel from "./panels/AuthPanel";
 import PreScriptPanel from "./panels/PreScriptPanel";
 import TestScriptPanel from "./panels/TestScriptPanel";
+import SettingsPanel from "./panels/SettingsPanel";
+import { isRedirectPolicyNonDefault } from "../../utils/request-state";
 
 export default function RequestTabs() {
 	const { request, activeTab, setActiveTab } = useRequestBuilderContext();
@@ -56,6 +58,13 @@ export default function RequestTabs() {
 			label: "Tests",
 			badge: request.testScript.trim() ? 1 : undefined,
 		},
+		{
+			id: "settings",
+			label: "Settings",
+			// Badges only when the request departs from the engine defaults, so
+			// the tab stays quiet for the requests that never touch it.
+			badge: isRedirectPolicyNonDefault(request) ? 1 : undefined,
+		},
 	];
 
 	return (
@@ -65,7 +74,7 @@ export default function RequestTabs() {
 			className="flex-1 flex flex-col overflow-hidden"
 		>
 			{/* Tab Headers */}
-			<TabsList className="flex w-full justify-start border-b border-border bg-transparent h-auto p-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-thin">
+			<TabsList className="flex w-full justify-start border-b border-border bg-transparent h-auto p-0 overflow-x-auto overflow-y-hidden flex-nowrap">
 				{tabs.map((tab) => (
 					<TabsTrigger
 						key={tab.id}
@@ -85,10 +94,23 @@ export default function RequestTabs() {
 				))}
 			</TabsList>
 
-			{/* Tab Content */}
-			<div className="flex-1 overflow-y-auto p-4">
-				<TabContent />
-			</div>
+			{/*
+			 * TabsContent per tab, not a plain <div>. Radix derives an
+			 * aria-controls id per trigger from its value, so rendering the
+			 * content outside the Tabs tree left all six triggers pointing at
+			 * panel ids that never existed - a tablist with no reachable panels.
+			 * Only the active TabsContent mounts, so <TabContent /> still renders
+			 * exactly once and its own switch resolves to that tab.
+			 */}
+			{tabs.map((tab) => (
+				<TabsContent
+					key={tab.id}
+					value={tab.id}
+					className="mt-0 flex-1 overflow-y-auto p-4"
+				>
+					<TabContent />
+				</TabsContent>
+			))}
 		</Tabs>
 	);
 }
@@ -109,6 +131,8 @@ function TabContent() {
 			return <PreScriptPanel />;
 		case "test-script":
 			return <TestScriptPanel />;
+		case "settings":
+			return <SettingsPanel />;
 		default:
 			return null;
 	}

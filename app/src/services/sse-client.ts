@@ -152,18 +152,18 @@ export class SSEClient {
 				// NOTE: we intentionally do NOT reconnect here. Standard `EventSource`
 				// has no API to set the `Last-Event-ID` header on a fresh connection,
 				// so a manual reconnect would request `from=0` and the engine would
-				// replay the entire retained topic — duplicating every tick already
+				// replay the entire retained topic - duplicating every tick already
 				// shown and clobbering live RPS / throughput visuals. The browser's
 				// own intra-connection retry (while in CONNECTING) does carry
 				// Last-Event-ID and is fine; once the browser gives up (CLOSED), the
 				// canonical recovery is to converge on `GET /run/:id/report`, which
 				// the load-test service does in its onClose handler.
 				if (this.eventSource?.readyState === EventSource.CLOSED) {
-					console.log("SSE connection closed unexpectedly — treating as terminal");
+					console.log("SSE connection closed unexpectedly - treating as terminal");
 					this.disconnect();
 					onClose();
 				}
-				// For CONNECTING state errors, wait — the browser will retry.
+				// For CONNECTING state errors, wait - the browser will retry.
 			});
 
 			this.eventSource.addEventListener("open", () => {

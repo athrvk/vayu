@@ -19,8 +19,22 @@ interface UseResizableReturn {
 	size: number;
 	isResizing: boolean;
 	/** Wire to the drag handle's onMouseDown. Captures the drag origin so size
-	 *  is computed as a delta — works for panels that don't start at x=0. */
+	 *  is computed as a delta - works for panels that don't start at x=0. */
 	startResizing: (e: React.MouseEvent) => void;
+	/**
+	 * Nudge the size by a delta, clamped to the same bounds as a drag.
+	 *
+	 * A drag handle that only listens for the mouse is unusable from the
+	 * keyboard, and this is a developer tool. Callers wire this to arrow keys on
+	 * a focusable `role="separator"`.
+	 *
+	 * `Infinity` / `-Infinity` are accepted and clamp to max / min, so Home and
+	 * End need no special case.
+	 */
+	resizeBy: (delta: number) => void;
+	/** Current bounds, for the handle's `aria-valuemin` / `aria-valuemax`. */
+	min: number;
+	max: number;
 }
 
 /**
@@ -87,5 +101,19 @@ export function useResizable({
 		};
 	}, [isResizing, min, max, direction]);
 
-	return { size, isResizing, startResizing };
+	// Nudged from the *derived* size, not the raw one: if bounds tightened since
+	// the last drag, a nudge should move from where the panel actually is. That
+	// part is load-bearing and tested.
+	//
+	// The clamp on the way in is not - `size` re-clamps on every render, so
+	// removing it changes no observable behaviour (a mutation test confirmed the
+	// suite cannot tell). It stays so the stored value never goes out of range,
+	// which matters because callers pass ±Infinity for jump-to-extreme and
+	// `Infinity` is not something to keep in state.
+	const resizeBy = useCallback(
+		(delta: number) => setRawSize(Math.min(max, Math.max(min, size + delta))),
+		[min, max, size]
+	);
+
+	return { size, isResizing, startResizing, resizeBy, min, max };
 }

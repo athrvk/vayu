@@ -6,7 +6,7 @@
  */
 
 /**
- * ModeStatsRow — the mode-adaptive Row 4 router. Four stat cards swap on d.mode.
+ * ModeStatsRow - the mode-adaptive Row 4 router. Four stat cards swap on d.mode.
  * For three of the four modes the 4th card is the universal p99 latency stat;
  * the first three switch per mode (Plan 4 §62–69):
  *
@@ -88,7 +88,7 @@ function renderModeStats(d: DashboardDerived) {
 	}
 }
 
-/** Duration — configured wall-clock with cleanup-overhead sub. */
+/** Duration - configured wall-clock with cleanup-overhead sub. */
 function DurationStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
@@ -101,7 +101,7 @@ function DurationStat({ d }: { d: DashboardDerived }) {
 					{d.setupOverhead !== undefined ? (
 						<span className="text-muted-foreground">{d.setupOverhead.toFixed(2)}s</span>
 					) : (
-						<span className="text-subtle-foreground">—</span>
+						<span className="text-subtle-foreground">-</span>
 					)}
 				</>
 			}
@@ -110,7 +110,7 @@ function DurationStat({ d }: { d: DashboardDerived }) {
 	);
 }
 
-/** Total requests — cumulative count with failed-count sub. */
+/** Total requests - cumulative count with failed-count sub. */
 function TotalRequestsStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
@@ -121,7 +121,7 @@ function TotalRequestsStat({ d }: { d: DashboardDerived }) {
 					failed{" "}
 					<span
 						className={cn(
-							d.failedRequests > 0 ? "text-destructive" : "text-muted-foreground"
+							d.failedRequests > 0 ? "text-destructive-text" : "text-muted-foreground"
 						)}
 					>
 						{formatNumber(d.failedRequests)}
@@ -133,7 +133,7 @@ function TotalRequestsStat({ d }: { d: DashboardDerived }) {
 	);
 }
 
-/** Peak concurrency — max in-flight with backpressure sub. */
+/** Peak concurrency - max in-flight with backpressure sub. */
 function PeakConcurrencyStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
@@ -150,7 +150,7 @@ function PeakConcurrencyStat({ d }: { d: DashboardDerived }) {
 	);
 }
 
-/** The universal 4th stat — p99 latency with mean/median sub-text. */
+/** The universal 4th stat - p99 latency with mean/median sub-text. */
 export function P99StatCard({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
@@ -172,7 +172,7 @@ export function P99StatCard({ d }: { d: DashboardDerived }) {
 						)}
 					</>
 				) : (
-					<span className="text-subtle-foreground italic">awaiting samples</span>
+					<span className="text-muted-foreground italic">awaiting samples</span>
 				)
 			}
 			infoTip={TOOLTIPS.p99Latency}

@@ -59,7 +59,7 @@ TEST (Encoding, UrlDecodeBasicAndPlus) {
     EXPECT_EQ (url_decode ("%7f%7F"), std::string ("\x7f\x7f", 2));
 }
 
-// A malformed percent-escape must pass through literally, never throw — the
+// A malformed percent-escape must pass through literally, never throw - the
 // decoder runs on attacker-influenced callback query strings and token bodies.
 TEST (Encoding, UrlDecodeToleratesMalformedEscapes) {
     EXPECT_EQ (url_decode ("%zz"), "%zz");     // non-hex digits

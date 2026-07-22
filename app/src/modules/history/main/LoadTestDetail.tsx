@@ -15,6 +15,7 @@ import { useState, useMemo, useEffect } from "react";
 import { CheckCircle, Activity, TrendingUp, BarChart3, Settings2 } from "lucide-react";
 import { Badge, Tabs, TabsContent, TabsList, TabsTrigger, ScrollArea } from "@/components/ui";
 import { formatNumber, loadTestTypeToLabel } from "@/utils";
+import { TruncatedText } from "@/components/shared";
 import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
@@ -29,7 +30,7 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 
 	// Fetch the persisted per-tick time-series once, here, so both the Overview
 	// stat cards (breakpoint / saturation, derived below) and the Performance tab
-	// charts read the same data — one query, shared cache.
+	// charts read the same data - one query, shared cache.
 	const {
 		data: timeSeriesData,
 		isLoading: isLoadingSeries,
@@ -60,7 +61,7 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 	// The report alone can't supply the capacity breakpoint (it needs the per-tick
 	// p99 series, now persisted per W1). Derive it from the time-series and fold it
 	// into the dashboard bundle so the Saturation card / Breakpoint stat light up
-	// for completed ramp_up runs instead of showing the "healthy"/"—" defaults.
+	// for completed ramp_up runs instead of showing the "healthy"/"-" defaults.
 	const sloThresholdMs = useClientSettingsStore((s) => s.sloThresholdMs);
 	const derived = useMemo(() => {
 		const base = reportToDerived(report);
@@ -84,9 +85,9 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 					<Badge variant="outline" className="font-mono font-bold shrink-0">
 						{report.metadata?.requestMethod || "GET"}
 					</Badge>
-					<span className="text-sm font-mono text-foreground truncate flex-1">
+					<TruncatedText className="text-sm font-mono text-foreground flex-1">
 						{report.metadata?.requestUrl || "Unknown URL"}
-					</span>
+					</TruncatedText>
 				</div>
 
 				{/* Load test config used for this run */}
@@ -145,10 +146,13 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 					</div>
 				)}
 
-				{/* Key metrics — p99-led, compact glance (stays visible across tabs) */}
+				{/* Key metrics - p99-led, compact glance (stays visible across tabs) */}
 				<div className="grid grid-cols-3 gap-3">
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
+							{/* Raw palette, and staying. Measured 3.50 light / 3.66 dark on
+						    this tile against the 3.0 icon bar - it clears it in both
+						    themes, and there is no violet semantic token to move it to. */}
 							<TrendingUp className="w-4 h-4 text-purple-500" />
 							<span className="text-xs text-muted-foreground">P99 Latency</span>
 						</div>
@@ -167,7 +171,7 @@ export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadT
 					</div>
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
-							<CheckCircle className="w-4 h-4 text-green-500" />
+							<CheckCircle className="w-4 h-4 text-status-success-text" />
 							<span className="text-xs text-muted-foreground">Success Rate</span>
 						</div>
 						<p className="text-xl font-bold text-foreground">

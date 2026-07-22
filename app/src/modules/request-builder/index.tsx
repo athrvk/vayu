@@ -20,7 +20,7 @@
  * - ResponseViewer displays the response
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { RequestBuilderProvider } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
@@ -32,6 +32,8 @@ import {
 	useCollectionAncestors,
 	queryKeys,
 } from "@/queries";
+import { EmptyState, ErrorState } from "@/components/shared";
+import { Button } from "@/components/ui";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
@@ -78,7 +80,7 @@ function authToRecord(
  * Gets request ID from store, fetches data, and provides context
  */
 export default function RequestBuilder() {
-	const { openTabs, activeTabId, openTab } = useTabsStore();
+	const { openTabs, activeTabId, openTab, closeTab } = useTabsStore();
 	const { activeEnvironmentId } = useSessionStore();
 	const { startRun } = useDashboardStore();
 	const showToast = useToastStore((s) => s.showToast);
@@ -96,7 +98,20 @@ export default function RequestBuilder() {
 	const [pendingLoadTestRequest, setPendingLoadTestRequest] = useState<RequestState | null>(null);
 
 	// Fetch request data
-	const { data: fetchedRequest, isLoading } = useRequestQuery(selectedRequestId);
+	const {
+		data: fetchedRequest,
+		isLoading,
+		isError,
+		refetch,
+	} = useRequestQuery(selectedRequestId);
+
+	// Remember the collection the user is working in so the welcome screen can
+	// land a new request here. Set from the loaded request, where collectionId
+	// is authoritative - not from a tab-focus cache peek, which can be stale.
+	const setLastCollectionId = useSessionStore((s) => s.setLastCollectionId);
+	useEffect(() => {
+		if (fetchedRequest?.collectionId) setLastCollectionId(fetchedRequest.collectionId);
+	}, [fetchedRequest?.collectionId, setLastCollectionId]);
 
 	// Ancestor chain for the current request's collection (root-first)
 	const collectionAncestors = useCollectionAncestors(fetchedRequest?.collectionId);
@@ -169,6 +184,8 @@ export default function RequestBuilder() {
 			authConfig,
 			preRequestScript: fetchedRequest.preRequestScript,
 			testScript: fetchedRequest.postRequestScript,
+			followRedirects: fetchedRequest.followRedirects,
+			maxRedirects: fetchedRequest.maxRedirects,
 			collectionId: fetchedRequest.collectionId,
 		};
 	}, [fetchedRequest]);
@@ -227,7 +244,7 @@ export default function RequestBuilder() {
 					execBody = { mode: request.bodyMode || "text", content: resolvedBody };
 				}
 
-				// Resolve auth — walk collection chain for inherit, resolve variables for concrete
+				// Resolve auth - walk collection chain for inherit, resolve variables for concrete
 				let execAuth: Record<string, unknown> | undefined;
 				if (request.authType === "inherit") {
 					execAuth = resolveInheritedAuth(collectionAncestors);
@@ -264,6 +281,11 @@ export default function RequestBuilder() {
 						auth: execAuth,
 						preRequestScript: composedPreScript || undefined,
 						postRequestScript: composedPostScript || undefined,
+						// Always sent, never elided: the engine defaults to
+						// following, so omitting `followRedirects: false` would
+						// silently follow the redirect the user asked to see.
+						followRedirects: request.followRedirects,
+						maxRedirects: request.maxRedirects,
 						requestId: fetchedRequest.id,
 					},
 					activeEnvironmentId || undefined
@@ -272,11 +294,11 @@ export default function RequestBuilder() {
 				if (!result) return null;
 
 				// Surface an OAuth 2.0 authorization requirement (the engine could
-				// not fetch a token non-interactively) — the response still renders
+				// not fetch a token non-interactively) - the response still renders
 				// its error, but the toast points the user at the fix.
 				if (result.errorCode === "AUTH_REQUIRED") {
 					showToast(
-						"OAuth 2.0 token required — open the Auth tab and click Get Token",
+						"OAuth 2.0 token required - open the Auth tab and click Get Token",
 						"error"
 					);
 				} else if (result.errorCode === "AUTH_FAILED") {
@@ -406,6 +428,8 @@ export default function RequestBuilder() {
 				auth: authPayload,
 				preRequestScript: request.preRequestScript || undefined,
 				postRequestScript: request.testScript || undefined,
+				followRedirects: request.followRedirects,
+				maxRedirects: request.maxRedirects,
 			});
 		},
 		[fetchedRequest, updateRequestMutation]
@@ -510,6 +534,10 @@ export default function RequestBuilder() {
 					headers: resolvedHeaders,
 					body: bodyPayload,
 					auth: loadTestAuth,
+					// Same redirect policy the single-request Send uses, so a
+					// load test measures the same hops the user sees.
+					followRedirects: pendingLoadTestRequest.followRedirects,
+					maxRedirects: pendingLoadTestRequest.maxRedirects,
 					// Load test config
 					mode: config.mode,
 					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,
@@ -519,6 +547,10 @@ export default function RequestBuilder() {
 					rampUpDuration: config.ramp_duration_seconds
 						? `${config.ramp_duration_seconds}s`
 						: undefined,
+					// Ramp-Up only. Never sent before: the field was plumbed to the
+					// engine and read back into the dashboard, but nothing set it, so
+					// every ramp started from the engine default of 1.
+					startConcurrency: config.start_concurrency,
 					maxInFlight: config.max_in_flight,
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,
@@ -589,26 +621,48 @@ export default function RequestBuilder() {
 
 	// Loading state
 	if (!selectedRequestId) {
-		return (
-			<div className="flex-1 flex items-center justify-center text-muted-foreground">
-				<p>Select a request to get started</p>
-			</div>
-		);
+		return <EmptyState title="Select a request to get started" />;
 	}
 
 	if (isLoading) {
 		return (
 			<div className="flex-1 flex items-center justify-center">
-				<div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+				{/*
+				 * Same ring as the response pane's loading state: `border-2` at
+				 * `vayu-spin 0.7s`. This one was `border-4` at Tailwind's
+				 * `animate-spin` (1s), so the two halves of the request builder
+				 * showed visibly different spinners - a thicker ring turning more
+				 * slowly on the left than on the right - whenever both were loading.
+				 */}
+				<div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-[vayu-spin_0.7s_linear_infinite]" />
 			</div>
 		);
 	}
 
-	if (!fetchedRequest) {
+	/*
+	 * Reaching here means the request was looked for and is genuinely gone -
+	 * `useRequestQuery` now fetches the collection lists rather than reading a
+	 * cache that may not have filled yet, so this is no longer the cold-start
+	 * race it used to be. The tab is therefore dead, and a centred "Request not
+	 * found" with no way out left the user to work out that closing it was the
+	 * only move. Deleting a request already closes its tabs
+	 * (`closeTabsForEntities`), so the usual cause is a delete from another
+	 * window or a database restored underneath the app.
+	 */
+	if (isError || !fetchedRequest) {
 		return (
-			<div className="flex-1 flex items-center justify-center text-muted-foreground">
-				<p>Request not found</p>
-			</div>
+			<ErrorState
+				title="This request no longer exists"
+				detail="It was deleted, or the collection it lived in was. Nothing here can be recovered - closing the tab is safe."
+				onRetry={() => refetch()}
+				action={
+					activeTab ? (
+						<Button variant="outline" size="sm" onClick={() => closeTab(activeTab.id)}>
+							Close tab
+						</Button>
+					) : undefined
+				}
+			/>
 		);
 	}
 

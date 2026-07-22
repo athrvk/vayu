@@ -80,7 +80,7 @@ export function useVariableResolver(
 			}
 		}
 
-		// 2. Collection chain — root-first so leaf variables override parent variables
+		// 2. Collection chain - root-first so leaf variables override parent variables
 		if (activeCollectionId) {
 			const chain = buildCollectionChain(activeCollectionId, collections);
 			for (const col of chain) {

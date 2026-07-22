@@ -11,11 +11,12 @@
  * Displays details for a single design mode request execution.
  */
 
-import { XCircle, Clock } from "lucide-react";
+import { Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, Badge, ScrollArea } from "@/components/ui";
 import { TimingBreakdown } from "./components";
 import { UnifiedResponseViewer } from "@/components/shared/response-viewer";
 import type { DesignRunDetailProps } from "../types";
+import { MethodBadge, TruncatedText, Callout } from "@/components/shared";
 
 export default function DesignRunDetail({ report, onBack: _onBack, runId }: DesignRunDetailProps) {
 	// Get the result from the report
@@ -57,12 +58,13 @@ export default function DesignRunDetail({ report, onBack: _onBack, runId }: Desi
 			<div className="border-b bg-card px-6 py-4">
 				{/* Request Summary */}
 				<div className="flex items-center gap-3 bg-muted/50 p-3">
-					<Badge variant="outline" className="font-mono font-bold shrink-0">
-						{trace?.request?.method || report.metadata?.requestMethod || "GET"}
-					</Badge>
-					<span className="text-sm font-mono text-foreground truncate flex-1">
+					<MethodBadge
+						method={trace?.request?.method || report.metadata?.requestMethod || "GET"}
+						size="md"
+					/>
+					<TruncatedText className="text-sm font-mono text-foreground flex-1">
 						{trace?.request?.url || report.metadata?.requestUrl || "Unknown URL"}
-					</span>
+					</TruncatedText>
 					<div className="flex items-center gap-3 shrink-0">
 						{result?.statusCode !== undefined && (
 							<Badge
@@ -89,21 +91,9 @@ export default function DesignRunDetail({ report, onBack: _onBack, runId }: Desi
 				<div className="p-6 space-y-4">
 					{/* Error Message */}
 					{result?.error && (
-						<Card className="border-destructive/30 bg-destructive/5">
-							<CardContent className="py-4">
-								<div className="flex items-start gap-3">
-									<XCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
-									<div>
-										<p className="text-sm font-medium text-destructive mb-1">
-											Request Failed
-										</p>
-										<p className="text-sm text-destructive/80 font-mono">
-											{result.error}
-										</p>
-									</div>
-								</div>
-							</CardContent>
-						</Card>
+						<Callout severity="blocking" title="Request failed">
+							<span className="font-mono">{result.error}</span>
+						</Callout>
 					)}
 
 					{/* Timing Breakdown */}

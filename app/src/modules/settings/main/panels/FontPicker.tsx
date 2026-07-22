@@ -21,7 +21,7 @@ import type { FontOption } from "@/constants/appearance";
 
 interface FontPickerProps {
 	options: readonly FontOption[];
-	/** Selected value — a preset's `value` or the literal "custom". */
+	/** Selected value - a preset's `value` or the literal "custom". */
 	value: string;
 	onChange: (value: string) => void;
 	/** The user-typed family (shown/edited when "custom" is selected). */
@@ -53,7 +53,7 @@ function FontTile({
 		<button
 			onClick={onClick}
 			className={cn(
-				"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
+				"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-colors",
 				"hover:bg-accent hover:border-accent-foreground/20",
 				selected ? "border-primary bg-primary/5" : "border-border"
 			)}
@@ -61,7 +61,7 @@ function FontTile({
 			<span className="text-sm font-medium">{label}</span>
 			<span className="text-xs text-muted-foreground">{description}</span>
 			<span
-				className="mt-1.5 text-[15px] leading-tight text-foreground"
+				className="mt-1.5 text-md leading-tight text-foreground"
 				style={{ fontFamily: stack }}
 			>
 				{sample}

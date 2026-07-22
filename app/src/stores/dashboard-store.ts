@@ -178,7 +178,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			}
 
 			// Fold the new ticks into the running aggregates. Both are monotone:
-			// peak only grows, breakpoint is latched on the first SLO crossing —
+			// peak only grows, breakpoint is latched on the first SLO crossing -
 			// so we walk each batch entry exactly once, never the full history.
 			const sloMs = useClientSettingsStore.getState().sloThresholdMs;
 			let peak = state.peakConcurrency;

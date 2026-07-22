@@ -14,6 +14,7 @@
 import { useState } from "react";
 import { Activity } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, Badge } from "@/components/ui";
+import { EmptyState } from "@/components/shared";
 import SampleRequestCard from "./SampleRequestCard";
 import type { TabProps, SampleResult } from "../../types";
 
@@ -23,9 +24,14 @@ export default function SamplesTab({ report }: TabProps) {
 	if (!report.results || report.results.length === 0) {
 		return (
 			<Card>
-				<CardContent className="py-12 text-center">
-					<Activity className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-					<p className="text-sm text-muted-foreground">No sampled requests available</p>
+				{/* The card supplies the frame; EmptyState brings its own padding, so
+				    CardContent adds none of its own. */}
+				<CardContent className="p-0">
+					<EmptyState
+						icon={Activity}
+						title="No sampled requests"
+						description="This run captured no request samples to show."
+					/>
 				</CardContent>
 			</Card>
 		);

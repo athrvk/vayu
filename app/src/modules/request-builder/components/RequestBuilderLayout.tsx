@@ -21,6 +21,7 @@ import { useRequestBuilderContext } from "../context";
 import UrlBar from "./UrlBar";
 import RequestDescription from "./RequestDescription";
 import RequestTabs from "./RequestTabs";
+import ResponseAnnouncer from "./ResponseAnnouncer";
 import ResponseViewer from "./ResponseViewer";
 
 export default function RequestBuilderLayout() {
@@ -76,6 +77,13 @@ export default function RequestBuilderLayout() {
 
 	return (
 		<div className="h-full flex flex-col">
+			{/*
+			 * Rendered unconditionally and outside the panels: the live region has
+			 * to exist before the response does, and it must survive the response
+			 * pane swapping between its loading, error and content states.
+			 */}
+			<ResponseAnnouncer />
+
 			{/* URL Bar - Always visible at top */}
 			<UrlBar />
 
@@ -93,7 +101,7 @@ export default function RequestBuilderLayout() {
 			>
 				{/* Request Editor Panel */}
 				<ResizablePanel
-					// react-resizable-panels v4 treats bare numbers as pixels — percentages must be strings
+					// react-resizable-panels v4 treats bare numbers as pixels - percentages must be strings
 					defaultSize={`${requestSplitRatio * 100}%`}
 					minSize="20%"
 					maxSize="80%"

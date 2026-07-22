@@ -28,18 +28,34 @@ interface InheritanceChainProps {
 	collectionId: string;
 }
 
+/**
+ * The auth *type*, never its value.
+ *
+ * This cell is `shrink-0` - it is meant to hold a short constant, and the row's
+ * name is what yields. It used to interpolate the credential itself
+ * (`Bearer ${auth.token}`), so one imported JWT put several hundred unbreakable
+ * mono characters into a flex child that had been told not to shrink: the row
+ * pushed past the card's border and scrolled the whole tab sideways. It also put
+ * the bearer token in plain sight in a summary panel that nobody opened to read
+ * a secret.
+ *
+ * The request-side twin of this component (request-builder's
+ * AuthInheritBanner) already does it this way - a bounded type label in the
+ * chain row, with the credential shown separately and truncated.
+ */
 function describeAuth(c: Collection): string {
 	const auth = c.auth;
 	switch (auth.mode) {
 		case "none":
 			return "No Auth";
 		case "bearer":
-			return `Bearer ${auth.token || "—"}`;
+			return "Bearer Token";
 		case "basic":
-			return `Basic ${auth.username || "—"}`;
+			return "Basic Auth";
 		case "apikey":
-			return `API Key ${auth.key || "—"}`;
+			return "API Key";
 		case "oauth2":
+			return "OAuth 2.0";
 		case "digest":
 		case "aws":
 		case "ntlm":
@@ -103,19 +119,19 @@ export default function InheritanceChain({ collectionId }: InheritanceChainProps
 						<span
 							className={cn(
 								"text-[10px] font-mono shrink-0",
-								isSource ? "text-primary" : "text-subtle-foreground"
+								isSource ? "text-primary" : "text-muted-foreground"
 							)}
 						>
 							{describeAuth(c)}
 						</span>
 
 						{isThis && (
-							<span className="text-[9px] font-bold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
+							<span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
 								THIS
 							</span>
 						)}
 						{isSource && !isThis && (
-							<span className="text-[9px] font-bold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
+							<span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
 								SOURCE
 							</span>
 						)}

@@ -132,7 +132,7 @@ function scopeString(scopes: unknown): string {
 }
 
 /**
- * OpenAPI 3 oauth2 securityScheme — pick the first usable flow.
+ * OpenAPI 3 oauth2 securityScheme - pick the first usable flow.
  */
 export function mapOpenApiV3OAuth2(scheme: Record<string, unknown>): RequestAuth {
 	const flows = (scheme.flows ?? {}) as Record<string, Record<string, unknown>>;

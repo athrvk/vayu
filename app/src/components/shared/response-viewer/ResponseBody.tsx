@@ -112,9 +112,7 @@ export default function ResponseBody({
 		const contentType = headers["content-type"] || headers["Content-Type"] || "image/png";
 		const imageData = bodyRaw || body;
 		return (
-			<div
-				className={cn("flex-1 flex items-center justify-center p-4 bg-zinc-900", className)}
-			>
+			<div className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
 						<ImageIcon className="w-4 h-4" />
@@ -126,7 +124,7 @@ export default function ResponseBody({
 						<img
 							src={`data:${contentType};base64,${imageData}`}
 							alt="Response"
-							className="max-w-full h-auto border border-border"
+							className="max-w-full h-auto border border-rule"
 						/>
 					</div>
 				</div>
@@ -137,9 +135,7 @@ export default function ResponseBody({
 	// Handle PDF
 	if (detectedType === "pdf") {
 		return (
-			<div
-				className={cn("flex-1 flex items-center justify-center p-4 bg-zinc-900", className)}
-			>
+			<div className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
 						<File className="w-4 h-4" />
@@ -156,9 +152,7 @@ export default function ResponseBody({
 	// Handle binary
 	if (detectedType === "binary") {
 		return (
-			<div
-				className={cn("flex-1 flex items-center justify-center p-4 bg-zinc-900", className)}
-			>
+			<div className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
 						<FileCode className="w-4 h-4" />
@@ -175,7 +169,7 @@ export default function ResponseBody({
 	return (
 		<div className={cn("flex-1 flex flex-col h-full", className)}>
 			{/* Mode Toggle Header */}
-			<div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-border bg-muted/20">
+			<div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-rule bg-muted/20">
 				<div className="flex items-center gap-2">
 					<FileCode className="w-4 h-4 text-muted-foreground" />
 					<span className="text-xs text-muted-foreground uppercase tracking-wide">

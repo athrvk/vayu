@@ -6,11 +6,11 @@
  */
 
 /**
- * HistoricalChartsSection — time-series charts for a completed run.
+ * HistoricalChartsSection - time-series charts for a completed run.
  *
  * Uses the centralized uPlot charts (same components the live dashboard renders),
  * all wired to one `syncKey` so hovering any chart moves the cursor across all of
- * them — read RPS, connections and status composition at the same instant.
+ * them - read RPS, connections and status composition at the same instant.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";

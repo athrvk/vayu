@@ -24,7 +24,7 @@ const OK: GuardResult = { ok: true };
 
 /**
  * Extract the lowercased hostname from a request URL. Returns null when the URL
- * cannot be parsed — which notably includes URLs still containing unresolved
+ * cannot be parsed - which notably includes URLs still containing unresolved
  * `{{variable}}` templates, so those are treated as "unknown host" and denied.
  */
 export function extractHost(url: string): string | null {

@@ -6,7 +6,7 @@
  */
 
 /**
- * Client settings — option lists, defaults, and guards for the renderer-only
+ * Client settings - option lists, defaults, and guards for the renderer-only
  * preferences held in the client-settings store (editor behavior, chart
  * granularity, SLO threshold, live refresh rate, auto-save). These arrays are
  * the single source of truth: the store defaults, the settings pickers, and the
@@ -53,7 +53,7 @@ export const CHART_GRANULARITY_OPTIONS: readonly LabeledOption<number>[] = [
 ];
 export const DEFAULT_CHART_BUCKET_SECONDS = 0.5;
 
-/** Capacity SLO — the p99 latency at which the breakpoint/saturation triggers. */
+/** Capacity SLO - the p99 latency at which the breakpoint/saturation triggers. */
 export const SLO_THRESHOLD_MIN_MS = 1;
 export const SLO_THRESHOLD_MAX_MS = 60_000;
 export const DEFAULT_SLO_THRESHOLD_MS = 200;
@@ -69,12 +69,30 @@ export const DEFAULT_LIVE_REFRESH_MS = 500;
 /* ── Auto-save ───────────────────────────────────────────────────────────── */
 
 export const AUTO_SAVE_DELAY_OPTIONS: readonly LabeledOption<number>[] = [
-	{ value: 1000, label: "1s" },
-	{ value: 3000, label: "3s" },
-	{ value: 5000, label: "5s" },
+	{ value: 5_000, label: "5s" },
+	{ value: 30_000, label: "30s" },
+	{ value: 60_000, label: "1m" },
 ];
 export const DEFAULT_AUTO_SAVE_ENABLED = true;
-export const DEFAULT_AUTO_SAVE_DELAY_MS = 3000;
+export const DEFAULT_AUTO_SAVE_DELAY_MS = 5_000;
+
+/**
+ * Snap a persisted delay onto the nearest offered option.
+ *
+ * The options were 1s/3s/5s and are now 5s/30s/1m, so anyone who had chosen 1s
+ * or 3s holds a value that no longer appears in the picker. Without this the
+ * setting renders with nothing selected while auto-save quietly keeps using the
+ * old interval - the control and the behaviour disagreeing, which is worse than
+ * either being wrong on its own.
+ *
+ * Nearest rather than reset-to-default, because 3s should land on 5s rather
+ * than jumping to a minute.
+ */
+export function nearestAutoSaveDelay(ms: number): number {
+	return AUTO_SAVE_DELAY_OPTIONS.reduce((best, o) =>
+		Math.abs(o.value - ms) < Math.abs(best.value - ms) ? o : best
+	).value;
+}
 
 export interface AutoSavePrefs {
 	enabled: boolean;

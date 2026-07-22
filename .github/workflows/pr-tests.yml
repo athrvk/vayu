@@ -1,4 +1,4 @@
-name: PR CI — run tests
+name: PR CI - run tests
 
 on:
   pull_request:

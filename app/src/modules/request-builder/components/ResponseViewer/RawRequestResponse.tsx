@@ -12,6 +12,7 @@
  */
 
 import { CodeEditor } from "@/components/ui";
+import { EmptyState } from "@/components/shared";
 import { buildRawResponse } from "@/components/shared/response-viewer";
 
 export interface RawRequestResponseProps {
@@ -39,7 +40,7 @@ export default function RawRequestResponse({ rawRequest, response }: RawRequestR
 		: rawResponse;
 
 	if (!rawRequest && !response) {
-		return <div className="p-8 text-center text-muted-foreground">No raw data available</div>;
+		return <EmptyState variant="inline" title="No raw data available" />;
 	}
 
 	return (

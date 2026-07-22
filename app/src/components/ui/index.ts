@@ -63,6 +63,8 @@ export {
 export { Tabs, TabsList, TabsTrigger, TabsContent } from "./tabs";
 
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./tooltip";
+export { TooltipIconButton } from "./tooltip-icon-button";
+export type { TooltipIconButtonProps } from "./tooltip-icon-button";
 
 export {
 	Select,

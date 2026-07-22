@@ -6,17 +6,17 @@
  */
 
 /**
- * Accent color schemes — the single source of truth.
+ * Accent color schemes - the single source of truth.
  *
  * Each scheme is applied via the `data-color-scheme` attribute on <html> and
  * only shifts the accent tokens (`--primary`, `--ring`, `--variable`,
  * `--chart-1`); the concrete HSL values live in `app/src/index.css` under the
  * matching `[data-color-scheme="…"]` selectors. The `ColorScheme` union, the
  * settings picker, and the runtime guard all derive from this array, so adding
- * a scheme means editing this file plus the CSS — nothing else.
+ * a scheme means editing this file plus the CSS - nothing else.
  */
 
-import { Cloud, Waves, Trees, Sunset, Sparkles, Heart } from "lucide-react";
+import { Cloud, Waves, Trees, Sunset, Sparkles, Heart, Gem, Contrast } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export interface ColorSchemeOption {
@@ -33,6 +33,8 @@ export const COLOR_SCHEMES = [
 	{ value: "sunset", label: "Sunset", description: "Warm and energetic", icon: Sunset },
 	{ value: "aurora", label: "Aurora", description: "Magical and modern", icon: Sparkles },
 	{ value: "coral", label: "Coral", description: "Vibrant and lively", icon: Heart },
+	{ value: "magenta", label: "Magenta", description: "Bold and electric", icon: Gem },
+	{ value: "graphite", label: "Graphite", description: "Muted and neutral", icon: Contrast },
 ] as const satisfies readonly ColorSchemeOption[];
 
 /** Accent color scheme name, applied via the `data-color-scheme` attribute. */

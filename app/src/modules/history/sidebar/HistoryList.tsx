@@ -6,10 +6,17 @@
  */
 
 import { useState } from "react";
-import { Search, Clock, Loader2 } from "lucide-react";
+import { Search, Clock } from "lucide-react";
 import { useTabsStore, useLayoutStore } from "@/stores";
 import { useHistoryStore, filterRuns } from "@/modules/history/history-store";
 import { useRunsQuery, useDeleteRunMutation } from "@/queries";
+import {
+	DrawerPanel,
+	EmptyState,
+	ErrorState,
+	TruncatedText,
+	ListSkeleton,
+} from "@/components/shared";
 import {
 	Button,
 	Input,
@@ -44,7 +51,7 @@ export default function HistoryList() {
 	const navigateToHistory = () => activateDrawerView("history");
 
 	// Use TanStack Query for runs data
-	const { data: allRuns = [], isLoading } = useRunsQuery();
+	const { data: allRuns = [], isLoading, isError, error, refetch } = useRunsQuery();
 	const deleteRunMutation = useDeleteRunMutation();
 
 	const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -52,6 +59,21 @@ export default function HistoryList() {
 
 	// Filter and sort runs using the helper function
 	const runs = filterRuns(allRuns, { searchQuery, filterType, filterStatus, sortBy });
+
+	/*
+	 * The drawer has three sibling views. The collections tree already tells the
+	 * user when its load failed; a history list that answers the same failure
+	 * with "No test runs found" is not just wrong on its own terms, it makes the
+	 * same event look like two different events depending on which view is open.
+	 * Nothing here offers a create CTA, so this is about that symmetry rather
+	 * than about preventing a duplicate.
+	 *
+	 * Gated on `allRuns`, not the filtered `runs`: TanStack keeps the last good
+	 * data through a failed background refetch, and a filter that happens to
+	 * match nothing is still a working list. Only a failure with nothing cached
+	 * earns the error pane.
+	 */
+	const showError = isError && allRuns.length === 0;
 
 	const runToDelete = deleteConfirmRunId
 		? allRuns.find((r) => r.id === deleteConfirmRunId)
@@ -81,147 +103,169 @@ export default function HistoryList() {
 	};
 
 	return (
-		<div className="flex flex-col h-full w-full p-4 space-y-4">
-			{/* Header */}
-			<div className="flex items-center justify-between shrink-0">
-				<div className="flex items-center gap-2 min-w-0">
-					<Clock className="w-4 h-4 text-primary shrink-0" />
-					<h2 className="text-sm font-semibold text-foreground truncate">
-						History of Runs
-					</h2>
-				</div>
-				{allRuns.length > 0 && (
-					<span className="text-xs text-muted-foreground shrink-0 ml-2">
+		<DrawerPanel
+			title="History"
+			actions={
+				allRuns.length > 0 ? (
+					<span className="text-xs text-muted-foreground shrink-0">
 						{allRuns.length} {allRuns.length === 1 ? "run" : "runs"}
 					</span>
-				)}
-			</div>
+				) : undefined
+			}
+		>
+			{/*
+			 * pt-2 is not decorative. The panel body scrolls, so it clips at its
+			 * own edge, and the search field's focus ring is drawn *outside* its
+			 * border box - flush against the top, the ring's upper edge was cut
+			 * off. Matches the 8px top inset the Variables view already uses.
+			 */}
+			<div className="flex h-full w-full flex-col space-y-4 px-3 pt-2 pb-3">
+				{/* Search & Filters */}
+				<div className="space-y-3 shrink-0">
+					<div className="relative">
+						<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+						<Input
+							type="text"
+							value={searchQuery}
+							onChange={(e) => setSearchQuery(e.target.value)}
+							placeholder="Search runs by api..."
+							className="pl-10 w-full"
+						/>
+					</div>
 
-			{/* Search & Filters */}
-			<div className="space-y-3 shrink-0">
-				<div className="relative">
-					<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-					<Input
-						type="text"
-						value={searchQuery}
-						onChange={(e) => setSearchQuery(e.target.value)}
-						placeholder="Search runs by api..."
-						className="pl-10 w-full"
-					/>
-				</div>
+					<div className="flex gap-2 flex-wrap">
+						<Select value={filterType} onValueChange={(v) => setFilterType(v as any)}>
+							<SelectTrigger className="flex-1 min-w-[120px]">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">All Types</SelectItem>
+								<SelectItem value="load">Load Test</SelectItem>
+								<SelectItem value="design">Design Mode</SelectItem>
+							</SelectContent>
+						</Select>
 
-				<div className="flex gap-2 flex-wrap">
-					<Select value={filterType} onValueChange={(v) => setFilterType(v as any)}>
-						<SelectTrigger className="flex-1 min-w-[120px]">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="all">All Types</SelectItem>
-							<SelectItem value="load">Load Test</SelectItem>
-							<SelectItem value="design">Design Mode</SelectItem>
-						</SelectContent>
-					</Select>
-
-					<Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as any)}>
-						<SelectTrigger className="flex-1 min-w-[120px]">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="all">All Status</SelectItem>
-							<SelectItem value="pending">Pending</SelectItem>
-							<SelectItem value="running">Running</SelectItem>
-							<SelectItem value="completed">Completed</SelectItem>
-							<SelectItem value="stopped">Stopped</SelectItem>
-							<SelectItem value="failed">Failed</SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
-
-				<div className="flex items-center gap-2 flex-wrap">
-					<span className="text-xs text-muted-foreground font-medium shrink-0">
-						Sort:
-					</span>
-					<div className="flex gap-1">
-						<Button
-							variant={sortBy === "newest" ? "default" : "ghost"}
-							onClick={() => setSortBy("newest")}
-							size="sm"
-							className="h-8"
+						<Select
+							value={filterStatus}
+							onValueChange={(v) => setFilterStatus(v as any)}
 						>
-							Newest
-						</Button>
-						<Button
-							variant={sortBy === "oldest" ? "default" : "ghost"}
-							onClick={() => setSortBy("oldest")}
-							size="sm"
-							className="h-8"
-						>
-							Oldest
-						</Button>
+							<SelectTrigger className="flex-1 min-w-[120px]">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">All Status</SelectItem>
+								<SelectItem value="pending">Pending</SelectItem>
+								<SelectItem value="running">Running</SelectItem>
+								<SelectItem value="completed">Completed</SelectItem>
+								<SelectItem value="stopped">Stopped</SelectItem>
+								<SelectItem value="failed">Failed</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+
+					<div className="flex items-center gap-2 flex-wrap">
+						<span className="text-xs text-muted-foreground font-medium shrink-0">
+							Sort:
+						</span>
+						<div className="flex gap-1">
+							<Button
+								variant={sortBy === "newest" ? "default" : "ghost"}
+								onClick={() => setSortBy("newest")}
+								size="sm"
+								className="h-8"
+							>
+								Newest
+							</Button>
+							<Button
+								variant={sortBy === "oldest" ? "default" : "ghost"}
+								onClick={() => setSortBy("oldest")}
+								size="sm"
+								className="h-8"
+							>
+								Oldest
+							</Button>
+						</div>
 					</div>
 				</div>
-			</div>
 
-			{/* Runs List */}
-			<div className="flex-1 min-h-0 overflow-hidden">
-				<div className="space-y-2 h-full overflow-y-auto pr-2 -mr-2">
-					{isLoading && (
-						<div className="flex flex-col items-center justify-center py-16">
-							<Loader2 className="w-8 h-8 text-primary animate-spin mb-3" />
-							<p className="text-sm text-muted-foreground">Loading runs...</p>
-						</div>
-					)}
+				{/* Runs List */}
+				<div className="flex-1 min-h-0 overflow-hidden">
+					{/*
+					 * No `-mr-2` here. That trick lets a scrollbar sit in the
+					 * parent's padding, but the parent clips (overflow-hidden), so
+					 * it pushed the scrollbar 8px past the clip edge and cut it off
+					 * lengthwise. Stay inside the parent and pad the content instead.
+					 *
+					 * Scrollbar styling is a global baseline (index.css) - nothing to
+					 * apply per container, which is what this element was missing.
+					 */}
+					<div className="h-full space-y-2 overflow-y-auto pr-1">
+						{isLoading && <ListSkeleton rows={4} leading badge />}
 
-					{!isLoading && runs.length === 0 && (
-						<div className="text-center py-16">
-							<div className="w-16 h-16 mx-auto mb-4 bg-muted/50 flex items-center justify-center">
-								<Clock className="w-8 h-8 text-muted-foreground/40" />
-							</div>
-							<p className="text-sm font-medium text-foreground">
-								No test runs found
-							</p>
-							<p className="text-xs text-muted-foreground mt-1">
-								{searchQuery || filterType !== "all" || filterStatus !== "all"
-									? "Try adjusting your filters"
-									: "Run your first load test to see results here"}
-							</p>
-						</div>
-					)}
-
-					{!isLoading &&
-						runs.map((run) => (
-							<RunItem
-								key={run.id}
-								run={run}
-								onSelect={navigateToRunDetail}
-								onDelete={handleDeleteClick}
-								isDeleting={deletingId === run.id}
-								isSelected={selectedRunId === run.id}
+						{!isLoading && showError && (
+							// `h-full` for the same reason as the empty state below:
+							// the parent is a scroll container, not a flex column, so
+							// the pane variant's `flex-1` has nothing to grow against.
+							<ErrorState
+								className="h-full"
+								title="Couldn't load run history"
+								detail={error instanceof Error ? error.message : undefined}
+								onRetry={() => void refetch()}
 							/>
-						))}
-				</div>
-			</div>
-
-			<DeleteConfirmDialog
-				open={!!deleteConfirmRunId}
-				onOpenChange={(open) => !open && setDeleteConfirmRunId(null)}
-				title="Delete run?"
-				description={
-					<>
-						This run will be permanently removed. This cannot be undone.
-						{deleteConfirmLabel && (
-							<span
-								className="mt-2 block font-mono text-xs text-muted-foreground truncate"
-								title={deleteConfirmLabel}
-							>
-								{deleteConfirmLabel}
-							</span>
 						)}
-					</>
-				}
-				onConfirm={handleConfirmDelete}
-				isDeleting={!!deletingId}
-			/>
-		</div>
+
+						{!isLoading && !showError && runs.length === 0 && (
+							// `h-full` because this scroll container is not a flex
+							// column, so `flex-1` has nothing to grow against. Without
+							// it the block sits at the top while the collections
+							// drawer - whose container *is* a flex column - centres.
+							<EmptyState
+								className="h-full"
+								icon={Clock}
+								title="No test runs found"
+								description={
+									searchQuery || filterType !== "all" || filterStatus !== "all"
+										? "Try widening the search or clearing the filters."
+										: "Run your first load test to see its results here."
+								}
+							/>
+						)}
+
+						{!isLoading &&
+							runs.map((run) => (
+								<RunItem
+									key={run.id}
+									run={run}
+									onSelect={navigateToRunDetail}
+									onDelete={handleDeleteClick}
+									isDeleting={deletingId === run.id}
+									isSelected={selectedRunId === run.id}
+								/>
+							))}
+					</div>
+				</div>
+
+				<DeleteConfirmDialog
+					open={!!deleteConfirmRunId}
+					onOpenChange={(open) => !open && setDeleteConfirmRunId(null)}
+					title="Delete run?"
+					description={
+						<>
+							This run will be permanently removed. This cannot be undone.
+							{deleteConfirmLabel && (
+								<TruncatedText
+									as="span"
+									className="mt-2 block font-mono text-xs text-muted-foreground"
+								>
+									{deleteConfirmLabel}
+								</TruncatedText>
+							)}
+						</>
+					}
+					onConfirm={handleConfirmDelete}
+					isDeleting={!!deletingId}
+				/>
+			</div>
+		</DrawerPanel>
 	);
 }

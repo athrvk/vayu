@@ -13,11 +13,28 @@
  */
 
 import type { Request, KeyValueEntry, RequestBody, RequestAuth } from "@/types";
+import {
+	DEFAULT_FOLLOW_REDIRECTS,
+	DEFAULT_MAX_REDIRECTS,
+	MAX_MAX_REDIRECTS,
+	MIN_MAX_REDIRECTS,
+} from "@/constants/request";
 
 export type BackendRequest = Omit<Request, "createdAt" | "updatedAt"> & {
 	createdAt: number | string;
 	updatedAt: number | string;
 };
+
+/**
+ * Coerce a raw `maxRedirects` into the range the Settings tab offers. Anything
+ * missing or non-numeric falls back to the engine default; a stored value
+ * outside the range is clamped rather than dropped, matching what the engine
+ * does with the same payload.
+ */
+function clampMaxRedirects(raw: unknown): number {
+	if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_MAX_REDIRECTS;
+	return Math.min(MAX_MAX_REDIRECTS, Math.max(MIN_MAX_REDIRECTS, Math.trunc(raw)));
+}
 
 export class RequestTransformer {
 	static toFrontend(raw: Record<string, any>): Request {
@@ -55,6 +72,14 @@ export class RequestTransformer {
 			auth,
 			preRequestScript: raw.preRequestScript ?? "",
 			postRequestScript: raw.postRequestScript ?? "",
+			// Redirect policy: a request stored before these columns existed
+			// comes back without them, and must read as the engine default
+			// rather than as "do not follow" / "zero hops".
+			followRedirects:
+				typeof raw.followRedirects === "boolean"
+					? raw.followRedirects
+					: DEFAULT_FOLLOW_REDIRECTS,
+			maxRedirects: clampMaxRedirects(raw.maxRedirects),
 			order: raw.order ?? 0,
 			createdAt: new Date(raw.createdAt).toISOString(),
 			updatedAt: new Date(raw.updatedAt).toISOString(),

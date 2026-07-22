@@ -33,7 +33,7 @@ export const isMac: boolean = detectMac();
 export const modKey: string = isMac ? "⌘" : "Ctrl";
 
 export interface Chord {
-	/** Primary modifier — ⌘ on macOS, Ctrl elsewhere. */
+	/** Primary modifier - ⌘ on macOS, Ctrl elsewhere. */
 	mod?: boolean;
 	shift?: boolean;
 	alt?: boolean;

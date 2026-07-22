@@ -36,7 +36,7 @@ export interface KeyValueEntry {
 
 /**
  * Variable value with enabled flag and optional type hint.
- * Note: `secret` is a UI masking hint — values are NOT encrypted at rest.
+ * Note: `secret` is a UI masking hint - values are NOT encrypted at rest.
  * Note: `type` affects UI rendering and validation only; values are always stored as strings.
  */
 export interface VariableValue {
@@ -59,14 +59,14 @@ export type RequestBody =
 /**
  * Auth configuration for requests.
  * `inherit` resolves by walking the parent collection chain at execution time.
- * Collections never use `inherit` — they are always the auth source.
+ * Collections never use `inherit` - they are always the auth source.
  */
 export type OAuth2GrantType = "authorization_code" | "client_credentials" | "password";
 
 /**
  * OAuth 2.0 configuration. Every string field may contain {{variables}},
  * resolved app-side before the config is sent to the engine. `state` is
- * intentionally absent — it is always generated per authorization attempt.
+ * intentionally absent - it is always generated per authorization attempt.
  */
 export interface OAuth2Config {
 	grantType: OAuth2GrantType;
@@ -131,10 +131,14 @@ export interface Request {
 	params: KeyValueEntry[];
 	headers: KeyValueEntry[];
 	body: RequestBody;
-	bodyType: BodyMode; // Denormalized mirror of body.mode — kept for queryability
+	bodyType: BodyMode; // Denormalized mirror of body.mode - kept for queryability
 	auth: RequestAuth;
 	preRequestScript: string;
 	postRequestScript: string;
+	/** Follow 3xx `Location` responses. Engine default is `true`. */
+	followRedirects: boolean;
+	/** Redirect hops allowed when {@link followRedirects} is on. Engine default is 10. */
+	maxRedirects: number;
 	order: number;
 	createdAt: string;
 	updatedAt: string;
@@ -174,7 +178,7 @@ export type VariableScope = "global" | "collection" | "environment";
 
 /**
  * Resolved variable with its value, scope, and secret flag.
- * Note: The `secret` field is a UI hint for masking — values are NOT encrypted at rest.
+ * Note: The `secret` field is a UI hint for masking - values are NOT encrypted at rest.
  *
  * `value` is always the raw string form (used for `{{var}}` interpolation in
  * URLs / headers / body). `type` and `typedValue` expose the declared
@@ -237,6 +241,8 @@ export interface LoadTestConfig {
 	iterations?: number;
 	mode: LoadTestMode;
 	ramp_duration_seconds?: number;
+	/** Ramp-Up only: connections at t=0, climbing to `concurrency`. */
+	start_concurrency?: number;
 	data_sample_rate?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
@@ -301,7 +307,7 @@ export interface LoadTestMetrics {
 	backpressure?: number;
 	dropped_requests?: number;
 	avg_queue_wait_ms?: number;
-	// Run progress — feeds the iterations-mode ETA stat. requests_expected is 0
+	// Run progress - feeds the iterations-mode ETA stat. requests_expected is 0
 	// for open-ended modes (constant_rps), in which case ETA is not shown.
 	requests_sent?: number;
 	requests_expected?: number;
@@ -412,6 +418,18 @@ export interface RunReport {
 			message?: string;
 			headers?: Record<string, string>;
 			body?: string;
+			// Design-mode traces (`POST /request`) nest the exchange instead of
+			// flattening it - see `store_result` in engine/src/http/routes/execution.cpp.
+			request?: {
+				method?: string;
+				url?: string;
+				headers?: Record<string, string>;
+				body?: string;
+			};
+			response?: {
+				headers?: Record<string, string>;
+				body?: unknown;
+			};
 		};
 	}>;
 }

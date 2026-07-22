@@ -35,7 +35,6 @@ import {
 	Loader2,
 	CircleCheck,
 	CircleSlash,
-	AlertTriangle,
 } from "lucide-react";
 import {
 	Button,
@@ -59,6 +58,7 @@ import type {
 } from "@/types";
 import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
+import { Callout } from "@/components/shared";
 
 const DEFAULT_ENDPOINT = "http://127.0.0.1:9877/mcp";
 
@@ -140,7 +140,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 		>
 			{copied ? (
 				<>
-					<Check className="w-3.5 h-3.5 mr-1 text-success" />
+					<Check className="w-3.5 h-3.5 mr-1 text-success-text" />
 					Copied
 				</>
 			) : (
@@ -218,7 +218,7 @@ export default function McpSettingsPanel() {
 		};
 	}, []);
 
-	// Re-check status when the user returns to the window — the server may have
+	// Re-check status when the user returns to the window - the server may have
 	// died or been toggled elsewhere while the panel sat open.
 	useEffect(() => {
 		if (!window.electronAPI) return;
@@ -264,7 +264,7 @@ export default function McpSettingsPanel() {
 					showToast(`Added Vayu to ${CLIENT_LABEL[client]}.`, "success");
 				} else if (res.reason === "cli-not-found") {
 					showToast(
-						`The ${CLIENT_CLI[client]} CLI wasn't found — copy the snippet below to add Vayu manually.`,
+						`The ${CLIENT_CLI[client]} CLI wasn't found - copy the snippet below to add Vayu manually.`,
 						"error"
 					);
 				} else {
@@ -328,15 +328,10 @@ export default function McpSettingsPanel() {
 	return (
 		<>
 			{!hasElectron && (
-				<Card className="border-warning/40 bg-warning/10">
-					<CardContent className="flex items-start gap-3 py-4">
-						<AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
-						<p className="text-sm text-muted-foreground">
-							MCP settings are only available in the desktop app. Run Vayu via
-							Electron to configure the MCP server.
-						</p>
-					</CardContent>
-				</Card>
+				<Callout severity="warning" title="Desktop only">
+					MCP settings are only available in the desktop app. Run Vayu via Electron to
+					configure the MCP server.
+				</Callout>
 			)}
 
 			{/* Connection status + onboarding */}
@@ -348,16 +343,13 @@ export default function McpSettingsPanel() {
 						{isLoading ? (
 							<Skeleton className="h-5 w-16 ml-1" />
 						) : !enabled ? (
-							<Badge
-								variant="secondary"
-								className="ml-1 bg-muted text-muted-foreground"
-							>
+							<Badge variant="chip" className="ml-1 bg-muted text-muted-foreground">
 								<CircleSlash className="w-3 h-3 mr-1" />
 								Disabled
 							</Badge>
 						) : running ? (
 							<Badge
-								variant="secondary"
+								variant="chip"
 								className="ml-1 border border-success/20 bg-success/10 text-success-text"
 							>
 								<CircleCheck className="w-3 h-3 mr-1" />
@@ -365,7 +357,7 @@ export default function McpSettingsPanel() {
 							</Badge>
 						) : (
 							<Badge
-								variant="secondary"
+								variant="chip"
 								className="ml-1 border border-warning/30 bg-warning/10 text-warning-text"
 							>
 								<CircleSlash className="w-3 h-3 mr-1" />
@@ -374,7 +366,7 @@ export default function McpSettingsPanel() {
 						)}
 					</div>
 					<CardDescription>
-						Any agent connects to the already-running app with one command — no extra
+						Any agent connects to the already-running app with one command - no extra
 						process to manage.
 					</CardDescription>
 				</CardHeader>
@@ -392,35 +384,35 @@ export default function McpSettingsPanel() {
 							checked={enabled}
 							onCheckedChange={(checked) => void toggleEnabled(checked)}
 							disabled={isLoading || !hasElectron}
+							aria-label="Enable MCP server"
 						/>
 					</div>
 
-					{/* Enabled but not listening — usually a port conflict. Offer a retry. */}
+					{/* Enabled but not listening - usually a port conflict. Offer a retry. */}
 					{!isLoading && enabled && !running && (
-						<div className="flex items-start justify-between gap-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2">
-							<div className="flex items-start gap-2">
-								<AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
-								<p className="text-xs text-muted-foreground">
-									The server is enabled but not listening — the port may be in
-									use.
-								</p>
-							</div>
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => void toggleEnabled(true)}
-								className="h-7 px-2 text-xs shrink-0"
-							>
-								Retry
-							</Button>
-						</div>
+						<Callout
+							severity="warning"
+							title="Enabled but not listening"
+							action={
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => void toggleEnabled(true)}
+									className="h-7 px-2 text-xs shrink-0"
+								>
+									Retry
+								</Button>
+							}
+						>
+							the port may be in use.
+						</Callout>
 					)}
 
 					<div className="flex items-center gap-2">
 						<Label className="text-xs font-medium text-muted-foreground w-20 shrink-0">
 							Endpoint
 						</Label>
-						<code className="flex-1 text-xs font-mono bg-muted rounded px-2 py-1.5 break-all">
+						<code className="flex-1 text-xs font-mono bg-muted rounded-md px-2 py-1.5 break-all">
 							{endpoint}
 						</code>
 						<CopyButton text={endpoint} />
@@ -457,7 +449,7 @@ export default function McpSettingsPanel() {
 									<CopyButton text={snippet.code} />
 								</div>
 							</div>
-							<pre className="text-xs font-mono bg-muted rounded px-3 py-2 overflow-x-auto whitespace-pre">
+							<pre className="text-xs font-mono bg-muted rounded-md px-3 py-2 overflow-x-auto whitespace-pre">
 								{snippet.code}
 							</pre>
 						</div>
@@ -538,6 +530,7 @@ export default function McpSettingsPanel() {
 															setToolsEnabled([tool.name], checked)
 														}
 														disabled={!config}
+														aria-label={`Enable tool ${tool.name}`}
 													/>
 												</div>
 											);
@@ -559,7 +552,7 @@ export default function McpSettingsPanel() {
 					</div>
 					<CardDescription>
 						Hosts an agent is permitted to send traffic to. Empty means no outbound
-						requests are allowed — a safe default. Add a host (no scheme or port), e.g.{" "}
+						requests are allowed - a safe default. Add a host (no scheme or port), e.g.{" "}
 						<code className="font-mono">api.example.com</code>.
 					</CardDescription>
 				</CardHeader>
@@ -570,24 +563,21 @@ export default function McpSettingsPanel() {
 							<Label className="text-sm">Allow all hosts</Label>
 							<p className="text-xs text-muted-foreground mt-0.5">
 								Bypass the allowlist and let agents target any host. Reduces safety
-								— leave off unless you trust the agent.
+								- leave off unless you trust the agent.
 							</p>
 						</div>
 						<Switch
 							checked={config?.allowAll ?? false}
 							onCheckedChange={(checked) => void persist({ allowAll: checked })}
 							disabled={!config}
+							aria-label="Allow all hosts"
 						/>
 					</div>
 
 					{config?.allowAll && (
-						<div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2">
-							<AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
-							<p className="text-xs text-muted-foreground">
-								All hosts are allowed. The per-host list below is ignored until you
-								turn this off.
-							</p>
-						</div>
+						<Callout severity="warning" title="All hosts are allowed">
+							the per-host list below is ignored until you turn this off.
+						</Callout>
 					)}
 
 					<div
@@ -608,6 +598,7 @@ export default function McpSettingsPanel() {
 									}
 								}}
 								placeholder="api.example.com"
+								aria-label="Host to allow"
 								className="max-w-xs"
 								disabled={!config || config.allowAll}
 							/>
@@ -634,7 +625,7 @@ export default function McpSettingsPanel() {
 										{host}
 										<button
 											onClick={() => removeHost(host)}
-											className="rounded p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors"
+											className="rounded-md p-0.5 hover:bg-destructive/10 hover:text-destructive-text transition-colors"
 											aria-label={`Remove ${host}`}
 										>
 											<X className="w-3.5 h-3.5" />
@@ -677,6 +668,7 @@ export default function McpSettingsPanel() {
 							) : (
 								<Input
 									type="number"
+									aria-label={field.label}
 									min={1}
 									value={
 										capDrafts[field.key] ??
@@ -724,6 +716,7 @@ export default function McpSettingsPanel() {
 							checked={config?.allowWrites ?? false}
 							onCheckedChange={(checked) => void persist({ allowWrites: checked })}
 							disabled={!config}
+							aria-label="Allow write operations"
 						/>
 						<Label className="text-sm text-muted-foreground">
 							{config?.allowWrites ? "Writes enabled" : "Read-only"}

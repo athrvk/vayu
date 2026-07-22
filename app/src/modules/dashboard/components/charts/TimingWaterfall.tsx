@@ -10,8 +10,8 @@ import type { RunReport } from "@/types";
 import { InfoChip } from "../shared";
 
 /**
- * Timing waterfall — from report.timingBreakdown. Always renders 5 rows so the
- * card height stays constant; during live (no report yet) values show "—" and
+ * Timing waterfall - from report.timingBreakdown. Always renders 5 rows so the
+ * card height stays constant; during live (no report yet) values show "-" and
  * bars are empty.
  */
 export function TimingWaterfall({ report }: { report: RunReport | null }) {
@@ -41,7 +41,7 @@ export function TimingWaterfall({ report }: { report: RunReport | null }) {
 			k: "TTFB",
 			v: tb?.avgFirstByteMs,
 			color: "hsl(var(--primary))",
-			tip: "Time to first byte. Server processing time + propagation. This is where slow endpoints reveal themselves — if TTFB dominates, the bottleneck is the server, not the network.",
+			tip: "Time to first byte. Server processing time + propagation. This is where slow endpoints reveal themselves - if TTFB dominates, the bottleneck is the server, not the network.",
 		},
 		{
 			k: "Download",
@@ -69,14 +69,14 @@ export function TimingWaterfall({ report }: { report: RunReport | null }) {
 							style={{ width: widthFor(s.v), background: s.color }}
 						/>
 					</div>
-					<span className="text-right font-mono tabular-nums text-[11.5px] font-medium">
+					<span className="text-right font-mono tabular-nums text-[11px] font-medium">
 						{hasData && s.v !== undefined ? (
 							<>
 								<span className="text-foreground">{s.v.toFixed(0)}</span>
 								<span className="text-subtle-foreground ml-0.5">ms</span>
 							</>
 						) : (
-							<span className="text-subtle-foreground">—</span>
+							<span className="text-subtle-foreground">-</span>
 						)}
 					</span>
 				</div>
@@ -87,7 +87,7 @@ export function TimingWaterfall({ report }: { report: RunReport | null }) {
 					{hasData ? (
 						<span className="text-foreground">{total.toFixed(0)} ms</span>
 					) : (
-						<span className="text-subtle-foreground">— ms</span>
+						<span className="text-subtle-foreground">- ms</span>
 					)}
 				</span>
 			</div>

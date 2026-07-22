@@ -178,7 +178,7 @@ Json serialize (const vayu::db::Request& r) {
     json["url"]          = r.url;
     json["order"]        = r.order;
 
-    // Query params — stored as JSON array of KeyValueEntry
+    // Query params - stored as JSON array of KeyValueEntry
     if (r.params.empty ()) {
         json["params"] = Json::array ();
     } else {
@@ -189,7 +189,7 @@ Json serialize (const vayu::db::Request& r) {
         }
     }
 
-    // Headers — stored as JSON array of KeyValueEntry
+    // Headers - stored as JSON array of KeyValueEntry
     if (r.headers.empty ()) {
         json["headers"] = Json::array ();
     } else {
@@ -200,7 +200,7 @@ Json serialize (const vayu::db::Request& r) {
         }
     }
 
-    // Body — stored as JSON discriminated union {mode, content?} | {mode, fields?}
+    // Body - stored as JSON discriminated union {mode, content?} | {mode, fields?}
     if (r.body.empty ()) {
         json["body"] = Json::object ({ { "mode", "none" } });
     } else {
@@ -225,6 +225,8 @@ Json serialize (const vayu::db::Request& r) {
 
     json["preRequestScript"]  = r.pre_request_script;
     json["postRequestScript"] = r.post_request_script;
+    json["followRedirects"]   = r.follow_redirects;
+    json["maxRedirects"]      = r.max_redirects;
     json["updatedAt"]         = r.updated_at;
     json["createdAt"]         = r.created_at;
     return json;
@@ -536,7 +538,7 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"url\":" << Json (r.url).dump () << ",";
     out << "\"order\":" << r.order << ",";
 
-    // Query params — JSON array of KeyValueEntry
+    // Query params - JSON array of KeyValueEntry
     out << "\"params\":";
     if (r.params.empty ()) {
         out << "[]";
@@ -554,7 +556,7 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     }
     out << ",";
 
-    // Headers — JSON array of KeyValueEntry
+    // Headers - JSON array of KeyValueEntry
     out << "\"headers\":";
     if (r.headers.empty ()) {
         out << "[]";
@@ -572,7 +574,7 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     }
     out << ",";
 
-    // Body — JSON discriminated union
+    // Body - JSON discriminated union
     out << "\"body\":";
     if (r.body.empty ()) {
         out << "{\"mode\":\"none\"}";
@@ -593,7 +595,7 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"bodyType\":" << Json (r.body_type.empty () ? "none" : r.body_type).dump ()
         << ",";
 
-    // Auth — JSON RequestAuth object
+    // Auth - JSON RequestAuth object
     out << "\"auth\":";
     if (r.auth.empty ()) {
         out << "{\"mode\":\"inherit\"}";
@@ -613,6 +615,8 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
 
     out << "\"preRequestScript\":" << Json (r.pre_request_script).dump () << ",";
     out << "\"postRequestScript\":" << Json (r.post_request_script).dump () << ",";
+    out << "\"followRedirects\":" << (r.follow_redirects ? "true" : "false") << ",";
+    out << "\"maxRedirects\":" << r.max_redirects << ",";
     out << "\"updatedAt\":" << r.updated_at << ",";
     out << "\"createdAt\":" << r.created_at;
     out << "}";

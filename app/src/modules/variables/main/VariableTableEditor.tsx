@@ -52,6 +52,7 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
+	TooltipIconButton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
@@ -136,7 +137,7 @@ interface VariableEditorProps {
 	/**
 	 * Embedded mode strips the standalone-screen chrome (title header, info
 	 * banner, count footer) so the editor can be slotted inside another
-	 * container — e.g. the Variables tab of CollectionDetail — without
+	 * container - e.g. the Variables tab of CollectionDetail - without
 	 * duplicating headings or fighting the host layout.
 	 */
 	embedded?: boolean;
@@ -339,7 +340,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		setActiveContext(contextId);
 
 		// Alias the ref object (not .current) so cleanup still reads the live
-		// .current — the timeout handle is scheduled after mount during debounced
+		// .current - the timeout handle is scheduled after mount during debounced
 		// save, so cleanup must clear whatever is actually pending, not a stale copy.
 		const timeoutRef = saveTimeoutRef;
 		return () => {
@@ -422,7 +423,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		setVariables(newVariables);
 		// Keep the ref in sync immediately (not just via the post-render effect):
 		// the secret toggle calls performSaveRef.current() synchronously right
-		// after this, and performSave reads variablesRef.current — a stale ref
+		// after this, and performSave reads variablesRef.current - a stale ref
 		// would persist the pre-edit value and the backend re-sync would then
 		// revert the change. Mirrors removeVariable.
 		variablesRef.current = newVariables;
@@ -487,7 +488,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 	if (dataError) {
 		return (
-			<div className="flex items-center justify-center h-full text-destructive">
+			<div className="flex items-center justify-center h-full text-destructive-text">
 				<AlertCircle className="w-5 h-5 mr-2" />
 				<span>
 					Failed to load{" "}
@@ -534,15 +535,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 									Active
 								</Badge>
 							)}
-							<Button
-								variant="ghost"
-								size="icon"
+							<TooltipIconButton
+								label="Delete environment"
+								icon={<Trash2 className="w-4 h-4" />}
 								onClick={() => setShowDeleteConfirm(true)}
-								className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-								title="Delete environment"
-							>
-								<Trash2 className="w-4 h-4" />
-							</Button>
+								className="h-8 w-8 text-muted-foreground hover:text-destructive-text hover:bg-destructive/10"
+							/>
 						</div>
 					)}
 				</div>
@@ -582,12 +580,13 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							<th className="pb-2 px-2">Variable</th>
 							<th className="pb-2 px-2">Value</th>
 							<th className="pb-2 px-2 w-[110px]">Type</th>
-							<th
-								className="pb-2 w-8 text-center"
-								title="Mark as secret (masks value in UI)"
-							>
-								<KeyRound className="w-3 h-3 inline-block" />
-							</th>
+							{/*
+							 * A word, like every other column. This was a bare key icon
+							 * whose meaning lived in a native `title` - which needs a
+							 * hover to appear, never shows on a touch device, and is
+							 * the only unlabelled column in a table of labelled ones.
+							 */}
+							<th className="pb-2 w-14 px-2">Secret</th>
 							<th className="pb-2 w-10"></th>
 						</tr>
 					</thead>
@@ -652,9 +651,19 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												)}
 											/>
 											{variable.secret && !variable.isNew && (
-												<Button
-													variant="ghost"
-													size="icon"
+												<TooltipIconButton
+													label={
+														isSecretRevealed
+															? "Hide value"
+															: "Reveal value"
+													}
+													icon={
+														isSecretRevealed ? (
+															<EyeOff className="w-3.5 h-3.5" />
+														) : (
+															<Eye className="w-3.5 h-3.5" />
+														)
+													}
 													onClick={() => {
 														setRevealedSecrets((prev) => {
 															const newSet = new Set(prev);
@@ -667,18 +676,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 														});
 													}}
 													className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
-													title={
-														isSecretRevealed
-															? "Hide value"
-															: "Reveal value"
-													}
-												>
-													{isSecretRevealed ? (
-														<EyeOff className="w-3.5 h-3.5" />
-													) : (
-														<Eye className="w-3.5 h-3.5" />
-													)}
-												</Button>
+												/>
 											)}
 										</div>
 									</td>
@@ -687,7 +685,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 											value={variable.type ?? "string"}
 											onValueChange={(v) => {
 												updateVariable(index, "type", v as VariableType);
-												// Only fire an immediate save if the row is already persisted —
+												// Only fire an immediate save if the row is already persisted -
 												// otherwise let the key/value entry commit it on first edit.
 												if (!variable.isNew) {
 													performSaveRef.current();
@@ -719,9 +717,13 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 									</td>
 									<td className="py-1 text-center">
 										{!variable.isNew && (
-											<Button
-												variant="ghost"
-												size="icon"
+											<TooltipIconButton
+												label={
+													variable.secret
+														? "Unmark as secret"
+														: "Mark as secret (masks value in UI)"
+												}
+												icon={<KeyRound className="w-4 h-4" />}
 												onClick={() => {
 													updateVariable(
 														index,
@@ -738,29 +740,37 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 													}
 													performSaveRef.current();
 												}}
+												/*
+												 * Always visible, unlike the delete button beside it.
+												 *
+												 * This is a state toggle, not a row action. Hidden at
+												 * rest, "not secret" looked identical to "no control
+												 * here", so masking a value was undiscoverable unless
+												 * you happened to hover the row - and a keyboard user
+												 * tabbed onto something invisible, since it carried no
+												 * `group-focus-within` either.
+												 *
+												 * Quiet rather than absent: `muted-foreground` clears
+												 * the 3.0 non-text bar on every surface here, and the
+												 * on state stays clearly distinct on `warning-text`.
+												 */
 												className={cn(
 													"h-8 w-8 transition-colors",
 													variable.secret
 														? "text-warning-text hover:text-warning-text hover:bg-warning/10"
-														: "text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
+														: "text-muted-foreground hover:text-foreground"
 												)}
-												title={
-													variable.secret
-														? "Unmark as secret"
-														: "Mark as secret (masks value in UI)"
-												}
-											>
-												<KeyRound className="w-4 h-4" />
-											</Button>
+											/>
 										)}
 									</td>
 									<td className="py-1">
 										{!variable.isNew && (
 											<Button
-												variant="ghost"
+												variant="rowActionDestructive"
 												size="icon"
 												onClick={() => removeVariable(index)}
-												className="h-8 w-8 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+												aria-label="Delete variable"
+												className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 											>
 												<Trash2 className="w-4 h-4" />
 											</Button>

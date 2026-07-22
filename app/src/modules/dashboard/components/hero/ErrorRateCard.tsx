@@ -34,7 +34,7 @@ const STATUS_SEGMENTS: readonly StatusSegment[] = [
 ];
 
 /**
- * Universal hero card #3 — transport-layer error rate + status-code stack.
+ * Universal hero card #3 - transport-layer error rate + status-code stack.
  * Bespoke body (gap-2 value row with a right-aligned count + stack + legend).
  */
 export function ErrorRateCard({
@@ -47,7 +47,10 @@ export function ErrorRateCard({
 	statusCodes: Record<string, number>;
 }) {
 	const errorRate = totalRequests > 0 ? (failedRequests / totalRequests) * 100 : 0;
-	const valueColor = errorRate === 0 ? "hsl(var(--success))" : "hsl(var(--destructive))";
+	// -text variants: this is the card's large number. The STATUS entries above
+	// keep the fill tokens - those paint legend swatches, not text.
+	const valueColor =
+		errorRate === 0 ? "hsl(var(--success-text))" : "hsl(var(--destructive-text))";
 
 	// Bucket status codes by class
 	const buckets = useMemo(() => {
@@ -57,7 +60,7 @@ export function ErrorRateCard({
 			if (code >= 200 && code < 300) out.s2 += count;
 			else if (code >= 400 && code < 500) out.s4 += count;
 			else if (code >= 500 && code < 600) out.s5 += count;
-			else out.err += count; // 0 / unknown — transport errors
+			else out.err += count; // 0 / unknown - transport errors
 		}
 		const total = out.s2 + out.s4 + out.s5 + out.err;
 		return { ...out, total };
@@ -75,7 +78,7 @@ export function ErrorRateCard({
 					{errorRate.toFixed(1)}
 				</span>
 				<span className="text-xs text-muted-foreground">%</span>
-				<span className="ml-auto text-[11px] font-mono text-subtle-foreground">
+				<span className="ml-auto text-[11px] font-mono text-muted-foreground">
 					{formatNumber(failedRequests)} / {formatNumber(totalRequests)}
 				</span>
 			</div>
@@ -119,7 +122,7 @@ function StatusLegend({
 }) {
 	const dim = count === 0;
 	return (
-		<span className={cn(dim && "text-subtle-foreground")}>
+		<span className={cn(dim && "text-muted-foreground")}>
 			<span
 				className="inline-block w-2 h-2 rounded-sm mr-1.5 align-[1px]"
 				style={{ background: color }}

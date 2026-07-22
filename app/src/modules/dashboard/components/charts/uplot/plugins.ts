@@ -6,7 +6,7 @@
  */
 
 /**
- * uPlot plugins for Vayu — the diagnostic-interactivity layer.
+ * uPlot plugins for Vayu - the diagnostic-interactivity layer.
  *
  * The point of the Canvas migration is not prettier lines; it is letting a user
  * *understand the service under test*: read exact values at any instant,
@@ -88,7 +88,7 @@ export function markersPlugin(getMarkers: () => Marker[], theme: UplotTheme): uP
 export type ValueFormatter = (v: number | null | undefined) => string;
 
 /**
- * Cursor tooltip — a positioned DOM overlay showing every series' value at the
+ * Cursor tooltip - a positioned DOM overlay showing every series' value at the
  * hovered instant. The core "understand the service" affordance: at t=42.1s you
  * see RPS, p50/p95/p99, error-rate and concurrency together, so a p99 spike is
  * read against the concurrency and error columns at the same x. Pairs with
@@ -120,7 +120,8 @@ export function tooltipPlugin(opts: {
 					background: "hsl(var(--card))",
 					color: "hsl(var(--card-foreground))",
 					border: "1px solid hsl(var(--border))",
-					borderRadius: "6px",
+					// Tracks the roundedness setting, like the app's own tooltip.
+					borderRadius: "var(--radius-md)",
 					boxShadow: "0 4px 12px hsl(var(--foreground) / 0.14)",
 					transform: "translate(-50%, calc(-100% - 12px))",
 					whiteSpace: "nowrap",
@@ -145,7 +146,7 @@ export function tooltipPlugin(opts: {
 					const series = u.series[s];
 					if (series.show === false) continue;
 					const raw = u.data[s][idx];
-					const formatted = (fmt[s] ?? ((v) => (v == null ? "—" : String(v))))(
+					const formatted = (fmt[s] ?? ((v) => (v == null ? "-" : String(v))))(
 						raw as number | null
 					);
 					const stroke =

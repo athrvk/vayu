@@ -6,7 +6,7 @@
  */
 
 /**
- * Monaco setup — side-effecting module. Import once, before React renders.
+ * Monaco setup - side-effecting module. Import once, before React renders.
  *
  * Points @monaco-editor/react at the locally bundled monaco-editor instead of
  * the jsdelivr CDN and wires the language web workers through Vite's `?worker`

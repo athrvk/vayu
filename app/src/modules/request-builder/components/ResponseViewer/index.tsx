@@ -20,25 +20,18 @@
  */
 
 import { useState } from "react";
-import { Copy, Check, Download, Terminal, BarChart3 } from "lucide-react";
-import {
-	Tabs,
-	TabsList,
-	TabsTrigger,
-	Badge,
-	Button,
-	Kbd,
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui";
+import { Terminal } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger, Badge, Kbd } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context";
 import { modKey } from "@/lib/platform";
-import { useDashboardStore } from "@/stores";
-import { ResponseBody as SharedResponseBody } from "@/components/shared/response-viewer";
-import { TIMING } from "@/config/timing";
-import ResponseHeader from "./ResponseHeader";
-import ResponseHeadersTab from "./ResponseHeadersTab";
+import {
+	ResponseBody as SharedResponseBody,
+	ResponseStatusBar,
+	ResponseActions,
+	ResponseHeadersPanel,
+	RESPONSE_TAB_TRIGGER,
+} from "@/components/shared/response-viewer";
 import ResponseCookies from "./ResponseCookies";
 import ResponseTimingTab from "./ResponseTimingTab";
 import ConsoleOutput from "./ConsoleOutput";
@@ -50,17 +43,7 @@ type ResponseTab = "body" | "headers" | "cookies" | "timing" | "console" | "test
 
 export default function ResponseViewer() {
 	const { response, isExecuting } = useRequestBuilderContext();
-	const { currentRunId, mode: dashboardMode } = useDashboardStore();
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
-	const [copied, setCopied] = useState(false);
-
-	// Check if there's a load test dashboard available
-	const hasLoadTestDashboard = !!currentRunId;
-
-	const handleViewLoadTest = () => {
-		// View dashboard: would require navigating to dashboard tab
-		// This is handled by dashboardMode being "running" which shows the button
-	};
 
 	// Loading state
 	if (isExecuting) {
@@ -68,7 +51,7 @@ export default function ResponseViewer() {
 			<div className="flex-1 flex items-center justify-center bg-panel">
 				<div className="text-center space-y-4">
 					<div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-[vayu-spin_0.7s_linear_infinite] mx-auto" />
-					<p className="text-[12px] text-muted-foreground">Sending request…</p>
+					<p className="text-xs text-muted-foreground">Sending request…</p>
 				</div>
 			</div>
 		);
@@ -94,32 +77,13 @@ export default function ResponseViewer() {
 						<polygon points="22 2 15 22 11 13 2 9 22 2" />
 					</svg>
 
-					<p className="text-[15px] font-medium text-foreground mb-1.5">
-						No response yet
-					</p>
-					<div className="flex items-center justify-center gap-1.5 text-[12px] text-muted-foreground">
+					<p className="text-md font-medium text-foreground mb-1.5">No response yet</p>
+					<div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
 						<span>Press</span>
 						<Kbd>{modKey}</Kbd>
 						<Kbd>↵</Kbd>
 						<span>or click Send</span>
 					</div>
-
-					{hasLoadTestDashboard && (
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={handleViewLoadTest}
-							className="mt-6"
-						>
-							<BarChart3 className="w-4 h-4 mr-2" />
-							View Load Test Dashboard
-							{dashboardMode === "running" && (
-								<Badge variant="default" className="ml-2 text-xs">
-									Live
-								</Badge>
-							)}
-						</Button>
-					)}
 				</div>
 			</div>
 		);
@@ -128,27 +92,16 @@ export default function ResponseViewer() {
 	// Client-side error state (status === 0 means no server response)
 	const isClientError = response.status === 0;
 
-	const handleCopy = async () => {
-		await navigator.clipboard.writeText(response.body);
-		setCopied(true);
-		setTimeout(() => setCopied(false), TIMING.STATUS_RESET_MS);
-	};
-
-	const handleDownload = () => {
-		const blob = new Blob([response.body], { type: "text/plain" });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = `response-${Date.now()}.${response.bodyType}`;
-		a.click();
-		URL.revokeObjectURL(url);
-	};
-
 	// Show dedicated error view for client-side errors
 	if (isClientError) {
 		return (
-			<div className="flex-1 flex flex-col bg-card overflow-hidden">
-				<ResponseHeader response={response} />
+			<div className="flex-1 flex flex-col surface-card overflow-hidden">
+				<ResponseStatusBar
+					status={response.status}
+					statusText={response.statusText}
+					time={response.time}
+					size={response.size}
+				/>
 				<ClientErrorView
 					errorCode={response.errorCode}
 					errorMessage={response.errorMessage}
@@ -158,9 +111,14 @@ export default function ResponseViewer() {
 	}
 
 	return (
-		<div className="flex-1 flex flex-col bg-card overflow-hidden">
+		<div className="flex-1 flex flex-col surface-card overflow-hidden">
 			{/* Response Header */}
-			<ResponseHeader response={response} />
+			<ResponseStatusBar
+				status={response.status}
+				statusText={response.statusText}
+				time={response.time}
+				size={response.size}
+			/>
 
 			{/* Response Tabs */}
 			<Tabs
@@ -168,17 +126,21 @@ export default function ResponseViewer() {
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				<div className="flex items-center justify-between border-b border-border px-4 gap-2">
-					<TabsList className="flex h-auto p-0 bg-transparent justify-start overflow-x-auto overflow-y-hidden flex-nowrap min-w-0 scrollbar-thin">
-						<TabsTrigger
-							value="body"
-							className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
-						>
+				{/* `border-rule`, and the `surface-card` root above is what gives it a
+				    value. Every divider in this pane says the same thing and the
+				    surface decides what it resolves to - `--border` in light, where it
+				    measures 1.304, and `--border-strong` in dark, where `--border`
+				    would be 1.003 (the same colour as the card, which is why the tab
+				    strip used to float free of the content). See index.css,
+				    "Surfaces, and the rule colour that reads on each". */}
+				<div className="flex items-center justify-between border-b border-rule px-4 gap-2">
+					<TabsList className="flex h-auto p-0 bg-transparent justify-start overflow-x-auto overflow-y-hidden flex-nowrap min-w-0">
+						<TabsTrigger value="body" className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}>
 							Body
 						</TabsTrigger>
 						<TabsTrigger
 							value="headers"
-							className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 						>
 							Headers
 							<Badge variant="secondary" className="ml-1.5 text-xs">
@@ -187,14 +149,14 @@ export default function ResponseViewer() {
 						</TabsTrigger>
 						<TabsTrigger
 							value="cookies"
-							className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 						>
 							Cookies
 						</TabsTrigger>
 						{response.timing && (
 							<TabsTrigger
 								value="timing"
-								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 							>
 								Timing
 							</TabsTrigger>
@@ -202,7 +164,7 @@ export default function ResponseViewer() {
 						{response.consoleLogs && response.consoleLogs.length > 0 && (
 							<TabsTrigger
 								value="console"
-								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 							>
 								<Terminal className="w-4 h-4 mr-1.5" />
 								Console
@@ -214,7 +176,7 @@ export default function ResponseViewer() {
 						{response.testResults && response.testResults.length > 0 && (
 							<TabsTrigger
 								value="tests"
-								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 							>
 								Tests
 								<Badge
@@ -233,74 +195,50 @@ export default function ResponseViewer() {
 						{response.rawRequest && (
 							<TabsTrigger
 								value="raw-request"
-								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 							>
 								Raw
 							</TabsTrigger>
 						)}
 					</TabsList>
 
-					{/* Actions */}
-					<div className="flex items-center gap-1 shrink-0">
-						{/* View Load Test Dashboard button */}
-						{hasLoadTestDashboard && (
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button
-										size="sm"
-										variant="outline"
-										onClick={handleViewLoadTest}
-										className="gap-1.5"
-									>
-										<BarChart3 className="w-4 h-4" />
-										<span className="hidden sm:inline">Load Test</span>
-										{dashboardMode === "running" && (
-											<span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-										)}
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent>View Load Test Dashboard</TooltipContent>
-							</Tooltip>
-						)}
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button size="icon" variant="ghost" onClick={handleCopy}>
-									{copied ? (
-										<Check className="w-4 h-4 text-green-500" />
-									) : (
-										<Copy className="w-4 h-4" />
-									)}
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>Copy response</TooltipContent>
-						</Tooltip>
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button size="icon" variant="ghost" onClick={handleDownload}>
-									<Download className="w-4 h-4" />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>Download response</TooltipContent>
-						</Tooltip>
-					</div>
+					{/* `response.bodyType` names the download; the history viewer has no
+					    such field and keeps `.txt`. Passed rather than inferred. */}
+					<ResponseActions content={response.body} fileExtension={response.bodyType} />
 				</div>
 
-				{/* Tab Content */}
-				<div className="flex-1 overflow-hidden">
-					{activeTab === "body" && (
-						<SharedResponseBody
-							body={response.body}
-							bodyRaw={response.bodyRaw}
-							headers={response.headers}
-							showModeToggle
-						/>
-					)}
-					{activeTab === "headers" && <ResponseHeadersTab response={response} />}
-					{activeTab === "cookies" && <ResponseCookies headers={response.headers} />}
-					{activeTab === "timing" && response.timing && (
+				{/*
+				 * TabsContent per tab, not a plain <div>. Radix derives an
+				 * aria-controls id per trigger from its value, so rendering the
+				 * content outside the Tabs tree left every trigger pointing at a
+				 * panel id that never existed. The conditional panels mirror the
+				 * conditions on their triggers above, so a tab and its panel are
+				 * always rendered together.
+				 */}
+				<TabsContent value="body" className="mt-0 flex-1 overflow-hidden">
+					<SharedResponseBody
+						body={response.body}
+						bodyRaw={response.bodyRaw}
+						headers={response.headers}
+						showModeToggle
+					/>
+				</TabsContent>
+				<TabsContent value="headers" className="mt-0 flex-1 overflow-hidden">
+					<ResponseHeadersPanel
+						requestHeaders={response.requestHeaders}
+						responseHeaders={response.headers}
+					/>
+				</TabsContent>
+				<TabsContent value="cookies" className="mt-0 flex-1 overflow-hidden">
+					<ResponseCookies headers={response.headers} />
+				</TabsContent>
+				{response.timing && (
+					<TabsContent value="timing" className="mt-0 flex-1 overflow-hidden">
 						<ResponseTimingTab timing={response.timing} />
-					)}
-					{activeTab === "console" && (
+					</TabsContent>
+				)}
+				{response.consoleLogs && response.consoleLogs.length > 0 && (
+					<TabsContent value="console" className="mt-0 flex-1 overflow-hidden">
 						<ConsoleOutput
 							logs={response.consoleLogs || []}
 							errors={{
@@ -308,15 +246,21 @@ export default function ResponseViewer() {
 								post: response.postScriptError,
 							}}
 						/>
-					)}
-					{activeTab === "tests" && <TestResults results={response.testResults || []} />}
-					{activeTab === "raw-request" && (
+					</TabsContent>
+				)}
+				{response.testResults && response.testResults.length > 0 && (
+					<TabsContent value="tests" className="mt-0 flex-1 overflow-hidden">
+						<TestResults results={response.testResults || []} />
+					</TabsContent>
+				)}
+				{response.rawRequest && (
+					<TabsContent value="raw-request" className="mt-0 flex-1 overflow-hidden">
 						<RawRequestResponse
 							rawRequest={response.rawRequest || ""}
 							response={response}
 						/>
-					)}
-				</div>
+					</TabsContent>
+				)}
 			</Tabs>
 		</div>
 	);

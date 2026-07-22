@@ -6,7 +6,7 @@
  */
 
 /**
- * computeEta — estimated seconds remaining for a closed-ended (iterations) run.
+ * computeEta - estimated seconds remaining for a closed-ended (iterations) run.
  *
  * ETA = (requestsExpected - requestsSent) / currentRps. Returns null when the
  * run is open-ended (requestsExpected === 0) or when currentRps is non-positive

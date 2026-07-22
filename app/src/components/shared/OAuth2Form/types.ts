@@ -11,7 +11,7 @@ import type { OAuth2Config } from "@/types";
 /**
  * Text input the form renders for every string field. Injected so the request
  * builder can supply a variable-aware VariableInput while the collection editor
- * supplies a plain Input — the shared form stays agnostic.
+ * supplies a plain Input - the shared form stays agnostic.
  */
 export type OAuth2TextInput = ComponentType<{
 	value: string;

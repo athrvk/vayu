@@ -66,12 +66,25 @@ export default function EditableVariable({
 			disabled={disabled}
 			showCurrentValue={true}
 			trigger={
+				/*
+				 * `font-[inherit]`, matching the plain-text segments beside it.
+				 *
+				 * This used to hardcode `ui-monospace, SFMono-Regular, 'SF Mono',
+				 * Menlo, Consolas, 'Liberation Mono', monospace` under a comment
+				 * saying "same monospace font as input for consistent character
+				 * widths" - and that stack does not contain the app's mono font.
+				 * `--font-mono` is `"JetBrains Mono", "Consolas", "Monaco",
+				 * monospace`, so a variable token rendered in a different typeface
+				 * from the text either side of it.
+				 *
+				 * That matters beyond looks. `VariableInput` paints this overlay on
+				 * top of a transparent <input>, and the caret the user steers by
+				 * belongs to the input. Any width difference between the two fonts
+				 * walks the caret away from the glyphs it appears to sit between -
+				 * which is exactly the drift the comment was trying to prevent.
+				 */
 				<span
-					style={{
-						// Use same monospace font as input for consistent character widths
-						fontFamily:
-							"ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
-					}}
+					className="font-[inherit]"
 					contentEditable={false}
 					suppressContentEditableWarning
 				>

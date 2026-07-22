@@ -39,7 +39,7 @@ function App() {
 	usePrefetchCollectionsAndRequests();
 	useRunsQuery();
 
-	// Keep engine config warm — proxied call timeouts derive from its
+	// Keep engine config warm - proxied call timeouts derive from its
 	// defaultTimeout setting (see services/api.ts proxiedRequestTimeoutMs)
 	useConfigQuery();
 

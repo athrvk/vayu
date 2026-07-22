@@ -13,7 +13,7 @@
  * (with explicit defaults before flag overrides) so no stale body/auth/header
  * can survive from the previous request. Identity and scripts (`id`, `name`,
  * `collectionId`, `preRequestScript`, `testScript`) are deliberately never
- * included — curl can't express them, so the caller keeps its own.
+ * included - curl can't express them, so the caller keeps its own.
  *
  * Files referenced with `@path` (e.g. `-d @body.json`, `-F field=@file`) can't
  * be read from a pasted command, so those entries are skipped rather than
@@ -54,7 +54,7 @@ export function detectCommand(text: string): CommandKind | null {
 
 /**
  * Parse a pasted curl/wget command into a request-shape partial.
- * Returns null when the text isn't a recognized command or parsing fails —
+ * Returns null when the text isn't a recognized command or parsing fails -
  * never throws to the caller.
  */
 export function parseCommand(text: string): ParsedRequest | null {
@@ -74,7 +74,7 @@ export function parseCommand(text: string): ParsedRequest | null {
 }
 
 // ============================================================================
-// Builder — accumulates state and resolves it into a ParsedRequest
+// Builder - accumulates state and resolves it into a ParsedRequest
 // ============================================================================
 
 interface Builder {
@@ -217,7 +217,7 @@ function resolve(b: Builder): ParsedRequest {
 			urlEncoded = toItems(parseFormPairs(b.dataParts));
 		} else {
 			// A raw, non-form payload (e.g. a JSON blob or plain text) with no
-			// Content-Type — keep it verbatim rather than mangling it into rows.
+			// Content-Type - keep it verbatim rather than mangling it into rows.
 			bodyMode = "text";
 			body = dataJoined;
 		}
@@ -391,7 +391,7 @@ function parseCurl(args: string[]): ParsedRequest {
 				const idx = v.indexOf("=");
 				if (idx !== -1) {
 					const fv = v.slice(idx + 1);
-					// Skip file uploads (field=@file) — can't read the file.
+					// Skip file uploads (field=@file) - can't read the file.
 					if (!isFileRef(fv)) b.formParts.push({ key: v.slice(0, idx), value: fv });
 				}
 				break;
@@ -403,7 +403,7 @@ function parseCurl(args: string[]): ParsedRequest {
 			case "-T":
 			case "--upload-file":
 				// File contents can't be read from a pasted command, but the flag
-				// implies a PUT — record the intent and discard the path.
+				// implies a PUT - record the intent and discard the path.
 				value();
 				b.uploadFile = true;
 				break;

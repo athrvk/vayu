@@ -72,7 +72,7 @@ interface SaveState {
 }
 
 export const useSaveStore = create<SaveState>((set, get) => {
-	// Internal helper — runs a save for the given context and updates store state.
+	// Internal helper - runs a save for the given context and updates store state.
 	// Caller must own the in-progress guard if needed.
 	const runSave = async (context: SaveContext) => {
 		set({ status: "saving", errorMessage: null });

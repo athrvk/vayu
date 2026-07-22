@@ -10,7 +10,7 @@
  *
  * Cosmetic app preferences: theme mode, accent color scheme, and interface
  * (font / scale / roundedness). Client-side only (localStorage-backed), so
- * there's no Save button — changes apply live. Rendered inside
+ * there's no Save button - changes apply live. Rendered inside
  * {@link ClientSettingsPanel} by the app-settings registry.
  */
 
@@ -35,6 +35,7 @@ import {
 } from "@/components/ui";
 import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
 import { useAppearance } from "@/hooks/useAppearance";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useClientSettingsStore } from "@/stores";
 import { COLOR_SCHEMES } from "@/constants/color-schemes";
 import {
@@ -48,7 +49,7 @@ import { cn } from "@/lib/utils";
 import { ToggleRow } from "./SettingControls";
 import { FontPicker } from "./FontPicker";
 
-// Vayu-flavored preview: an HTTP method, path, status, and latency — mixed case
+// Vayu-flavored preview: an HTTP method, path, status, and latency - mixed case
 // and digits so the face's letterforms still read clearly.
 const UI_FONT_SAMPLE = "GET /users · 200 OK · 45ms";
 
@@ -58,6 +59,7 @@ export default function AppearancePanel() {
 	const { font, setFont, fontCustom, setFontCustom, scale, setScale, radius, setRadius } =
 		useAppearance();
 	const reducedMotion = useClientSettingsStore((s) => s.reducedMotion);
+	const osReducesMotion = usePrefersReducedMotion();
 	const setReducedMotion = useClientSettingsStore((s) => s.setReducedMotion);
 
 	const themeOptions: {
@@ -114,7 +116,7 @@ export default function AppearancePanel() {
 										key={option.value}
 										onClick={() => setTheme(option.value)}
 										className={cn(
-											"relative flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all",
+											"relative flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-colors",
 											"hover:bg-accent hover:border-accent-foreground/20",
 											isSelected
 												? "border-primary bg-primary/5"
@@ -187,7 +189,7 @@ export default function AppearancePanel() {
 										key={option.value}
 										onClick={() => setColorScheme(option.value)}
 										className={cn(
-											"relative flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all",
+											"relative flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-colors",
 											"hover:bg-accent hover:border-accent-foreground/20",
 											isSelected
 												? "border-primary bg-primary/5"
@@ -235,7 +237,7 @@ export default function AppearancePanel() {
 				</CardContent>
 			</Card>
 
-			{/* Interface — font + scale + roundedness */}
+			{/* Interface - font + scale + roundedness */}
 			<Card>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
@@ -276,7 +278,7 @@ export default function AppearancePanel() {
 										key={option.value}
 										onClick={() => setScale(option.value)}
 										className={cn(
-											"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-all",
+											"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-colors",
 											"hover:bg-accent hover:border-accent-foreground/20",
 											isSelected
 												? "border-primary bg-primary/5"
@@ -309,7 +311,7 @@ export default function AppearancePanel() {
 										key={option.value}
 										onClick={() => setRadius(option.value)}
 										className={cn(
-											"relative flex flex-col items-start gap-1.5 p-3 rounded-lg border-2 text-left transition-all",
+											"relative flex flex-col items-start gap-1.5 p-3 rounded-lg border-2 text-left transition-colors",
 											"hover:bg-accent hover:border-accent-foreground/20",
 											isSelected
 												? "border-primary bg-primary/5"
@@ -341,6 +343,19 @@ export default function AppearancePanel() {
 							checked={reducedMotion}
 							onChange={setReducedMotion}
 						/>
+						{osReducesMotion && (
+							/*
+							 * Without this the row reads "off" while the app is in
+							 * fact not animating, and the only honest explanation
+							 * lives outside Vayu. The switch stays interactive
+							 * because it still means something: turning it on keeps
+							 * motion reduced if the system preference later changes.
+							 */
+							<p className="mt-2 text-xs text-muted-foreground">
+								Your system already asks for reduced motion, so Vayu is minimizing
+								animations regardless of this setting.
+							</p>
+						)}
 					</div>
 				</CardContent>
 			</Card>

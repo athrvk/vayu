@@ -15,7 +15,7 @@ import { generateId } from "./id";
 /**
  * Parse the query string of a URL into key/value items.
  *
- * Variable tokens (`{{var}}`) are preserved verbatim — decoding is skipped for
+ * Variable tokens (`{{var}}`) are preserved verbatim - decoding is skipped for
  * any segment that contains them so the variable syntax survives round-trips.
  */
 export function parseQueryParams(url: string): KeyValueItem[] {

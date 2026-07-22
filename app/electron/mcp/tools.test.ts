@@ -75,7 +75,7 @@ describe("tool registry", () => {
 		expect(get).toMatchObject({ category: "read", readOnly: true });
 		const upd = catalog.find((t) => t.name === "update_engine_config");
 		expect(upd).toMatchObject({ category: "write", readOnly: false });
-		// Metadata only — no handler leaks across the boundary.
+		// Metadata only - no handler leaks across the boundary.
 		expect(get).not.toHaveProperty("handler");
 	});
 });
@@ -352,7 +352,7 @@ describe("dispatchTool", () => {
 		expect(payload).toMatchObject({
 			method: "POST",
 			url: "https://api.example.com/users",
-			// Body is emitted as { mode, content } — the shape the engine reads.
+			// Body is emitted as { mode, content } - the shape the engine reads.
 			body: { mode: "json", content: '{"a":1}' },
 		});
 	});

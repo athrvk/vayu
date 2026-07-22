@@ -10,7 +10,7 @@
  *
  * The engine emits full dotted paths as `insertText` (e.g. "pm.test(...)",
  * "pm.response.code"). Monaco treats "." as a word separator, so the word under
- * the cursor right after "pm." is empty — replacing only that word leaves the
+ * the cursor right after "pm." is empty - replacing only that word leaves the
  * typed "pm." in place and the full-path insert appends after it, producing
  * "pm.pm.test". To insert correctly we must replace the entire dotted
  * identifier chain the user has already typed.
@@ -24,7 +24,7 @@ const DOTTED_CHAIN = /[A-Za-z_$][\w$]*(?:\.[\w$]*)*$/;
 /**
  * 1-based column where the completion replace-range should start: the beginning
  * of the dotted identifier chain immediately before the cursor. Returns the
- * cursor column itself (zero-width insert) when there is no such chain — e.g.
+ * cursor column itself (zero-width insert) when there is no such chain - e.g.
  * after `pm.expect(x).`, where the chain is broken by `)`, so member-relative
  * items like `to.equal` insert after the dot instead of swallowing it.
  *

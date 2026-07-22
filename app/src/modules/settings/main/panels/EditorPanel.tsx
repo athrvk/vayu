@@ -8,7 +8,7 @@
 /**
  * EditorPanel
  *
- * Code-editor behavior — font size, word wrap, minimap, line numbers, tab
+ * Code-editor behavior - font size, word wrap, minimap, line numbers, tab
  * width. Applies to every Monaco instance (scripts, request/response bodies)
  * via the shared CodeEditor wrapper. Client-side only. The code font family
  * lives under Appearance alongside the UI font.
@@ -53,7 +53,7 @@ export default function EditorPanel() {
 						<CardTitle className="text-base">Editor</CardTitle>
 					</div>
 					<CardDescription>
-						Applies to every code editor in the app — scripts and request/response
+						Applies to every code editor in the app - scripts and request/response
 						bodies.
 					</CardDescription>
 				</CardHeader>
@@ -122,7 +122,7 @@ export default function EditorPanel() {
 				</CardContent>
 			</Card>
 
-			{/* Live preview — reflects the settings above (font, wrap, line numbers,
+			{/* Live preview - reflects the settings above (font, wrap, line numbers,
 			    minimap, tab width) and the code font. */}
 			<Card>
 				<CardHeader className="pb-3">

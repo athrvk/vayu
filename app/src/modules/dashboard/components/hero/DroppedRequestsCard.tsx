@@ -11,7 +11,7 @@ import { HeroCardShell, HeroValue } from "./HeroCardShell";
 /**
  * Replaces the Rate Fidelity hero card when a constant_rps run has dropped
  * requests. A drop means the generator could not submit because its in-flight
- * pool filled up — the server, not the generator, is the bottleneck.
+ * pool filled up - the server, not the generator, is the bottleneck.
  */
 export function DroppedRequestsCard({
 	dropped,
@@ -31,17 +31,17 @@ export function DroppedRequestsCard({
 					Requests the generator could not submit because its in-flight pool filled up.
 					Root cause is usually slow server responses tying up curl handles. Lowering{" "}
 					<code>targetRps</code> or raising <code>maxInFlight</code> defers drops in
-					exchange for higher queue wait — but the server is still the bottleneck.
+					exchange for higher queue wait - but the server is still the bottleneck.
 				</>
 			}
 		>
-			<HeroValue value={formatNumber(dropped)} color="hsl(var(--destructive))" />
+			<HeroValue value={formatNumber(dropped)} color="hsl(var(--destructive-text))" />
 			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
 				of <span className="text-foreground font-semibold">{formatNumber(scheduled)}</span>{" "}
 				scheduled · <span className="text-foreground font-semibold">{pct.toFixed(1)}</span>%
 			</p>
-			<p className="text-[11px] mt-2" style={{ color: "hsl(var(--warning))" }}>
-				Server saturating — try lowering target RPS
+			<p className="text-[11px] mt-2 text-warning-text">
+				Server saturating - try lowering target RPS
 			</p>
 		</HeroCardShell>
 	);

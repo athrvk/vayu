@@ -21,21 +21,16 @@
  */
 
 import { useState } from "react";
-import { Clock, FileText, Copy, Check, Download } from "lucide-react";
-import {
-	Tabs,
-	TabsList,
-	TabsTrigger,
-	Badge,
-	Button,
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui";
+import { FileText } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger, Badge, Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "../EmptyState";
 import ResponseBody from "./ResponseBody";
 import HeadersViewer, { CompactHeadersViewer } from "./HeadersViewer";
-import { formatSize } from "./utils";
+import { ResponseStatusBar } from "./ResponseStatusBar";
+import { ResponseActions } from "./ResponseActions";
+import { ResponseHeadersPanel } from "./ResponseHeadersPanel";
+import { RESPONSE_TAB_TRIGGER } from "./tab-trigger";
 import type { UnifiedResponseViewerProps } from "./types";
 
 type ResponseTab = "body" | "headers" | "request";
@@ -50,7 +45,6 @@ export default function UnifiedResponseViewer({
 	className,
 }: UnifiedResponseViewerProps) {
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
-	const [copied, setCopied] = useState(false);
 
 	// Merge trace data with response/request if available
 	const effectiveResponse = response || trace?.response;
@@ -59,50 +53,35 @@ export default function UnifiedResponseViewer({
 	// Empty state
 	if (!effectiveResponse?.body && !effectiveRequest) {
 		return (
-			<div className={cn("flex-1 flex items-center justify-center bg-card", className)}>
-				<div className="flex flex-col items-center text-center">
-					<FileText className="w-16 h-16 text-muted-foreground mb-5" strokeWidth={1.5} />
-					<p className="text-[15px] font-medium text-foreground mb-1.5">
-						No response captured
-					</p>
-					<p className="text-[12px] text-muted-foreground">
-						This run finished without recording request or response data.
-					</p>
-				</div>
+			<div className={cn("flex-1 flex surface-card", className)}>
+				<EmptyState
+					icon={FileText}
+					title="No response captured"
+					description="This run finished without recording request or response data."
+				/>
 			</div>
 		);
 	}
 
-	const handleCopy = async () => {
-		const content = effectiveResponse?.bodyRaw || effectiveResponse?.body;
-		if (content) {
-			await navigator.clipboard.writeText(content);
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
-		}
-	};
-
-	const handleDownload = () => {
-		const content = effectiveResponse?.bodyRaw || effectiveResponse?.body;
-		if (content) {
-			const blob = new Blob([content], { type: "text/plain" });
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement("a");
-			a.href = url;
-			a.download = `response-${Date.now()}.txt`;
-			a.click();
-			URL.revokeObjectURL(url);
-		}
-	};
+	/*
+	 * This viewer prefers the raw bytes: a stored run is being inspected, so what
+	 * the server actually sent matters more than a prettified rendering. The
+	 * request builder copies its formatted body instead - which is why
+	 * `ResponseActions` takes the content rather than deriving it.
+	 */
+	const copyableContent = effectiveResponse?.bodyRaw || effectiveResponse?.body;
 
 	// Compact mode: simpler layout for embedded views
 	if (compact) {
 		return (
 			<div
-				className={cn("flex flex-col bg-card border rounded-lg overflow-hidden", className)}
+				className={cn(
+					"flex flex-col surface-card border border-rule rounded-lg overflow-hidden",
+					className
+				)}
 			>
 				{/* Simple tab buttons */}
-				<div className="flex gap-2 p-3 border-b bg-muted/30">
+				<div className="flex gap-2 p-3 border-b border-rule bg-muted/30">
 					<Button
 						variant={activeTab === "body" ? "default" : "ghost"}
 						size="sm"
@@ -136,12 +115,9 @@ export default function UnifiedResponseViewer({
 						/>
 					)}
 					{activeTab === "body" && !effectiveResponse?.body && (
-						<div className="flex items-center justify-center h-full text-muted-foreground">
-							<div className="text-center py-8">
-								<FileText className="w-6 h-6 mx-auto mb-2 opacity-30" />
-								<p className="text-sm">No response body</p>
-							</div>
-						</div>
+						// `h-full` because this scroll container is not a flex column,
+						// so the primitive's `flex-1` has nothing to grow against.
+						<EmptyState icon={FileText} title="No response body" className="h-full" />
 					)}
 					{activeTab === "headers" && (
 						<div className="p-4 space-y-4 overflow-auto h-full">
@@ -163,10 +139,7 @@ export default function UnifiedResponseViewer({
 								Object.keys(effectiveRequest.headers).length === 0) &&
 								(!effectiveResponse?.headers ||
 									Object.keys(effectiveResponse.headers).length === 0) && (
-									<div className="py-8 text-center text-muted-foreground">
-										<FileText className="w-6 h-6 mx-auto mb-2 opacity-30" />
-										<p className="text-sm">No headers available</p>
-									</div>
+									<EmptyState icon={FileText} title="No headers available" />
 								)}
 						</div>
 					)}
@@ -177,12 +150,12 @@ export default function UnifiedResponseViewer({
 
 	// Full mode: complete response viewer with all features
 	return (
-		<div className={cn("flex-1 flex flex-col bg-card overflow-hidden", className)}>
+		<div className={cn("flex-1 flex flex-col surface-card overflow-hidden", className)}>
 			{/* Response Header with status/time/size */}
 			{effectiveResponse?.status !== undefined && (
 				<ResponseStatusBar
 					status={effectiveResponse.status}
-					statusText={effectiveResponse.statusText || ""}
+					statusText={effectiveResponse.statusText}
 					time={effectiveResponse.time}
 					size={effectiveResponse.size}
 				/>
@@ -194,19 +167,13 @@ export default function UnifiedResponseViewer({
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				<div className="flex items-center justify-between border-b border-border px-4">
+				<div className="flex items-center justify-between border-b border-rule px-4">
 					<TabsList className="h-auto p-0 bg-transparent">
-						<TabsTrigger
-							value="body"
-							className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
-						>
+						<TabsTrigger value="body" className={RESPONSE_TAB_TRIGGER}>
 							Body
 						</TabsTrigger>
 						{!hiddenTabs.includes("headers") && (
-							<TabsTrigger
-								value="headers"
-								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
-							>
+							<TabsTrigger value="headers" className={RESPONSE_TAB_TRIGGER}>
 								Headers
 								{effectiveResponse?.headers && (
 									<Badge variant="secondary" className="ml-1.5 text-xs">
@@ -216,45 +183,26 @@ export default function UnifiedResponseViewer({
 							</TabsTrigger>
 						)}
 						{!hiddenTabs.includes("request") && effectiveRequest && (
-							<TabsTrigger
-								value="request"
-								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
-							>
+							<TabsTrigger value="request" className={RESPONSE_TAB_TRIGGER}>
 								Request
 							</TabsTrigger>
 						)}
 					</TabsList>
 
-					{/* Actions */}
-					{showActions && effectiveResponse?.body && (
-						<div className="flex items-center gap-1">
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button size="icon" variant="ghost" onClick={handleCopy}>
-										{copied ? (
-											<Check className="w-4 h-4 text-status-success" />
-										) : (
-											<Copy className="w-4 h-4" />
-										)}
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent>Copy response</TooltipContent>
-							</Tooltip>
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button size="icon" variant="ghost" onClick={handleDownload}>
-										<Download className="w-4 h-4" />
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent>Download response</TooltipContent>
-							</Tooltip>
-						</div>
+					{/* No `fileExtension`: a stored run carries no detected body type,
+					    so downloads stay `.txt` as they always have here. */}
+					{showActions && copyableContent && (
+						<ResponseActions content={copyableContent} />
 					)}
 				</div>
 
-				{/* Tab Content */}
-				<div className="flex-1 overflow-hidden">
-					{activeTab === "body" && effectiveResponse?.body && (
+				{/*
+				 * TabsContent per value. Radix builds each trigger's aria-controls
+				 * from its value, so content rendered outside the Tabs tree left all
+				 * three triggers advertising panels that were never rendered.
+				 */}
+				<TabsContent value="body" className="mt-0 flex-1 overflow-hidden">
+					{effectiveResponse?.body && (
 						<ResponseBody
 							body={effectiveResponse.body}
 							bodyRaw={effectiveResponse.bodyRaw}
@@ -262,32 +210,25 @@ export default function UnifiedResponseViewer({
 							showModeToggle
 						/>
 					)}
-					{activeTab === "body" && !effectiveResponse?.body && (
-						<div className="flex items-center justify-center h-full text-muted-foreground">
-							<div className="text-center">
-								<FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
-								<p className="text-sm">No response body</p>
-							</div>
-						</div>
+					{!effectiveResponse?.body && (
+						// `h-full` because TabsContent is not a flex column, so the
+						// primitive's `flex-1` has nothing to grow against.
+						<EmptyState icon={FileText} title="No response body" className="h-full" />
 					)}
-					{activeTab === "headers" && (
-						<div className="p-4 overflow-auto h-full space-y-4">
-							{effectiveRequest?.headers &&
-								Object.keys(effectiveRequest.headers).length > 0 && (
-									<HeadersViewer
-										headers={effectiveRequest.headers}
-										variant="request"
-										defaultOpen={false}
-									/>
-								)}
-							<HeadersViewer
-								headers={effectiveResponse?.headers || {}}
-								variant="response"
-								defaultOpen={true}
-							/>
-						</div>
-					)}
-					{activeTab === "request" && (
+				</TabsContent>
+				{!hiddenTabs.includes("headers") && (
+					<TabsContent value="headers" className="mt-0 flex-1 overflow-hidden">
+						{/* This inlined the same panel the request builder had in
+						    `ResponseHeadersTab`, minus its empty state - so a response with
+						    no headers showed a blank pane with nothing saying why. */}
+						<ResponseHeadersPanel
+							requestHeaders={effectiveRequest?.headers}
+							responseHeaders={effectiveResponse?.headers}
+						/>
+					</TabsContent>
+				)}
+				{!hiddenTabs.includes("request") && effectiveRequest && (
+					<TabsContent value="request" className="mt-0 flex-1 overflow-hidden">
 						<div className="p-4 overflow-auto h-full space-y-4">
 							{effectiveRequest?.headers &&
 								Object.keys(effectiveRequest.headers).length > 0 && (
@@ -314,56 +255,9 @@ export default function UnifiedResponseViewer({
 								</div>
 							)}
 						</div>
-					)}
-				</div>
+					</TabsContent>
+				)}
 			</Tabs>
-		</div>
-	);
-}
-
-// Status bar component
-function ResponseStatusBar({
-	status,
-	statusText,
-	time,
-	size,
-}: {
-	status: number;
-	statusText: string;
-	time?: number;
-	size?: number;
-}) {
-	const statusColor =
-		status >= 200 && status < 300
-			? "bg-status-success"
-			: status >= 300 && status < 400
-				? "bg-warning"
-				: status >= 400 && status < 500
-					? "bg-status-stopped"
-					: "bg-status-error";
-
-	return (
-		<div className="flex items-center gap-4 px-4 py-3 border-b border-border bg-muted/30">
-			{/* Status */}
-			<Badge className={cn("font-mono", statusColor)}>
-				{status} {statusText}
-			</Badge>
-
-			{/* Time */}
-			{time !== undefined && (
-				<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-					<Clock className="w-4 h-4" />
-					<span>{time.toFixed(4)} ms</span>
-				</div>
-			)}
-
-			{/* Size */}
-			{size !== undefined && (
-				<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-					<FileText className="w-4 h-4" />
-					<span>{formatSize(size)}</span>
-				</div>
-			)}
 		</div>
 	);
 }

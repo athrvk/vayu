@@ -8,9 +8,9 @@
 /**
  * GeneralPanel
  *
- * System-level app settings: auto-save behavior, data management (clear stored
- * run history), on-disk storage locations, and a reset-to-defaults for every
- * renderer preference. Client-side; the data actions talk to the engine's run
+ * System-level app settings: the installed version and a manual update check,
+ * auto-save behavior, data management (clear stored run history), on-disk
+ * storage locations, and a reset-to-defaults for every renderer preference. Client-side; the data actions talk to the engine's run
  * store via the existing API.
  */
 
@@ -24,6 +24,7 @@ import {
 	CardTitle,
 	Button,
 	Kbd,
+	DeleteConfirmDialog,
 } from "@/components/ui";
 import { modKey } from "@/lib/platform";
 import { useClientSettingsStore } from "@/stores";
@@ -32,6 +33,7 @@ import { useRunsQuery, useInvalidateRuns } from "@/queries/runs";
 import { apiService } from "@/services";
 import { AUTO_SAVE_DELAY_OPTIONS } from "@/constants/client-settings";
 import { OptionButtons, ToggleRow } from "./SettingControls";
+import { UpdatesCard } from "./UpdatesCard";
 
 interface AppPaths {
 	appDir: string;
@@ -50,6 +52,8 @@ export default function GeneralPanel() {
 	const invalidateRuns = useInvalidateRuns();
 	const showToast = useToastStore((s) => s.showToast);
 	const [clearing, setClearing] = useState(false);
+	const [confirmClear, setConfirmClear] = useState(false);
+	const [confirmReset, setConfirmReset] = useState(false);
 
 	useEffect(() => {
 		window.electronAPI
@@ -58,15 +62,18 @@ export default function GeneralPanel() {
 			.catch(() => {});
 	}, []);
 
+	/*
+	 * Confirmed through the app's own DeleteConfirmDialog rather than
+	 * `window.confirm`. The native dialog ignores the theme, the accent and the
+	 * roundedness setting entirely, and - being modal to the whole renderer -
+	 * it also blocks the JS thread, so the live dashboard stops updating behind
+	 * it. Every other destructive action in the app (deleting a run, a
+	 * collection, a request) already routes through this dialog, which also
+	 * focuses Cancel first so a reflexive Enter does not wipe the history.
+	 */
 	const clearHistory = async () => {
+		setConfirmClear(false);
 		if (runs.length === 0) return;
-		if (
-			!window.confirm(
-				`Delete all ${runs.length} stored run${runs.length === 1 ? "" : "s"}? This cannot be undone.`
-			)
-		) {
-			return;
-		}
 		setClearing(true);
 		try {
 			const results = await Promise.allSettled(runs.map((r) => apiService.deleteRun(r.id)));
@@ -75,7 +82,7 @@ export default function GeneralPanel() {
 			showToast(
 				failed === 0
 					? "Run history cleared"
-					: `Cleared history — ${failed} run${failed === 1 ? "" : "s"} could not be deleted`,
+					: `Cleared history - ${failed} run${failed === 1 ? "" : "s"} could not be deleted`,
 				failed === 0 ? "success" : "error"
 			);
 		} finally {
@@ -83,18 +90,27 @@ export default function GeneralPanel() {
 		}
 	};
 
+	/*
+	 * Same in-app dialog as Clear run history, for the same reason: the native
+	 * `window.confirm` ignores the theme, the accent and the roundedness that
+	 * this panel exists to configure, and blocks the renderer thread while it is
+	 * open. It also focuses Cancel first, so a reflexive Enter does not reset.
+	 *
+	 * `confirmVariant="default"` rather than destructive: this is irreversible
+	 * but it removes nothing - a red button would overstate it next to the one
+	 * that really does delete run history.
+	 */
 	const resetSettings = () => {
-		if (
-			window.confirm(
-				"Reset all appearance, editor, and dashboard settings to their defaults? The app will reload. Your collections, requests, and run history are not affected."
-			)
-		) {
-			resetAll();
-		}
+		setConfirmReset(false);
+		resetAll();
 	};
 
 	return (
 		<>
+			{/* Version + manual update check - the first thing people open
+			    General looking for. */}
+			<UpdatesCard />
+
 			{/* Auto-save */}
 			<Card>
 				<CardHeader className="pb-3">
@@ -154,7 +170,7 @@ export default function GeneralPanel() {
 						<Button
 							variant="outline"
 							size="sm"
-							onClick={clearHistory}
+							onClick={() => setConfirmClear(true)}
 							disabled={runs.length === 0 || clearing}
 							className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 						>
@@ -225,7 +241,7 @@ export default function GeneralPanel() {
 					<Button
 						variant="outline"
 						size="sm"
-						onClick={resetSettings}
+						onClick={() => setConfirmReset(true)}
 						className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 					>
 						<RotateCcw className="w-4 h-4 mr-1.5" />
@@ -233,6 +249,25 @@ export default function GeneralPanel() {
 					</Button>
 				</CardContent>
 			</Card>
+
+			<DeleteConfirmDialog
+				open={confirmReset}
+				onOpenChange={setConfirmReset}
+				title="Reset app settings?"
+				description="Appearance, editor and dashboard preferences go back to their defaults and the app reloads. Collections, requests and run history are not affected."
+				onConfirm={resetSettings}
+				confirmLabel="Reset"
+				confirmVariant="default"
+			/>
+
+			<DeleteConfirmDialog
+				open={confirmClear}
+				onOpenChange={setConfirmClear}
+				title="Clear run history?"
+				description={`All ${runs.length} stored run${runs.length === 1 ? "" : "s"} and their metrics will be permanently removed. This cannot be undone.`}
+				onConfirm={clearHistory}
+				isDeleting={clearing}
+			/>
 		</>
 	);
 }

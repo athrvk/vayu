@@ -6,7 +6,7 @@
  */
 
 /**
- * OAuth2Form — shared editor for an {@link OAuth2Config}. Rendered by the
+ * OAuth2Form - shared editor for an {@link OAuth2Config}. Rendered by the
  * request builder's Auth tab and (via an injected TextInput) the collection
  * auth editor. Non-interactive grants (client credentials, password) fetch
  * tokens directly; the Authorization Code flow is selectable but its token
@@ -139,7 +139,7 @@ export default function OAuth2Form({
 					<TextInput
 						value={value.callbackUrl ?? ""}
 						onChange={(v) => set("callbackUrl", v)}
-						placeholder="auto — 127.0.0.1 loopback"
+						placeholder="auto - 127.0.0.1 loopback"
 					/>,
 					"Leave blank to use an automatic loopback redirect."
 				)}
@@ -204,7 +204,7 @@ export default function OAuth2Form({
 							onCheckedChange={(c) => set("pkce", c)}
 						/>
 						<span className="text-xs text-muted-foreground">
-							Use PKCE (S256) — recommended
+							Use PKCE (S256) - recommended
 						</span>
 					</div>
 				)}

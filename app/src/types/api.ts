@@ -129,6 +129,8 @@ export interface CreateRequestRequest {
 	auth?: RequestAuth;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	followRedirects?: boolean;
+	maxRedirects?: number;
 	order?: number;
 }
 
@@ -145,6 +147,8 @@ export interface UpdateRequestRequest {
 	auth?: RequestAuth;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	followRedirects?: boolean;
+	maxRedirects?: number;
 	order?: number;
 }
 
@@ -189,6 +193,13 @@ export interface ExecuteRequestRequest {
 	auth?: Record<string, unknown>;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	/**
+	 * Redirect policy. Omitted means the engine's own defaults apply (follow,
+	 * cap at 10) - send them explicitly so a request that opts out of following
+	 * actually sees its 3xx in the response pane.
+	 */
+	followRedirects?: boolean;
+	maxRedirects?: number;
 	requestId?: string;
 	environmentId?: string;
 }
@@ -209,6 +220,11 @@ export interface StartLoadTestRequest {
 	headers?: Record<string, string>;
 	body?: unknown;
 	auth?: Record<string, unknown>;
+
+	// Redirect policy - same fields the single-request endpoint takes, so a load
+	// test exercises the request under the policy the user configured for it.
+	followRedirects?: boolean;
+	maxRedirects?: number;
 
 	// Load test strategy
 	mode: LoadTestMode;

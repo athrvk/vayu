@@ -14,7 +14,7 @@ import { useAppUpdate } from "@/hooks/useAppUpdate";
  * Slim banner that appears when a newer Vayu release is available.
  *
  *   - silent platforms (Windows, Linux AppImage): the update is already
- *     downloaded — offer a restart-to-install.
+ *     downloaded - offer a restart-to-install.
  *   - macOS (ad-hoc signed): offer to copy the one-line installer command.
  *   - other notify platforms (.deb): link to the release page.
  */

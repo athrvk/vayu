@@ -9,7 +9,7 @@
  * @file store.ts
  * @brief Disk persistence for the MCP safety config, so an allowlist / caps the
  *        user sets in Settings survive an app restart. Main-process only (uses
- *        electron-store) — the shared tool registry and the stdio CLI never
+ *        electron-store) - the shared tool registry and the stdio CLI never
  *        import this; the CLI takes its config from environment variables.
  */
 
@@ -25,7 +25,7 @@ interface McpStoreShape {
 let store: Store<McpStoreShape> | null = null;
 
 // Lazily created so the store is only touched once Electron's `app` is ready and
-// `userData` resolves — mirrors how window-state is persisted.
+// `userData` resolves - mirrors how window-state is persisted.
 function getStore(): Store<McpStoreShape> {
 	if (!store) store = new Store<McpStoreShape>({ name: "mcp-config" });
 	return store;

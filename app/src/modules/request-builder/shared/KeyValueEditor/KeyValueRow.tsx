@@ -76,7 +76,19 @@ function KeyValueRow({
 					checked={item.enabled}
 					onChange={(e) => onUpdate(item.id, "enabled", e.target.checked)}
 					disabled={isReadOnly || !canDisable}
-					className="w-4 h-4 rounded-md border-input cursor-pointer disabled:opacity-50"
+					// Named after the row it governs. Without this it announced as
+					// a bare "checkbox", giving no clue which row it enables - and
+					// there is one per row.
+					aria-label={item.key ? `Enable ${item.key}` : "Enable this row"}
+					// `accent-primary` paints the native control in the user's accent.
+					// Without it the browser default wins - a fixed blue that ignores
+					// both the theme and the accent scheme, in the densest table in
+					// the app. The variables table already does this with
+					// `accent-scope-*`; this one had been left on the browser blue.
+					// The neighbouring `rounded-md` / `border-input` are inert on a
+					// native checkbox (no `appearance-none`), so `accent-color` is the
+					// only property here that actually paints.
+					className="w-4 h-4 accent-primary cursor-pointer disabled:opacity-50"
 				/>
 			) : (
 				<div className="w-4" />
@@ -102,7 +114,18 @@ function KeyValueRow({
 			{/* Resolved Preview */}
 			{showResolved && (
 				<div className="flex items-center min-w-0">
-					<div className="truncate overflow-x-auto scrollbar-thin text-sm font-mono text-muted-foreground bg-muted/50 px-2 py-1.5 w-full h-9 flex items-center">
+					{/*
+					 * `rounded-md`, so the preview follows Settings → Appearance →
+					 * Roundedness like every other box. With no radius class at all it
+					 * was pinned square at every setting - the same escape hatch as a
+					 * bare `rounded`, in the other direction.
+					 *
+					 * `truncate` alone: it sets `overflow: hidden`, which the old
+					 * `overflow-x-auto` beside it contradicted outright. Nothing
+					 * scrolled; the ellipsis just fought a scrollbar that could not
+					 * appear.
+					 */}
+					<div className="truncate rounded-md text-sm font-mono text-muted-foreground bg-muted/50 px-2 py-1.5 w-full h-9 flex items-center">
 						{item.enabled && (resolvedKey || resolvedValue) ? (
 							<>
 								<span className={hasVariableInKey ? "text-primary" : ""}>
@@ -114,7 +137,7 @@ function KeyValueRow({
 								</span>
 							</>
 						) : (
-							<span className="italic text-muted-foreground/50">—</span>
+							<span className="italic text-muted-foreground">-</span>
 						)}
 					</div>
 				</div>
@@ -123,11 +146,17 @@ function KeyValueRow({
 			{/* Remove Button */}
 			<Button
 				size="icon"
-				variant="ghost"
+				variant="rowActionDestructive"
 				onClick={() => onRemove(item.id)}
 				disabled={isReadOnly || !canRemove}
+				aria-label="Remove row"
 				className={cn(
-					"h-8 w-8 text-muted-foreground hover:text-destructive transition-opacity",
+					// `focus-visible:opacity-100` is not decoration. The button was
+					// revealed on hover only, so a keyboard user tabbing through a
+					// headers table landed on a fully transparent control - including
+					// its focus ring - once per row, and Enter there silently deleted
+					// the row they could not see they were on.
+					"h-8 w-8 transition-opacity focus-visible:opacity-100",
 					!canRemove
 						? "opacity-0 cursor-not-allowed"
 						: "opacity-0 group-hover:opacity-100"

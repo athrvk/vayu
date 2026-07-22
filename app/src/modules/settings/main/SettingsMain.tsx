@@ -41,6 +41,7 @@ import {
 	CardTitle,
 	Skeleton,
 } from "@/components/ui";
+import { EmptyState } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ClientSettingsPanel from "./panels/ClientSettingsPanel";
 import { getAppPanel, isClientCategory } from "./app-panels";
@@ -90,12 +91,8 @@ interface EditedValue {
 
 export default function SettingsMain() {
 	const { selectedCategory } = useSettingsStore();
-	const {
-		pendingRestart,
-		restartRequiredKeys,
-		addRestartRequiredKey,
-		clearRestartRequired,
-	} = useEngineStore();
+	const { pendingRestart, restartRequiredKeys, addRestartRequiredKey, clearRestartRequired } =
+		useEngineStore();
 	const {
 		startSaving,
 		completeSave,
@@ -244,20 +241,16 @@ export default function SettingsMain() {
 
 	if (!selectedCategory) {
 		return (
-			<div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4 p-8">
-				<Settings className="w-16 h-16 opacity-30" />
-				<div className="text-center max-w-md">
-					<p className="text-lg font-medium">No Category Selected</p>
-					<p className="text-sm mt-2">
-						Select a category from the sidebar to view and edit settings
-					</p>
-				</div>
-			</div>
+			<EmptyState
+				icon={Settings}
+				title="No category selected"
+				description="Pick a category from the sidebar to edit its settings."
+			/>
 		);
 	}
 
 	// Client (app) categories are rendered by their registered panel, wrapped in
-	// the shared shell (no Save/Reset bar — these prefs auto-persist).
+	// the shared shell (no Save/Reset bar - these prefs auto-persist).
 	const appPanel = getAppPanel(selectedCategory);
 	if (appPanel) {
 		const Panel = appPanel.Component;
@@ -284,7 +277,7 @@ export default function SettingsMain() {
 
 	if (error) {
 		return (
-			<div className="flex-1 flex flex-col items-center justify-center text-destructive gap-4 p-8">
+			<div className="flex-1 flex flex-col items-center justify-center text-destructive-text gap-4 p-8">
 				<AlertCircle className="w-12 h-12" />
 				<div className="text-center">
 					<p className="text-lg font-medium">Failed to load settings</p>
@@ -519,6 +512,10 @@ export default function SettingsMain() {
 						const edited = editedValues[entry.key];
 						const isModified = edited !== undefined;
 						const hasError = edited?.error;
+						// Per entry, so `aria-describedby` never points at another
+						// setting's message - and only rendered when there is one,
+						// so the reference is never dangling.
+						const errorId = `setting-${entry.key}-error`;
 						const needsRestart = isRestartRequired(entry);
 						const isPendingRestart = restartRequiredKeys.includes(entry.key);
 
@@ -547,7 +544,21 @@ export default function SettingsMain() {
 													</span>
 												)}
 												{isPendingRestart && (
-													<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-amber-500 text-white">
+													/*
+													 * White on a solid `amber-500` measured 2.14 - the
+													 * worst text contrast in the app, and at 10px. It
+													 * failed in *both* themes, because a raw palette
+													 * fill and white are the same two colours whatever
+													 * the surface underneath.
+													 *
+													 * Now the wash pattern the sibling "Restart
+													 * Required" chip beside it already uses, on warning
+													 * tokens: 4.87 light / 7.45 dark. It keeps a
+													 * stronger border than that sibling so the two stay
+													 * distinguishable - "Pending" is the more urgent of
+													 * the pair and should not read as identical.
+													 */
+													<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-warning/50 bg-warning/15 text-[10px] font-medium text-warning-text">
 														Pending
 													</span>
 												)}
@@ -576,6 +587,12 @@ export default function SettingsMain() {
 												onCheckedChange={(checked) =>
 													handleBooleanToggle(entry, checked)
 												}
+												// The setting's name lives in the CardTitle above
+												// and is not associated with the control, so
+												// without this the switch announced as a bare
+												// "switch" - and every engine setting renders
+												// one of these.
+												aria-label={entry.label}
 											/>
 											<Label className="text-sm text-muted-foreground">
 												{currentValue === "true" ? "Enabled" : "Disabled"}
@@ -606,6 +623,29 @@ export default function SettingsMain() {
 																? "Enter bytes"
 																: undefined
 														}
+														// Same as the Switch above: the name is in
+														// the CardTitle, which nothing links to this
+														// input.
+														aria-label={entry.label}
+														/*
+														 * Out-of-range values were signalled by a
+														 * red border and a line of text sitting
+														 * loose beside the field - colour alone,
+														 * and a message the field did not point
+														 * at. `aria-invalid` states it, and
+														 * `aria-describedby` reads the reason out
+														 * with the field instead of leaving it to
+														 * be found.
+														 *
+														 * `|| undefined` so valid fields carry no
+														 * attribute at all, rather than a
+														 * misleading aria-invalid="false" on every
+														 * setting on the screen.
+														 */
+														aria-invalid={hasError ? true : undefined}
+														aria-describedby={
+															hasError ? errorId : undefined
+														}
 														min={entry.min}
 														max={entry.max}
 													/>
@@ -632,7 +672,10 @@ export default function SettingsMain() {
 												)}
 											</div>
 											{hasError && (
-												<p className="text-xs text-destructive">
+												<p
+													id={errorId}
+													className="text-xs text-destructive-text"
+												>
 													{edited.error}
 												</p>
 											)}

@@ -16,7 +16,7 @@ import CollectionDetail from "@/modules/collections/CollectionDetail";
 import LoadTestDashboard from "@/modules/dashboard";
 import { HistoryDetail } from "@/modules/history/main";
 import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
-import { SettingsLayout } from "@/modules/settings";
+import { SettingsMain } from "@/modules/settings";
 import VariablesMain from "@/modules/variables/main/VariablesMain";
 
 function renderTabContent(tab: Tab | null): React.ReactNode {
@@ -35,7 +35,7 @@ function renderTabContent(tab: Tab | null): React.ReactNode {
 		case "variables":
 			return <VariablesMain />;
 		case "settings":
-			return <SettingsLayout />;
+			return <SettingsMain />;
 		default:
 			return null;
 	}
@@ -62,6 +62,9 @@ export default function Shell() {
 		if (activeTab?.type === "variables") {
 			setDrawerOpen(true);
 			setDrawerView("variables");
+		} else if (activeTab?.type === "settings") {
+			setDrawerOpen(true);
+			setDrawerView("settings");
 		} else if (activeTab?.type === "collection" || activeTab?.type === "request") {
 			setDrawerOpen(true);
 			setDrawerView("collections");
@@ -73,7 +76,7 @@ export default function Shell() {
 			if (!(e.metaKey || e.ctrlKey)) return;
 			const key = e.key.toLowerCase();
 
-			// ⇧⌘E / ⇧⌘H / ⇧⌘U — drawer view switchers (match Dock tooltips)
+			// ⇧⌘E / ⇧⌘H / ⇧⌘U - drawer view switchers (match Dock tooltips)
 			if (e.shiftKey) {
 				const views: Record<string, DrawerView> = {
 					e: "collections",
@@ -136,19 +139,17 @@ export default function Shell() {
 	return (
 		<div className="flex flex-col h-full bg-background overflow-hidden">
 			<ImportModal />
+			{/* Every tab uses the same shell: one left Drawer (its view switches
+			    with the tab - collections/history/variables/settings), the main
+			    content, and the request-only ContextBar. No tab type takes over
+			    the row, so the Dock's drawer switchers always have a Drawer to act
+			    on. */}
 			<div className="flex flex-1 overflow-hidden relative">
-				{activeTab?.type === "settings" ? (
-					// Settings takes over the whole content row — no drawer or context bar
-					renderTabContent(activeTab)
-				) : (
-					<>
-						<Drawer />
-						<main className="flex-1 overflow-hidden flex flex-col min-w-0">
-							{renderTabContent(activeTab)}
-						</main>
-						<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
-					</>
-				)}
+				<Drawer />
+				<main className="flex-1 overflow-hidden flex flex-col min-w-0">
+					{renderTabContent(activeTab)}
+				</main>
+				<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
 			</div>
 			<Dock />
 		</div>

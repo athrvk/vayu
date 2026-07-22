@@ -14,6 +14,8 @@
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <algorithm>
+
 namespace vayu::http::routes {
 
 void register_request_routes (RouteContext& ctx) {
@@ -88,7 +90,8 @@ void register_request_routes (RouteContext& ctx) {
      * Otherwise, creates a new request (requires 'collectionId', 'name',
      * 'method', 'url'). Body params: id, collectionId, name, method, url,
      * headers (object), body (any), auth (object), preRequestScript (string),
-     * postRequestScript (string) Returns: The saved request object.
+     * postRequestScript (string), followRedirects (bool), maxRedirects (int)
+     * Returns: The saved request object.
      */
     ctx.server.Post (
     "/requests", [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -159,7 +162,7 @@ void register_request_routes (RouteContext& ctx) {
                 r.url = json["url"].get<std::string> ();
             }
 
-            // Validate and store params — must be an array of KeyValueEntry
+            // Validate and store params - must be an array of KeyValueEntry
             if (json.contains ("params")) {
                 const auto& p = json["params"];
                 if (!p.is_array () && !p.is_null ()) {
@@ -183,7 +186,7 @@ void register_request_routes (RouteContext& ctx) {
                 r.params = p.is_null () ? "[]" : p.dump ();
             }
 
-            // Validate and store headers — must be an array of KeyValueEntry
+            // Validate and store headers - must be an array of KeyValueEntry
             if (json.contains ("headers")) {
                 const auto& h = json["headers"];
                 if (!h.is_array () && !h.is_null ()) {
@@ -224,6 +227,16 @@ void register_request_routes (RouteContext& ctx) {
                 : json["postRequestScript"].get<std::string> ();
             if (json.contains ("order") && !json["order"].is_null ()) {
                 r.order = json["order"].get<int> ();
+            }
+            if (json.contains ("followRedirects") && json["followRedirects"].is_boolean ()) {
+                r.follow_redirects = json["followRedirects"].get<bool> ();
+            }
+            if (json.contains ("maxRedirects") && json["maxRedirects"].is_number_integer ()) {
+                // Clamp to the range the UI offers; libcurl reads -1 as
+                // "unlimited", which is not a policy we want a stray value to
+                // select.
+                int max_redirects = json["maxRedirects"].get<int> ();
+                r.max_redirects   = std::clamp (max_redirects, 0, 100);
             }
 
             if (is_update) {

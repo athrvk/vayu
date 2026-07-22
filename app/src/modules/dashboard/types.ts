@@ -81,7 +81,7 @@ export interface MetricsViewProps {
  * Single derived-metrics bundle the orchestrator computes once (memoized) and
  * passes to the mode-adaptive HeroRow and ModeStatsRow. Centralizing derivation
  * here keeps the hero/stat card variants pure presentational components that
- * read what they need — no card re-derives from raw metrics (Plan 4 gate #9).
+ * read what they need - no card re-derives from raw metrics (Plan 4 gate #9).
  */
 export interface DashboardDerived {
 	mode: LoadMode;
@@ -168,8 +168,7 @@ export interface DisplayMetrics {
 	current_concurrency?: number; // Number of concurrent HTTP connections
 	dropped_requests?: number;
 	avg_queue_wait_ms?: number;
-	// Run progress — feeds the iterations-mode ETA stat (live only).
+	// Run progress - feeds the iterations-mode ETA stat (live only).
 	requests_sent?: number;
 	requests_expected?: number;
 }
-

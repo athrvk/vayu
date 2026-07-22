@@ -1,0 +1,41 @@
+# Line endings: LF in the repository AND in the working tree, on every platform.
+#
+# Without this, Git on Windows defaults to core.autocrlf=true, which checks
+# files out with CRLF while .prettierrc.json pins `endOfLine: "lf"`. The result
+# was that `pnpm format:check` failed on 247 source files - including every file
+# nobody had touched - so prettier and eslint were useless as signals: you could
+# not tell a real style problem from a checkout artifact. 242 of those 247
+# failures were line endings alone; only 5 files had anything genuinely wrong.
+#
+# It also made `prettier --write` dangerous. Formatting one file you had edited
+# rewrote its line endings too, so a two-line change arrived as a whole-file
+# diff. Contributors worked around it by not formatting at all.
+#
+# Vayu is developed on Linux, macOS and Windows, so the working tree must be
+# identical on all three: same bytes, same hashes, same prettier result, and a
+# diff that shows only what someone actually changed. `eol=lf` overrides
+# core.autocrlf per repository, so nobody needs local git configuration and a
+# Windows contributor cannot produce a CRLF commit by accident.
+#
+# Nothing here needs CRLF. There are no .bat, .cmd or .ps1 files; the shell
+# scripts (install.sh, scripts/) are run by sh on all three platforms, and CRLF
+# would break their shebang lines outright.
+* text=auto eol=lf
+
+# Binaries: never convert, never diff as text.
+*.png binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.jar binary
+*.zip binary
+
+# Patches carry their own line endings by construction. Rewriting them changes
+# the content the patch expects and breaks `git apply`. `-text` alone is not
+# enough here - the `eol=lf` above still applies - so `eol` is unset too.
+#
+# The vendored trees need no exception: their blobs are already LF, so the rule
+# above is a no-op for them. Marking them `-text` would be actively wrong, since
+# Git would then store whatever the working tree holds - CRLF on a Windows
+# checkout - and 253 vendored files would churn.
+*.patch -text -eol

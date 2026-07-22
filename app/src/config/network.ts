@@ -9,7 +9,7 @@
  * UI-to-Engine Network Configuration
  *
  * The engine sidecar listens on a fixed local port (see engine docs and
- * app/electron/constants.ts — the electron main process duplicates the port
+ * app/electron/constants.ts - the electron main process duplicates the port
  * because it cannot import renderer modules).
  */
 

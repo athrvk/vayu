@@ -7,7 +7,7 @@
 
 /**
  * @file http/routes/oauth.cpp
- * @brief OAuth 2.0 token endpoints — acquisition, cache status, cache clear.
+ * @brief OAuth 2.0 token endpoints - acquisition, cache status, cache clear.
  *
  * POST   /oauth2/token          {config, force?, interactive?} → token | error
  * GET    /oauth2/token?key=K    → {found, expired?, token?}
@@ -133,7 +133,7 @@ nlohmann::json authorize_status_json (const AuthorizeStatus& st) {
 void register_oauth_routes (RouteContext& ctx) {
     // The authorization manager is owned by the Server (ctx.authorize_manager,
     // see server.hpp) so its dtor stops any live loopback listeners while the
-    // Database is still alive — no process-lifetime static. Handlers reach it
+    // Database is still alive - no process-lifetime static. Handlers reach it
     // through the captured ctx (a stable heap object), never a local reference.
 
     ctx.server.Post ("/oauth2/token",

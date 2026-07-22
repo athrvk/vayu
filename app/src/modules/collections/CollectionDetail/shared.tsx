@@ -10,6 +10,37 @@
  */
 
 import { Info } from "lucide-react";
+import { Callout } from "@/components/shared";
+
+/**
+ * A failed save on these tabs used to be invisible.
+ *
+ * Every tab calls `updateCollection.mutate(...)`, there is no global
+ * `MutationCache.onError` (see lib/query-client.ts), and no tab read
+ * `isError`/`error` - so a rejected save just flipped the button from "Saving…"
+ * back to "Save Changes" and left the user believing it had gone through. The
+ * mutation *recorded* the failure; nothing rendered it.
+ *
+ * `blocking`, not `warning`: nothing was written, so this is the error tier.
+ */
+export function SaveFailed({
+	mutation,
+	what,
+	className,
+}: {
+	mutation: { isError: boolean; error: unknown };
+	what: string;
+	/** Spacing is the caller's - the three tabs use different layouts. */
+	className?: string;
+}) {
+	if (!mutation.isError) return null;
+	const detail = mutation.error instanceof Error ? mutation.error.message : null;
+	return (
+		<Callout severity="blocking" title={`Couldn't save ${what}`} className={className}>
+			{detail ?? "The change was not saved. Try again."}
+		</Callout>
+	);
+}
 
 interface FieldProps {
 	label: string;
@@ -24,7 +55,7 @@ export function Field({ label, hint, children }: FieldProps) {
 				{label}
 			</div>
 			{children}
-			{hint && <div className="text-[11px] text-subtle-foreground mt-1">{hint}</div>}
+			{hint && <div className="text-[11px] text-muted-foreground mt-1">{hint}</div>}
 		</div>
 	);
 }
@@ -67,9 +98,9 @@ export function ComingSoon({ label }: { label: string }) {
 }
 
 export function formatRelative(iso: string | undefined): string {
-	if (!iso) return "—";
+	if (!iso) return "-";
 	const then = new Date(iso).getTime();
-	if (Number.isNaN(then)) return "—";
+	if (Number.isNaN(then)) return "-";
 	const diffMs = Date.now() - then;
 	const sec = Math.floor(diffMs / 1000);
 	if (sec < 60) return "just now";

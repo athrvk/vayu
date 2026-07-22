@@ -10,6 +10,7 @@ import { formatRelativeTime, loadTestTypeToLabel } from "@/utils";
 import type { Run } from "@/types";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { MethodBadge } from "@/components/shared";
 import {
 	CheckCircle2,
 	XCircle,
@@ -27,15 +28,6 @@ interface RunItemProps {
 	onDelete: (runId: string, event: React.MouseEvent) => void;
 	isDeleting: boolean;
 	isSelected?: boolean;
-}
-
-function methodBadgeStyle(method: string): React.CSSProperties {
-	const c = `var(--method-${method.toLowerCase()})`;
-	return {
-		color: `hsl(${c})`,
-		background: `hsl(${c} / 0.1)`,
-		border: `1px solid hsl(${c} / 0.3)`,
-	};
 }
 
 export default function RunItem({
@@ -66,13 +58,13 @@ export default function RunItem({
 	const getStatusIcon = () => {
 		switch (run.status) {
 			case "completed":
-				return <CheckCircle2 className="w-4 h-4 text-status-success" />;
+				return <CheckCircle2 className="w-4 h-4 text-status-success-text" />;
 			case "failed":
-				return <XCircle className="w-4 h-4 text-status-error" />;
+				return <XCircle className="w-4 h-4 text-status-error-text" />;
 			case "running":
-				return <Activity className="w-4 h-4 text-status-running animate-pulse" />;
+				return <Activity className="w-4 h-4 text-status-running-text animate-pulse" />;
 			case "stopped":
-				return <StopCircle className="w-4 h-4 text-status-stopped" />;
+				return <StopCircle className="w-4 h-4 text-status-stopped-text" />;
 			default:
 				return <Clock className="w-4 h-4 text-muted-foreground" />;
 		}
@@ -80,9 +72,17 @@ export default function RunItem({
 
 	return (
 		<div
-			onClick={() => onSelect(run.id)}
 			className={cn(
-				"group relative bg-card border cursor-pointer transition-all transition-colors overflow-hidden w-full",
+				// focus-row: the card is the perceived target, so it paints the ring
+				// for the activator inside it. It also has overflow-hidden, which
+				// would clip an outset ring - focus-row's is inset.
+				// `surface-card` + `border-rule`, not a hardcoded token. A run row
+				// is a card, and `--border` on `--card` measures 1.003 in dark - the
+				// same colour, so the row had no edge and separated only by the
+				// card-on-panel step, itself 1.09. Declaring the surface resolves the
+				// rule to 1.278 dark / 1.304 light; pinning `--border-strong` fixed
+				// dark but pushed light to 1.553.
+				"focus-row group relative surface-card border border-rule cursor-pointer transition-colors overflow-hidden w-full",
 				isSelected
 					? "bg-primary/10 hover:bg-primary/15 border-primary/50 ring-1 ring-inset ring-primary/20 shadow-sm"
 					: "hover:border-primary/50 hover:shadow-sm"
@@ -108,10 +108,10 @@ export default function RunItem({
 						<span
 							className={cn(
 								"text-xs font-medium capitalize shrink-0",
-								run.status === "completed" && "text-status-success",
-								run.status === "failed" && "text-status-error",
-								run.status === "running" && "text-status-running",
-								run.status === "stopped" && "text-status-stopped",
+								run.status === "completed" && "text-status-success-text",
+								run.status === "failed" && "text-status-error-text",
+								run.status === "running" && "text-status-running-text",
+								run.status === "stopped" && "text-status-stopped-text",
 								run.status === "pending" && "text-muted-foreground"
 							)}
 						>
@@ -124,18 +124,27 @@ export default function RunItem({
 							{formatTime(run.startTime)}
 						</span>
 					</div>
-					<div className="flex items-center gap-1 shrink-0">
+					{/* z-10: sits above the stretched activator below, so delete
+					    stays clickable while the rest of the card selects the run. */}
+					<div className="relative z-10 flex items-center gap-1 shrink-0">
+						{/* The purple is raw palette, and stays: measured 3.93 light /
+						    4.59 dark against the panel, so it clears the 3.0 icon bar in
+						    both themes, and there is no violet semantic token to move it
+						    to. Not every raw palette class is a defect. */}
 						{run.type === "load" && (
 							<Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />
 						)}
 						<Button
-							variant="ghost"
+							variant="rowActionDestructive"
 							size="icon"
 							onClick={(e) => onDelete(run.id, e)}
 							disabled={isDeleting}
+							aria-label={`Delete run`}
 							className={cn(
-								"h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-opacity",
-								isDeleting ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+								"h-6 w-6 transition-opacity",
+								isDeleting
+									? "opacity-100"
+									: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
 							)}
 						>
 							{isDeleting ? (
@@ -150,14 +159,7 @@ export default function RunItem({
 				{/* Request Info */}
 				{requestUrl && (
 					<div className="flex items-start gap-2 mb-1.5 min-w-0 flex-wrap">
-						{method && (
-							<span
-								className="text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded-md"
-								style={methodBadgeStyle(method)}
-							>
-								{method}
-							</span>
-						)}
+						{method && <MethodBadge method={method} className="h-5 items-center" />}
 						<p
 							className="text-xs text-foreground font-medium break-words flex-1 min-w-0 leading-5"
 							title={requestUrl}
@@ -198,6 +200,27 @@ export default function RunItem({
 					</p>
 				)}
 			</div>
+
+			{/*
+			 * The card used to be a <div onClick>: clickable by mouse, but not
+			 * focusable, not in the tab order and not operable by Enter or Space.
+			 * A keyboard user could reach "Delete run" inside a card but had no way
+			 * to *open* one - the destructive action was reachable and the primary
+			 * one was not.
+			 *
+			 * A stretched activator keeps the whole card clickable while being a
+			 * real button. It is last in the DOM and absolutely positioned so it
+			 * covers the content without disturbing layout; the actions group above
+			 * carries z-10 to stay on top of it.
+			 */}
+			<button
+				type="button"
+				onClick={() => onSelect(run.id)}
+				aria-label={`Open ${run.type === "load" ? "load test" : "request"} run, ${run.status}${
+					requestUrl ? `, ${requestUrl}` : ""
+				}`}
+				className="absolute inset-0 z-0 cursor-pointer"
+			/>
 		</div>
 	);
 }

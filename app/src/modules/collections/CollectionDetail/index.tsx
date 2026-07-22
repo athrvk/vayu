@@ -12,11 +12,12 @@
  * navigation-store.navigateToCollection(collectionId).
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
-import { Badge, Tabs, TabsList, TabsTrigger } from "@/components/ui";
+import { Badge, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui";
+import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
 import { useCollectionsQuery, useRequestsQuery } from "@/queries/collections";
-import { useTabsStore } from "@/stores";
+import { useTabsStore, useSessionStore } from "@/stores";
 import AuthTab from "./AuthTab";
 import InfoTab from "./InfoTab";
 import ScriptTab from "./ScriptTab";
@@ -39,7 +40,19 @@ export default function CollectionDetail() {
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const selectedCollectionId = activeTab?.type === "collection" ? activeTab.entityId : null;
 
-	const { data: collections = [] } = useCollectionsQuery();
+	// Remember the collection the user is working in (see RequestBuilder).
+	const setLastCollectionId = useSessionStore((s) => s.setLastCollectionId);
+	useEffect(() => {
+		if (selectedCollectionId) setLastCollectionId(selectedCollectionId);
+	}, [selectedCollectionId, setLastCollectionId]);
+
+	const {
+		data: collections = [],
+		isLoading: collectionsLoading,
+		isError: collectionsFailed,
+		error: collectionsError,
+		refetch: refetchCollections,
+	} = useCollectionsQuery();
 	const { data: requests = [] } = useRequestsQuery(selectedCollectionId);
 
 	const collection = useMemo(
@@ -49,12 +62,33 @@ export default function CollectionDetail() {
 
 	const [tab, setTab] = useState<CollectionTab>("info");
 
-	if (!collection) {
+	// Loading and missing are different answers. `collections` defaults to `[]`,
+	// so a collection tab restored from a previous session resolves to nothing
+	// while its query is still in flight - and telling the user their collection
+	// is gone is worse than telling them nothing yet.
+	if (collectionsLoading) {
+		return <DetailSkeleton label="Loading collection" />;
+	}
+
+	// Failed is the third answer, and here the most damaging one to get wrong:
+	// "Collection not found" asserts that the thing the user opened has been
+	// deleted, when all that happened is a fetch failed.
+	//
+	// Gated on there being no collection to show. TanStack keeps the last good
+	// data through a failed background refetch, and swapping a working pane for
+	// an error would take away more than it tells.
+	if (collectionsFailed && !collection) {
 		return (
-			<div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-				Collection not found.
-			</div>
+			<ErrorState
+				title="Couldn't load the collection"
+				detail={collectionsError instanceof Error ? collectionsError.message : undefined}
+				onRetry={() => void refetchCollections()}
+			/>
 		);
+	}
+
+	if (!collection) {
+		return <EmptyState title="Collection not found" />;
 	}
 
 	const variableCount = Object.keys(collection.variables ?? {}).length;
@@ -64,9 +98,9 @@ export default function CollectionDetail() {
 			{/* Header */}
 			<div className="flex items-center gap-2.5 h-[52px] px-5 bg-panel border-b border-border shrink-0">
 				<Folder className="w-[15px] h-[15px] text-primary shrink-0" />
-				<span className="text-[14px] font-semibold text-foreground">{collection.name}</span>
+				<span className="text-sm font-semibold text-foreground">{collection.name}</span>
 				<span className="text-xs text-muted-foreground">
-					— {requests.length} request{requests.length !== 1 ? "s" : ""}
+					- {requests.length} request{requests.length !== 1 ? "s" : ""}
 				</span>
 			</div>
 
@@ -76,7 +110,7 @@ export default function CollectionDetail() {
 				onValueChange={(v) => setTab(v as CollectionTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				<TabsList className="flex justify-start h-auto p-0 bg-panel border-b border-border rounded-none px-5 shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-thin">
+				<TabsList className="flex justify-start h-auto p-0 bg-panel border-b border-border rounded-none px-5 shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap">
 					{TABS.map((t) => {
 						const showBadge = t.id === "variables" && variableCount > 0;
 						return (
@@ -99,16 +133,31 @@ export default function CollectionDetail() {
 					})}
 				</TabsList>
 
-				{/* Content */}
-				<div className="flex-1 overflow-auto p-6 bg-background">
-					{tab === "info" && (
-						<InfoTab collection={collection} requestCount={requests.length} />
-					)}
-					{tab === "auth" && <AuthTab collection={collection} />}
-					{tab === "pre-script" && <ScriptTab collection={collection} kind="pre" />}
-					{tab === "post-script" && <ScriptTab collection={collection} kind="post" />}
-					{tab === "variables" && <VariablesTab collection={collection} />}
-				</div>
+				{/*
+				 * TabsContent per tab, keyed off the same TABS list as the
+				 * triggers. Radix derives each trigger's aria-controls from its
+				 * value, so content in a plain <div> outside the Tabs tree left
+				 * every trigger pointing at a panel id that was never rendered.
+				 * Only the active panel mounts, so the switch below still resolves
+				 * to exactly one tab.
+				 */}
+				{TABS.map((t) => (
+					<TabsContent
+						key={t.id}
+						value={t.id}
+						className="mt-0 flex-1 overflow-auto p-6 bg-background"
+					>
+						{t.id === "info" && (
+							<InfoTab collection={collection} requestCount={requests.length} />
+						)}
+						{t.id === "auth" && <AuthTab collection={collection} />}
+						{t.id === "pre-script" && <ScriptTab collection={collection} kind="pre" />}
+						{t.id === "post-script" && (
+							<ScriptTab collection={collection} kind="post" />
+						)}
+						{t.id === "variables" && <VariablesTab collection={collection} />}
+					</TabsContent>
+				))}
 			</Tabs>
 		</div>
 	);

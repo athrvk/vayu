@@ -6,13 +6,15 @@
  */
 
 import { useRef, useEffect } from "react";
-import { ChevronRight, ChevronDown, Folder, MoreVertical, Loader2 } from "lucide-react";
+import { ChevronRight, ChevronDown, Folder, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
+import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
+import { INDENT_STEP } from "@/constants/layout";
 
 export interface CollectionItemProps {
 	collection: Collection;
@@ -34,13 +36,15 @@ export interface CollectionItemProps {
 	onCollectionClick: (collection: Collection) => void;
 	onRequestClick: (collectionId: string, requestId: string) => void;
 	onCollectionToggle: (collection: Collection) => void;
-	onShowContextMenu: (e: React.MouseEvent, collectionId: string) => void;
+	/** Actions for this collection's ⋯ menu; built by CollectionTree. */
+	getCollectionActions: (collection: Collection) => RowAction[];
 	onRenameChange: (value: string) => void;
 	onRenameSubmit: (collectionId: string) => void;
 	onRenameCancel: () => void;
 	onStartRename: (collection: Collection) => void;
 	onDeleteRequest: (requestId: string) => Promise<void>;
 	onRequestDeleteClick?: (requestId: string, requestName: string) => void;
+	onDuplicateRequest?: (request: Request) => void;
 	onSubCollectionNameChange: (value: string) => void;
 	onCreateSubfolder: (parentId: string) => void;
 	onCancelSubfolder: () => void;
@@ -70,13 +74,14 @@ export default function CollectionItem({
 	onCollectionClick,
 	onRequestClick,
 	onCollectionToggle,
-	onShowContextMenu,
+	getCollectionActions,
 	onRenameChange,
 	onRenameSubmit,
 	onRenameCancel,
 	onStartRename,
 	onDeleteRequest,
 	onRequestDeleteClick,
+	onDuplicateRequest,
 	onSubCollectionNameChange,
 	onCreateSubfolder,
 	onCancelSubfolder,
@@ -139,14 +144,38 @@ export default function CollectionItem({
 		onCollectionToggle(collection);
 	};
 
-	const indentPx = 2 + depth;
+	/**
+	 * Indentation is padding *inside* the row, never margin around it. A margin
+	 * would push the row's background in too, so a nested row's hover and
+	 * selection fill would stop short of the panel edge while a top-level row's
+	 * reached it. Depth is shown by where the content sits, not where the row
+	 * starts.
+	 */
+	const indentPx = 8 + depth * INDENT_STEP;
 
 	return (
 		<div className={cn("select-none", isDeleting && "opacity-50")}>
 			{/* Collection Header */}
+			{/* The row is the treeitem: one tab stop for the whole tree, arrows
+			    move between rows (useRovingTreeFocus). tabIndex starts at -1; the
+			    hook promotes exactly one row to 0. */}
 			<div
+				role="treeitem"
+				tabIndex={-1}
+				aria-expanded={isExpanded}
+				aria-selected={isSelected}
 				className={cn(
-					"flex items-center gap-1 py-1.5 pr-2 rounded-md group transition-colors cursor-pointer",
+					// focus-row: this row is the perceived target, not the narrower
+					// label button inside it - it paints the keyboard focus ring.
+					// The transition deliberately omits outline-color (which
+					// `transition-colors` includes in Tailwind v4): a focus ring must
+					// appear instantly, otherwise it visibly fades between rows as
+					// Tab moves. Hover may ease; focus may not.
+					// h-8: the shared drawer row height. Row height used to be an
+					// accident of content - the 28px chevron set it here, padding set
+					// it elsewhere - so sibling drawer views ran 34/36/38/40px and the
+					// rhythm shifted every time you switched view.
+					"focus-row flex h-8 items-center gap-1 pr-2 group transition-[color,background-color,border-color] cursor-pointer",
 					isSelected
 						? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
 						: "hover:bg-accent"
@@ -155,8 +184,15 @@ export default function CollectionItem({
 			>
 				<button
 					onClick={handleToggleClick}
+					tabIndex={-1}
+					data-tree-toggle
 					className={cn(
-						"flex items-center justify-center w-7 h-7 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+						// focus-self: this toggles expansion rather than opening the
+						// collection, so it keeps its own ring instead of lighting
+						// up the whole row.
+						// w-6 h-6 (24px) so the chevron fits the 32px row. Still an
+						// adequate pointer target, and the row itself remains clickable.
+						"focus-self flex items-center justify-center w-6 h-6 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
 						isSelected
 							? "text-primary/90 hover:text-primary"
 							: "text-muted-foreground hover:text-foreground"
@@ -175,11 +211,16 @@ export default function CollectionItem({
 				<button
 					onClick={handleClick}
 					onDoubleClick={handleDoubleClick}
-					className="flex items-center gap-2 flex-1 text-left cursor-pointer"
+					tabIndex={-1}
+					data-tree-activate
+					className="flex min-w-0 items-center gap-2 flex-1 text-left cursor-pointer"
 					disabled={isDeleting || isRenaming}
 				>
 					<Folder
-						className={cn("w-4 h-4", depth === 0 ? "text-primary" : "text-primary/70")}
+						className={cn(
+							"w-4 h-4 shrink-0",
+							depth === 0 ? "text-primary" : "text-primary/70"
+						)}
 					/>
 					{isRenaming ? (
 						<Input
@@ -200,42 +241,44 @@ export default function CollectionItem({
 						/>
 					) : (
 						<>
-							<span
+							{/*
+							 * truncate + min-w-0 on the button: a flex item won't
+							 * shrink below its content by default, so without both a
+							 * long name widens the row and scrolls the whole panel
+							 * sideways instead of ellipsing.
+							 */}
+							<TruncatedText
 								className={cn(
 									"text-sm text-foreground cursor-pointer",
 									depth === 0 && "font-medium"
 								)}
 							>
 								{collection.name}
-							</span>
-							<span className="text-xs text-muted-foreground">
+							</TruncatedText>
+							{/* shrink-0: the count is short and load-bearing - the name
+							    yields first. */}
+							<span className="shrink-0 text-xs text-muted-foreground">
 								({requests.length + childCollections.length})
 							</span>
 						</>
 					)}
 				</button>
 
+				{/* Same ⋯ menu component as request and environment rows. Revealed on
+				    keyboard focus as well as hover, so a keyboard user never lands on
+				    an invisible control. */}
 				{!isRenaming && (
-					<div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-						<Button
-							variant="ghost"
-							size="icon"
-							className="h-6 w-6"
-							onClick={(e) => {
-								e.preventDefault();
-								e.stopPropagation();
-								onShowContextMenu(e, collection.id);
-							}}
-						>
-							<MoreVertical className="w-3 h-3" />
-						</Button>
-					</div>
+					<RowActionsMenu
+						label={`More actions for ${collection.name}`}
+						className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+						actions={getCollectionActions(collection)}
+					/>
 				)}
 			</div>
 
 			{/* Children (Subfolders + Requests) - indented by depth */}
 			{isExpanded && (
-				<div className="mt-1 space-y-0.5" style={{ marginLeft: indentPx + 16 }}>
+				<div className="mt-1 space-y-0.5">
 					{/* Subfolder Creation Form */}
 					{creatingSubfolder === collection.id && (
 						<div className="flex gap-2 py-1 px-2">
@@ -296,13 +339,14 @@ export default function CollectionItem({
 							onCollectionClick={onCollectionClick}
 							onCollectionToggle={onCollectionToggle}
 							onRequestClick={onRequestClick}
-							onShowContextMenu={onShowContextMenu}
+							getCollectionActions={getCollectionActions}
 							onRenameChange={onRenameChange}
 							onRenameSubmit={onRenameSubmit}
 							onRenameCancel={onRenameCancel}
 							onStartRename={onStartRename}
 							onDeleteRequest={onDeleteRequest}
 							onRequestDeleteClick={onRequestDeleteClick}
+							onDuplicateRequest={onDuplicateRequest}
 							onSubCollectionNameChange={onSubCollectionNameChange}
 							onCreateSubfolder={onCreateSubfolder}
 							onCancelSubfolder={onCancelSubfolder}
@@ -328,6 +372,7 @@ export default function CollectionItem({
 							key={request.id}
 							request={request}
 							collectionId={collection.id}
+							depth={depth + 1}
 							onSelect={onRequestClick}
 							onDelete={onDeleteRequest}
 							onBeforeDelete={onRequestDeleteClick}
@@ -339,6 +384,7 @@ export default function CollectionItem({
 							onRenameSubmit={onRequestRenameSubmit}
 							onRenameCancel={onRequestRenameCancel}
 							onStartRename={onStartRequestRename}
+							onDuplicate={onDuplicateRequest}
 						/>
 					))}
 				</div>

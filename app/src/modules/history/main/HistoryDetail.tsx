@@ -12,10 +12,11 @@
  * LoadTestDetail or DesignRunDetail based on run type.
  */
 
-import { AlertCircle, History, ArrowLeft } from "lucide-react";
+import { History, ArrowLeft } from "lucide-react";
 import { useRunReportQuery } from "@/queries";
 import { useTabsStore, useLayoutStore } from "@/stores";
 import { Button, Badge } from "@/components/ui";
+import { TruncatedText, EmptyState, ErrorState, DetailSkeleton } from "@/components/shared";
 import LoadTestDetail from "./LoadTestDetail";
 import DesignRunDetail from "./DesignRunDetail";
 
@@ -34,6 +35,7 @@ export default function HistoryDetail() {
 		data: report,
 		isLoading: loading,
 		error: queryError,
+		refetch,
 	} = useRunReportQuery(selectedRunId);
 
 	const error = queryError instanceof Error ? queryError.message : null;
@@ -41,33 +43,32 @@ export default function HistoryDetail() {
 	// No run selected
 	if (!selectedRunId) {
 		return (
-			<div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4">
-				<History className="w-12 h-12 opacity-50" />
-				<div className="text-center">
-					<p className="text-lg font-medium">No Run Selected</p>
-					<p className="text-sm mt-1">Select a run from the sidebar to view details</p>
-				</div>
-			</div>
+			<EmptyState
+				icon={History}
+				title="No run selected"
+				description="Pick a run from the sidebar to see its results."
+			/>
 		);
 	}
 
-	// Loading state
+	// Loading state. A skeleton rather than a spinner, matching every other
+	// detail pane: it holds the shape of the report header that is about to
+	// land instead of only saying "busy".
 	if (loading) {
-		return (
-			<div className="flex-1 flex items-center justify-center">
-				<div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-			</div>
-		);
+		return <DetailSkeleton label="Loading run report" rows={5} />;
 	}
 
-	// Error state
+	// Error state. Previously a hand-rolled pane whose only action was "Back to
+	// History" - it walked the user away from the run instead of offering the
+	// one thing that might work, a retry. A transient engine hiccup left no way
+	// back in short of re-selecting the run.
 	if (error || !report) {
 		return (
-			<div className="flex-1 flex flex-col items-center justify-center text-muted-foreground space-y-4">
-				<AlertCircle className="w-12 h-12 text-destructive/50" />
-				<p>{error || "Report not found"}</p>
-				<Button onClick={navigateToHistory}>Back to History</Button>
-			</div>
+			<ErrorState
+				title="Couldn't load this run"
+				detail={error ?? "The engine returned no report for this run."}
+				onRetry={() => void refetch()}
+			/>
 		);
 	}
 
@@ -85,15 +86,19 @@ export default function HistoryDetail() {
 						size="icon"
 						onClick={navigateToHistory}
 						className="shrink-0"
+						aria-label="Back to history"
 					>
 						<ArrowLeft className="w-5 h-5" />
 					</Button>
 					<div className="flex-1 min-w-0">
 						<div className="flex items-center gap-2">
-							<h1 className="text-lg font-semibold text-foreground truncate">
+							<TruncatedText
+								as="h1"
+								className="text-lg font-semibold text-foreground"
+							>
 								{report.metadata?.requestUrl ||
 									(isDesignRun ? "Design Request" : "Load Test Report")}
-							</h1>
+							</TruncatedText>
 							<Badge variant="outline" className="text-xs shrink-0">
 								{isDesignRun ? "Design" : "Load Test"}
 							</Badge>
@@ -113,9 +118,13 @@ export default function HistoryDetail() {
 													? "destructive"
 													: "outline"
 										}
+										/* "stopped" is a run status, so it takes the
+										   --status-stopped family the sidebar's RunItem
+										   already uses - not a raw orange that happens to
+										   look the same. */
 										className={`text-xs capitalize ${
 											report.metadata.status === "stopped"
-												? "border-orange-500 text-orange-600 dark:text-orange-400"
+												? "border-status-stopped text-status-stopped-text"
 												: ""
 										}`}
 									>

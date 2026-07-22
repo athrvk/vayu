@@ -22,6 +22,21 @@ const badgeVariants = cva(
 				destructive:
 					"border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
 				outline: "text-foreground",
+				/**
+				 * Not interactive; the caller owns the colour - status-code
+				 * chips, scope counts. No background, no text colour, and
+				 * crucially no `hover:`.
+				 *
+				 * Every variant above pairs `bg-x` with `hover:bg-x/80`, and
+				 * `cn()` is tailwind-merge, which treats `hover:bg-*` as a
+				 * different group from `bg-*`. So a caller passing
+				 * `className="bg-status-success-fill"` replaced the background
+				 * and left the hover behind: a green 200 chip faded to the
+				 * user's accent on hover, animated by the base
+				 * `transition-colors`. None of these are clickable, so the
+				 * hover was never wanted.
+				 */
+				chip: "border-transparent",
 			},
 		},
 		defaultVariants: {

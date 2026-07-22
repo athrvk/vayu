@@ -26,7 +26,7 @@ function parseRaw(raw: string): unknown {
 	try {
 		return JSON.parse(raw);
 	} catch {
-		// Throws on malformed YAML — let it propagate as a parse error.
+		// Throws on malformed YAML - let it propagate as a parse error.
 		return yaml.load(raw);
 	}
 }

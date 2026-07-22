@@ -21,7 +21,7 @@ Both conditions must hold: the top-level object must have `_type === "export"` a
 
 ## Structure & tree reconstruction
 
-An Insomnia v4 export has the shape `{ _type: "export", __export_format: 4, resources: Resource[] }`. Each resource carries `_id`, `_type`, an optional `parentId`, and type-specific fields. There is no nesting in the JSON — hierarchy is expressed entirely through `parentId` references.
+An Insomnia v4 export has the shape `{ _type: "export", __export_format: 4, resources: Resource[] }`. Each resource carries `_id`, `_type`, an optional `parentId`, and type-specific fields. There is no nesting in the JSON - hierarchy is expressed entirely through `parentId` references.
 
 Reconstruction steps in `parse()`:
 
@@ -65,7 +65,7 @@ Both build through `buildCollection`. Differences are gated by `isWorkspace`.
 | `description` | `description` | Falls back to `""`. |
 | `environment` (object, workspace only) | `variables` | `toEnvVars(node.environment ?? {})` for workspaces; **request_groups always get `variables: {}`** (their inline environment, if any, is not read). |
 | `authentication` | `auth` | Mapped via `insomniaAuth`. Collections may not be `inherit`: a resulting `inherit` is coerced to `{ mode: "none" }`. |
-| — | `preRequestScript` / `postRequestScript` | Always `""` for collections (workspace/group-level scripts are not imported). |
+| - | `preRequestScript` / `postRequestScript` | Always `""` for collections (workspace/group-level scripts are not imported). |
 | (reconstructed children) | `children` / `requests` | Built from `byParent`. |
 
 ### Request
@@ -84,7 +84,7 @@ Built by `buildRequest`.
 | `authentication` | `auth` | Via `insomniaAuth`. See [Auth mapping](#auth-mapping). |
 | `preRequestScript` | `preRequestScript` | Only if `opts.importScripts`; else `""`. |
 | `afterResponseScript` | `postRequestScript` | Only if `opts.importScripts`; else `""`. Note the source field is `afterResponseScript`. |
-| `_id` | — | Not propagated to the draft `id`; used only for tree reconstruction. |
+| `_id` | - | Not propagated to the draft `id`; used only for tree reconstruction. |
 
 `mapKeyValues` runs `normalizeVars` over every value and preserves duplicate keys and order.
 
@@ -108,7 +108,7 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 | `text/plain` | `{ mode: "text", content }` | `content = normalizeVars(body.text)`. |
 | `application/graphql` | `{ mode: "graphql", content }` | `content = normalizeVars(body.text)`. |
 | `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `body.params[]` → `mapKeyValues` (`name → key`, `disabled` honored). |
-| `multipart/form-data` | `{ mode: "form-data", fields }` | `body.params[]` **filtered to drop entries where `type === "file"`**, then `mapKeyValues`. File parts are silently discarded — note this is **not** recorded in `meta.skipped` (no `"file_body"` item is emitted by this parser). |
+| `multipart/form-data` | `{ mode: "form-data", fields }` | `body.params[]` **filtered to drop entries where `type === "file"`**, then `mapKeyValues`. File parts are silently discarded - note this is **not** recorded in `meta.skipped` (no `"file_body"` item is emitted by this parser). |
 | anything else, missing, or empty | `{ mode: "none" }` | Includes raw/binary/file-only bodies. |
 
 ## Auth mapping
@@ -121,17 +121,17 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 | any type with `disabled === true` | `{ mode: "none" }` | no |
 | `bearer` | `{ mode: "bearer", token }` | no |
 | `basic` | `{ mode: "basic", username, password }` | no |
-| `apikey` | `{ mode: "apikey", key, value, in }` — `in` is `"query"` when `addTo === "queryParams"`, else `"header"` | no |
-| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` via `mapInsomniaOAuth2` — **executable** | no |
+| `apikey` | `{ mode: "apikey", key, value, in }` - `in` is `"query"` when `addTo === "queryParams"`, else `"header"` | no |
+| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` via `mapInsomniaOAuth2` - **executable** | no |
 | `digest` | `{ mode: "digest", config }` | **yes** |
 | `ntlm` | `{ mode: "ntlm", config }` | **yes** |
-| `iam` | `{ mode: "aws", config }` — Insomnia names AWS IAM `"iam"`; Vayu stores it as the `aws` config bag | **yes** |
+| `iam` | `{ mode: "aws", config }` - Insomnia names AWS IAM `"iam"`; Vayu stores it as the `aws` config bag | **yes** |
 | any other / unrecognized type | `{ mode: "inherit" }` | no |
 
 Notes:
 
 - **`disabled` takes precedence over `type`.** If `authentication.disabled === true`, the result is `{ mode: "none" }` regardless of `type`. If `authentication` is missing or has no `type` (and is not disabled), the result is `{ mode: "inherit" }`.
-- `oauth2` is mapped to an executable `OAuth2Config` (`mapInsomniaOAuth2`) and does **not** count. `digest`/`ntlm`/`iam` are stored as opaque `config` bags (the auth object with `type` and `disabled` removed) and are **not executed** by Vayu — each occurrence increments `meta.nonExecutableAuth`.
+- `oauth2` is mapped to an executable `OAuth2Config` (`mapInsomniaOAuth2`) and does **not** count. `digest`/`ntlm`/`iam` are stored as opaque `config` bags (the auth object with `type` and `disabled` removed) and are **not executed** by Vayu - each occurrence increments `meta.nonExecutableAuth`.
 - The same `insomniaAuth` is called for **collection-level** auth (workspace/request_group), sharing the same `authCtx`. So a non-executable auth on a workspace or folder also counts toward `nonExecutableAuth`. For collections, an `inherit` result is coerced to `{ mode: "none" }` (collections can never inherit).
 
 ## Environments
@@ -144,7 +144,7 @@ Environments are imported only when `opts.importEnvironments` is true. They are 
 Flattening per base:
 
 - **No sub-envs:** emit one `EnvironmentDraft` from the base's `data`. Name = `base.name ?? workspace.name ?? "Environment"`.
-- **Has sub-envs:** emit one `EnvironmentDraft` **per sub-env**, with variables `{ ...baseVars, ...subVars }` (sub-env values override base on key collision). Name = `sub.name ?? "Environment"`. **The standalone base environment is not emitted** when sub-envs exist — its values survive only merged into each sub-env.
+- **Has sub-envs:** emit one `EnvironmentDraft` **per sub-env**, with variables `{ ...baseVars, ...subVars }` (sub-env values override base on key collision). Name = `sub.name ?? "Environment"`. **The standalone base environment is not emitted** when sub-envs exist - its values survive only merged into each sub-env.
 
 Each variable is produced by `toEnvVars`: keys come straight from the env `data` object; values are `normalizeVars(asString(v))` (objects/arrays are JSON-stringified, numbers/booleans coerced to strings), and every variable is `{ value, enabled: true }`. `secret` is never set. `meta.environmentCount` equals the number of emitted `EnvironmentDraft`s.
 
@@ -152,13 +152,13 @@ Each variable is produced by `toEnvVars`: keys come straight from the env `data`
 
 `ImportOptions`:
 
-- **`importScripts`** — when false, request `preRequestScript`/`postRequestScript` are forced to `""`. When true, they come from `preRequestScript` and `afterResponseScript`. (Collection-level scripts are always `""` regardless.)
-- **`importEnvironments`** — when false, the entire environment pass is skipped; `environments` is `[]` and `environmentCount` is `0`. Workspace-level `environment` data still populates the root collection's `variables` independently of this flag.
+- **`importScripts`** - when false, request `preRequestScript`/`postRequestScript` are forced to `""`. When true, they come from `preRequestScript` and `afterResponseScript`. (Collection-level scripts are always `""` regardless.)
+- **`importEnvironments`** - when false, the entire environment pass is skipped; `environments` is `[]` and `environmentCount` is `0`. Workspace-level `environment` data still populates the root collection's `variables` independently of this flag.
 
 Lossy / dropped, summary:
 
 - gRPC, WebSocket, API spec, unit test, and unit-test-suite resources are dropped and counted in `meta.skipped` (only when encountered as direct children of a workspace/request_group during the tree walk; see counting nuance above).
-- `multipart/form-data` file parts are dropped silently — **not** reflected in `meta.skipped`.
+- `multipart/form-data` file parts are dropped silently - **not** reflected in `meta.skipped`.
 - Non-executable auth types (`digest`, `ntlm`, `iam→aws`) are stored but not run; each occurrence (request or collection level) increments `meta.nonExecutableAuth`. `oauth2` is executable and excluded.
 - Nunjucks tags and filtered template expressions are preserved as literal text.
 - request_group inline environments, collection/group scripts, and resource `_id`s are not carried into the draft model.

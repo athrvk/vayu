@@ -20,10 +20,11 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 ├── <UpdateBanner />
 └── <Shell />                            // components/layout/Shell.tsx - tab-centric layout with drawer + context bar
     ├── <ImportModal />                  // modules/collections/ImportModal.tsx - global overlay, open-state in a store
-    ├── <Drawer />                       // components/layout/Drawer.tsx - resizable 220–480px; switches between views
+    ├── <Drawer />                       // components/layout/Drawer.tsx - resizable 220–480px; single left nav; switches views
     │   ├── <CollectionTree />           //   collections view (default)
     │   ├── <HistoryList />              //   history view
-    │   └── <VariablesCategoryTree />    //   variables view
+    │   ├── <VariablesCategoryTree />    //   variables view
+    │   └── <SettingsCategoryTree />     //   settings view
     ├── main content (switched on active tab type)
     │   ├── <WelcomeScreen />            // type="welcome"     modules/welcome/
     │   ├── <RequestBuilder />           // type="request"     modules/request-builder/
@@ -31,7 +32,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
     │   ├── <LoadTestDashboard />        // type="dashboard"   modules/dashboard/
     │   ├── <HistoryDetail />            // type="run"         modules/history/main/
     │   ├── <VariablesMain />            // type="variables"   modules/variables/main/
-    │   └── <SettingsMain />             // type="settings"    modules/settings/main/ (with SettingsCategoryTree sidebar)
+    │   └── <SettingsMain />             // type="settings"    modules/settings/main/ (content pane; tree is in the Drawer)
     ├── <ContextBar />                   // components/layout/ContextBar.tsx - 252px; request tabs only; push ≥1200px / overlay <1200px
     └── <Dock />                         // components/layout/Dock.tsx - drawer view switchers + engine/save status + toggles
 ```
@@ -51,7 +52,9 @@ Custom window title bar (Electron frameless window, h-[38px]). Platform-specific
 - **Windows:** Native window overlay; no HTML controls in the bar.
 - **Linux:** Custom HTML min/max/close buttons (right); `EnvPill` showing active environment.
 
-The entire bar is marked as a drag region (`WebkitAppRegion: "drag"`) except for interactive elements, which explicitly set `no-drag`.
+The entire bar is marked as a drag region (`WebkitAppRegion: "drag"`) except for interactive elements, which explicitly set `no-drag`. Keep `no-drag` on the interactive elements themselves, never on a layout wrapper: the `TabStrip` wrapper flexes to fill the bar, so marking *it* `no-drag` turns all the empty space right of the last tab into a dead zone the window can't be dragged by. `TabStrip` sets `no-drag` on its own tab row for this reason.
+
+The logo is imported as a module (`@shared/icon_png/...`), not referenced as `/icon.png`. With `base: "./"`, a root-absolute path resolves against the filesystem root under the packaged `file://` build and silently fails to load - it only appears to work in dev, where Vite serves it over HTTP.
 
 ### `TabStrip` (`components/layout/TabStrip.tsx`)
 
@@ -67,19 +70,25 @@ Horizontal row of open tabs plus a "+" button. Reads from `useTabsStore` (open t
 
 Main layout: tab-centric with resizable drawer, split/overlay context bar, and docked footer.
 
-- **Keyboard handlers:** mounts global key listeners for ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U (drawer views), ⌘I (toggle context bar), ⌘, (settings).
+- **One uniform layout for every tab** - `Drawer` (left) + main content + `ContextBar` (right). No tab type takes over the row. This is deliberate: the Dock's drawer switchers always have a Drawer to act on, so they can never be dead. (Settings used to full-take-over and suppress the Drawer, which left those buttons doing nothing while Settings was open.)
+- **Left navigation is always the Drawer.** Every main view that needs a category/entity list uses the shared Drawer for it - never its own left rail. `SettingsMain` and `VariablesMain` are pure content panes; their category trees live in the Drawer (`settings` / `variables` views). Follow this pattern for any new view - do not add a second sidebar inside the main area.
+- **Keyboard handlers:** ⌘S (save), ⌘W (close tab), ⌘B (toggle drawer), ⇧⌘E/H/U (drawer views), ⌘I (toggle context bar), ⌘, (open settings tab).
 - **Drawer:** toggles visibility via `toggleDrawer()` (state in `useLayoutStore`); always resizable 220–480px.
-- **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Renders the appropriate screen module; default is `WelcomeScreen`.
+- **Content routing:** switches main area based on `activeTab.type` (welcome | request | collection | dashboard | run | variables | settings). Default is `WelcomeScreen`.
+- **Drawer-view sync:** an effect points the Drawer at the view matching the active tab - `variables`→variables, `settings`→settings, `request`/`collection`→collections - and opens it.
 - **ContextBar mode:** picks "push" (≥1200px width) or "overlay" based on window width. Context bar is request-tab–only.
 - **`<ImportModal />`** mounted once as a global overlay; visibility in a dedicated store.
 
 ### `Drawer` (`components/layout/Drawer.tsx`)
 
-Resizable sidebar (220–480px default, per view). One of three views per `useLayoutStore.drawerView`:
+Resizable sidebar (220–480px default, per view). The single left navigation for the whole app - one of four views per `useLayoutStore.drawerView`:
 
 - **`collections`** - `CollectionTree` (hierarchical collections + requests).
 - **`history`** - `HistoryList` (past runs, filtered/sorted).
 - **`variables`** - `VariablesCategoryTree` (variable scopes: globals, collections, environments).
+- **`settings`** - `SettingsCategoryTree` (app + engine setting categories).
+
+Both `variables` and `settings` follow the same nav/content split: the tree lives here in the Drawer, the editor is the corresponding tab (`VariablesMain` / `SettingsMain`), and selecting a category sets the shared store selection **and** opens/focuses that tab.
 
 Resize handle on the right edge (double-click resets to defaults). Visibility toggled by `toggleDrawer()` or ⌘B.
 
@@ -96,9 +105,9 @@ Resize handle on the right edge (double-click resets to defaults). Visibility to
 
 Footer bar (h-8, shrink-0). Horizontal layout:
 
-- **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U). Active state highlights when drawer is open and matching view.
+- **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U), Settings (⌘,). Each activates its Drawer view; active state highlights when the drawer is open on that view. Settings sits here too because it is now a Drawer view like the rest.
 - **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved / error), app version.
-- **Right - toggles:** Context bar toggle (⌘I), Settings (⌘,).
+- **Right - toggles:** Context bar toggle (⌘I).
 
 ## Request Builder (`modules/request-builder/`)
 
@@ -119,8 +128,8 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 | `context/RequestBuilderProvider.tsx`, `context/RequestBuilderContext.tsx` | Local request-editing state + the execute/save/load-test callbacks |
 | `components/RequestBuilderLayout.tsx` | Resizable vertical layout composing UrlBar / RequestTabs / ResponseViewer |
 | `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` - method dropdown, URL input (variable highlighting), Send + Load Test buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
-| `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel`. `AuthPanel` supports None / Bearer / Basic / API Key / **OAuth 2.0** (via the shared [`OAuth2Form`](#shared-oauth-20-form)) |
-| `components/ResponseViewer/` | `index`, `ResponseHeader`, `ResponseHeadersTab`, `ResponseCookies`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` |
+| `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel`, `SettingsPanel`. `AuthPanel` supports None / Bearer / Basic / API Key / **OAuth 2.0** (via the shared [`OAuth2Form`](#shared-oauth-20-form)). `SettingsPanel` holds the per-request redirect policy (**Follow redirects** + **Maximum redirects**); the tab strip badges it via `isRedirectPolicyNonDefault` (in `utils/request-state`) only when the request departs from the engine defaults |
+| `components/ResponseViewer/` | `index`, `ResponseCookies`, `ResponseTimingTab`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` (status bar, actions and the Headers tab now come from `shared/response-viewer/`) |
 | `components/RequestDescription.tsx` | Editable request description |
 | `components/LoadTestConfigDialog.tsx` | Load-test configuration dialog (mode, duration, RPS, concurrency, …). Renders `OAuth2LoadTestGuard` when the request's effective auth is OAuth 2.0 |
 | `components/OAuth2LoadTestGuard.tsx`, `components/oauth2-load-test-coverage.ts` | Warns when a duration-based load test would outlive its access token (the engine acquires a token once per run, no mid-run refresh): offers **Refresh** when a fresh token would cover the run, or **blocks Start** (with a "Start anyway" override) when even a fresh token can't. The pure coverage decision lives in `oauth2-load-test-coverage.ts` |
@@ -224,22 +233,56 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 
 ## Settings (`modules/settings/`)
 
-- **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** - settings category navigation.
+Same nav/content split as Variables: the category tree renders in the **Drawer** (`settings` view), not inside the settings tab. Selecting a category sets `useSettingsStore.selectedCategory` **and** opens the settings tab, so `SettingsMain` shows that panel. There is no `SettingsLayout` two-pane wrapper anymore - the Drawer is the left pane.
+
+- **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** - settings category navigation; rendered by the Drawer.
 - **Main (`main/`)** - `SettingsMain.tsx` (screen `"settings"`) hosts the app-settings category panels under `main/panels/`: `AppearancePanel.tsx`, `DashboardPanel.tsx`, `GeneralPanel.tsx`, and `EditorPanel.tsx`, plus the shared `ClientSettingsPanel.tsx` wrapper, `FontPicker.tsx`, and `SettingControls.tsx` primitives. `app-panels.ts` is the panel registry/metadata. (The former monolithic `UISettingsPanel.tsx` was split into these panels in PR #55.)
 
 ## Welcome (`modules/welcome/`)
 
-`WelcomeScreen.tsx` - default screen when no request/collection is selected; entry points include opening the import modal.
+Vayu's new-tab surface - rendered for the `welcome` tab (opened by TabStrip's `+`), when no tab is open, and for a request tab with no entity.
+
+It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restored, so returning users land back on their own tabs. Its job is to start something new. Keep marketing content off it - a feature pitch and static perf claims were removed for exactly that reason. Anything already visible in the Collections sidebar or History drawer is a duplicate and does not belong here either.
+
+- `WelcomeScreen.tsx` - container: queries, `handleNewRequest`, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user.
+- `EmptyState.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
+- `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
+- `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`.
+
+Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel - the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
+
+Design rationale: `app/src/modules/welcome/README.md`
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 
 Response-rendering primitives reused outside the request builder (e.g. history detail):
 
-- `UnifiedResponseViewer.tsx` - top-level response view
+- `UnifiedResponseViewer.tsx` - top-level response view for stored runs
 - `ResponseBody.tsx` - body rendering (JSON/text/HTML/XML)
-- `HeadersViewer.tsx` - response headers
+- `HeadersViewer.tsx` - response headers (plus `CompactHeadersViewer`)
+- `StatusCodeBadge.tsx` - the status chip
+- `ResponseStatusBar.tsx` - status chip + elapsed time + payload size
+- `ResponseActions.tsx` - the copy/download pair
+- `ResponseHeadersPanel.tsx` - the Headers tab body
+- `tab-trigger.ts` - `RESPONSE_TAB_TRIGGER`, the underline-on-active class
 
-> Note: the request builder has its own richer `components/ResponseViewer/` (with console output, test results, cookies, raw request/response, client-error view). The `shared/response-viewer/` set is the lighter, reusable one.
+> **Two shells, shared parts.** The request builder has its own richer
+> `components/ResponseViewer/` (console output, test results, cookies, timing,
+> raw request/response, client-error view) fed from live context;
+> `UnifiedResponseViewer` shows three tabs from a stored run and adds a compact
+> mode. They are **not** merged, and should not be: seven tabs against three,
+> live context against props, and three different empty/loading/error states
+> would become a component driven by flags.
+>
+> What *was* duplicated is extracted above. Before this, the status bar existed
+> twice class-for-class, the copy/download pair twice (already drifted three
+> ways), the Headers tab twice, and the tab-trigger string ten times - which is
+> why the same invisible-divider fix had to be applied to both, and why
+> `StatusCodeBadge`'s `status === 0` branch was once lost from one copy and
+> rendered a literal `0`.
+>
+> Adding a genuinely shared piece: put it here and consume it from both. Adding
+> something only one shell needs: leave it in that shell.
 
 ## Shared OAuth 2.0 Form (`components/shared/OAuth2Form/`)
 

@@ -28,7 +28,7 @@ import type {
 
 /**
  * UI-layer extension of KeyValueEntry with a stable React key (`id`).
- * The `id` is ephemeral — it is NOT persisted to the backend.
+ * The `id` is ephemeral - it is NOT persisted to the backend.
  * Strip it with `toKeyValueEntries()` before sending to the API.
  */
 export interface KeyValueItem extends KeyValueEntry {
@@ -40,7 +40,14 @@ export interface KeyValueItem extends KeyValueEntry {
 // Tab Types
 // ============================================================================
 
-export type RequestTab = "params" | "headers" | "body" | "auth" | "pre-script" | "test-script";
+export type RequestTab =
+	| "params"
+	| "headers"
+	| "body"
+	| "auth"
+	| "pre-script"
+	| "test-script"
+	| "settings";
 
 export interface TabInfo {
 	id: RequestTab;
@@ -131,6 +138,10 @@ export interface RequestState {
 	// Scripts
 	preRequestScript: string;
 	testScript: string;
+
+	// Execution settings (Settings tab)
+	followRedirects: boolean;
+	maxRedirects: number;
 }
 
 // ============================================================================
@@ -140,8 +151,13 @@ export interface RequestState {
 /**
  * Per-request timing breakdown (milliseconds). Phase fields (dns…download) are
  * sequential segments of the request; `wire` is libcurl's transfer time and
- * `queueWait` is generator-side overhead (total − wire). Populated for live
- * executes; absent for responses restored from history (latency only).
+ * `queueWait` is generator-side overhead (total − wire).
+ *
+ * Present on a live execute, and again when a response is restored from the
+ * last stored design run - the engine writes the five phases into that run's
+ * trace (`store_result`, engine/src/http/routes/execution.cpp). `wire` and
+ * `queueWait` are the two the design-mode writer omits, so they are absent on a
+ * restored response; every consumer must treat both as optional.
  */
 export interface ResponseTiming {
 	total: number;

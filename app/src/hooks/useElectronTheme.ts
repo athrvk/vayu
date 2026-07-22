@@ -34,7 +34,7 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 	const [isLoading, setIsLoading] = useState(true);
 
 	// Apply theme to document. `scheme` is required (not defaulted from state) so
-	// this callback stays stable across accent changes — otherwise the init
+	// this callback stays stable across accent changes - otherwise the init
 	// effect below, keyed on it, would re-run (and re-hit Electron) every time
 	// the accent changes.
 	const applyTheme = useCallback(

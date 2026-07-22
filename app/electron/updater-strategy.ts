@@ -34,7 +34,7 @@ export function resolveUpdateStrategy({
 
 	switch (platform) {
 		// macOS ships ad-hoc signed (no Apple Developer ID), so Squirrel.Mac
-		// cannot verify a downloaded update — notify only.
+		// cannot verify a downloaded update - notify only.
 		case "darwin":
 			return "notify";
 		case "win32":

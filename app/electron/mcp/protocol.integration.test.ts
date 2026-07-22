@@ -164,7 +164,7 @@ describe("MCP protocol handshake (in-memory)", () => {
 			// Human accepts the elicitation prompt.
 			elicit: () => ({ action: "accept", content: { proceed: true } }),
 		});
-		// No `confirmed` flag — confirmation comes from elicitation.
+		// No `confirmed` flag - confirmation comes from elicitation.
 		const res = (await client.callTool({
 			name: "start_load_run",
 			arguments: { url: "https://api.example.com/x", mode: "constant_rps", targetRps: 50 },
@@ -386,12 +386,12 @@ describe("Streamable HTTP host", () => {
 
 /**
  * The production path: a real MCP SDK client driving the stateless Streamable
- * HTTP host over a real socket — the transport agents (Claude Code / Cursor)
+ * HTTP host over a real socket - the transport agents (Claude Code / Cursor)
  * actually use. Proves the full initialize -> tools/list -> tools/call round-trip
  * works over HTTP (not just the in-memory transport), and that the safety guards
  * apply on this transport too.
  */
-describe("Streamable HTTP host — real SDK client end-to-end", () => {
+describe("Streamable HTTP host - real SDK client end-to-end", () => {
 	const HOST = "127.0.0.1";
 	let nextPort = 9895;
 	let httpServer: McpHttpServer | null = null;

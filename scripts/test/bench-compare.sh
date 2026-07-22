@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bench-compare.sh — head-to-head RPS comparison: Vayu engine vs wrk vs vegeta
+# bench-compare.sh - head-to-head RPS comparison: Vayu engine vs wrk vs vegeta
 #
 # All three clients hit the SAME mock server (scripts/test/mock-server.go, :8080)
 # with matched concurrency + duration, so the comparison is apples-to-apples.
@@ -49,7 +49,7 @@ JSON
 }
 
 setcfg workers "$WORKERS"
-echo "## Vayu vs wrk vs vegeta  —  $URL  (${DUR}s/run, workers=$WORKERS)"
+echo "## Vayu vs wrk vs vegeta  -  $URL  (${DUR}s/run, workers=$WORKERS)"
 echo
 echo "| concurrency | wrk (req/s) | vegeta (req/s) | vayu (req/s) | vayu/wrk |"
 echo "|---|---|---|---|---|"

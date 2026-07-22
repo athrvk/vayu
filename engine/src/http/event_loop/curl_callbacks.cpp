@@ -63,7 +63,7 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
     // Status line: "HTTP/<version> <code> [<reason phrase>]"
     // Capture the wire reason phrase so we can preserve server-custom
     // text (e.g. "422 Unprocessable Entity", "404 Object Not Found").
-    // HTTP/2+ status lines have no phrase — leave status_text empty and
+    // HTTP/2+ status lines have no phrase - leave status_text empty and
     // let the caller fall back to a code→phrase lookup.
     if (line.starts_with ("HTTP/")) {
         auto first_space = line.find (' ');

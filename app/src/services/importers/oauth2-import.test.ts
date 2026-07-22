@@ -77,7 +77,7 @@ describe("mapPostmanOAuth2", () => {
 	});
 
 	it("rewrites {{postman}} vars to {{vayu}} form", () => {
-		// normalizeVars maps Postman :var / {{var}} — at minimum {{var}} passes through.
+		// normalizeVars maps Postman :var / {{var}} - at minimum {{var}} passes through.
 		expect(
 			cfg(
 				mapPostmanOAuth2({

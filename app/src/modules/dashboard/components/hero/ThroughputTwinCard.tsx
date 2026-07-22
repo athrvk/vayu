@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { InfoChip, Eyebrow, fmt } from "../shared";
 import { TOOLTIPS } from "../tooltips";
 
-/** constant_rps hero card #2 — twin send/throughput rates from the open model. */
+/** constant_rps hero card #2 - twin send/throughput rates from the open model. */
 export function ThroughputTwinCard({
 	sendRate,
 	throughput,
@@ -40,25 +40,25 @@ export function ThroughputTwinCard({
 			</Eyebrow>
 			<div className="grid grid-cols-2 gap-4 items-end mt-1">
 				<div>
-					<div className="text-[24px] leading-none font-bold font-mono tabular-nums text-foreground">
+					<div className="text-2xl leading-none font-bold font-mono tabular-nums text-foreground">
 						{fmt(sendRate, 1)}
 						<span className="text-xs text-muted-foreground font-sans font-normal ml-1">
 							req/s
 						</span>
 					</div>
-					<div className="text-[10px] uppercase tracking-[0.06em] text-subtle-foreground mt-1.5">
+					<div className="text-[10px] uppercase tracking-[0.06em] text-muted-foreground mt-1.5">
 						dispatched
 						<InfoChip tip={TOOLTIPS.sendThroughputDispatched} />
 					</div>
 				</div>
 				<div>
-					<div className="text-[24px] leading-none font-bold font-mono tabular-nums text-foreground">
+					<div className="text-2xl leading-none font-bold font-mono tabular-nums text-foreground">
 						{fmt(throughput, 1)}
 						<span className="text-xs text-muted-foreground font-sans font-normal ml-1">
 							req/s
 						</span>
 					</div>
-					<div className="text-[10px] uppercase tracking-[0.06em] text-subtle-foreground mt-1.5">
+					<div className="text-[10px] uppercase tracking-[0.06em] text-muted-foreground mt-1.5">
 						received
 						<InfoChip tip={TOOLTIPS.sendThroughputReceived} />
 					</div>
@@ -71,7 +71,7 @@ export function ThroughputTwinCard({
 							"inline-block px-1.5 py-px rounded-sm font-mono text-[10px] font-bold",
 							deltaOk
 								? "bg-success/10 text-success-text"
-								: "bg-destructive/10 text-destructive"
+								: "bg-destructive/10 text-destructive-text"
 						)}
 					>
 						Δ {delta.toFixed(1)}

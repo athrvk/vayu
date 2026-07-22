@@ -12,7 +12,7 @@
  * separate files that render them (MetricsView, HistoricalChartsSection,
  * PerformanceTab).
  *
- * Only same-x-axis (time) charts belong in a group — the concurrency scatter and
+ * Only same-x-axis (time) charts belong in a group - the concurrency scatter and
  * the percentile-distribution plot have different x axes and are deliberately
  * left unsynced.
  */

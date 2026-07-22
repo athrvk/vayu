@@ -179,7 +179,7 @@ const std::string& url, TokenRequest& req, const std::string& key) {
 // NOTE: `scope`/`audience`/`resource` are intentionally omitted (matches
 // Postman's keying). Configs differing only in scope share a cached token; set a
 // distinct credentialsId to separate them. Must stay byte-identical with the
-// app's computeOAuth2CacheKey — see cache-key.ts and the shared test vectors.
+// app's computeOAuth2CacheKey - see cache-key.ts and the shared test vectors.
 std::string cache_key (const nlohmann::json& config) {
     const std::string grant = field (config, "grantType");
     std::string creds_id    = field (config, "credentialsId");

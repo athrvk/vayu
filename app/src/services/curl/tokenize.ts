@@ -16,7 +16,7 @@
  *   - line continuations       → backslash + newline (bash) and ^ + newline (cmd)
  *   - leading prompt noise      → "$ " / "> " stripped per line
  *
- * `{{variables}}` are not special — they pass through as plain text.
+ * `{{variables}}` are not special - they pass through as plain text.
  *
  * Throws on an unterminated quote so the caller can fall back to a no-op.
  */

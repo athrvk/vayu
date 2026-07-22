@@ -1,4 +1,7 @@
 /**
+ * @vitest-environment jsdom
+ */
+/**
  * Characterization snapshots for the hero cards. Lock exact SVG/DOM output
  * BEFORE the B6 HeroCardShell extraction; the refactor must keep every snapshot
  * byte-identical (catches chrome drift, spacing changes, dropped bars/chips).

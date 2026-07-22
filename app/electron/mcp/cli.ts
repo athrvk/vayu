@@ -9,7 +9,7 @@
  * @file cli.ts
  * @brief Standalone stdio MCP server. Reuses the exact same tool registry and
  *        server factory as the Electron-hosted Streamable HTTP server, but over
- *        stdio — the transport stdio-only clients (Zed) and headless/CI setups
+ *        stdio - the transport stdio-only clients (Zed) and headless/CI setups
  *        need. Run: `node dist-electron/mcp/cli.js` (requires a running engine).
  *
  *        stdout is the JSON-RPC channel; all human logging goes to stderr.

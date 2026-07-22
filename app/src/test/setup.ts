@@ -1,5 +1,16 @@
-import "@testing-library/jest-dom/vitest";
 import { vi } from "vitest";
+
+/*
+ * This file runs for every test, including the `node`-environment ones that
+ * never touch a DOM. Everything below is DOM setup, so it is guarded rather
+ * than made conditional at the call site -- an unguarded
+ * `HTMLCanvasElement.prototype` reference throws before any test runs.
+ */
+const hasDom = typeof window !== "undefined";
+
+if (hasDom) {
+	await import("@testing-library/jest-dom/vitest");
+}
 
 /**
  * jsdom has no Canvas 2D implementation, but uPlot (our centralized chart engine)
@@ -24,9 +35,11 @@ const noopContext = new Proxy(
 	}
 ) as unknown as CanvasRenderingContext2D;
 
-HTMLCanvasElement.prototype.getContext = vi.fn(
-	() => noopContext
-) as unknown as HTMLCanvasElement["getContext"];
+if (hasDom) {
+	HTMLCanvasElement.prototype.getContext = vi.fn(
+		() => noopContext
+	) as unknown as HTMLCanvasElement["getContext"];
+}
 
 // uPlot builds paths with Path2D (jsdom has none); a no-op class is enough since
 // the stubbed context's stroke/fill are no-ops.

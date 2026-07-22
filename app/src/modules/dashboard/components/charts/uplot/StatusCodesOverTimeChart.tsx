@@ -43,37 +43,49 @@ export function StatusCodesOverTimeChart({
 
 	// Each class = the band between its cumulative line and the one below it.
 	const series: UPlotSeriesSpec[] = [
-		{ label: "2xx", role: "success", kind: "area", width: 0.75, format: fmtCount },
+		{ label: "2xx", role: "status-success", kind: "area", width: 0.75, format: fmtCount },
+		/*
+		 * The five series resolve through `constants/http-status.ts` now, so a
+		 * colour means the same class here as on a response badge or a history
+		 * tile. 3xx used `categorical` and a failed connection used `muted`, which
+		 * were series slots rather than status colours: `categorical` is also p99,
+		 * HDR latency, the latency breakdown and the throughput area, so the violet
+		 * a user saw for 3xx taught them nothing, and `muted` made "nothing came
+		 * back" read as de-emphasised rather than as its own outcome.
+		 *
+		 * Colour is the whole encoding in a stacked area chart, so two classes
+		 * sharing one is a misread. These five are at least 0.144 apart in OKLab.
+		 */
 		{
 			label: "3xx",
-			role: "primary",
+			role: "status-redirect",
 			width: 0.75,
 			bandTo: 1,
-			bandRole: "primary",
+			bandRole: "status-redirect",
 			format: fmtCount,
 		},
 		{
 			label: "4xx",
-			role: "warning",
+			role: "status-client-error",
 			width: 0.75,
 			bandTo: 2,
-			bandRole: "warning",
+			bandRole: "status-client-error",
 			format: fmtCount,
 		},
 		{
 			label: "5xx",
-			role: "destructive",
+			role: "status-server-error",
 			width: 0.75,
 			bandTo: 3,
-			bandRole: "destructive",
+			bandRole: "status-server-error",
 			format: fmtCount,
 		},
 		{
 			label: "err",
-			role: "muted",
+			role: "status-no-response",
 			width: 0.75,
 			bandTo: 4,
-			bandRole: "muted",
+			bandRole: "status-no-response",
 			format: fmtCount,
 		},
 	];

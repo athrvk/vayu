@@ -38,7 +38,10 @@ export default function TestResults({ results }: TestResultsProps) {
 					<div
 						key={i}
 						className={cn(
-							"p-3 border",
+							// `rounded-md`: these were the only square-cornered cards
+							// in the response pane, and they ignored the Roundedness
+							// setting entirely.
+							"p-3 rounded-md border",
 							test.passed
 								? "bg-status-success/10 border-status-success/20"
 								: "bg-status-error/10 border-status-error/20"
@@ -46,21 +49,23 @@ export default function TestResults({ results }: TestResultsProps) {
 					>
 						<div className="flex items-start gap-2">
 							{test.passed ? (
-								<CheckCircle className="w-5 h-5 text-status-success mt-0.5 flex-shrink-0" />
+								<CheckCircle className="w-5 h-5 text-status-success-text mt-0.5 flex-shrink-0" />
 							) : (
-								<XCircle className="w-5 h-5 text-status-error mt-0.5 flex-shrink-0" />
+								<XCircle className="w-5 h-5 text-status-error-text mt-0.5 flex-shrink-0" />
 							)}
 							<div className="flex-1">
 								<p
 									className={cn(
 										"text-sm font-medium",
-										test.passed ? "text-status-success" : "text-status-error"
+										test.passed
+											? "text-status-success-text"
+											: "text-status-error-text"
 									)}
 								>
 									{test.name}
 								</p>
 								{test.error && (
-									<p className="text-sm text-status-error mt-1 font-mono">
+									<p className="text-sm text-status-error-text mt-1 font-mono">
 										{test.error}
 									</p>
 								)}

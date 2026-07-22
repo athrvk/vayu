@@ -17,6 +17,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
+import { TooltipIconButton } from "./tooltip-icon-button";
 import { Input } from "./input";
 import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
@@ -78,7 +79,7 @@ export function VariablePopover({
 		}
 	}, [varInfoValue, isOpen]);
 
-	// Initialize ref when opening — varInfo intentionally excluded so external
+	// Initialize ref when opening - varInfo intentionally excluded so external
 	// reference churn (e.g. inline object creation in parent) doesn't reset
 	// editValue while the user is typing.
 	useEffect(() => {
@@ -152,11 +153,37 @@ export function VariablePopover({
 		}
 	};
 
-	// Wrap trigger in span with click handler
+	/**
+	 * The trigger is a `<span>`, because a `{{variable}}` token sits inline in the
+	 * middle of a URL or a header value and must not break the text flow.
+	 *
+	 * Radix's `asChild` clones its click handler and `aria-*` onto this span, but
+	 * it does not make a span focusable - it assumes the child is already an
+	 * interactive element. So every variable token in the app was mouse-only: a
+	 * keyboard user could not open the popover to see what a variable resolved
+	 * to, or edit it, anywhere in the URL bar, headers, params or auth fields.
+	 *
+	 * `role="button"` plus `tabIndex` plus Enter/Space is what a `<button>` would
+	 * have given for free, minus the block-level layout that would wreck the
+	 * inline flow. `disabled` tokens leave the tab order rather than sitting in it
+	 * doing nothing.
+	 */
 	const triggerElement = (
 		<span
+			role="button"
+			tabIndex={disabled ? -1 : 0}
 			className={triggerClassName}
 			onClick={handleTriggerClick}
+			onKeyDown={(e) => {
+				if (disabled) return;
+				if (e.key === "Enter" || e.key === " ") {
+					// Space in particular: the token is usually inside a text input,
+					// where it would otherwise type a space.
+					e.preventDefault();
+					e.stopPropagation();
+					setIsOpen(true);
+				}
+			}}
 			style={{ display: "inline" }}
 		>
 			{trigger}
@@ -216,23 +243,22 @@ export function VariablePopover({
 											</span>
 										)}
 										{varInfo.secret && varInfo.value && (
-											<Button
-												variant="ghost"
-												size="icon"
+											<TooltipIconButton
+												label={
+													isSecretRevealed ? "Hide value" : "Reveal value"
+												}
+												icon={
+													isSecretRevealed ? (
+														<EyeOff className="w-3 h-3" />
+													) : (
+														<Eye className="w-3 h-3" />
+													)
+												}
 												onClick={() =>
 													setIsSecretRevealed(!isSecretRevealed)
 												}
 												className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 text-muted-foreground hover:text-foreground"
-												title={
-													isSecretRevealed ? "Hide value" : "Reveal value"
-												}
-											>
-												{isSecretRevealed ? (
-													<EyeOff className="w-3 h-3" />
-												) : (
-													<Eye className="w-3 h-3" />
-												)}
-											</Button>
+											/>
 										)}
 									</div>
 								</div>
@@ -258,23 +284,22 @@ export function VariablePopover({
 											autoFocus
 										/>
 										{varInfo.secret && (
-											<Button
-												variant="ghost"
-												size="icon"
+											<TooltipIconButton
+												label={
+													isSecretRevealed ? "Hide value" : "Reveal value"
+												}
+												icon={
+													isSecretRevealed ? (
+														<EyeOff className="w-3.5 h-3.5" />
+													) : (
+														<Eye className="w-3.5 h-3.5" />
+													)
+												}
 												onClick={() =>
 													setIsSecretRevealed(!isSecretRevealed)
 												}
 												className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
-												title={
-													isSecretRevealed ? "Hide value" : "Reveal value"
-												}
-											>
-												{isSecretRevealed ? (
-													<EyeOff className="w-3.5 h-3.5" />
-												) : (
-													<Eye className="w-3.5 h-3.5" />
-												)}
-											</Button>
+											/>
 										)}
 									</div>
 								</div>

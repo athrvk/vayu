@@ -22,7 +22,7 @@ export type TabType =
 export interface Tab {
 	id: string; // unique tab instance ID (nanoid or crypto.randomUUID)
 	type: TabType;
-	entityId: string | null; // requestId, collectionId, runId — null for singletons
+	entityId: string | null; // requestId, collectionId, runId - null for singletons
 }
 
 const MAX_OPEN_TABS = 12;

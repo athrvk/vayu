@@ -186,7 +186,7 @@ export class ErrorBoundary extends Component<Props, State> {
 						<CardHeader>
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-3">
-									<AlertCircle className="w-6 h-6 text-destructive" />
+									<AlertCircle className="w-6 h-6 text-destructive-text" />
 									<CardTitle>Something went wrong</CardTitle>
 								</div>
 								<span className="text-xs text-muted-foreground">
@@ -220,7 +220,7 @@ export class ErrorBoundary extends Component<Props, State> {
 								>
 									{copied ? (
 										<>
-											<Check className="w-4 h-4 mr-2 text-status-success" />
+											<Check className="w-4 h-4 mr-2 text-status-success-text" />
 											Copied!
 										</>
 									) : (

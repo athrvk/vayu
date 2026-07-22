@@ -12,10 +12,11 @@
  */
 
 import { ArrowLeft, StopCircle, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Button, TooltipIconButton } from "@/components/ui";
 import { useTabsStore, useDashboardStore } from "@/stores";
-import { getMethodColor } from "@/utils";
 import type { DashboardHeaderProps } from "../types";
+import { MethodBadge } from "@/components/shared";
+import { loadTestModeLabel } from "@/constants/load-test-modes";
 
 function formatElapsed(ms: number): string {
 	const totalSeconds = Math.floor(ms / 1000);
@@ -52,73 +53,53 @@ export default function DashboardHeader({
 	// authoritative elapsed while running (last SSE tick's elapsed_seconds) and
 	// the final report's testDuration once completed. Both are monotonic, so the
 	// timer never double-counts or jumps backward. (A previous client-side 1s
-	// liveTick was ADDED on top of elapsedDuration — since both advanced on
+	// liveTick was ADDED on top of elapsedDuration - since both advanced on
 	// different clocks, the timer ran ~2x fast and flickered/regressed on desync.)
 	const displayMs = elapsedDuration;
 
 	// Config summary line
 	const configParts: string[] = [];
 	if (configuration?.concurrency != null) configParts.push(`${configuration.concurrency} VUs`);
-	if (configuration?.mode) {
-		const modeLabel =
-			configuration.mode === "rps"
-				? "RPS Mode"
-				: configuration.mode === "concurrency"
-					? "Concurrency Mode"
-					: configuration.mode;
-		configParts.push(modeLabel);
-	}
+	// Was matching on "rps" / "concurrency", which `LoadTestMode` cannot hold -
+	// so every real run fell through and printed a raw `constant_rps` here.
+	if (configuration?.mode) configParts.push(loadTestModeLabel(configuration.mode));
 	if (displayMs > 0) configParts.push(`${formatElapsed(displayMs)} elapsed`);
 	const configSummary = configParts.join(" · ");
 
 	return (
 		<div className="h-[52px] flex items-center gap-3 px-5 bg-panel border-b border-border shrink-0">
-			{/* Back button — returns to the previous screen (typically request builder) */}
+			{/* Back button - returns to the previous screen (typically request builder) */}
 			{canNavigateBack && (
-				<Button
-					size="icon"
-					variant="ghost"
+				<TooltipIconButton
+					label="Back"
+					icon={<ArrowLeft className="w-4 h-4" />}
 					onClick={navigateBack}
 					className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-					title="Back"
-				>
-					<ArrowLeft className="w-4 h-4" />
-				</Button>
+				/>
 			)}
 
 			{/* Status pill */}
 			{isStreaming ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-status-success/15 text-status-success border border-status-success/25 shrink-0">
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold tracking-wide bg-status-success/15 text-status-success-text border border-status-success/25 shrink-0">
 					<span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
 					LIVE
 				</span>
 			) : mode === "completed" ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
 					COMPLETED
 				</span>
 			) : mode === "stopped" ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
 					STOPPED
 				</span>
 			) : null}
 
 			{/* Method badge */}
-			{requestMethod && (
-				<span
-					className="text-[11px] font-bold font-mono px-1.5 py-0.5 rounded-md shrink-0"
-					style={{
-						color: `hsl(${getMethodColor(requestMethod)})`,
-						background: `hsl(${getMethodColor(requestMethod)} / 0.094)`,
-						border: `1px solid hsl(${getMethodColor(requestMethod)} / 0.188)`,
-					}}
-				>
-					{requestMethod.toUpperCase()}
-				</span>
-			)}
+			{requestMethod && <MethodBadge method={requestMethod} size="md" />}
 
 			{/* URL */}
 			{requestUrl ? (
-				<span className="text-[12px] font-mono text-foreground flex-1 truncate min-w-0">
+				<span className="text-xs font-mono text-foreground flex-1 truncate min-w-0">
 					{requestUrl}
 				</span>
 			) : (
@@ -127,7 +108,7 @@ export default function DashboardHeader({
 
 			{/* Config summary */}
 			{configSummary && (
-				<span className="text-[12px] text-muted-foreground shrink-0 hidden sm:block">
+				<span className="text-xs text-muted-foreground shrink-0 hidden sm:block">
 					{configSummary}
 				</span>
 			)}
@@ -139,7 +120,7 @@ export default function DashboardHeader({
 					variant="ghost"
 					onClick={onStop}
 					disabled={isStopping}
-					className="h-7 px-2.5 text-[12px] text-destructive hover:bg-destructive/10 hover:text-destructive border border-destructive/30 shrink-0"
+					className="h-7 px-2.5 text-xs text-destructive-text hover:bg-destructive/10 hover:text-destructive-text border border-destructive/30 shrink-0"
 				>
 					{isStopping ? (
 						<>

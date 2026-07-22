@@ -39,6 +39,13 @@ interface VariableInputProps {
 	disabled?: boolean;
 	suggestions?: string[]; // Optional list of plain text suggestions (e.g., standard headers)
 	onPaste?: (e: React.ClipboardEvent<HTMLInputElement>) => void; // Raw paste passthrough
+	/**
+	 * Names the field. Needed because the placeholder is dropped once the value
+	 * contains a variable (it would show through the highlight overlay), and a
+	 * placeholder was the only thing naming these inputs - so typing `{{x}}`
+	 * silently left the field anonymous to a screen reader.
+	 */
+	"aria-label"?: string;
 }
 
 // Parse text into segments (text and variables)
@@ -82,6 +89,7 @@ export default function VariableInput({
 	disabled = false,
 	suggestions = [],
 	onPaste,
+	"aria-label": ariaLabel,
 }: VariableInputProps) {
 	const { getAllVariables, updateVariable } = useRequestBuilderContext();
 
@@ -363,7 +371,7 @@ export default function VariableInput({
 		<div
 			ref={containerRef}
 			className={cn(
-				// Default chrome — overridable via className. Wrapper owns border/bg/size
+				// Default chrome - overridable via className. Wrapper owns border/bg/size
 				// so the inner input can be borderless and fill it.
 				"relative flex items-center h-9 w-full bg-background rounded-md border border-input px-3 text-sm font-mono shadow-sm transition-colors",
 				"focus-within:outline-none focus-within:ring-1 focus-within:ring-ring",
@@ -383,6 +391,9 @@ export default function VariableInput({
 				onFocus={handleFocus}
 				onBlur={handleBlur}
 				placeholder={!hasVariables ? placeholder : undefined}
+				// Falls back to the placeholder text so the field keeps a name
+				// even when the placeholder itself is withheld above.
+				aria-label={ariaLabel ?? placeholder}
 				disabled={disabled}
 				className={cn(
 					"absolute inset-0 w-full h-full bg-transparent border-0 outline-none px-[inherit] font-[inherit] text-[inherit]",

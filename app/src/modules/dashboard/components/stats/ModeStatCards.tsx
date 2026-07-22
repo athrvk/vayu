@@ -6,7 +6,7 @@
  */
 
 /**
- * ModeStatCards — the mode-specific Row 4 stats that exist for only one load
+ * ModeStatCards - the mode-specific Row 4 stats that exist for only one load
  * mode (constant_concurrency / iterations / ramp_up). The shared cards
  * (Duration, Total requests, Peak concurrency) and the universal p99 card live
  * in ModeStatsRow.tsx, which routes between these per d.mode. All cards are pure
@@ -22,7 +22,7 @@ import { StatCard } from "./StatCard";
 
 // ---- constant_concurrency ----
 
-/** Throughput / VU — achieved throughput divided by configured concurrency. */
+/** Throughput / VU - achieved throughput divided by configured concurrency. */
 export function ThroughputPerVuStat({ d }: { d: DashboardDerived }) {
 	const perVu =
 		d.throughput !== undefined && d.configuredConcurrency && d.configuredConcurrency > 0
@@ -40,7 +40,7 @@ export function ThroughputPerVuStat({ d }: { d: DashboardDerived }) {
 
 // ---- iterations ----
 
-/** Elapsed — wall-clock since start (iterations count up to completion). */
+/** Elapsed - wall-clock since start (iterations count up to completion). */
 export function ElapsedStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
@@ -52,7 +52,7 @@ export function ElapsedStat({ d }: { d: DashboardDerived }) {
 	);
 }
 
-/** Remaining (ETA) — projected seconds to finish the remaining iterations. */
+/** Remaining (ETA) - projected seconds to finish the remaining iterations. */
 export function RemainingEtaStat({ d }: { d: DashboardDerived }) {
 	const eta = computeEta({
 		requestsExpected: d.requestsExpected,
@@ -62,14 +62,14 @@ export function RemainingEtaStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
 			label="Remaining (ETA)"
-			value={eta !== null ? Math.round(eta).toString() : "—"}
+			value={eta !== null ? Math.round(eta).toString() : "-"}
 			unit={eta !== null ? "s" : undefined}
 			infoTip={TOOLTIPS.remainingEta}
 		/>
 	);
 }
 
-/** Mean iter time — average wall-clock per iteration (tracks p50 closely). */
+/** Mean iter time - average wall-clock per iteration (tracks p50 closely). */
 export function MeanIterTimeStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
@@ -83,19 +83,19 @@ export function MeanIterTimeStat({ d }: { d: DashboardDerived }) {
 
 // ---- ramp_up ----
 
-/** Breakpoint — concurrency at which p99 first crossed the SLO threshold. */
+/** Breakpoint - concurrency at which p99 first crossed the SLO threshold. */
 export function BreakpointStat({ d }: { d: DashboardDerived }) {
 	const { crossed, concurrency } = d.breakpoint;
 	return (
 		<StatCard
 			label="Breakpoint"
-			value={crossed && concurrency !== null ? formatNumber(concurrency) : "—"}
+			value={crossed && concurrency !== null ? formatNumber(concurrency) : "-"}
 			infoTip={TOOLTIPS.breakpoint}
 		/>
 	);
 }
 
-/** p99 at peak — tail latency at the breakpoint (or current p99 if uncrossed). */
+/** p99 at peak - tail latency at the breakpoint (or current p99 if uncrossed). */
 export function P99AtPeakStat({ d }: { d: DashboardDerived }) {
 	const value = d.breakpoint.crossed ? (d.breakpoint.p99Ms ?? d.p99Latency) : d.p99Latency;
 	return (

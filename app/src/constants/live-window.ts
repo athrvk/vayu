@@ -6,7 +6,7 @@
  */
 
 /**
- * Live dashboard chart window — how much recent live history the dashboard
+ * Live dashboard chart window - how much recent live history the dashboard
  * charts retain, as a **time** window (not a point count). A renderer-only
  * preference, persisted to localStorage. This array is the single source of
  * truth: the type, the settings picker, and the runtime guard all derive from it.
@@ -45,7 +45,7 @@ export function liveWindowSeconds(value: LiveWindow): number | null {
 }
 
 /**
- * Hard safety cap on retained live ticks regardless of the chosen window — a
+ * Hard safety cap on retained live ticks regardless of the chosen window - a
  * backstop so a very long "full run" (or a misbehaving high tick rate) can't
  * grow memory without bound. ~33 min at the default 10 Hz tick.
  */

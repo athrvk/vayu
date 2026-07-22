@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
+import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
+import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
 // Per-phase explanations for the network timing breakdown. Kept in sync with
 // the wording in ResponseTimingTab (request-builder), which explains the same
@@ -33,7 +35,7 @@ const PHASE_TIPS = {
 	dns: "Hostname → IP resolution. Usually a few ms once cached; >50ms suggests slow DNS or a fresh lookup.",
 	connect: "TCP three-way handshake. Zero on connection reuse (HTTP keep-alive / HTTP/2).",
 	tls: "SSL/TLS handshake (HTTPS only). Zero for plain HTTP and on resumed connections.",
-	ttfb: "Time to first byte — server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
+	ttfb: "Time to first byte - server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
 	download:
 		"Response body transfer time. Large for big payloads or slow links; near-zero for small JSON.",
 } as const;
@@ -99,17 +101,19 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									key={code}
 									className="p-3 bg-card border border-border rounded-md"
 								>
+									{/*
+									 * `constants/http-status`, not a local ternary. This
+									 * one put 3xx on `status-running` - the blue that
+									 * means "a run is in progress" - which was the
+									 * fourth different answer for 3xx in the app.
+									 */}
 									<span
 										className={cn(
 											"font-mono font-bold text-lg",
-											code === "0" && "text-status-error",
-											code.startsWith("2") && "text-status-success",
-											code.startsWith("3") && "text-status-running",
-											code.startsWith("4") && "text-warning-text",
-											code.startsWith("5") && "text-status-error"
+											STATUS_CLASS_STYLE[httpStatusClass(Number(code))].text
 										)}
 									>
-										{code === "0" ? "Error" : code}
+										{statusCodeLabel(Number(code))}
 									</span>
 									<p className="text-sm text-muted-foreground">
 										{String(count)} requests
@@ -135,7 +139,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<div className="space-y-3">
 							<div className="flex justify-between">
 								<span className="text-muted-foreground">Total Errors:</span>
-								<span className="font-semibold text-destructive">
+								<span className="font-semibold text-destructive-text">
 									{report.errors.total}
 								</span>
 							</div>
@@ -163,7 +167,8 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									DNS <InfoChip tip={PHASE_TIPS.dns} />
 								</p>
 								<p className="font-bold">
-									{report.timingBreakdown.avgDnsMs.toFixed(2)}ms
+									{formatPhaseDuration(report.timingBreakdown.avgDnsMs).value}
+									{formatPhaseDuration(report.timingBreakdown.avgDnsMs).unit}
 								</p>
 							</div>
 							<div>
@@ -171,7 +176,8 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									Connect <InfoChip tip={PHASE_TIPS.connect} />
 								</p>
 								<p className="font-bold">
-									{report.timingBreakdown.avgConnectMs.toFixed(2)}ms
+									{formatPhaseDuration(report.timingBreakdown.avgConnectMs).value}
+									{formatPhaseDuration(report.timingBreakdown.avgConnectMs).unit}
 								</p>
 							</div>
 							<div>
@@ -179,7 +185,8 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									TLS <InfoChip tip={PHASE_TIPS.tls} />
 								</p>
 								<p className="font-bold">
-									{report.timingBreakdown.avgTlsMs.toFixed(2)}ms
+									{formatPhaseDuration(report.timingBreakdown.avgTlsMs).value}
+									{formatPhaseDuration(report.timingBreakdown.avgTlsMs).unit}
 								</p>
 							</div>
 							<div>
@@ -187,7 +194,14 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									First Byte <InfoChip tip={PHASE_TIPS.ttfb} />
 								</p>
 								<p className="font-bold">
-									{report.timingBreakdown.avgFirstByteMs.toFixed(2)}ms
+									{
+										formatPhaseDuration(report.timingBreakdown.avgFirstByteMs)
+											.value
+									}
+									{
+										formatPhaseDuration(report.timingBreakdown.avgFirstByteMs)
+											.unit
+									}
 								</p>
 							</div>
 							<div>
@@ -195,7 +209,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									Download <InfoChip tip={PHASE_TIPS.download} />
 								</p>
 								<p className="font-bold">
-									{report.timingBreakdown.avgDownloadMs.toFixed(2)}ms
+									{
+										formatPhaseDuration(report.timingBreakdown.avgDownloadMs)
+											.value
+									}
+									{formatPhaseDuration(report.timingBreakdown.avgDownloadMs).unit}
 								</p>
 							</div>
 						</div>
@@ -213,7 +231,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
 							<div>
 								<p className="text-sm text-muted-foreground">Slow Requests</p>
-								<p className="font-bold text-status-stopped">
+								<p className="font-bold text-status-stopped-text">
 									{report.slowRequests.count}
 								</p>
 							</div>
@@ -224,7 +242,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 							<div>
 								<p className="text-sm text-muted-foreground">Percentage</p>
 								<p className="font-bold">
-									{report.slowRequests.percentage.toFixed(2)}%
+									{report.slowRequests.percentage.toFixed(1)}%
 								</p>
 							</div>
 						</div>
@@ -250,13 +268,13 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 							</div>
 							<div>
 								<p className="text-sm text-muted-foreground">Passed</p>
-								<p className="font-bold text-status-success">
+								<p className="font-bold text-status-success-text">
 									{report.testValidation.testsPassed}
 								</p>
 							</div>
 							<div>
 								<p className="text-sm text-muted-foreground">Failed</p>
-								<p className="font-bold text-destructive">
+								<p className="font-bold text-destructive-text">
 									{report.testValidation.testsFailed}
 								</p>
 							</div>
@@ -307,11 +325,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 													{/* Status Icon */}
 													{isError ? (
-														<AlertCircle className="w-4 h-4 text-destructive shrink-0" />
+														<AlertCircle className="w-4 h-4 text-destructive-text shrink-0" />
 													) : isSlow ? (
-														<Clock className="w-4 h-4 text-status-stopped shrink-0" />
+														<Clock className="w-4 h-4 text-status-stopped-text shrink-0" />
 													) : (
-														<CheckCircle2 className="w-4 h-4 text-status-success shrink-0" />
+														<CheckCircle2 className="w-4 h-4 text-status-success-text shrink-0" />
 													)}
 
 													{/* Request Number */}
@@ -335,7 +353,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 													<span
 														className={cn(
 															"text-sm font-mono shrink-0",
-															isSlow && "text-status-stopped"
+															isSlow && "text-status-stopped-text"
 														)}
 													>
 														{result.latencyMs.toFixed(1)}ms
@@ -348,7 +366,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 													{/* Error preview */}
 													{isError && result.error && (
-														<span className="text-xs text-destructive truncate basis-full sm:basis-auto sm:max-w-[200px]">
+														<span className="text-xs text-destructive-text truncate basis-full sm:basis-auto sm:max-w-[200px]">
 															{result.error.split(":")[0]}
 														</span>
 													)}
@@ -364,7 +382,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 															<p className="text-xs font-medium text-muted-foreground">
 																Error
 															</p>
-															<p className="text-sm bg-destructive/10 text-destructive p-2 rounded-md font-mono text-xs break-all">
+															<p className="text-sm bg-destructive/10 text-destructive-text p-2 rounded-md font-mono text-xs break-all">
 																{result.error}
 															</p>
 														</div>
@@ -500,7 +518,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 
 															{/* Slow Request Warning */}
 															{result.trace.isSlow && (
-																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive p-2 rounded-md">
+																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive-text p-2 rounded-md">
 																	<Clock className="w-3 h-3" />
 																	<span>
 																		Slow request:{" "}

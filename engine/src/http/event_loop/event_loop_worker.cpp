@@ -226,7 +226,7 @@ void EventLoopWorker::stop (bool wait_for_pending) {
     running = false;
 
     if (!wait_for_pending) {
-        // Worker has exited — we are now the sole SPSC consumer. Cancel any
+        // Worker has exited - we are now the sole SPSC consumer. Cancel any
         // requests that were never started (still sitting in pending_queue).
         std::unique_ptr<TransferData> data;
         while (pending_queue.pop (data)) {

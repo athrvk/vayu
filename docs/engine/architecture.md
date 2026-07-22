@@ -147,7 +147,7 @@ the [API reference](api-reference.md#authentication) for the `/oauth2/*` routes.
 
 The engine composes a request only **partway**. On `POST /request` it loads the
 environment, globals, and the request's collection variables (into the QuickJS
-script context), resolves/applies concrete auth, and runs the pre/post scripts —
+script context), resolves/applies concrete auth, and runs the pre/post scripts -
 but it does **not**:
 
 - interpolate `{{variables}}` into the URL / headers / body (no `{{}}` handling
@@ -158,8 +158,8 @@ but it does **not**:
 
 Those three steps are done **client-side**, so they are duplicated in the app
 renderer and the MCP layer (`app/electron/mcp/resolve.ts`). Consolidating them
-into the engine — so clients pass a `requestId` + `environmentId` and the engine
-composes — is a deferred maintainability item: see
+into the engine - so clients pass a `requestId` + `environmentId` and the engine
+composes - is a deferred maintainability item: see
 `docs/plans/pending-backlog.md` → **A1**. Do not start it without an explicit ask.
 
 ### Database (`SQLite`)

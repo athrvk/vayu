@@ -8,9 +8,9 @@
 /**
  * Custom TitleBar Component
  *
- * h-[38px] — must match TITLEBAR_HEIGHT in electron/constants.ts
+ * h-[38px] - must match TITLEBAR_HEIGHT in electron/constants.ts
  * macOS: traffic lights inset (~80px), no HTML controls
- * Windows: native overlay handles controls — no HTML buttons
+ * Windows: native overlay handles controls - no HTML buttons
  * Linux: custom HTML min/max/close buttons
  */
 
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { TabStrip } from "./TabStrip";
+import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
 
 const isElectron = !!window.electronAPI;
 const isMac = window.electronAPI?.platform === "darwin";
@@ -85,7 +86,10 @@ function EnvSwitcher() {
 			<DropdownMenuTrigger asChild>
 				<button
 					className={cn(
-						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-full shrink-0 transition-colors",
+						// rounded-md, not rounded-full: this is an interactive control,
+						// so its corners follow the Appearance → Roundedness setting.
+						// rounded-full is reserved for non-interactive indicators.
+						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-md shrink-0 transition-colors",
 						activeEnv
 							? "bg-accent text-accent-foreground hover:bg-accent/80"
 							: "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
@@ -124,32 +128,31 @@ export default function TitleBar() {
 	if (!isElectron) return null;
 
 	return (
-		<div
+		// <header>: the app's banner region, so it is reachable as a landmark
+		// rather than being an unnamed div in the accessibility tree.
+		<header
 			className="titlebar h-[38px] flex items-center bg-panel border-b border-border shrink-0 select-none"
 			style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 		>
 			{/* macOS: space for native traffic lights */}
 			{isMac && <div className="w-20 shrink-0" />}
 
-			{/* Logo — all platforms */}
+			{/* Logo - all platforms. The icon is imported as a module, not referenced
+			    as "/icon.png": `base: "./"` means a root-absolute path does not
+			    resolve under the packaged file:// build. */}
 			<div
 				className="flex items-center px-3 shrink-0"
 				style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 			>
-				<img
-					src="/icon.png"
-					alt="Vayu"
-					className="w-5 h-5"
-					onError={(e) => {
-						(e.target as HTMLImageElement).style.display = "none";
-					}}
-				/>
+				<img src={iconUrl} alt="Vayu" className="w-5 h-5" />
 			</div>
 
-			{/* TabStrip — fills available width */}
+			{/* TabStrip - fills available width. This wrapper stays a drag region so
+			    the empty space to the right of the last tab moves the window on every
+			    platform; TabStrip marks its own tab row `no-drag`. */}
 			<div
 				className="flex-1 flex overflow-hidden h-full"
-				style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+				style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 			>
 				<TabStrip />
 			</div>
@@ -170,9 +173,9 @@ export default function TitleBar() {
 				}
 			>
 				<EnvSwitcher />
-				{/* Linux only — Windows uses native overlay, macOS uses traffic lights */}
+				{/* Linux only - Windows uses native overlay, macOS uses traffic lights */}
 				{isLinux && <WindowControls />}
 			</div>
-		</div>
+		</header>
 	);
 }

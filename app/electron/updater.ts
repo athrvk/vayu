@@ -32,11 +32,44 @@ export interface UpdateAvailablePayload {
 	installCommand?: string;
 }
 
+/**
+ * Outcome of a user-initiated check.
+ *
+ * The periodic check stays silent, so it produces no result - only a check the
+ * user asked for needs an answer, and "nothing happened" is not one.
+ */
+export type UpdateCheckResult =
+	| { status: "unavailable"; detail: string }
+	| { status: "up-to-date"; version: string }
+	| ({ status: "available" } & UpdateAvailablePayload)
+	| { status: "error"; message: string };
+
+/** Where a manual check came from - it decides how the result is delivered. */
+type CheckSource = "menu" | "renderer";
+
+/**
+ * A check the user asked for and is waiting on. electron-updater answers
+ * through events rather than the `checkForUpdates()` promise, so the settle
+ * path runs from the event handlers.
+ */
+interface PendingCheck {
+	source: CheckSource;
+	settle: (result: UpdateCheckResult) => void;
+	promise: Promise<UpdateCheckResult>;
+	timer: NodeJS.Timeout;
+}
+
+/**
+ * How long to wait for an answer before giving up. Without this a check that
+ * never gets a reply - a hung connection, a feed that stalls after the TCP
+ * handshake - leaves the settings button spinning with no way back.
+ */
+const CHECK_TIMEOUT_MS = 30_000;
+
 let intervalTimer: NodeJS.Timeout | null = null;
 /** True once initAutoUpdater has configured the updater (not in dev). */
 let updaterReady = false;
-/** Set while a user-initiated check is in flight, so we can show feedback. */
-let manualCheckPending = false;
+let pendingCheck: PendingCheck | null = null;
 let mainWindowRef: BrowserWindow | null = null;
 
 /**
@@ -58,6 +91,21 @@ export function initAutoUpdater(win: BrowserWindow): void {
 	});
 
 	mainWindowRef = win;
+
+	// Registered before the `disabled` bail-out. The renderer calls these
+	// unconditionally, and an unregistered channel rejects with "No handler
+	// registered" - an error that reads like a bug rather than "not in a
+	// packaged build". They no-op safely while `updaterReady` is false.
+	ipcMain.handle("update:restartToInstall", () => {
+		// Only meaningful on the silent path, where an update was downloaded.
+		if (updaterReady) autoUpdater.quitAndInstall();
+	});
+
+	ipcMain.handle("update:openReleasePage", (_event, url: string) => {
+		return shell.openExternal(url);
+	});
+
+	ipcMain.handle("update:check", () => checkForUpdatesNow("renderer"));
 
 	if (strategy === "disabled") {
 		console.log("[Updater] disabled (development)");
@@ -85,6 +133,7 @@ export function initAutoUpdater(win: BrowserWindow): void {
 					: undefined,
 		};
 		send("update:available", payload);
+		settleCheck({ status: "available", ...payload });
 	});
 
 	autoUpdater.on("update-downloaded", (info) => {
@@ -93,41 +142,15 @@ export function initAutoUpdater(win: BrowserWindow): void {
 
 	// Only surfaced for user-initiated checks; the periodic check stays silent.
 	autoUpdater.on("update-not-available", () => {
-		if (manualCheckPending) {
-			manualCheckPending = false;
-			void dialog.showMessageBox(win, {
-				type: "info",
-				message: "You're up to date",
-				detail: `Vayu ${app.getVersion()} is the latest version.`,
-				buttons: ["OK"],
-			});
-		}
+		settleCheck({ status: "up-to-date", version: app.getVersion() });
 	});
 
 	autoUpdater.on("error", (err) => {
 		console.error("[Updater] error:", err);
-		if (manualCheckPending) {
-			manualCheckPending = false;
-			void dialog.showMessageBox(win, {
-				type: "error",
-				message: "Couldn't check for updates",
-				detail: err.message,
-				buttons: ["OK"],
-			});
-		}
+		settleCheck({ status: "error", message: err.message });
 	});
 
 	updaterReady = true;
-
-	// Renderer-driven actions.
-	ipcMain.handle("update:restartToInstall", () => {
-		// Only meaningful on the silent path, where an update was downloaded.
-		autoUpdater.quitAndInstall();
-	});
-
-	ipcMain.handle("update:openReleasePage", (_event, url: string) => {
-		return shell.openExternal(url);
-	});
 
 	const check = () =>
 		autoUpdater.checkForUpdates().catch((err) => console.error("[Updater] check failed:", err));
@@ -137,26 +160,88 @@ export function initAutoUpdater(win: BrowserWindow): void {
 }
 
 /**
- * Trigger a check on demand (from the "Check for Updates…" menu item).
- * Shows a dialog when already up to date or when the check fails, so the user
- * always gets feedback — unlike the silent periodic check.
+ * Deliver the outcome of the check the user is waiting on, if any.
+ *
+ * Events fire for the periodic check too, so a result with nothing waiting is
+ * dropped - that is the silent path doing its job, not a missed answer.
  */
-export function checkForUpdatesNow(): void {
-	if (!updaterReady) {
-		if (mainWindowRef) {
+function settleCheck(result: UpdateCheckResult): void {
+	const pending = pendingCheck;
+	if (!pending) return;
+	pendingCheck = null;
+	clearTimeout(pending.timer);
+
+	// The menu item has no UI of its own, so it reports through a native
+	// dialog. The settings panel renders the same result in place, and a modal
+	// on top of it would be redundant.
+	if (pending.source === "menu" && mainWindowRef) {
+		if (result.status === "up-to-date") {
 			void dialog.showMessageBox(mainWindowRef, {
 				type: "info",
-				message: "Updates unavailable",
-				detail: "Update checks only run in packaged builds of Vayu.",
+				message: "You're up to date",
+				detail: `Vayu ${result.version} is the latest version.`,
+				buttons: ["OK"],
+			});
+		} else if (result.status === "error") {
+			void dialog.showMessageBox(mainWindowRef, {
+				type: "error",
+				message: "Couldn't check for updates",
+				detail: result.message,
 				buttons: ["OK"],
 			});
 		}
-		return;
+		// "available" needs no dialog - the update banner is already showing it.
 	}
-	manualCheckPending = true;
-	autoUpdater.checkForUpdates().catch((err) => {
-		console.error("[Updater] manual check failed:", err);
+
+	pending.settle(result);
+}
+
+/**
+ * Trigger a check on demand, from the "Check for Updates…" menu item or from
+ * Settings → General. Always resolves with an outcome, so the caller can give
+ * the user feedback - unlike the periodic check, which stays silent.
+ */
+export function checkForUpdatesNow(source: CheckSource = "menu"): Promise<UpdateCheckResult> {
+	if (!updaterReady) {
+		const result: UpdateCheckResult = {
+			status: "unavailable",
+			detail: "Update checks only run in packaged builds of Vayu.",
+		};
+		if (source === "menu" && mainWindowRef) {
+			void dialog.showMessageBox(mainWindowRef, {
+				type: "info",
+				message: "Updates unavailable",
+				detail: result.detail,
+				buttons: ["OK"],
+			});
+		}
+		return Promise.resolve(result);
+	}
+
+	// A check is already in flight: join it rather than starting a second one.
+	// Both callers then get the same answer, and only one dialog is shown.
+	if (pendingCheck) return pendingCheck.promise;
+
+	let settle!: (result: UpdateCheckResult) => void;
+	const promise = new Promise<UpdateCheckResult>((resolve) => {
+		settle = resolve;
 	});
+	const timer = setTimeout(() => {
+		settleCheck({ status: "error", message: "The update check timed out." });
+	}, CHECK_TIMEOUT_MS);
+	// Node keeps the process alive for a pending timer; this one must not hold
+	// up quit if the user closes the window mid-check.
+	timer.unref?.();
+	pendingCheck = { source, settle, promise, timer };
+
+	autoUpdater.checkForUpdates().catch((err) => {
+		// The `error` event usually fires too, but not for every rejection -
+		// settling here as well is safe because settleCheck is idempotent.
+		console.error("[Updater] manual check failed:", err);
+		settleCheck({ status: "error", message: err instanceof Error ? err.message : String(err) });
+	});
+
+	return promise;
 }
 
 /** Stop the periodic check (used on app teardown / tests). */
@@ -165,4 +250,7 @@ export function disposeAutoUpdater(): void {
 		clearInterval(intervalTimer);
 		intervalTimer = null;
 	}
+	// A check waiting on an event that will never arrive now the app is going
+	// away: settle it so nothing is left hanging on the promise.
+	settleCheck({ status: "error", message: "The update check was cancelled." });
 }

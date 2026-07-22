@@ -144,7 +144,7 @@ TEST_F (MetricsCollectorTest, SampleWindowReflectsRecordedInterval) {
 
     auto window = collector->sample_window_percentiles ();
 
-    constexpr double tolerance = 1.0;  // 1ms — HdrHistogram bucketing
+    constexpr double tolerance = 1.0;  // 1ms - HdrHistogram bucketing
     EXPECT_NEAR (window.min, 1.0, tolerance);
     EXPECT_NEAR (window.max, 100.0, tolerance);
     EXPECT_NEAR (window.p50, 50.0, tolerance);
@@ -161,7 +161,7 @@ TEST_F (MetricsCollectorTest, SampleWindowResetsBetweenIntervals) {
     EXPECT_NEAR (first.p99, 10.0, 1.0);
 
     // Second interval: all high-latency samples. The window must NOT carry the
-    // low-latency samples forward — sampling reset it.
+    // low-latency samples forward - sampling reset it.
     for (int i = 0; i < 500; ++i) {
         collector->record_success (200, 500.0, 0.0);
     }
@@ -217,7 +217,7 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsPrefersWindowedPercentiles) {
 }
 
 TEST_F (MetricsCollectorTest, SampleWindowSafeUnderConcurrentWriters) {
-    // Writers record while the producer samples the window — the phaser must keep
+    // Writers record while the producer samples the window - the phaser must keep
     // this race-free (resolves D8 for the windowed source). Assert correctness of
     // the cumulative count and that sampling never crashes.
     constexpr int kThreads = 4;
@@ -330,7 +330,7 @@ TEST_F (MetricsCollectorTest, PreservesOutOfRangeStatusCodes) {
 
 // Per-code counts must be exact under concurrency: the lock-free hot path
 // (#20) replaced the mutex-guarded map, so verify N threads hammering a spread
-// of distinct codes — including an out-of-range code on the overflow path —
+// of distinct codes - including an out-of-range code on the overflow path -
 // produce exact per-code totals with no lost increments.
 TEST_F (MetricsCollectorTest, ThreadSafePerCodeCounts) {
     const int num_threads         = 8;
@@ -547,7 +547,7 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsPercentilesZeroWhenNoSamples) {
 }
 
 // ============================================================================
-// Run-progress fields (requestsSent / requestsExpected) — feed the dashboard
+// Run-progress fields (requestsSent / requestsExpected) - feed the dashboard
 // ETA stat: (requestsExpected - requestsSent) / currentRps.
 // ============================================================================
 

@@ -109,7 +109,7 @@ void register_metrics_routes (RouteContext& ctx) {
                     }
 
                     // Map metric values to LoadTestMetrics fields. Latency percentiles
-                    // are now persisted per-tick as windowed (rolling) values —
+                    // are now persisted per-tick as windowed (rolling) values -
                     // unlabeled rows; the labeled cumulative final-summary rows are
                     // skipped here so the series stays purely windowed.
                     if (metric.name == vayu::MetricName::Rps) {
@@ -377,7 +377,7 @@ void register_metrics_routes (RouteContext& ctx) {
                 offset += batch.size ();
 
                 // Terminate only once the producer has appended its final tick
-                // (closed) AND we have drained the buffer — never gate on
+                // (closed) AND we have drained the buffer - never gate on
                 // is_running, which can flip before the final tick lands.
                 if (context->closed.load (std::memory_order_acquire) &&
                 offset >= context->published_count.load (std::memory_order_acquire)) {

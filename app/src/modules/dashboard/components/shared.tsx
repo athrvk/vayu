@@ -27,7 +27,7 @@ export function InfoChip({ tip }: { tip: ReactNode }) {
 						<Info className="h-2.5 w-2.5" />
 					</button>
 				</TooltipTrigger>
-				<TooltipContent className="max-w-[260px] text-[11.5px] leading-relaxed">
+				<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
 					{tip}
 				</TooltipContent>
 			</Tooltip>
@@ -39,7 +39,7 @@ export function Eyebrow({ children }: { children: ReactNode }) {
 	return <p className={EYEBROW_CLASS}>{children}</p>;
 }
 
-/** Format a possibly-undefined number, falling back to an em-dash. */
+/** Format a possibly-undefined number, falling back to a dash. */
 export function fmt(v: number | undefined, digits = 1): string {
-	return v !== undefined ? v.toFixed(digits) : "—";
+	return v !== undefined ? v.toFixed(digits) : "-";
 }

@@ -9,8 +9,8 @@
  * Electron main-process constants.
  *
  * The main process is built separately from the renderer (tsconfig.node.json)
- * and cannot import renderer modules, so values shared with the UI — most
- * notably the engine port — are duplicated in src/config/network.ts. Keep
+ * and cannot import renderer modules, so values shared with the UI - most
+ * notably the engine port - are duplicated in src/config/network.ts. Keep
  * them in sync.
  */
 
@@ -20,7 +20,7 @@ export const ENGINE_PORT = 9876;
 /** Lock file written by the engine inside its data dir. */
 export const ENGINE_LOCK_FILE = "vayu.lock";
 
-// MCP server (Model Context Protocol) — a TypeScript sidecar hosted in this
+// MCP server (Model Context Protocol) - a TypeScript sidecar hosted in this
 // main process that exposes the engine's capabilities to agents (Claude Code,
 // Codex, Cursor, …) over Streamable HTTP. Bound to loopback only. See
 // docs/engine/mcp.md.

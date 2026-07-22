@@ -60,6 +60,8 @@ Stores individual HTTP request definitions.
 | `pre_request_script`  | TEXT    | Default `""`                                         |
 | `post_request_script` | TEXT    | Default `""`                                         |
 | `order`               | INTEGER | Sort order within collection; default 0              |
+| `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
+| `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
 | `created_at`          | INTEGER | Unix ms                                              |
 | `updated_at`          | INTEGER | Unix ms                                              |
 
@@ -91,6 +93,17 @@ The `oauth2` `config` holds the grant type, endpoints, client id/secret,
 placement options, etc. Secret fields (`clientSecret`, `password`) are stored
 **in plaintext** here, same as bearer/basic credentials - the v1 posture. The
 resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
+
+**follow_redirects / max_redirects** - the request's redirect policy, surfaced
+in the request builder's **Settings** tab and serialized as `followRedirects` /
+`maxRedirects`. They mirror the executable `vayu::Request` fields of the same
+name, so the saved policy is what `POST /request` and `POST /run` apply.
+
+Both columns are `NOT NULL` with a `DEFAULT`, which is what lets `sync_schema()`
+add them to an existing, non-empty `requests` table - a `NOT NULL` column with
+no default cannot be added by `ALTER TABLE ADD COLUMN`. Rows written before the
+columns existed backfill to `1` / `10`, i.e. the behaviour they already had.
+`max_redirects` is clamped to `0..100` on write.
 
 ---
 
@@ -206,7 +219,7 @@ metrics producer thread writes a batch each tick. Struct is `db::Metric`.
   derivations. `latency_p75/p90/p999/min/max` are **not** persisted per tick.
 - **Final-summary rows** (`latency_p50/p75/p90/p95/p99/p999/min/max`, `labels` =
   `{"percentile":"p50"}` etc.): written once at completion from the cumulative-from-start
-  HdrHistogram — the whole-run numbers the report surfaces. The `/run/:id/report` reader
+  HdrHistogram - the whole-run numbers the report surfaces. The `/run/:id/report` reader
   keys on the non-empty label so the per-tick windowed rows never overwrite these.
 
 ---
@@ -227,9 +240,22 @@ Individual request outcomes - all errors plus sampled successes (sampling is con
 | `error`       | TEXT       | Error message for failures; empty on success                 |
 | `trace_data`  | TEXT       | JSON (headers/body/timing breakdown) - design mode + errors + slow samples |
 
-`trace_data` timing breakdown includes `total`, `wire`, `queueWait`, `dns`, `connect`, `tls`,
-`firstByte`, `download` (all ms). `total` is perceived latency; `wire` is libcurl's
-`CURLINFO_TOTAL_TIME`; `queueWait = total − wire` is time spent queued inside the generator.
+`trace_data` timing keys are all in ms and carry the `Ms` suffix: `totalMs`, `wireMs`,
+`queueWaitMs`, `dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`, `downloadMs`. `totalMs` is perceived
+latency; `wireMs` is libcurl's `CURLINFO_TOTAL_TIME`; `queueWaitMs = totalMs − wireMs` is time
+spent queued inside the generator.
+
+**The writers store different subsets, at different nesting**, so read the one you need rather
+than assuming all eight are there and flat:
+
+| Writer | What lands in `trace_data` |
+|--------|----------------------------|
+| Load run, success sample (`load_strategy.cpp`) | timing only, flat, all eight keys - and only when `save_timing_breakdown` is on or the sample crossed `slow_threshold_ms` (which also adds `isSlow` / `thresholdMs`) |
+| Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0` |
+| Design mode (`store_result` in `execution.cpp`) | the five phase keys flat (`dnsMs`…`downloadMs`), **each only when non-zero** - a reused connection writes no `connectMs`/`tlsMs`. No `totalMs`/`wireMs`/`queueWaitMs`; perceived total lives in the `latency_ms` column. Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). |
+
+That design-mode subset is what rebuilds the request builder's response pane (Timing tab included)
+after a restart - see `app/src/modules/request-builder/utils/restore-response.ts`.
 
 ---
 

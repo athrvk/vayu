@@ -10,7 +10,7 @@ import type { Breakpoint } from "../../utils/computeBreakpoint";
 import { HeroCardShell } from "./HeroCardShell";
 
 /**
- * ramp_up hero card #2 — whether the server has hit its capacity ceiling.
+ * ramp_up hero card #2 - whether the server has hit its capacity ceiling.
  * "Degrading" when p99 has crossed the SLO breakpoint or transport errors have
  * appeared; the call-out names the concurrency at which degradation began.
  *
@@ -24,12 +24,22 @@ export function SaturationCard({
 	failedRequests: number;
 }) {
 	const degrading = breakpoint.crossed || failedRequests > 0;
-	const color = degrading ? "hsl(var(--warning))" : "hsl(var(--success))";
+
+	/*
+	 * The `-text` variants, not the bare fill tokens.
+	 *
+	 * This was an inline `style={{ color: "hsl(var(--warning))" }}`. Measured on
+	 * `--card`, `--warning` is 2.14 and `--destructive` 1.73 - this is the same
+	 * "fill token used as a foreground" bug swept out of the app earlier, and it
+	 * survived because the guard scans for the `text-<family>` *class* and an
+	 * inline style is invisible to it. The guard now covers both forms.
+	 */
+	const colorClass = degrading ? "text-warning-text" : "text-success-text";
 
 	return (
 		<HeroCardShell label="Saturation" tip={TOOLTIPS.saturation}>
 			<div className="flex items-baseline gap-1 mt-1">
-				<span className="text-[22px] font-bold leading-none" style={{ color }}>
+				<span className={`text-[22px] font-bold leading-none ${colorClass}`}>
 					{degrading ? "⚠ degrading" : "✓ healthy"}
 				</span>
 			</div>

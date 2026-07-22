@@ -36,7 +36,7 @@ class RateLimiterTest : public ::testing::Test {
 // the test depend on real network latency: on macOS x64 (Rosetta-emulated on
 // Apple-silicon runners) the curl_multi loop overhead shifted the measured
 // RPS outside the ±25% window even though the rate limiter itself was fine.
-// Hitting localhost removes that variance — we're checking engine behavior,
+// Hitting localhost removes that variance - we're checking engine behavior,
 // not someone else's web service.
 TEST_F (RateLimiterTest, EnforcesTargetRPS) {
     // Configure for 100 RPS

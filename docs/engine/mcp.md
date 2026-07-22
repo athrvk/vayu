@@ -6,7 +6,7 @@ Vayu exposes its engine to AI agents (Claude Code, Cursor, VS Code, Codex, Zed)
 through a [Model Context Protocol](https://modelcontextprotocol.io) server. The
 server is TypeScript, hosted in the Electron main process, built on the official
 [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk),
-and proxies the engine's REST API on `:9876`. The **C++ engine is not modified** —
+and proxies the engine's REST API on `:9876`. The **C++ engine is not modified** -
 the MCP layer is Apache-2.0 like the rest of the app.
 
 Once Vayu is running, any agent opts in with one command; if Vayu is down, the
@@ -48,7 +48,7 @@ claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
 ```
 
 ```json
-// VS Code (.vscode/mcp.json) — note the "servers" key
+// VS Code (.vscode/mcp.json) - note the "servers" key
 {
   "servers": { "vayu": { "type": "http", "url": "http://127.0.0.1:9877/mcp" } }
 }
@@ -114,36 +114,36 @@ Every tool carries a `category` (surfaced in Settings for enable/disable), MCP
 validated by the SDK). A few declare an `outputSchema` and return validated
 `structuredContent` alongside the text rendering.
 
-The four categories partition tools by what they can do — and thus which gate
+The four categories partition tools by what they can do - and thus which gate
 applies: **read** (inspection, always safe), **execute** (sends real traffic to
-a target — allowlist), **write** (mutates saved data or engine config — write
-toggle), **load** (starts/stops load tests — allowlist + caps + confirmation).
+a target - allowlist), **write** (mutates saved data or engine config - write
+toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 
 | Tool                   | Category | Maps to                                      | Gate                       |
 | ---------------------- | -------- | -------------------------------------------- | -------------------------- |
-| `get_engine_health`    | read     | `GET /health` (structured)                   | —                          |
-| `list_collections`     | read     | `GET /collections`                           | —                          |
-| `list_requests`        | read     | `GET /requests?collectionId=`                | —                          |
-| `list_environments`    | read     | `GET /environments`                          | —                          |
-| `list_runs`            | read     | `GET /runs`                                  | —                          |
-| `get_run_report`       | read     | `GET /run/:id/report`                        | —                          |
-| `get_engine_config`    | read     | `GET /config`                                | —                          |
-| `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | —                          |
-| `compare_runs`         | read     | 2× `GET /run/:id/report` → diff (structured) | —                          |
+| `get_engine_health`    | read     | `GET /health` (structured)                   | -                          |
+| `list_collections`     | read     | `GET /collections`                           | -                          |
+| `list_requests`        | read     | `GET /requests?collectionId=`                | -                          |
+| `list_environments`    | read     | `GET /environments`                          | -                          |
+| `list_runs`            | read     | `GET /runs`                                  | -                          |
+| `get_run_report`       | read     | `GET /run/:id/report`                        | -                          |
+| `get_engine_config`    | read     | `GET /config`                                | -                          |
+| `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | -                          |
+| `compare_runs`         | read     | 2× `GET /run/:id/report` → diff (structured) | -                          |
 | `run_request`          | execute  | `POST /request`                              | allowlist                  |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /request` (×N)     | allowlist per host         |
 | `create_request`       | write    | `POST /requests`                             | write toggle               |
 | `update_environment`   | write    | `GET`+`POST /environments` (fetch-merge)     | write toggle               |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
 | `start_load_run`       | load     | `POST /run`                                  | allowlist + caps + confirm |
-| `stop_run`             | load     | `POST /run/:id/stop`                         | —                          |
+| `stop_run`             | load     | `POST /run/:id/stop`                         | -                          |
 
 Notes:
 
-- **`start_load_run`** requires confirmation — via elicitation when the client
-  supports it, otherwise a `confirmed: true` flag — and enforces the RPS /
+- **`start_load_run`** requires confirmation - via elicitation when the client
+  supports it, otherwise a `confirmed: true` flag - and enforces the RPS /
   concurrency / duration caps. `get_live_metrics` is a **bounded snapshot** (SSE
-  read with a time budget), not a stream — `tools/call` stays request/response.
+  read with a time budget), not a stream - `tools/call` stays request/response.
 - **`update_engine_config`** reads the config back after applying and flags any
   changed key that needs an engine **restart** to take effect under
   `restartRequired` in its structured result (the engine marks these in each
@@ -162,7 +162,7 @@ Notes:
 
 ### Request composition
 
-In Vayu the **renderer** — not the engine — prepares a request before sending
+In Vayu the **renderer** - not the engine - prepares a request before sending
 it: it resolves `{{variables}}`, walks the collection ancestor chain to resolve
 `inherit` auth, and composes the collection-chain pre/post scripts with the
 request's own. The engine only *applies* a concrete `auth` block (bearer / basic
@@ -175,14 +175,14 @@ Because MCP talks to the engine directly, it must do that preparation itself.
 (`useVariableResolver.ts` + `request-builder/index.tsx` + `auth-mapping.ts`) and
 is applied so a tool call behaves like the app clicking Send:
 
-- **Variables** — resolved in URL, headers, and body with the app's precedence
+- **Variables** - resolved in URL, headers, and body with the app's precedence
   (environment > collection chain, leaf→root > globals; enabled only; unknown →
   empty string). The allowlist is checked against the **resolved** host.
-- **Auth** — `run_collection_smoke` applies each saved request's stored auth
+- **Auth** - `run_collection_smoke` applies each saved request's stored auth
   (`inherit` resolves against the collection chain); `run_request` /
   `start_load_run` accept an explicit `auth` block. In all cases variables inside
   the block are resolved and the engine applies it (oauth2 uses its token cache).
-- **Scripts** — `run_collection_smoke` composes the collection-chain pre/post
+- **Scripts** - `run_collection_smoke` composes the collection-chain pre/post
   scripts (root→leaf) with the request's own and sends them for the engine to
   run, so a request's tests and setup actually execute.
 
@@ -235,20 +235,20 @@ never modified. All configurable in **Settings → MCP** and persisted.
 - **Target allowlist** (default empty ⇒ deny all). Network-touching tools refuse
   off-list hosts with an actionable error. An **"Allow all hosts"** opt-in
   bypasses the list (still rejects unresolved `{{variables}}`); off by default.
-- **Hard caps** — max RPS / concurrency / duration on `start_load_run`; over-cap
+- **Hard caps** - max RPS / concurrency / duration on `start_load_run`; over-cap
   requests are rejected. With the allowlist, these are the real limits on load.
-- **Load-run confirmation** — anti-accident, not anti-adversary: it stops a stray
+- **Load-run confirmation** - anti-accident, not anti-adversary: it stops a stray
   tool call from starting load, but on HTTP it is agent-side (the caps/allowlist
   are the enforcement). Elicitation upgrades it to a human prompt where supported.
-- **Write toggle** (`allowWrites`, default off) — gates the data-mutating tools
+- **Write toggle** (`allowWrites`, default off) - gates the data-mutating tools
   `create_request`, `update_environment`, `update_engine_config`. Does not gate
   `run_request` / `run_collection_smoke` / load runs (allowlist + caps).
-- **Per-tool control** — any tool or whole read/execute/write/load category can be
+- **Per-tool control** - any tool or whole read/execute/write/load category can be
   switched off; a disabled tool is omitted from `tools/list` **and** rejected by
   `tools/call`.
-- **Server on/off** — the whole server can be disabled; while off the endpoint
+- **Server on/off** - the whole server can be disabled; while off the endpoint
   does not accept connections. Persists across restarts.
-- **Transport hardening** — loopback bind, Host-header (DNS-rebinding) validation,
+- **Transport hardening** - loopback bind, Host-header (DNS-rebinding) validation,
   `POST`-only, 4 MB body cap.
 
 **Why no auth token on the endpoint:** any local process could already reach the
@@ -271,7 +271,7 @@ process did not already have.
 | `disabledTools`      | `[]`    | Tool names to hide/reject.                    |
 
 The renderer never sets these directly: `main.ts` sanitizes every change
-(`sanitizeSafetyInput` — normalizes/de-dupes hosts, clamps caps to positive
+(`sanitizeSafetyInput` - normalizes/de-dupes hosts, clamps caps to positive
 integers, validates `disabledTools` against the tool catalog) before applying it
 live and writing it to disk.
 
@@ -340,13 +340,13 @@ Rationale behind the load-bearing decisions.
 
 MCP could have been hosted inside the C++ engine (zero hop, single binary). The
 deciding factor: **there is no official C++ SDK**, so in-engine would mean owning
-the protocol in C++ or betting on a pre-1.0 community lib — right as the spec
+the protocol in C++ or betting on a pre-1.0 community lib - right as the spec
 churns (the
 [2026-07-28 RC](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
 removed the GET stream endpoint and protocol-level sessions). The official TS SDK
 absorbs that churn, Node is already the Electron runtime, and the engine stays
 untouched (keeping it AGPL-clean). The accepted tradeoff: MCP is up when the
-**app** is open, not engine-only — covered later by the stdio CLI for headless use.
+**app** is open, not engine-only - covered later by the stdio CLI for headless use.
 
 ### Stateless HTTP, and the server→client push gap
 
@@ -356,16 +356,16 @@ and the GET stream. The cost is that `tools/list_changed` and elicitation can't 
 **pushed** over HTTP (no held-open stream), so they fall back as described in
 [Transports](#what-is-live-on-each-transport). Making them live would require a
 stateful server (real `sessionIdGenerator`, SSE responses, a GET stream per
-session, persistent per-session servers mutated on toggle) — deferred, since it
+session, persistent per-session servers mutated on toggle) - deferred, since it
 builds on the mechanism the spec is deprecating and the payoff is client-dependent.
 
 ## Deferred
 
-- **MCP-originated run tagging** — tag runs started via MCP so History shows
+- **MCP-originated run tagging** - tag runs started via MCP so History shows
   provenance.
-- **`vayu mcp` bin** — package the stdio CLI as a first-class command (backlog M1).
-- **Live push over HTTP** — stateful sessions (see Design notes).
-- **Hosted MCP for Vayu Cloud** — OAuth-gated, remote.
+- **`vayu mcp` bin** - package the stdio CLI as a first-class command (backlog M1).
+- **Live push over HTTP** - stateful sessions (see Design notes).
+- **Hosted MCP for Vayu Cloud** - OAuth-gated, remote.
 
 ## References
 

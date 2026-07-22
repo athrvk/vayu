@@ -42,9 +42,10 @@ export default function SampleRequestCard({
 	return (
 		<div
 			className={cn(
-				"border overflow-hidden transition-all",
+				"border overflow-hidden transition-colors",
 				isError && "border-destructive/30",
-				isSuccess && "border-green-500/20"
+				// status-success, matching the CheckCircle this border frames.
+				isSuccess && "border-status-success/20"
 			)}
 		>
 			{/* Header - Always Visible */}
@@ -55,9 +56,9 @@ export default function SampleRequestCard({
 				<span className="text-xs font-mono text-muted-foreground w-8">#{index + 1}</span>
 
 				{isError ? (
-					<XCircle className="w-4 h-4 text-destructive shrink-0" />
+					<XCircle className="w-4 h-4 text-destructive-text shrink-0" />
 				) : (
-					<CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+					<CheckCircle className="w-4 h-4 text-status-success-text shrink-0" />
 				)}
 
 				<Badge
@@ -86,8 +87,8 @@ export default function SampleRequestCard({
 					{/* Error Message */}
 					{sample.error && (
 						<div className="p-3 bg-destructive/10 border border-destructive/20">
-							<p className="text-xs font-medium text-destructive mb-1">Error</p>
-							<p className="text-sm text-destructive font-mono break-all">
+							<p className="text-xs font-medium text-destructive-text mb-1">Error</p>
+							<p className="text-sm text-destructive-text font-mono break-all">
 								{sample.error}
 							</p>
 						</div>

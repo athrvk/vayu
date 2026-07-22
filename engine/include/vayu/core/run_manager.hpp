@@ -58,7 +58,7 @@ struct RunContext {
     // ---- Live metrics "topic" (N1) ---------------------------------------
     // Append-only buffer of wire-ready SSE payload strings (each is a full
     // "event: metrics\nid: <n>\ndata: {...}\n\n"). Produced by the metrics
-    // thread, replayed+tailed by /metrics/live. MUST be mutex-guarded — a
+    // thread, replayed+tailed by /metrics/live. MUST be mutex-guarded - a
     // vector realloc would move/free the backing array under a concurrent
     // reader (UAF) even for already-published indices, so the atomic offset
     // alone is not enough. Readers copy out under the lock.
@@ -84,7 +84,7 @@ struct RunContext {
         return tick_buffer.size ();
     }
 
-    // notify_refill deliberately does NOT lock refill_mtx — locking on every
+    // notify_refill deliberately does NOT lock refill_mtx - locking on every
     // completion would put a contended mutex on the 60k-RPS hot path.
     void notify_refill () {
         refill_cv.notify_one ();
@@ -140,7 +140,7 @@ class RunManager {
     std::map<std::string, std::shared_ptr<RunContext>> retained_runs_;
 
     // Background TTL sweeper. Without this, retained runs only get evicted when
-    // /metrics/live or start_run fires — headless API users (POST /run +
+    // /metrics/live or start_run fires - headless API users (POST /run +
     // GET /run/:id/report) never trigger either, and retained RunContexts
     // (full tick_buffer, HdrHistogram, counters) accumulate indefinitely.
     std::thread sweeper_thread_;
@@ -175,7 +175,7 @@ class RunManager {
     // Start a background thread that periodically calls sweep_retained. The
     // provider is invoked each tick to obtain the current TTL (ms), so a config
     // change to liveRetentionMs is honored live; sweep cadence is TTL/2
-    // (floored at 500ms). Idempotent — second calls are no-ops. Stopped in the
+    // (floored at 500ms). Idempotent - second calls are no-ops. Stopped in the
     // destructor (or via stop_sweeper) so daemon shutdown is clean.
     void start_sweeper (std::function<int64_t ()> ttl_provider);
     // Convenience overload for a fixed TTL (used by tests).

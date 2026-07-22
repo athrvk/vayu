@@ -8,7 +8,7 @@
 /**
  * Load test configuration defaults and input limits.
  *
- * Limits mirror what the engine accepts on /run — keep them in sync with the
+ * Limits mirror what the engine accepts on /run - keep them in sync with the
  * engine's validation when it changes.
  */
 
@@ -19,6 +19,8 @@ export const LOAD_TEST_DEFAULTS = {
 	CONCURRENCY: 10,
 	ITERATIONS: 1000,
 	RAMP_DURATION_S: 30,
+	/** Ramp-Up starts here and climbs to CONCURRENCY. Matches the engine default. */
+	START_CONCURRENCY: 1,
 	/** % of successful responses persisted for inspection. */
 	SAMPLE_RATE_PCT: 10,
 	/** Responses slower than this are flagged and saved. */
@@ -33,6 +35,7 @@ export const LOAD_TEST_LIMITS = {
 	CONCURRENCY: { MIN: 1, MAX: 1000 },
 	ITERATIONS: { MIN: 1, MAX: 1_000_000 },
 	RAMP_DURATION_S: { MIN: 1, MAX: 3600 },
+	START_CONCURRENCY: { MIN: 1, MAX: 1000 },
 	SAMPLE_RATE_PCT: { MIN: 0, MAX: 100 },
 	SLOW_THRESHOLD_MS: { MIN: 0, MAX: 60_000 },
 } as const;

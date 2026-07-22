@@ -104,7 +104,7 @@ describe("buildRampOverlay", () => {
 
 	it("counts overshoot, not just deficit (A3 regression)", () => {
 		// At t=15 the configured curve is 50 (still ramping) but achieved is
-		// 450 — a 9x overshoot. A deficit-only formula clamps this to 0%; the
+		// 450 - a 9x overshoot. A deficit-only formula clamps this to 0%; the
 		// two-sided deviation must surface it as a large number.
 		const overlay = buildRampOverlay(
 			[tick({ elapsed_seconds: 15, current_concurrency: 450 })],

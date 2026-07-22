@@ -727,7 +727,7 @@ def setup_environment(project_root: Path):
             ver_out = subprocess.check_output(["cmake", "--version"], text=True).split()[2]
             major, minor = int(ver_out.split(".")[0]), int(ver_out.split(".")[1])
             if major < 3 or (major == 3 and minor < 25):
-                log_dim(f'cmake {ver_out} is too old — upgrading via Kitware APT...')
+                log_dim(f'cmake {ver_out} is too old - upgrading via Kitware APT...')
                 subprocess.run(["sudo", "apt-get", "install", "-y", "apt-transport-https", "ca-certificates", "gnupg", "wget"], check=True)
                 subprocess.run(
                     "wget -qO - https://apt.kitware.com/keys/kitware-archive-latest.asc "
@@ -774,7 +774,7 @@ def setup_environment(project_root: Path):
                 log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} Node.js v{ver}')
                 node_ok = True
             else:
-                log_dim(f'Node.js v{ver} is too old — Vite 8 needs >= 20.19 (22 LTS recommended).')
+                log_dim(f'Node.js v{ver} is too old - Vite 8 needs >= 20.19 (22 LTS recommended).')
         except Exception:
             pass
 
@@ -1212,7 +1212,7 @@ def build_app(dev_mode: bool, engine_binary: Optional[Path], project_root: Path)
             # by lipo-merging arm64+x64 engines before packaging. A local build
             # only has the host-arch engine, so @electron/universal can't merge
             # it ("same in both" single-arch file). Build for the host arch
-            # instead — CI still ships the universal release. Invoke the binary
+            # instead - CI still ships the universal release. Invoke the binary
             # via `pnpm exec` (not `pnpm run ... --`, which forwards the `--`
             # literally and makes electron-builder ignore these flags).
             host_arch = "arm64" if platform.machine() == "arm64" else "x64"

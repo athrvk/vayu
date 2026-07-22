@@ -8,8 +8,8 @@
 /**
  * useAppearance Hook
  *
- * Owns the renderer-only interface preferences — UI font, interface scale, and
- * corner roundedness — persisting them to localStorage and applying them to the
+ * Owns the renderer-only interface preferences - UI font, interface scale, and
+ * corner roundedness - persisting them to localStorage and applying them to the
  * document. Font swaps the `--font-sans` custom property; radius swaps
  * `--radius`; scale sets the page zoom factor (webFrame in Electron, a CSS
  * `zoom` fallback in the browser). The pre-paint script in index.html applies
@@ -51,7 +51,7 @@ function applyRadius(radius: UiRadius): void {
 function applyScale(scale: UiScale): void {
 	const factor = scaleFactor(scale);
 	if (window.electronAPI?.setZoomFactor) {
-		// Real page zoom — reflows the viewport, unlike CSS zoom on a child.
+		// Real page zoom - reflows the viewport, unlike CSS zoom on a child.
 		window.electronAPI.setZoomFactor(factor);
 	} else {
 		// Browser/dev fallback: good enough to preview, imperfect at the edges.

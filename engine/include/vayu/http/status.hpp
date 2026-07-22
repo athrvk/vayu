@@ -11,7 +11,7 @@
  *
  * Single source of truth for status-text rendering across the engine
  * (HTTP client header callbacks, CLI display, persisted results). The
- * frontend trusts whatever statusText the engine emits — it does not
+ * frontend trusts whatever statusText the engine emits - it does not
  * have its own copy of this table.
  *
  * Verified against the IANA HTTP Status Code Registry:
@@ -23,13 +23,13 @@
  *
  * Codes that are registered but obsoleted/deprecated (305, 510) are
  * included so the UI shows meaningful text if a server still emits
- * them. Code 418 is marked "(Unused)" in IANA — intentionally omitted;
+ * them. Code 418 is marked "(Unused)" in IANA - intentionally omitted;
  * the class-based fallback (Client Error) applies.
  *
  * For codes outside the registry the function returns the class label
  * ("Informational", "Success", "Redirect", "Client Error",
- * "Server Error"). Status 0 — vayu's synthetic value for client-side
- * failures — returns "Error".
+ * "Server Error"). Status 0 - vayu's synthetic value for client-side
+ * failures - returns "Error".
  */
 
 #pragma once
@@ -40,7 +40,7 @@ namespace vayu::http {
 
 inline std::string status_text (int code) {
     switch (code) {
-    // Synthetic — no server response (client-side failure)
+    // Synthetic - no server response (client-side failure)
     case 0: return "Error";
 
     // 1xx Informational

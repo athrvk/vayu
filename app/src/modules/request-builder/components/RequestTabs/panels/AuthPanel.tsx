@@ -44,7 +44,7 @@ const AUTH_TYPES: { value: AuthType; label: string; icon: typeof Key }[] = [
 
 // Variable-aware text input for the OAuth 2.0 form (so {{variables}} work in
 // every field). Secret fields (client secret / password) instead use the masked
-// SecretInput with a reveal toggle — masking and {{variable}} token highlighting
+// SecretInput with a reveal toggle - masking and {{variable}} token highlighting
 // can't coexist, and hiding the secret at rest wins for those fields.
 const VariableTextInput: OAuth2TextInput = ({ value, onChange, placeholder, type }) =>
 	type === "password" ? (

@@ -39,6 +39,7 @@ import type {
 	RequestBuilderContextValue,
 } from "../types";
 import { createDefaultRequestState } from "../utils/request-state";
+import { responseFromRunResult } from "../utils/restore-response";
 
 interface RequestBuilderProviderProps {
 	children: ReactNode;
@@ -108,48 +109,11 @@ export default function RequestBuilderProvider({
 		if (isLoadingLastRun) return;
 
 		// Try to reconstruct response from last design run
-		if (lastDesignRunReport?.results && lastDesignRunReport.results.length > 0) {
-			const lastResult = lastDesignRunReport.results[0];
-			const trace = lastResult.trace as any;
-
-			if (trace?.response) {
-				// Determine body type
-				let bodyType: "json" | "html" | "xml" | "text" | "binary" = "text";
-				const body =
-					typeof trace.response.body === "string"
-						? trace.response.body
-						: JSON.stringify(trace.response.body, null, 2);
-
-				try {
-					JSON.parse(body);
-					bodyType = "json";
-				} catch {
-					if (body.includes("<html") || body.includes("<!DOCTYPE")) {
-						bodyType = "html";
-					} else if (body.includes("<?xml") || body.includes("<xml")) {
-						bodyType = "xml";
-					}
-				}
-
-				const restoredResponse: ResponseState = {
-					status: lastResult.statusCode || 0,
-					statusText: lastResult.statusText || "",
-					headers: trace.response.headers || {},
-					requestHeaders: trace.request?.headers || {},
-					rawRequest: trace.request
-						? `${trace.request.method} ${trace.request.url}`
-						: undefined,
-					body,
-					bodyType,
-					size: body.length,
-					time: lastResult.latencyMs || 0,
-					timestamp: new Date(lastResult.timestamp).toISOString(),
-				};
-
-				setLocalResponse(restoredResponse);
-				storeSetResponse(request.id, restoredResponse);
-				hasLoadedFromBackend.current = request.id;
-			}
+		const restoredResponse = responseFromRunResult(lastDesignRunReport?.results?.[0]);
+		if (restoredResponse) {
+			setLocalResponse(restoredResponse);
+			storeSetResponse(request.id, restoredResponse);
+			hasLoadedFromBackend.current = request.id;
 		}
 
 		// Mark as loaded even if no response found

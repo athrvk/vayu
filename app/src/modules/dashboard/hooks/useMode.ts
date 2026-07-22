@@ -6,7 +6,7 @@
  */
 
 /**
- * useMode — the single source of truth for the dashboard's load-test mode.
+ * useMode - the single source of truth for the dashboard's load-test mode.
  *
  * The engine/run-config `mode` string is freeform (and historically defaulted
  * to the constant_rps model). Every mode-adaptive component MUST derive its
@@ -29,7 +29,7 @@ const KNOWN_MODES: ReadonlySet<LoadMode> = new Set<LoadMode>([
 /**
  * Normalise a raw run-config mode string into a {@link LoadMode}.
  *
- * Unknown/absent values fall back to `constant_rps` — the legacy model the
+ * Unknown/absent values fall back to `constant_rps` - the legacy model the
  * dashboard was originally built around, so behaviour is unchanged for runs
  * that predate explicit mode tagging.
  */
@@ -41,7 +41,7 @@ export function resolveMode(rawMode?: string): LoadMode {
 }
 
 /**
- * Hook form of {@link resolveMode}. Pure and synchronous — there is no state
+ * Hook form of {@link resolveMode}. Pure and synchronous - there is no state
  * to subscribe to, but exposing it as a hook keeps call sites consistent and
  * leaves room to fold in store/config lookups later without a signature change.
  */

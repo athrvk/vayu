@@ -6,7 +6,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Folder, Plus, Trash2, Edit2, Copy, FolderPlus, Loader2, Download } from "lucide-react";
+import { Folder, Plus, Trash2, Edit2, FolderPlus, Loader2, Download } from "lucide-react";
 import { useTabsStore, useSaveStore, useImportModalStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
@@ -22,16 +22,16 @@ import {
 import {
 	Button,
 	Input,
-	Separator,
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
 	TooltipProvider,
 	DeleteConfirmDialog,
-	ScrollArea,
-	Skeleton,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
+import { useRovingTreeFocus } from "./useRovingTreeFocus";
+import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
+import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
 import { TIMING } from "@/config/timing";
@@ -45,6 +45,7 @@ export default function CollectionTree() {
 		useCollectionsStore();
 	const { startSaving, completeSave, failSave, setStatus } = useSaveStore();
 	const treeRef = useRef<HTMLDivElement>(null);
+	const treeFocus = useRovingTreeFocus(treeRef);
 	const scrolledRequestRef = useRef<string | null>(null);
 
 	// Get selected collection and request IDs from active tab
@@ -58,7 +59,17 @@ export default function CollectionTree() {
 		openTab({ type: "collection", entityId: collectionId });
 
 	// TanStack Query hooks
-	const { data: collections = [], isLoading: isLoadingCollections } = useCollectionsQuery();
+	// isError as well as isLoading. The query is destructured with `= []`, so a
+	// failed fetch is indistinguishable from an empty workspace unless it is
+	// asked about - and the empty state's "Add your first collection" would
+	// invite a duplicate of collections that already exist.
+	const {
+		data: collections = [],
+		isLoading: isLoadingCollections,
+		isError: collectionsFailed,
+		error: collectionsError,
+		refetch: refetchCollections,
+	} = useCollectionsQuery();
 
 	// Fetch requests for ALL collections (prefetched data is already in cache)
 	// This ensures the UI reflects the data immediately on load
@@ -125,11 +136,6 @@ export default function CollectionTree() {
 	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID
 	const [newCollectionName, setNewCollectionName] = useState(DEFAULT_COLLECTION_NAME);
 	const [newSubCollectionName, setNewSubCollectionName] = useState(DEFAULT_FOLDER_NAME);
-	const [contextMenu, setContextMenu] = useState<{
-		collectionId: string;
-		x: number;
-		y: number;
-	} | null>(null);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState("");
 	const [renamingRequestId, setRenamingRequestId] = useState<string | null>(null);
@@ -141,24 +147,21 @@ export default function CollectionTree() {
 		id: string;
 		name: string;
 	} | null>(null);
-	const contextMenuRef = useRef<HTMLDivElement>(null);
-
-	// Close context menu on outside click
-	useEffect(() => {
-		const handleClickOutside = (e: MouseEvent) => {
-			if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
-				setContextMenu(null);
-			}
-		};
-
-		if (contextMenu) {
-			document.addEventListener("mousedown", handleClickOutside);
-		}
-
-		return () => {
-			document.removeEventListener("mousedown", handleClickOutside);
-		};
-	}, [contextMenu]);
+	/**
+	 * Report a failed mutation through the same channel the rename path already
+	 * uses - `failSave` puts "Save failed" in the Dock.
+	 *
+	 * Rename was the only handler here that caught anything. Create and delete
+	 * called `mutateAsync` bare, so a rejection was an unhandled promise and
+	 * nothing else: a failed delete closed the confirm dialog, un-dimmed the row
+	 * and left the collection sitting there with no explanation, which reads as
+	 * "the click didn't register" rather than "the delete failed".
+	 */
+	const reportFailure = useCallback(
+		(error: unknown, fallback: string) =>
+			failSave(error instanceof Error ? error.message : fallback),
+		[failSave]
+	);
 
 	const handleRenameCancel = useCallback(() => {
 		setRenamingId(null);
@@ -212,7 +215,12 @@ export default function CollectionTree() {
 	const handleCreateCollection = async () => {
 		if (!newCollectionName.trim() || createCollectionMutation.isPending) return;
 
-		await createCollectionMutation.mutateAsync({ name: newCollectionName.trim() });
+		try {
+			await createCollectionMutation.mutateAsync({ name: newCollectionName.trim() });
+		} catch (error) {
+			reportFailure(error, "Failed to create collection");
+			return; // Keep the form open with the typed name so it can be retried.
+		}
 		setNewCollectionName("");
 		setCreatingCollection(false);
 	};
@@ -225,10 +233,15 @@ export default function CollectionTree() {
 			toggleCollectionExpanded(parentId);
 		}
 
-		await createCollectionMutation.mutateAsync({
-			name: newSubCollectionName.trim(),
-			parentId: parentId,
-		});
+		try {
+			await createCollectionMutation.mutateAsync({
+				name: newSubCollectionName.trim(),
+				parentId: parentId,
+			});
+		} catch (error) {
+			reportFailure(error, "Failed to create folder");
+			return;
+		}
 		handleCancelSubfolder();
 	};
 
@@ -239,12 +252,18 @@ export default function CollectionTree() {
 			toggleCollectionExpanded(collectionId);
 		}
 
-		const request = await createRequestMutation.mutateAsync({
-			collectionId: collectionId,
-			name: DEFAULT_REQUEST_NAME,
-			method: "GET",
-			url: "",
-		});
+		let request: Request | undefined;
+		try {
+			request = await createRequestMutation.mutateAsync({
+				collectionId: collectionId,
+				name: DEFAULT_REQUEST_NAME,
+				method: "GET",
+				url: "",
+			});
+		} catch (error) {
+			reportFailure(error, "Failed to create request");
+			return;
+		}
 
 		if (request) {
 			navigateToRequest(collectionId, request.id);
@@ -254,7 +273,6 @@ export default function CollectionTree() {
 	const handleRenameCollection = (collection: Collection) => {
 		setRenamingId(collection.id);
 		setRenameValue(collection.name);
-		setContextMenu(null);
 	};
 
 	const handleRenameSubmit = async (collectionId: string) => {
@@ -281,30 +299,85 @@ export default function CollectionTree() {
 		setRenameValue("");
 	};
 
-	const handleDuplicateCollection = async (collectionId: string) => {
-		if (createCollectionMutation.isPending) return;
+	/**
+	 * Duplicate a request, contents and all - method, URL, params, headers,
+	 * body, auth and both scripts. Collections deliberately have no equivalent:
+	 * copying one means recursing through nested folders and issuing a create
+	 * per request, which is its own feature. The previous collection "Duplicate"
+	 * only created an empty folder named "(Copy)", which read as a working clone
+	 * and was not one, so it was removed rather than left misleading.
+	 */
+	const handleDuplicateRequest = useCallback(
+		async (request: Request) => {
+			if (createRequestMutation.isPending) return;
+			try {
+				const copy = await createRequestMutation.mutateAsync({
+					collectionId: request.collectionId,
+					name: `${request.name} (Copy)`,
+					description: request.description,
+					method: request.method,
+					url: request.url,
+					params: request.params,
+					headers: request.headers,
+					body: request.body,
+					bodyType: request.bodyType,
+					auth: request.auth,
+					preRequestScript: request.preRequestScript,
+					postRequestScript: request.postRequestScript,
+				});
+				openTab({ type: "request", entityId: copy.id });
+			} catch (error) {
+				reportFailure(error, "Failed to duplicate request");
+			}
+		},
+		[createRequestMutation, openTab, reportFailure]
+	);
 
-		const collection = collections.find((c) => c.id === collectionId);
-		if (!collection) return;
-
-		await createCollectionMutation.mutateAsync({ name: `${collection.name} (Copy)` });
-		setContextMenu(null);
-	};
-
-	const MENU_WIDTH = 180;
-	const MENU_HEIGHT = 260;
-
-	const handleShowContextMenu = (e: React.MouseEvent, collectionId: string) => {
-		e.preventDefault();
-		e.stopPropagation();
-		const x = Math.max(0, Math.min(e.clientX, window.innerWidth - MENU_WIDTH));
-		const y = Math.max(0, Math.min(e.clientY, window.innerHeight - MENU_HEIGHT));
-		setContextMenu({
-			collectionId,
-			x,
-			y,
-		});
-	};
+	/**
+	 * Actions for a collection's "⋯" menu. Defined here, where the handlers and
+	 * state live, and rendered by the shared RowActionsMenu - the same component
+	 * request and environment rows use, so every row menu looks and behaves
+	 * alike. This replaced a hand-rolled fixed-position popover that had to
+	 * compute its own coordinates and close itself on an outside click, and
+	 * which had no keyboard support.
+	 */
+	const getCollectionActions = useCallback(
+		(collection: Collection): RowAction[] => [
+			{
+				label: "Rename",
+				icon: Edit2,
+				onSelect: () => handleRenameCollection(collection),
+			},
+			{
+				label: "Add Request",
+				icon: Plus,
+				onSelect: () => void handleCreateRequest(collection.id),
+			},
+			{
+				label: "Add Folder",
+				icon: FolderPlus,
+				onSelect: () => {
+					if (!expandedCollectionIds.has(collection.id)) {
+						toggleCollectionExpanded(collection.id);
+					}
+					setCreatingSubfolder(collection.id);
+				},
+			},
+			{
+				label: "Delete",
+				icon: Trash2,
+				destructive: true,
+				onSelect: () =>
+					setDeleteConfirm({
+						type: "collection",
+						id: collection.id,
+						name: collection.name,
+					}),
+			},
+		],
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[expandedCollectionIds, toggleCollectionExpanded]
+	);
 
 	const handleDeleteCollection = useCallback(
 		async (collectionId: string) => {
@@ -327,11 +400,19 @@ export default function CollectionTree() {
 			try {
 				await deleteCollectionMutation.mutateAsync(collectionId);
 				closeTabsForEntities(affected);
+			} catch (error) {
+				reportFailure(error, "Failed to delete collection");
 			} finally {
 				setDeletingCollectionId(null);
 			}
 		},
-		[deleteCollectionMutation, closeTabsForEntities, collections, getRequestsByCollection]
+		[
+			deleteCollectionMutation,
+			closeTabsForEntities,
+			collections,
+			getRequestsByCollection,
+			reportFailure,
+		]
 	);
 
 	const handleDeleteRequest = useCallback(
@@ -342,11 +423,13 @@ export default function CollectionTree() {
 				await deleteRequestMutation.mutateAsync(requestId);
 				// Close any open tab pointing at the now-deleted request.
 				closeTabsForEntities([requestId]);
+			} catch (error) {
+				reportFailure(error, "Failed to delete request");
 			} finally {
 				setDeletingRequestId(null);
 			}
 		},
-		[deleteRequestMutation, closeTabsForEntities]
+		[deleteRequestMutation, closeTabsForEntities, reportFailure]
 	);
 
 	const handleRequestDeleteClick = useCallback((requestId: string, requestName: string) => {
@@ -418,11 +501,10 @@ export default function CollectionTree() {
 	}, []);
 
 	return (
-		<div ref={treeRef} className="flex flex-col h-full w-full p-4 space-y-2">
-			{/* Header */}
-			<div className="flex items-center justify-between mb-4">
-				<h2 className="text-sm font-semibold text-foreground">Collections</h2>
-				<div className="flex items-center gap-1">
+		<DrawerPanel
+			title="Collections"
+			actions={
+				<>
 					<TooltipProvider>
 						<Tooltip>
 							<TooltipTrigger asChild>
@@ -432,6 +514,7 @@ export default function CollectionTree() {
 									onClick={handleOpenNewCollectionForm}
 									disabled={createCollectionMutation.isPending}
 									className="h-8 w-8"
+									aria-label="Add collection"
 								>
 									{createCollectionMutation.isPending ? (
 										<Loader2 className="w-4 h-4 animate-spin" />
@@ -450,6 +533,7 @@ export default function CollectionTree() {
 									onClick={handleNewRequestClick}
 									disabled={createRequestMutation.isPending}
 									className="h-8 w-8"
+									aria-label="Add request"
 								>
 									{createRequestMutation.isPending ? (
 										<Loader2 className="w-4 h-4 animate-spin" />
@@ -479,223 +563,169 @@ export default function CollectionTree() {
 							<TooltipContent>Import collection</TooltipContent>
 						</Tooltip>
 					</TooltipProvider>
-				</div>
-			</div>
-
-			{/* New Collection Form */}
-			{creatingCollection && (
-				<div className="flex gap-2 mb-2">
-					<Input
-						type="text"
-						value={newCollectionName}
-						onChange={(e) => setNewCollectionName(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") handleCreateCollection();
-							if (e.key === "Escape") {
+				</>
+			}
+		>
+			<div ref={treeRef} className="flex h-full flex-col">
+				{/* New Collection Form */}
+				{creatingCollection && (
+					<div className="flex gap-2 mb-2">
+						<Input
+							type="text"
+							value={newCollectionName}
+							onChange={(e) => setNewCollectionName(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") handleCreateCollection();
+								if (e.key === "Escape") {
+									setCreatingCollection(false);
+									setNewCollectionName("");
+								}
+							}}
+							placeholder="Collection name"
+							className="flex-1 h-8 text-sm"
+							disabled={createCollectionMutation.isPending}
+							autoFocus
+						/>
+						<Button
+							size="sm"
+							onClick={handleCreateCollection}
+							disabled={createCollectionMutation.isPending}
+						>
+							{createCollectionMutation.isPending && (
+								<Loader2 className="w-3 h-3 animate-spin mr-1" />
+							)}
+							Add
+						</Button>
+						<Button
+							variant="secondary"
+							size="sm"
+							onClick={() => {
 								setCreatingCollection(false);
 								setNewCollectionName("");
-							}
-						}}
-						placeholder="Collection name"
-						className="flex-1 h-8 text-sm"
-						disabled={createCollectionMutation.isPending}
-						autoFocus
-					/>
-					<Button
-						size="sm"
-						onClick={handleCreateCollection}
-						disabled={createCollectionMutation.isPending}
-					>
-						{createCollectionMutation.isPending && (
-							<Loader2 className="w-3 h-3 animate-spin mr-1" />
-						)}
-						Add
-					</Button>
-					<Button
-						variant="secondary"
-						size="sm"
-						onClick={() => {
-							setCreatingCollection(false);
-							setNewCollectionName("");
-						}}
-						disabled={createCollectionMutation.isPending}
-					>
-						Cancel
-					</Button>
-				</div>
-			)}
-
-			{/* Loading state */}
-			{isLoadingCollections && (
-				<div className="space-y-2 py-2">
-					{[1, 2, 3].map((i) => (
-						<div key={i} className="flex items-center gap-2 px-2 py-1.5">
-							<Skeleton className="h-4 w-4 rounded-md" />
-							<Skeleton className="h-4 w-5 flex-shrink-0 rounded-md" />
-							<Skeleton className="h-4 flex-1 rounded-md" />
-						</div>
-					))}
-				</div>
-			)}
-
-			{/* Zero collections empty state */}
-			{!isLoadingCollections && collections.length === 0 && !creatingCollection && (
-				<div className="text-center py-8 text-sm text-muted-foreground">
-					<Folder className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-					<p className="font-medium text-foreground">No collections yet</p>
-					<p className="mt-1 text-muted-foreground">
-						Collections help you group and organize your requests.
-					</p>
-					<Button
-						variant="link"
-						onClick={handleOpenNewCollectionForm}
-						className="mt-3 text-primary"
-					>
-						Add your first collection
-					</Button>
-				</div>
-			)}
-
-			{/* Root-level collections (no parentId) - sorted by order, scrollable */}
-			{!isLoadingCollections && rootCollections.length > 0 && (
-				<ScrollArea className="flex-1 min-h-0 -mx-1 px-1">
-					<div className="space-y-0.5 pr-2">
-						{rootCollections.map((collection) => (
-							<CollectionItem
-								key={collection.id}
-								collection={collection}
-								allCollections={collections}
-								depth={0}
-								expandedCollectionIds={expandedCollectionIds}
-								selectedCollectionId={selectedCollectionId}
-								selectedRequestId={selectedRequestId}
-								renamingId={renamingId}
-								renameValue={renameValue}
-								deletingCollectionId={deletingCollectionId}
-								deletingRequestId={deletingRequestId}
-								creatingSubfolder={creatingSubfolder}
-								newSubCollectionName={newSubCollectionName}
-								isCreatingSubfolder={createCollectionMutation.isPending}
-								getRequestsByCollection={getRequestsByCollection}
-								onCollectionClick={handleCollectionClick}
-								onCollectionToggle={handleCollectionToggle}
-								onRequestClick={handleRequestClick}
-								onShowContextMenu={handleShowContextMenu}
-								onRenameChange={setRenameValue}
-								onRenameSubmit={handleRenameSubmit}
-								onRenameCancel={handleRenameCancel}
-								onStartRename={handleRenameCollection}
-								onDeleteRequest={handleDeleteRequest}
-								onSubCollectionNameChange={setNewSubCollectionName}
-								onCreateSubfolder={handleCreateSubfolder}
-								onCancelSubfolder={handleCancelSubfolder}
-								renamingRequestId={renamingRequestId}
-								renameRequestValue={renameRequestValue}
-								onRequestRenameChange={setRenameRequestValue}
-								onRequestRenameSubmit={handleRequestRenameSubmit}
-								onRequestRenameCancel={handleRequestRenameCancel}
-								onStartRequestRename={handleStartRequestRename}
-								onRequestDeleteClick={handleRequestDeleteClick}
-							/>
-						))}
+							}}
+							disabled={createCollectionMutation.isPending}
+						>
+							Cancel
+						</Button>
 					</div>
-				</ScrollArea>
-			)}
+				)}
 
-			{/* Context Menu */}
-			{contextMenu && (
-				<div
-					ref={contextMenuRef}
-					className="fixed bg-popover border rounded-lg shadow-md py-1 z-50 min-w-[180px]"
-					style={{
-						top: contextMenu.y,
-						left: contextMenu.x,
-					}}
-				>
-					<button
-						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
-						onClick={() => {
-							const collection = collections.find(
-								(c) => c.id === contextMenu.collectionId
-							);
-							if (collection) handleRenameCollection(collection);
-						}}
-					>
-						<Edit2 className="w-4 h-4 mr-2 flex-shrink-0" />
-						<span>Rename</span>
-					</button>
-					<button
-						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
-						onClick={() => handleDuplicateCollection(contextMenu.collectionId)}
-					>
-						<Copy className="w-4 h-4 mr-2 flex-shrink-0" />
-						<span>Duplicate</span>
-					</button>
-					<button
-						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
-						onClick={async (e) => {
-							e.stopPropagation();
-							const collectionId = contextMenu.collectionId;
-							setContextMenu(null);
-							await handleCreateRequest(collectionId);
-						}}
-					>
-						<Plus className="w-4 h-4 mr-2 flex-shrink-0" />
-						<span>Add Request</span>
-					</button>
-					<button
-						className="flex items-center w-full px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
-						onClick={() => {
-							const parentId = contextMenu.collectionId;
-							setContextMenu(null);
-							if (!expandedCollectionIds.has(parentId)) {
-								toggleCollectionExpanded(parentId);
+				{/* Loading state */}
+				{isLoadingCollections && <ListSkeleton rows={3} leading badge />}
+
+				{/* Load failed - not the same as having none.
+				    Gated on there being nothing cached: a background refetch can
+				    fail while the tree still holds good data, and replacing a
+				    working tree with an error pane would lose more than it
+				    tells. */}
+				{!isLoadingCollections && collectionsFailed && collections.length === 0 && (
+					<ErrorState
+						title="Couldn't load collections"
+						detail={
+							collectionsError instanceof Error ? collectionsError.message : undefined
+						}
+						onRetry={() => void refetchCollections()}
+					/>
+				)}
+
+				{/* Zero collections empty state */}
+				{!isLoadingCollections &&
+					!collectionsFailed &&
+					collections.length === 0 &&
+					!creatingCollection && (
+						<EmptyState
+							icon={Folder}
+							title="No collections yet"
+							description="Collections group related requests - make one to get started."
+							action={
+								<Button
+									variant="link"
+									onClick={handleOpenNewCollectionForm}
+									className="text-primary"
+								>
+									Add your first collection
+								</Button>
 							}
-							setCreatingSubfolder(parentId);
-						}}
-					>
-						<FolderPlus className="w-4 h-4 mr-2 flex-shrink-0" />
-						<span>Add Folder</span>
-					</button>
-					<Separator className="my-1" />
-					<button
-						className="flex items-center w-full px-2 py-1.5 text-sm text-destructive hover:bg-accent cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-						onClick={() => {
-							const collection = collections.find(
-								(c) => c.id === contextMenu.collectionId
-							);
-							setDeleteConfirm({
-								type: "collection",
-								id: contextMenu.collectionId,
-								name: collection?.name ?? "Collection",
-							});
-							setContextMenu(null);
-						}}
-					>
-						<Trash2 className="w-4 h-4 mr-2 flex-shrink-0" />
-						<span>Delete</span>
-					</button>
-				</div>
-			)}
+						/>
+					)}
 
-			<DeleteConfirmDialog
-				open={!!deleteConfirm}
-				onOpenChange={(open) => !open && setDeleteConfirm(null)}
-				title={
-					deleteConfirm?.type === "collection" ? "Delete collection?" : "Delete request?"
-				}
-				description={
-					deleteConfirm?.type === "collection"
-						? `"${deleteConfirm?.name}" and all its requests will be permanently removed. This cannot be undone.`
-						: `"${deleteConfirm?.name}" will be permanently removed. This cannot be undone.`
-				}
-				onConfirm={handleConfirmDelete}
-				isDeleting={
-					(deleteConfirm?.type === "collection" &&
-						deletingCollectionId === deleteConfirm?.id) ||
-					(deleteConfirm?.type === "request" && deletingRequestId === deleteConfirm?.id)
-				}
-			/>
-		</div>
+				{/* Root-level collections (no parentId) - sorted by order, scrollable.
+			    role="tree" + roving tabindex: the whole tree is one tab stop and
+			    arrow keys move between rows (see useRovingTreeFocus). */}
+				{!isLoadingCollections && rootCollections.length > 0 && (
+					<div className="flex-1 min-h-0">
+						<div
+							role="tree"
+							aria-label="Collections"
+							onKeyDown={treeFocus.onKeyDown}
+							onFocus={treeFocus.onFocus}
+							className="space-y-0.5"
+						>
+							{rootCollections.map((collection) => (
+								<CollectionItem
+									key={collection.id}
+									collection={collection}
+									allCollections={collections}
+									depth={0}
+									expandedCollectionIds={expandedCollectionIds}
+									selectedCollectionId={selectedCollectionId}
+									selectedRequestId={selectedRequestId}
+									renamingId={renamingId}
+									renameValue={renameValue}
+									deletingCollectionId={deletingCollectionId}
+									deletingRequestId={deletingRequestId}
+									creatingSubfolder={creatingSubfolder}
+									newSubCollectionName={newSubCollectionName}
+									isCreatingSubfolder={createCollectionMutation.isPending}
+									getRequestsByCollection={getRequestsByCollection}
+									onCollectionClick={handleCollectionClick}
+									onCollectionToggle={handleCollectionToggle}
+									onRequestClick={handleRequestClick}
+									getCollectionActions={getCollectionActions}
+									onRenameChange={setRenameValue}
+									onRenameSubmit={handleRenameSubmit}
+									onRenameCancel={handleRenameCancel}
+									onStartRename={handleRenameCollection}
+									onDeleteRequest={handleDeleteRequest}
+									onSubCollectionNameChange={setNewSubCollectionName}
+									onCreateSubfolder={handleCreateSubfolder}
+									onCancelSubfolder={handleCancelSubfolder}
+									renamingRequestId={renamingRequestId}
+									renameRequestValue={renameRequestValue}
+									onRequestRenameChange={setRenameRequestValue}
+									onRequestRenameSubmit={handleRequestRenameSubmit}
+									onRequestRenameCancel={handleRequestRenameCancel}
+									onStartRequestRename={handleStartRequestRename}
+									onRequestDeleteClick={handleRequestDeleteClick}
+									onDuplicateRequest={handleDuplicateRequest}
+								/>
+							))}
+						</div>
+					</div>
+				)}
+
+				<DeleteConfirmDialog
+					open={!!deleteConfirm}
+					onOpenChange={(open) => !open && setDeleteConfirm(null)}
+					title={
+						deleteConfirm?.type === "collection"
+							? "Delete collection?"
+							: "Delete request?"
+					}
+					description={
+						deleteConfirm?.type === "collection"
+							? `"${deleteConfirm?.name}" and all its requests will be permanently removed. This cannot be undone.`
+							: `"${deleteConfirm?.name}" will be permanently removed. This cannot be undone.`
+					}
+					onConfirm={handleConfirmDelete}
+					isDeleting={
+						(deleteConfirm?.type === "collection" &&
+							deletingCollectionId === deleteConfirm?.id) ||
+						(deleteConfirm?.type === "request" &&
+							deletingRequestId === deleteConfirm?.id)
+					}
+				/>
+			</div>
+		</DrawerPanel>
 	);
 }

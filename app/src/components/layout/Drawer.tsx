@@ -6,60 +6,52 @@
  */
 
 import { useLayoutStore } from "@/stores";
-import { DEFAULT_DRAWER_WIDTHS } from "@/constants/layout";
-import { useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
-import { ScrollArea } from "@/components/ui";
+import { PanelResizeHandle } from "./PanelResizeHandle";
+import { DEFAULT_DRAWER_WIDTH } from "@/constants/layout";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
+import { SettingsCategoryTree } from "@/modules/settings";
 
 export function Drawer() {
-	const { drawerOpen, drawerView, drawerWidths, setDrawerWidth } = useLayoutStore();
-	const { data: collections = [] } = useCollectionsQuery();
-	const { data: environments = [] } = useEnvironmentsQuery();
+	const { drawerOpen, drawerView, drawerWidth, setDrawerWidth } = useLayoutStore();
 
 	if (!drawerOpen) return null;
 
-	const width = drawerWidths[drawerView];
-
-	const startResize = (e: React.PointerEvent) => {
-		e.currentTarget.setPointerCapture(e.pointerId);
-		const startX = e.clientX;
-		const startWidth = drawerWidths[drawerView];
-
-		const onMove = (moveEvent: PointerEvent) => {
-			setDrawerWidth(drawerView, startWidth + moveEvent.clientX - startX);
-		};
-		const onUp = () => {
-			window.removeEventListener("pointermove", onMove);
-			window.removeEventListener("pointerup", onUp);
-		};
-		window.addEventListener("pointermove", onMove);
-		window.addEventListener("pointerup", onUp);
-	};
+	const width = drawerWidth;
 
 	return (
-		<div className="relative flex shrink-0 bg-panel" style={{ width }}>
-			<div className="flex-1 overflow-hidden flex flex-col min-w-0">
+		/* <aside>, so the sidebar is a landmark a screen reader can jump to
+		   instead of an anonymous div. Labelled by the active view because the
+		   drawer hosts four different panels - "Complementary" alone would not
+		   say which one is showing. */
+		<aside
+			className="relative flex shrink-0 bg-panel"
+			style={{ width }}
+			aria-label={`${drawerView.charAt(0).toUpperCase()}${drawerView.slice(1)} sidebar`}
+		>
+			<div className="panel-clip flex-1 overflow-hidden flex flex-col min-w-0">
+				{/* Each view supplies its own DrawerPanel, which owns the header and
+				    the scroll region - the Drawer no longer wraps some views in a
+				    ScrollArea and leaves others to manage their own.
+
+				    Views fetch their own data too. The Drawer used to query
+				    collections and environments purely to hand them to the
+				    Variables view, which meant the loading state was lost at the
+				    boundary and an in-flight query rendered as an empty tree. */}
 				{drawerView === "collections" && <CollectionTree />}
 				{drawerView === "history" && <HistoryList />}
-				{drawerView === "variables" && (
-					<ScrollArea className="h-full w-full">
-						<VariablesCategoryTree
-							collections={collections}
-							environments={environments}
-						/>
-					</ScrollArea>
-				)}
+				{drawerView === "variables" && <VariablesCategoryTree />}
+				{drawerView === "settings" && <SettingsCategoryTree />}
 			</div>
 
-			<div
-				className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-accent/20"
-				onPointerDown={startResize}
-				onDoubleClick={() => setDrawerWidth(drawerView, DEFAULT_DRAWER_WIDTHS[drawerView])}
-			>
-				<div className="absolute right-0 top-0 bottom-0 w-px bg-border" />
-			</div>
-		</div>
+			<PanelResizeHandle
+				side="right"
+				width={drawerWidth}
+				setWidth={setDrawerWidth}
+				defaultWidth={DEFAULT_DRAWER_WIDTH}
+				label="Resize sidebar"
+			/>
+		</aside>
 	);
 }

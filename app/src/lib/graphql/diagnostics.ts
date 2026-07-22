@@ -6,7 +6,7 @@
  */
 
 /**
- * Pure GraphQL diagnostics — monaco-free so it is unit-testable in node.
+ * Pure GraphQL diagnostics - monaco-free so it is unit-testable in node.
  * Positions are 1-based (Monaco convention); graphql-language-service emits
  * 0-based LSP ranges, converted here.
  */

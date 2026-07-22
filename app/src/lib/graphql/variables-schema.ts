@@ -36,7 +36,7 @@ export function buildVariablesJsonSchema(
 			return getVariablesJSONSchema(facts.variableToType);
 		}
 	} catch {
-		// Unparseable / invalid query — no variables schema to offer.
+		// Unparseable / invalid query - no variables schema to offer.
 	}
 	return null;
 }

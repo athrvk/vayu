@@ -11,7 +11,7 @@ import type { OAuth2Config } from "@/types";
  * Compute the token cache key for an OAuth 2.0 config.
  *
  * MUST stay byte-identical with the engine's vayu::http::oauth::cache_key
- * (engine/src/http/oauth_client.cpp) — both sides key the token cache by this
+ * (engine/src/http/oauth_client.cpp) - both sides key the token cache by this
  * string, and the shared test vectors in cache-key.test.ts / oauth_client_test.cpp
  * pin the format:
  *

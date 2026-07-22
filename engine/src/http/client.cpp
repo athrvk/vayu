@@ -82,7 +82,7 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
  *    "404 Object Not Found" or GitHub's "422 Unprocessable Entity";
  *  - subsequent "Key: Value" header lines.
  *
- * HTTP/2 and HTTP/3 don't carry reason phrases on the wire — the status
+ * HTTP/2 and HTTP/3 don't carry reason phrases on the wire - the status
  * line is just "HTTP/2 200". In that case status_text is cleared and the
  * caller falls back to its code→phrase lookup.
  *
@@ -112,7 +112,7 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
             if (second_space != std::string::npos && second_space + 1 < line.size ()) {
                 response->status_text = line.substr (second_space + 1);
             } else {
-                // No reason phrase (HTTP/2+) — let the caller fall back to a lookup.
+                // No reason phrase (HTTP/2+) - let the caller fall back to a lookup.
                 response->status_text.clear ();
             }
         }
@@ -363,7 +363,7 @@ Result<Response> Client::send (const Request& request) {
     // Perform the request. Stamp submission just before perform so that
     // perceived latency excludes our own setup cost above but covers everything
     // libcurl does on this thread. For single-shot sends there is no generator
-    // queue, so queue_wait_ms will be near zero — that's the correct contract.
+    // queue, so queue_wait_ms will be near zero - that's the correct contract.
     auto submitted_at = std::chrono::steady_clock::now ();
     CURLcode res = curl_easy_perform (curl);
     auto completion = std::chrono::steady_clock::now ();
