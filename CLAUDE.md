@@ -157,9 +157,22 @@ cd app && pnpm format:check        # Prettier
 - **No bare `rounded`** - it ignores the Roundedness setting. → `radius-token.test.tsx`
 - **Adding an accent scheme:** `constants/color-schemes.ts` + `index.css`, both
   themes, nothing else. → `color-schemes.test.ts`
+- **A `Badge` that paints its own `bg-` must be `variant="chip"`.** Every other
+  variant pairs `bg-x` with `hover:bg-x/80`, and `cn()` (tailwind-merge) replaces
+  `bg-*` but *not* `hover:bg-*` - so the caller's fill won at rest and the
+  variant's hover won on hover. Status chips turned the accent colour under the
+  pointer. → `badge-hover.test.tsx`
+- **No em-dashes anywhere in the repo.** Use ` - `.
 - **`docs/design-system.md` values are checked against `index.css`**
   → `design-system-doc.test.ts`. Prose is not - if you change a value, read the
   sentence around it.
+
+**"Written but never read" is this codebase's most repeated defect** - found six
+times: state one layer records and no layer displays (SSE errors, save-failure
+reasons, an import phase), and config one branch defines and another re-derives
+inline (`SCOPE_CONFIG.global`). Store-level tests never catch these; they are
+wiring bugs. When you add a field, grep for a reader before assuming there is
+one.
 
 **Before measuring or changing a class, `rg` for it in the components.** Twice a
 conclusion was drawn about a combination the app never renders (`bg-border-strong`
@@ -173,6 +186,15 @@ that file reflows ~480 lines. Format only files you touched that were clean befo
 **Mutation-check behavioural tests** (revert the fix, confirm failure, restore).
 Source-scanning guards must assert they scanned something non-empty - one passed
 for weeks reading an empty string, since vitest stubs CSS imports to `""`.
+
+**A source scan cannot see a class that arrives in a variable.** The badge-hover
+guard scanned for `<Badge className="bg-…">` and missed both real instances,
+because each got its background from a `statusColor` / `config.tint` binding;
+reverting the fix left the scan green. For class-list defects, render the
+component and assert on `element.className`. Derive a guard's rule from the
+component (e.g. which variants actually carry a `hover:bg-*`) rather than
+hardcoding it - a hardcoded version flagged `variant="outline"`, which owns no
+background and cannot collide.
 
 ## Engine HTTP API
 
@@ -188,6 +210,17 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/health` | Health check |
 
 See `docs/engine/api-reference.md` for full reference.
+
+Two gaps worth knowing before you design around them:
+
+- **There is no `GET /requests/:id`** - only `GET /requests?collectionId=`. A
+  single request is found by fetching collection lists and scanning them
+  (`useRequestQuery`). Tabs are persisted, so that path runs on every cold
+  start; it must fetch, not just read cache.
+- **`followRedirects` / `maxRedirects` / `verifySSL` are accepted by the engine**
+  (`follow_redirects` defaults to **true**) but nothing in the app sends them, so
+  3xx responses are followed and never reach the response pane. `304` is the
+  only observable 3xx.
 
 ## Request composition (known duplication - do not add a third copy)
 
