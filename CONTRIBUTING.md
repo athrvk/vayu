@@ -276,6 +276,12 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 | `perf` | Performance improvement |
 | `test` | Adding tests |
 | `chore` | Maintenance tasks |
+| `ci` | CI workflows and automation |
+| `build` | Build scripts, tooling, dependencies |
+
+These are the types `.github/workflows/pr-title.yml` accepts. A pull request
+title outside the list fails that check, so add a row here first if you need a
+new one.
 
 ### Examples
 

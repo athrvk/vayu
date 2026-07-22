@@ -1,0 +1,33 @@
+name: Labeler
+
+# `pull_request_target`, unlike `pr-title.yml` next door, and the difference is
+# deliberate. Applying a label needs `pull-requests: write`, and a fork pull
+# request on the plain `pull_request` trigger gets a read-only token no matter
+# what this file requests, so the labeller would silently do nothing for exactly
+# the contributors it is most useful for.
+#
+# `pull_request_target` runs with a real token, which is only safe because this
+# job never checks out the pull request's code. It reads the changed-file list
+# from the API and applies labels. Do not add `actions/checkout` here: checking
+# out the head of an untrusted fork under this trigger is the well-known way to
+# hand a write-scoped token to someone else's code.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    name: Apply path labels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/labeler@v7
+        with:
+          # Re-evaluate on every push rather than only adding. A pull request
+          # that stops touching the engine should stop being labelled `engine`.
+          # Only labels named in .github/labeler.yml are affected, so `bug`,
+          # `enhancement` and the rest stay under human control.
+          sync-labels: true
