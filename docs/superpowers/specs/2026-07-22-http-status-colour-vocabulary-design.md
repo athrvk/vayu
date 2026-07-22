@@ -78,6 +78,45 @@ Adopt the chart's mapping as canonical, extended with an explicit
 | `server-error` | 5xx | `status-error` |
 | `no-response` | `0` | `status-no-response` *(new)* |
 
+### What is unified, and what deliberately is not
+
+**The classification is unified. The palettes are not.** This distinction is the
+whole design and it is easy to misread, so it is stated before anything else.
+
+The dashboard chart does not paint from `--status-*` at all. `uplotTheme.ts`
+resolves its roles to the *semantic* family — `success → --success`,
+`warning → --warning`, `destructive → --destructive`,
+`categorical → --chart-3` — and those hold different values from the
+`--status-*` set (`--warning` is `38 92% 50%`; `--status-warning` will be
+`38 92% 36%`).
+
+That split is correct and stays. A chart series is a translucent area fill on a
+plot background; a badge is a solid chip under a white label; a tile is a 10%
+wash. They are different optical problems and already have different tiers for
+that reason.
+
+So what every site comes to share is **`httpStatusClass(code)`** — the decision
+about *which class a code belongs to*, and therefore which hue family it gets.
+Each tier then resolves that class through its own palette. Concretely:
+
+| | resolves through |
+|---|---|
+| DOM surfaces (badge, tiles, counts) | `STATUS_CLASS_STYLE` → `--status-*` |
+| uPlot series | `ROLE_TOKEN` → `--success` / `--warning` / `--destructive` / `--chart-3` |
+
+The consequence to accept openly: **`--status-redirect` and `--chart-3` are two
+tokens for one concept.** They are the same hue (258) by construction, and
+`--status-redirect-text` in dark is deliberately byte-identical to `--chart-3`
+dark, but they are not one source of truth and will not track each other
+automatically. A comment on each pointing at the other is the mitigation, plus
+the separation guard in (3).
+
+The alternative — pointing the chart's roles at `--status-*` — would be a true
+single source, but it recolours the dashboard: dark-mode 3xx would drop from a
+bright 72% violet to a muted 62% one, and 4xx from 50% to 36%. That is a visible
+change to a surface nobody has screenshotted, for a consistency nobody can see.
+Rejected.
+
 **`status-warning` is not a complete triad today.** Only
 `--status-warning-fill` exists — there is no `--status-warning` indicator and no
 `--status-warning-text`. That is why `OverviewTab` reaches for raw `yellow-700`
@@ -207,8 +246,10 @@ icon bar for that consistency. Recording it because it is surprising, not
 proposing to change it — that is a separate decision with a wide blast radius.
 
 `--status-redirect-text` dark is `258 78% 72%`, byte-identical to `--chart-3`
-dark — deliberate, so the chart's violet and the response pane's violet are the
-same colour and not merely the same hue family.
+dark. That is deliberate but narrow: it makes the *dark text* tier land exactly
+on the chart's violet. The other tiers do not coincide — the badge fill is
+`258 60% 46%` and the chart band is `--chart-3` — and they are not meant to. What
+is shared is hue 258, per the tier split above.
 
 Resulting five-class separation at the indicator tier: worst pair **0.144**
 (client-error vs no-response), against the badge mapping's current **0.000**.
@@ -249,6 +290,21 @@ export const STATUS_CLASS_STYLE: Record<HttpStatusClass, {
 export const STATUS_CLASS_LABEL: Record<HttpStatusClass, string>;
 ```
 
+**Every input needs a stated answer, including the ones nobody thinks about.**
+The current inline branches all end in a bare `else` that funnels *everything*
+unmatched into the server-error colour — so `httpStatusClass(101)` would today
+paint a `101 Switching Protocols` as red. The rules:
+
+| input | class | why |
+|---|---|---|
+| `200`–`299` | `success` | |
+| `300`–`399` | `redirect` | |
+| `400`–`499` | `client-error` | |
+| `500`–`599` | `server-error` | |
+| `100`–`199` | `redirect` | Not a final answer — something else follows, which is the same thing a 3xx says. Grouping them is coherent; painting a `101` red is not. |
+| `0` | `no-response` | |
+| `NaN`, negative, `≥ 600` | `no-response` | We do not have a valid response. Never falls through to an error colour. |
+
 **Every value is a complete literal string, not composed from a stem.** This
 matters for two independent reasons.
 
@@ -272,7 +328,7 @@ word, rather than mis-assemble a string.
 |---|---|
 | `ResponseViewer/ResponseHeader.tsx` | Use the shared badge (below). |
 | `shared/response-viewer/UnifiedResponseViewer.tsx` | Use the shared badge; regains the `status === 0` → `ERR` case it lost. |
-| `dashboard/…/StatusCodesOverTimeChart.tsx` | `categorical` → an explicit `redirect` role; `muted` → `no-response`. Behaviour unchanged, name now honest. |
+| `dashboard/…/StatusCodesOverTimeChart.tsx` | Routes its series through `httpStatusClass` instead of hardcoded labels. **Keeps its own palette** (`ROLE_TOKEN` → `--success` / `--chart-3` / `--warning` / `--destructive` / `--muted-foreground`), so no pixel changes. Only the classification is shared. |
 | `history/…/OverviewTab.tsx` | Raw palette → `STATUS_CLASS_STYLE[c].tint` + `.text`. Gains a distinct no-response tile, so a 5xx and a failed connection stop looking identical. |
 | `dashboard/…/RequestResponseView.tsx` | `status-running-text` → `status-redirect-text`; `warning-text` → `status-warning-text`. |
 
@@ -298,9 +354,11 @@ different axis and folding it in would overreach.
 3. **Separation assertion** — the five indicator values stay ≥0.10 apart in
    OKLab, so a future tweak to one cannot silently collide with another. Current
    worst pair is warning/no-response at 0.144.
-4. **`status === 0` is not a server error** — a plain unit test on
-   `httpStatusClass`, since that is the one case the duplicated badge got wrong
-   and the tiles still conflate.
+4. **Every input has an answer** — a table-driven unit test on `httpStatusClass`
+   pinning all seven rows above, including `101`, `NaN`, `-1` and `600`. The two
+   that matter: `0` is not a server error (the case the duplicated badge got
+   wrong and the tiles still conflate), and nothing falls through to an error
+   colour by default.
 5. **Literal-class assertion** — `STATUS_CLASS_STYLE` contains no template
    literals or concatenation, so nobody can refactor it into something Tailwind
    cannot see. Scans the module source and asserts it read a non-empty file.
