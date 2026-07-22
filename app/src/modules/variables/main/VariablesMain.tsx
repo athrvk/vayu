@@ -16,7 +16,10 @@
 import { useVariablesStore } from "@/modules/variables/variables-store";
 import { useCollectionsQuery, useEnvironmentsQuery, useGlobalsQuery } from "@/queries";
 import VariableTableEditor from "./VariableTableEditor";
-import { Variable } from "lucide-react";
+// `Braces` is the app-wide mark for variables - see the note in
+// `components/layout/Dock.tsx`. It was `Variable` here, `Database` on the
+// welcome Launcher and `Zap` in the Dock: three glyphs for one concept.
+import { Braces } from "lucide-react";
 import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
 
 export default function VariablesMain() {
@@ -47,7 +50,7 @@ export default function VariablesMain() {
 	if (!selectedCategory) {
 		return (
 			<EmptyState
-				icon={Variable}
+				icon={Braces}
 				title="No category selected"
 				description="Pick a category from the sidebar to manage its variables."
 			/>

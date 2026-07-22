@@ -14,7 +14,9 @@
  */
 
 import { useRef } from "react";
-import { X, Plus, Folder, Zap, Clock, Settings } from "lucide-react";
+// `Zap` stays: here it is the load-test dashboard's icon, which is what the
+// bolt means throughout the app. `Braces` is the variables mark (see `Dock.tsx`).
+import { X, Plus, Folder, Zap, Braces, Clock, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTabsStore, type Tab } from "@/stores";
 import { useRequestQuery, useCollectionsQuery } from "@/queries";
@@ -55,6 +57,12 @@ function TabIcon({ type }: { type: Tab["type"] }) {
 			return <Zap className="w-3 h-3 shrink-0" />;
 		case "run":
 			return <Clock className="w-3 h-3 shrink-0" />;
+		case "variables":
+			// The Dock and the welcome Launcher both open this view from a
+			// `Braces` control; the tab it opened carried no icon at all, so the
+			// glyph the user pressed vanished on arrival. `Braces` is the app's
+			// variables mark - see the note in `Dock.tsx`.
+			return <Braces className="w-3 h-3 shrink-0" />;
 		case "settings":
 			return <Settings className="w-3 h-3 shrink-0" />;
 		default:

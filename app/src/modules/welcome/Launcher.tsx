@@ -13,7 +13,10 @@
  * is open and the logo is in the title bar.
  */
 
-import { Download, Plus, Database, History } from "lucide-react";
+// `Braces` is the app-wide mark for variables - see the note in
+// `components/layout/Dock.tsx`. It was `Database` here, which reads as stored
+// records rather than `{{name}}` substitutions.
+import { Download, Plus, Braces, History } from "lucide-react";
 import type { Run } from "@/types";
 import { ActionTile } from "./components/ActionTile";
 import { FooterLinks } from "./components/FooterLinks";
@@ -50,7 +53,7 @@ export function Launcher({
 					<ActionTile icon={Plus} label="New request" onClick={onNewRequest} />
 					<ActionTile icon={Download} label="Import" onClick={onImport} />
 					<ActionTile icon={History} label="History" onClick={onHistory} />
-					<ActionTile icon={Database} label="Variables" onClick={onVariables} />
+					<ActionTile icon={Braces} label="Variables" onClick={onVariables} />
 				</div>
 			</section>
 

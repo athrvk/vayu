@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { FolderOpen, Clock, Zap, PanelRight, Settings } from "lucide-react";
+import { FolderOpen, Clock, Braces, PanelRight, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
 import { useLayoutStore, useEngineStore, useSaveStore, type DrawerView } from "@/stores";
@@ -33,7 +33,35 @@ const DRAWER_BUTTONS: DrawerButton[] = [
 	},
 	{
 		view: "variables",
-		icon: <Zap className="w-4 h-4" />,
+		/*
+		 * `Braces`, not `Zap`. The lightning bolt is this app's load-test mark -
+		 * it is the Load Test button in the URL bar, the dashboard tab icon, and
+		 * the badge on a load run in History. Sitting in the Dock it said "run",
+		 * which is the one thing this view does not do.
+		 *
+		 * `{}` is the strongest reading of "variables" here because it *is* the
+		 * syntax: every variable in Vayu is written `{{name}}`, in the URL bar,
+		 * in headers, in bodies, in scripts. The user has already learned the
+		 * glyph before they ever look at the Dock.
+		 *
+		 * Rejected: `Variable` (lucide's `(x)`) is maths notation, not ours, and
+		 * its centre crossing packs a 6-unit X into a 24-unit box - at 16px that
+		 * is roughly 4px of detail, and it gives the icon the same
+		 * round-with-something-inside silhouette as Clock and Settings.
+		 * `SquareCode` (`<>` in a box) reads "script", and Vayu has real pre/post
+		 * scripts to confuse it with. `Parentheses` is `Variable` minus the X:
+		 * unreadable on its own, and it says "call", not "value".
+		 *
+		 * Distinctness in the strip: Braces is two thin open curves with a gap
+		 * down the middle, the only glyph of the four that is not a closed or
+		 * centre-filled shape - Collections is a solid horizontal trapezoid,
+		 * History a filled circle, Settings a round cog.
+		 *
+		 * Kept in step with `variables/main/VariablesMain.tsx` (empty state) and
+		 * `welcome/Launcher.tsx` (the Variables tile), which drew the same
+		 * concept as `Variable` and `Database` respectively.
+		 */
+		icon: <Braces className="w-4 h-4" />,
 		label: "Variables",
 		shortcut: formatChord({ mod: true, shift: true, key: "U" }),
 	},
