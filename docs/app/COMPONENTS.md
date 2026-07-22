@@ -129,7 +129,7 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 | `components/RequestBuilderLayout.tsx` | Resizable vertical layout composing UrlBar / RequestTabs / ResponseViewer |
 | `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` - method dropdown, URL input (variable highlighting), Send + Load Test buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
 | `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel`, `SettingsPanel`. `AuthPanel` supports None / Bearer / Basic / API Key / **OAuth 2.0** (via the shared [`OAuth2Form`](#shared-oauth-20-form)). `SettingsPanel` holds the per-request redirect policy (**Follow redirects** + **Maximum redirects**); the tab strip badges it via `isRedirectPolicyNonDefault` (in `utils/request-state`) only when the request departs from the engine defaults |
-| `components/ResponseViewer/` | `index`, `ResponseHeader`, `ResponseHeadersTab`, `ResponseCookies`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` |
+| `components/ResponseViewer/` | `index`, `ResponseCookies`, `ResponseTimingTab`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` (status bar, actions and the Headers tab now come from `shared/response-viewer/`) |
 | `components/RequestDescription.tsx` | Editable request description |
 | `components/LoadTestConfigDialog.tsx` | Load-test configuration dialog (mode, duration, RPS, concurrency, …). Renders `OAuth2LoadTestGuard` when the request's effective auth is OAuth 2.0 |
 | `components/OAuth2LoadTestGuard.tsx`, `components/oauth2-load-test-coverage.ts` | Warns when a duration-based load test would outlive its access token (the engine acquires a token once per run, no mid-run refresh): offers **Refresh** when a fresh token would cover the run, or **blocks Start** (with a "Start anyway" override) when even a fresh token can't. The pure coverage decision lives in `oauth2-load-test-coverage.ts` |
@@ -257,11 +257,32 @@ Design rationale: `app/src/modules/welcome/README.md`
 
 Response-rendering primitives reused outside the request builder (e.g. history detail):
 
-- `UnifiedResponseViewer.tsx` - top-level response view
+- `UnifiedResponseViewer.tsx` - top-level response view for stored runs
 - `ResponseBody.tsx` - body rendering (JSON/text/HTML/XML)
-- `HeadersViewer.tsx` - response headers
+- `HeadersViewer.tsx` - response headers (plus `CompactHeadersViewer`)
+- `StatusCodeBadge.tsx` - the status chip
+- `ResponseStatusBar.tsx` - status chip + elapsed time + payload size
+- `ResponseActions.tsx` - the copy/download pair
+- `ResponseHeadersPanel.tsx` - the Headers tab body
+- `tab-trigger.ts` - `RESPONSE_TAB_TRIGGER`, the underline-on-active class
 
-> Note: the request builder has its own richer `components/ResponseViewer/` (with console output, test results, cookies, raw request/response, client-error view). The `shared/response-viewer/` set is the lighter, reusable one.
+> **Two shells, shared parts.** The request builder has its own richer
+> `components/ResponseViewer/` (console output, test results, cookies, timing,
+> raw request/response, client-error view) fed from live context;
+> `UnifiedResponseViewer` shows three tabs from a stored run and adds a compact
+> mode. They are **not** merged, and should not be: seven tabs against three,
+> live context against props, and three different empty/loading/error states
+> would become a component driven by flags.
+>
+> What *was* duplicated is extracted above. Before this, the status bar existed
+> twice class-for-class, the copy/download pair twice (already drifted three
+> ways), the Headers tab twice, and the tab-trigger string ten times - which is
+> why the same invisible-divider fix had to be applied to both, and why
+> `StatusCodeBadge`'s `status === 0` branch was once lost from one copy and
+> rendered a literal `0`.
+>
+> Adding a genuinely shared piece: put it here and consume it from both. Adding
+> something only one shell needs: leave it in that shell.
 
 ## Shared OAuth 2.0 Form (`components/shared/OAuth2Form/`)
 

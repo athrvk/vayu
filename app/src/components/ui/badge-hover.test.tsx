@@ -37,7 +37,7 @@ import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cn } from "@/lib/utils";
 import { badgeVariants } from "./badge";
-import ResponseHeader from "@/modules/request-builder/components/ResponseViewer/ResponseHeader";
+import { ResponseStatusBar } from "@/components/shared/response-viewer";
 
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -85,7 +85,7 @@ describe("the merge asymmetry that caused this", () => {
  */
 describe("the response status chip", () => {
 	const renderStatus = (status: number, statusText: string) => {
-		render(<ResponseHeader response={{ status, statusText, time: 12, size: 34 }} />);
+		render(<ResponseStatusBar status={status} statusText={statusText} time={12} size={34} />);
 		const el = screen.getByText(new RegExp(status === 0 ? "ERR" : String(status)));
 		return el.closest('[data-slot="badge"]') as HTMLElement;
 	};

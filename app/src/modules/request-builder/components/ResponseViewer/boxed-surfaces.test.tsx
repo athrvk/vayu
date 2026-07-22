@@ -43,7 +43,7 @@ import { render } from "@testing-library/react";
 import ConsoleOutput from "./ConsoleOutput";
 import TestResults from "./TestResults";
 import ClientErrorView from "./ClientErrorView";
-import ResponseHeader from "./ResponseHeader";
+import { ResponseStatusBar } from "@/components/shared/response-viewer";
 import ResponseCookies from "./ResponseCookies";
 
 /**
@@ -151,7 +151,7 @@ describe("dividers inside the response card", () => {
 
 	it("gives the status bar a bottom edge", () => {
 		const { container } = render(
-			<ResponseHeader response={{ status: 200, statusText: "OK", time: 120, size: 2048 }} />
+			<ResponseStatusBar status={200} statusText="OK" time={120} size={2048} />
 		);
 		const bar = container.firstElementChild as HTMLElement;
 

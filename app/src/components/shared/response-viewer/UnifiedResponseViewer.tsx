@@ -21,24 +21,16 @@
  */
 
 import { useState } from "react";
-import { Clock, FileText, Copy, Check, Download } from "lucide-react";
-import {
-	Tabs,
-	TabsContent,
-	TabsList,
-	TabsTrigger,
-	Badge,
-	Button,
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui";
+import { FileText } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger, Badge, Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "../EmptyState";
 import ResponseBody from "./ResponseBody";
 import HeadersViewer, { CompactHeadersViewer } from "./HeadersViewer";
-import { formatSize, formatResponseTime } from "./utils";
-import { StatusCodeBadge } from "./StatusCodeBadge";
+import { ResponseStatusBar } from "./ResponseStatusBar";
+import { ResponseActions } from "./ResponseActions";
+import { ResponseHeadersPanel } from "./ResponseHeadersPanel";
+import { RESPONSE_TAB_TRIGGER } from "./tab-trigger";
 import type { UnifiedResponseViewerProps } from "./types";
 
 type ResponseTab = "body" | "headers" | "request";
@@ -53,7 +45,6 @@ export default function UnifiedResponseViewer({
 	className,
 }: UnifiedResponseViewerProps) {
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
-	const [copied, setCopied] = useState(false);
 
 	// Merge trace data with response/request if available
 	const effectiveResponse = response || trace?.response;
@@ -72,27 +63,13 @@ export default function UnifiedResponseViewer({
 		);
 	}
 
-	const handleCopy = async () => {
-		const content = effectiveResponse?.bodyRaw || effectiveResponse?.body;
-		if (content) {
-			await navigator.clipboard.writeText(content);
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
-		}
-	};
-
-	const handleDownload = () => {
-		const content = effectiveResponse?.bodyRaw || effectiveResponse?.body;
-		if (content) {
-			const blob = new Blob([content], { type: "text/plain" });
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement("a");
-			a.href = url;
-			a.download = `response-${Date.now()}.txt`;
-			a.click();
-			URL.revokeObjectURL(url);
-		}
-	};
+	/*
+	 * This viewer prefers the raw bytes: a stored run is being inspected, so what
+	 * the server actually sent matters more than a prettified rendering. The
+	 * request builder copies its formatted body instead - which is why
+	 * `ResponseActions` takes the content rather than deriving it.
+	 */
+	const copyableContent = effectiveResponse?.bodyRaw || effectiveResponse?.body;
 
 	// Compact mode: simpler layout for embedded views
 	if (compact) {
@@ -178,7 +155,7 @@ export default function UnifiedResponseViewer({
 			{effectiveResponse?.status !== undefined && (
 				<ResponseStatusBar
 					status={effectiveResponse.status}
-					statusText={effectiveResponse.statusText || ""}
+					statusText={effectiveResponse.statusText}
 					time={effectiveResponse.time}
 					size={effectiveResponse.size}
 				/>
@@ -192,17 +169,11 @@ export default function UnifiedResponseViewer({
 			>
 				<div className="flex items-center justify-between border-b border-rule px-4">
 					<TabsList className="h-auto p-0 bg-transparent">
-						<TabsTrigger
-							value="body"
-							className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
-						>
+						<TabsTrigger value="body" className={RESPONSE_TAB_TRIGGER}>
 							Body
 						</TabsTrigger>
 						{!hiddenTabs.includes("headers") && (
-							<TabsTrigger
-								value="headers"
-								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
-							>
+							<TabsTrigger value="headers" className={RESPONSE_TAB_TRIGGER}>
 								Headers
 								{effectiveResponse?.headers && (
 									<Badge variant="secondary" className="ml-1.5 text-xs">
@@ -212,49 +183,16 @@ export default function UnifiedResponseViewer({
 							</TabsTrigger>
 						)}
 						{!hiddenTabs.includes("request") && effectiveRequest && (
-							<TabsTrigger
-								value="request"
-								className="border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
-							>
+							<TabsTrigger value="request" className={RESPONSE_TAB_TRIGGER}>
 								Request
 							</TabsTrigger>
 						)}
 					</TabsList>
 
-					{/* Actions */}
-					{showActions && effectiveResponse?.body && (
-						<div className="flex items-center gap-1">
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button
-										size="icon"
-										variant="ghost"
-										onClick={handleCopy}
-										aria-label="Copy response"
-									>
-										{copied ? (
-											<Check className="w-4 h-4 text-status-success-text" />
-										) : (
-											<Copy className="w-4 h-4" />
-										)}
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent>Copy response</TooltipContent>
-							</Tooltip>
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button
-										size="icon"
-										variant="ghost"
-										onClick={handleDownload}
-										aria-label="Download response"
-									>
-										<Download className="w-4 h-4" />
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent>Download response</TooltipContent>
-							</Tooltip>
-						</div>
+					{/* No `fileExtension`: a stored run carries no detected body type,
+					    so downloads stay `.txt` as they always have here. */}
+					{showActions && copyableContent && (
+						<ResponseActions content={copyableContent} />
 					)}
 				</div>
 
@@ -280,21 +218,13 @@ export default function UnifiedResponseViewer({
 				</TabsContent>
 				{!hiddenTabs.includes("headers") && (
 					<TabsContent value="headers" className="mt-0 flex-1 overflow-hidden">
-						<div className="p-4 overflow-auto h-full space-y-4">
-							{effectiveRequest?.headers &&
-								Object.keys(effectiveRequest.headers).length > 0 && (
-									<HeadersViewer
-										headers={effectiveRequest.headers}
-										variant="request"
-										defaultOpen={false}
-									/>
-								)}
-							<HeadersViewer
-								headers={effectiveResponse?.headers || {}}
-								variant="response"
-								defaultOpen={true}
-							/>
-						</div>
+						{/* This inlined the same panel the request builder had in
+						    `ResponseHeadersTab`, minus its empty state - so a response with
+						    no headers showed a blank pane with nothing saying why. */}
+						<ResponseHeadersPanel
+							requestHeaders={effectiveRequest?.headers}
+							responseHeaders={effectiveResponse?.headers}
+						/>
 					</TabsContent>
 				)}
 				{!hiddenTabs.includes("request") && effectiveRequest && (
@@ -328,42 +258,6 @@ export default function UnifiedResponseViewer({
 					</TabsContent>
 				)}
 			</Tabs>
-		</div>
-	);
-}
-
-// Status bar component
-function ResponseStatusBar({
-	status,
-	statusText,
-	time,
-	size,
-}: {
-	status: number;
-	statusText: string;
-	time?: number;
-	size?: number;
-}) {
-	return (
-		<div className="flex items-center gap-4 px-4 py-3 border-b border-rule bg-muted/30">
-			{/* Status */}
-			<StatusCodeBadge status={status} statusText={statusText} />
-
-			{/* Time */}
-			{time !== undefined && (
-				<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-					<Clock className="w-4 h-4" />
-					<span>{formatResponseTime(time)}</span>
-				</div>
-			)}
-
-			{/* Size */}
-			{size !== undefined && (
-				<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-					<FileText className="w-4 h-4" />
-					<span>{formatSize(size)}</span>
-				</div>
-			)}
 		</div>
 	);
 }

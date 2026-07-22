@@ -20,25 +20,18 @@
  */
 
 import { useState } from "react";
-import { Copy, Check, Download, Terminal } from "lucide-react";
-import {
-	Tabs,
-	TabsContent,
-	TabsList,
-	TabsTrigger,
-	Badge,
-	Button,
-	Kbd,
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui";
+import { Terminal } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger, Badge, Kbd } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context";
 import { modKey } from "@/lib/platform";
-import { ResponseBody as SharedResponseBody } from "@/components/shared/response-viewer";
-import { TIMING } from "@/config/timing";
-import ResponseHeader from "./ResponseHeader";
-import ResponseHeadersTab from "./ResponseHeadersTab";
+import {
+	ResponseBody as SharedResponseBody,
+	ResponseStatusBar,
+	ResponseActions,
+	ResponseHeadersPanel,
+	RESPONSE_TAB_TRIGGER,
+} from "@/components/shared/response-viewer";
 import ResponseCookies from "./ResponseCookies";
 import ResponseTimingTab from "./ResponseTimingTab";
 import ConsoleOutput from "./ConsoleOutput";
@@ -51,7 +44,6 @@ type ResponseTab = "body" | "headers" | "cookies" | "timing" | "console" | "test
 export default function ResponseViewer() {
 	const { response, isExecuting } = useRequestBuilderContext();
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
-	const [copied, setCopied] = useState(false);
 
 	// Loading state
 	if (isExecuting) {
@@ -100,27 +92,16 @@ export default function ResponseViewer() {
 	// Client-side error state (status === 0 means no server response)
 	const isClientError = response.status === 0;
 
-	const handleCopy = async () => {
-		await navigator.clipboard.writeText(response.body);
-		setCopied(true);
-		setTimeout(() => setCopied(false), TIMING.STATUS_RESET_MS);
-	};
-
-	const handleDownload = () => {
-		const blob = new Blob([response.body], { type: "text/plain" });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = `response-${Date.now()}.${response.bodyType}`;
-		a.click();
-		URL.revokeObjectURL(url);
-	};
-
 	// Show dedicated error view for client-side errors
 	if (isClientError) {
 		return (
 			<div className="flex-1 flex flex-col surface-card overflow-hidden">
-				<ResponseHeader response={response} />
+				<ResponseStatusBar
+					status={response.status}
+					statusText={response.statusText}
+					time={response.time}
+					size={response.size}
+				/>
 				<ClientErrorView
 					errorCode={response.errorCode}
 					errorMessage={response.errorMessage}
@@ -132,7 +113,12 @@ export default function ResponseViewer() {
 	return (
 		<div className="flex-1 flex flex-col surface-card overflow-hidden">
 			{/* Response Header */}
-			<ResponseHeader response={response} />
+			<ResponseStatusBar
+				status={response.status}
+				statusText={response.statusText}
+				time={response.time}
+				size={response.size}
+			/>
 
 			{/* Response Tabs */}
 			<Tabs
@@ -149,15 +135,12 @@ export default function ResponseViewer() {
 				    "Surfaces, and the rule colour that reads on each". */}
 				<div className="flex items-center justify-between border-b border-rule px-4 gap-2">
 					<TabsList className="flex h-auto p-0 bg-transparent justify-start overflow-x-auto overflow-y-hidden flex-nowrap min-w-0">
-						<TabsTrigger
-							value="body"
-							className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
-						>
+						<TabsTrigger value="body" className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}>
 							Body
 						</TabsTrigger>
 						<TabsTrigger
 							value="headers"
-							className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 						>
 							Headers
 							<Badge variant="secondary" className="ml-1.5 text-xs">
@@ -166,14 +149,14 @@ export default function ResponseViewer() {
 						</TabsTrigger>
 						<TabsTrigger
 							value="cookies"
-							className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+							className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 						>
 							Cookies
 						</TabsTrigger>
 						{response.timing && (
 							<TabsTrigger
 								value="timing"
-								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 							>
 								Timing
 							</TabsTrigger>
@@ -181,7 +164,7 @@ export default function ResponseViewer() {
 						{response.consoleLogs && response.consoleLogs.length > 0 && (
 							<TabsTrigger
 								value="console"
-								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 							>
 								<Terminal className="w-4 h-4 mr-1.5" />
 								Console
@@ -193,7 +176,7 @@ export default function ResponseViewer() {
 						{response.testResults && response.testResults.length > 0 && (
 							<TabsTrigger
 								value="tests"
-								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 							>
 								Tests
 								<Badge
@@ -212,47 +195,16 @@ export default function ResponseViewer() {
 						{response.rawRequest && (
 							<TabsTrigger
 								value="raw-request"
-								className="shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
 							>
 								Raw
 							</TabsTrigger>
 						)}
 					</TabsList>
 
-					{/* Actions */}
-					<div className="flex items-center gap-1 shrink-0">
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									size="icon"
-									variant="ghost"
-									onClick={handleCopy}
-									aria-label="Copy response"
-								>
-									{copied ? (
-										// Only feedback that the copy happened.
-										<Check className="w-4 h-4 text-status-success-text" />
-									) : (
-										<Copy className="w-4 h-4" />
-									)}
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>Copy response</TooltipContent>
-						</Tooltip>
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									size="icon"
-									variant="ghost"
-									onClick={handleDownload}
-									aria-label="Download response"
-								>
-									<Download className="w-4 h-4" />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>Download response</TooltipContent>
-						</Tooltip>
-					</div>
+					{/* `response.bodyType` names the download; the history viewer has no
+					    such field and keeps `.txt`. Passed rather than inferred. */}
+					<ResponseActions content={response.body} fileExtension={response.bodyType} />
 				</div>
 
 				{/*
@@ -272,7 +224,10 @@ export default function ResponseViewer() {
 					/>
 				</TabsContent>
 				<TabsContent value="headers" className="mt-0 flex-1 overflow-hidden">
-					<ResponseHeadersTab response={response} />
+					<ResponseHeadersPanel
+						requestHeaders={response.requestHeaders}
+						responseHeaders={response.headers}
+					/>
 				</TabsContent>
 				<TabsContent value="cookies" className="mt-0 flex-1 overflow-hidden">
 					<ResponseCookies headers={response.headers} />

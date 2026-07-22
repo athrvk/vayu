@@ -16,6 +16,17 @@ export { default as UnifiedResponseViewer } from "./UnifiedResponseViewer";
 export { default as ResponseBody } from "./ResponseBody";
 export { default as HeadersViewer, CompactHeadersViewer } from "./HeadersViewer";
 
+// Pieces shared by the two response viewers. They are two different shells -
+// seven tabs from live context, three from a stored run - so these are the
+// parts that were genuinely identical, not an attempt to merge the shells.
+export { ResponseStatusBar } from "./ResponseStatusBar";
+export { ResponseActions } from "./ResponseActions";
+export { ResponseHeadersPanel } from "./ResponseHeadersPanel";
+export { RESPONSE_TAB_TRIGGER } from "./tab-trigger";
+export type { ResponseStatusBarProps } from "./ResponseStatusBar";
+export type { ResponseActionsProps } from "./ResponseActions";
+export type { ResponseHeadersPanelProps } from "./ResponseHeadersPanel";
+
 // Utilities
 export {
 	detectBodyType,
