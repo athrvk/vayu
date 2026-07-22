@@ -18,6 +18,15 @@
 
 import { create } from "zustand";
 
+/**
+ * A structural *subset* of the request builder's `ResponseState`, not a copy of
+ * it: callers hand over a whole `ResponseState` and `setResponse` spreads it, so
+ * fields this interface never names (`timing`, `bodyRaw`, `errorCode`, …) are
+ * stored and read back through the `as ResponseState` cast in
+ * RequestBuilderProvider. Never narrow the write to a hand-picked field list -
+ * that silently drops whatever was left out, which is exactly how the Timing tab
+ * lost its data on the restore path.
+ */
 export interface StoredResponse {
 	status: number;
 	statusText: string;

@@ -414,6 +414,18 @@ export interface RunReport {
 			message?: string;
 			headers?: Record<string, string>;
 			body?: string;
+			// Design-mode traces (`POST /request`) nest the exchange instead of
+			// flattening it - see `store_result` in engine/src/http/routes/execution.cpp.
+			request?: {
+				method?: string;
+				url?: string;
+				headers?: Record<string, string>;
+				body?: string;
+			};
+			response?: {
+				headers?: Record<string, string>;
+				body?: unknown;
+			};
 		};
 	}>;
 }

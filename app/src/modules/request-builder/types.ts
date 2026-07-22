@@ -140,8 +140,13 @@ export interface RequestState {
 /**
  * Per-request timing breakdown (milliseconds). Phase fields (dns…download) are
  * sequential segments of the request; `wire` is libcurl's transfer time and
- * `queueWait` is generator-side overhead (total − wire). Populated for live
- * executes; absent for responses restored from history (latency only).
+ * `queueWait` is generator-side overhead (total − wire).
+ *
+ * Present on a live execute, and again when a response is restored from the
+ * last stored design run - the engine writes the five phases into that run's
+ * trace (`store_result`, engine/src/http/routes/execution.cpp). `wire` and
+ * `queueWait` are the two the design-mode writer omits, so they are absent on a
+ * restored response; every consumer must treat both as optional.
  */
 export interface ResponseTiming {
 	total: number;
