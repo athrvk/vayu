@@ -236,6 +236,10 @@ QuickJS supports ES2020 features with some limitations:
 - Test scripts in load tests are executed **deferred** (after test completion)
 - Only a sample of responses are validated (configurable)
 - Results are aggregated and reported in the final report
+- `POST /run`'s `tests` field carries the collection chain's test scripts as
+  well as the request's own, composed the same way as `POST /request` (see
+  [Script Parts](#script-parts) below) - a collection-level assertion is now
+  checked under load, not only in design mode
 
 ## Script Parts
 

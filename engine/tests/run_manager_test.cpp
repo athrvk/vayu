@@ -1,4 +1,5 @@
 #include "vayu/core/run_manager.hpp"
+#include "vayu/http/script_parts.hpp"
 #include <gtest/gtest.h>
 
 using namespace vayu::core;
@@ -117,4 +118,26 @@ TEST (RunManagerRetention, SweepEvictsExpiredOnly) {
 
     EXPECT_EQ (mgr.get_run_or_retained ("a"), nullptr);
     EXPECT_NE (mgr.get_run_or_retained ("b"), nullptr);
+}
+
+// A load run's `tests` may arrive as a list of parts, exactly like the design
+// path's scripts. Before this, only the request's own test script was sent, so
+// a collection-level assertion passed in design mode and was silently never
+// checked under load.
+TEST (RunManager, TestsAcceptAListOfParts) {
+    auto config = nlohmann::json::parse (R"({
+      "tests": [
+        {"origin":"collection","id":"c1","name":"API","script":"pm.test(\"a\",()=>{});"},
+        {"origin":"request","id":"r1","script":"pm.test(\"b\",()=>{});"}
+      ]
+    })");
+
+    EXPECT_EQ (vayu::http::read_script (config, "tests", "tests"),
+    "pm.test(\"a\",()=>{});\n\npm.test(\"b\",()=>{});");
+}
+
+TEST (RunManager, TestsStillAcceptAPlainString) {
+    auto config = nlohmann::json::parse (R"({"tests":"pm.test(\"a\",()=>{});"})");
+
+    EXPECT_EQ (vayu::http::read_script (config, "tests", "tests"), "pm.test(\"a\",()=>{});");
 }

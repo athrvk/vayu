@@ -512,6 +512,15 @@ Start a load test run (Vayu Mode).
 }
 ```
 
+**`tests` accepts both forms**, like `preRequestScripts` / `postRequestScripts`
+on `POST /request` above: the legacy single string, or a list of parts
+(`[{ "origin": "collection" | "request", "id", "name", "script" }]`) that the
+engine joins itself (see [scripting.md](scripting.md#script-parts)). The list
+wins when both are sent. Sending the collection chain's parts means its
+assertions are now actually checked under load - previously only the
+request's own `tests` string was ever sent, so a collection-level assertion
+passed in design mode and was silently never validated by a load run.
+
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
 token **before** creating the run and warms the cache for the workers. An
 unauthorizable config is rejected up front with `409` (interactive sign-in

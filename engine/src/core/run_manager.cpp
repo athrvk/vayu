@@ -14,6 +14,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/http/request_builder.hpp"
+#include "vayu/http/script_parts.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
@@ -190,7 +191,11 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg)
 
     // Extract test script from config (now at root level)
     if (config.contains ("tests")) {
-        test_script = config["tests"].get<std::string> ();
+        // Either a plain string or a list of parts. `read_script` handles both
+        // and picks the list when both are present. Load runs now receive the
+        // collection chain's test scripts as well as the request's own; before
+        // this, a collection-level assertion was silently never checked.
+        test_script = vayu::http::read_script (config, "tests", "tests");
     }
 
     metrics_collector = std::make_unique<MetricsCollector> (id, mc_config);
