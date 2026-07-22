@@ -30,6 +30,7 @@ import { render, screen, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import DesignRunView from "./DesignRunView";
+import { RequestNotFoundError } from "@/queries";
 import type { Run, Request } from "@/types";
 
 const updateRequest = vi.fn();
@@ -48,6 +49,13 @@ let liveRequest: Request | null = null;
  * list and scans, so on a cold cache it is genuinely slow.
  */
 let isLoadingRequest = false;
+/*
+ * The lookup's settled error, if any. `RequestNotFoundError` (the real one, via
+ * importActual) is a genuine deletion and must still seed the orphan copy;
+ * anything else is a transport failure and must not seed at all.
+ */
+let requestError: Error | null = null;
+const refetchRequest = vi.fn();
 
 vi.mock("@/queries", async () => {
 	const actual = await vi.importActual<typeof import("@/queries")>("@/queries");
@@ -56,6 +64,9 @@ vi.mock("@/queries", async () => {
 		useRequestQuery: () => ({
 			data: liveRequest ?? undefined,
 			isLoading: isLoadingRequest,
+			isError: requestError !== null,
+			error: requestError,
+			refetch: refetchRequest,
 		}),
 		useCollectionAncestors: () => [],
 		useUpdateRequestMutation: () => ({ mutateAsync: updateRequest, isPending: false }),
@@ -149,6 +160,7 @@ function selectRequestTab(name: RegExp) {
 beforeEach(() => {
 	vi.clearAllMocks();
 	isLoadingRequest = false;
+	requestError = null;
 	liveRequest = {
 		id: "req_1",
 		collectionId: "col_1",
@@ -310,9 +322,10 @@ describe("DesignRunView - saving back to the request", () => {
 	});
 
 	it("hides Save when the request has been deleted", () => {
-		// Nothing to write back to. Absent rather than disabled - a disabled
-		// button invites a hunt for the condition that would enable it.
+		// A genuine deletion settles as the sentinel, not as bare null data -
+		// that is what production produces, and what seeds the orphan copy.
 		liveRequest = null;
+		requestError = new RequestNotFoundError("req_1");
 
 		renderView(designRun());
 
@@ -321,6 +334,7 @@ describe("DesignRunView - saving back to the request", () => {
 
 	it("replays the recorded Authorization when the request is gone", async () => {
 		liveRequest = null;
+		requestError = new RequestNotFoundError("req_1");
 		executeRequest.mockResolvedValue({
 			status: 200,
 			statusText: "OK",
@@ -330,14 +344,50 @@ describe("DesignRunView - saving back to the request", () => {
 
 		renderView(designRun());
 
+		// The sentinel is the orphan case, so it seeds normally: the seed put the
+		// wire headers in the editor, the old token goes out as-is, and the run is
+		// replayed exactly as it ran. A 401 is then a true answer about replaying
+		// it, and the header is editable to fix that.
 		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
 		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
 
-		// The seed put the wire headers in the editor, so the old token goes out
-		// as-is and the run is replayed exactly as it ran. A 401 is then a true
-		// answer about replaying it, and the header is editable to fix that.
 		expect(executeRequest.mock.calls[0][0].headers.Authorization).toBe("Bearer SECRET");
 		expect(executeRequest.mock.calls[0][0].auth).toBeUndefined();
+	});
+});
+
+describe("DesignRunView - a lookup failure is not a deletion", () => {
+	/*
+	 * `.catch(() => [])` on each per-collection list fetch (collections.ts) means
+	 * a single swallowed transient failure can throw "not found" on a healthy
+	 * engine. Only the `RequestNotFoundError` sentinel is a real deletion; any
+	 * other settled error is a transport failure. Seeding a copy from a run whose
+	 * request could not be fetched would silently replay the stale token as
+	 * though the request were an orphan - so a non-sentinel error must offer a
+	 * retry and seed nothing.
+	 */
+	it("shows a retry, and does not seed the editor, when the lookup fails", () => {
+		liveRequest = null;
+		requestError = new Error("Failed to fetch");
+
+		renderView(designRun());
+
+		expect(screen.getByText(/couldn't load this run's request/i)).toBeTruthy();
+		// The raw reason earns its place in a developer tool.
+		expect(screen.getByText(/failed to fetch/i)).toBeTruthy();
+		expect(screen.getByRole("button", { name: /try again/i })).toBeTruthy();
+		// Nothing was seeded - no URL bar, no builder.
+		expect(screen.queryByRole("textbox", { name: /request url/i })).toBeNull();
+	});
+
+	it("retries the lookup rather than walking the user away", () => {
+		liveRequest = null;
+		requestError = new Error("Failed to fetch");
+
+		renderView(designRun());
+
+		fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+		expect(refetchRequest).toHaveBeenCalledTimes(1);
 	});
 });
 
