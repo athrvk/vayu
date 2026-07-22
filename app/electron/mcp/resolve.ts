@@ -97,6 +97,10 @@ export interface SavedRequestLike {
  * Mirrors `ScriptPart` in `app/src/types/domain.ts` - restated here because
  * `resolve.ts` cannot import from `app/src/` (see `app/tsconfig.node.json`).
  * Keep the two definitions structurally identical.
+ *
+ * `origin`/`id`/`name` are sent and persisted starting with this change, but
+ * nothing in the app reads them back yet - intentional groundwork for the
+ * run/history views to attribute a script failure to its source later.
  */
 export interface ScriptPart {
 	origin: "collection" | "request";

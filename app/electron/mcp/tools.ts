@@ -195,6 +195,10 @@ function buildExecutionPayload(
 	if (bodyContent !== undefined) {
 		payload.body = { mode: str(args, "bodyType") ?? "text", content: rs(bodyContent) };
 	}
+	// preRequestScript/postRequestScript here are an agent-supplied ad-hoc
+	// script, not collection-chain composition - there is no chain to collect
+	// parts from, so this deliberately keeps sending the legacy singular key
+	// (still accepted by the engine's `read_script`), not `ScriptPart[]`.
 	for (const key of ["requestId", "environmentId", "preRequestScript", "postRequestScript"]) {
 		const v = str(args, key);
 		if (v !== undefined) payload[key] = v;

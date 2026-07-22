@@ -295,14 +295,29 @@ await apiService.executeRequest({
   method: "GET",
   url: "https://api.example.com/users",
   headers: { "Authorization": "Bearer {{token}}" },
-  preRequestScript: "console.log('Pre-request');",
-  postRequestScript: "pm.test('Status 200', () => pm.expect(pm.response.code).to.equal(200));",
+  preRequestScripts: [
+    { origin: "request", id: "req_123", script: "console.log('Pre-request');" }
+  ],
+  postRequestScripts: [
+    {
+      origin: "request",
+      id: "req_123",
+      script: "pm.test('Status 200', () => pm.expect(pm.response.code).to.equal(200));"
+    }
+  ],
   followRedirects: true,
   maxRedirects: 10,
   requestId: "req_123",
   environmentId: "env_456"
 });
 ```
+
+`preRequestScripts` / `postRequestScripts` are an ordered list of `ScriptPart`s
+(`{ origin: "collection" | "request", id?, name?, script }`), not a single
+string: the collection chain's scripts (root→leaf), then the request's own,
+built client-side by `scriptParts()` (`request-builder/utils/script-parts.ts`
+for the renderer, `resolve.ts` for MCP). The **engine** joins the parts and runs
+the result - see `docs/engine/architecture.md` → *Request composition boundary*.
 
 **Redirect policy is always sent, never elided.** `followRedirects` and
 `maxRedirects` come from the request's **Settings** tab and are included on

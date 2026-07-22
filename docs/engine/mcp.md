@@ -172,11 +172,16 @@ interpolation and drops `{"mode":"inherit"}` as "resolved app-side"
 Scripts are handled differently: both clients collect the collection-chain
 pre/post scripts (root→leaf) and the request's own as an ordered list of parts,
 each naming where it came from (`{ origin, id, name?, script }`), and send the
-list - the **engine** joins the parts with `"\n\n"` and runs the result
-(`preRequestScripts` / `postRequestScripts` on `POST /request`, `tests` on
-`POST /run`; parts whose script is blank are dropped). Composing the *content*
-of the script is engine-side now; building the ordered *list* is still
-client-side, so it still needs both clients to agree.
+list as `preRequestScripts` / `postRequestScripts` on `POST /request` - the
+**engine** joins the parts with `"\n\n"` and runs the result (parts whose
+script is blank are dropped). The renderer's load path builds the same kind of
+list for its `tests` field on `POST /run`; MCP's only `POST /run` caller
+(`start_load_run`) has no collection to chain-compose from - it forwards an
+agent-supplied ad-hoc `tests` string as-is, the same as its ad-hoc
+`preRequestScript`/`postRequestScript` (`tools.ts::buildExecutionPayload`), not
+a chain-built list. Composing the *content* of a script list is engine-side
+now; building the ordered *list* is still client-side, so it still needs both
+clients to agree.
 
 Because MCP talks to the engine directly, it must do that preparation itself.
 `resolve.ts` is the main-process port of the renderer pipeline

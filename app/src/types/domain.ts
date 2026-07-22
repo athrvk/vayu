@@ -128,6 +128,12 @@ export function compareCollectionOrder(a: Collection, b: Collection): number {
  * own and send a single string, so a stored run could not say which part came
  * from where - and writing that string back to a request would put the
  * collection's script inside it permanently. The engine joins them now.
+ *
+ * `origin`/`id`/`name` are sent and persisted starting with this change, but
+ * nothing in the app reads them back yet - that is intentional groundwork for
+ * the run/history views (not yet built) to attribute a script failure to the
+ * collection or request it came from. Do not read this as dead weight; it is
+ * the next layer's job to add the reader.
  */
 export interface ScriptPart {
 	origin: "collection" | "request";

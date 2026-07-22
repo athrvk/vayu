@@ -305,9 +305,14 @@ is therefore **duplicated** across the two engine clients:
 Composing the collection-chain + request pre/post scripts is **no longer** part
 of that duplication: both clients now collect an ordered list of `ScriptPart`s
 (root-to-leaf chain, then the request's own, each naming its origin) and send
-the list - `preRequestScripts` / `postRequestScripts` on `POST /request`, `tests`
-on `POST /run` - and the **engine** joins them with `"\n\n"` and runs the result.
-Each client still builds that list itself (`scriptParts` in
+the list as `preRequestScripts` / `postRequestScripts` on `POST /request` - and
+the **engine** joins them with `"\n\n"` and runs the result. The renderer's load
+path sends the same kind of list as `tests` on `POST /run`. MCP has no
+chain-composing `/run` caller: `start_load_run` takes an agent-supplied ad-hoc
+`tests` string (like its ad-hoc `preRequestScript`/`postRequestScript`, see
+`tools.ts::buildExecutionPayload`), not a chain-built list, so this is not "both
+clients send the list on `/run`". Each client still builds its own script-part
+list itself (the `scriptParts` helper in
 `app/src/modules/request-builder/utils/script-parts.ts` and in
 `app/electron/mcp/resolve.ts` - the same intentional duplication, since MCP
 cannot import from `app/src/`), so a change to the list-building rule (e.g. what

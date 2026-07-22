@@ -165,11 +165,12 @@ Script composition moved partly server-side already: clients send an ordered
 list of parts (`{ origin: "collection" | "request", id?, name?, script }` -
 `preRequestScripts` / `postRequestScripts` on `POST /request`, `tests` on
 `POST /run`; the legacy single-string field still works) built by walking the
-collection chain root-to-leaf then appending the request's own
-(`engine/src/http/script_parts.cpp::read_script`). The engine joins the parts
-with `"\n\n"`, dropping any whose script is empty or only whitespace, and runs
-the result once. Building that ordered list - not joining it - is what remains
-client-side.
+collection chain root-to-leaf then appending the request's own (`scriptParts`
+in `app/src/modules/request-builder/utils/script-parts.ts` and in
+`app/electron/mcp/resolve.ts`). The engine joins the parts with `"\n\n"`,
+dropping any whose script is empty or only whitespace, and runs the result once
+(`engine/src/http/script_parts.cpp::read_script`). Building that ordered list -
+not joining it - is what remains client-side.
 
 ### Database (`SQLite`)
 
