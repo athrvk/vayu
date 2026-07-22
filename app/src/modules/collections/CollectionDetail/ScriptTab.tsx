@@ -108,7 +108,7 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 					{usedVars.slice(0, 8).map((v) => (
 						<Badge
 							key={v}
-							variant="secondary"
+							variant="chip"
 							className="font-mono text-[10px] bg-primary/10 text-variable border-0"
 						>
 							{`{{${v}}}`}

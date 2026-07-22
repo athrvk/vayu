@@ -360,9 +360,13 @@ export default function VariablesCategoryTree() {
 														<TruncatedText className="flex-1">
 															{environment.name}
 														</TruncatedText>
+														{/* `chip`: `secondary` brings
+														    `hover:bg-secondary/80`, which outlives
+														    the scope tint below and greyed the
+														    badge on hover. */}
 														{variableCount > 0 && (
 															<Badge
-																variant="secondary"
+																variant="chip"
 																className="text-xs bg-scope-environment/10 text-scope-environment px-1.5 py-0 shrink-0"
 															>
 																{variableCount}
@@ -480,9 +484,11 @@ export default function VariablesCategoryTree() {
 												<TruncatedText className="flex-1">
 													{collection.name}
 												</TruncatedText>
+												{/* `chip` — same reason as the environment
+												    badge above. */}
 												{variableCount > 0 && (
 													<Badge
-														variant="secondary"
+														variant="chip"
 														className="text-xs bg-scope-collection/10 text-scope-collection px-1.5 py-0"
 													>
 														{variableCount}

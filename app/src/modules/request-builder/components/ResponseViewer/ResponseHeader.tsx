@@ -40,7 +40,14 @@ export default function ResponseHeader({ response }: ResponseHeaderProps) {
 	return (
 		<div className="flex items-center gap-4 px-4 py-3 border-b border-border bg-muted/30">
 			{/* Status */}
-			<Badge className={cn("font-mono", statusColor)}>
+			{/* `chip`, not the default variant: the default carries
+			    `hover:bg-primary-fill/80`, which survives tailwind-merge even
+			    though the fill below replaces its background — so this chip
+			    faded to the user's accent on hover. It is not clickable. */}
+			<Badge
+				variant="chip"
+				className={cn("font-mono shadow text-primary-foreground", statusColor)}
+			>
 				{response.status === 0 ? "ERR" : response.status} {response.statusText}
 			</Badge>
 

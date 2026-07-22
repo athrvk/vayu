@@ -343,16 +343,13 @@ export default function McpSettingsPanel() {
 						{isLoading ? (
 							<Skeleton className="h-5 w-16 ml-1" />
 						) : !enabled ? (
-							<Badge
-								variant="secondary"
-								className="ml-1 bg-muted text-muted-foreground"
-							>
+							<Badge variant="chip" className="ml-1 bg-muted text-muted-foreground">
 								<CircleSlash className="w-3 h-3 mr-1" />
 								Disabled
 							</Badge>
 						) : running ? (
 							<Badge
-								variant="secondary"
+								variant="chip"
 								className="ml-1 border border-success/20 bg-success/10 text-success-text"
 							>
 								<CircleCheck className="w-3 h-3 mr-1" />
@@ -360,7 +357,7 @@ export default function McpSettingsPanel() {
 							</Badge>
 						) : (
 							<Badge
-								variant="secondary"
+								variant="chip"
 								className="ml-1 border border-warning/30 bg-warning/10 text-warning-text"
 							>
 								<CircleSlash className="w-3 h-3 mr-1" />
