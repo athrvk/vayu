@@ -130,4 +130,21 @@ describe("InheritedScriptsNotice", () => {
 
 		expect(screen.getByText("Parent Collection")).toBeInTheDocument();
 	});
+
+	// Presence alone would pass even if the rows were reversed - `chain` is
+	// already root first, and reversing it would print the leaf's script
+	// before the root's, actively misleading about what runs first. Assert
+	// the sequence, not just that both names appear.
+	it("renders the chain root to leaf, matching execution order", () => {
+		chain.length = 0;
+		chain.push(
+			collection("root", "Outer", { preRequestScript: "pm.environment.set('a', 1);" }),
+			collection("leaf", "Inner", { preRequestScript: "pm.environment.set('b', 2);" })
+		);
+
+		render(<InheritedScriptsNotice variant="pre" collectionId="leaf" />);
+
+		const names = screen.getAllByText(/^(Outer|Inner)$/).map((el) => el.textContent);
+		expect(names).toEqual(["Outer", "Inner"]);
+	});
 });
