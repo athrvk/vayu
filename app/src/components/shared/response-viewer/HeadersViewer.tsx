@@ -10,6 +10,16 @@
  *
  * Displays HTTP headers in a collapsible table format.
  * Used for both request and response headers.
+ *
+ * The row rules are `border-border-strong`. This table renders inside the
+ * response pane's `bg-card`, where `--border` is the same colour as the card in
+ * dark - and the rows were `border-border/50` on top of that, measuring **1.002**.
+ * Visible in light at 1.138, absent in dark. `--border-strong` gives 1.553 light
+ * / 1.278 dark.
+ *
+ * The rows are not held a step lighter than the header: at this surface a step
+ * lighter lands back at invisible. See `docs/design-system.md`, "a divider inside
+ * a card".
  */
 
 import { useState } from "react";
@@ -60,7 +70,7 @@ export default function HeadersViewer({
 			<CollapsibleContent className="mt-2">
 				<table className="w-full text-sm">
 					<thead>
-						<tr className="border-b border-border">
+						<tr className="border-b border-border-strong">
 							<th className="text-left py-2 px-3 font-medium text-muted-foreground">
 								Name
 							</th>
@@ -71,7 +81,10 @@ export default function HeadersViewer({
 					</thead>
 					<tbody>
 						{entries.map(([name, value]) => (
-							<tr key={name} className="border-b border-border/50 hover:bg-muted/50">
+							<tr
+								key={name}
+								className="border-b border-border-strong hover:bg-muted/50"
+							>
 								<td className={cn("py-2 px-3 font-mono", colorClass)}>{name}</td>
 								<td className="py-2 px-3 font-mono break-all">{value}</td>
 							</tr>
@@ -108,11 +121,16 @@ export function CompactHeadersViewer({
 					{title}
 				</h4>
 			)}
-			<div className="bg-muted p-3 space-y-1">
+			<div className="bg-muted p-3 rounded-md space-y-1">
 				{entries.map(([key, value]) => (
+					// `border-foreground/15`, not a border token. These rows sit on a
+					// full `bg-muted` slab, and no border token is visible there in
+					// both themes - `--border-strong` is the *weaker* of the two in
+					// dark, because `--muted` sits between them. An alpha of
+					// `--foreground` flips with the theme: 1.36 light / 1.58 dark.
 					<div
 						key={key}
-						className="flex gap-2 py-1 border-b border-border/50 last:border-0"
+						className="flex gap-2 py-1 border-b border-foreground/15 last:border-0"
 					>
 						<span className="text-xs font-medium text-primary shrink-0">{key}:</span>
 						<span className="text-xs text-foreground break-all">{value}</span>

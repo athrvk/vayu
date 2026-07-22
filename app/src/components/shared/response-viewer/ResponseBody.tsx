@@ -124,7 +124,7 @@ export default function ResponseBody({
 						<img
 							src={`data:${contentType};base64,${imageData}`}
 							alt="Response"
-							className="max-w-full h-auto border border-border"
+							className="max-w-full h-auto border border-border-strong"
 						/>
 					</div>
 				</div>
@@ -169,7 +169,7 @@ export default function ResponseBody({
 	return (
 		<div className={cn("flex-1 flex flex-col h-full", className)}>
 			{/* Mode Toggle Header */}
-			<div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-border bg-muted/20">
+			<div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-border-strong bg-muted/20">
 				<div className="flex items-center gap-2">
 					<FileCode className="w-4 h-4 text-muted-foreground" />
 					<span className="text-xs text-muted-foreground uppercase tracking-wide">

@@ -101,7 +101,7 @@ export default function UnifiedResponseViewer({
 				className={cn("flex flex-col bg-card border rounded-lg overflow-hidden", className)}
 			>
 				{/* Simple tab buttons */}
-				<div className="flex gap-2 p-3 border-b bg-muted/30">
+				<div className="flex gap-2 p-3 border-b border-border-strong bg-muted/30">
 					<Button
 						variant={activeTab === "body" ? "default" : "ghost"}
 						size="sm"
@@ -187,7 +187,7 @@ export default function UnifiedResponseViewer({
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				<div className="flex items-center justify-between border-b border-border px-4">
+				<div className="flex items-center justify-between border-b border-border-strong px-4">
 					<TabsList className="h-auto p-0 bg-transparent">
 						<TabsTrigger
 							value="body"
@@ -342,7 +342,7 @@ function ResponseStatusBar({
 	size?: number;
 }) {
 	return (
-		<div className="flex items-center gap-4 px-4 py-3 border-b border-border bg-muted/30">
+		<div className="flex items-center gap-4 px-4 py-3 border-b border-border-strong bg-muted/30">
 			{/* Status */}
 			<StatusCodeBadge status={status} statusText={statusText} />
 
