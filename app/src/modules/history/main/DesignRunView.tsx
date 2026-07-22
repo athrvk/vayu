@@ -40,10 +40,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import { RequestBuilderProvider } from "@/modules/request-builder/context";
 import RequestBuilderLayout from "@/modules/request-builder/components/RequestBuilderLayout";
-import { useRequestQuery, useCollectionAncestors, queryKeys } from "@/queries";
+import { useRequestQuery, useCollectionAncestors, isRequestNotFound, queryKeys } from "@/queries";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { useSessionStore, useToastStore } from "@/stores";
-import { Button } from "@/components/ui";
+import { Button, Badge } from "@/components/ui";
+import { ErrorState } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
 import {
 	editorToAuth,
@@ -78,23 +79,42 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	 * before storing a run - so the seed needs it to decide where headers and
 	 * auth come from.
 	 *
-	 * **Nothing may be seeded until this query has settled.** `seedFromRun`
-	 * branches on a falsy `liveRequest` and reads it as "the request was
-	 * deleted": wire headers including the recorded `Authorization`, and
-	 * `authType: "none"`. While the query is still in flight `data` is also
-	 * falsy, so seeding early produces exactly that deleted-request seed - and
-	 * the provider never takes a correction, because its reset effect is keyed
-	 * on `initialRequest?.id`, which is null before and after. The builder would
-	 * keep replaying the recorded token instead of resolving auth fresh.
+	 * Three outcomes, and all three have to be kept apart, because `seedFromRun`
+	 * treats a falsy `liveRequest` as "the request was deleted" - it seeds the
+	 * recorded wire headers, `Authorization` included, and `authType: "none"`:
 	 *
-	 * `isLoading` is `isPending && isFetching`, so a run with no `requestId`
-	 * disables the query and settles immediately rather than hanging here. A
-	 * deleted request settles as an error after its retries, so "gone" and
-	 * "still looking" stay distinguishable - which is the whole bug.
+	 * - **still loading.** `data` is falsy but the answer is not in yet. Seeding
+	 *   now bakes in the deleted-request seed, and the provider never corrects
+	 *   it: its reset effect keys on `initialRequest?.id`, which is null before
+	 *   and after. So the pane is held until the query settles. `isLoading` is
+	 *   `isPending && isFetching`, so a run with no `requestId` disables the
+	 *   query and settles at once rather than hanging on the spinner.
+	 *
+	 * - **settled, request gone.** A genuine deletion, thrown as
+	 *   `RequestNotFoundError`. This is the orphan case that legitimately
+	 *   replays the recorded headers, so it is the *only* error allowed to reach
+	 *   `seedFromRun`'s request-gone branch.
+	 *
+	 * - **settled, lookup failed.** A transport failure throws something else.
+	 *   Crucially `.catch(() => [])` on each per-collection list fetch
+	 *   (`collections.ts`) means one swallowed transient failure surfaces as a
+	 *   `RequestNotFoundError` too would be wrong - so we test for the sentinel
+	 *   type, not just "there was an error". A non-sentinel error means the
+	 *   request could not be fetched, and seeding a copy from it would be
+	 *   guessing: show a retry instead.
 	 */
-	const { data: liveRequest, isLoading: isResolvingRequest } = useRequestQuery(
-		run.requestId ?? null
-	);
+	const {
+		data: liveRequest,
+		isLoading: isResolvingRequest,
+		isError: requestLookupErrored,
+		error: requestLookupError,
+		refetch: refetchRequest,
+	} = useRequestQuery(run.requestId ?? null);
+
+	// A real deletion (the sentinel) is the orphan case and seeds normally; any
+	// other settled error is a transport failure that must not seed at all.
+	const requestLookupFailed = requestLookupErrored && !isRequestNotFound(requestLookupError);
+
 	const collectionAncestors = useCollectionAncestors(liveRequest?.collectionId);
 	const { resolveString, resolveObject } = useVariableResolver({
 		collectionId: liveRequest?.collectionId || undefined,
@@ -278,25 +298,60 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 		);
 	}
 
+	/*
+	 * The lookup settled in a transport failure, not a deletion. Seeding the
+	 * copy from a run whose request could not be fetched would silently replay
+	 * the recorded token as though the request were an orphan - so offer a retry
+	 * instead of guessing. A genuine deletion is not caught here: it flows on and
+	 * seeds the orphan copy, which is correct for one.
+	 */
+	if (requestLookupFailed) {
+		const detail = requestLookupError instanceof Error ? requestLookupError.message : null;
+		return (
+			<ErrorState
+				title="Couldn't load this run's request"
+				detail={detail ?? "The request behind this run could not be fetched."}
+				onRetry={() => void refetchRequest()}
+			/>
+		);
+	}
+
 	return (
 		<div className="flex flex-col h-full min-h-0">
-			{/*
-			 * The Save button exists only while the request does. When it has been
-			 * deleted there is nothing to write back to, so the row is absent
-			 * rather than disabled - a disabled button invites a hunt for the
-			 * condition that would enable it, and none can be met here.
-			 */}
-			{liveRequest && (
-				<div className="flex items-center gap-2 px-4 py-2 border-b border-rule surface-card shrink-0">
-					<span className="text-xs text-muted-foreground mr-auto">
-						You are editing a copy - nothing here is saved.
-					</span>
-					<Button variant="outline" size="sm" onClick={() => setShowSaveDialog(true)}>
+			<div className="flex items-center gap-2 px-4 py-2 border-b border-rule surface-card shrink-0">
+				<span className="text-xs text-muted-foreground">
+					You are editing a copy - nothing here is saved.
+				</span>
+				{/*
+				 * The mode this run actually sent, read-only. The Auth tab shows the
+				 * request's *current* mode, so seeing both side by side is the only
+				 * way to notice the request's auth changed since this ran. Only the
+				 * mode survives storage, so there is nothing more to show. Absent
+				 * when the run sent no auth.
+				 */}
+				{seed.recordedAuthMode && (
+					<Badge variant="outline" className="text-xs shrink-0 font-normal">
+						Run sent auth: {seed.recordedAuthMode}
+					</Badge>
+				)}
+				{/*
+				 * The Save button exists only while the request does. When it has
+				 * been deleted there is nothing to write back to, so it is absent
+				 * rather than disabled - a disabled button invites a hunt for the
+				 * condition that would enable it, and none can be met here.
+				 */}
+				{liveRequest && (
+					<Button
+						variant="outline"
+						size="sm"
+						className="ml-auto"
+						onClick={() => setShowSaveDialog(true)}
+					>
 						<Save className="w-3.5 h-3.5 mr-1.5" />
 						Save this run to the request
 					</Button>
-				</div>
-			)}
+				)}
+			</div>
 
 			<div className="flex-1 min-h-0">
 				<RequestBuilderProvider

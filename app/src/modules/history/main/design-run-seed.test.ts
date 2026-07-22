@@ -138,6 +138,28 @@ describe("seedFromRun", () => {
 			expect(request.authType).toBe("bearer");
 			expect(request.authConfig?.token).toBe("FRESH-TOKEN");
 		});
+
+		it("returns the mode the run actually sent, separate from the live auth", () => {
+			// The editor shows the request's *current* mode; this is what the run
+			// sent. Kept apart so the two can be compared - the whole point of
+			// surfacing it. Only the mode survives storage.
+			const { recordedAuthMode } = seedFromRun(run(), liveRequest);
+
+			expect(recordedAuthMode).toBe("bearer");
+		});
+
+		it("leaves the recorded mode undefined when the run sent no auth", () => {
+			const none = run({
+				configSnapshot: { method: "GET", url: "https://x.test/", auth: { mode: "none" } },
+			} as Partial<Run>);
+
+			expect(seedFromRun(none, liveRequest).recordedAuthMode).toBeUndefined();
+			// And when the snapshot recorded no auth object at all.
+			const absent = run({
+				configSnapshot: { method: "GET", url: "https://x.test/" },
+			} as Partial<Run>);
+			expect(seedFromRun(absent, liveRequest).recordedAuthMode).toBeUndefined();
+		});
 	});
 
 	describe("when the request is gone", () => {

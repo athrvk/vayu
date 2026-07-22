@@ -59,6 +59,15 @@ export interface DesignRunSeed {
 	/** Set only for a run stored before script parts existed. */
 	legacyPreScript?: string;
 	legacyPostScript?: string;
+	/**
+	 * The auth mode this run actually sent, from the snapshot. Only the *mode*
+	 * survives storage (`sanitize_config_snapshot` strips the credential), so
+	 * this is all there is - but shown read-only next to the live request's
+	 * current auth it answers "did the request's auth change since this ran?",
+	 * which the editor alone cannot, because the editor shows the *current*
+	 * mode. `undefined` when the run recorded no auth (mode "none" or absent).
+	 */
+	recordedAuthMode?: string;
 }
 
 function toHeaderItems(headers: Record<string, string> | undefined) {
@@ -128,5 +137,8 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 		collectionPostScripts: collectionParts(snapshot.postRequestScripts),
 		legacyPreScript: snapshot.preRequestScripts ? undefined : snapshot.preRequestScript,
 		legacyPostScript: snapshot.postRequestScripts ? undefined : snapshot.postRequestScript,
+		// "none" carries no information the absence would not, so normalise it away.
+		recordedAuthMode:
+			snapshot.auth?.mode && snapshot.auth.mode !== "none" ? snapshot.auth.mode : undefined,
 	};
 }

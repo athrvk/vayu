@@ -118,6 +118,31 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 }
 
 /**
+ * The error thrown when the lookup completes and the request is genuinely gone -
+ * as opposed to a transport failure, which throws whatever the fetch rejected
+ * with. Callers that must tell a real deletion from an unreachable engine
+ * (`DesignRunView`, which replays an orphan run's recorded headers only for a
+ * true deletion) discriminate with `isRequestNotFound`, not by matching the
+ * message string - so the wording below can change without silently reopening
+ * that bug. It matters because `.catch(() => [])` on each per-collection list
+ * fetch means one swallowed transient failure can otherwise masquerade as "not
+ * found" on an otherwise healthy engine.
+ */
+export class RequestNotFoundError extends Error {
+	readonly requestId: string;
+	constructor(requestId: string) {
+		super(`Request ${requestId} no longer exists`);
+		this.name = "RequestNotFoundError";
+		this.requestId = requestId;
+	}
+}
+
+/** True only for a genuine deletion, never for a transport failure. */
+export function isRequestNotFound(error: unknown): error is RequestNotFoundError {
+	return error instanceof RequestNotFoundError;
+}
+
+/**
  * Fetch a single request by ID.
  *
  * The engine has no `GET /requests/:id` - only `GET /requests?collectionId=` -
@@ -199,7 +224,7 @@ export function useRequestQuery(requestId: string | null) {
 				if (found) return remember(found);
 			}
 
-			throw new Error(`Request ${id} no longer exists`);
+			throw new RequestNotFoundError(id);
 		},
 		enabled: !!requestId,
 		// The fetch above is authoritative, so a miss is now a real miss. One
