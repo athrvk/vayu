@@ -172,4 +172,3 @@ export interface DisplayMetrics {
 	requests_sent?: number;
 	requests_expected?: number;
 }
-

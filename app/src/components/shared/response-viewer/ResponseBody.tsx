@@ -112,9 +112,7 @@ export default function ResponseBody({
 		const contentType = headers["content-type"] || headers["Content-Type"] || "image/png";
 		const imageData = bodyRaw || body;
 		return (
-			<div
-				className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}
-			>
+			<div className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
 						<ImageIcon className="w-4 h-4" />
@@ -137,9 +135,7 @@ export default function ResponseBody({
 	// Handle PDF
 	if (detectedType === "pdf") {
 		return (
-			<div
-				className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}
-			>
+			<div className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
 						<File className="w-4 h-4" />
@@ -156,9 +152,7 @@ export default function ResponseBody({
 	// Handle binary
 	if (detectedType === "binary") {
 		return (
-			<div
-				className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}
-			>
+			<div className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
 						<FileCode className="w-4 h-4" />

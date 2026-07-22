@@ -19,11 +19,7 @@
  */
 
 import { Input, Label, Switch } from "@/components/ui";
-import {
-	DEFAULT_MAX_REDIRECTS,
-	MAX_MAX_REDIRECTS,
-	MIN_MAX_REDIRECTS,
-} from "@/constants/request";
+import { DEFAULT_MAX_REDIRECTS, MAX_MAX_REDIRECTS, MIN_MAX_REDIRECTS } from "@/constants/request";
 import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../../context";
 
@@ -87,7 +83,10 @@ export default function SettingsPanel() {
 			<div className="space-y-1.5">
 				<Label
 					htmlFor="setting-max-redirects"
-					className={cn("text-sm font-medium", !followRedirects && "text-muted-foreground")}
+					className={cn(
+						"text-sm font-medium",
+						!followRedirects && "text-muted-foreground"
+					)}
 				>
 					{MAX_LABEL}
 				</Label>
