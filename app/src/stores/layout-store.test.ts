@@ -1,3 +1,9 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * zustand's `persist` needs a storage backend to attach `.persist` to the
+ * store at all, so `.persist.getOptions()` is undefined without a DOM.
+ */
 import { describe, it, expect, beforeEach } from "vitest";
 import { useLayoutStore } from "./layout-store";
 import { STORAGE_KEYS } from "@/constants/storage-keys";

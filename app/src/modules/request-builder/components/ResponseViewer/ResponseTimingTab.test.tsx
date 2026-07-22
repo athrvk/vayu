@@ -1,4 +1,7 @@
 /**
+ * @vitest-environment jsdom
+ */
+/**
  * Tests for ResponseTimingTab - the per-request timing breakdown.
  */
 

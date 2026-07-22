@@ -93,6 +93,19 @@ CMake presets: `linux-dev`, `linux-prod`, `macos-dev`, `macos-prod`, `windows-de
 cd app && pnpm test
 ```
 
+**Tests default to the `node` environment.** A DOM costs ~2s per file and half
+the suite never touches one. If your test renders, or reaches `document` /
+`window` / `localStorage` (zustand `persist` does, without naming it), start the
+file with:
+
+```ts
+/**
+ * @vitest-environment jsdom
+ */
+```
+
+Forgetting it fails loudly (`document is not defined`), never silently.
+
 ### Type checking
 
 ```bash

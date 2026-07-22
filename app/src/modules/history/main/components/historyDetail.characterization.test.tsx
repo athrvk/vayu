@@ -1,4 +1,7 @@
 /**
+ * @vitest-environment jsdom
+ */
+/**
  * Characterization snapshots for the mode-adaptive history detail. Render
  * LoadTestDetail with a fixed RunReport per mode; lock the DOM so future
  * refactors stay byte-identical. The default (Overview) tab renders the
