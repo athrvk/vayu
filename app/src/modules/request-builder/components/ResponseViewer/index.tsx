@@ -119,7 +119,7 @@ export default function ResponseViewer() {
 	// Show dedicated error view for client-side errors
 	if (isClientError) {
 		return (
-			<div className="flex-1 flex flex-col bg-card overflow-hidden">
+			<div className="flex-1 flex flex-col surface-card overflow-hidden">
 				<ResponseHeader response={response} />
 				<ClientErrorView
 					errorCode={response.errorCode}
@@ -130,7 +130,7 @@ export default function ResponseViewer() {
 	}
 
 	return (
-		<div className="flex-1 flex flex-col bg-card overflow-hidden">
+		<div className="flex-1 flex flex-col surface-card overflow-hidden">
 			{/* Response Header */}
 			<ResponseHeader response={response} />
 
@@ -140,12 +140,14 @@ export default function ResponseViewer() {
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				{/* `border-border-strong`: this rule is what separates the tab strip
-				    from the response body, and both sit on this component's `bg-card`.
-				    `--border` measures 1.003 there - the tabs floated free of the
-				    content in dark mode. See design-system.md, "a divider inside a
-				    card". */}
-				<div className="flex items-center justify-between border-b border-border-strong px-4 gap-2">
+				{/* `border-rule`, and the `surface-card` root above is what gives it a
+				    value. Every divider in this pane says the same thing and the
+				    surface decides what it resolves to - `--border` in light, where it
+				    measures 1.304, and `--border-strong` in dark, where `--border`
+				    would be 1.003 (the same colour as the card, which is why the tab
+				    strip used to float free of the content). See index.css,
+				    "Surfaces, and the rule colour that reads on each". */}
+				<div className="flex items-center justify-between border-b border-rule px-4 gap-2">
 					<TabsList className="flex h-auto p-0 bg-transparent justify-start overflow-x-auto overflow-y-hidden flex-nowrap min-w-0">
 						<TabsTrigger
 							value="body"

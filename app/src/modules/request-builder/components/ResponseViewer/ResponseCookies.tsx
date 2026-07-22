@@ -49,7 +49,7 @@ export default function ResponseCookies({ headers }: ResponseCookiesProps) {
 		<div className="p-4 overflow-auto h-full">
 			<table className="w-full text-sm">
 				<thead>
-					<tr className="border-b border-border-strong">
+					<tr className="border-b border-rule">
 						<th className="text-left py-2 px-3 font-medium text-muted-foreground">
 							Name
 						</th>
@@ -63,7 +63,7 @@ export default function ResponseCookies({ headers }: ResponseCookiesProps) {
 				</thead>
 				<tbody>
 					{cookies.map((cookie, i) => (
-						<tr key={i} className="border-b border-border-strong hover:bg-muted/50">
+						<tr key={i} className="border-b border-rule hover:bg-muted/50">
 							<td className="py-2 px-3 font-mono text-primary align-top">
 								{cookie.name}
 							</td>

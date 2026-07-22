@@ -25,6 +25,13 @@
 	--color-destructive-text: hsl(var(--destructive-text));
 	--color-border: hsl(var(--border));
 	--color-border-strong: hsl(var(--border-strong));
+	/*
+	 * `border-rule` - a divider whose colour is chosen by the surface it sits on
+	 * rather than by whoever writes it. See the `--rule` declarations below.
+	 * Registered as a theme colour (not a bare class) so tailwind-merge treats it
+	 * as a border colour and `cn()` resolves it against `border-*` correctly.
+	 */
+	--color-rule: var(--rule);
 	--color-input: hsl(var(--input));
 	--color-ring: hsl(var(--ring));
 	--color-panel: hsl(var(--panel));
@@ -117,6 +124,18 @@
 @layer base {
 	:root {
 		/* ── Light mode - Paper White ── */
+
+		/*
+		 * The default rule colour: what reads on the canvas and on `--panel`.
+		 * Surfaces that need a different one re-declare `--rule` (see the
+		 * `.surface-*` classes further down); because custom properties inherit,
+		 * a `border-rule` divider picks up whichever surface encloses it without
+		 * its author having to know which that is.
+		 *
+		 * This resolves per theme on its own - `--border` is already redefined
+		 * under `.dark`, and `.dark` sits on the same `:root` element.
+		 */
+		--rule: hsl(var(--border));
 
 		/* 3-level elevation (cool near-neutral; higher surfaces are lighter) */
 		--background: 240 6% 96%; /* #f4f4f5 - paper-white canvas */
@@ -825,6 +844,64 @@
 }
 
 @layer components {
+	/*
+	 * ── Surfaces, and the rule colour that reads on each ──
+	 *
+	 * A divider is visible or not depending on what it sits *on*, never on what
+	 * it is. `--border` is tuned for the canvas (1.14) and is the *same colour*
+	 * as `--card` in dark (1.00), so a rule inside a card is simply absent. That
+	 * defect has now been found and fixed one component at a time roughly ten
+	 * times on this branch, because the knowledge lived in a doc rather than in
+	 * the code, and every author had to re-derive it.
+	 *
+	 * So the surface declares it. A surface class sets its background *and* the
+	 * `--rule` that reads on it; a divider just says `border-rule` and inherits
+	 * the right answer, including through nesting - a sunken slab inside a card
+	 * re-declares `--rule`, so rows inside the slab get the slab's colour while
+	 * the card's own dividers keep the card's.
+	 *
+	 * This does not make the mistake impossible, it makes it *enumerable*: the
+	 * only way to get it wrong now is a surface root that forgets to declare,
+	 * and there are a handful of those rather than one per divider.
+	 *
+	 * Measured, both themes:
+	 *
+	 *                            light    dark
+	 *   canvas / panel  --border  1.14     1.14
+	 *   card                      1.304    1.278   (per theme, see below)
+	 *   sunken (muted)            1.356    1.343
+	 *
+	 * The card rule is per-theme on purpose. A single token cannot serve both:
+	 * `--border` is right in light (1.304) and invisible in dark (1.003), while
+	 * `--border-strong` fixes dark (1.278) but overshoots light to 1.553. Since
+	 * `--rule` is a variable, each theme gets the token that lands on ~1.29 -
+	 * which is the target the design system already states.
+	 */
+	.surface-card {
+		background-color: hsl(var(--card));
+		--rule: hsl(var(--border));
+	}
+
+	.dark .surface-card {
+		--rule: hsl(var(--border-strong));
+	}
+
+	/*
+	 * A sunken slab - a code block, a log pane, a compact list. `--muted` is the
+	 * one surface where no border token works: it sits *between* `--border`
+	 * (L 10%) and `--border-strong` (L 18%) in dark, so the usual escape hatch
+	 * makes the edge fainter still. An alpha of `--foreground` flips with the
+	 * theme and does work.
+	 */
+	.surface-sunken {
+		background-color: hsl(var(--muted));
+		--rule: hsl(var(--foreground) / 0.15);
+	}
+
+	.dark .surface-sunken {
+		--rule: hsl(var(--foreground) / 0.1);
+	}
+
 	/* Decelerate in, accelerate out - the standard pairing for a surface that
 	   arrives and then leaves. Overlay and panel share a duration so they land
 	   together. */

@@ -62,7 +62,7 @@ export default function UnifiedResponseViewer({
 	// Empty state
 	if (!effectiveResponse?.body && !effectiveRequest) {
 		return (
-			<div className={cn("flex-1 flex bg-card", className)}>
+			<div className={cn("flex-1 flex surface-card", className)}>
 				<EmptyState
 					icon={FileText}
 					title="No response captured"
@@ -98,10 +98,13 @@ export default function UnifiedResponseViewer({
 	if (compact) {
 		return (
 			<div
-				className={cn("flex flex-col bg-card border rounded-lg overflow-hidden", className)}
+				className={cn(
+					"flex flex-col surface-card border border-rule rounded-lg overflow-hidden",
+					className
+				)}
 			>
 				{/* Simple tab buttons */}
-				<div className="flex gap-2 p-3 border-b border-border-strong bg-muted/30">
+				<div className="flex gap-2 p-3 border-b border-rule bg-muted/30">
 					<Button
 						variant={activeTab === "body" ? "default" : "ghost"}
 						size="sm"
@@ -170,7 +173,7 @@ export default function UnifiedResponseViewer({
 
 	// Full mode: complete response viewer with all features
 	return (
-		<div className={cn("flex-1 flex flex-col bg-card overflow-hidden", className)}>
+		<div className={cn("flex-1 flex flex-col surface-card overflow-hidden", className)}>
 			{/* Response Header with status/time/size */}
 			{effectiveResponse?.status !== undefined && (
 				<ResponseStatusBar
@@ -187,7 +190,7 @@ export default function UnifiedResponseViewer({
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				<div className="flex items-center justify-between border-b border-border-strong px-4">
+				<div className="flex items-center justify-between border-b border-rule px-4">
 					<TabsList className="h-auto p-0 bg-transparent">
 						<TabsTrigger
 							value="body"
@@ -342,7 +345,7 @@ function ResponseStatusBar({
 	size?: number;
 }) {
 	return (
-		<div className="flex items-center gap-4 px-4 py-3 border-b border-border-strong bg-muted/30">
+		<div className="flex items-center gap-4 px-4 py-3 border-b border-rule bg-muted/30">
 			{/* Status */}
 			<StatusCodeBadge status={status} statusText={statusText} />
 

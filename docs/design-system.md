@@ -304,6 +304,50 @@ border sits on a card is an ancestry question a source scan cannot answer.
 `border border-border bg-card` in the source, and only the ancestry tells them
 apart - so measure the parent's computed background before calling one a defect.
 
+### `border-rule`: let the surface pick the token
+
+Because that ancestry question has to be answered correctly every single time,
+and was not - the same defect was found and fixed one component at a time about
+ten times - the answer now lives in the stylesheet instead of in this document.
+
+A **surface class** sets its background *and* the `--rule` that reads on it.
+A divider says `border-rule` and inherits the right value, including through
+nesting: a `surface-sunken` slab inside a `surface-card` re-declares `--rule`, so
+rows in the slab get the slab's colour while the card's own dividers keep the
+card's.
+
+```tsx
+<div className="surface-card">            {/* declares --rule */}
+  <div className="border-b border-rule">  {/* resolves to the card's */}
+    <div className="surface-sunken">      {/* re-declares --rule */}
+      <div className="border-b border-rule" />  {/* resolves to the slab's */}
+```
+
+Measured in the running app, both themes:
+
+| surface | light | dark |
+|---|---:|---:|
+| canvas / panel (`:root` default) | 1.186 | 1.143 |
+| `surface-card` | 1.304 | 1.278 |
+| `surface-sunken` | 1.356 | 1.343 |
+
+The card rule is **per theme on purpose**. No single token serves both:
+`--border` is right in light (1.304) and invisible in dark (1.003), while
+`--border-strong` fixes dark (1.278) but overshoots light to 1.553. `--rule` is a
+variable, so each theme gets the token that lands on ~1.29 - the parity this
+section already asks for. Being able to do that is the point of centralising.
+
+This does not make the mistake impossible; it makes it **enumerable**. A
+`border-rule` whose ancestors declare no surface falls back to the `:root`
+default and is invisible on a card again - so the guard pins the *declarations*
+(`surface-rule.test.tsx`), not the `border-rule` classes, which prove nothing on
+their own. Resolved colour is a computed-style question and is checked in the
+browser.
+
+Definitions live in `app/src/index.css` under "Surfaces, and the rule colour that
+reads on each". Adopted by the response-viewer family; the rest of the app still
+uses explicit tokens and can migrate as it is touched.
+
 **On `--muted` there is no border to pick.** It is the one surface where
 `--border-strong` is *weaker* than `--border`: `--muted` (L 16%) sits between
 them (L 10% and L 18%) in dark, so the usual escape hatch makes the edge

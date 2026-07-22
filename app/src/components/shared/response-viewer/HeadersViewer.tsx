@@ -11,15 +11,18 @@
  * Displays HTTP headers in a collapsible table format.
  * Used for both request and response headers.
  *
- * The row rules are `border-border-strong`. This table renders inside the
- * response pane's `bg-card`, where `--border` is the same colour as the card in
- * dark - and the rows were `border-border/50` on top of that, measuring **1.002**.
- * Visible in light at 1.138, absent in dark. `--border-strong` gives 1.553 light
- * / 1.278 dark.
+ * The rules are `border-rule`, so their colour comes from whichever surface
+ * encloses this table rather than from a token picked here. Rendered in the
+ * response pane that is a `surface-card`, they resolve to 1.304 light / 1.278
+ * dark; the compact variant below sits on a `surface-sunken` and its rows
+ * resolve to 1.356 / 1.343 without saying anything different.
+ *
+ * They were `border-border/50` on a card: 1.138 in light, **1.002** in dark -
+ * the same colour as the card. Obvious in light, entirely absent in dark, which
+ * is how it was reported.
  *
  * The rows are not held a step lighter than the header: at this surface a step
- * lighter lands back at invisible. See `docs/design-system.md`, "a divider inside
- * a card".
+ * lighter lands back at invisible.
  */
 
 import { useState } from "react";
@@ -70,7 +73,7 @@ export default function HeadersViewer({
 			<CollapsibleContent className="mt-2">
 				<table className="w-full text-sm">
 					<thead>
-						<tr className="border-b border-border-strong">
+						<tr className="border-b border-rule">
 							<th className="text-left py-2 px-3 font-medium text-muted-foreground">
 								Name
 							</th>
@@ -81,10 +84,7 @@ export default function HeadersViewer({
 					</thead>
 					<tbody>
 						{entries.map(([name, value]) => (
-							<tr
-								key={name}
-								className="border-b border-border-strong hover:bg-muted/50"
-							>
+							<tr key={name} className="border-b border-rule hover:bg-muted/50">
 								<td className={cn("py-2 px-3 font-mono", colorClass)}>{name}</td>
 								<td className="py-2 px-3 font-mono break-all">{value}</td>
 							</tr>
@@ -121,17 +121,16 @@ export function CompactHeadersViewer({
 					{title}
 				</h4>
 			)}
-			<div className="bg-muted p-3 rounded-md space-y-1">
+			<div className="surface-sunken p-3 rounded-md space-y-1">
 				{entries.map(([key, value]) => (
-					// `border-foreground/15`, not a border token. These rows sit on a
-					// full `bg-muted` slab, and no border token is visible there in
-					// both themes - `--border-strong` is the *weaker* of the two in
-					// dark, because `--muted` sits between them. An alpha of
-					// `--foreground` flips with the theme: 1.36 light / 1.58 dark.
-					<div
-						key={key}
-						className="flex gap-2 py-1 border-b border-foreground/15 last:border-0"
-					>
+					// Same `border-rule` as the table above, resolving differently
+					// because `surface-sunken` re-declares it. That slab is `--muted`,
+					// the one surface where no border token works in both themes:
+					// `--border-strong` is the *weaker* of the two in dark, since
+					// `--muted` sits between them, and the pair inverts in light. The
+					// surface class supplies an alpha of `--foreground` instead, which
+					// flips with the theme - 1.356 light / 1.343 dark.
+					<div key={key} className="flex gap-2 py-1 border-b border-rule last:border-0">
 						<span className="text-xs font-medium text-primary shrink-0">{key}:</span>
 						<span className="text-xs text-foreground break-all">{value}</span>
 					</div>

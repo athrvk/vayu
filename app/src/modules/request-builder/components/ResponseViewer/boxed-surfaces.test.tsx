@@ -129,21 +129,24 @@ describe("test results", () => {
 });
 
 /**
- * `ResponseViewer` renders everything below it on `bg-card`, and
- * design-system.md line 285 already states the rule for that surface: a divider
- * inside a card needs `border-border-strong`, because `--border` measures 1.003
- * there - the same colour as the card. Three dividers in this pane had never
- * been converted, so in dark mode the status bar had no bottom edge, the tab
- * strip did not separate from the body, and the cookie table ran together as one
- * block (its row rule was `border-border/50`, which composites to 1.002).
+ * Dividers in this pane say `border-rule` and let the enclosing surface decide
+ * what that resolves to - `--border` on a card in light (1.304),
+ * `--border-strong` in dark, where `--border` is 1.003, the same colour as the
+ * card. Three dividers here had never been converted at all: the status bar had
+ * no bottom edge, the tab strip did not separate from the body, and the cookie
+ * table ran together as one block (its row rule was `border-border/50`, which
+ * composites to 1.002).
  *
- * `--border-strong` gives 1.278 dark / 1.553 light.
+ * These assert the *leaf* half of the contract. The half that can silently
+ * revert - a surface root forgetting to declare `--rule` - is pinned in
+ * `shared/response-viewer/surface-rule.test.tsx`, because `border-rule` being
+ * present proves nothing on its own.
  */
 describe("dividers inside the response card", () => {
 	/** Anything drawing a rule: the elements whose border is their only edge. */
 	const rules = (container: HTMLElement) =>
 		Array.from(container.querySelectorAll<HTMLElement>("*")).filter((el) =>
-			/\bborder-(b|t|y)?-?border/.test(el.className)
+			/\bborder-(b|t|y)?-?(rule|border)\b/.test(el.className)
 		);
 
 	it("gives the status bar a bottom edge", () => {
@@ -153,10 +156,10 @@ describe("dividers inside the response card", () => {
 		const bar = container.firstElementChild as HTMLElement;
 
 		expect(bar.className).toMatch(/\bborder-b\b/);
-		expect(bar.className).toMatch(/\bborder-border-strong\b/);
+		expect(bar.className).toMatch(/\bborder-rule\b/);
 	});
 
-	it("rules the cookie table at a weight that survives dark mode", () => {
+	it("rules the cookie table through the surface, not a hardcoded token", () => {
 		const { container } = render(
 			<ResponseCookies headers={{ "set-cookie": "session=abc; Path=/" }} />
 		);
@@ -165,9 +168,9 @@ describe("dividers inside the response card", () => {
 		// A header rule and at least one row rule.
 		expect(ruled.length).toBeGreaterThanOrEqual(2);
 		for (const el of ruled) {
-			expect(el.className).toMatch(/\bborder-border-strong\b/);
-			// `/50` on top of this token lands back at 1.12 in dark.
-			expect(el.className).not.toMatch(/border-border(-strong)?\/\d/);
+			expect(el.className).toMatch(/\bborder-rule\b/);
+			// Any alpha would re-open the gap: `/50` on a card lands at 1.002.
+			expect(el.className).not.toMatch(/border-(rule|border(-strong)?)\/\d/);
 		}
 	});
 });

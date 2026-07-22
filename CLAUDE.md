@@ -183,15 +183,28 @@ cd app && pnpm format:check        # Prettier
 
 **A border is invisible or not depending on what it sits *on*, never on what it
 is.** `--border` is tuned for the canvas (1.14) and is the *same colour* as
-`--card` in dark (1.00), so a rule inside a card is simply absent - use
-`border-border-strong` (1.28). But a card's own outline on `border-border` is
-correct, because that edge faces the canvas. Both read as
-`border border-border bg-card` in the source; only the ancestry tells them
-apart, so **measure the parent's computed background** before calling one a
-defect. On `--muted` / `--accent` there is no answer: `--border-strong` is
-*weaker* there than `--border` in dark (1.11 vs 1.16), and the pair inverts in
-light, so a muted box must be defined by its fill. Full table in
+`--card` in dark (1.00), so a rule inside a card is simply absent. A card's own
+outline on `border-border` is correct, though, because that edge faces the
+canvas - and both read as `border border-border bg-card` in the source, so only
+the ancestry tells them apart. This was found and fixed one component at a time
+about ten times before it was centralised.
+
+**Write `border-rule`, not a border token.** A surface class (`surface-card`,
+`surface-sunken`) sets its background *and* declares the `--rule` that reads on
+it; `border-rule` inherits the right value, per theme, including through
+nesting. Card resolves to 1.304 light / 1.278 dark, sunken to 1.356 / 1.343 -
+parity a single token cannot give, since `--border` is invisible in dark and
+`--border-strong` overshoots light. On `--muted` / `--accent` no border token
+works at all: `--border-strong` is *weaker* there than `--border` in dark
+(1.11 vs 1.16) and the pair inverts in light, which is why sunken uses an alpha
+of `--foreground`. Definitions in `index.css`, rationale in
 `docs/design-system.md`.
+
+The mistake is now **enumerable, not impossible**: a `border-rule` under no
+declared surface silently falls back to the invisible default. So guard the
+*declarations* (`surface-rule.test.tsx`) - asserting `border-rule` is present
+proves nothing. Adopted by the response-viewer family; elsewhere still uses
+explicit tokens, migrate as you touch.
 
 **"Written but never read" is this codebase's most repeated defect** - found
 nine times: state one layer records and no layer displays (SSE errors,

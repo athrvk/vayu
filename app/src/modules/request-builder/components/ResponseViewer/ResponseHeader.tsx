@@ -34,7 +34,7 @@ export default function ResponseHeader({ response }: ResponseHeaderProps) {
 		 * to 1.04. So the bar that reports status, time and size had no boundary at
 		 * all in dark mode, top or bottom. `--border-strong` gives 1.278.
 		 */
-		<div className="flex items-center gap-4 px-4 py-3 border-b border-border-strong bg-muted/30">
+		<div className="flex items-center gap-4 px-4 py-3 border-b border-rule bg-muted/30">
 			{/* Status */}
 			<StatusCodeBadge status={response.status} statusText={response.statusText} />
 
