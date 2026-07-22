@@ -528,6 +528,10 @@ export default function RequestBuilder() {
 					rampUpDuration: config.ramp_duration_seconds
 						? `${config.ramp_duration_seconds}s`
 						: undefined,
+					// Ramp-Up only. Never sent before: the field was plumbed to the
+					// engine and read back into the dashboard, but nothing set it, so
+					// every ramp started from the engine default of 1.
+					startConcurrency: config.start_concurrency,
 					maxInFlight: config.max_in_flight,
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,

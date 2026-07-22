@@ -8,7 +8,14 @@
 import { describe, it, expect } from "vitest";
 import { summarise } from "./summary";
 
-const base = { duration: 60, rps: 100, concurrency: 10, iterations: 1000, rampDuration: 30 };
+const base = {
+	duration: 60,
+	rps: 100,
+	concurrency: 10,
+	iterations: 1000,
+	rampDuration: 30,
+	startConcurrency: 1,
+};
 
 describe("summarise", () => {
 	it("states the total for a constant rate, which no field shows", () => {

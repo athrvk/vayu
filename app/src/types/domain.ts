@@ -237,6 +237,8 @@ export interface LoadTestConfig {
 	iterations?: number;
 	mode: LoadTestMode;
 	ramp_duration_seconds?: number;
+	/** Ramp-Up only: connections at t=0, climbing to `concurrency`. */
+	start_concurrency?: number;
 	data_sample_rate?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;

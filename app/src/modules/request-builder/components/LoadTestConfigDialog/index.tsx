@@ -29,7 +29,7 @@ import { useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { LoadTestConfig, OAuth2Config } from "@/types";
 import OAuth2LoadTestGuard from "../OAuth2LoadTestGuard";
-import { validateRampDuration } from "../../utils/loadTestValidation";
+import { validateRampDuration, validateStartConcurrency } from "../../utils/loadTestValidation";
 import { LOAD_TEST_DEFAULTS, LOAD_TEST_LIMITS } from "@/constants/load-test";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
@@ -59,6 +59,7 @@ interface SavedLoadTestConfig {
 	concurrency: number;
 	iterations: number;
 	rampDuration: number;
+	startConcurrency: number;
 	maxInFlight: number | null;
 	sampleRate: number;
 	slowThreshold: number;
@@ -183,6 +184,9 @@ export default function LoadTestConfigDialog({
 	const [rampDuration, setRampDuration] = useState(
 		saved.rampDuration ?? LOAD_TEST_DEFAULTS.RAMP_DURATION_S
 	);
+	const [startConcurrency, setStartConcurrency] = useState(
+		saved.startConcurrency ?? LOAD_TEST_DEFAULTS.START_CONCURRENCY
+	);
 	const [maxInFlight, setMaxInFlight] = useState<string>(
 		saved.maxInFlight != null ? String(saved.maxInFlight) : ""
 	);
@@ -211,6 +215,8 @@ export default function LoadTestConfigDialog({
 	const usesDuration = mode !== "iterations";
 
 	const rampDurationError = validateRampDuration(mode, duration, rampDuration);
+	const startConcurrencyError = validateStartConcurrency(mode, startConcurrency, concurrency);
+	const blockingError = rampDurationError ?? startConcurrencyError;
 
 	const notices = useMemo(() => {
 		const list: { key: string; severity: Severity; node: React.ReactNode }[] = [];
@@ -222,6 +228,18 @@ export default function LoadTestConfigDialog({
 				node: (
 					<Callout severity="blocking" title="Ramp is longer than the run">
 						{rampDurationError}
+					</Callout>
+				),
+			});
+		}
+
+		if (startConcurrencyError) {
+			list.push({
+				key: "start-concurrency",
+				severity: "blocking",
+				node: (
+					<Callout severity="blocking" title="Ramp would run downwards">
+						{startConcurrencyError}
 					</Callout>
 				),
 			});
@@ -243,10 +261,10 @@ export default function LoadTestConfigDialog({
 		return list.sort(
 			(a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
 		);
-	}, [rampDurationError, hasPreRequestScript]);
+	}, [rampDurationError, startConcurrencyError, hasPreRequestScript]);
 
 	const handleStart = () => {
-		if (rampDurationError) return;
+		if (blockingError) return;
 
 		const maxInFlightValue = maxInFlight.trim() !== "" ? Number(maxInFlight) : null;
 
@@ -257,6 +275,7 @@ export default function LoadTestConfigDialog({
 			concurrency,
 			iterations,
 			rampDuration,
+			startConcurrency,
 			maxInFlight: maxInFlightValue,
 			sampleRate,
 			slowThreshold,
@@ -288,6 +307,7 @@ export default function LoadTestConfigDialog({
 		} else if (mode === "ramp_up") {
 			config.concurrency = concurrency;
 			config.ramp_duration_seconds = rampDuration;
+			config.start_concurrency = startConcurrency;
 		}
 
 		onStart(config);
@@ -365,6 +385,18 @@ export default function LoadTestConfigDialog({
 
 						{mode === "ramp_up" && (
 							<NumberField
+								id="lt-start-concurrency"
+								label="Start from"
+								value={startConcurrency}
+								onChange={num(setStartConcurrency)}
+								min={LOAD_TEST_LIMITS.START_CONCURRENCY.MIN}
+								max={LOAD_TEST_LIMITS.START_CONCURRENCY.MAX}
+								hint="Connections at the start of the ramp. The engine climbs from here to the target."
+							/>
+						)}
+
+						{mode === "ramp_up" && (
+							<NumberField
 								id="lt-ramp"
 								label="Ramp duration"
 								unit="sec"
@@ -378,8 +410,16 @@ export default function LoadTestConfigDialog({
 
 					<p className="rounded-md border border-border bg-panel px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
 						{summarise(
-							{ mode, duration, rps, concurrency, iterations, rampDuration },
-							rampDurationError !== null
+							{
+								mode,
+								duration,
+								rps,
+								concurrency,
+								iterations,
+								rampDuration,
+								startConcurrency,
+							},
+							blockingError !== null
 						)}
 					</p>
 
@@ -490,7 +530,7 @@ export default function LoadTestConfigDialog({
 					</Button>
 					<Button
 						onClick={handleStart}
-						disabled={isStarting || rampDurationError !== null || oauthGated}
+						disabled={isStarting || blockingError !== null || oauthGated}
 					>
 						{isStarting ? (
 							<>

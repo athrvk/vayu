@@ -29,6 +29,7 @@ export interface SummaryInput {
 	concurrency: number;
 	iterations: number;
 	rampDuration: number;
+	startConcurrency: number;
 }
 
 /** `6000` → `"6,000"`. Grouped because these run to five and six figures. */
@@ -46,7 +47,7 @@ function plural(n: number, one: string, many = `${one}s`): string {
  *                 printed as a confident falsehood.
  */
 export function summarise(input: SummaryInput, blocked = false): string {
-	const { mode, duration, rps, concurrency, iterations, rampDuration } = input;
+	const { mode, duration, rps, concurrency, iterations, rampDuration, startConcurrency } = input;
 
 	if (mode === "iterations") {
 		return `Sends exactly ${plural(iterations, "request")} using ${plural(
@@ -71,7 +72,10 @@ export function summarise(input: SummaryInput, blocked = false): string {
 	// ramp_up — the one case where the old prose was earning its keep.
 	const atTarget = duration - rampDuration;
 	const tail = atTarget > 0 ? ` then holds it for the remaining ${count(atTarget)}s` : "";
-	return `Climbs to ${plural(concurrency, "connection")} over ${count(
-		rampDuration
-	)}s${tail}, within a ${count(duration)}s run. The ramp counts towards the total.`;
+	return `Climbs from ${count(startConcurrency)} to ${plural(
+		concurrency,
+		"connection"
+	)} over ${count(rampDuration)}s${tail}, within a ${count(
+		duration
+	)}s run. The ramp counts towards the total.`;
 }

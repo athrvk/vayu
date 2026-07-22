@@ -174,3 +174,43 @@ describe("keyboard", () => {
 		}
 	});
 });
+
+describe("ramp start concurrency", () => {
+	it("offers a start field, so a ramp no longer always begins at 1", () => {
+		// The engine reads `startConcurrency` and defaults it to 1. It was
+		// plumbed through the payload, the store and the dashboard's derived
+		// report — and nothing ever set it, so every ramp started from 1
+		// whatever the user wanted.
+		open();
+		pickProfile("Ramp-Up");
+		expect(screen.getByLabelText(/start from/i)).toBeInTheDocument();
+	});
+
+	it("sends it, and only for Ramp-Up", () => {
+		const { onStart } = open();
+		pickProfile("Ramp-Up");
+		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "4" } });
+		expect(started(onStart).start_concurrency).toBe(4);
+	});
+
+	it("omits it for every other profile", () => {
+		const { onStart } = open();
+		expect(started(onStart)).not.toHaveProperty("start_concurrency");
+	});
+
+	it("blocks a start above the target, which would ramp downwards", () => {
+		open();
+		pickProfile("Ramp-Up");
+		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "999" } });
+
+		expect(screen.getByText(/Ramp would run downwards/i)).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+	});
+
+	it("says where the ramp begins in the summary", () => {
+		open();
+		pickProfile("Ramp-Up");
+		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "3" } });
+		expect(screen.getByText(/Climbs from 3 to 10 connections/i)).toBeInTheDocument();
+	});
+});
