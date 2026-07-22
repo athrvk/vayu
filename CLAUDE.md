@@ -196,6 +196,29 @@ component (e.g. which variants actually carry a `hover:bg-*`) rather than
 hardcoding it - a hardcoded version flagged `variant="outline"`, which owns no
 background and cannot collide.
 
+## Subagents in worktrees - check the base first
+
+Worktree provisioning cuts from **`master`**, not the branch you are on, and it
+does so inconsistently - in one batch of four agents, three were 113 commits
+behind and one was current. An agent that does not check will produce findings
+against code that no longer exists; a previous round lost five agents' work this
+way, ~190 commits behind.
+
+Every subagent prompt must open with a base check naming the expected commit:
+
+```bash
+git log --oneline -1
+git rev-list --count HEAD..<expected>          # 0 means current
+git merge-base --is-ancestor HEAD <expected>   # ok to fast-forward if clean
+```
+
+A strict ancestor with a clean tree can be repaired losslessly
+(`git reset --hard <expected>`); anything else should stop and report. Have the
+agent state which case applied, so a silent misfire still shows up.
+
+Also pin the base **in the prompt as a literal SHA**. "The current branch" means
+nothing inside a worktree that was cut from somewhere else.
+
 ## Engine HTTP API
 
 The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
