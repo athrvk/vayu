@@ -166,9 +166,28 @@ export function formatBody(body: any, bodyType?: BodyType): string {
  * bug survived in `UnifiedResponseViewer` - the duplication was the defect.
  */
 export function formatResponseTime(ms: number): string {
-	if (ms < 1) return `${ms.toFixed(2)} ms`;
-	if (ms < 1000) return `${Math.round(ms)} ms`;
-	return `${(ms / 1000).toFixed(2)} s`;
+	const { value, unit } = formatDuration(ms);
+	return `${value} ${unit}`;
+}
+
+/**
+ * A duration split into its number and its unit, so a caller can style the unit
+ * separately (these are rendered smaller and in `subtle-foreground` throughout).
+ *
+ * Use for independent values - a total, a queue wait - where each may sensibly
+ * carry its own unit. For a set of values that are read against each other, use
+ * `formatPhaseDuration`, which keeps more precision in the millisecond range.
+ */
+export function formatDuration(ms: number): { value: string; unit: DurationUnit } {
+	if (ms < 1) return { value: ms.toFixed(2), unit: "ms" };
+	if (ms < 1000) return { value: String(Math.round(ms)), unit: "ms" };
+	/*
+	 * Seconds all the way up, no minutes tier. This is a latency tool: a 65s
+	 * response is already pathological and "65.43 s" says so more usefully than
+	 * "1.1 min". Keeping it also makes this a pure refactor of the behaviour
+	 * `formatResponseTime` already had.
+	 */
+	return { value: (ms / 1000).toFixed(2), unit: "s" };
 }
 
 /**
@@ -190,6 +209,28 @@ export function formatPhaseMs(ms: number): string {
 	if (ms >= 100) return ms.toFixed(0);
 	if (ms >= 10) return ms.toFixed(1);
 	return ms.toFixed(2);
+}
+
+export type DurationUnit = "ms" | "s";
+
+/**
+ * A timing phase, split into number and unit.
+ *
+ * Same unit rule as `formatDuration` - milliseconds until a full second, then
+ * seconds - but it keeps the significant-digit ladder above, because a phase
+ * needs precision `formatDuration` does not: a cached DNS lookup is 0.04ms and
+ * rounding it to `0` erases the only signal there is.
+ *
+ * An earlier version fixed one unit across the whole row, on the theory that
+ * phases are compared against each other. That was wrong in practice: it turned
+ * a 262ms connect into `0.26 s` and a 0.96ms download into `0.00 s`. A
+ * millisecond value is perfectly readable on its own, and the percentage column
+ * beside it already carries the comparison. Only the phase that genuinely runs
+ * into seconds should change unit.
+ */
+export function formatPhaseDuration(ms: number): { value: string; unit: DurationUnit } {
+	if (ms < 1000) return { value: formatPhaseMs(ms), unit: "ms" };
+	return { value: (ms / 1000).toFixed(2), unit: "s" };
 }
 
 /**

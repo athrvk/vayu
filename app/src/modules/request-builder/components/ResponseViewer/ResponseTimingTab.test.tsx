@@ -46,9 +46,15 @@ describe("ResponseTimingTab", () => {
 		expect(screen.getByText("Wire")).toBeInTheDocument();
 		expect(screen.getByText("Queue")).toBeInTheDocument();
 		expect(screen.getByText("Total")).toBeInTheDocument();
-		expect(screen.getByText("1008")).toBeInTheDocument(); // wire
-		expect(screen.getByText("1011")).toBeInTheDocument(); // total
-		expect(screen.getByText("0.20")).toBeInTheDocument(); // queueWait (<10 → 2 dp)
+		// Past a second these read as seconds; the queue wait stays in ms, which
+		// is the point - "0.00 s" would erase it.
+		// Wire 1008ms and Total 1011ms both read "1.01 s" - 3ms apart is noise at
+		// this scale, so two matches is right, not a bug.
+		expect(screen.getAllByText("1.01")).toHaveLength(2);
+		expect(screen.getAllByText("s").length).toBeGreaterThan(0);
+		// The queue wait stays in ms. Converting it would print "0.00 s".
+		expect(screen.getByText("0.20")).toBeInTheDocument();
+		expect(screen.getAllByText("ms").length).toBeGreaterThan(0);
 	});
 
 	it("omits Wire and Queue when those fields are absent (restored responses)", () => {

@@ -11,7 +11,7 @@
  * Displays request timing breakdown (DNS, Connect, TLS, TTFB, Download).
  */
 
-import { formatPhaseMs } from "@/components/shared/response-viewer/utils";
+import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
 
 interface TimingBreakdownProps {
 	dnsMs?: number;
@@ -44,8 +44,10 @@ export default function TimingBreakdown({
 				<div className={`bg-blue-50 dark:bg-blue-950/30 ${padding} rounded-md text-center`}>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>DNS</p>
 					<p className={`${textSize} font-bold text-blue-700 dark:text-blue-300`}>
-						{formatPhaseMs(dnsMs)}
-						<span className="text-xs font-normal">ms</span>
+						{formatPhaseDuration(dnsMs).value}
+						<span className="text-xs font-normal">
+							{formatPhaseDuration(dnsMs).unit}
+						</span>
 					</p>
 				</div>
 			)}
@@ -55,8 +57,10 @@ export default function TimingBreakdown({
 				>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>Connect</p>
 					<p className={`${textSize} font-bold text-purple-700 dark:text-purple-300`}>
-						{formatPhaseMs(connectMs)}
-						<span className="text-xs font-normal">ms</span>
+						{formatPhaseDuration(connectMs).value}
+						<span className="text-xs font-normal">
+							{formatPhaseDuration(connectMs).unit}
+						</span>
 					</p>
 				</div>
 			)}
@@ -66,8 +70,10 @@ export default function TimingBreakdown({
 				>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>TLS</p>
 					<p className={`${textSize} font-bold text-indigo-700 dark:text-indigo-300`}>
-						{formatPhaseMs(tlsMs)}
-						<span className="text-xs font-normal">ms</span>
+						{formatPhaseDuration(tlsMs).value}
+						<span className="text-xs font-normal">
+							{formatPhaseDuration(tlsMs).unit}
+						</span>
 					</p>
 				</div>
 			)}
@@ -77,8 +83,10 @@ export default function TimingBreakdown({
 				>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>TTFB</p>
 					<p className={`${textSize} font-bold text-green-700 dark:text-green-300`}>
-						{formatPhaseMs(firstByteMs)}
-						<span className="text-xs font-normal">ms</span>
+						{formatPhaseDuration(firstByteMs).value}
+						<span className="text-xs font-normal">
+							{formatPhaseDuration(firstByteMs).unit}
+						</span>
 					</p>
 				</div>
 			)}
@@ -88,8 +96,10 @@ export default function TimingBreakdown({
 				>
 					<p className={`${labelSize} text-muted-foreground uppercase`}>Download</p>
 					<p className={`${textSize} font-bold text-yellow-700 dark:text-yellow-300`}>
-						{formatPhaseMs(downloadMs)}
-						<span className="text-xs font-normal">ms</span>
+						{formatPhaseDuration(downloadMs).value}
+						<span className="text-xs font-normal">
+							{formatPhaseDuration(downloadMs).unit}
+						</span>
 					</p>
 				</div>
 			)}

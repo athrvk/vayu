@@ -18,7 +18,7 @@
  */
 
 import { type ReactNode } from "react";
-import { formatPhaseMs } from "@/components/shared/response-viewer/utils";
+import { formatDuration, formatPhaseDuration } from "@/components/shared/response-viewer/utils";
 import { Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ResponseTiming } from "../../types";
@@ -140,8 +140,12 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 							<InfoTip tip={p.tip} />
 						</span>
 						<span className="text-right font-mono tabular-nums text-[12px]">
-							<span className="text-foreground">{formatPhaseMs(p.value)}</span>
-							<span className="text-subtle-foreground ml-0.5">ms</span>
+							<span className="text-foreground">
+								{formatPhaseDuration(p.value).value}
+							</span>
+							<span className="text-subtle-foreground ml-0.5">
+								{formatPhaseDuration(p.value).unit}
+							</span>
 						</span>
 						<span className="text-right font-mono tabular-nums text-[11px] text-muted-foreground">
 							{pct(p.value).toFixed(0)}%
@@ -201,8 +205,8 @@ function TimingStat({
 						: "font-mono tabular-nums text-foreground"
 				}
 			>
-				{formatPhaseMs(value)}
-				<span className="text-subtle-foreground ml-0.5">ms</span>
+				{formatDuration(value).value}
+				<span className="text-subtle-foreground ml-0.5">{formatDuration(value).unit}</span>
 			</span>
 		</span>
 	);

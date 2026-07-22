@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
-import { formatPhaseMs } from "@/components/shared/response-viewer/utils";
+import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
 
 // Per-phase explanations for the network timing breakdown. Kept in sync with
 // the wording in ResponseTimingTab (request-builder), which explains the same
@@ -164,7 +164,8 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									DNS <InfoChip tip={PHASE_TIPS.dns} />
 								</p>
 								<p className="font-bold">
-									{formatPhaseMs(report.timingBreakdown.avgDnsMs)}ms
+									{formatPhaseDuration(report.timingBreakdown.avgDnsMs).value}
+									{formatPhaseDuration(report.timingBreakdown.avgDnsMs).unit}
 								</p>
 							</div>
 							<div>
@@ -172,7 +173,8 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									Connect <InfoChip tip={PHASE_TIPS.connect} />
 								</p>
 								<p className="font-bold">
-									{formatPhaseMs(report.timingBreakdown.avgConnectMs)}ms
+									{formatPhaseDuration(report.timingBreakdown.avgConnectMs).value}
+									{formatPhaseDuration(report.timingBreakdown.avgConnectMs).unit}
 								</p>
 							</div>
 							<div>
@@ -180,7 +182,8 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									TLS <InfoChip tip={PHASE_TIPS.tls} />
 								</p>
 								<p className="font-bold">
-									{formatPhaseMs(report.timingBreakdown.avgTlsMs)}ms
+									{formatPhaseDuration(report.timingBreakdown.avgTlsMs).value}
+									{formatPhaseDuration(report.timingBreakdown.avgTlsMs).unit}
 								</p>
 							</div>
 							<div>
@@ -188,7 +191,14 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									First Byte <InfoChip tip={PHASE_TIPS.ttfb} />
 								</p>
 								<p className="font-bold">
-									{formatPhaseMs(report.timingBreakdown.avgFirstByteMs)}ms
+									{
+										formatPhaseDuration(report.timingBreakdown.avgFirstByteMs)
+											.value
+									}
+									{
+										formatPhaseDuration(report.timingBreakdown.avgFirstByteMs)
+											.unit
+									}
 								</p>
 							</div>
 							<div>
@@ -196,7 +206,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									Download <InfoChip tip={PHASE_TIPS.download} />
 								</p>
 								<p className="font-bold">
-									{formatPhaseMs(report.timingBreakdown.avgDownloadMs)}ms
+									{
+										formatPhaseDuration(report.timingBreakdown.avgDownloadMs)
+											.value
+									}
+									{formatPhaseDuration(report.timingBreakdown.avgDownloadMs).unit}
 								</p>
 							</div>
 						</div>
