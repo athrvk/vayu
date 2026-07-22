@@ -118,45 +118,94 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 }
 
 /**
- * Fetch a single request by ID
+ * Fetch a single request by ID.
  *
- * This looks up the request from the cache since there's no dedicated
- * GET /requests/:id endpoint. First checks the detail cache (set by mutations),
- * then falls back to searching through collection request lists.
+ * The engine has no `GET /requests/:id` — only `GET /requests?collectionId=` —
+ * so a single request is found by looking through the collection lists.
+ *
+ * This used to read the cache and nothing else, which made it a race it usually
+ * lost on a cold start. Tabs are persisted and restored, so on launch this runs
+ * immediately for every restored request tab while
+ * `usePrefetchCollectionsAndRequests` is still two round trips from filling
+ * those lists. It threw, retried 3× at 100ms, gave up — and because
+ * `staleTime: Infinity` keeps the error parked, it never recovered once the
+ * lists *did* arrive. The result was a permanent "Request not found" on the
+ * restored tab, and a tab strip of anonymous "Request" labels, until you
+ * clicked the request again in the sidebar.
+ *
+ * So it now *fetches* what it needs instead of hoping someone else already
+ * did. Cache first (free), then the collection lists, hydrated through the same
+ * query keys the sidebar uses so the work is shared rather than duplicated.
+ * Only a request that genuinely no longer exists reaches the throw.
  */
 export function useRequestQuery(requestId: string | null) {
 	const queryClient = useQueryClient();
 
 	return useQuery({
 		queryKey: queryKeys.requests.detail(requestId ?? ""),
-		queryFn: () => {
-			// First check if we already have this request in detail cache
-			const cached = queryClient.getQueryData<Request>(queryKeys.requests.detail(requestId!));
+		queryFn: async () => {
+			const id = requestId!;
+
+			// Populated by mutations, and by this function on a previous miss.
+			const cached = queryClient.getQueryData<Request>(queryKeys.requests.detail(id));
 			if (cached) return cached;
 
-			// Search through all cached request lists to find this one
-			const queriesData = queryClient.getQueriesData<Request[]>({
-				queryKey: queryKeys.requests.lists(),
+			const scanCachedLists = () => {
+				for (const [, requests] of queryClient.getQueriesData<Request[]>({
+					queryKey: queryKeys.requests.lists(),
+				})) {
+					const found = requests?.find((r) => r.id === id);
+					if (found) return found;
+				}
+				return undefined;
+			};
+
+			const remember = (found: Request) => {
+				queryClient.setQueryData(queryKeys.requests.detail(id), found);
+				return found;
+			};
+
+			const alreadyLoaded = scanCachedLists();
+			if (alreadyLoaded) return remember(alreadyLoaded);
+
+			/*
+			 * Nothing cached yet. `fetchQuery` rather than `prefetchQuery`: it
+			 * returns the data and, critically, dedupes against an identical
+			 * in-flight request — so racing the prefetch costs no extra traffic,
+			 * it just awaits the same promise.
+			 */
+			const collections = await queryClient.fetchQuery({
+				queryKey: queryKeys.collections.list(),
+				queryFn: () => apiService.listCollections(),
+				staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
 			});
 
-			for (const [, requests] of queriesData) {
-				if (requests) {
-					const found = requests.find((r) => r.id === requestId);
-					if (found) {
-						// Also populate the detail cache for next time
-						queryClient.setQueryData(queryKeys.requests.detail(requestId!), found);
-						return found;
-					}
-				}
+			const lists = await Promise.all(
+				collections.map((collection) =>
+					queryClient
+						.fetchQuery({
+							queryKey: queryKeys.requests.listByCollection(collection.id),
+							queryFn: () => apiService.listRequests({ collectionId: collection.id }),
+							staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
+						})
+						// One unreadable collection must not sink the others — the
+						// request we want is probably in a different one.
+						.catch(() => [] as Request[])
+				)
+			);
+
+			for (const list of lists) {
+				const found = list.find((r) => r.id === id);
+				if (found) return remember(found);
 			}
 
-			throw new Error(`Request ${requestId} not found in cache`);
+			throw new Error(`Request ${id} no longer exists`);
 		},
 		enabled: !!requestId,
-		// Retry a few times with short delay - the cache might be updating
+		// The fetch above is authoritative, so a miss is now a real miss. One
+		// retry covers a transient network blip, not a cache that has not filled.
 		retry: QUERY_CACHE.REQUEST_LOOKUP_RETRY,
 		retryDelay: QUERY_CACHE.REQUEST_LOOKUP_RETRY_DELAY_MS,
-		// Use stale data since we're reading from cache
 		staleTime: Infinity,
 	});
 }

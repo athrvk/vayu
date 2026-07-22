@@ -32,7 +32,8 @@ import {
 	useCollectionAncestors,
 	queryKeys,
 } from "@/queries";
-import { EmptyState } from "@/components/shared";
+import { EmptyState, ErrorState } from "@/components/shared";
+import { Button } from "@/components/ui";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
@@ -79,7 +80,7 @@ function authToRecord(
  * Gets request ID from store, fetches data, and provides context
  */
 export default function RequestBuilder() {
-	const { openTabs, activeTabId, openTab } = useTabsStore();
+	const { openTabs, activeTabId, openTab, closeTab } = useTabsStore();
 	const { activeEnvironmentId } = useSessionStore();
 	const { startRun } = useDashboardStore();
 	const showToast = useToastStore((s) => s.showToast);
@@ -97,7 +98,12 @@ export default function RequestBuilder() {
 	const [pendingLoadTestRequest, setPendingLoadTestRequest] = useState<RequestState | null>(null);
 
 	// Fetch request data
-	const { data: fetchedRequest, isLoading } = useRequestQuery(selectedRequestId);
+	const {
+		data: fetchedRequest,
+		isLoading,
+		isError,
+		refetch,
+	} = useRequestQuery(selectedRequestId);
 
 	// Remember the collection the user is working in so the welcome screen can
 	// land a new request here. Set from the loaded request, where collectionId
@@ -613,11 +619,30 @@ export default function RequestBuilder() {
 		);
 	}
 
-	if (!fetchedRequest) {
+	/*
+	 * Reaching here means the request was looked for and is genuinely gone —
+	 * `useRequestQuery` now fetches the collection lists rather than reading a
+	 * cache that may not have filled yet, so this is no longer the cold-start
+	 * race it used to be. The tab is therefore dead, and a centred "Request not
+	 * found" with no way out left the user to work out that closing it was the
+	 * only move. Deleting a request already closes its tabs
+	 * (`closeTabsForEntities`), so the usual cause is a delete from another
+	 * window or a database restored underneath the app.
+	 */
+	if (isError || !fetchedRequest) {
 		return (
-			<div className="flex-1 flex items-center justify-center text-muted-foreground">
-				<p>Request not found</p>
-			</div>
+			<ErrorState
+				title="This request no longer exists"
+				detail="It was deleted, or the collection it lived in was. Nothing here can be recovered — closing the tab is safe."
+				onRetry={() => refetch()}
+				action={
+					activeTab ? (
+						<Button variant="outline" size="sm" onClick={() => closeTab(activeTab.id)}>
+							Close tab
+						</Button>
+					) : undefined
+				}
+			/>
 		);
 	}
 

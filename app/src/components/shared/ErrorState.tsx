@@ -30,6 +30,7 @@
  * retry.
  */
 
+import type { ReactNode } from "react";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -49,6 +50,12 @@ interface ErrorStateProps {
 	detail?: string;
 	/** A query's `refetch`. Renders the "Try again" button. */
 	onRetry?: () => void;
+	/**
+	 * A second way out, rendered beside "Try again" — "Close tab" for a pane
+	 * whose entity is gone. Retrying is pointless when the thing was deleted,
+	 * and an error state offering only a doomed retry is a dead end.
+	 */
+	action?: ReactNode;
 	variant?: "pane" | "inline";
 	className?: string;
 }
@@ -57,6 +64,7 @@ export function ErrorState({
 	title,
 	detail,
 	onRetry,
+	action,
 	variant = "pane",
 	className,
 }: ErrorStateProps) {
@@ -69,6 +77,7 @@ export function ErrorState({
 						Try again
 					</Button>
 				)}
+				{action}
 			</div>
 		);
 	}
@@ -90,10 +99,15 @@ export function ErrorState({
 					</p>
 				)}
 			</div>
-			{onRetry && (
-				<Button variant="outline" size="sm" onClick={onRetry}>
-					Try again
-				</Button>
+			{(onRetry || action) && (
+				<div className="flex items-center gap-2">
+					{onRetry && (
+						<Button variant="outline" size="sm" onClick={onRetry}>
+							Try again
+						</Button>
+					)}
+					{action}
+				</div>
 			)}
 		</div>
 	);
