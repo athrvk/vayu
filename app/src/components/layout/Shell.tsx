@@ -66,8 +66,25 @@ export default function Shell() {
 			setDrawerOpen(true);
 			setDrawerView("settings");
 		} else if (activeTab?.type === "collection" || activeTab?.type === "request") {
-			setDrawerOpen(true);
-			setDrawerView("collections");
+			/*
+			 * ...but never out of History.
+			 *
+			 * This branch infers the drawer from the tab type, which was sound
+			 * while the collections tree was the only thing that opened a request
+			 * tab. It no longer is: a design run in History opens the builder for
+			 * the request it ran. Switching the drawer on arrival threw the user
+			 * out of the run list one click in, so working through several runs
+			 * meant reopening History between every one.
+			 *
+			 * Read imperatively rather than through the dep array on purpose -
+			 * the question is "what was showing when this tab opened", asked once
+			 * on arrival. As a dependency it would re-fire on every view change
+			 * and drag the user back to collections the moment they left it.
+			 */
+			if (useLayoutStore.getState().drawerView !== "history") {
+				setDrawerOpen(true);
+				setDrawerView("collections");
+			}
 		}
 	}, [activeTab?.type, activeTab?.entityId, setDrawerOpen, setDrawerView]);
 
