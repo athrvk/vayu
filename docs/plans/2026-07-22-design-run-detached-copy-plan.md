@@ -81,7 +81,7 @@ Create `app/src/components/shared/response-viewer/build-raw-request.test.ts`:
  * A live send gets this string from the engine, which builds the real wire
  * message. A restored one has to rebuild it from the four fields the trace
  * stores, and the two are read in the same tab, so the shape has to match
- * `build_raw_request` in engine/src/http/client.cpp.
+ * `Client::send` in engine/src/http/client.cpp:277-331.
  */
 
 import { describe, it, expect } from "vitest";
@@ -158,7 +158,7 @@ In `app/src/components/shared/response-viewer/utils.ts`, add directly above `bui
  * Rebuild the raw HTTP request from the parts a stored trace keeps.
  *
  * A live send gets `rawRequest` from the engine, which assembles the real wire
- * message (`build_raw_request`, engine/src/http/client.cpp). A restored one has
+ * message (`Client::send`, engine/src/http/client.cpp:277-331). A restored one has
  * no such string - the trace stores method, url, headers and body separately -
  * and the restore path used to collapse all four into `${method} ${url}`, so
  * the Raw tab of a reopened run showed a single line and the body that was sent

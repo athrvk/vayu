@@ -11,7 +11,7 @@
  * A live send gets this string from the engine, which builds the real wire
  * message. A restored one has to rebuild it from the four fields the trace
  * stores, and the two are read in the same tab, so the shape has to match
- * `build_raw_request` in engine/src/http/client.cpp.
+ * `Client::send` in engine/src/http/client.cpp:277-331.
  */
 
 import { describe, it, expect } from "vitest";

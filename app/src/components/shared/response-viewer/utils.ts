@@ -246,7 +246,7 @@ export function formatSize(bytes: number): string {
  * Rebuild the raw HTTP request from the parts a stored trace keeps.
  *
  * A live send gets `rawRequest` from the engine, which assembles the real wire
- * message (`build_raw_request`, engine/src/http/client.cpp). A restored one has
+ * message (`Client::send`, engine/src/http/client.cpp:277-331). A restored one has
  * no such string - the trace stores method, url, headers and body separately -
  * and the restore path used to collapse all four into `${method} ${url}`, so
  * the Raw tab of a reopened run showed a single line and the body that was sent
