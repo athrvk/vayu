@@ -243,29 +243,35 @@ QuickJS supports ES2020 features with some limitations:
 
 ## Script Parts
 
-A request's effective pre-request script, test script, and (for load runs) its
-`tests` script are each composed of parts: the collection chain's own script,
-then the request's own script, in that order. `POST /request` and `POST /run`
-accept either form:
+A script's effective source is composed of parts: the collection chain's own
+script, then the request's own script, in that order. Each route accepts its
+own field(s), each in either of two forms:
 
-- The legacy single string (`preRequestScript`, `postRequestScript`, `tests`) -
-  already-joined text, kept because the engine is a standalone binary with a
-  documented HTTP API.
-- A list of parts (`preRequestScripts`, `postRequestScripts`, `tests` as an
-  array), each an object recording where it came from - `{ "origin":
-  "collection" | "request", "id": "...", "name": "...", "script": "..." }` -
-  so a stored run can say which part is whose.
+- `POST /request` takes `preRequestScript` / `postRequestScript` (legacy
+  single string, already-joined text) or `preRequestScripts` /
+  `postRequestScripts` (a list of parts). The load path (`POST /run`) does not
+  read either of these two keys.
+- `POST /run` takes `tests` (the deferred validation script), either as a
+  legacy single string or as a list of parts. `POST /request` does not read
+  `tests`.
 
-When both are sent, **the list wins**; they are never merged. Parts that are
-empty or only whitespace are dropped.
+A list of parts is an array of objects, each recording where it came from -
+`{ "origin": "collection" | "request", "id": "...", "name": "...", "script":
+"..." }` - so a stored run can say which part is whose.
+
+When both the list and the legacy string are sent for the same field, **the
+list wins**; they are never merged. Parts that are empty or only whitespace are
+dropped.
 
 **The parts are joined with a blank line (`"\n\n"`) and run as a single script
-in one shared JavaScript scope** - not as separate `engine.execute()` calls.
-That means a `const` or `let` declared in the collection's part is visible to
-the request's part, exactly as if one person had typed the whole thing into
-one editor. It also means a syntax error's reported line number is counted
-from the start of the joined text, not from the start of whichever part
-actually has the mistake.
+in one shared JavaScript scope** - one call to the script engine per field
+(`engine.execute()` for `preRequestScript(s)` / `postRequestScript(s)`,
+`engine.execute_test()` for `tests`), not one call per part. That means a
+`const` or `let` declared in the collection's part is visible to the
+request's part, exactly as if one person had typed the whole thing into one
+editor. It also means a syntax error's reported line number is counted from
+the start of the joined text, not from the start of whichever part actually
+has the mistake.
 
 ## Error Handling
 

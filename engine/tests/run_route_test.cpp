@@ -7,6 +7,11 @@
 // the run. Before this, the only way to read it was GET /run/:id/report, which
 // is a load-test aggregate: for a design run its summary is computed from a
 // single sample and its metadata carries no configuration at all.
+//
+// These tests cover vayu::json::attach_design_result (the serializer) in
+// isolation, not the GET /run/:id route handler itself - the suite has no
+// in-process HTTP route tests. Deleting the attach_design_result call from
+// runs.cpp, or the type guard around it, leaves this file green.
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>

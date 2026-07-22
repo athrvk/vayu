@@ -424,7 +424,7 @@ request's:
 {
   "preRequestScripts": [
     { "origin": "collection", "id": "c1", "name": "API", "script": "const base = pm.environment.get('baseUrl');" },
-    { "origin": "request", "id": "r1", "script": "pm.request.headers.add({ key: 'X-Trace', value: base });" }
+    { "origin": "request", "id": "r1", "script": "pm.environment.set('traceId', base);" }
   ]
 }
 ```

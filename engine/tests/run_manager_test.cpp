@@ -1,5 +1,4 @@
 #include "vayu/core/run_manager.hpp"
-#include "vayu/http/script_parts.hpp"
 #include <gtest/gtest.h>
 
 using namespace vayu::core;
@@ -124,7 +123,13 @@ TEST (RunManagerRetention, SweepEvictsExpiredOnly) {
 // path's scripts. Before this, only the request's own test script was sent, so
 // a collection-level assertion passed in design mode and was silently never
 // checked under load.
-TEST (RunManager, TestsAcceptAListOfParts) {
+//
+// This exercises the wiring through RunContext's constructor - not
+// `read_script` in isolation (that coverage lives in script_compose_test.cpp).
+// Reverting run_manager.cpp's call back to `config["tests"].get<std::string>
+// ()` makes the constructor throw for a list payload; verified by temporarily
+// reverting and confirming this test fails, then restoring.
+TEST (RunManager, ConstructorJoinsTestScriptParts) {
     auto config = nlohmann::json::parse (R"({
       "tests": [
         {"origin":"collection","id":"c1","name":"API","script":"pm.test(\"a\",()=>{});"},
@@ -132,12 +137,13 @@ TEST (RunManager, TestsAcceptAListOfParts) {
       ]
     })");
 
-    EXPECT_EQ (vayu::http::read_script (config, "tests", "tests"),
-    "pm.test(\"a\",()=>{});\n\npm.test(\"b\",()=>{});");
+    RunContext ctx ("r", config);
+    EXPECT_EQ (ctx.test_script, "pm.test(\"a\",()=>{});\n\npm.test(\"b\",()=>{});");
 }
 
-TEST (RunManager, TestsStillAcceptAPlainString) {
+TEST (RunManager, ConstructorStillAcceptsAPlainTestString) {
     auto config = nlohmann::json::parse (R"({"tests":"pm.test(\"a\",()=>{});"})");
 
-    EXPECT_EQ (vayu::http::read_script (config, "tests", "tests"), "pm.test(\"a\",()=>{});");
+    RunContext ctx ("r", config);
+    EXPECT_EQ (ctx.test_script, "pm.test(\"a\",()=>{});");
 }

@@ -19,7 +19,12 @@ std::string read_script (const nlohmann::json& json, const char* list_key, const
         for (const auto& part : *it) {
             if (!part.is_object ())
                 continue;
-            const auto script = part.value ("script", std::string{});
+            // A non-string "script" would throw out of .get<std::string>()
+            // deep in RunContext's constructor, outside any try - dropping it
+            // matches the rule for a missing key or a non-object part.
+            if (!part.contains ("script") || !part["script"].is_string ())
+                continue;
+            const auto& script = part["script"].get<std::string> ();
             if (is_blank (script))
                 continue;
             if (!joined.empty ())

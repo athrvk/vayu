@@ -54,6 +54,21 @@ TEST (ScriptParts, DropsPartsThatAreOnlyWhitespace) {
     EXPECT_EQ (read_script (json, "preRequestScripts", "preRequestScript"), "real");
 }
 
+TEST (ScriptParts, DropsPartsWhoseScriptIsNotAString) {
+    // {"script": 42} used to throw type_error.302 out of read_script - which
+    // RunContext's constructor calls outside any try/catch, so a bad part
+    // orphaned a `runs` row at "pending" instead of returning a 400. Drop it
+    // like any other malformed part instead.
+    auto json = nlohmann::json::parse (R"({
+      "preRequestScripts": [
+        {"origin":"collection","script":42},
+        {"origin":"request","script":"real"}
+      ]
+    })");
+
+    EXPECT_EQ (read_script (json, "preRequestScripts", "preRequestScript"), "real");
+}
+
 TEST (ScriptParts, MissingEmptyAndAllBlankAllMeanNoScript) {
     auto missing = nlohmann::json::parse (R"({})");
     auto empty   = nlohmann::json::parse (R"({"preRequestScripts":[]})");
@@ -75,4 +90,23 @@ TEST (ScriptParts, KeepsOrder) {
     })");
 
     EXPECT_EQ (read_script (json, "preRequestScripts", "preRequestScript"), "1\n\n2\n\n3");
+}
+
+// POST /run's `tests` field uses the same key name for both forms - unlike
+// preRequestScripts/preRequestScript, which are two separate keys. Confirms
+// list_key == legacy_key still resolves correctly: the list is found first
+// and wins, and a plain string under that same key still works when there is
+// no array.
+TEST (ScriptParts, SameKeyServesBothFormsForTests) {
+    auto list = nlohmann::json::parse (R"({
+      "tests": [
+        {"origin":"collection","id":"c1","name":"API","script":"pm.test(\"a\",()=>{});"},
+        {"origin":"request","id":"r1","script":"pm.test(\"b\",()=>{});"}
+      ]
+    })");
+    EXPECT_EQ (read_script (list, "tests", "tests"),
+    "pm.test(\"a\",()=>{});\n\npm.test(\"b\",()=>{});");
+
+    auto legacy = nlohmann::json::parse (R"({"tests":"pm.test(\"a\",()=>{});"})");
+    EXPECT_EQ (read_script (legacy, "tests", "tests"), "pm.test(\"a\",()=>{});");
 }

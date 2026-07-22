@@ -6,7 +6,9 @@
 #include "vayu/runtime/script_engine.hpp"
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
+#include "vayu/http/script_parts.hpp"
 #include "vayu/types.hpp"
 
 using namespace vayu;
@@ -397,6 +399,36 @@ TEST_F (ScriptEngineTest, ConsoleLog) {
     ASSERT_GE (result.console_output.size (), 2);
     EXPECT_EQ (result.console_output[0], "Hello, World!");
     EXPECT_EQ (result.console_output[1], "Value: 42");
+}
+
+// ============================================================================
+// Script Parts: Shared Scope
+// ============================================================================
+
+// Pins the property the whole script-parts feature depends on: parts joined
+// by vayu::http::read_script and run through a single engine.execute() call
+// share one JavaScript scope, so a const declared in an earlier part is
+// visible to a later one. This does not catch someone splitting the execute
+// call apart in execution.cpp (a source-level regression, not a behavioral
+// one this test can see) - it only pins read_script's join, run once,
+// behaving as documented.
+TEST_F (ScriptEngineTest, ComposedPartsShareOneScope) {
+    auto json = nlohmann::json::parse (R"({
+      "preRequestScripts": [
+        {"origin":"collection","script":"const shared = 42;"},
+        {"origin":"request","script":"console.log(\"got \" + shared);"}
+      ]
+    })");
+    auto script =
+    vayu::http::read_script (json, "preRequestScripts", "preRequestScript");
+
+    ScriptContext ctx;
+    ctx.request = &request;
+    auto result = engine.execute (script, ctx);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_GE (result.console_output.size (), 1);
+    EXPECT_EQ (result.console_output[0], "got 42");
 }
 
 // ============================================================================
