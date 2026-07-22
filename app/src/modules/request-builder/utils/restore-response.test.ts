@@ -110,7 +110,7 @@ describe("responseFromRunResult", () => {
 		);
 	});
 
-	it("returns null when the run result carries no response trace", () => {
+	it("returns null when the run result carries neither an exchange nor an error", () => {
 		expect(responseFromRunResult(undefined)).toBeNull();
 		expect(responseFromRunResult(sample({ trace: { dnsMs: 4.2 } }))).toBeNull();
 	});
@@ -120,6 +120,60 @@ describe("responseFromRunResult", () => {
 
 		expect(restored?.body).toBe("");
 		expect(restored?.bodyType).toBe("text");
+	});
+});
+
+/**
+ * A request that never reached a server stores no `response` node at all -
+ * `store_result` writes `error_type`/`error_message` instead. Returning null
+ * left the response pane blank, which was survivable while a second viewer
+ * showed the error in its own callout. Once the builder is the only place a
+ * design run is displayed, the failure has to arrive with it.
+ */
+describe("a run that failed before reaching the server", () => {
+	const failed = sample({
+		statusCode: 0,
+		statusText: "",
+		trace: {
+			request: {
+				method: "GET",
+				url: "https://nope.example.test/",
+				headers: {},
+			},
+			error_type: "CONNECTION_FAILED",
+			error_message: "Could not connect to host",
+			dnsMs: 12,
+		},
+	});
+
+	it("maps to the same status-0 shape a live failure produces", () => {
+		const restored = responseFromRunResult(failed);
+
+		// status 0 is what sends the pane to ClientErrorView, and errorCode
+		// picks its icon and hint. The engine's `to_string(ErrorCode)` uses
+		// the same words as a live `errorCode`.
+		expect(restored?.status).toBe(0);
+		expect(restored?.errorCode).toBe("CONNECTION_FAILED");
+		expect(restored?.errorMessage).toBe("Could not connect to host");
+	});
+
+	it("still carries what was sent, and the phases that got as far as they did", () => {
+		const restored = responseFromRunResult(failed);
+
+		expect(restored?.rawRequest).toContain("GET / HTTP/1.1");
+		expect(restored?.timing?.dns).toBe(12);
+	});
+
+	it("falls back to the result's own error text", () => {
+		// Older rows, and the load-test writer, do not fill `error_message`.
+		const restored = responseFromRunResult(
+			sample({
+				error: "Timeout was reached",
+				trace: { error_type: "TIMEOUT" },
+			})
+		);
+
+		expect(restored?.errorMessage).toBe("Timeout was reached");
 	});
 });
 
