@@ -38,7 +38,10 @@ export default function TestResults({ results }: TestResultsProps) {
 					<div
 						key={i}
 						className={cn(
-							"p-3 border",
+							// `rounded-md`: these were the only square-cornered cards
+							// in the response pane, and they ignored the Roundedness
+							// setting entirely.
+							"p-3 rounded-md border",
 							test.passed
 								? "bg-status-success/10 border-status-success/20"
 								: "bg-status-error/10 border-status-error/20"

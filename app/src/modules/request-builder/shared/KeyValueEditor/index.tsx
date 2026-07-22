@@ -103,17 +103,6 @@ export default function KeyValueEditor({
 
 	return (
 		<div className="space-y-2">
-			{/* Header */}
-			{/* <div className="flex items-center justify-between">
-				<div className="flex items-center gap-2">
-					{enabledCount > 0 && (
-						<Badge variant="secondary" className="text-xs">
-							{enabledCount} active
-						</Badge>
-					)}
-				</div>
-			</div> */}
-
 			{/* Column Headers */}
 			<div
 				className={cn(

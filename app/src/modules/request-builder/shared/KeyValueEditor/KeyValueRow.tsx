@@ -80,7 +80,15 @@ function KeyValueRow({
 					// a bare "checkbox", giving no clue which row it enables - and
 					// there is one per row.
 					aria-label={item.key ? `Enable ${item.key}` : "Enable this row"}
-					className="w-4 h-4 rounded-md border-input cursor-pointer disabled:opacity-50"
+					// `accent-primary` paints the native control in the user's accent.
+					// Without it the browser default wins - a fixed blue that ignores
+					// both the theme and the accent scheme, in the densest table in
+					// the app. The variables table already does this with
+					// `accent-scope-*`; this one had been left on the browser blue.
+					// The neighbouring `rounded-md` / `border-input` are inert on a
+					// native checkbox (no `appearance-none`), so `accent-color` is the
+					// only property here that actually paints.
+					className="w-4 h-4 accent-primary cursor-pointer disabled:opacity-50"
 				/>
 			) : (
 				<div className="w-4" />
@@ -106,7 +114,18 @@ function KeyValueRow({
 			{/* Resolved Preview */}
 			{showResolved && (
 				<div className="flex items-center min-w-0">
-					<div className="truncate overflow-x-auto text-sm font-mono text-muted-foreground bg-muted/50 px-2 py-1.5 w-full h-9 flex items-center">
+					{/*
+					 * `rounded-md`, so the preview follows Settings → Appearance →
+					 * Roundedness like every other box. With no radius class at all it
+					 * was pinned square at every setting - the same escape hatch as a
+					 * bare `rounded`, in the other direction.
+					 *
+					 * `truncate` alone: it sets `overflow: hidden`, which the old
+					 * `overflow-x-auto` beside it contradicted outright. Nothing
+					 * scrolled; the ellipsis just fought a scrollbar that could not
+					 * appear.
+					 */}
+					<div className="truncate rounded-md text-sm font-mono text-muted-foreground bg-muted/50 px-2 py-1.5 w-full h-9 flex items-center">
 						{item.enabled && (resolvedKey || resolvedValue) ? (
 							<>
 								<span className={hasVariableInKey ? "text-primary" : ""}>

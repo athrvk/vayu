@@ -9,6 +9,19 @@
  * ConsoleOutput Component
  *
  * Displays console logs separated by pre-scripts and tests.
+ *
+ * The four boxes here - two error cards, two log slabs - were the module's
+ * square-corner cluster: no radius class at all, so they stayed sharp at every
+ * Roundedness setting while their neighbours followed it.
+ *
+ * The log slabs also dropped `border border-border`. `--border` is tuned for the
+ * canvas, and on `--muted` it measures **1.16** dark / **1.11** light - it drew
+ * nothing. `--border-strong` is not the escape hatch it was elsewhere either:
+ * `--muted` (L 16%) sits *between* `--border` (L 10%) and `--border-strong`
+ * (L 18%) in dark, so strengthening the border makes it fainter still, 1.107. No
+ * border token can outline a muted box in this theme. The fill does that job on
+ * its own at 1.149 - which is what the Quick Reference slabs in the script
+ * panels have always relied on.
  */
 
 import { useState, useMemo } from "react";
@@ -53,7 +66,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 			{(errors.pre || errors.post) && (
 				<div className="space-y-2">
 					{errors.pre && (
-						<div className="p-3 bg-destructive/10 border border-destructive/20">
+						<div className="p-3 rounded-md bg-destructive/10 border border-destructive/20">
 							<div className="flex items-start gap-2">
 								<AlertCircle className="w-4 h-4 text-destructive-text mt-0.5 flex-shrink-0" />
 								<div className="flex-1 min-w-0">
@@ -68,7 +81,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 						</div>
 					)}
 					{errors.post && (
-						<div className="p-3 bg-destructive/10 border border-destructive/20">
+						<div className="p-3 rounded-md bg-destructive/10 border border-destructive/20">
 							<div className="flex items-start gap-2">
 								<AlertCircle className="w-4 h-4 text-destructive-text mt-0.5 flex-shrink-0" />
 								<div className="flex-1 min-w-0">
@@ -125,7 +138,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 								</Badge>
 							</CollapsibleTrigger>
 							<CollapsibleContent className="mt-2">
-								<div className="bg-muted p-3 font-mono text-sm space-y-1 border border-border">
+								<div className="bg-muted p-3 rounded-md font-mono text-sm space-y-1">
 									{preLogs.map((log, i) => (
 										<div key={i} className="flex items-start gap-2">
 											<Terminal className="w-4 h-4 text-status-running-text mt-0.5 flex-shrink-0" />
@@ -161,7 +174,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 								</Badge>
 							</CollapsibleTrigger>
 							<CollapsibleContent className="mt-2">
-								<div className="bg-muted p-3 font-mono text-sm space-y-1 border border-border">
+								<div className="bg-muted p-3 rounded-md font-mono text-sm space-y-1">
 									{testLogs.map((log, i) => (
 										<div key={i} className="flex items-start gap-2">
 											<Terminal className="w-4 h-4 text-status-success-text mt-0.5 flex-shrink-0" />

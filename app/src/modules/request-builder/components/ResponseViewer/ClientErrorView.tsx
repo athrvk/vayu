@@ -19,6 +19,7 @@ import {
 	ShieldX,
 	Link2Off,
 	ServerOff,
+	Lightbulb,
 	type LucideIcon,
 } from "lucide-react";
 
@@ -90,10 +91,19 @@ export default function ClientErrorView({ errorCode, errorMessage }: ClientError
 					</p>
 				</div>
 
+				{/*
+				 * A lucide glyph, not the emoji this tip used to open with. That was
+				 * the only emoji in `modules/`, and it rendered in the OS emoji font:
+				 * full colour beside 12px muted text, at whatever size and baseline
+				 * that font chose, on a row where every other icon in the app is a
+				 * stroked lucide mark in a token colour. It also sat inside the <p>,
+				 * so it inherited nothing and aligned to nothing.
+				 */}
 				{hint && (
-					<div className="bg-muted/50 rounded-lg p-3 text-left">
+					<div className="bg-muted/50 rounded-lg p-3 text-left flex items-start gap-2">
+						<Lightbulb className="w-3.5 h-3.5 mt-0.5 shrink-0 text-muted-foreground" />
 						<p className="text-xs text-muted-foreground">
-							<span className="font-medium">💡 Tip:</span> {hint}
+							<span className="font-medium">Tip:</span> {hint}
 						</p>
 					</div>
 				)}
