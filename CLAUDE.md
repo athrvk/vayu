@@ -162,7 +162,13 @@ cd app && pnpm format:check        # Prettier
 - **No chart series on `--primary`/`--chart-1`** - both track the user's accent
   and can collide with a semantic series. Use `categorical`.
   → `status-code-series.test.ts`
-- **No bare `rounded`** - it ignores the Roundedness setting. → `radius-token.test.tsx`
+- **No bare `rounded`** - it ignores the Roundedness setting. → `radius-token.test.tsx`.
+  **No radius class at all** is the same escape hatch pointing the other way: it
+  pins the box at 0 for a user who chose Rounded. No source scan can flag it,
+  because plenty of surfaces are square on purpose (header bars, tab strips,
+  full-bleed editors) - only the component knows which it is, so render it and
+  read `element.className`. Seven boxes in the request builder were stuck square
+  this way. → `boxed-surfaces.test.tsx`, `KeyValueRow.test.tsx`
 - **Adding an accent scheme:** `constants/color-schemes.ts` + `index.css`, both
   themes, nothing else. → `color-schemes.test.ts`
 - **A `Badge` that paints its own `bg-` must be `variant="chip"`.** Every other
@@ -175,12 +181,30 @@ cd app && pnpm format:check        # Prettier
   → `design-system-doc.test.ts`. Prose is not - if you change a value, read the
   sentence around it.
 
-**"Written but never read" is this codebase's most repeated defect** - found six
-times: state one layer records and no layer displays (SSE errors, save-failure
-reasons, an import phase), and config one branch defines and another re-derives
-inline (`SCOPE_CONFIG.global`). Store-level tests never catch these; they are
-wiring bugs. When you add a field, grep for a reader before assuming there is
-one.
+**A border is invisible or not depending on what it sits *on*, never on what it
+is.** `--border` is tuned for the canvas (1.14) and is the *same colour* as
+`--card` in dark (1.00), so a rule inside a card is simply absent - use
+`border-border-strong` (1.28). But a card's own outline on `border-border` is
+correct, because that edge faces the canvas. Both read as
+`border border-border bg-card` in the source; only the ancestry tells them
+apart, so **measure the parent's computed background** before calling one a
+defect. On `--muted` / `--accent` there is no answer: `--border-strong` is
+*weaker* there than `--border` in dark (1.11 vs 1.16), and the pair inverts in
+light, so a muted box must be defined by its fill. Full table in
+`docs/design-system.md`.
+
+**"Written but never read" is this codebase's most repeated defect** - found
+nine times: state one layer records and no layer displays (SSE errors,
+save-failure reasons, an import phase, parsed cookie attributes), and config one
+branch defines and another re-derives inline (`SCOPE_CONFIG.global`). Store-level
+tests never catch these; they are wiring bugs. When you add a field, grep for a
+reader before assuming there is one.
+
+**A hand-rolled copy of a primitive does not receive the primitive's fixes.**
+The script panels printed `scope[0].toUpperCase()` in a plain `Badge` instead of
+using `VariableScopeBadge`, so the scope-colour fix that landed in the primitive
+never reached them and all three scopes stayed grey. Before styling something
+that already exists as a primitive, `rg` for the primitive.
 
 **Before measuring or changing a class, `rg` for it in the components.** Twice a
 conclusion was drawn about a combination the app never renders (`bg-border-strong`

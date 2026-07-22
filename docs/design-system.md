@@ -287,16 +287,32 @@ tuned for the canvas - its dark value is commented "= rgba(255,255,255,0.07)
 on dark canvas", where it measures 1.14. Measured against the surfaces it is
 actually used on:
 
-| | canvas | panel | card |
-|---|---:|---:|---:|
-| `--border` | 1.14 | 1.08 | **1.00** |
-| `--border-strong` | 1.47 | 1.39 | 1.28 |
+| | canvas | panel | card | muted |
+|---|---:|---:|---:|---:|
+| `--border` | 1.14 | 1.08 | **1.00** | 1.16 |
+| `--border-strong` | 1.47 | 1.39 | 1.28 | **1.11** |
 
 At 1.00 the divider is the same colour as the card and simply is not there
 in dark mode. `--border-strong` gives 1.28, which is what `--border` itself
 achieves on a card in light mode - so the strong token on dark reads the way
 the default token reads on light. This is not enforced by a test: whether a
 border sits on a card is an ancestry question a source scan cannot answer.
+
+**Ask what the box sits *on*, not what it is.** A card's own outline is fine on
+`border-border`, because that edge faces the canvas, where the token measures
+1.14 as designed. The 1.00 case is a rule *inside* a card. Both look like
+`border border-border bg-card` in the source, and only the ancestry tells them
+apart - so measure the parent's computed background before calling one a defect.
+
+**On `--muted` there is no border to pick.** It is the one surface where
+`--border-strong` is *weaker* than `--border`: `--muted` (L 16%) sits between
+them (L 10% and L 18%) in dark, so the usual escape hatch makes the edge
+fainter still, 1.11 against 1.16, and neither is visible. In light the pair
+inverts, 1.11 and 1.32, so whichever token is chosen one theme gets no edge at
+all. A `bg-muted` block has to be defined by its fill instead, which separates
+from a card at 1.18 light / 1.15 dark - the treatment the console log slabs and
+the script panels' Quick Reference blocks use. `--accent` carries the same value
+as `--muted` in both themes and behaves identically.
 | switch **off** track vs card | 1.55 | 1.28 | failed |
 | switch off **thumb** vs its track | 1.41 | 12.35 | failed in light |
 | switch **on** track vs card | 5.39 | 5.89 | passes |
