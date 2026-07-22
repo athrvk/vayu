@@ -93,6 +93,14 @@ CMake presets: `linux-dev`, `linux-prod`, `macos-dev`, `macos-prod`, `windows-de
 cd app && pnpm test
 ```
 
+**A test must never assert the host platform.** Vayu is built on Linux, macOS
+and Windows and CI runs all three. `platform.test.ts` asserted `isMac === false`
+and called that "the test environment"; it was true only because jsdom reports
+a Linux-ish user-agent, so the macOS branch was never exercised anywhere. Moving
+to `node` removed the accident - Node has a real global `navigator` - and only
+the macOS runner failed. Stub the input (`vi.stubGlobal`, or `process.platform`
+as `updater.test.ts` does) and assert **both** branches.
+
 **Tests default to the `node` environment.** A DOM costs ~2s per file and half
 the suite never touches one. If your test renders, or reaches `document` /
 `window` / `localStorage` (zustand `persist` does, without naming it), start the
