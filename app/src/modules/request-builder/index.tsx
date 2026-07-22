@@ -46,6 +46,7 @@ import {
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
 import { scriptParts } from "./utils/script-parts";
+import { buildExecBody, responseFromExecuteResult } from "./utils/execute-mapping";
 import type {
 	HttpMethod,
 	LoadTestConfig,
@@ -193,37 +194,8 @@ export default function RequestBuilder() {
 						resolveString(value),
 					])
 				);
-				const resolvedBody = request.body ? resolveString(request.body) : request.body;
-
-				// Build body payload for engine matching the discriminated union
-				let execBody:
-					| {
-							mode: string;
-							content?: string;
-							fields?: Array<{ key: string; value: string; enabled: boolean }>;
-					  }
-					| undefined;
-				if (request.bodyMode === "form-data") {
-					execBody = {
-						mode: "form-data",
-						fields: toKeyValueEntries(request.formData).map((e) => ({
-							key: resolveString(e.key),
-							value: resolveString(e.value),
-							enabled: e.enabled,
-						})),
-					};
-				} else if (request.bodyMode === "x-www-form-urlencoded") {
-					execBody = {
-						mode: "x-www-form-urlencoded",
-						fields: toKeyValueEntries(request.urlEncoded).map((e) => ({
-							key: resolveString(e.key),
-							value: resolveString(e.value),
-							enabled: e.enabled,
-						})),
-					};
-				} else if (request.bodyMode !== "none" && resolvedBody) {
-					execBody = { mode: request.bodyMode || "text", content: resolvedBody };
-				}
+				// Shared with the History run view's send path - see execute-mapping.ts
+				const execBody = buildExecBody(request, resolveString);
 
 				// Resolve auth - walk collection chain for inherit, resolve variables for concrete
 				let execAuth: Record<string, unknown> | undefined;
@@ -296,56 +268,8 @@ export default function RequestBuilder() {
 					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 				}
 
-				// Determine body type from content-type header
-				const contentType = (result.headers?.["content-type"] || "").toLowerCase();
-				const bodyType: ResponseState["bodyType"] = contentType.includes("json")
-					? "json"
-					: contentType.includes("html")
-						? "html"
-						: contentType.includes("xml")
-							? "xml"
-							: "text";
-
-				// Extract bodyRaw (raw response from server) - always use this for raw view
-				const bodyRaw =
-					result.bodyRaw ||
-					(typeof result.body === "object" && result.body !== null
-						? JSON.stringify(result.body, null, 2)
-						: String(result.body || ""));
-
-				// For pretty view, use parsed body if available, otherwise use raw
-				// Note: typeof null === "object" in JavaScript, so we need to check for null explicitly
-				const body =
-					typeof result.body === "object" && result.body !== null
-						? JSON.stringify(result.body, null, 2)
-						: result.body !== null && result.body !== undefined
-							? String(result.body)
-							: bodyRaw || "";
-
-				return {
-					// Use status from result, but don't default to 200 if it's 0 (client-side error)
-					// 0 is a valid status code for client-side errors (no server response)
-					status:
-						result.status !== undefined && result.status !== null ? result.status : 200,
-					statusText: result.statusText || "",
-					headers: result.headers || {},
-					requestHeaders: result.requestHeaders,
-					rawRequest: result.rawRequest,
-					body,
-					bodyRaw, // Always include raw body for raw view mode
-					bodyType,
-					time: result.timing?.total || 0,
-					timing: result.timing,
-					size: result.bodySize || 0,
-					// Client-side error info (from engine/curl)
-					errorCode: result.errorCode,
-					errorMessage: result.errorMessage,
-					// Script execution results
-					consoleLogs: result.consoleLogs,
-					testResults: result.testResults,
-					preScriptError: result.preScriptError,
-					postScriptError: result.postScriptError,
-				};
+				// Shared with the History run view's send path - see execute-mapping.ts
+				return responseFromExecuteResult(result);
 			} catch (error) {
 				console.error("Execute request failed:", error);
 				const errorMsg = error instanceof Error ? error.message : String(error);

@@ -50,7 +50,11 @@ import {
 	resolveInheritedAuth,
 	authToRecord,
 } from "@/modules/request-builder/utils/auth-mapping";
-import { toKeyValueEntries, toFlatHeaders } from "@/modules/request-builder/utils/key-value";
+import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
+import {
+	buildExecBody,
+	responseFromExecuteResult,
+} from "@/modules/request-builder/utils/execute-mapping";
 import { generateUUID } from "@/modules/request-builder/utils/id";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { seedFromRun } from "./design-run-seed";
@@ -153,36 +157,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						resolveString(value),
 					])
 				);
-				const resolvedBody = request.body ? resolveString(request.body) : request.body;
-
-				let execBody:
-					| {
-							mode: string;
-							content?: string;
-							fields?: Array<{ key: string; value: string; enabled: boolean }>;
-					  }
-					| undefined;
-				if (request.bodyMode === "form-data") {
-					execBody = {
-						mode: "form-data",
-						fields: toKeyValueEntries(request.formData).map((e) => ({
-							key: resolveString(e.key),
-							value: resolveString(e.value),
-							enabled: e.enabled,
-						})),
-					};
-				} else if (request.bodyMode === "x-www-form-urlencoded") {
-					execBody = {
-						mode: "x-www-form-urlencoded",
-						fields: toKeyValueEntries(request.urlEncoded).map((e) => ({
-							key: resolveString(e.key),
-							value: resolveString(e.value),
-							enabled: e.enabled,
-						})),
-					};
-				} else if (request.bodyMode !== "none" && resolvedBody) {
-					execBody = { mode: request.bodyMode || "text", content: resolvedBody };
-				}
+				// Shared with the builder's own send path - see execute-mapping.ts
+				const execBody = buildExecBody(request, resolveString);
 
 				/*
 				 * Auth is resolved fresh from the saved request, using the same
@@ -255,48 +231,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 				}
 
-				const contentType = (result.headers?.["content-type"] || "").toLowerCase();
-				const bodyType: ResponseState["bodyType"] = contentType.includes("json")
-					? "json"
-					: contentType.includes("html")
-						? "html"
-						: contentType.includes("xml")
-							? "xml"
-							: "text";
-
-				const bodyRaw =
-					result.bodyRaw ||
-					(typeof result.body === "object" && result.body !== null
-						? JSON.stringify(result.body, null, 2)
-						: String(result.body || ""));
-
-				const body =
-					typeof result.body === "object" && result.body !== null
-						? JSON.stringify(result.body, null, 2)
-						: result.body !== null && result.body !== undefined
-							? String(result.body)
-							: bodyRaw || "";
-
-				return {
-					status:
-						result.status !== undefined && result.status !== null ? result.status : 200,
-					statusText: result.statusText || "",
-					headers: result.headers || {},
-					requestHeaders: result.requestHeaders,
-					rawRequest: result.rawRequest,
-					body,
-					bodyRaw,
-					bodyType,
-					time: result.timing?.total || 0,
-					timing: result.timing,
-					size: result.bodySize || 0,
-					errorCode: result.errorCode,
-					errorMessage: result.errorMessage,
-					consoleLogs: result.consoleLogs,
-					testResults: result.testResults,
-					preScriptError: result.preScriptError,
-					postScriptError: result.postScriptError,
-				};
+				// Shared with the builder's own send path - see execute-mapping.ts
+				return responseFromExecuteResult(result);
 			} catch (error) {
 				console.error("Replaying the run failed:", error);
 				const errorMsg = error instanceof Error ? error.message : String(error);
