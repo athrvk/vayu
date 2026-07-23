@@ -131,10 +131,18 @@ export default function RequestItem({
 			)}
 
 			{/*
-			 * Delete moved into the ⋯ menu, but the Delete key still targets a
-			 * data-tree-delete element (see useRovingTreeFocus). This is that
-			 * target: never shown, never announced - a keyboard path only.
+			 * Keyboard-only targets for the roving tree (see useRovingTreeFocus):
+			 * F2 clicks data-tree-rename, Delete clicks data-tree-delete. Never
+			 * shown, never announced - the same actions live in the ⋯ menu.
 			 */}
+			<button
+				type="button"
+				className="hidden"
+				aria-hidden="true"
+				tabIndex={-1}
+				data-tree-rename
+				onClick={() => onStartRename?.(request)}
+			/>
 			<button
 				type="button"
 				className="hidden"

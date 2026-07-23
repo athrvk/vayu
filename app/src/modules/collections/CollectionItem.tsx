@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { ChevronRight, ChevronDown, Folder, Loader2 } from "lucide-react";
+import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
@@ -89,6 +89,8 @@ export default function CollectionItem({
 	onStartRequestRename,
 }: CollectionItemProps) {
 	const isExpanded = expandedCollectionIds.has(collection.id);
+	// Open-folder glyph while expanded, so the folder itself echoes the chevron.
+	const FolderIcon = isExpanded ? FolderOpen : Folder;
 	const isSelected = selectedCollectionId === collection.id;
 	const requests = getRequestsByCollection(collection.id);
 	const isRenaming = renamingId === collection.id;
@@ -192,7 +194,7 @@ export default function CollectionItem({
 					className="flex min-w-0 items-center gap-2 flex-1 text-left cursor-pointer"
 					disabled={isDeleting || isRenaming}
 				>
-					<Folder
+					<FolderIcon
 						className={cn(
 							"w-4 h-4 shrink-0",
 							depth === 0 ? "text-primary" : "text-primary/70"
@@ -250,6 +252,16 @@ export default function CollectionItem({
 						actions={getCollectionActions(collection)}
 					/>
 				)}
+				{/* Keyboard-only rename target: F2 clicks it (see useRovingTreeFocus).
+				    Never shown; the same action lives in the row's menu. */}
+				<button
+					type="button"
+					className="hidden"
+					aria-hidden="true"
+					tabIndex={-1}
+					data-tree-rename
+					onClick={() => onStartRename(collection)}
+				/>
 			</div>
 
 			{/* Children (Subfolders + Requests) - indented by depth */}

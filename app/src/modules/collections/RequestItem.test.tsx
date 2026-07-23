@@ -59,7 +59,7 @@ function renderItem() {
 		/>
 	);
 	const target = container.querySelector("[data-tree-activate]") as HTMLElement;
-	return { onSelect, onStartRename, target };
+	return { onSelect, onStartRename, target, container };
 }
 
 describe("RequestItem opens without a click delay", () => {
@@ -81,6 +81,15 @@ describe("RequestItem opens without a click delay", () => {
 	it("starts a rename on double click", () => {
 		const { onStartRename, target } = renderItem();
 		fireEvent.doubleClick(target);
+		expect(onStartRename).toHaveBeenCalledWith(REQUEST);
+	});
+
+	// The keyboard path: useRovingTreeFocus clicks this hidden control on F2.
+	it("exposes a data-tree-rename control wired to onStartRename", () => {
+		const { onStartRename, container } = renderItem();
+		const control = container.querySelector("[data-tree-rename]") as HTMLElement;
+		expect(control).toBeTruthy();
+		fireEvent.click(control);
 		expect(onStartRename).toHaveBeenCalledWith(REQUEST);
 	});
 });
