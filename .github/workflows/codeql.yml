@@ -49,9 +49,12 @@ jobs:
           # stated here so the intent is explicit next to the C++ job that
           # cannot use it.
           build-mode: none
-          # Suppress alerts in code that is not ours or not shipped. These filter
-          # the report, not the scan, so vendored JS and build output stop
-          # generating noise without hiding anything in `app/src`.
+          # Suppress findings in code that is not ours or not shipped, without
+          # hiding anything in `app/src`. Under `build-mode: none` these
+          # exclude files from *extraction*, not merely from the report: adding
+          # the vendor entry below took the run log from 93
+          # `Extracting .../engine/vendor/...` lines to 0, so the scan gets
+          # cheaper as well as quieter.
           #
           # `engine/vendor` is the tree this list was describing all along and
           # did not name: 90 tracked .js files across the two vendored QuickJS
