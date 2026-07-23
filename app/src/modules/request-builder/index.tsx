@@ -556,11 +556,12 @@ export default function RequestBuilder() {
 	}
 
 	/*
-	 * Reaching here means the request was looked for and is genuinely gone -
-	 * `useRequestQuery` now fetches the collection lists rather than reading a
-	 * cache that may not have filled yet, so this is no longer the cold-start
-	 * race it used to be. The tab is therefore dead, and a centred "Request not
-	 * found" with no way out left the user to work out that closing it was the
+	 * Reaching here means the lookup errored. `useRequestQuery` hits
+	 * `GET /requests/:id`, so a genuine deletion (404) is authoritative rather
+	 * than the cold-start race it used to be; a transport failure lands here too,
+	 * but the retry below recovers it once the engine is back. The message reads
+	 * for the common case (deleted), and a centred "Request not found" with no
+	 * way out used to leave the user to work out that closing the tab was the
 	 * only move. Deleting a request already closes its tabs
 	 * (`closeTabsForEntities`), so the usual cause is a delete from another
 	 * window or a database restored underneath the app.

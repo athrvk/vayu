@@ -146,6 +146,42 @@ They are always present in the response: a request saved before these columns
 existed reads back as the engine defaults (`true` / `10`), which is the
 behaviour it already had.
 
+### GET /requests/:id
+
+Fetch a single request by id, in one lookup. The app uses this to load a
+restored request tab or a design-run copy on cold start, instead of fetching
+every collection's request list and scanning them for the id.
+
+**Path Parameters:**
+- `id` (required): The request ID to fetch
+
+**Response:** The request object, in the same shape as a `GET /requests` list
+entry.
+```json
+{
+  "id": "req_1234567890",
+  "collectionId": "col_1234567890",
+  "name": "Get Users",
+  "method": "GET",
+  "url": "{{baseUrl}}/users",
+  "params": [],
+  "headers": [],
+  "body": { "mode": "none" },
+  "bodyType": "none",
+  "auth": { "mode": "inherit" },
+  "preRequestScript": "",
+  "postRequestScript": "",
+  "followRedirects": true,
+  "maxRedirects": 10,
+  "createdAt": 1234567890,
+  "updatedAt": 1234567890
+}
+```
+
+**404** when the request genuinely does not exist. This is distinct from a
+`5xx`: the caller relies on that difference to tell a real deletion from an
+unreachable engine, and must not treat a transport failure as "deleted".
+
 ### POST /requests
 
 Create or update a request. If `id` is provided and exists, performs an update.

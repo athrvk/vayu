@@ -279,12 +279,15 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 
 See `docs/engine/api-reference.md` for full reference.
 
-Two gaps worth knowing before you design around them:
+Two things worth knowing before you design around them:
 
-- **There is no `GET /requests/:id`** - only `GET /requests?collectionId=`. A
-  single request is found by fetching collection lists and scanning them
-  (`useRequestQuery`). Tabs are persisted, so that path runs on every cold
-  start; it must fetch, not just read cache.
+- **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
+  to load a restored request tab or a design-run copy on cold start - one round
+  trip, not the old scan of every collection's list. A `404` means the request
+  was genuinely deleted; anything else (a `5xx`, an unreachable engine) is a
+  transport failure, and callers (`DesignRunView`) must keep those apart - only
+  a real 404 becomes `RequestNotFoundError`. `GET /requests?collectionId=` still
+  lists a collection's requests.
 - **`followRedirects` / `maxRedirects` are per-request and stored** (request
   builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
   Both clients send them on *every* execute and load test rather than eliding

@@ -14,6 +14,7 @@
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { apiService } from "@/services/api";
+import { ApiError } from "@/services";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import type {
@@ -145,91 +146,48 @@ export function isRequestNotFound(error: unknown): error is RequestNotFoundError
 /**
  * Fetch a single request by ID.
  *
- * The engine has no `GET /requests/:id` - only `GET /requests?collectionId=` -
- * so a single request is found by looking through the collection lists.
+ * One round trip: `GET /requests/:id`. The engine reads it straight out of the
+ * DB, so this no longer fetches every collection's list and scans them for the
+ * id - the N+1 fan-out that used to run on every cold start, once per restored
+ * request tab.
  *
- * This used to read the cache and nothing else, which made it a race it usually
- * lost on a cold start. Tabs are persisted and restored, so on launch this runs
- * immediately for every restored request tab while
- * `usePrefetchCollectionsAndRequests` is still two round trips from filling
- * those lists. It threw, retried 3× at 100ms, gave up - and because
- * `staleTime: Infinity` keeps the error parked, it never recovered once the
- * lists *did* arrive. The result was a permanent "Request not found" on the
- * restored tab, and a tab strip of anonymous "Request" labels, until you
- * clicked the request again in the sidebar.
+ * That scan was also a race it usually lost on launch: tabs are persisted, so
+ * this runs immediately for each restored tab while the lists are still two
+ * round trips from being filled, and `staleTime: Infinity` parked the "not
+ * found" it threw so it never recovered once the lists *did* arrive. A point
+ * lookup has no such window - a 404 is authoritative the instant it returns.
  *
- * So it now *fetches* what it needs instead of hoping someone else already
- * did. Cache first (free), then the collection lists, hydrated through the same
- * query keys the sidebar uses so the work is shared rather than duplicated.
- * Only a request that genuinely no longer exists reaches the throw.
+ * The 404-vs-everything-else split is load-bearing, not cosmetic. `getRequest`
+ * throws `ApiError` on any non-2xx; only a real 404 becomes
+ * `RequestNotFoundError` (a genuine deletion), and every other failure - a 5xx,
+ * an unreachable engine - is rethrown untouched. That is what lets callers like
+ * `DesignRunView` tell "the request was deleted" from "the engine hiccuped",
+ * which the old `.catch(() => [])` scan could not: one swallowed list failure
+ * looked identical to "not in any list".
+ *
+ * Already-cached ids (a request just created or updated writes its own detail
+ * cache) are served without a network call, because `staleTime: Infinity` keeps
+ * the cached value fresh.
  */
 export function useRequestQuery(requestId: string | null) {
-	const queryClient = useQueryClient();
-
 	return useQuery({
 		queryKey: queryKeys.requests.detail(requestId ?? ""),
 		queryFn: async () => {
-			const id = requestId!;
-
-			// Populated by mutations, and by this function on a previous miss.
-			const cached = queryClient.getQueryData<Request>(queryKeys.requests.detail(id));
-			if (cached) return cached;
-
-			const scanCachedLists = () => {
-				for (const [, requests] of queryClient.getQueriesData<Request[]>({
-					queryKey: queryKeys.requests.lists(),
-				})) {
-					const found = requests?.find((r) => r.id === id);
-					if (found) return found;
+			try {
+				return await apiService.getRequest(requestId!);
+			} catch (error) {
+				// A definitive deletion, distinct from a transport failure.
+				if (error instanceof ApiError && error.statusCode === 404) {
+					throw new RequestNotFoundError(requestId!);
 				}
-				return undefined;
-			};
-
-			const remember = (found: Request) => {
-				queryClient.setQueryData(queryKeys.requests.detail(id), found);
-				return found;
-			};
-
-			const alreadyLoaded = scanCachedLists();
-			if (alreadyLoaded) return remember(alreadyLoaded);
-
-			/*
-			 * Nothing cached yet. `fetchQuery` rather than `prefetchQuery`: it
-			 * returns the data and, critically, dedupes against an identical
-			 * in-flight request - so racing the prefetch costs no extra traffic,
-			 * it just awaits the same promise.
-			 */
-			const collections = await queryClient.fetchQuery({
-				queryKey: queryKeys.collections.list(),
-				queryFn: () => apiService.listCollections(),
-				staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
-			});
-
-			const lists = await Promise.all(
-				collections.map((collection) =>
-					queryClient
-						.fetchQuery({
-							queryKey: queryKeys.requests.listByCollection(collection.id),
-							queryFn: () => apiService.listRequests({ collectionId: collection.id }),
-							staleTime: QUERY_CACHE.DEFAULT_STALE_TIME_MS,
-						})
-						// One unreadable collection must not sink the others - the
-						// request we want is probably in a different one.
-						.catch(() => [] as Request[])
-				)
-			);
-
-			for (const list of lists) {
-				const found = list.find((r) => r.id === id);
-				if (found) return remember(found);
+				throw error;
 			}
-
-			throw new RequestNotFoundError(id);
 		},
 		enabled: !!requestId,
-		// The fetch above is authoritative, so a miss is now a real miss. One
-		// retry covers a transient network blip, not a cache that has not filled.
-		retry: QUERY_CACHE.REQUEST_LOOKUP_RETRY,
+		// Never retry a real deletion - a 404 is final. Only a transport failure
+		// is worth a retry, and only a bounded number of times.
+		retry: (count, error) =>
+			!isRequestNotFound(error) && count < QUERY_CACHE.REQUEST_LOOKUP_RETRY,
 		retryDelay: QUERY_CACHE.REQUEST_LOOKUP_RETRY_DELAY_MS,
 		staleTime: Infinity,
 	});
