@@ -62,24 +62,81 @@ Check engine status and version.
 }
 ```
 
-### GET /config
+### POST /shutdown
 
-Get global configuration settings. Backed by the `config_entries` table; each entry carries UI
-metadata (label, description, category, default, min/max). Keys include:
+Gracefully shut down the engine. This is the shutdown path the Electron app uses
+on quit (it is more reliable than a signal on Windows, where `SIGTERM` does not
+behave as expected).
 
+The response is sent **before** shutdown begins, so the client always receives
+the `200`. About 100ms later, on a detached thread, the engine invokes its
+shutdown callback: the daemon's main loop exits, active runs are stopped, the
+lock file is released, logs are flushed, and the process exits.
+
+**Response:** `200`
 ```json
 {
-  "workers": 8,
-  "maxConnections": 10000,
-  "defaultTimeout": 30000,
-  "statsInterval": 100,
-  "contextPoolSize": 64,
-  "liveTickIntervalMs": 100,
-  "liveRetentionMs": 60000
+  "status": "ok",
+  "message": "Shutdown initiated"
 }
 ```
 
-`POST /config` validates each key against its registered type and min/max range.
+### GET /config
+
+Get global configuration settings. Backed by the `config_entries` table. The
+response is an `entries` array; each entry carries its value plus the UI metadata
+the Settings panel renders (label, description, category, default, and optional
+min/max):
+
+```json
+{
+  "entries": [
+    {
+      "key": "workers",
+      "value": "8",
+      "type": "integer",
+      "label": "Worker Threads",
+      "description": "Number of worker threads for load generation.",
+      "category": "performance",
+      "default": "8",
+      "min": "1",
+      "max": "256",
+      "updatedAt": 1234567890
+    }
+  ]
+}
+```
+
+`min` and `max` are present only for entries that declare them. `value` and
+`default` are always strings; `type` is one of `integer`, `number`, `boolean`,
+or `string`.
+
+### POST /config
+
+Update one or more configuration entries. Two body shapes are accepted:
+
+**Batch** - update several keys at once:
+```json
+{ "entries": { "workers": "16", "defaultTimeout": "30000" } }
+```
+
+**Single** - update one key:
+```json
+{ "key": "workers", "value": "16" }
+```
+
+In both shapes, non-string values (numbers, booleans) are coerced to strings.
+Each key is validated against its registered `type` and, for `integer` / `number`
+entries, its `min`/`max` range; `boolean` entries must be `"true"` or `"false"`.
+Validation is all-or-nothing: if any key is unknown or out of range, nothing is
+applied and the response is `400` with the specific reason(s):
+
+```json
+{ "error": { "code": "invalid_config", "message": "'workers' must be at most 256 (got 9999)" } }
+```
+
+**Success response:** `200` - the full updated entries array (same shape as
+`GET /config`) plus `"success": true`.
 
 ## Collections
 
@@ -271,6 +328,41 @@ Delete a request.
   "id": "req_1234567890"
 }
 ```
+
+## Import
+
+### POST /import/fetch
+
+Fetch a remote collection or spec by URL, server-side, so the app can import a
+resource that browser CORS would otherwise block. The engine proxies the `GET`
+via libcurl and returns the raw body and content type.
+
+**Request:**
+```json
+{ "url": "https://example.com/collection.json" }
+```
+
+The `url` must be a string starting with `http://` or `https://`.
+
+**Response:** `200`
+```json
+{
+  "content": "...raw response body...",
+  "contentType": "application/json"
+}
+```
+
+`contentType` echoes the fetched response's `Content-Type` header, defaulting to
+`application/octet-stream` when absent. The response JSON is serialized with
+invalid UTF-8 replaced rather than throwing, so binary or malformed content can
+never turn into a `500`.
+
+**Errors:**
+- `400` `{ "error": "Invalid JSON body" }` - the request body did not parse.
+- `400` `{ "error": "Invalid URL" }` - `url` is missing, not a string, or does
+  not start with `http://` / `https://`.
+- `502` `{ "error": "Failed to fetch: <detail>" }` - the upstream request failed
+  (connection error, transport failure).
 
 ## Environments
 
@@ -967,7 +1059,7 @@ Get script engine API completions for UI autocomplete.
 | 404 | Resource not found |
 | 409 | OAuth 2.0 interactive authorization required (`/run` pre-flight, `/oauth2/token`) |
 | 500 | Internal server error |
-| 502 | OAuth 2.0 token-endpoint network error |
+| 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
 
 ## Notes
 
