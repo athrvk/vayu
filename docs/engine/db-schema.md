@@ -12,13 +12,22 @@ automatically on startup - no migration scripts are needed for additive changes.
 
 ## Tables
 
+**ID format.** Row IDs are `<prefix>_` + a random UUIDv4 (lowercase `8-4-4-4-12`
+hex, e.g. `col_3f2b1c9a-...`), the same shape whether a row is created by the app
+or the engine. The engine generates them with `vayu::utils::generate_id("col_")`
+(see `engine/src/utils/id.cpp`); the app's import pipeline uses
+`col_${crypto.randomUUID()}`. The engine formerly built IDs from a millisecond
+timestamp, so two rows created in the same millisecond collided and - because
+persistence upserts (`storage.replace()`) - silently merged; the random UUID
+removes that. `globals.id` is the one exception: a fixed literal `"globals"`.
+
 ### `collections`
 
 Stores folder/group hierarchy for requests.
 
 | Column               | Type    | Notes                                        |
 |----------------------|---------|----------------------------------------------|
-| `id`                 | TEXT PK | UUID                                         |
+| `id`                 | TEXT PK | `col_` + UUID                                |
 | `parent_id`          | TEXT    | NULL for root collections                    |
 | `name`               | TEXT    |                                              |
 | `description`        | TEXT    | Default `""`                                 |
@@ -46,7 +55,7 @@ Stores individual HTTP request definitions.
 
 | Column                | Type    | Notes                                                |
 |-----------------------|---------|------------------------------------------------------|
-| `id`                  | TEXT PK | UUID                                                 |
+| `id`                  | TEXT PK | `req_` + UUID                                        |
 | `collection_id`       | TEXT    | FK → `collections.id` (not enforced by SQLite FK)   |
 | `name`                | TEXT    |                                                      |
 | `description`         | TEXT    | Default `""`                                         |
@@ -113,7 +122,7 @@ Stores named variable sets.
 
 | Column       | Type    | Notes                                 |
 |--------------|---------|---------------------------------------|
-| `id`         | TEXT PK | UUID                                  |
+| `id`         | TEXT PK | `env_` + UUID                         |
 | `name`       | TEXT    |                                       |
 | `description`| TEXT    | Default `""`                          |
 | `variables`  | TEXT    | JSON: `Record<string, VariableValue>` |
@@ -142,7 +151,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 
 | Column            | Type    | Notes                                                       |
 |-------------------|---------|-------------------------------------------------------------|
-| `id`              | TEXT PK | UUID                                                        |
+| `id`              | TEXT PK | `run_` + UUID                                               |
 | `request_id`      | TEXT    | FK → `requests.id` (optional; set in design mode)           |
 | `environment_id`  | TEXT    | FK → `environments.id` (optional)                           |
 | `type`            | TEXT    | `"design"` or `"load"`                                      |
