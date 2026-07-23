@@ -210,9 +210,13 @@ of `--foreground`. Definitions in `index.css`, rationale in
 
 The mistake is now **enumerable, not impossible**: a `border-rule` under no
 declared surface silently falls back to the invisible default. So guard the
-*declarations* (`surface-rule.test.tsx`) - asserting `border-rule` is present
-proves nothing. Adopted by the response-viewer family; elsewhere still uses
-explicit tokens, migrate as you touch.
+*declarations* (`surface-rule.test.tsx`, `ImportModal.surface-rule.test.tsx`) -
+asserting `border-rule` is present proves nothing. Adopted by the
+response-viewer family and the import dialog; elsewhere still uses explicit
+tokens, migrate as you touch. On an element whose primitive already sets a
+background utility (`DialogContent`'s `bg-background`), `surface-card` alone
+loses the cascade - write the pair `bg-card surface-card`
+(see `docs/design-system.md`).
 
 **"Written but never read" is this codebase's most repeated defect** - found
 nine times: state one layer records and no layer displays (SSE errors,

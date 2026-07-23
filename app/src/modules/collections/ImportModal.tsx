@@ -161,9 +161,19 @@ export function ImportModal() {
 						 * works; the button is the keyboard path to the same
 						 * hidden <input type="file">.
 						 */
+						/*
+						 * The dashed edge is a drag-target affordance and wants
+						 * prominence - but on this fill (`--muted`/`--accent`)
+						 * `--border-strong` is the *faintest* option in dark (1.108,
+						 * below plain `--border` at 1.157), because the fill sits
+						 * between the two tokens in lightness. `surface-sunken`'s
+						 * alpha-of-foreground rule is the strongest edge available
+						 * here in both themes (1.356 light / 1.343 dark), and its
+						 * background is the same value `bg-accent` carried.
+						 */
 						<button
 							type="button"
-							className="w-full cursor-pointer rounded-lg border-2 border-dashed border-border-strong bg-accent px-6 py-9 text-center"
+							className="w-full cursor-pointer rounded-lg border-2 border-dashed border-rule surface-sunken px-6 py-9 text-center"
 							onClick={() => fileInputRef.current?.click()}
 							onDragOver={(e) => e.preventDefault()}
 							onDrop={(e) => {
@@ -183,7 +193,10 @@ export function ImportModal() {
 								{FORMAT_BADGES.map((b) => (
 									<span
 										key={b}
-										className="rounded-md border border-border bg-card px-2 py-0.5 text-[10px] font-semibold"
+										// Bare `bg-card` on purpose: the chip's edge faces the
+										// sunken drop zone, so its `border-rule` must inherit the
+										// zone's declaration, not declare a card rule of its own.
+										className="rounded-md border border-rule bg-card px-2 py-0.5 text-[10px] font-semibold"
 									>
 										{b}
 									</span>
@@ -261,12 +274,20 @@ export function ImportModal() {
 			<DialogContent
 				// Overrides the default padded grid: this dialog manages its own
 				// header/tabs/body/footer bands, each with its own divider.
-				className="flex w-[500px] max-w-[500px] max-h-[82vh] flex-col gap-0 overflow-hidden border-border-strong bg-card p-0"
+				//
+				// `bg-card surface-card` must stay a pair: `surface-card` sets the
+				// same background, but from `@layer components`, so the primitive's
+				// `bg-background` utility would outrank it - and tailwind-merge does
+				// not treat `surface-card` as a background class, so only `bg-card`
+				// strips the primitive's. The utility wins the cascade; the surface
+				// class contributes the `--rule` declaration the dividers below
+				// resolve against.
+				className="flex w-[500px] max-w-[500px] max-h-[82vh] flex-col gap-0 overflow-hidden border-border-strong bg-card surface-card p-0"
 				// No prose description; without this Radix logs a missing
 				// aria-describedby warning.
 				aria-describedby={undefined}
 			>
-				<DialogHeader className="flex-row items-center justify-between space-y-0 border-b border-border px-5 py-4">
+				<DialogHeader className="flex-row items-center justify-between space-y-0 border-b border-rule px-5 py-4">
 					<DialogTitle className="text-sm font-bold tracking-tight">
 						Import Collection
 					</DialogTitle>
@@ -293,7 +314,7 @@ export function ImportModal() {
 					}}
 					className="flex min-h-0 flex-1 flex-col"
 				>
-					<TabsList className="h-auto w-full justify-start rounded-none border-b border-border bg-transparent p-0 px-5">
+					<TabsList className="h-auto w-full justify-start rounded-none border-b border-rule bg-transparent p-0 px-5">
 						{(["file", "url", "paste"] as Tab[]).map((t) => (
 							<TabsTrigger
 								key={t}
@@ -331,7 +352,7 @@ export function ImportModal() {
 				</Tabs>
 
 				{phase === "preview" && (
-					<div className="flex items-center justify-between gap-3 border-t border-border px-5 py-4">
+					<div className="flex items-center justify-between gap-3 border-t border-rule px-5 py-4">
 						{/*
 						 * One <label> each. These were two checkboxes inside a single
 						 * <label>: a label's control is its *first* labelable
@@ -397,7 +418,7 @@ function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: (
 					<X className="h-3.5 w-3.5" />
 				</button>
 			</div>
-			<div className="max-h-[190px] overflow-y-auto rounded-md border border-border bg-accent p-2">
+			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
 				{collections.map((c, i) => (
 					<TreeNode key={i} name={c.name} requests={c.requests} children={c.children} />
 				))}
