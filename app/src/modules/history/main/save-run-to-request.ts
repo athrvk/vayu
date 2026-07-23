@@ -36,13 +36,78 @@
 import type { KeyValueEntry, Request, RequestBody, UpdateRequestRequest } from "@/types";
 import type { KeyValueItem, RequestState } from "@/modules/request-builder/types";
 import { toKeyValueEntries } from "@/modules/request-builder/utils/key-value";
+import { SYSTEM_HEADER_KEYS } from "@/modules/request-builder/utils/system-headers";
 import type { DesignRunSeed } from "./design-run-seed";
 
-/** One row of the confirmation's "what will change" list. */
+/** How one key/value entry differs between the request and the run. */
+export type EntryChangeKind = "added" | "removed" | "changed";
+
+/** One key's change within a key/value field (Headers, Params). */
+export interface EntryChange {
+	key: string;
+	kind: EntryChangeKind;
+	/** Present for `removed` and `changed`. */
+	from?: string;
+	/** Present for `added` and `changed`. */
+	to?: string;
+}
+
+/**
+ * One row of the confirmation's "what will change" list.
+ *
+ * A scalar field (Method, URL, redirects, a script) carries `from`/`to`. A
+ * key/value field (Headers, Params) carries `entries` instead - a per-key diff,
+ * because a joined before/after string is not a diff the user can read.
+ */
 export interface RunSaveChange {
 	field: string;
-	from: string;
-	to: string;
+	from?: string;
+	to?: string;
+	entries?: EntryChange[];
+}
+
+/**
+ * The app's own managed headers - `X-Vayu-Version`, `X-Request-ID`, `User-Agent`.
+ * They are injected fresh on every send and re-added by the builder on load, so
+ * they never belong in a saved request: a stored run carries whatever version it
+ * sent, and writing that back would pin an old version onto the request. Dropped
+ * from both the diff and the write.
+ */
+function userEntries(entries: KeyValueEntry[]): KeyValueEntry[] {
+	return entries.filter((e) => !SYSTEM_HEADER_KEYS.has(e.key.trim().toLowerCase()));
+}
+
+/** Enabled, non-empty keys as a map; last value wins on a duplicate key. */
+function entryMap(entries: KeyValueEntry[]): Map<string, string> {
+	const map = new Map<string, string>();
+	for (const e of entries) {
+		if (e.enabled === false || !e.key.trim()) continue;
+		map.set(e.key, e.value);
+	}
+	return map;
+}
+
+/**
+ * A per-key diff of two key/value lists. Added and changed keys come first in
+ * the new list's order, removed keys after - so the result reads as "here is
+ * what the request will have", with the losses noted at the end.
+ */
+function diffEntries(from: KeyValueEntry[], to: KeyValueEntry[]): EntryChange[] {
+	const before = entryMap(from);
+	const after = entryMap(to);
+	const changes: EntryChange[] = [];
+
+	for (const [key, toValue] of after) {
+		if (!before.has(key)) {
+			changes.push({ key, kind: "added", to: toValue });
+		} else if (before.get(key) !== toValue) {
+			changes.push({ key, kind: "changed", from: before.get(key), to: toValue });
+		}
+	}
+	for (const [key, fromValue] of before) {
+		if (!after.has(key)) changes.push({ key, kind: "removed", from: fromValue });
+	}
+	return changes;
 }
 
 /** One row of the confirmation's "left alone" list. */
@@ -107,10 +172,19 @@ export function diffRunAgainstRequest(seed: DesignRunSeed, live: Request): RunSa
 		if (from !== to) changes.push({ field, from, to });
 	};
 
+	// A key/value field diffs per key, so the user sees which header changed
+	// rather than two joined strings. System headers are already stripped from
+	// the patch, so comparing against the live request's user headers keeps them
+	// out of the diff too.
+	const addEntries = (field: string, from: KeyValueEntry[], to: KeyValueEntry[]) => {
+		const entries = diffEntries(userEntries(from), userEntries(to));
+		if (entries.length > 0) changes.push({ field, entries });
+	};
+
 	add("Method", live.method, patch.method ?? live.method);
 	add("URL", live.url, patch.url ?? live.url);
-	add("Params", describeEntries(live.params ?? []), describeEntries(patch.params ?? []));
-	add("Headers", describeEntries(live.headers ?? []), describeEntries(patch.headers ?? []));
+	addEntries("Params", live.params ?? [], patch.params ?? []);
+	addEntries("Headers", live.headers ?? [], patch.headers ?? []);
 	add("Body", describeBody(live.body), describeBody(patch.body ?? live.body));
 
 	// Absent for a legacy run, and absent means "not written" - so it must not
@@ -175,7 +249,10 @@ export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateReq
 		method: request.method ?? live.method,
 		url: request.url ?? live.url,
 		params: items(request.params),
-		headers: items(request.headers),
+		// System headers are dropped, not persisted: the builder re-injects them
+		// with current values on load, so writing a run's stale X-Vayu-Version /
+		// X-Request-ID would pin an old version onto the request.
+		headers: userEntries(items(request.headers)),
 		body,
 		bodyType: body.mode,
 		followRedirects: request.followRedirects ?? live.followRedirects,

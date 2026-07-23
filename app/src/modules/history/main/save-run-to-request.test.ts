@@ -174,7 +174,7 @@ describe("diffRunAgainstRequest", () => {
 		expect(diffRunAgainstRequest(seedFromRun(run(), live), live)).toEqual([]);
 	});
 
-	it("reports the before and after of a change", () => {
+	it("reports the before and after of a scalar change", () => {
 		const live = liveRequest();
 		const method = diffRunAgainstRequest(seedFromRun(run(), live), live).find(
 			(d) => d.field === "Method"
@@ -183,6 +183,64 @@ describe("diffRunAgainstRequest", () => {
 		expect(method).toBeDefined();
 		expect(method!.from).toBe("GET");
 		expect(method!.to).toBe("POST");
+	});
+
+	it("diffs headers per entry, not as one blob", () => {
+		// The bug this replaces truncated both sides of a joined string, so the
+		// user could not see which header changed. The diff is now per key.
+		const live = liveRequest(); // headers: [X-Old: stale]
+		const headers = diffRunAgainstRequest(seedFromRun(run(), live), live).find(
+			(d) => d.field === "Headers"
+		);
+
+		expect(headers).toBeDefined();
+		expect(headers!.entries).toEqual([
+			{ key: "X-Plain", kind: "added", to: "visible" },
+			{ key: "X-Old", kind: "removed", from: "stale" },
+		]);
+	});
+
+	it("marks a changed header value, keeping both sides", () => {
+		const live = liveRequest({ headers: [{ key: "X-Plain", value: "old", enabled: true }] });
+		const headers = diffRunAgainstRequest(seedFromRun(run(), live), live).find(
+			(d) => d.field === "Headers"
+		);
+
+		expect(headers!.entries).toEqual([
+			{ key: "X-Plain", kind: "changed", from: "old", to: "visible" },
+		]);
+	});
+
+	it("never diffs or writes the app's own system headers", () => {
+		// X-Vayu-Version and X-Request-ID are injected fresh on every send and
+		// re-added by the builder on load. A stored run carries whatever version
+		// it sent, and saving that back would pin an old version onto the request.
+		const stale = run({
+			configSnapshot: {
+				method: "POST",
+				url: "https://api.example.test/users?page=2",
+				headers: {
+					"X-Plain": "visible",
+					"X-Vayu-Version": "0.9.0",
+					"X-Request-ID": "old-uuid",
+				},
+			},
+		} as Partial<Run>);
+		const live = liveRequest();
+
+		const seed = seedFromRun(stale, live);
+		const headers = diffRunAgainstRequest(seed, live).find((d) => d.field === "Headers");
+
+		// The version/request-id churn does not appear in the diff...
+		const keys = (headers?.entries ?? []).map((e) => e.key);
+		expect(keys).not.toContain("X-Vayu-Version");
+		expect(keys).not.toContain("X-Request-ID");
+
+		// ...and is not written back onto the request.
+		const patch = applyRunToRequest(seed, live);
+		const written = (patch.headers ?? []).map((h) => h.key.toLowerCase());
+		expect(written).not.toContain("x-vayu-version");
+		expect(written).not.toContain("x-request-id");
 	});
 });
 
