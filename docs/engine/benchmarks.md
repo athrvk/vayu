@@ -82,7 +82,7 @@ restart needed despite the "Requires Restart" label on some):
   causes congestion collapse (in-flight balloons to tens of thousands, multi-second
   queue latency, throughput *halves*). Bound it to **~256–500** for clean,
   low-latency saturation. Closed-loop constant-concurrency avoids the issue entirely.
-- `eventLoopMaxConcurrent` / `eventLoopMaxPerHost` / `requestBatchSize` -
+- `eventLoopMaxConcurrent` / `eventLoopMaxPerHost` -
   secondary; effects are within run-to-run noise once the above are set.
 
 ## Reproduce it
