@@ -28,11 +28,14 @@ export {
 	useCreateRequestMutation,
 	useUpdateRequestMutation,
 	useDeleteRequestMutation,
+	isRequestNotFound,
 } from "./collections";
+export { RequestNotFoundError } from "./collections";
 
 // Runs (History)
 export {
 	useRunsQuery,
+	useRunQuery,
 	useRunReportQuery,
 	useLastDesignRunQuery,
 	useDeleteRunMutation,

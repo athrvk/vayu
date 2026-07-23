@@ -15,8 +15,33 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <utility>
 
 namespace vayu::http::routes {
+
+/**
+ * Testable core of GET /requests/:id, returning {http_status, json_body}.
+ *
+ * A missing request is a *definitive* 404, never a transport failure. That
+ * distinction is the whole point of the endpoint: the app reads a single
+ * request by id, so a real 404 means "deleted" and a 5xx means "engine
+ * unreachable" - two states the previous collection-list scan could not tell
+ * apart, because one swallowed list failure looked identical to "not in any
+ * list". Present -> 200 with the same serialized shape a list entry carries
+ * (`serialize(const db::Request&)`), so the client transforms it identically.
+ *
+ * Extracted so the wiring (404 vs 200 + body) is covered without an in-process
+ * HTTP server - see requests_route_test.cpp. The error body matches
+ * `send_error`'s flat `{"error": message}` shape.
+ */
+std::pair<int, nlohmann::json> get_request_response (vayu::db::Database& db,
+const std::string& id) {
+    auto request = db.get_request (id);
+    if (!request) {
+        return { 404, nlohmann::json{ { "error", "Request not found" } } };
+    }
+    return { 200, vayu::json::serialize (*request) };
+}
 
 void register_request_routes (RouteContext& ctx) {
     /**
@@ -79,6 +104,33 @@ void register_request_routes (RouteContext& ctx) {
             }
         } catch (const std::exception& e) {
             vayu::utils::log_error ("GET /requests - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
+        }
+    });
+
+    /**
+     * GET /requests/:id
+     * Retrieves a single request by id in one lookup, so a restored tab or a
+     * design-run copy does not have to fetch every collection's list and scan
+     * them. Returns 200 with the request, or 404 if it genuinely does not
+     * exist (as opposed to a transport failure, which the app must treat
+     * differently). Path params: id - The request ID to fetch.
+     */
+    ctx.server.Get (R"(/requests/([^/]+))",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        std::string request_id = req.matches[1];
+        vayu::utils::log_info ("GET /requests/:id - Fetching request: " + request_id);
+        try {
+            auto [status, body] = get_request_response (ctx.db, request_id);
+            if (status == 404) {
+                vayu::utils::log_warning (
+                "GET /requests/:id - Request not found: " + request_id);
+            }
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "GET /requests/:id - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

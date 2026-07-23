@@ -21,6 +21,7 @@ import type {
 	RequestAuth,
 	OAuth2Config,
 	LoadTestMode,
+	ScriptPart,
 } from "./domain";
 
 // API Response wrapper
@@ -191,8 +192,8 @@ export interface ExecuteRequestRequest {
 	headers?: Record<string, string>;
 	body?: unknown;
 	auth?: Record<string, unknown>;
-	preRequestScript?: string;
-	postRequestScript?: string;
+	preRequestScripts?: ScriptPart[];
+	postRequestScripts?: ScriptPart[];
 	/**
 	 * Redirect policy. Omitted means the engine's own defaults apply (follow,
 	 * cap at 10) - send them explicitly so a request that opts out of following
@@ -253,7 +254,7 @@ export interface StartLoadTestRequest {
 	success_sample_rate?: number; // 0-100
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
-	tests?: string;
+	tests?: ScriptPart[];
 }
 
 export interface StartLoadTestResponse {

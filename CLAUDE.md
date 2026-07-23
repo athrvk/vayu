@@ -38,10 +38,18 @@ vayu/
 ## Prerequisites
 
 - CMake ≥ 3.25, Ninja, C++20 compiler (g++ or clang++)
-- vcpkg with `$VCPKG_ROOT` set
+- vcpkg with `$VCPKG_ROOT` set (Linux/macOS; on Windows it is auto-detected - see below)
 - Node.js ≥ 20.19 (22 LTS recommended - see `app/.nvmrc`), pnpm ≥ 10
 
 Run `python build.py --setup` to install all prerequisites automatically (Linux/macOS only).
+
+**On Windows, do not hand-configure cmake or set `VCPKG_ROOT` - just run
+`build.py`.** It imports the MSVC environment via `vcvars` and finds cmake,
+ninja and vcpkg inside the Visual Studio Build Tools install
+(`...\BuildTools\VC\vcpkg`) on its own, so an unset `VCPKG_ROOT` is fine. Poking
+at the build tree directly (empty `build/`, no `VCPKG_ROOT`) looks like "can't
+build locally" when `python build.py -e -t` builds the engine and runs the C++
+tests in ~2 min. If you keep vcpkg elsewhere, set `VCPKG_ROOT` and it is honored.
 
 ## Build Commands
 
@@ -279,12 +287,15 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 
 See `docs/engine/api-reference.md` for full reference.
 
-Two gaps worth knowing before you design around them:
+Two things worth knowing before you design around them:
 
-- **There is no `GET /requests/:id`** - only `GET /requests?collectionId=`. A
-  single request is found by fetching collection lists and scanning them
-  (`useRequestQuery`). Tabs are persisted, so that path runs on every cold
-  start; it must fetch, not just read cache.
+- **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
+  to load a restored request tab or a design-run copy on cold start - one round
+  trip, not the old scan of every collection's list. A `404` means the request
+  was genuinely deleted; anything else (a `5xx`, an unreachable engine) is a
+  transport failure, and callers (`DesignRunView`) must keep those apart - only
+  a real 404 becomes `RequestNotFoundError`. `GET /requests?collectionId=` still
+  lists a collection's requests.
 - **`followRedirects` / `maxRedirects` are per-request and stored** (request
   builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
   Both clients send them on *every* execute and load test rather than eliding
@@ -294,22 +305,38 @@ Two gaps worth knowing before you design around them:
 
 ## Request composition (known duplication - do not add a third copy)
 
-Preparing a request before it executes - resolving `{{variables}}`, resolving
-`inherit` auth via the collection-chain walk, and composing the collection-chain +
-request pre/post scripts - happens **client-side** today, and is therefore
-**duplicated** across the two engine clients:
+Preparing a request before it executes - resolving `{{variables}}` and resolving
+`inherit` auth via the collection-chain walk - happens **client-side** today, and
+is therefore **duplicated** across the two engine clients:
 
 - **Renderer:** `app/src/hooks/useVariableResolver.ts` + inline in
   `app/src/modules/request-builder/index.tsx` + `utils/auth-mapping.ts`.
 - **MCP:** `app/electron/mcp/resolve.ts`.
 
+Composing the collection-chain + request pre/post scripts is **no longer** part
+of that duplication: both clients now collect an ordered list of `ScriptPart`s
+(root-to-leaf chain, then the request's own, each naming its origin) and send
+the list as `preRequestScripts` / `postRequestScripts` on `POST /request` - and
+the **engine** joins them with `"\n\n"` and runs the result. The renderer's load
+path sends the same kind of list as `tests` on `POST /run`. MCP has no
+chain-composing `/run` caller: `start_load_run` takes an agent-supplied ad-hoc
+`tests` string (like its ad-hoc `preRequestScript`/`postRequestScript`, see
+`tools.ts::buildExecutionPayload`), not a chain-built list, so this is not "both
+clients send the list on `/run`". Each client still builds its own script-part
+list itself (the `scriptParts` helper in
+`app/src/modules/request-builder/utils/script-parts.ts` and in
+`app/electron/mcp/resolve.ts` - the same intentional duplication, since MCP
+cannot import from `app/src/`), so a change to the list-building rule (e.g. what
+counts as blank) still needs both copies changed together.
+
 The engine does the rest of execution (loads variables for script context, applies
-concrete auth incl. OAuth2, runs scripts) but intentionally does **no** `{{var}}`
-interpolation and drops `{"mode":"inherit"}` as "resolved app-side". If you change
-resolution/auth/script semantics, **change both client copies together** and keep
-them in sync (guarded by `app/electron/mcp/resolve.test.ts`). **Do not add a third
-copy** - a new engine client should reuse `resolve.ts`. The intended long-term fix
-(consolidate composition into the engine) is deferred and documented in
+concrete auth incl. OAuth2, joins and runs the script parts) but intentionally
+does **no** `{{var}}` interpolation and drops `{"mode":"inherit"}` as "resolved
+app-side". If you change resolution/auth/script-list-building semantics, **change
+both client copies together** and keep them in sync (guarded by
+`app/electron/mcp/resolve.test.ts`). **Do not add a third copy** - a new engine
+client should reuse `resolve.ts`. The intended long-term fix (consolidate the
+remaining variable/auth resolution into the engine) is deferred and documented in
 `docs/plans/pending-backlog.md` → **A1**; do not start it without explicit ask.
 
 ## Releasing

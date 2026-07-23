@@ -130,6 +130,7 @@ export default function ResponseViewer() {
 					statusText={response.statusText}
 					time={response.time}
 					size={response.size}
+					restoredFrom={response.restoredFrom}
 				/>
 				<ClientErrorView
 					errorCode={response.errorCode}
@@ -147,6 +148,7 @@ export default function ResponseViewer() {
 				statusText={response.statusText}
 				time={response.time}
 				size={response.size}
+				restoredFrom={response.restoredFrom}
 			/>
 
 			{/* Response Tabs */}

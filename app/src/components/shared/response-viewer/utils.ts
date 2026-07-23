@@ -243,6 +243,57 @@ export function formatSize(bytes: number): string {
 }
 
 /**
+ * Rebuild the raw HTTP request from the parts a stored trace keeps.
+ *
+ * A live send gets `rawRequest` from the engine, which assembles the real wire
+ * message (`Client::send`, engine/src/http/client.cpp:277-331). A restored one has
+ * no such string - the trace stores method, url, headers and body separately -
+ * and the restore path used to collapse all four into `${method} ${url}`, so
+ * the Raw tab of a reopened run showed a single line and the body that was sent
+ * was not reachable anywhere in the app.
+ *
+ * This follows the engine's order so the two read the same: request line with
+ * the path, `Host` from the URL, the sent headers, `Content-Length` for a body,
+ * blank line, body.
+ */
+export function buildRawRequest(
+	method: string,
+	url: string,
+	headers: Record<string, string> = {},
+	body?: string
+): string {
+	let target = url;
+	let host = "";
+	try {
+		const parsed = new URL(url);
+		target = `${parsed.pathname}${parsed.search}` || "/";
+		host = parsed.host;
+	} catch {
+		// A URL the platform will not parse - a host with no scheme, or one
+		// still holding an unresolved {{variable}}. Keep the string whole rather
+		// than inventing a split, and let the Host header fall away with it.
+	}
+
+	let raw = `${method || "GET"} ${target} HTTP/1.1\r\n`;
+	if (host) raw += `Host: ${host}\r\n`;
+
+	for (const [key, value] of Object.entries(headers)) {
+		// Host comes from the URL above; printing it twice is a protocol error.
+		if (key.toLowerCase() === "host") continue;
+		raw += `${key}: ${value}\r\n`;
+	}
+
+	// Bytes, not characters - the engine counts `content.size()`, and any
+	// non-ASCII in the body makes the two differ.
+	if (body) raw += `Content-Length: ${new TextEncoder().encode(body).length}\r\n`;
+
+	raw += "\r\n";
+	if (body) raw += body;
+
+	return raw;
+}
+
+/**
  * Build raw HTTP response string
  */
 export function buildRawResponse(

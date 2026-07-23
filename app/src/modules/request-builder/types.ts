@@ -19,6 +19,7 @@ import type {
 	KeyValueEntry,
 	OAuth2Config,
 	ResolvedVariable,
+	ScriptPart,
 	VariableScope,
 } from "@/types";
 
@@ -170,6 +171,13 @@ export interface ResponseTiming {
 	download: number;
 }
 
+/** Which stored run a response was rebuilt from, and when that run happened. */
+export interface RestoredFrom {
+	runId?: string;
+	/** ISO timestamp of the run result. */
+	at: string;
+}
+
 export interface ResponseState {
 	status: number;
 	statusText: string;
@@ -182,7 +190,15 @@ export interface ResponseState {
 	size: number;
 	time: number;
 	timing?: ResponseTiming;
-	timestamp?: string;
+	/**
+	 * Set only when this response was rebuilt from a stored run rather than sent
+	 * just now - a cold start, or a run opened from History. Drives the pane's
+	 * age chip, which is the only thing that tells the two apart: the request
+	 * beside it may have been edited since. Gone after the next send.
+	 *
+	 * This replaced a bare `timestamp` that had one writer and no reader.
+	 */
+	restoredFrom?: RestoredFrom;
 	errorCode?: string;
 	errorMessage?: string;
 	consoleLogs?: string[];
@@ -204,6 +220,23 @@ export interface RequestBuilderContextValue {
 	// Response State
 	response: ResponseState | null;
 	setResponse: (response: ResponseState | null) => void;
+
+	/**
+	 * Collection script parts to list as "runs before your own", overriding the
+	 * live collection chain. Set only by the History run view, which shows what
+	 * a stored run recorded; undefined everywhere else, where the script panels
+	 * walk the chain themselves.
+	 */
+	inheritedPreScripts?: ScriptPart[];
+	inheritedPostScripts?: ScriptPart[];
+
+	/**
+	 * The whole glued script a pre-script-parts run recorded. Set only by the
+	 * History run view; the editor is empty for such a run, so this is the only
+	 * place its script text appears.
+	 */
+	legacyPreScript?: string;
+	legacyPostScript?: string;
 
 	// UI State
 	activeTab: RequestTab;

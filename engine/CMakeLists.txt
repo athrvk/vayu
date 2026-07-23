@@ -248,6 +248,7 @@ add_library(vayu_core STATIC
     src/http/thread_pool.cpp
     src/http/rate_limiter.cpp
     src/http/sse.cpp
+    src/http/script_parts.cpp
     src/utils/json.cpp
     src/utils/logger.cpp
     src/utils/metrics_helper.cpp
@@ -383,10 +384,13 @@ if(VAYU_BUILD_TESTS)
         tests/metrics_collector_test.cpp
         tests/import_route_test.cpp
         tests/config_route_test.cpp
+        tests/requests_route_test.cpp
         tests/execution_timeout_test.cpp
         tests/load_strategy_test.cpp
         tests/refill_deficit_test.cpp
         tests/run_manager_test.cpp
+        tests/run_route_test.cpp
+        tests/script_compose_test.cpp
         tests/encoding_test.cpp
         tests/auth_resolver_test.cpp
         tests/request_builder_test.cpp
@@ -397,6 +401,7 @@ if(VAYU_BUILD_TESTS)
         tests/oauth_authorize_test.cpp
         src/http/routes/import.cpp
         src/http/routes/config.cpp
+        src/http/routes/requests.cpp
         src/http/routes/oauth.cpp
         src/http/routes/oauth_authorize.cpp
         src/http/routes/execution.cpp

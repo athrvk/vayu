@@ -146,6 +146,42 @@ They are always present in the response: a request saved before these columns
 existed reads back as the engine defaults (`true` / `10`), which is the
 behaviour it already had.
 
+### GET /requests/:id
+
+Fetch a single request by id, in one lookup. The app uses this to load a
+restored request tab or a design-run copy on cold start, instead of fetching
+every collection's request list and scanning them for the id.
+
+**Path Parameters:**
+- `id` (required): The request ID to fetch
+
+**Response:** The request object, in the same shape as a `GET /requests` list
+entry.
+```json
+{
+  "id": "req_1234567890",
+  "collectionId": "col_1234567890",
+  "name": "Get Users",
+  "method": "GET",
+  "url": "{{baseUrl}}/users",
+  "params": [],
+  "headers": [],
+  "body": { "mode": "none" },
+  "bodyType": "none",
+  "auth": { "mode": "inherit" },
+  "preRequestScript": "",
+  "postRequestScript": "",
+  "followRedirects": true,
+  "maxRedirects": 10,
+  "createdAt": 1234567890,
+  "updatedAt": 1234567890
+}
+```
+
+**404** when the request genuinely does not exist. This is distinct from a
+`5xx`: the caller relies on that difference to tell a real deletion from an
+unreachable engine, and must not treat a transport failure as "deleted".
+
 ### POST /requests
 
 Create or update a request. If `id` is provided and exists, performs an update.
@@ -414,6 +450,27 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
 }
 ```
 
+**Script parts.** `preRequestScript` / `postRequestScript` above are the legacy
+single-string form and still work. The engine also accepts `preRequestScripts`
+/ `postRequestScripts`: a list of parts, each recording where it came from, so
+a stored run can say which part is the collection's and which is the
+request's:
+
+```json
+{
+  "preRequestScripts": [
+    { "origin": "collection", "id": "c1", "name": "API", "script": "const base = pm.environment.get('baseUrl');" },
+    { "origin": "request", "id": "r1", "script": "pm.environment.set('traceId', base);" }
+  ]
+}
+```
+
+When both forms are sent, the list wins - they are never merged. Parts are
+joined with a blank line and run as a single script in one shared scope (see
+[scripting.md](scripting.md#script-parts)), so a variable declared in an
+earlier part is visible to a later one; parts that are empty or only
+whitespace are dropped.
+
 **Redirect policy.** `followRedirects` defaults to **true**, so omitting it
 follows every 3xx and only the final response is returned - send
 `followRedirects: false` to see the 3xx status and its `Location` header. Both
@@ -490,6 +547,15 @@ Start a load test run (Vayu Mode).
   "status": "running"
 }
 ```
+
+**`tests` accepts both forms**, like `preRequestScripts` / `postRequestScripts`
+on `POST /request` above: the legacy single string, or a list of parts
+(`[{ "origin": "collection" | "request", "id", "name", "script" }]`) that the
+engine joins itself (see [scripting.md](scripting.md#script-parts)). The list
+wins when both are sent. Sending the collection chain's parts means its
+assertions are now actually checked under load - previously only the
+request's own `tests` string was ever sent, so a collection-level assertion
+passed in design mode and was silently never validated by a load run.
 
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
 token **before** creating the run and warms the cache for the workers. An
@@ -646,7 +712,35 @@ List all test runs (both design mode and load tests).
 
 Get details for a specific run.
 
-**Response:** Run object with full details.
+**Response:** The run object shown in `GET /runs` (`id`, `requestId`,
+`environmentId`, `type`, `status`, `configSnapshot`, `startTime`, `endTime`).
+
+For a `design` run that has at least one stored result, the response also
+carries a `result` object with that run's single exchange - the only other
+place it appears is `GET /run/:runId/report`, whose `results` array and
+`metadata.configuration` are load-test concepts and are absent for a design
+run.
+
+```json
+{
+  "id": "run_1234567890",
+  "requestId": "req_1234567890",
+  "environmentId": null,
+  "type": "design",
+  "status": "completed",
+  "configSnapshot": { "...": "the raw run payload" },
+  "startTime": 1234567890,
+  "endTime": 1234567891,
+  "result": {
+    "timestamp": 1234567891,
+    "statusCode": 200,
+    "statusText": "OK",
+    "latencyMs": 42.1,
+    "error": "optional, only when the request failed",
+    "trace": { "request": { "...": "..." }, "response": { "...": "..." } }
+  }
+}
+```
 
 ### POST /run/:runId/stop
 

@@ -46,7 +46,23 @@ The stdio MCP server (`app/electron/mcp/cli.ts`) is built and tested but is only
 
 Preparing a request before it executes - resolving `{{variables}}`, walking the
 collection chain for `inherit` auth, and composing the collection-chain + request
-pre/post scripts - currently happens **client-side, once per engine client**:
+pre/post scripts - used to happen **client-side, once per engine client**.
+
+**Script slice: done.** The engine now accepts an ordered list of script parts
+(`{ origin: "collection" | "request", id?, name?, script }` -
+`preRequestScripts` / `postRequestScripts` on `POST /request`, `tests` on
+`POST /run`) and joins them with `"\n\n"` itself, dropping any part whose script
+is empty or only whitespace (`engine/src/http/script_parts.cpp`). Both clients
+still *build* that ordered list client-side (root-to-leaf chain, then the
+request's own) - `app/src/modules/request-builder/utils/script-parts.ts` and the
+`scriptParts` helper in `app/electron/mcp/resolve.ts` - but no longer join the
+strings together, so a stored run can say which part came from where and a
+collection's script can no longer end up glued into a saved request. See
+`docs/engine/mcp.md` → *Request composition* and `docs/engine/architecture.md` →
+*Request composition boundary*.
+
+**Still open: `{{variable}}` interpolation and `inherit`-auth resolution.**
+These remain **client-side, once per engine client**:
 
 - **Renderer:** `app/src/hooks/useVariableResolver.ts` + inline in
   `app/src/modules/request-builder/index.tsx` (execute + load paths) +
@@ -54,25 +70,26 @@ pre/post scripts - currently happens **client-side, once per engine client**:
 - **MCP:** `app/electron/mcp/resolve.ts` - a faithful port of the renderer
   pipeline (added when MCP became a second engine client; see PR / `mcp.md`).
 
-**Root cause - the engine already does most of composition but stops ~80% in.**
+**Root cause - the engine already does most of composition but stops short.**
 On `POST /request` (`engine/src/http/routes/execution.cpp`) it loads the
 environment, globals, and the request's collection variables (into the script
 context), applies concrete auth (`build_request` → `apply_auth`, incl. the OAuth2
-token cache), and runs the pre/post scripts. It does **not** interpolate `{{var}}`
-into the URL/headers/body, resolve `inherit` auth from the collection chain, or
-compose the chain's scripts - and it takes auth/scripts from the POST body rather
-than from the saved request. It even drops `{"mode":"inherit"}` explicitly as
+token cache), and now joins and runs the pre/post script parts. It does **not**
+interpolate `{{var}}` into the URL/headers/body or resolve `inherit` auth from
+the collection chain - and it takes auth/scripts from the POST body rather than
+from the saved request. It even drops `{"mode":"inherit"}` explicitly as
 "resolved app-side" (`auth_resolver.cpp::parse_auth`). So every client fills that
 gap itself, which is why the logic is duplicated.
 
 **Direction (NOT yet actioned - documented for awareness).** Finish composition
 in the engine: an "execute a saved request by id, fully composed" path that
-interpolates variables, walks the inherit-auth chain, and composes scripts,
-reusing the maps + auth/script machinery it already has. Then MCP drops its
-composition entirely (hands the engine `requestId` + `environmentId`), and the
-renderer can adopt it for **send** while keeping `useVariableResolver` only for
-live UI preview/highlighting - a genuinely separate concern. The codebase already
-accepts this TS-preview / C++-execution split (see the `castByType` mirror note in
+interpolates variables and walks the inherit-auth chain, reusing the maps +
+auth machinery it already has (the script machinery is already reused, per the
+slice above). Then MCP drops its remaining composition entirely (hands the
+engine `requestId` + `environmentId`), and the renderer can adopt it for **send**
+while keeping `useVariableResolver` only for live UI preview/highlighting - a
+genuinely separate concern. The codebase already accepts this TS-preview /
+C++-execution split (see the `castByType` mirror note in
 `app/src/lib/variable-cast.ts`).
 
 **Cost / why deferred.** Substantial new C++ in the AGPL engine (+ gtest

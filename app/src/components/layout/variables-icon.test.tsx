@@ -46,6 +46,7 @@ vi.mock("@/queries", () => ({
 	useEnvironmentsQuery: () => ({ data: [], isLoading: false, isError: false }),
 	useGlobalsQuery: () => ({ data: undefined, isLoading: false, error: null }),
 	useRequestQuery: () => ({ data: undefined, isLoading: false, isError: false }),
+	useRunQuery: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({

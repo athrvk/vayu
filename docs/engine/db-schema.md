@@ -257,6 +257,10 @@ than assuming all eight are there and flat:
 That design-mode subset is what rebuilds the request builder's response pane (Timing tab included)
 after a restart - see `app/src/modules/request-builder/utils/restore-response.ts`.
 
+A design run has exactly one `results` row. `GET /run/:runId` serves it (as `result`)
+alongside the run itself, in addition to `GET /run/:runId/report`'s `results` array - the
+same row, read by two routes for two different callers.
+
 ---
 
 ### `config_entries`

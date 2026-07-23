@@ -37,9 +37,16 @@ import { Button } from "@/components/ui";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
-import { authToEditor, editorToAuth } from "./utils/auth-mapping";
+import {
+	authToEditor,
+	editorToAuth,
+	resolveInheritedAuth,
+	authToRecord,
+} from "./utils/auth-mapping";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
+import { scriptParts } from "./utils/script-parts";
+import { buildExecBody, responseFromExecuteResult } from "./utils/execute-mapping";
 import type {
 	HttpMethod,
 	LoadTestConfig,
@@ -47,32 +54,7 @@ import type {
 	RequestBody,
 	RequestAuth,
 	OAuth2Config,
-	Collection,
 } from "@/types";
-
-/**
- * Walk the ancestor chain leaf-first and return the first non-none auth.
- * Collections are always concrete auth sources (never inherit), so the first
- * non-none one found is the effective inherited auth for the request.
- */
-function resolveInheritedAuth(ancestors: Collection[]): Record<string, unknown> | undefined {
-	for (let i = ancestors.length - 1; i >= 0; i--) {
-		const auth = ancestors[i].auth;
-		if (auth.mode !== "none") {
-			// Spread the discriminated union into a plain record for the engine
-			return { ...auth } as Record<string, unknown>;
-		}
-	}
-	return undefined;
-}
-
-/** Convert a concrete RequestAuth (non-inherit) to the flat record the engine expects. */
-function authToRecord(
-	auth: Exclude<RequestAuth, { mode: "inherit" }>
-): Record<string, unknown> | undefined {
-	if (auth.mode === "none") return undefined;
-	return { ...auth } as Record<string, unknown>;
-}
 
 /**
  * RequestBuilder - Main entry point
@@ -212,37 +194,8 @@ export default function RequestBuilder() {
 						resolveString(value),
 					])
 				);
-				const resolvedBody = request.body ? resolveString(request.body) : request.body;
-
-				// Build body payload for engine matching the discriminated union
-				let execBody:
-					| {
-							mode: string;
-							content?: string;
-							fields?: Array<{ key: string; value: string; enabled: boolean }>;
-					  }
-					| undefined;
-				if (request.bodyMode === "form-data") {
-					execBody = {
-						mode: "form-data",
-						fields: toKeyValueEntries(request.formData).map((e) => ({
-							key: resolveString(e.key),
-							value: resolveString(e.value),
-							enabled: e.enabled,
-						})),
-					};
-				} else if (request.bodyMode === "x-www-form-urlencoded") {
-					execBody = {
-						mode: "x-www-form-urlencoded",
-						fields: toKeyValueEntries(request.urlEncoded).map((e) => ({
-							key: resolveString(e.key),
-							value: resolveString(e.value),
-							enabled: e.enabled,
-						})),
-					};
-				} else if (request.bodyMode !== "none" && resolvedBody) {
-					execBody = { mode: request.bodyMode || "text", content: resolvedBody };
-				}
+				// Shared with the History run view's send path - see execute-mapping.ts
+				const execBody = buildExecBody(request, resolveString);
 
 				// Resolve auth - walk collection chain for inherit, resolve variables for concrete
 				let execAuth: Record<string, unknown> | undefined;
@@ -258,19 +211,22 @@ export default function RequestBuilder() {
 					execAuth = raw ? (resolveObject(raw) as Record<string, unknown>) : undefined;
 				}
 
-				// Compose pre/post scripts: collection chain root→leaf, then the request's own script
-				const composedPreScript = [
-					...collectionAncestors.map((c) => c.preRequestScript).filter(Boolean),
-					request.preRequestScript,
-				]
-					.filter(Boolean)
-					.join("\n\n");
-				const composedPostScript = [
-					...collectionAncestors.map((c) => c.postRequestScript).filter(Boolean),
-					request.testScript,
-				]
-					.filter(Boolean)
-					.join("\n\n");
+				// Script parts: the collection chain root to leaf, then the
+				// request's own. The engine joins them and runs the result as
+				// one script. Joining here meant a stored run could not say
+				// which part came from where.
+				const preScriptParts = scriptParts(
+					collectionAncestors,
+					(c) => c.preRequestScript,
+					fetchedRequest.id,
+					request.preRequestScript
+				);
+				const postScriptParts = scriptParts(
+					collectionAncestors,
+					(c) => c.postRequestScript,
+					fetchedRequest.id,
+					request.testScript
+				);
 
 				const result = await engineExecuteRequest(
 					{
@@ -279,8 +235,8 @@ export default function RequestBuilder() {
 						headers: resolvedHeaders,
 						body: execBody,
 						auth: execAuth,
-						preRequestScript: composedPreScript || undefined,
-						postRequestScript: composedPostScript || undefined,
+						preRequestScripts: preScriptParts,
+						postRequestScripts: postScriptParts,
 						// Always sent, never elided: the engine defaults to
 						// following, so omitting `followRedirects: false` would
 						// silently follow the redirect the user asked to see.
@@ -306,62 +262,14 @@ export default function RequestBuilder() {
 				}
 
 				// Refresh variables so script-set values (e.g. pm.environment.set) appear in the UI
-				if (composedPreScript) {
+				if (preScriptParts) {
 					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 				}
 
-				// Determine body type from content-type header
-				const contentType = (result.headers?.["content-type"] || "").toLowerCase();
-				const bodyType: ResponseState["bodyType"] = contentType.includes("json")
-					? "json"
-					: contentType.includes("html")
-						? "html"
-						: contentType.includes("xml")
-							? "xml"
-							: "text";
-
-				// Extract bodyRaw (raw response from server) - always use this for raw view
-				const bodyRaw =
-					result.bodyRaw ||
-					(typeof result.body === "object" && result.body !== null
-						? JSON.stringify(result.body, null, 2)
-						: String(result.body || ""));
-
-				// For pretty view, use parsed body if available, otherwise use raw
-				// Note: typeof null === "object" in JavaScript, so we need to check for null explicitly
-				const body =
-					typeof result.body === "object" && result.body !== null
-						? JSON.stringify(result.body, null, 2)
-						: result.body !== null && result.body !== undefined
-							? String(result.body)
-							: bodyRaw || "";
-
-				return {
-					// Use status from result, but don't default to 200 if it's 0 (client-side error)
-					// 0 is a valid status code for client-side errors (no server response)
-					status:
-						result.status !== undefined && result.status !== null ? result.status : 200,
-					statusText: result.statusText || "",
-					headers: result.headers || {},
-					requestHeaders: result.requestHeaders,
-					rawRequest: result.rawRequest,
-					body,
-					bodyRaw, // Always include raw body for raw view mode
-					bodyType,
-					time: result.timing?.total || 0,
-					timing: result.timing,
-					size: result.bodySize || 0,
-					// Client-side error info (from engine/curl)
-					errorCode: result.errorCode,
-					errorMessage: result.errorMessage,
-					// Script execution results
-					consoleLogs: result.consoleLogs,
-					testResults: result.testResults,
-					preScriptError: result.preScriptError,
-					postScriptError: result.postScriptError,
-				};
+				// Shared with the History run view's send path - see execute-mapping.ts
+				return responseFromExecuteResult(result);
 			} catch (error) {
 				console.error("Execute request failed:", error);
 				const errorMsg = error instanceof Error ? error.message : String(error);
@@ -558,7 +466,15 @@ export default function RequestBuilder() {
 					success_sample_rate: config.data_sample_rate,
 					slow_threshold_ms: config.slow_threshold_ms,
 					save_timing_breakdown: config.save_timing_breakdown,
-					tests: pendingLoadTestRequest.testScript || undefined,
+					// The collection chain's test scripts too. Load runs only ever
+					// validated the request's own, so a collection-level assertion
+					// passed in design mode and was never checked under load.
+					tests: scriptParts(
+						collectionAncestors,
+						(c) => c.postRequestScript,
+						fetchedRequest.id,
+						pendingLoadTestRequest.testScript
+					),
 				};
 
 				const result = await apiService.startLoadTest(apiRequest);
@@ -640,11 +556,12 @@ export default function RequestBuilder() {
 	}
 
 	/*
-	 * Reaching here means the request was looked for and is genuinely gone -
-	 * `useRequestQuery` now fetches the collection lists rather than reading a
-	 * cache that may not have filled yet, so this is no longer the cold-start
-	 * race it used to be. The tab is therefore dead, and a centred "Request not
-	 * found" with no way out left the user to work out that closing it was the
+	 * Reaching here means the lookup errored. `useRequestQuery` hits
+	 * `GET /requests/:id`, so a genuine deletion (404) is authoritative rather
+	 * than the cold-start race it used to be; a transport failure lands here too,
+	 * but the retry below recovers it once the engine is back. The message reads
+	 * for the common case (deleted), and a centred "Request not found" with no
+	 * way out used to leave the user to work out that closing the tab was the
 	 * only move. Deleting a request already closes its tabs
 	 * (`closeTabsForEntities`), so the usual cause is a delete from another
 	 * window or a database restored underneath the app.
