@@ -113,30 +113,37 @@ Delete a collection and all its requests (cascading delete).
 
 ### GET /requests
 
-List requests in a collection.
+List requests in a collection. Results are ordered by the requests' `order`
+field (ascending), the same contract `GET /collections` has for collections.
 
 **Query Parameters:**
 - `collectionId` (required): Collection ID to fetch requests from
 
-**Response:**
+**Response:** An array of request objects, each in the same shape as a
+`GET /requests/:id` response: `params`/`headers` are arrays of
+`{key, value, enabled}` entries and `body` is a JSON discriminated union
+(see the `requests` table in [db-schema.md](db-schema.md)).
 ```json
 [
   {
     "id": "req_1234567890",
     "collectionId": "col_1234567890",
     "name": "Get Users",
+    "description": "",
     "method": "GET",
     "url": "{{baseUrl}}/users",
-    "params": {},
-    "headers": {},
-    "body": "",
+    "order": 0,
+    "params": [{ "key": "page", "value": "1", "enabled": true }],
+    "headers": [{ "key": "Accept", "value": "application/json", "enabled": true }],
+    "body": { "mode": "none" },
     "bodyType": "none",
-    "auth": {},
+    "auth": { "mode": "inherit" },
     "preRequestScript": "",
     "postRequestScript": "",
     "followRedirects": true,
     "maxRedirects": 10,
-    "updatedAt": 1234567890
+    "updatedAt": 1234567890,
+    "createdAt": 1234567890
   }
 ]
 ```
@@ -162,8 +169,10 @@ entry.
   "id": "req_1234567890",
   "collectionId": "col_1234567890",
   "name": "Get Users",
+  "description": "",
   "method": "GET",
   "url": "{{baseUrl}}/users",
+  "order": 0,
   "params": [],
   "headers": [],
   "body": { "mode": "none" },

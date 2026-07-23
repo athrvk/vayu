@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "vayu/db/database.hpp"
@@ -215,6 +216,72 @@ TEST_F (DatabaseTest, ReturnsEmptyGlobalsWhenNotSet) {
 
     auto retrieved = db.get_globals ();
     EXPECT_FALSE (retrieved.has_value ());
+}
+
+// ==================== Request Ordering Tests ====================
+
+// GET /requests serves this vector verbatim, so the ordering contract lives
+// here: rows come back sorted by `order`, matching what get_collections has
+// always done for collections. Inserted deliberately out of order - without
+// the ORDER BY this returns rowid (insertion) order and fails.
+TEST_F (DatabaseTest, RequestsInCollectionSortedByOrder) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    Collection col;
+    col.id    = "col_1";
+    col.name  = "API";
+    col.order = 0;
+    db.create_collection (col);
+
+    const std::vector<std::pair<std::string, int>> inserted = { { "req_c", 2 },
+        { "req_a", 0 }, { "req_b", 1 } };
+    for (const auto& [id, order] : inserted) {
+        Request r;
+        r.id            = id;
+        r.collection_id = "col_1";
+        r.name          = id;
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test/" + id;
+        r.order         = order;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+    }
+
+    auto requests = db.get_requests_in_collection ("col_1");
+    ASSERT_EQ (requests.size (), 3);
+    EXPECT_EQ (requests[0].id, "req_a");
+    EXPECT_EQ (requests[1].id, "req_b");
+    EXPECT_EQ (requests[2].id, "req_c");
+}
+
+// ==================== Config Cleanup Tests ====================
+
+// "requestBatchSize" drove the removed batched request iteration. Seeding no
+// longer creates it, and - because the Settings UI renders engine entries
+// dynamically from GET /config - an upgraded database must lose the row too,
+// or the dead knob keeps showing up. Simulates the upgrade by planting the
+// row before re-running the seed.
+TEST_F (DatabaseTest, SeedRemovesRetiredRequestBatchSizeEntry) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    ConfigEntry stale;
+    stale.key           = "requestBatchSize";
+    stale.value         = "5";
+    stale.type          = "integer";
+    stale.label         = "Request Batch Size";
+    stale.description   = "left behind by an older version";
+    stale.category      = "general_engine";
+    stale.default_value = "5";
+    stale.updated_at    = 1;
+    db.save_config_entry (stale);
+    ASSERT_TRUE (db.get_config_entry ("requestBatchSize").has_value ());
+
+    db.seed_default_config ();
+
+    EXPECT_FALSE (db.get_config_entry ("requestBatchSize").has_value ());
 }
 
 // ==================== Environment Delete Tests ====================
