@@ -345,8 +345,18 @@ their own. Resolved colour is a computed-style question and is checked in the
 browser.
 
 Definitions live in `app/src/index.css` under "Surfaces, and the rule colour that
-reads on each". Adopted by the response-viewer family; the rest of the app still
-uses explicit tokens and can migrate as it is touched.
+reads on each". Adopted by the response-viewer family and the import dialog
+(`ImportModal.surface-rule.test.tsx` guards the latter's declarations); the rest
+of the app still uses explicit tokens and can migrate as it is touched.
+
+One trap the import dialog documents: `surface-card` **cannot simply replace**
+a background utility that a primitive already sets. The surface classes live in
+`@layer components`, and a utility (`bg-background` on `DialogContent`) outranks
+any component-layer class - while tailwind-merge does not recognise
+`surface-card` as a background class, so it will not strip the primitive's
+utility either. On such an element write the pair `bg-card surface-card`: the
+utility wins the cascade, the surface class contributes the `--rule`
+declaration, and both set the same colour.
 
 **On `--muted` there is no border to pick.** It is the one surface where
 `--border-strong` is *weaker* than `--border`: `--muted` (L 16%) sits between
@@ -357,6 +367,16 @@ all. A `bg-muted` block has to be defined by its fill instead, which separates
 from a card at 1.18 light / 1.15 dark - the treatment the console log slabs and
 the script panels' Quick Reference blocks use. `--accent` carries the same value
 as `--muted` in both themes and behaves identically.
+
+That fill-not-border guidance is about a *block* separating from its parent. An
+edge that is itself the point is different: the import drop zone's dashed border
+is a drag-target affordance, and it uses `surface-sunken` + `border-rule` - the
+alpha-of-`--foreground` rule is the one edge that does work on this fill, and
+the strongest available in both themes (1.356 light / 1.343 dark). The
+`border-border-strong` it previously kept "for prominence" is in fact the
+*faintest* option there in dark (1.11, per the table above). Decided in issue
+#69; the detected-collections preview list in the same dialog got the same
+treatment.
 | switch **off** track vs card | 1.55 | 1.28 | failed |
 | switch off **thumb** vs its track | 1.41 | 12.35 | failed in light |
 | switch **on** track vs card | 5.39 | 5.89 | passes |
