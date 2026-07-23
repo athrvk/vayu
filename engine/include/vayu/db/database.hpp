@@ -7,6 +7,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <chrono>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -72,11 +74,6 @@ class Database {
     void add_results_batch (const std::vector<Result>& results); // Transactional batch insert
     std::vector<Result> get_results (const std::string& run_id);
 
-    // Transaction helpers
-    void begin_transaction ();
-    void commit_transaction ();
-    void rollback_transaction ();
-
     // Config Entries - Structured configuration with metadata
     void save_config_entry (const ConfigEntry& entry);
     std::optional<ConfigEntry> get_config_entry (const std::string& key);
@@ -93,6 +90,20 @@ class Database {
     private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    /**
+     * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked error.
+     *
+     * On a busy error the mutex is released *before* sleeping (exponential
+     * backoff, @p base * (attempt+1)), then the call is retried - so a retry
+     * never stalls other endpoints that need the same mutex. Non-busy
+     * exceptions rethrow immediately; busy exhaustion after @p attempts logs
+     * and rethrows. @p what names the operation for log messages.
+     */
+    void retry_on_busy (const char* what,
+    int attempts,
+    std::chrono::milliseconds base,
+    const std::function<void ()>& fn);
 };
 
 } // namespace vayu::db
