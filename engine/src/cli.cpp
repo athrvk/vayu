@@ -197,8 +197,8 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
     }
 
     if (is_load_test) {
-        // Load Test -> POST /run
-        auto res = cli.Post ("/run", content, "application/json");
+        // Load Test -> POST /runs
+        auto res = cli.Post ("/runs", content, "application/json");
 
         if (!res) {
             vayu::utils::log_error ("Error: Failed to connect to daemon at " + daemon_url);
@@ -210,7 +210,12 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
             std::string run_id = response_json["runId"];
             vayu::utils::log_info ("Load test started successfully.");
             std::cout << "Run ID: " << run_id << "\n";
-            vayu::utils::log_info ("Monitor status at: " + daemon_url + "/stats/" + run_id);
+            // The live SSE stream, not the legacy /stats/:id poller. Served
+            // from the in-memory collector; a finished run stays readable for
+            // liveRetentionMs (default 60s), then 404s with a hint pointing
+            // at /runs/:id/report.
+            vayu::utils::log_info (
+            "Monitor status at: " + daemon_url + "/runs/" + run_id + "/live");
             return 0;
         } else {
             std::string msg =
@@ -222,9 +227,9 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
             return 1;
         }
     } else {
-        // Single Request -> POST /request
+        // Single Request -> POST /execute
         // Note: The daemon expects the raw JSON request definition
-        auto res = cli.Post ("/request", content, "application/json");
+        auto res = cli.Post ("/execute", content, "application/json");
 
         if (!res) {
             std::string msg = "Error: Failed to connect to daemon at " + daemon_url;

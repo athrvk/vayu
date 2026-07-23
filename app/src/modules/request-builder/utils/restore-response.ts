@@ -22,7 +22,7 @@ import type { RunReport } from "@/types";
 import type { ResponseState, ResponseTiming } from "../types";
 import { buildRawRequest } from "@/components/shared/response-viewer";
 
-/** One element of `RunReport.results` - the shape `GET /run/:id/report` returns. */
+/** One element of `RunReport.results` - the shape `GET /runs/:id/report` returns. */
 export type RunResultSample = NonNullable<RunReport["results"]>[number];
 
 /**

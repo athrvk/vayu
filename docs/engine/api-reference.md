@@ -24,6 +24,29 @@ carries a machine-readable code (and any provider detail):
 }
 ```
 
+## Deprecated aliases
+
+The execution and run/metrics routes were consolidated behind a `/runs` family,
+`/execute`, and `/runs/:id/metrics`. The old paths still work - each is
+registered as a deprecated alias of its canonical route (same handler, same
+behavior) and logs a `(deprecated alias)` marker per request. **These aliases
+will be removed in a future minor release**; new clients should use the
+canonical paths.
+
+| Deprecated alias | Canonical route |
+|------------------|-----------------|
+| `POST /request` | `POST /execute` |
+| `POST /run` | `POST /runs` |
+| `GET /run/:id` | `GET /runs/:id` |
+| `DELETE /run/:id` | `DELETE /runs/:id` |
+| `POST /run/:id/stop` | `POST /runs/:id/stop` |
+| `GET /run/:id/report` | `GET /runs/:id/report` |
+| `GET /metrics/live/:id` | `GET /runs/:id/live` |
+| `GET /stats/:id?format=json` | `GET /runs/:id/metrics` |
+
+`GET /stats/:id` in its **SSE** mode is legacy DB-polling and is retained
+wholesale (no canonical rename); prefer `GET /runs/:id/live` for live metrics.
+
 ## Health & Configuration
 
 ### GET /health
@@ -334,7 +357,7 @@ Set global variables.
 ## Authentication
 
 The engine **resolves auth server-side**. Every request's `auth` object (on
-`POST /request` and `POST /run`) is applied to the outgoing request before it
+`POST /execute` and `POST /runs`) is applied to the outgoing request before it
 hits the wire:
 
 | `auth.mode` | Effect |
@@ -427,9 +450,11 @@ and `cacheKey` is returned.
 
 ## Execution
 
-### POST /request
+### POST /execute
 
 Execute a single HTTP request (Design Mode). Returns immediate response with test results.
+
+> Alias: `POST /request` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 The request's `auth` (see [Authentication](#authentication)) is resolved before
 the pre-request script runs, so `pm.request` reflects the real outgoing headers.
@@ -484,7 +509,7 @@ whitespace are dropped.
 follows every 3xx and only the final response is returned - send
 `followRedirects: false` to see the 3xx status and its `Location` header. Both
 clients send these explicitly for exactly that reason (see
-[api-integration](../app/api-integration.md)). `POST /run` accepts the same
+[api-integration](../app/api-integration.md)). `POST /runs` accepts the same
 three fields with the same defaults, so a load test can be run under the policy
 the request was configured with.
 
@@ -519,9 +544,11 @@ the request was configured with.
 }
 ```
 
-### POST /run
+### POST /runs
 
 Start a load test run (Vayu Mode).
+
+> Alias: `POST /run` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 **Request:**
 ```json
@@ -544,7 +571,7 @@ Start a load test run (Vayu Mode).
   "requestId": "req_1234567890",      // Optional, links to saved request
   "environmentId": "env_1234567890",  // Optional
   "tests": "",               // Optional, deferred validation script
-  "followRedirects": true,   // Optional, default true - see POST /request
+  "followRedirects": true,   // Optional, default true - see POST /execute
   "maxRedirects": 10         // Optional, default 10
 }
 ```
@@ -558,7 +585,7 @@ Start a load test run (Vayu Mode).
 ```
 
 **`tests` accepts both forms**, like `preRequestScripts` / `postRequestScripts`
-on `POST /request` above: the legacy single string, or a list of parts
+on `POST /execute` above: the legacy single string, or a list of parts
 (`[{ "origin": "collection" | "request", "id", "name", "script" }]`) that the
 engine joins itself (see [scripting.md](scripting.md#script-parts)). The list
 wins when both are sent. Sending the collection chain's parts means its
@@ -587,18 +614,60 @@ target *is* the in-flight bound, so `maxInFlight` is ignored there.
 
 ## Metrics & Statistics
 
-### GET /stats/:runId
+### GET /runs/:runId/metrics
 
-> **Prefer `GET /metrics/live/:runId`** (below) for live dashboards - it replays a retained
-> in-memory tick topic with no attach race. `/stats/:runId` is the legacy DB-polling path; it
-> remains useful for **historical** retrieval via `?format=json&limit=&offset=` (paginated
-> time-series read), which the app uses to hydrate the history view.
->
-> The `?format=json` per-tick rows carry the **windowed** latency percentiles
-> (`latency_p50_ms` / `latency_p95_ms` / `latency_p99_ms`, snake_case) alongside
-> rps/throughput/concurrency/status codes, so the history view can rebuild the
-> percentiles-over-time chart, the response-time-vs-concurrency scatter, and the
-> capacity-breakpoint / saturation stats from stored data.
+Paginated **historical time-series** (JSON) for a run's charts. This is the
+canonical replacement for the legacy `GET /stats/:runId?format=json`; both call
+the same `run_time_series_response` core so they cannot drift. The response is
+**always JSON** - any `format` query param is ignored.
+
+**Query parameters:**
+- `limit` - max records per page (default 5000, invalid/&le;0 falls back to 5000, capped at 50000).
+- `offset` - skip N records (default 0, negative floored to 0).
+
+Per-tick rows carry the **windowed** latency percentiles (`latency_p50_ms` /
+`latency_p95_ms` / `latency_p99_ms`, snake_case) alongside
+rps/throughput/concurrency/status codes, so the history view can rebuild the
+percentiles-over-time chart, the response-time-vs-concurrency scatter, and the
+capacity-breakpoint / saturation stats from stored data.
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "timestamp": 1234567890,
+      "elapsed_seconds": 10.5,
+      "requests_completed": 1500,
+      "requests_failed": 5,
+      "current_rps": 150.5,
+      "current_concurrency": 100,
+      "send_rate": 150.0,
+      "throughput": 149.5,
+      "backpressure": 0,
+      "error_rate": 0.33,
+      "dropped_requests": 0,
+      "bytes_sent": 48000,
+      "bytes_received": 1920000,
+      "status_codes": { "200": 1495, "404": 3, "500": 2 },
+      "latency_p50_ms": 38.5,
+      "latency_p95_ms": 95.1,
+      "latency_p99_ms": 12.0
+    }
+  ],
+  "pagination": { "total": 1, "limit": 5000, "offset": 0, "hasMore": false, "returned": 1 }
+}
+```
+
+A missing run returns `404` with `{"error":"Run not found"}`.
+
+### GET /stats/:runId (deprecated)
+
+> **Prefer `GET /runs/:runId/live`** (above) for live dashboards - it replays a retained
+> in-memory tick topic with no attach race. `/stats/:runId` is the legacy DB-polling path
+> and is retained wholesale (its SSE mode gets no canonical rename). Its historical
+> `?format=json&limit=&offset=` retrieval is a deprecated alias of `GET /runs/:runId/metrics`
+> (same core); new callers should use that path.
 
 Stream real-time metrics for a load test using Server-Sent Events (SSE).
 
@@ -622,7 +691,9 @@ data: {"totalRequests":6000,"totalErrors":30,"totalSuccess":5970,"errorRate":0.5
 - `activeConnections`: Active concurrent connections
 - `elapsedSeconds`: Elapsed time since test start
 
-### GET /metrics/live/:runId
+### GET /runs/:runId/live
+
+> Alias: `GET /metrics/live/:runId` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 Stream live metrics for a run via Server-Sent Events, replayed from a retained
 in-memory tick topic. The engine produces one wire-ready `metrics` tick per
@@ -682,13 +753,13 @@ needed), and the stream resumes from `Last-Event-ID + 1`.
 and rely on `Last-Event-ID` - `EventSource` does not expose a header-setting
 API, so a fresh connect would request `from=0` and replay the entire retained
 topic, duplicating ticks already shown. The canonical recovery is to converge
-on the stored report via `GET /run/:runId/report` (the same path used at normal
+on the stored report via `GET /runs/:runId/report` (the same path used at normal
 run end). This is the pattern the bundled app uses.
 
 **Responses:**
 - `200` - SSE stream (active run, or finished run still within the retention window).
 - `404` - run not found or evicted past `liveRetentionMs`; the body hints
-  `Use /run/:runId/report for the stored report`. Clients should fall back to
+  `Use /runs/:runId/report for the stored report`. Clients should fall back to
   the stored report in this case.
 
 Tuning: `liveTickIntervalMs` (live tick cadence, 10–1000ms) and
@@ -717,7 +788,9 @@ List all test runs (both design mode and load tests).
 ]
 ```
 
-### GET /run/:runId
+### GET /runs/:runId
+
+> Alias: `GET /run/:runId` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 Get details for a specific run.
 
@@ -726,7 +799,7 @@ Get details for a specific run.
 
 For a `design` run that has at least one stored result, the response also
 carries a `result` object with that run's single exchange - the only other
-place it appears is `GET /run/:runId/report`, whose `results` array and
+place it appears is `GET /runs/:runId/report`, whose `results` array and
 `metadata.configuration` are load-test concepts and are absent for a design
 run.
 
@@ -751,7 +824,9 @@ run.
 }
 ```
 
-### POST /run/:runId/stop
+### POST /runs/:runId/stop
+
+> Alias: `POST /run/:runId/stop` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 Stop a running load test.
 
@@ -763,7 +838,9 @@ Stop a running load test.
 }
 ```
 
-### GET /run/:runId/report
+### GET /runs/:runId/report
+
+> Alias: `GET /run/:runId/report` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 Get the final report for a completed run. Reconstructed from the `runs`, `metrics`, and `results`
 tables (there is no stored `summary` blob). The response is a **nested** object; conditional
@@ -828,7 +905,9 @@ only when a test script ran).
 per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percentiles) is
 **perceived** latency.
 
-### DELETE /run/:runId
+### DELETE /runs/:runId
+
+> Alias: `DELETE /run/:runId` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
 Delete a run and all associated metrics/results.
 

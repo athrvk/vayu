@@ -23,7 +23,7 @@
 import { describe, it, expect } from "vitest";
 import { responseFromRunResult, timingFromTrace, type RunResultSample } from "./restore-response";
 
-/** A design-run result as `GET /run/:id/report` returns it. */
+/** A design-run result as `GET /runs/:id/report` returns it. */
 function sample(overrides: Partial<RunResultSample> = {}): RunResultSample {
 	return {
 		timestamp: 1_750_000_000_000,
