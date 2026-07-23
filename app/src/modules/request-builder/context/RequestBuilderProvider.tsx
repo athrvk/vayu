@@ -93,6 +93,14 @@ export default function RequestBuilderProvider({
 		collectionId: collectionId || null,
 	}));
 
+	// The id of the request currently on screen. This single provider is reused
+	// across request tabs (no per-tab key), so an execute that is still in flight
+	// when the user switches requests must be able to tell whether its result
+	// still belongs on screen. A ref, not the closure's `request`, because the
+	// running executeRequest closed over the request that was active at Send.
+	const currentRequestIdRef = useRef<string | null>(request.id ?? null);
+	currentRequestIdRef.current = request.id ?? null;
+
 	// Response state - use store for persistence across view switches
 	const { getResponse, setResponse: storeSetResponse } = useResponseStore();
 	const [response, setLocalResponse] = useState<ResponseState | null>(() => {
@@ -192,6 +200,10 @@ export default function RequestBuilderProvider({
 				collectionId: collectionId || null,
 			});
 			setHasUnsavedChanges(false);
+			// Clear any executing state carried over from the request we just left.
+			// It belongs to that request's in-flight run, not this one; without this
+			// the switched-to request shows a "Sending" spinner it never triggered.
+			setIsExecuting(false);
 
 			// Restore response from store for this request
 			const requestId = initialRequest.id;
@@ -340,20 +352,39 @@ export default function RequestBuilderProvider({
 	const executeRequest = useCallback(async () => {
 		if (!onExecute) return;
 
+		// Snapshot the request as it is at Send. If the user switches to another
+		// request before this resolves, the result must land on the request that
+		// actually ran - not on whatever is on screen when it finishes.
+		const executingRequest = request;
+		const executingId = executingRequest.id;
+
 		setIsExecuting(true);
-		setResponse(null);
+		setLocalResponse(null);
 
 		try {
-			const result = await onExecute(request);
+			const result = await onExecute(executingRequest);
 			if (result) {
-				setResponse(result);
+				// Persist under the request that ran, so returning to it shows its
+				// own response. `storeSetResponse` is keyed by id and is safe even
+				// if this provider has since moved on to another request.
+				if (executingId) storeSetResponse(executingId, result);
+				// Only touch the shared live view if that request is still on
+				// screen. The ref reflects the current request, unlike this
+				// closure's frozen `executingId`.
+				if (currentRequestIdRef.current === executingId) {
+					setLocalResponse(result);
+				}
 			}
 		} catch (error) {
 			console.error("Request execution failed:", error);
 		} finally {
-			setIsExecuting(false);
+			// Same guard: a stale finish must not clear the spinner of a different
+			// request the user has since started.
+			if (currentRequestIdRef.current === executingId) {
+				setIsExecuting(false);
+			}
 		}
-	}, [request, onExecute, setResponse]);
+	}, [request, onExecute, storeSetResponse]);
 
 	// Start load test
 	const startLoadTest = useCallback(() => {
