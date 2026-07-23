@@ -2,7 +2,7 @@
 #
 # Labels are not created on demand: every key here must already exist in the
 # repository or the run fails on it. `ci` and `build` were added alongside this
-# file; `app`, `engine` and `documentation` already existed.
+# file; `app`, `engine`, `database` and `documentation` already existed.
 #
 # Overlap is expected and fine. A change to `.github/release-notes/*.md` is both
 # `ci` and `documentation`, and a release bump touching both trees earns `app`,
@@ -16,6 +16,19 @@ app:
 engine:
   - changed-files:
       - any-glob-to-any-file: 'engine/**'
+
+# A subset of `engine`, so a database change earns both labels - which is the
+# point of a finer label, and consistent with the overlap noted above. The
+# store is one translation unit plus its header, test and schema doc, so this
+# is an explicit file list rather than a directory. Uses the existing
+# `database` label; there is no separate `db` label.
+database:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'engine/src/db/**'
+          - 'engine/include/vayu/db/**'
+          - 'engine/tests/db_test.cpp'
+          - 'docs/engine/db-schema.md'
 
 ci:
   - changed-files:
