@@ -1,0 +1,147 @@
+name: CodeQL
+
+# Two languages on two schedules, because they cost very different amounts.
+#
+# JavaScript/TypeScript analyses from source with no build, so it is cheap
+# enough to run on every pull request alongside the existing checks.
+#
+# C++ has no source-only mode: CodeQL builds a database by watching the compiler
+# run, so it has to compile the engine. That build cannot use sccache - a cache
+# hit means no compiler invocation for the tracer to observe - so it is a cold
+# build every time, ~15-25 min against the ~8 min the cached PR build takes.
+# Putting that on every pull request would dominate the wait for a check that
+# rarely changes its answer, so C++ runs on a weekly schedule and on pushes to
+# master instead. Public repositories get unlimited runner minutes, so the only
+# cost is latency, and this keeps it off the path people wait on.
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  schedule:
+    # Mondays 06:00 UTC. A fixed off-peak time; nothing depends on the exact hour.
+    - cron: '0 6 * * 1'
+
+# Only ever one analysis in flight per ref. A push to master landing while its
+# own pull-request analysis is still running would otherwise run both.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  javascript:
+    name: Analyze JavaScript/TypeScript
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # `build-mode: none` is the source-only path - no compilation, which
+          # is what makes this job cheap. Also the default for this language,
+          # stated here so the intent is explicit next to the C++ job that
+          # cannot use it.
+          build-mode: none
+          # Suppress alerts in code that is not ours or not shipped. These filter
+          # the report, not the scan, so vendored JS and build output stop
+          # generating noise without hiding anything in `app/src`.
+          config: |
+            paths-ignore:
+              - '**/node_modules'
+              - '**/dist'
+              - '**/build'
+              - '**/*.test.ts'
+              - '**/*.test.tsx'
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:javascript-typescript
+
+  cpp:
+    name: Analyze C++
+    runs-on: ubuntu-latest
+    # Not on pull requests: the cold build is too slow for the path people wait
+    # on. Push-to-master and the weekly schedule cover it. `workflow_dispatch`
+    # is not wired up deliberately; add it if an on-demand C++ scan is wanted.
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 40
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    env:
+      VCPKG_COMMIT: 'cea592f4772491abdb7c483387a59ea89889f4be'
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            build-essential \
+            pkg-config \
+            ca-certificates
+
+      # The dependency archives can still be cached: vcpkg builds them, not the
+      # engine, so CodeQL does not need to trace their compilation. Only the
+      # engine's own object files must compile fresh, which is the point below.
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-Linux-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-Linux-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-Linux-
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
+          vcpkgJsonGlob: 'engine/vcpkg.json'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+          # Manual, not autobuild: autobuild does not know about the vcpkg
+          # toolchain and would fail to configure. The build below runs between
+          # init and analyze, under the tracer init installs.
+          build-mode: manual
+          # The engine vendors quickjs-ng, picosha2 and hdrhistogram under
+          # engine/vendor. They are third-party and compile into the database
+          # regardless, but their alerts are not ours to fix, so drop them from
+          # the report.
+          config: |
+            paths-ignore:
+              - 'engine/vendor'
+
+      # No sccache, on purpose. CodeQL's tracer builds its database from observed
+      # compiler invocations; an sccache hit skips the compiler and the object
+      # would be invisible to the scan. So no launcher is set and no
+      # sccache-action runs - this compiles cold, which is the whole reason this
+      # job is scheduled rather than per-pull-request. Tests are off: analysing
+      # the test suite adds build time and finds nothing that ships.
+      - name: Build engine
+        uses: lukka/run-cmake@v10
+        with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          configurePreset: linux-prod
+          buildPreset: linux-prod
+          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=OFF']"
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:c-cpp
