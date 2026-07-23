@@ -159,7 +159,7 @@ The app uses a dual-state management approach:
   - Handles error transformation and user-friendly messages
 
 - **`sse-client.ts`**: Server-Sent Events client for real-time metrics
-  - Connects to `/metrics/live/:runId` (replayable tick topic - no attach race)
+  - Connects to `/runs/:runId/live` (replayable tick topic - no attach race)
   - No custom reconnect loop: the engine sends an explicit `complete` event, so `CLOSED` is terminal and transient errors are left to the browser's `EventSource` retry
   - Parses and forwards metrics to dashboard store
 
@@ -183,19 +183,19 @@ The app uses a dual-state management approach:
 2. `useEngine().executeRequest()` is called
 3. Variables are resolved via `useVariableResolver()`
 4. Request is transformed to backend format (camelCase)
-5. `apiService.executeRequest()` sends `POST /request` to engine
+5. `apiService.executeRequest()` sends `POST /execute` to engine
 6. Response is transformed back to frontend format (snake_case)
 7. Response is displayed in ResponseViewer
 
 ### Load Test Flow
 
 1. User configures load test and clicks "Start Load Test"
-2. `useEngine().startLoadTest()` sends `POST /run` to engine
+2. `useEngine().startLoadTest()` sends `POST /runs` to engine
 3. Engine returns `runId`
 4. `useDashboardStore().startRun()` initializes dashboard state
-5. `useSSE()` connects to `/metrics/live/:runId` SSE endpoint
+5. `useSSE()` connects to `/runs/:runId/live` SSE endpoint
 6. Metrics stream in real-time and update dashboard
-7. When test completes, final report is fetched via `GET /run/:id/report`
+7. When test completes, final report is fetched via `GET /runs/:id/report`
 
 ### Variable Resolution Flow
 

@@ -105,7 +105,7 @@ The Manager communicates with the Engine via a localhost HTTP API on port 9876.
 ```
 Manager                              Engine
    │                                    │
-   │  POST /request                     │
+   │  POST /execute                     │
    │  {method, url, headers, body}      │
    ├───────────────────────────────────►│
    │                                    │
@@ -119,14 +119,14 @@ Manager                              Engine
 ```
 Manager                              Engine
    │                                    │
-   │  POST /run                         │
+   │  POST /runs                        │
    │  {request, mode, duration, ...}   │
    ├───────────────────────────────────►│
    │                                    │
    │  200 OK {runId}                    │
    │◄───────────────────────────────────┤
    │                                    │
-   │  GET /metrics/live/{runId} (SSE)   │
+   │  GET /runs/{runId}/live (SSE)      │
    ├───────────────────────────────────►│
    │                                    │
    │  event: metrics                    │
@@ -136,7 +136,7 @@ Manager                              Engine
    │  event: complete                   │
    │◄───────────────────────────────────┤
    │                                    │
-   │  GET /run/{runId}/report           │
+   │  GET /runs/{runId}/report          │
    ├───────────────────────────────────►│
    │                                    │
    │  200 OK {summary, latency, ...}    │
@@ -165,7 +165,7 @@ See [App Architecture - Sidecar](app/architecture.md#engine-sidecar-electronside
 
 1. User builds request in RequestBuilder
 2. Variables resolved in frontend (`{{baseUrl}}` → `https://api.example.com`)
-3. Manager sends `POST /request` to Engine
+3. Manager sends `POST /execute` to Engine
 4. Engine executes HTTP request via libcurl
 5. Engine runs pre-request script (if provided)
 6. Engine runs test script (if provided)
@@ -175,12 +175,12 @@ See [App Architecture - Sidecar](app/architecture.md#engine-sidecar-electronside
 ### Load Test Execution
 
 1. User configures load test (mode, duration, concurrency)
-2. Manager sends `POST /run` to Engine
+2. Manager sends `POST /runs` to Engine
 3. Engine starts load test and returns `runId`
-4. Manager connects to SSE stream (`/metrics/live/{runId}`)
+4. Manager connects to SSE stream (`/runs/{runId}/live`)
 5. Engine streams real-time metrics (RPS, latency, errors)
 6. Manager updates dashboard in real-time
-7. When test completes, Manager fetches final report (`/run/{runId}/report`)
+7. When test completes, Manager fetches final report (`/runs/{runId}/report`)
 
 ### Variable Resolution
 

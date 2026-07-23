@@ -268,14 +268,15 @@ const vayu::Response& response) {
 
 void register_execution_routes (RouteContext& ctx) {
     /**
-     * POST /request
+     * POST /execute  (alias: POST /request, deprecated)
      * Executes a single HTTP request (Design Mode).
      *
      * Returns:
      * - 200: Request was processed (check response body for server status/errors)
      * - 400: Invalid request format (malformed JSON, missing required fields)
      */
-    ctx.server.Post ("/request", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler execute_request =
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string run_id;
 
         // Parse and validate request
@@ -284,7 +285,7 @@ void register_execution_routes (RouteContext& ctx) {
             json = nlohmann::json::parse (req.body);
         } catch (const nlohmann::json::exception& e) {
             vayu::utils::log_warning (
-            "POST /request - Invalid JSON: " + std::string (e.what ()));
+            "POST /execute - Invalid JSON: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
             return;
         }
@@ -297,7 +298,7 @@ void register_execution_routes (RouteContext& ctx) {
         "defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
         auto built = vayu::http::build_request (json, &ctx.db, request_timeout_ms);
         if (built.parse_failed) {
-            vayu::utils::log_warning ("POST /request - Invalid request format");
+            vayu::utils::log_warning ("POST /execute - Invalid request format");
             send_error (res, 400, built.error_message);
             return;
         }
@@ -325,7 +326,7 @@ void register_execution_routes (RouteContext& ctx) {
         }
 
         // Log request details
-        vayu::utils::log_info ("POST /request - Design Mode: run_id=" + run_id +
+        vayu::utils::log_info ("POST /execute - Design Mode: run_id=" + run_id +
         ", method=" + json.value ("method", "UNKNOWN") +
         ", url=" + json.value ("url", "UNKNOWN") +
         ", request_id=" + run.request_id.value_or ("none") +
@@ -437,24 +438,27 @@ void register_execution_routes (RouteContext& ctx) {
         res.set_content (
         build_response_json (response, pre_script_result, post_script_result).dump (2),
         "application/json");
-    });
+    };
+    ctx.server.Post ("/execute", execute_request);
+    ctx.server.Post ("/request", deprecated_alias (execute_request));
 
     /**
-     * POST /run
+     * POST /runs  (alias: POST /run, deprecated)
      * Starts a load test run (Vayu Mode).
      *
      * Returns:
      * - 202: Load test accepted and started
      * - 400: Invalid request format
      */
-    ctx.server.Post ("/run", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler start_load_test =
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         // Parse JSON
         nlohmann::json json;
         try {
             json = nlohmann::json::parse (req.body);
         } catch (const nlohmann::json::exception& e) {
             vayu::utils::log_warning (
-            "POST /run - Invalid JSON: " + std::string (e.what ()));
+            "POST /runs - Invalid JSON: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
             return;
         }
@@ -462,7 +466,7 @@ void register_execution_routes (RouteContext& ctx) {
         // Validate required fields
         if (!json.contains ("method") || !json.contains ("url")) {
             vayu::utils::log_warning (
-            "POST /run - Missing required fields: method, url");
+            "POST /runs - Missing required fields: method, url");
             send_error (res, 400, "Missing required fields: method, url");
             return;
         }
@@ -470,7 +474,7 @@ void register_execution_routes (RouteContext& ctx) {
         if (!json.contains ("mode") && !json.contains ("duration") &&
         !json.contains ("iterations")) {
             vayu::utils::log_warning (
-            "POST /run - Missing mode/duration/iterations config");
+            "POST /runs - Missing mode/duration/iterations config");
             send_error (res, 400, "Must specify either 'mode' with 'duration' or 'iterations'");
             return;
         }
@@ -502,7 +506,7 @@ void register_execution_routes (RouteContext& ctx) {
             }
         }
 
-        vayu::utils::log_info ("POST /run - Load Test: run_id=" + run_id +
+        vayu::utils::log_info ("POST /runs - Load Test: run_id=" + run_id +
         ", mode=" + json.value ("mode", "unspecified") +
         ", method=" + json.value ("method", "UNKNOWN") +
         ", url=" + json.value ("url", "UNKNOWN") + ", duration=" + duration_str +
@@ -517,7 +521,7 @@ void register_execution_routes (RouteContext& ctx) {
         auto preflight =
         vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
         if (!preflight.ok) {
-            vayu::utils::log_warning ("POST /run - Auth pre-flight failed: " +
+            vayu::utils::log_warning ("POST /runs - Auth pre-flight failed: " +
             preflight.message);
             res.status =
             (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
@@ -533,7 +537,7 @@ void register_execution_routes (RouteContext& ctx) {
             ctx.db.create_run (run);
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "POST /run - Failed to create run: " + std::string (e.what ()));
+            "POST /runs - Failed to create run: " + std::string (e.what ()));
             send_error (res, 400, "Failed to create run record");
             return;
         }
@@ -548,7 +552,9 @@ void register_execution_routes (RouteContext& ctx) {
 
         res.status = 202;
         res.set_content (response.dump (), "application/json");
-    });
+    };
+    ctx.server.Post ("/runs", start_load_test);
+    ctx.server.Post ("/run", deprecated_alias (start_load_test));
 }
 
 } // namespace vayu::http::routes

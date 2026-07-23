@@ -97,7 +97,7 @@ resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
 **follow_redirects / max_redirects** - the request's redirect policy, surfaced
 in the request builder's **Settings** tab and serialized as `followRedirects` /
 `maxRedirects`. They mirror the executable `vayu::Request` fields of the same
-name, so the saved policy is what `POST /request` and `POST /run` apply.
+name, so the saved policy is what `POST /execute` and `POST /runs` apply.
 
 Both columns are `NOT NULL` with a `DEFAULT`, which is what lets `sync_schema()`
 add them to an existing, non-empty `requests` table - a `NOT NULL` column with
@@ -152,7 +152,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `end_time`        | INTEGER | Unix ms                                                     |
 
 There is **no** `summary` column - aggregate metrics for a finished run are reconstructed at
-read time from the `metrics` and `results` tables (see `GET /run/:runId/report`).
+read time from the `metrics` and `results` tables (see `GET /runs/:runId/report`).
 
 **`config_snapshot` redaction** - the snapshot is the raw run payload, which can
 carry auth credentials. Before persistence, its top-level `auth` object is
@@ -219,7 +219,7 @@ metrics producer thread writes a batch each tick. Struct is `db::Metric`.
   derivations. `latency_p75/p90/p999/min/max` are **not** persisted per tick.
 - **Final-summary rows** (`latency_p50/p75/p90/p95/p99/p999/min/max`, `labels` =
   `{"percentile":"p50"}` etc.): written once at completion from the cumulative-from-start
-  HdrHistogram - the whole-run numbers the report surfaces. The `/run/:id/report` reader
+  HdrHistogram - the whole-run numbers the report surfaces. The `/runs/:id/report` reader
   keys on the non-empty label so the per-tick windowed rows never overwrite these.
 
 ---
@@ -257,8 +257,8 @@ than assuming all eight are there and flat:
 That design-mode subset is what rebuilds the request builder's response pane (Timing tab included)
 after a restart - see `app/src/modules/request-builder/utils/restore-response.ts`.
 
-A design run has exactly one `results` row. `GET /run/:runId` serves it (as `result`)
-alongside the run itself, in addition to `GET /run/:runId/report`'s `results` array - the
+A design run has exactly one `results` row. `GET /runs/:runId` serves it (as `result`)
+alongside the run itself, in addition to `GET /runs/:runId/report`'s `results` array - the
 same row, read by two routes for two different callers.
 
 ---

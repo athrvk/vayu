@@ -192,13 +192,13 @@ Server-Sent Events client for real-time load test metrics streaming.
 
 ### Features
 
-- **Single endpoint**: Connects to `/metrics/live/:runId`. The engine retains a replayable tick
-  topic, so the client connects immediately after `POST /run` with no attach race - it replays
+- **Single endpoint**: Connects to `/runs/:runId/live`. The engine retains a replayable tick
+  topic, so the client connects immediately after `POST /runs` with no attach race - it replays
   from offset 0 and tails to the `complete` event (even for sub-second runs).
 - **No custom reconnect loop**: The engine sends an explicit `complete` event at normal run end,
   so a `CLOSED` readyState is treated as terminal. Transient `CONNECTING` errors are left to the
   browser's built-in `EventSource` retry. At run end the app converges on the stored report
-  (`GET /run/:id/report`) rather than reconnecting to the stream.
+  (`GET /runs/:id/report`) rather than reconnecting to the stream.
 - **Event Handling**: `metrics` events, `complete` event, `error` handling
 - **Metrics Parsing**: `mapSseMetrics()` transforms the engine's camelCase blob to the frontend
   `LoadTestMetrics` shape (includes drops, queue-wait, percentiles, bytes, status-code map)
@@ -245,8 +245,8 @@ export const API_ENDPOINTS = {
   REQUEST_BY_ID: (id: string) => `/requests/${id}`,
   
   // Execution
-  EXECUTE_REQUEST: "/request",
-  START_LOAD_TEST: "/run",
+  EXECUTE_REQUEST: "/execute",
+  START_LOAD_TEST: "/runs",
 
   // OAuth 2.0
   OAUTH2_TOKEN: "/oauth2/token",
@@ -256,16 +256,16 @@ export const API_ENDPOINTS = {
   
   // Runs
   RUNS: "/runs",
-  RUN_BY_ID: (id: string) => `/run/${id}`,
-  RUN_REPORT: (id: string) => `/run/${id}/report`,
-  RUN_STOP: (id: string) => `/run/${id}/stop`,
+  RUN_BY_ID: (id: string) => `/runs/${id}`,
+  RUN_REPORT: (id: string) => `/runs/${id}/report`,
+  RUN_STOP: (id: string) => `/runs/${id}/stop`,
   
   // Real-time stats (SSE)
-  METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`,
+  METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,
 
   // Time-series metrics (JSON, paginated) - used to hydrate history
   STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0) =>
-    `/stats/${runId}?format=json&limit=${limit}&offset=${offset}`,
+    `/runs/${runId}/metrics?limit=${limit}&offset=${offset}`,
 };
 ```
 
@@ -279,7 +279,7 @@ export const API_ENDPOINTS = {
 1. **User Action**: Clicks "Send" in RequestBuilder
 2. **Variable Resolution**: `useVariableResolver()` resolves `{{variables}}` in URL, headers, body
 3. **Request Transformation**: Frontend format → backend format
-4. **API Call**: `apiService.executeRequest()` → `POST /request`
+4. **API Call**: `apiService.executeRequest()` → `POST /execute`
 5. **Response Transformation**: Backend format → frontend format
 6. **Display**: Response shown in ResponseViewer
 
@@ -348,12 +348,12 @@ configured with.
 
 1. **User Action**: Configures and starts load test
 2. **Request Transformation**: Frontend `LoadTestConfig` → backend format
-3. **API Call**: `apiService.startLoadTest()` → `POST /run`
+3. **API Call**: `apiService.startLoadTest()` → `POST /runs`
 4. **Response**: `{ runId: "run_123", status: "running" }`
 5. **Dashboard Initialization**: `useDashboardStore().startRun(runId)`
-6. **SSE Connection**: `useSSE()` connects to `/metrics/live/:runId`
+6. **SSE Connection**: `useSSE()` connects to `/runs/:runId/live`
 7. **Metrics Streaming**: Real-time metrics update dashboard
-8. **Completion**: When test completes, fetch final report via `GET /run/:id/report`
+8. **Completion**: When test completes, fetch final report via `GET /runs/:id/report`
 
 **Example Load Test Request:**
 ```typescript
@@ -481,7 +481,7 @@ jest.spyOn(apiService, 'executeRequest').mockResolvedValue(mockResponse);
 
 1. Verify load test is running (`status: "running"`)
 2. Check browser console for SSE errors
-3. Verify endpoint: `/metrics/live/:runId` or `/stats/:runId`
+3. Verify endpoint: `/runs/:runId/live` or `/runs/:runId/metrics`
 
 ### CORS Errors
 

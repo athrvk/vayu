@@ -43,21 +43,21 @@ export const API_ENDPOINTS = {
 	SCRIPT_COMPLETIONS: `/scripting/completions`,
 
 	// Execution
-	EXECUTE_REQUEST: `/request`,
-	START_LOAD_TEST: `/run`,
+	EXECUTE_REQUEST: `/execute`,
+	START_LOAD_TEST: `/runs`,
 
 	// Runs
 	RUNS: `/runs`,
-	RUN_BY_ID: (id: string) => `/run/${id}`,
-	RUN_REPORT: (id: string) => `/run/${id}/report`,
-	RUN_STOP: (id: string) => `/run/${id}/stop`,
+	RUN_BY_ID: (id: string) => `/runs/${id}`,
+	RUN_REPORT: (id: string) => `/runs/${id}/report`,
+	RUN_STOP: (id: string) => `/runs/${id}/stop`,
 
-	// Real-time stats (SSE)
-	METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`, // New endpoint (memory-based, faster)
+	// Real-time stats (SSE, memory-based, faster)
+	METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,
 
-	// Time-series metrics (JSON, paginated)
+	// Time-series metrics (JSON, paginated). Always JSON - no format param.
 	STATS_TIME_SERIES: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0) =>
-		`/stats/${runId}?format=json&limit=${limit}&offset=${offset}`,
+		`/runs/${runId}/metrics?limit=${limit}&offset=${offset}`,
 
 	// Import
 	IMPORT_FETCH: `/import/fetch`,

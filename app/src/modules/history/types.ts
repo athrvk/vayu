@@ -61,7 +61,7 @@ export interface SampleResult {
 }
 
 /**
- * Time-series metrics response from /stats/:runId?format=json
+ * Time-series metrics response from GET /runs/:runId/metrics
  */
 export interface TimeSeriesResponse {
 	data: LoadTestMetrics[];

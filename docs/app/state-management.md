@@ -469,7 +469,7 @@ useSSE({
 
 **Features:**
 - Automatic connection/disconnection based on `runId` and `enabled`
-- Connects to `/metrics/live/:runId` (engine endpoint)
+- Connects to `/runs/:runId/live` (engine endpoint)
 - Replayable tick stream with explicit `complete` event (no custom reconnect logic needed)
 - Forwards metrics to `useDashboardStore().addMetricsBatch()`
 - Transient errors left to browser's built-in `EventSource` retry
@@ -556,7 +556,7 @@ const { forceSave, status, isSaving } = useSaveManager({
 2. `useEngine().startLoadTest()` is called with the request, config, and optional environment ID
 3. Engine responds with `runId`
 4. `useDashboardStore().startRun(runId, config, requestInfo)` initializes dashboard state
-5. `useSSE({ runId, enabled: true })` hook connects to `/metrics/live/:runId`
+5. `useSSE({ runId, enabled: true })` hook connects to `/runs/:runId/live`
 6. As metrics stream in, `addMetricsBatch()` efficiently folds them into historical metrics (capped at 3,000) and updates running aggregates (peak concurrency, SLO breakpoint)
 7. Dashboard view shows live metrics, request/response (from the SSE stream's final response), and aggregates
 8. When the run completes, the engine sends a `complete` event
