@@ -5,7 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useRef, useEffect } from "react";
 import { ChevronRight, ChevronDown, Folder, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import type { Collection, Request } from "@/types";
@@ -13,7 +12,6 @@ import { compareCollectionOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
 import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { cn } from "@/lib/utils";
-import { TIMING } from "@/config/timing";
 import { INDENT_STEP } from "@/constants/layout";
 
 export interface CollectionItemProps {
@@ -99,41 +97,19 @@ export default function CollectionItem({
 		.filter((c) => c.parentId === collection.id)
 		.sort(compareCollectionOrder);
 
-	const expandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const CLICK_DELAY_MS = TIMING.TREE_CLICK_DELAY_MS;
-
-	useEffect(
-		() => () => {
-			if (expandTimeoutRef.current) clearTimeout(expandTimeoutRef.current);
-		},
-		[]
-	);
-
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
-		// Second click of a double-click: ignore (double-click handler will run rename only)
-		if (e.detail === 2) return;
-
-		if (expandTimeoutRef.current) {
-			clearTimeout(expandTimeoutRef.current);
-			expandTimeoutRef.current = null;
-		}
-
-		expandTimeoutRef.current = setTimeout(() => {
-			expandTimeoutRef.current = null;
-			onCollectionClick(collection);
-		}, CLICK_DELAY_MS);
+		// The second click of a double-click also fires `click`; ignore it so the
+		// double-click starts a rename. The first click already opened the
+		// collection (opening is idempotent), so there is nothing to defer - and
+		// none of the 80ms delay that made a single click to open feel laggy.
+		if (e.detail > 1) return;
+		onCollectionClick(collection);
 	};
 
 	const handleDoubleClick = (e: React.MouseEvent) => {
 		e.stopPropagation();
 		if (isDeleting || isRenaming) return;
-
-		if (expandTimeoutRef.current) {
-			clearTimeout(expandTimeoutRef.current);
-			expandTimeoutRef.current = null;
-		}
-
 		onStartRename(collection);
 	};
 
