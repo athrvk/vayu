@@ -25,23 +25,20 @@
  * status - the things the pane below does not repeat.
  */
 
-import { History, ArrowLeft } from "lucide-react";
+import { History } from "lucide-react";
 import { useRunQuery, useRunReportQuery } from "@/queries";
-import { useTabsStore, useLayoutStore } from "@/stores";
-import { Button, Badge } from "@/components/ui";
+import { useTabsStore } from "@/stores";
+import { Badge } from "@/components/ui";
 import { EmptyState, ErrorState, DetailSkeleton } from "@/components/shared";
 import LoadTestDetail from "./LoadTestDetail";
 import DesignRunView from "./DesignRunView";
 
 export default function HistoryDetail() {
 	const { openTabs, activeTabId } = useTabsStore();
-	const { activateDrawerView } = useLayoutStore();
 
 	// Get selectedRunId from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const selectedRunId = activeTab?.type === "run" ? activeTab.entityId : null;
-
-	const navigateToHistory = () => activateDrawerView("history");
 
 	const {
 		data: run,
@@ -106,18 +103,14 @@ export default function HistoryDetail() {
 
 	return (
 		<div className="flex flex-col h-full bg-background">
-			{/* Header with Back Button */}
+			{/*
+			 * Run identity header. No back button: this is a tab, closed from the
+			 * tab strip, and History lives in the left nav. The old "Back to
+			 * history" only called activateDrawerView("history"), which toggled the
+			 * drawer open/closed rather than navigating anywhere.
+			 */}
 			<div className="border-b border-border bg-card px-6 py-3 shrink-0">
 				<div className="flex items-center gap-3">
-					<Button
-						variant="ghost"
-						size="icon"
-						onClick={navigateToHistory}
-						className="shrink-0"
-						aria-label="Back to history"
-					>
-						<ArrowLeft className="w-5 h-5" />
-					</Button>
 					<div className="flex-1 min-w-0 flex items-center gap-2">
 						<h1 className="text-sm font-semibold text-foreground shrink-0">
 							{isDesignRun ? "Design run" : "Load test"}
@@ -153,11 +146,7 @@ export default function HistoryDetail() {
 				{isDesignRun ? (
 					<DesignRunView run={run} />
 				) : (
-					<LoadTestDetail
-						report={report!}
-						onBack={navigateToHistory}
-						runId={selectedRunId}
-					/>
+					<LoadTestDetail report={report!} runId={selectedRunId} />
 				)}
 			</div>
 		</div>

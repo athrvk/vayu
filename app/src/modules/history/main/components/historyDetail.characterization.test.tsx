@@ -73,16 +73,10 @@ function report(mode: string, cfg: Record<string, unknown>): RunReport {
 	};
 }
 
-const noop = () => {};
-
 describe("LoadTestDetail (mode-adaptive)", () => {
 	it("constant_rps", () => {
 		const { container } = renderWithClient(
-			<LoadTestDetail
-				report={report("constant_rps", { targetRps: 200 })}
-				onBack={noop}
-				runId="r"
-			/>
+			<LoadTestDetail report={report("constant_rps", { targetRps: 200 })} runId="r" />
 		);
 		expect(container.innerHTML).toMatchSnapshot();
 	});
@@ -90,7 +84,6 @@ describe("LoadTestDetail (mode-adaptive)", () => {
 		const { container } = renderWithClient(
 			<LoadTestDetail
 				report={report("constant_concurrency", { concurrency: 50 })}
-				onBack={noop}
 				runId="r"
 			/>
 		);
@@ -98,11 +91,7 @@ describe("LoadTestDetail (mode-adaptive)", () => {
 	});
 	it("iterations", () => {
 		const { container } = renderWithClient(
-			<LoadTestDetail
-				report={report("iterations", { concurrency: 20 })}
-				onBack={noop}
-				runId="r"
-			/>
+			<LoadTestDetail report={report("iterations", { concurrency: 20 })} runId="r" />
 		);
 		expect(container.innerHTML).toMatchSnapshot();
 	});
@@ -114,7 +103,6 @@ describe("LoadTestDetail (mode-adaptive)", () => {
 					startConcurrency: 1,
 					rampUpDuration: "2s",
 				})}
-				onBack={noop}
 				runId="r"
 			/>
 		);

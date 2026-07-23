@@ -21,7 +21,8 @@ import MethodSelector from "./MethodSelector";
 import UrlInput from "./UrlInput";
 
 export default function UrlBar() {
-	const { request, isExecuting, executeRequest, startLoadTest } = useRequestBuilderContext();
+	const { request, isExecuting, executeRequest, startLoadTest, canStartLoadTest } =
+		useRequestBuilderContext();
 	const isLoadTestRunning = useDashboardStore((s) => s.isStreaming);
 	const openTab = useTabsStore((s) => s.openTab);
 
@@ -75,24 +76,28 @@ export default function UrlBar() {
 			    not be fixed without breaking dark (which was fine at 7.40). It now
 			    mirrors the idle variant's `text-primary border-primary bg-primary/10`
 			    shape with status tokens, and measures 4.98 light / 8.36 dark. */}
-			{isLoadTestRunning ? (
-				<button
-					onClick={viewRunningTest}
-					className="h-[34px] px-3.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-opacity shrink-0 font-[inherit] text-status-success-text border border-status-success/40 bg-status-success/10"
-				>
-					<Activity className="w-3.5 h-3.5" />
-					View running test
-				</button>
-			) : (
-				<button
-					onClick={startLoadTest}
-					disabled={!canExecute}
-					className="h-[34px] px-3.5 rounded-md text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-opacity shrink-0 font-[inherit] text-primary border border-primary bg-primary/10"
-				>
-					<Zap className="w-3.5 h-3.5" />
-					Load Test
-				</button>
-			)}
+			{/* Hidden entirely when the builder cannot load test - a detached copy
+			    of a past design run has no load-test handler, so showing the button
+			    (or a disabled one) would only mislead. */}
+			{canStartLoadTest &&
+				(isLoadTestRunning ? (
+					<button
+						onClick={viewRunningTest}
+						className="h-[34px] px-3.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-opacity shrink-0 font-[inherit] text-status-success-text border border-status-success/40 bg-status-success/10"
+					>
+						<Activity className="w-3.5 h-3.5" />
+						View running test
+					</button>
+				) : (
+					<button
+						onClick={startLoadTest}
+						disabled={!canExecute}
+						className="h-[34px] px-3.5 rounded-md text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-opacity shrink-0 font-[inherit] text-primary border border-primary bg-primary/10"
+					>
+						<Zap className="w-3.5 h-3.5" />
+						Load Test
+					</button>
+				))}
 		</div>
 	);
 }

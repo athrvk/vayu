@@ -24,7 +24,7 @@ import { useClientSettingsStore } from "@/stores";
 import { OverviewTab, PerformanceTab, SamplesTab } from "./components";
 import type { LoadTestDetailProps, TimeSeriesResponse } from "../types";
 
-export default function LoadTestDetail({ report, onBack: _onBack, runId }: LoadTestDetailProps) {
+export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const [activeTab, setActiveTab] = useState("overview");
 	const config = report.metadata?.configuration;
 

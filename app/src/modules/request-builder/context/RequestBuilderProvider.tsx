@@ -99,7 +99,9 @@ export default function RequestBuilderProvider({
 	// still belongs on screen. A ref, not the closure's `request`, because the
 	// running executeRequest closed over the request that was active at Send.
 	const currentRequestIdRef = useRef<string | null>(request.id ?? null);
-	currentRequestIdRef.current = request.id ?? null;
+	useEffect(() => {
+		currentRequestIdRef.current = request.id ?? null;
+	}, [request.id]);
 
 	// Response state - use store for persistence across view switches
 	const { getResponse, setResponse: storeSetResponse } = useResponseStore();
@@ -419,6 +421,7 @@ export default function RequestBuilderProvider({
 			executeRequest,
 			saveRequest,
 			startLoadTest,
+			canStartLoadTest: !!onStartLoadTest,
 		}),
 		[
 			request,
@@ -442,6 +445,7 @@ export default function RequestBuilderProvider({
 			executeRequest,
 			saveRequest,
 			startLoadTest,
+			onStartLoadTest,
 		]
 	);
 
