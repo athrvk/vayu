@@ -179,6 +179,24 @@ namespace vayu::db {
 inline auto make_storage (const std::string& path) {
     return sqlite_orm::make_storage (path,
 
+    // ─────────────── INDEXES ───────────────
+    // sqlite_orm requires indexes to precede the tables in the argument list.
+    // sync_schema() creates them on fresh and pre-existing databases alike, so
+    // this is additive and needs no migration.
+    //
+    // metrics/results are the unbounded-growth tables (a load run writes ~20
+    // metric rows/sec), so a run_id scan slows down with every run ever
+    // recorded, not just the current one. get_metrics_since is polled every
+    // 500ms by the legacy SSE loop.
+    make_index ("idx_metrics_run_id", &Metric::run_id),
+    make_index ("idx_results_run_id", &Result::run_id),
+    // Sidebar load (get_requests_in_collection) and cascade delete.
+    make_index ("idx_requests_collection_id", &Request::collection_id),
+    // The cascade-delete BFS in delete_collection walks one lookup per node.
+    make_index ("idx_collections_parent_id", &Collection::parent_id),
+    // get_all_runs sorts the whole table on every GET /runs.
+    make_index ("idx_runs_start_time", &Run::start_time),
+
     // ─────────────── PROJECT MANAGEMENT TABLES ───────────────
 
     // Collections: Folder hierarchy for organizing requests
