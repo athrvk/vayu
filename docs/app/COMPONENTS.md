@@ -195,7 +195,6 @@ The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run con
 | `RunMetadata.tsx` | Endpoint, config (mode/duration/RPS/concurrency), timing |
 | `MetricsView.tsx` | Orchestrator - composes the hero row, stat row, and charts per mode |
 | `RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests |
-| `MetricCard.tsx` | Single metric stat card |
 | `shared.tsx`, `tooltips.tsx` | Shared bits (Eyebrow/InfoChip) + centralized InfoChip wording |
 
 **`hero/` - mode-adaptive hero cards** (`HeroRow.tsx` selects per mode, all built on `HeroCardShell.tsx`): `RateFidelityCard`, `DroppedRequestsCard`, `AchievedThroughputCard`, `ThroughputCard`, `ThroughputTwinCard`, `CurrentConcurrencyCard`, `ConcurrencyUtilCard`, `SaturationCard`, `ProgressCard`, `ErrorRateCard`.
@@ -228,7 +227,7 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 | `PerformanceTab.tsx` | Latency/throughput detail |
 | `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs |
 | `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
-| `LatencyMetric.tsx`, `MetricCard.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts |
+| `LatencyMetric.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts |
 
 > History detail reuses the live dashboard's `hero/`, `charts/`, and `stats/` components by feeding them a `DashboardDerived` built from the stored report (`reportToDerived`), so live and historical views stay visually consistent.
 
