@@ -89,6 +89,35 @@ export default function ResponseViewer() {
 		);
 	}
 
+	// Which of the four conditional tabs are present on *this* response. The
+	// engine emits `timing`/`rawRequest` on every live execute but omits them
+	// from some restored traces, and `consoleLogs`/`testResults` only when a
+	// script produced them - so the tab set shrinks as you switch responses.
+	const hasTiming = !!response.timing;
+	const hasConsole = !!response.consoleLogs && response.consoleLogs.length > 0;
+	const hasTests = !!response.testResults && response.testResults.length > 0;
+	const hasRaw = !!response.rawRequest;
+
+	// The tabs actually rendered below, in trigger order. Both the triggers and
+	// their panels key off the same `has*` flags, so this list is exactly the
+	// set Radix has to select from.
+	const availableTabs: ResponseTab[] = [
+		"body",
+		"headers",
+		"cookies",
+		...(hasTiming ? (["timing"] as const) : []),
+		...(hasConsole ? (["console"] as const) : []),
+		...(hasTests ? (["tests"] as const) : []),
+		...(hasRaw ? (["raw-request"] as const) : []),
+	];
+
+	// Clamp the selection to a tab that still renders. `activeTab` is local state
+	// that survives a response change, so a tab clicked on one response can name
+	// a trigger the next response no longer draws - leaving the controlled Tabs
+	// root with nothing to select and a blank pane (issue #59). Falling back to
+	// `body`, which is always present, keeps a tab selected and the body shown.
+	const effectiveTab = availableTabs.includes(activeTab) ? activeTab : "body";
+
 	// Client-side error state (status === 0 means no server response)
 	const isClientError = response.status === 0;
 
@@ -122,7 +151,7 @@ export default function ResponseViewer() {
 
 			{/* Response Tabs */}
 			<Tabs
-				value={activeTab}
+				value={effectiveTab}
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
@@ -153,7 +182,7 @@ export default function ResponseViewer() {
 						>
 							Cookies
 						</TabsTrigger>
-						{response.timing && (
+						{hasTiming && (
 							<TabsTrigger
 								value="timing"
 								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
@@ -161,7 +190,7 @@ export default function ResponseViewer() {
 								Timing
 							</TabsTrigger>
 						)}
-						{response.consoleLogs && response.consoleLogs.length > 0 && (
+						{hasConsole && (
 							<TabsTrigger
 								value="console"
 								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
@@ -169,11 +198,11 @@ export default function ResponseViewer() {
 								<Terminal className="w-4 h-4 mr-1.5" />
 								Console
 								<Badge variant="secondary" className="ml-1.5 text-xs">
-									{response.consoleLogs.length}
+									{response.consoleLogs!.length}
 								</Badge>
 							</TabsTrigger>
 						)}
-						{response.testResults && response.testResults.length > 0 && (
+						{hasTests && (
 							<TabsTrigger
 								value="tests"
 								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
@@ -181,18 +210,18 @@ export default function ResponseViewer() {
 								Tests
 								<Badge
 									variant={
-										response.testResults.every((t) => t.passed)
+										response.testResults!.every((t) => t.passed)
 											? "default"
 											: "destructive"
 									}
 									className="ml-1.5 text-xs"
 								>
-									{response.testResults.filter((t) => t.passed).length}/
-									{response.testResults.length}
+									{response.testResults!.filter((t) => t.passed).length}/
+									{response.testResults!.length}
 								</Badge>
 							</TabsTrigger>
 						)}
-						{response.rawRequest && (
+						{hasRaw && (
 							<TabsTrigger
 								value="raw-request"
 								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
@@ -232,12 +261,12 @@ export default function ResponseViewer() {
 				<TabsContent value="cookies" className="mt-0 flex-1 overflow-hidden">
 					<ResponseCookies headers={response.headers} />
 				</TabsContent>
-				{response.timing && (
+				{hasTiming && (
 					<TabsContent value="timing" className="mt-0 flex-1 overflow-hidden">
-						<ResponseTimingTab timing={response.timing} />
+						<ResponseTimingTab timing={response.timing!} />
 					</TabsContent>
 				)}
-				{response.consoleLogs && response.consoleLogs.length > 0 && (
+				{hasConsole && (
 					<TabsContent value="console" className="mt-0 flex-1 overflow-hidden">
 						<ConsoleOutput
 							logs={response.consoleLogs || []}
@@ -248,12 +277,12 @@ export default function ResponseViewer() {
 						/>
 					</TabsContent>
 				)}
-				{response.testResults && response.testResults.length > 0 && (
+				{hasTests && (
 					<TabsContent value="tests" className="mt-0 flex-1 overflow-hidden">
 						<TestResults results={response.testResults || []} />
 					</TabsContent>
 				)}
-				{response.rawRequest && (
+				{hasRaw && (
 					<TabsContent value="raw-request" className="mt-0 flex-1 overflow-hidden">
 						<RawRequestResponse
 							rawRequest={response.rawRequest || ""}
