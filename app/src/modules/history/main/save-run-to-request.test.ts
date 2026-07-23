@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { diffRunAgainstRequest, applyRunToRequest, excludedFromSave } from "./save-run-to-request";
+import { buildChangeset, applyRunToRequest, diffSegments } from "./save-run-to-request";
 import { seedFromRun } from "./design-run-seed";
 import type { Run, Request } from "@/types";
 
@@ -142,79 +142,108 @@ describe("applyRunToRequest", () => {
 	});
 });
 
-describe("diffRunAgainstRequest", () => {
-	it("lists only the fields that actually changed", () => {
-		const live = liveRequest();
-		const fields = diffRunAgainstRequest(seedFromRun(run(), live), live).map((d) => d.field);
-
-		expect(fields).toContain("Method");
-		expect(fields).toContain("URL");
-		expect(fields).toContain("Headers");
-		expect(fields).toContain("Body");
-		expect(fields).toContain("Follow redirects");
-		expect(fields).toContain("Max redirects");
-	});
-
-	it("says nothing about a field the run and the request agree on", () => {
-		// Same everything: saving would be a no-op, and the dialog should say so
-		// rather than listing seven rows of identical values.
-		const live = liveRequest({
-			method: "POST",
-			url: "https://api.example.test/users?page=2",
-			params: [{ key: "page", value: "2", enabled: true }],
-			headers: [{ key: "X-Plain", value: "visible", enabled: true }],
-			body: { mode: "json", content: '{"a":1}' },
-			bodyType: "json",
-			preRequestScript: "console.log(t);",
-			postRequestScript: "pm.test('ok', () => {});",
-			followRedirects: false,
-			maxRedirects: 3,
-		});
-
-		expect(diffRunAgainstRequest(seedFromRun(run(), live), live)).toEqual([]);
-	});
-
-	it("reports the before and after of a scalar change", () => {
-		const live = liveRequest();
-		const method = diffRunAgainstRequest(seedFromRun(run(), live), live).find(
-			(d) => d.field === "Method"
-		);
-
-		expect(method).toBeDefined();
-		expect(method!.from).toBe("GET");
-		expect(method!.to).toBe("POST");
-	});
-
-	it("diffs headers per entry, not as one blob", () => {
-		// The bug this replaces truncated both sides of a joined string, so the
-		// user could not see which header changed. The diff is now per key.
-		const live = liveRequest(); // headers: [X-Old: stale]
-		const headers = diffRunAgainstRequest(seedFromRun(run(), live), live).find(
-			(d) => d.field === "Headers"
-		);
-
-		expect(headers).toBeDefined();
-		expect(headers!.entries).toEqual([
-			{ key: "X-Plain", kind: "added", to: "visible" },
-			{ key: "X-Old", kind: "removed", from: "stale" },
+describe("diffSegments", () => {
+	it("keeps the shared prefix and shows only the tail that changed", () => {
+		expect(
+			diffSegments(
+				"https://api.example.test/users/{{id}}",
+				"https://api.example.test/users/5"
+			)
+		).toEqual([
+			{ text: "https://api.example.test/users/", kind: "same" },
+			{ text: "{{id}}", kind: "del" },
+			{ text: "5", kind: "add" },
 		]);
 	});
 
-	it("marks a changed header value, keeping both sides", () => {
-		const live = liveRequest({ headers: [{ key: "X-Plain", value: "old", enabled: true }] });
-		const headers = diffRunAgainstRequest(seedFromRun(run(), live), live).find(
-			(d) => d.field === "Headers"
-		);
-
-		expect(headers!.entries).toEqual([
-			{ key: "X-Plain", kind: "changed", from: "old", to: "visible" },
+	it("keeps a shared prefix and suffix around a middle edit", () => {
+		expect(diffSegments('pm.set("t", Date.now())', 'pm.set("t", 1)')).toEqual([
+			{ text: 'pm.set("t", ', kind: "same" },
+			{ text: "Date.now()", kind: "del" },
+			{ text: "1", kind: "add" },
+			{ text: ")", kind: "same" },
 		]);
 	});
 
-	it("never diffs or writes the app's own system headers", () => {
-		// X-Vayu-Version and X-Request-ID are injected fresh on every send and
-		// re-added by the builder on load. A stored run carries whatever version
-		// it sent, and saving that back would pin an old version onto the request.
+	it("is a single same segment when nothing changed", () => {
+		expect(diffSegments("abc", "abc")).toEqual([{ text: "abc", kind: "same" }]);
+	});
+});
+
+describe("buildChangeset", () => {
+	const fields = (seed: ReturnType<typeof seedFromRun>, live: Request) =>
+		buildChangeset(seed, live).map((i) => i.field);
+
+	it("lists every field the save touches, as one uniform list", () => {
+		const live = liveRequest();
+		const f = fields(seedFromRun(run(), live), live);
+
+		expect(f).toContain("Method");
+		expect(f).toContain("URL");
+		expect(f).toContain("Headers");
+		expect(f).toContain("Body");
+		expect(f).toContain("Follow redirects");
+		expect(f).toContain("Max redirects");
+	});
+
+	it("always includes Auth as a kept row - no separate unchanged section", () => {
+		const live = liveRequest();
+		const auth = buildChangeset(seedFromRun(run(), live), live).find((i) => i.field === "Auth");
+
+		expect(auth).toBeDefined();
+		expect(auth!.state).toBe("kept");
+		// The reason travels with the row, not a demoted list.
+		expect(auth!.note).toMatch(/credential|mode/i);
+	});
+
+	it("shows auth mode drift when the request's mode differs from the run's", () => {
+		// run recorded bearer (fixture), request now uses none.
+		const live = liveRequest({ auth: { mode: "none" } } as Partial<Request>);
+		const auth = buildChangeset(seedFromRun(run(), live), live).find((i) => i.field === "Auth");
+
+		expect(auth!.detail).toMatch(/differs/);
+		expect(auth!.driftFrom).toBe("none");
+		expect(auth!.driftTo).toBe("bearer");
+	});
+
+	it("collapses auth to the plain mode when it matches", () => {
+		const live = liveRequest({ auth: { mode: "bearer", token: "x" } } as Partial<Request>);
+		const auth = buildChangeset(seedFromRun(run(), live), live).find((i) => i.field === "Auth");
+
+		expect(auth!.detail).toBe("kept");
+		expect(auth!.value).toBe("bearer");
+		expect(auth!.driftFrom).toBeUndefined();
+	});
+
+	it("makes scripts a changed row with a diff, for a modern run", () => {
+		const live = liveRequest();
+		const pre = buildChangeset(seedFromRun(run(), live), live).find(
+			(i) => i.field === "Pre-request script"
+		);
+
+		expect(pre!.state).toBe("changed");
+		expect(pre!.collapsible).toBe(true);
+		expect(pre!.segments).toBeDefined();
+	});
+
+	it("makes scripts a single kept row for a legacy run", () => {
+		const legacy = run({
+			configSnapshot: {
+				method: "POST",
+				url: "https://api.example.test/users?page=2",
+				preRequestScript: "collectionPart\n\nrequestPart",
+			},
+		} as Partial<Run>);
+		const live = liveRequest();
+		const set = buildChangeset(seedFromRun(legacy, live), live);
+
+		const scripts = set.find((i) => i.field === "Scripts");
+		expect(scripts?.state).toBe("kept");
+		// The per-field script rows do not appear for a legacy run.
+		expect(set.map((i) => i.field)).not.toContain("Pre-request script");
+	});
+
+	it("diffs headers per entry, and never the app's own system headers", () => {
 		const stale = run({
 			configSnapshot: {
 				method: "POST",
@@ -226,50 +255,41 @@ describe("diffRunAgainstRequest", () => {
 				},
 			},
 		} as Partial<Run>);
-		const live = liveRequest();
+		const live = liveRequest(); // headers: [X-Old: stale]
 
 		const seed = seedFromRun(stale, live);
-		const headers = diffRunAgainstRequest(seed, live).find((d) => d.field === "Headers");
+		const headers = buildChangeset(seed, live).find((i) => i.field === "Headers");
 
-		// The version/request-id churn does not appear in the diff...
 		const keys = (headers?.entries ?? []).map((e) => e.key);
+		expect(keys).toContain("X-Plain");
+		expect(keys).toContain("X-Old");
 		expect(keys).not.toContain("X-Vayu-Version");
 		expect(keys).not.toContain("X-Request-ID");
 
-		// ...and is not written back onto the request.
 		const patch = applyRunToRequest(seed, live);
 		const written = (patch.headers ?? []).map((h) => h.key.toLowerCase());
 		expect(written).not.toContain("x-vayu-version");
 		expect(written).not.toContain("x-request-id");
 	});
-});
 
-describe("excludedFromSave", () => {
-	it("names auth as unchanged, so the exclusion is visible rather than silent", () => {
-		const live = liveRequest();
-		const excluded = excludedFromSave(seedFromRun(run(), live));
+	it("shows only the kept rows when the request already matches the run", () => {
+		// Everything equal, so nothing is writable; Auth (kept) is still shown.
+		const live = liveRequest({
+			method: "POST",
+			url: "https://api.example.test/users?page=2",
+			params: [{ key: "page", value: "2", enabled: true }],
+			headers: [{ key: "X-Plain", value: "visible", enabled: true }],
+			body: { mode: "json", content: '{"a":1}' },
+			bodyType: "json",
+			preRequestScript: "console.log(t);",
+			postRequestScript: "pm.test('ok', () => {});",
+			followRedirects: false,
+			maxRedirects: 3,
+			auth: { mode: "bearer", token: "x" },
+		} as Partial<Request>);
 
-		expect(excluded.map((e) => e.field)).toContain("Auth");
-		// A reason, not just a label - the user should know why.
-		expect(excluded.find((e) => e.field === "Auth")!.reason).toMatch(/credential/i);
-	});
-
-	it("also names scripts for a legacy run, so it writes visibly fewer fields", () => {
-		const legacy = run({
-			configSnapshot: {
-				method: "POST",
-				url: "https://api.example.test/users?page=2",
-				preRequestScript: "collectionPart\n\nrequestPart",
-			},
-		} as Partial<Run>);
-		const live = liveRequest();
-
-		const modern = excludedFromSave(seedFromRun(run(), live)).map((e) => e.field);
-		const old = excludedFromSave(seedFromRun(legacy, live)).map((e) => e.field);
-
-		expect(modern).not.toContain("Scripts");
-		expect(old).toContain("Scripts");
-		// The visible difference between an old run and a new one.
-		expect(old.length).toBeGreaterThan(modern.length);
+		const set = buildChangeset(seedFromRun(run(), live), live);
+		expect(set.every((i) => i.state === "kept")).toBe(true);
+		expect(set.map((i) => i.field)).toEqual(["Auth"]);
 	});
 });

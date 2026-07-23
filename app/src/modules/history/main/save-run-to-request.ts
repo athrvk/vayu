@@ -9,9 +9,9 @@
  * Copy a stored run's values back onto the request it came from.
  *
  * Pure on purpose - no hooks, no queries. The dialog shows what
- * {@link diffRunAgainstRequest} returns and sends what
- * {@link applyRunToRequest} builds, so the rule about what may be written is
- * testable without rendering anything.
+ * {@link buildChangeset} returns and sends what {@link applyRunToRequest}
+ * builds, so the rule about what may be written is testable without rendering
+ * anything.
  *
  * ## What is deliberately not written
  *
@@ -28,9 +28,9 @@
  * script inside the request permanently - the next send would glue it on again
  * and run it twice.
  *
- * Neither exclusion is silent: {@link excludedFromSave} names both, and the
- * dialog lists them as unchanged. That is what makes "an older run saves fewer
- * fields" visible rather than surprising.
+ * Neither is silent: {@link buildChangeset} emits both as `kept` rows, in the
+ * same list as every change, with the reason inline. That is what makes "an
+ * older run saves fewer fields" visible rather than surprising.
  */
 
 import type { KeyValueEntry, Request, RequestBody, UpdateRequestRequest } from "@/types";
@@ -52,18 +52,77 @@ export interface EntryChange {
 	to?: string;
 }
 
+/** What happens to a field when the run is saved. */
+export type ChangeState = "changed" | "removed" | "added" | "kept";
+
+/** One run of characters in a value diff: shared, removed, or added. */
+export interface DiffSeg {
+	text: string;
+	kind: "same" | "del" | "add";
+}
+
+/** A per-key change within a key/value field, ready to render. */
+export interface ChangesetEntry {
+	key: string;
+	kind: EntryChangeKind;
+	/** Present for `changed` - the value diffed segment by segment. */
+	segments?: DiffSeg[];
+	/** Present for `added` / `removed` - the whole value. */
+	value?: string;
+}
+
 /**
- * One row of the confirmation's "what will change" list.
- *
- * A scalar field (Method, URL, redirects, a script) carries `from`/`to`. A
- * key/value field (Headers, Params) carries `entries` instead - a per-key diff,
- * because a joined before/after string is not a diff the user can read.
+ * One row of the confirmation, whatever its field. The dialog shows every field
+ * the same way - there is no separate "unchanged" section - so a scalar change,
+ * a key/value change, and a kept field are all `ChangesetItem`s, told apart by
+ * `state` and by which of the optional carriers is set.
  */
-export interface RunSaveChange {
+export interface ChangesetItem {
 	field: string;
-	from?: string;
-	to?: string;
-	entries?: EntryChange[];
+	state: ChangeState;
+	/** Right-aligned label: "changed", "2 removed", "kept", "kept · differs". */
+	detail: string;
+	/** A scalar changed value (URL, body, a script), diffed. */
+	segments?: DiffSeg[];
+	/** A key/value field (Headers, Params). */
+	entries?: ChangesetEntry[];
+	/** A kept field's plain value (auth mode when it matches). */
+	value?: string;
+	/** A kept field whose value drifted (auth mode differs), shown neutral. */
+	driftFrom?: string;
+	driftTo?: string;
+	/** Why a kept field is not written. */
+	note?: string;
+	/** A long value (a script) that opens on demand rather than always. */
+	collapsible?: boolean;
+}
+
+/**
+ * A minimal value diff: the shared prefix and suffix stay, and the middle that
+ * differs becomes one removed run and one added run. It covers the common
+ * single-edit case - a changed URL tail, a header value, a one-spot script edit -
+ * with no dependency. A multi-part edit collapses to a single del+add span,
+ * which still reads as "this middle changed"; swap in a real word-differ (jsdiff)
+ * if finer hunks are ever wanted.
+ */
+export function diffSegments(from: string, to: string): DiffSeg[] {
+	if (from === to) return [{ text: from, kind: "same" }];
+	const max = Math.min(from.length, to.length);
+	let start = 0;
+	while (start < max && from[start] === to[start]) start++;
+	let endF = from.length;
+	let endT = to.length;
+	while (endF > start && endT > start && from[endF - 1] === to[endT - 1]) {
+		endF--;
+		endT--;
+	}
+	const segs: DiffSeg[] = [];
+	if (start > 0) segs.push({ text: from.slice(0, start), kind: "same" });
+	if (endF > start) segs.push({ text: from.slice(start, endF), kind: "del" });
+	if (endT > start) segs.push({ text: to.slice(start, endT), kind: "add" });
+	const suffix = from.slice(endF);
+	if (suffix) segs.push({ text: suffix, kind: "same" });
+	return segs;
 }
 
 /**
@@ -110,12 +169,6 @@ function diffEntries(from: KeyValueEntry[], to: KeyValueEntry[]): EntryChange[] 
 	return changes;
 }
 
-/** One row of the confirmation's "left alone" list. */
-export interface RunSaveExclusion {
-	field: string;
-	reason: string;
-}
-
 /**
  * A run stored before the engine took over joining scripts. Its parts cannot be
  * separated, so Save leaves scripts alone.
@@ -158,82 +211,128 @@ function describeBody(body: RequestBody | undefined): string {
 	return `${body.mode} (${body.content || ""})`;
 }
 
+/** Right-aligned label for a key/value field: "2 removed", "1 changed", "3 changes". */
+function entriesLabel(entries: EntryChange[]): string {
+	const kinds = new Set(entries.map((e) => e.kind));
+	const n = entries.length;
+	if (kinds.size === 1) {
+		const word = [...kinds][0]; // added | removed | changed
+		return `${n} ${word}`;
+	}
+	return `${n} ${n === 1 ? "change" : "changes"}`;
+}
+
+/** Field-level state for a key/value field: the single kind, or "changed" if mixed. */
+function entriesState(entries: EntryChange[]): ChangeState {
+	const kinds = new Set(entries.map((e) => e.kind));
+	return kinds.size === 1 ? ([...kinds][0] as ChangeState) : "changed";
+}
+
+/** Number of lines that differ, for a collapsed script row's summary. */
+function changedLineLabel(from: string, to: string): string {
+	const a = from.split("\n");
+	const b = to.split("\n");
+	const n = Math.max(a.length, b.length);
+	let changed = 0;
+	for (let i = 0; i < n; i++) if ((a[i] ?? "") !== (b[i] ?? "")) changed++;
+	return `${changed} ${changed === 1 ? "line" : "lines"}`;
+}
+
+/** The Auth row - always kept, since a run stores the mode only. */
+function authItem(seed: DesignRunSeed, live: Request): ChangesetItem {
+	const liveMode = live.auth?.mode || "none";
+	const runMode = seed.recordedAuthMode || "none";
+	if (liveMode === runMode) {
+		return {
+			field: "Auth",
+			state: "kept",
+			detail: "kept",
+			value: runMode,
+			note: "A stored run keeps only the mode, never the credential, so yours is left alone.",
+		};
+	}
+	return {
+		field: "Auth",
+		state: "kept",
+		detail: "kept · differs",
+		driftFrom: liveMode,
+		driftTo: runMode,
+		note: `This run used ${runMode}; it is not written, because a stored run keeps only the mode.`,
+	};
+}
+
 /**
- * Everything Save would write, as `field -> {from, to}` pairs, **excluding
- * fields whose value already matches**. A run opened and saved unchanged
- * produces an empty list, which is what lets the dialog say so instead of
- * listing seven identical rows.
+ * The whole confirmation as one list. Every field a Save touches is a row, in
+ * the order the request stores them, plus Auth (always kept) and - for a run
+ * stored before per-part scripts - Scripts (kept). Fields that already match the
+ * run are left out, so an unchanged save shows only the two kept rows.
+ *
+ * System headers are stripped from the patch and from the comparison, so the
+ * app's own `X-Vayu-Version` / `X-Request-ID` never appear as changes.
  */
-export function diffRunAgainstRequest(seed: DesignRunSeed, live: Request): RunSaveChange[] {
+export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetItem[] {
 	const patch = applyRunToRequest(seed, live);
-	const changes: RunSaveChange[] = [];
+	const items: ChangesetItem[] = [];
 
-	const add = (field: string, from: string, to: string) => {
-		if (from !== to) changes.push({ field, from, to });
+	const scalar = (field: string, from: string, to: string, collapsible = false) => {
+		if (from === to) return;
+		items.push({
+			field,
+			state: "changed",
+			detail: collapsible ? changedLineLabel(from, to) : "changed",
+			segments: diffSegments(from, to),
+			collapsible,
+		});
 	};
 
-	// A key/value field diffs per key, so the user sees which header changed
-	// rather than two joined strings. System headers are already stripped from
-	// the patch, so comparing against the live request's user headers keeps them
-	// out of the diff too.
-	const addEntries = (field: string, from: KeyValueEntry[], to: KeyValueEntry[]) => {
-		const entries = diffEntries(userEntries(from), userEntries(to));
-		if (entries.length > 0) changes.push({ field, entries });
-	};
-
-	add("Method", live.method, patch.method ?? live.method);
-	add("URL", live.url, patch.url ?? live.url);
-	addEntries("Params", live.params ?? [], patch.params ?? []);
-	addEntries("Headers", live.headers ?? [], patch.headers ?? []);
-	add("Body", describeBody(live.body), describeBody(patch.body ?? live.body));
-
-	// Absent for a legacy run, and absent means "not written" - so it must not
-	// be reported as a change to "".
-	if (patch.preRequestScript !== undefined) {
-		add(
-			"Pre-request script",
-			live.preRequestScript || "none",
-			patch.preRequestScript || "none"
+	const keyValues = (field: string, from: KeyValueEntry[], to: KeyValueEntry[]) => {
+		const raw = diffEntries(userEntries(from), userEntries(to));
+		if (raw.length === 0) return;
+		const entries: ChangesetEntry[] = raw.map((e) =>
+			e.kind === "changed"
+				? { key: e.key, kind: e.kind, segments: diffSegments(e.from ?? "", e.to ?? "") }
+				: { key: e.key, kind: e.kind, value: e.kind === "added" ? e.to : e.from }
 		);
-	}
-	if (patch.postRequestScript !== undefined) {
-		add("Test script", live.postRequestScript || "none", patch.postRequestScript || "none");
+		items.push({ field, state: entriesState(raw), detail: entriesLabel(raw), entries });
+	};
+
+	scalar("Method", live.method, patch.method ?? live.method);
+	scalar("URL", live.url, patch.url ?? live.url);
+	keyValues("Params", live.params ?? [], patch.params ?? []);
+	keyValues("Headers", live.headers ?? [], patch.headers ?? []);
+	scalar("Body", describeBody(live.body), describeBody(patch.body ?? live.body));
+
+	if (isLegacyRun(seed)) {
+		items.push({
+			field: "Scripts",
+			state: "kept",
+			detail: "kept",
+			note: "This run predates per-part scripts, so its collection and request scripts are one string that cannot be split apart.",
+		});
+	} else {
+		// `undefined` means the patch does not write the field, so it is not a change.
+		if (patch.preRequestScript !== undefined) {
+			scalar("Pre-request script", live.preRequestScript || "", patch.preRequestScript, true);
+		}
+		if (patch.postRequestScript !== undefined) {
+			scalar("Test script", live.postRequestScript || "", patch.postRequestScript, true);
+		}
 	}
 
-	add(
+	scalar(
 		"Follow redirects",
 		String(live.followRedirects),
 		String(patch.followRedirects ?? live.followRedirects)
 	);
-	add(
+	scalar(
 		"Max redirects",
 		String(live.maxRedirects),
 		String(patch.maxRedirects ?? live.maxRedirects)
 	);
 
-	return changes;
-}
+	items.push(authItem(seed, live));
 
-/**
- * The fields Save will *not* touch, with the reason. Shown alongside the diff
- * so the exclusions read as a decision rather than an omission.
- */
-export function excludedFromSave(seed: DesignRunSeed): RunSaveExclusion[] {
-	const excluded: RunSaveExclusion[] = [
-		{
-			field: "Auth",
-			reason: "A stored run keeps only the auth mode - never the credential. Writing it back would discard the request's own.",
-		},
-	];
-
-	if (isLegacyRun(seed)) {
-		excluded.push({
-			field: "Scripts",
-			reason: "This run predates per-part scripts, so its collection and request scripts are one string that cannot be split apart again.",
-		});
-	}
-
-	return excluded;
+	return items;
 }
 
 /**
