@@ -238,16 +238,27 @@ function changedLineLabel(from: string, to: string): string {
 	return `${changed} ${changed === 1 ? "line" : "lines"}`;
 }
 
-/** The Auth row - always kept, since a run stores the mode only. */
+/**
+ * The Auth row - always kept, since a run stores the mode only.
+ *
+ * Drift is shown only when it is a real comparison. A request set to `inherit`
+ * is resolved to a concrete mode at send time, so the run records that resolved
+ * result, not `inherit` - comparing the two (`inherit -> none`) is apples to
+ * oranges and reads as a change that is not one. So an `inherit` request just
+ * shows its mode, kept. Two concrete modes that differ (request `bearer`, run
+ * `basic`) are genuine drift and worth surfacing.
+ */
 function authItem(seed: DesignRunSeed, live: Request): ChangesetItem {
 	const liveMode = live.auth?.mode || "none";
 	const runMode = seed.recordedAuthMode || "none";
-	if (liveMode === runMode) {
+	const comparable = liveMode !== "inherit";
+
+	if (!comparable || liveMode === runMode) {
 		return {
 			field: "Auth",
 			state: "kept",
 			detail: "kept",
-			value: runMode,
+			value: liveMode,
 			note: "A stored run keeps only the mode, never the credential, so yours is left alone.",
 		};
 	}

@@ -215,6 +215,19 @@ describe("buildChangeset", () => {
 		expect(auth!.driftFrom).toBeUndefined();
 	});
 
+	it("does not treat an inherit request as auth drift", () => {
+		// A request set to `inherit` is resolved to a concrete mode at send time,
+		// so the run records that resolved result, never `inherit`. Comparing the
+		// two is apples to oranges, so show `inherit` kept, with no drift - even
+		// though the fixture run recorded `bearer`.
+		const live = liveRequest({ auth: { mode: "inherit" } } as Partial<Request>);
+		const auth = buildChangeset(seedFromRun(run(), live), live).find((i) => i.field === "Auth");
+
+		expect(auth!.detail).toBe("kept");
+		expect(auth!.value).toBe("inherit");
+		expect(auth!.driftFrom).toBeUndefined();
+	});
+
 	it("makes scripts a changed row with a diff, for a modern run", () => {
 		const live = liveRequest();
 		const pre = buildChangeset(seedFromRun(run(), live), live).find(
