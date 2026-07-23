@@ -110,7 +110,7 @@ export interface ScriptPart {
 	script: string;
 }
 
-/** The body the engine's `POST /request` accepts. `POST /run` takes its own shape. */
+/** The body the engine's `POST /execute` accepts. `POST /runs` takes its own shape. */
 export interface OutgoingRequest {
 	method: string;
 	url: string;
@@ -309,7 +309,7 @@ export function composeScripts(
 // --- Headers & body ----------------------------------------------------------
 
 /**
- * Flatten a `KeyValueEntry[]` into the object map the engine's `POST /request`
+ * Flatten a `KeyValueEntry[]` into the object map the engine's `POST /execute`
  * expects, keeping only enabled rows and resolving variables in keys and
  * values. Later duplicates win, matching header-map semantics.
  */

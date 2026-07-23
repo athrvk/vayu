@@ -126,7 +126,7 @@ applied to the outgoing request rather than being left to the UI. This lives in
 
 - **`request_builder`** (`build_request`) - the single request-construction
   pipeline: deserialize the payload, apply the resolved timeout, then resolve
-  auth. Both `POST /request` and `POST /run` go through it.
+  auth. Both `POST /execute` and `POST /runs` go through it.
 - **`auth_resolver`** (`apply_auth` / `preflight_auth`) - a typed `Auth` variant
   with an exhaustive per-mode handler: bearer/basic/api-key are injected inline;
   `oauth2` delegates to the token client. A user-supplied `Authorization` header
@@ -145,7 +145,7 @@ the [API reference](api-reference.md#authentication) for the `/oauth2/*` routes.
 
 ### Request composition boundary (client-side today)
 
-The engine composes a request only **partway**. On `POST /request` it loads the
+The engine composes a request only **partway**. On `POST /execute` it loads the
 environment, globals, and the request's collection variables (into the QuickJS
 script context), resolves/applies concrete auth, and now also **joins and runs
 the pre/post script parts** - but it does **not**:
@@ -163,8 +163,8 @@ composes - is a deferred maintainability item: see
 
 Script composition moved partly server-side already: clients send an ordered
 list of parts (`{ origin: "collection" | "request", id?, name?, script }` -
-`preRequestScripts` / `postRequestScripts` on `POST /request`, `tests` on
-`POST /run`; the legacy single-string field still works) built by walking the
+`preRequestScripts` / `postRequestScripts` on `POST /execute`, `tests` on
+`POST /runs`; the legacy single-string field still works) built by walking the
 collection chain root-to-leaf then appending the request's own (`scriptParts`
 in `app/src/modules/request-builder/utils/script-parts.ts` and in
 `app/electron/mcp/resolve.ts`). The engine joins the parts with `"\n\n"`,
@@ -194,7 +194,7 @@ See [Database Schema](db-schema.md) for the full column list.
 ### Design Mode (Single Request)
 
 ```
-1. POST /request
+1. POST /execute
    ↓
 2. Build request: parse JSON + apply timeout + resolve auth (bearer/basic/
    apikey/oauth2). Auth is resolved BEFORE the script so pm.request is accurate
@@ -215,7 +215,7 @@ See [Database Schema](db-schema.md) for the full column list.
 ### Load Test Mode
 
 ```
-1. POST /run
+1. POST /runs
    ↓
 2. Parse config + pre-flight auth (oauth2 tokens acquired & cache warmed;
    409 up front if interactive sign-in is required)
@@ -233,7 +233,7 @@ See [Database Schema](db-schema.md) for the full column list.
 8. Metrics collector aggregates results in-memory; metrics thread
    writes per-tick snapshots into the retained tick topic + DB
    ↓
-9. Client streams ticks via SSE (/metrics/live/:runId), replayed
+9. Client streams ticks via SSE (/runs/:runId/live), replayed
    from offset 0 then tailed to the `complete` event
    ↓
 10. On completion: batch-write results to DB; run retained (TTL) so

@@ -12,10 +12,10 @@
  * was sent) or `LoadTestDetail` (the load-test report) by run type.
  *
  * It fetches the **run**, not only the report, because the two endpoints answer
- * different questions. `GET /run/:id/report` is a load-test aggregate: run it
+ * different questions. `GET /runs/:id/report` is a load-test aggregate: run it
  * against a design run and the percentiles all come from one sample, and
  * `metadata.configuration` is missing entirely - so it cannot say what a design
- * run's auth, scripts or redirect settings were. `GET /run/:id` can, and for a
+ * run's auth, scripts or redirect settings were. `GET /runs/:id` can, and for a
  * design run it also carries the stored exchange. The report is therefore
  * fetched only for a load run.
  *

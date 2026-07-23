@@ -284,7 +284,7 @@ export interface RunResultTrace {
 }
 
 /**
- * The single exchange for a design run, attached by `GET /run/:id` -
+ * The single exchange for a design run, attached by `GET /runs/:id` -
  * `attach_design_result` in engine/src/utils/json.cpp. Design runs only: a
  * design run has exactly one result, so the engine embeds it on the run
  * itself instead of requiring a second `/results` fetch.
