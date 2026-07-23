@@ -172,14 +172,6 @@ constexpr int SPIN_COUNT = 2000;
 } // namespace queue
 
 /**
- * @brief Database streaming configuration
- */
-namespace db_streaming {
-/// Batch size for streaming requests to prevent OOM
-constexpr size_t REQUEST_BATCH_SIZE = 5;
-} // namespace db_streaming
-
-/**
  * @brief Database optimization configuration
  */
 namespace database {

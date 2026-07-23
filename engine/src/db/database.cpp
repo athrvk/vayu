@@ -620,15 +620,7 @@ std::optional<Request> Database::get_request (const std::string& id) {
 std::vector<Request> Database::get_requests_in_collection (const std::string& collection_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<Request> (
-    where (c (&Request::collection_id) == collection_id));
-}
-
-// Helper function to get all requests for iteration (needed because template can't access impl_)
-std::vector<Request> Database::_get_all_requests_for_collection (
-const std::string& collection_id) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.get_all<Request> (
-    where (c (&Request::collection_id) == collection_id));
+    where (c (&Request::collection_id) == collection_id), order_by (&Request::order));
 }
 
 void Database::delete_request (const std::string& id) {
@@ -1067,6 +1059,14 @@ double Database::get_config_double (const std::string& key, double default_value
 
 void Database::seed_default_config () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+
+    // Retired settings: "requestBatchSize" drove the removed batched request
+    // iteration and is no longer read anywhere. Delete any row left behind by
+    // an older version so the Settings UI (which renders engine entries
+    // dynamically from GET /config) stops offering a dead knob.
+    impl_->storage.remove_all<ConfigEntry> (
+    where (c (&ConfigEntry::key) == "requestBatchSize"));
+
     // Get existing config entries (if any) to preserve user-modified values
     auto existing = impl_->storage.get_all<ConfigEntry> ();
     std::unordered_map<std::string, ConfigEntry> existing_map;
@@ -1127,16 +1127,6 @@ void Database::seed_default_config () {
     "1000",   // min: 1 second
     "300000", // max: 5 minutes
     now });
-
-    upsert_config (ConfigEntry{ "requestBatchSize",
-    std::to_string (vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE),
-    "integer", "Request Batch Size",
-    "Batch size when fetching large collections from DB. Smaller batches save "
-    "RAM; "
-    "larger batches load faster. "
-    "Default is optimized for most cases.",
-    "general_engine", std::to_string (vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE),
-    "1", "1000", now });
 
     // =========================================================================
     // DATABASE PERFORMANCE CONFIGURATION
