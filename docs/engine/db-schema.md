@@ -36,7 +36,16 @@ Stores folder/group hierarchy for requests.
 Collections are always auth sources - they never store `{"mode":"inherit"}`.
 
 **Cascade delete**: deleting a collection performs BFS to collect all descendant IDs, then
-deletes all their requests before deleting the collections deepest-first. See `Database::delete_collection()`.
+deletes all their requests before deleting the collections deepest-first, wrapped in a single
+transaction so a crash mid-cascade cannot leave a half-deleted subtree. See
+`Database::delete_collection()`.
+
+`parent_id` forms a tree, but SQLite enforces no such constraint, so the BFS carries a visited
+set and is **cycle-safe**: a self-parent (`parent_id == id`) or an `A -> B -> A` loop terminates
+instead of growing the work list forever under the global DB mutex (which would hang every
+endpoint, including `/health`). `POST /collections` rejects the writes that would create such a
+cycle (see [api-reference.md](api-reference.md) - POST /collections), so cycles only arise from
+data written before that validation existed; the visited set is what lets deletion recover from it.
 
 ---
 

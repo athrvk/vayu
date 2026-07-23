@@ -39,6 +39,7 @@
 #include <sstream>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/utils/logger.hpp"
@@ -556,28 +557,46 @@ std::optional<Collection> Database::get_collection (const std::string& id) {
 }
 
 // Cascade delete: recursively removes all descendant collections and their requests.
-// BFS discovers all descendant IDs, then deletes deepest-first.
+// BFS discovers all descendant IDs, then deletes deepest-first inside a single
+// transaction.
 void Database::delete_collection (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("Deleting collection (cascade): id=" + id);
 
-    // 1. Collect all descendant IDs via BFS (root first)
-    std::vector<std::string> to_delete = { id };
-    size_t idx                         = 0;
+    // 1. Collect all descendant IDs via BFS (root first). The visited set makes
+    //    the walk terminate even on cyclic parent_id data - a self-parent or an
+    //    A -> B -> A loop that may have been written before write-time
+    //    validation existed. Without it, `to_delete` grows forever while this
+    //    method holds the global DB mutex, hanging every endpoint including
+    //    /health until the daemon is restarted (issue #79).
+    std::vector<std::string> to_delete;
+    std::unordered_set<std::string> visited;
+    to_delete.push_back (id);
+    visited.insert (id);
+    size_t idx = 0;
     while (idx < to_delete.size ()) {
         auto children = impl_->storage.get_all<Collection> (
         where (c (&Collection::parent_id) == to_delete[idx]));
         for (const auto& child : children) {
-            to_delete.push_back (child.id);
+            if (visited.insert (child.id).second) {
+                to_delete.push_back (child.id);
+            }
         }
         ++idx;
     }
 
-    // 2. Delete deepest-first so foreign-key integrity holds at each step
-    for (auto it = to_delete.rbegin (); it != to_delete.rend (); ++it) {
-        impl_->storage.remove_all<Request> (where (c (&Request::collection_id) == *it));
-        impl_->storage.remove_all<Collection> (where (c (&Collection::id) == *it));
-    }
+    // 2. Delete deepest-first so foreign-key integrity holds at each step,
+    //    wrapped in a single transaction so a crash mid-cascade cannot leave a
+    //    half-deleted subtree. Safe under the recursive mutex already held -
+    //    the lambda only calls sqlite_orm on the same storage handle (same
+    //    pattern as add_metrics_batch).
+    impl_->storage.transaction ([&] {
+        for (auto it = to_delete.rbegin (); it != to_delete.rend (); ++it) {
+            impl_->storage.remove_all<Request> (where (c (&Request::collection_id) == *it));
+            impl_->storage.remove_all<Collection> (where (c (&Collection::id) == *it));
+        }
+        return true; // Commit
+    });
 }
 
 // ============================================================================
