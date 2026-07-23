@@ -210,9 +210,10 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
             std::string run_id = response_json["runId"];
             vayu::utils::log_info ("Load test started successfully.");
             std::cout << "Run ID: " << run_id << "\n";
-            // The live SSE stream, not the legacy /stats/:id poller. It serves
-            // from the in-memory collector while the run is active; once the
-            // run ends it 404s with a hint pointing at /runs/:id/report.
+            // The live SSE stream, not the legacy /stats/:id poller. Served
+            // from the in-memory collector; a finished run stays readable for
+            // liveRetentionMs (default 60s), then 404s with a hint pointing
+            // at /runs/:id/report.
             vayu::utils::log_info (
             "Monitor status at: " + daemon_url + "/runs/" + run_id + "/live");
             return 0;

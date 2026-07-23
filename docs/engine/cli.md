@@ -136,9 +136,11 @@ Monitor status at: http://127.0.0.1:9876/runs/run_1234567890/live
 ```
 
 Use that URL to stream real-time metrics via Server-Sent Events (SSE). It serves
-from the engine's in-memory collector while the run is active; once the run
-finishes it returns `404` with a hint pointing at `GET /runs/:runId/report` for
-the stored report.
+from the engine's in-memory collector, and a **finished** run stays readable for
+the `liveRetentionMs` window (default 60s, `GET /config`) - a reader attaching
+late still gets the run's ticks replayed from the start. Once that window
+expires, or for a run id the engine has never seen, it returns `404` with a hint
+pointing at `GET /runs/:runId/report` for the stored report.
 
 ## Prerequisites
 
