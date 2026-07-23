@@ -11,6 +11,7 @@ import requestItemSrc from "@/modules/collections/RequestItem.tsx?raw";
 
 vi.mock("@/queries", () => ({
 	useRequestQuery: () => ({ data: undefined }),
+	useRunQuery: () => ({ data: undefined }),
 	useCollectionsQuery: () => ({ data: [] }),
 }));
 

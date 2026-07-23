@@ -19,7 +19,7 @@ import { useRef } from "react";
 import { X, Plus, Folder, Zap, Braces, Clock, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTabsStore, type Tab } from "@/stores";
-import { useRequestQuery, useCollectionsQuery } from "@/queries";
+import { useRequestQuery, useRunQuery, useCollectionsQuery } from "@/queries";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { MethodBadge, ScrollOnOverflow } from "@/components/shared";
@@ -79,6 +79,9 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 
 	// Hooks run unconditionally (React rules); they no-op for non-matching types.
 	const { data: request } = useRequestQuery(tab.type === "request" ? tab.entityId : null);
+	// A run tab's label needs the run behind it. The same query keys HistoryDetail
+	// uses, so an open run's detail is shared rather than refetched.
+	const { data: run } = useRunQuery(tab.type === "run" ? tab.entityId : null);
 	const { data: collections = [] } = useCollectionsQuery();
 	// Resolve {{variables}} in the URL so the tab shows the concrete path
 	const { resolveString } = useVariableResolver({
@@ -133,10 +136,38 @@ function TabItem({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 			label = "Load Test";
 			title = "Load Test";
 			break;
-		case "run":
-			label = "Run";
-			title = "Run";
+		case "run": {
+			// A run tab is a past design run or load test. "Run" told none of them
+			// apart - a row of identical tabs. Show what actually ran: the
+			// snapshot's method and path, the same shape a request tab uses, so the
+			// tab names its request. The Clock icon already marks it a run, and the
+			// tooltip says which kind. The path comes from the stored snapshot
+			// (resolved when it was sent), so it survives the request being renamed
+			// or deleted.
+			const snapshot = run?.configSnapshot;
+			const kind = run?.type === "load" ? "Load test" : "Design run";
+			const path = snapshot?.url ? pathLabel(snapshot.url) : "";
+			if (run && (snapshot?.method || path)) {
+				label = (
+					<span className="inline-flex items-baseline gap-1.5 min-w-0">
+						{snapshot?.method && (
+							<MethodBadge
+								method={snapshot.method}
+								variant="text"
+								muted={!isActive}
+							/>
+						)}
+						<span className="truncate">{path || kind}</span>
+					</span>
+				);
+				title = `${kind}: ${[snapshot?.method, path].filter(Boolean).join(" ")}`;
+			} else {
+				// Still loading, or a run with no snapshot to name it by.
+				label = run ? kind : "Run";
+				title = run ? kind : "Run";
+			}
 			break;
+		}
 	}
 
 	return (
