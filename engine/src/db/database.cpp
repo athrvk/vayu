@@ -1191,10 +1191,12 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::database::SYNCHRONOUS), "integer",
     "Data Safety Mode (Requires Restart)",
     "How aggressively SQLite ensures test results are written to disk. "
-    "Options: 0 = Off (fastest, safe with WAL mode), 1 = Normal "
-    "(balanced), 2 = Full (safest, slowest). "
-    "For load testing, Off (0) is recommended - WAL mode provides "
-    "durability while maximizing write throughput for storing results. "
+    "Options: 0 = Off (fastest; the database stays consistent after a crash, "
+    "but the most recent results may be lost on power failure or OS crash - "
+    "acceptable for test telemetry), 1 = Normal (balanced), 2 = Full (safest, "
+    "slowest). "
+    "For load testing, Off (0) is recommended - it maximizes write throughput "
+    "for storing results while keeping the database uncorrupted. "
     "This setting directly impacts how fast results can be saved during "
     "high-RPS tests. Default: Off.",
     "database_performance",
