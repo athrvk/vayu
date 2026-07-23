@@ -126,16 +126,19 @@ Body:
 
 The CLI prints:
 - Run ID
-- Link to monitor stats endpoint
+- Link to the live metrics stream
 
 **Example output:**
 
 ```
 Run ID: run_1234567890
-Monitor status at: http://127.0.0.1:9876/stats/run_1234567890
+Monitor status at: http://127.0.0.1:9876/runs/run_1234567890/live
 ```
 
-Use the stats endpoint URL to stream real-time metrics via Server-Sent Events (SSE).
+Use that URL to stream real-time metrics via Server-Sent Events (SSE). It serves
+from the engine's in-memory collector while the run is active; once the run
+finishes it returns `404` with a hint pointing at `GET /runs/:runId/report` for
+the stored report.
 
 ## Prerequisites
 
