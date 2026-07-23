@@ -167,7 +167,7 @@ function requireStr(args: Record<string, unknown>, key: string): string {
 class ToolArgError extends Error {}
 
 /**
- * Build the engine `/request` or `/run` body from loose tool arguments. When a
+ * Build the engine `/execute` or `/runs` body from loose tool arguments. When a
  * `resolver` is supplied, `{{variables}}` are substituted in the URL, header
  * keys/values, and body content (the app resolves these renderer-side before
  * the engine ever sees them; MCP must do the same). `opts.url` lets the caller

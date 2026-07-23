@@ -11,9 +11,11 @@
 
 #include <chrono>
 #include <nlohmann/json.hpp>
+#include <utility>
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/utils/logger.hpp"
 
 namespace vayu::http {
 // Owns interactive OAuth 2.0 authorization attempts; defined in oauth_authorize.hpp.
@@ -46,6 +48,27 @@ inline void send_error (httplib::Response& res, int status, const std::string& m
  */
 inline void send_json (httplib::Response& res, const nlohmann::json& data) {
     res.set_content (data.dump (), "application/json");
+}
+
+/**
+ * @brief Wrap a handler so a deprecated-alias registration is distinguishable
+ *        in the logs from its canonical counterpart.
+ *
+ * The renamed routes register one shared handler under both the canonical path
+ * (first) and the legacy path (second). cpp-httplib handlers are copyable
+ * std::functions, so the body is never duplicated; `req.matches[1]` is identical
+ * under both patterns. The alias registration wraps the handler with this so the
+ * per-request logs carry a ` (deprecated alias)` marker and the actual `req.path`
+ * that was hit - the canonical registration logs unchanged.
+ */
+inline httplib::Server::Handler
+deprecated_alias (httplib::Server::Handler handler) {
+    return [handler = std::move (handler)] (
+           const httplib::Request& req, httplib::Response& res) {
+        vayu::utils::log_info (req.method + " " + req.path +
+        " (deprecated alias) - prefer the canonical path");
+        handler (req, res);
+    };
 }
 
 /**

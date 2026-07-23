@@ -133,7 +133,7 @@ export class EngineClient {
 	}
 
 	getRunReport(runId: string, signal?: AbortSignal): Promise<unknown> {
-		return this.request("GET", `/run/${encodeURIComponent(runId)}/report`, undefined, signal);
+		return this.request("GET", `/runs/${encodeURIComponent(runId)}/report`, undefined, signal);
 	}
 
 	// --- Engine configuration ------------------------------------------------
@@ -160,15 +160,15 @@ export class EngineClient {
 	// --- Execute -------------------------------------------------------------
 
 	executeRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
-		return this.request("POST", "/request", payload, signal);
+		return this.request("POST", "/execute", payload, signal);
 	}
 
 	startRun(payload: unknown, signal?: AbortSignal): Promise<unknown> {
-		return this.request("POST", "/run", payload, signal);
+		return this.request("POST", "/runs", payload, signal);
 	}
 
 	stopRun(runId: string, signal?: AbortSignal): Promise<unknown> {
-		return this.request("POST", `/run/${encodeURIComponent(runId)}/stop`, undefined, signal);
+		return this.request("POST", `/runs/${encodeURIComponent(runId)}/stop`, undefined, signal);
 	}
 
 	/**
@@ -191,7 +191,7 @@ export class EngineClient {
 		const ticks: MetricsTick[] = [];
 		try {
 			const res = await this.fetchImpl(
-				`${this.baseUrl}/metrics/live/${encodeURIComponent(runId)}`,
+				`${this.baseUrl}/runs/${encodeURIComponent(runId)}/live`,
 				{
 					method: "GET",
 					headers: { Accept: "text/event-stream" },
@@ -201,7 +201,7 @@ export class EngineClient {
 			if (!res.ok) {
 				const text = await res.text().catch(() => "");
 				throw new EngineRequestError(
-					`Engine responded ${res.status} for GET /metrics/live/${runId}`,
+					`Engine responded ${res.status} for GET /runs/${runId}/live`,
 					res.status,
 					text
 				);

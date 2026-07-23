@@ -49,14 +49,28 @@ jobs:
           # stated here so the intent is explicit next to the C++ job that
           # cannot use it.
           build-mode: none
-          # Suppress alerts in code that is not ours or not shipped. These filter
-          # the report, not the scan, so vendored JS and build output stop
-          # generating noise without hiding anything in `app/src`.
+          # Suppress findings in code that is not ours or not shipped, without
+          # hiding anything in `app/src`. Under `build-mode: none` these
+          # exclude files from *extraction*, not merely from the report: adding
+          # the vendor entry below took the run log from 93
+          # `Extracting .../engine/vendor/...` lines to 0, so the scan gets
+          # cheaper as well as quieter.
+          #
+          # `engine/vendor` is the tree this list was describing all along and
+          # did not name: 90 tracked .js files across the two vendored QuickJS
+          # copies (quickjs on Linux/macOS, quickjs-ng on Windows). Three of
+          # them are upstream examples and tests written in QuickJS's own
+          # dialect - BigDecimal (`13591409m`) and BigFloat (`1l`) literals,
+          # which are engine extensions and not valid JavaScript - so every
+          # scan reported "Could not process some files due to syntax errors"
+          # against files Vayu never compiles, ships or runs. Node's parser
+          # rejects the same three.
           config: |
             paths-ignore:
               - '**/node_modules'
               - '**/dist'
               - '**/build'
+              - 'engine/vendor'
               - '**/*.test.ts'
               - '**/*.test.tsx'
 

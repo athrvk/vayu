@@ -236,8 +236,8 @@ QuickJS supports ES2020 features with some limitations:
 - Test scripts in load tests are executed **deferred** (after test completion)
 - Only a sample of responses are validated (configurable)
 - Results are aggregated and reported in the final report
-- `POST /run`'s `tests` field carries the collection chain's test scripts as
-  well as the request's own, composed the same way as `POST /request` (see
+- `POST /runs`'s `tests` field carries the collection chain's test scripts as
+  well as the request's own, composed the same way as `POST /execute` (see
   [Script Parts](#script-parts) below) - a collection-level assertion is now
   checked under load, not only in design mode
 
@@ -247,12 +247,12 @@ A script's effective source is composed of parts: the collection chain's own
 script, then the request's own script, in that order. Each route accepts its
 own field(s), each in either of two forms:
 
-- `POST /request` takes `preRequestScript` / `postRequestScript` (legacy
+- `POST /execute` takes `preRequestScript` / `postRequestScript` (legacy
   single string, already-joined text) or `preRequestScripts` /
-  `postRequestScripts` (a list of parts). The load path (`POST /run`) does not
+  `postRequestScripts` (a list of parts). The load path (`POST /runs`) does not
   read either of these two keys.
-- `POST /run` takes `tests` (the deferred validation script), either as a
-  legacy single string or as a list of parts. `POST /request` does not read
+- `POST /runs` takes `tests` (the deferred validation script), either as a
+  legacy single string or as a list of parts. `POST /execute` does not read
   `tests`.
 
 A list of parts is an array of objects, each recording where it came from -

@@ -282,14 +282,18 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/request` | Send a single request (auth resolved engine-side) |
-| POST | `/run` | Start a load test run |
-| GET | `/metrics/live/:runId` | SSE stream of live metrics |
-| GET | `/stats/:runId` | Historical stats for a run |
+| POST | `/execute` | Send a single request (auth resolved engine-side) |
+| POST | `/runs` | Start a load test run |
+| GET | `/runs/:runId/live` | SSE stream of live metrics |
+| GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
 
-See `docs/engine/api-reference.md` for full reference.
+The pre-consolidation paths (`POST /request`, `POST /run`, `GET /run/:id[/report|/stop]`,
+`DELETE /run/:id`, `GET /metrics/live/:runId`, `GET /stats/:runId?format=json`) still
+work as **deprecated aliases** and will be removed in a future minor release; `GET
+/stats/:runId` in its SSE mode is retained wholesale. See `docs/engine/api-reference.md`
+(Deprecated aliases) for full reference.
 
 Two things worth knowing before you design around them:
 
@@ -320,18 +324,21 @@ is therefore **duplicated** across the two engine clients:
 Composing the collection-chain + request pre/post scripts is **no longer** part
 of that duplication: both clients now collect an ordered list of `ScriptPart`s
 (root-to-leaf chain, then the request's own, each naming its origin) and send
-the list as `preRequestScripts` / `postRequestScripts` on `POST /request` - and
+the list as `preRequestScripts` / `postRequestScripts` on `POST /execute` - and
 the **engine** joins them with `"\n\n"` and runs the result. The renderer's load
-path sends the same kind of list as `tests` on `POST /run`. MCP has no
-chain-composing `/run` caller: `start_load_run` takes an agent-supplied ad-hoc
+path sends the same kind of list as `tests` on `POST /runs`. MCP has no
+chain-composing `/runs` caller: `start_load_run` takes an agent-supplied ad-hoc
 `tests` string (like its ad-hoc `preRequestScript`/`postRequestScript`, see
 `tools.ts::buildExecutionPayload`), not a chain-built list, so this is not "both
-clients send the list on `/run`". Each client still builds its own script-part
+clients send the list on `/runs`". Each client still builds its own script-part
 list itself (the `scriptParts` helper in
 `app/src/modules/request-builder/utils/script-parts.ts` and in
 `app/electron/mcp/resolve.ts` - the same intentional duplication, since MCP
 cannot import from `app/src/`), so a change to the list-building rule (e.g. what
 counts as blank) still needs both copies changed together.
+
+The endpoint names above are the canonical ones (`POST /execute`, `POST /runs`);
+the old `POST /request` / `POST /run` still work as deprecated aliases.
 
 The engine does the rest of execution (loads variables for script context, applies
 concrete auth incl. OAuth2, joins and runs the script parts) but intentionally

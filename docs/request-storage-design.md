@@ -34,7 +34,7 @@ Requests are stored **WITH variables** (e.g., `{{baseUrl}}/api/users`) in the da
 **Process**:
 1. User clicks "Send" in the UI
 2. Frontend resolves variables using the selected environment
-3. Resolved request is sent to `/request` endpoint
+3. Resolved request is sent to `/execute` endpoint
 4. Backend executes the HTTP request
 5. Backend stores **both** the resolved request AND response in execution history
 

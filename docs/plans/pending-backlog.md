@@ -50,8 +50,8 @@ pre/post scripts - used to happen **client-side, once per engine client**.
 
 **Script slice: done.** The engine now accepts an ordered list of script parts
 (`{ origin: "collection" | "request", id?, name?, script }` -
-`preRequestScripts` / `postRequestScripts` on `POST /request`, `tests` on
-`POST /run`) and joins them with `"\n\n"` itself, dropping any part whose script
+`preRequestScripts` / `postRequestScripts` on `POST /execute`, `tests` on
+`POST /runs`) and joins them with `"\n\n"` itself, dropping any part whose script
 is empty or only whitespace (`engine/src/http/script_parts.cpp`). Both clients
 still *build* that ordered list client-side (root-to-leaf chain, then the
 request's own) - `app/src/modules/request-builder/utils/script-parts.ts` and the
@@ -71,7 +71,7 @@ These remain **client-side, once per engine client**:
   pipeline (added when MCP became a second engine client; see PR / `mcp.md`).
 
 **Root cause - the engine already does most of composition but stops short.**
-On `POST /request` (`engine/src/http/routes/execution.cpp`) it loads the
+On `POST /execute` (`engine/src/http/routes/execution.cpp`) it loads the
 environment, globals, and the request's collection variables (into the script
 context), applies concrete auth (`build_request` → `apply_auth`, incl. the OAuth2
 token cache), and now joins and runs the pre/post script parts. It does **not**

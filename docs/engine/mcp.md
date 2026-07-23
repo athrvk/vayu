@@ -126,17 +126,17 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_requests`        | read     | `GET /requests?collectionId=`                | -                          |
 | `list_environments`    | read     | `GET /environments`                          | -                          |
 | `list_runs`            | read     | `GET /runs`                                  | -                          |
-| `get_run_report`       | read     | `GET /run/:id/report`                        | -                          |
+| `get_run_report`       | read     | `GET /runs/:id/report`                       | -                          |
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | -                          |
-| `compare_runs`         | read     | 2× `GET /run/:id/report` → diff (structured) | -                          |
-| `run_request`          | execute  | `POST /request`                              | allowlist                  |
-| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /request` (×N)     | allowlist per host         |
+| `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| -                          |
+| `run_request`          | execute  | `POST /execute`                              | allowlist                  |
+| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /execute` (×N)     | allowlist per host         |
 | `create_request`       | write    | `POST /requests`                             | write toggle               |
 | `update_environment`   | write    | `GET`+`POST /environments` (fetch-merge)     | write toggle               |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `start_load_run`       | load     | `POST /run`                                  | allowlist + caps + confirm |
-| `stop_run`             | load     | `POST /run/:id/stop`                         | -                          |
+| `start_load_run`       | load     | `POST /runs`                                 | allowlist + caps + confirm |
+| `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 
 Notes:
 
@@ -172,10 +172,10 @@ interpolation and drops `{"mode":"inherit"}` as "resolved app-side"
 Scripts are handled differently: both clients collect the collection-chain
 pre/post scripts (root→leaf) and the request's own as an ordered list of parts,
 each naming where it came from (`{ origin, id, name?, script }`), and send the
-list as `preRequestScripts` / `postRequestScripts` on `POST /request` - the
+list as `preRequestScripts` / `postRequestScripts` on `POST /execute` - the
 **engine** joins the parts with `"\n\n"` and runs the result (parts whose
 script is blank are dropped). The renderer's load path builds the same kind of
-list for its `tests` field on `POST /run`; MCP's only `POST /run` caller
+list for its `tests` field on `POST /runs`; MCP's only `POST /runs` caller
 (`start_load_run`) has no collection to chain-compose from - it forwards an
 agent-supplied ad-hoc `tests` string as-is, the same as its ad-hoc
 `preRequestScript`/`postRequestScript` (`tools.ts::buildExecutionPayload`), not
