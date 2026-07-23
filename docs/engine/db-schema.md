@@ -283,6 +283,31 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 
 ---
 
+## Indexes
+
+Declared alongside the tables in `make_storage()` (`engine/src/db/database.cpp`). `sqlite_orm`
+requires index arguments to precede the table arguments. `sync_schema()` creates them on startup
+for fresh **and** pre-existing databases, so adding an index is additive and needs no migration.
+
+| Index                        | Column                  | Query paths that rely on it                                                                                                                       |
+|------------------------------|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `idx_metrics_run_id`         | `metrics.run_id`        | `get_metrics`, `get_metrics_since` (polled every 500ms by the legacy SSE loop in `http/routes/metrics.cpp`), `get_metrics_paginated`, `count_metrics`, and the `remove_all` in `delete_run` |
+| `idx_results_run_id`         | `results.run_id`        | `get_results` and the `remove_all` in `delete_run`                                                                                                |
+| `idx_requests_collection_id` | `requests.collection_id`| `get_requests_in_collection` (every sidebar load) and cascade delete                                                                              |
+| `idx_collections_parent_id`  | `collections.parent_id` | The cascade-delete BFS in `Database::delete_collection`, which does one lookup per node in the subtree                                            |
+| `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs`, which sorts on every `GET /runs`                                                                                                  |
+
+`metrics` and `results` are the unbounded-growth tables - a load run writes roughly 20 metric
+rows per second - so without `run_id` indexes a lookup slows down with every run ever recorded,
+not just the current one. `collections.parent_id` is a nullable column; `sqlite_orm` indexes it
+without special handling.
+
+Guarded by `DatabaseTest.CreatesIndexesOnFreshDatabase` and
+`DatabaseTest.RecreatesIndexesOnExistingDatabase` in `engine/tests/db_test.cpp`, which read
+`sqlite_master` directly rather than trusting what `sqlite_orm` reports about itself.
+
+---
+
 ## VariableValue shape
 
 Used in `collections.variables`, `environments.variables`, and `globals.variables`:

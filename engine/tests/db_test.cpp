@@ -4,8 +4,12 @@
  */
 
 #include <gtest/gtest.h>
+#include <sqlite3.h>
 
 #include <filesystem>
+#include <set>
+#include <string>
+#include <vector>
 
 #include "vayu/db/database.hpp"
 
@@ -234,6 +238,111 @@ TEST_F (DatabaseTest, DeletesEnvironment) {
 
     auto deleted = db.get_environment ("env_1");
     EXPECT_FALSE (deleted.has_value ());
+}
+
+// ==================== Index Tests ====================
+
+// Every index declared in make_storage(), each backing a hot query path:
+// metrics/results by run_id, requests by collection_id, collections by
+// parent_id, runs by start_time. See the comments there for which queries
+// rely on which. Named explicitly rather than counted, because sqlite also
+// creates sqlite_autoindex_* entries of its own.
+const std::vector<std::string> EXPECTED_INDEXES = { "idx_metrics_run_id",
+    "idx_results_run_id", "idx_requests_collection_id",
+    "idx_collections_parent_id", "idx_runs_start_time" };
+
+// Reads index names straight out of sqlite_master on a separate connection,
+// so the assertion does not rest on anything sqlite_orm reports about itself.
+// Callers open this only after the Database has been destroyed, which keeps
+// WAL visibility out of the picture.
+std::set<std::string> read_index_names (const std::string& path) {
+    std::set<std::string> names;
+
+    sqlite3* handle = nullptr;
+    if (sqlite3_open (path.c_str (), &handle) != SQLITE_OK) {
+        ADD_FAILURE () << "could not open " << path << ": " << sqlite3_errmsg (handle);
+        sqlite3_close (handle);
+        return names;
+    }
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (handle, "SELECT name FROM sqlite_master WHERE type='index'",
+        -1, &stmt, nullptr) != SQLITE_OK) {
+        ADD_FAILURE () << "could not query sqlite_master: " << sqlite3_errmsg (handle);
+        sqlite3_close (handle);
+        return names;
+    }
+
+    while (sqlite3_step (stmt) == SQLITE_ROW) {
+        const auto* name = sqlite3_column_text (stmt, 0);
+        if (name != nullptr) {
+            names.emplace (reinterpret_cast<const char*> (name));
+        }
+    }
+
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return names;
+}
+
+void drop_index (const std::string& path, const std::string& index_name) {
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (path.c_str (), &handle), SQLITE_OK);
+
+    const std::string sql = "DROP INDEX IF EXISTS " + index_name;
+    char* err             = nullptr;
+    if (sqlite3_exec (handle, sql.c_str (), nullptr, nullptr, &err) != SQLITE_OK) {
+        ADD_FAILURE () << "could not drop " << index_name << ": "
+                       << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+    }
+
+    sqlite3_close (handle);
+}
+
+TEST_F (DatabaseTest, CreatesIndexesOnFreshDatabase) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    const auto names = read_index_names (TEST_DB_PATH);
+    for (const auto& expected : EXPECTED_INDEXES) {
+        EXPECT_TRUE (names.contains (expected)) << "missing index: " << expected;
+    }
+}
+
+// Adding indexes is meant to be additive - an existing database picks them up
+// on the next startup, with no migration. Dropping them and re-opening
+// reproduces exactly that, without needing a pre-index schema on disk to test
+// against.
+TEST_F (DatabaseTest, RecreatesIndexesOnExistingDatabase) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    for (const auto& name : EXPECTED_INDEXES) {
+        drop_index (TEST_DB_PATH, name);
+    }
+
+    // Guard the guard: if the drop silently did nothing, the re-open assertion
+    // below would pass without proving anything.
+    const auto after_drop = read_index_names (TEST_DB_PATH);
+    for (const auto& name : EXPECTED_INDEXES) {
+        ASSERT_FALSE (after_drop.contains (name)) << "drop did not remove: " << name;
+    }
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    const auto recreated = read_index_names (TEST_DB_PATH);
+    for (const auto& expected : EXPECTED_INDEXES) {
+        EXPECT_TRUE (recreated.contains (expected))
+        << "sync_schema did not recreate: " << expected;
+    }
 }
 
 } // namespace
