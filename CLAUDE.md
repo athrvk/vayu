@@ -38,10 +38,18 @@ vayu/
 ## Prerequisites
 
 - CMake ≥ 3.25, Ninja, C++20 compiler (g++ or clang++)
-- vcpkg with `$VCPKG_ROOT` set
+- vcpkg with `$VCPKG_ROOT` set (Linux/macOS; on Windows it is auto-detected - see below)
 - Node.js ≥ 20.19 (22 LTS recommended - see `app/.nvmrc`), pnpm ≥ 10
 
 Run `python build.py --setup` to install all prerequisites automatically (Linux/macOS only).
+
+**On Windows, do not hand-configure cmake or set `VCPKG_ROOT` - just run
+`build.py`.** It imports the MSVC environment via `vcvars` and finds cmake,
+ninja and vcpkg inside the Visual Studio Build Tools install
+(`...\BuildTools\VC\vcpkg`) on its own, so an unset `VCPKG_ROOT` is fine. Poking
+at the build tree directly (empty `build/`, no `VCPKG_ROOT`) looks like "can't
+build locally" when `python build.py -e -t` builds the engine and runs the C++
+tests in ~2 min. If you keep vcpkg elsewhere, set `VCPKG_ROOT` and it is honored.
 
 ## Build Commands
 
