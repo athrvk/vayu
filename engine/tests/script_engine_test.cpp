@@ -8,6 +8,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
+
 #include "vayu/http/script_parts.hpp"
 #include "vayu/types.hpp"
 
@@ -552,4 +554,79 @@ TEST_F (ScriptEngineTest, ContextPooling) {
         ASSERT_EQ (result.tests.size (), 1);
         EXPECT_TRUE (result.tests[0].passed);
     }
+}
+
+// ============================================================================
+// Script Execution Timeout Tests (#107)
+// ============================================================================
+
+// A non-allocating infinite loop must be interrupted by the wall-clock deadline
+// rather than hanging the calling thread. Mutation-check: revert the
+// JS_SetInterruptHandler wiring in acquire_context/execute and this test hangs.
+TEST_F (ScriptEngineTest, InfiniteLoopTimesOut) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 200;
+    ScriptEngine timeout_engine (cfg);
+
+    ScriptContext ctx;
+    ctx.response = &response;
+
+    const auto start   = std::chrono::steady_clock::now ();
+    auto result        = timeout_engine.execute ("while (true) {}", ctx);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - start)
+                         .count ();
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("timed out"), std::string::npos)
+    << "error was: " << result.error_message;
+    // Should abort near the deadline, not run indefinitely. Generous upper bound to
+    // stay robust on slow CI while still proving the loop does not run forever.
+    EXPECT_LT (elapsed, 5000) << "took " << elapsed << "ms";
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// A fast script under the limit must not be falsely aborted by the deadline.
+TEST_F (ScriptEngineTest, FastScriptUnderTimeoutStillPasses) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 200;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (R"(
+        pm.test("Fast test", function() {
+            pm.expect(1).to.equal(1);
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_TRUE (result.error_message.empty ());
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed);
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// timeout_ms == 0 disables the wall-clock limit (escape hatch); a bounded loop
+// still completes normally with no false timeout.
+TEST_F (ScriptEngineTest, ZeroTimeoutDisablesLimit) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 0;
+    ScriptEngine no_timeout_engine (cfg);
+
+    ScriptContext ctx;
+    auto result = no_timeout_engine.execute (
+    "var n = 0; for (var i = 0; i < 100000; i++) { n += i; } n", ctx);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_TRUE (result.error_message.empty ());
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
 }
