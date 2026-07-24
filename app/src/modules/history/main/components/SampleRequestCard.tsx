@@ -12,10 +12,13 @@
  */
 
 import { CheckCircle, XCircle } from "lucide-react";
-import { Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import TimingBreakdown from "./TimingBreakdown";
-import { UnifiedResponseViewer } from "@/components/shared/response-viewer";
+import {
+	UnifiedResponseViewer,
+	HeadersViewer,
+	StatusCodeBadge,
+} from "@/components/shared/response-viewer";
 import type { SampleResult } from "../../types";
 
 interface SampleRequestCardProps {
@@ -61,12 +64,7 @@ export default function SampleRequestCard({
 					<CheckCircle className="w-4 h-4 text-status-success-text shrink-0" />
 				)}
 
-				<Badge
-					variant={isError ? "destructive" : isSuccess ? "default" : "outline"}
-					className="font-mono text-xs"
-				>
-					{sample.statusCode === 0 ? "ERR" : sample.statusCode}
-				</Badge>
+				<StatusCodeBadge status={sample.statusCode} className="text-xs" />
 
 				<span className="text-sm font-medium font-mono">
 					{sample.latencyMs.toFixed(1)}ms
@@ -111,18 +109,11 @@ export default function SampleRequestCard({
 						</div>
 					)}
 
-					{/* Request Headers */}
+					{/* Request Headers - the shared collapsible table, not a raw JSON
+					    dump. It sat directly above a UnifiedResponseViewer that already
+					    renders headers properly; the two treatments no longer differ. */}
 					{sample.trace?.request?.headers && (
-						<div>
-							<h4 className="text-xs font-semibold text-muted-foreground mb-2 uppercase">
-								Request Headers
-							</h4>
-							<pre className="bg-muted p-3 text-xs overflow-x-auto max-h-40">
-								{typeof sample.trace.request.headers === "object"
-									? JSON.stringify(sample.trace.request.headers, null, 2)
-									: sample.trace.request.headers}
-							</pre>
-						</div>
+						<HeadersViewer headers={sample.trace.request.headers} variant="request" />
 					)}
 
 					{/* Response using UnifiedResponseViewer */}

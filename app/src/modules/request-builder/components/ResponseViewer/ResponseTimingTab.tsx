@@ -19,6 +19,7 @@
 
 import { type ReactNode } from "react";
 import { formatDuration, formatPhaseDuration } from "@/components/shared/response-viewer/utils";
+import { PHASE_TIPS } from "@/components/shared/response-viewer/phase-tips";
 import { Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ResponseTiming } from "../../types";
@@ -65,35 +66,35 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 			label: "DNS",
 			value: timing.dnsMs,
 			color: "hsl(var(--chart-2))",
-			tip: "Hostname → IP resolution. Usually a few ms once cached; >50ms suggests slow DNS or a fresh lookup.",
+			tip: PHASE_TIPS.dns,
 		},
 		{
 			key: "connect",
 			label: "Connect",
 			value: timing.connectMs,
 			color: "hsl(var(--chart-4))",
-			tip: "TCP three-way handshake. Zero on connection reuse (HTTP keep-alive / HTTP/2).",
+			tip: PHASE_TIPS.connect,
 		},
 		{
 			key: "tls",
 			label: "TLS",
 			value: timing.tlsMs,
 			color: "hsl(var(--chart-5))",
-			tip: "SSL/TLS handshake (HTTPS only). Zero for plain HTTP and on resumed connections.",
+			tip: PHASE_TIPS.tls,
 		},
 		{
 			key: "ttfb",
 			label: "TTFB",
 			value: timing.firstByteMs,
 			color: "hsl(var(--primary))",
-			tip: "Time to first byte - server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
+			tip: PHASE_TIPS.ttfb,
 		},
 		{
 			key: "download",
 			label: "Download",
 			value: timing.downloadMs,
 			color: "hsl(var(--success))",
-			tip: "Response body transfer time. Large for big payloads or slow links; near-zero for small JSON.",
+			tip: PHASE_TIPS.download,
 		},
 	];
 
