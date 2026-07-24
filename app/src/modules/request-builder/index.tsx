@@ -325,7 +325,14 @@ export default function RequestBuilder() {
 
 			await updateRequestMutation.mutateAsync({
 				id: fetchedRequest.id,
-				name: request.name,
+				// `name` is deliberately omitted: the builder never edits it (it is
+				// renamed from the collection sidebar), so `request.name` is only a
+				// snapshot taken when the tab opened and the reset effect keeps it
+				// keyed by id - a rename does not change the id, so the snapshot goes
+				// stale. Sending it here made this debounced auto-save clobber a
+				// sidebar rename with the old name a few seconds later. The engine
+				// does a partial update on an existing id, so omitting `name` leaves
+				// the current (renamed) value untouched.
 				description: request.description,
 				method: request.method as HttpMethod,
 				url: request.url,

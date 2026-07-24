@@ -7,7 +7,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include <algorithm>
+#include <chrono>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -15,7 +16,6 @@
 
 #include <sqlite_orm/sqlite_orm.h>
 
-#include "vayu/core/constants.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::db {
@@ -36,49 +36,6 @@ class Database {
     void save_request (const Request& r);
     std::optional<Request> get_request (const std::string& id);
     std::vector<Request> get_requests_in_collection (const std::string& collection_id);
-
-    /**
-     * @brief Iterate over requests in a collection using a callback.
-     * This allows streaming without loading all requests into memory.
-     * Fetches requests in batches to minimize memory usage.
-     * @param collection_id The collection ID to fetch requests from
-     * @param callback Function called for each request. Return false to stop iteration.
-     */
-    template <typename Callback>
-    void iterate_requests_in_collection (const std::string& collection_id, Callback&& callback) {
-        // Get batch size from config (or use default constant)
-        const size_t batch_size = static_cast<size_t> (get_config_int (
-        "requestBatchSize", vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE));
-
-        // Fetch in batches to avoid loading everything into memory at once
-        size_t offset = 0;
-
-        while (true) {
-            // Get all requests using helper that can access impl_
-            auto all_requests = _get_all_requests_for_collection (collection_id);
-
-            // Process only the current batch
-            size_t start_idx = offset;
-            size_t end_idx = std::min (start_idx + batch_size, all_requests.size ());
-
-            if (start_idx >= all_requests.size ()) {
-                break;
-            }
-
-            // Process batch
-            for (size_t i = start_idx; i < end_idx; ++i) {
-                if (!callback (all_requests[i])) {
-                    return; // Callback requested to stop
-                }
-            }
-
-            offset = end_idx;
-            if (end_idx >= all_requests.size ()) {
-                break;
-            }
-        }
-    }
-
     void delete_request (const std::string& id);
 
     void save_environment (const Environment& e);
@@ -117,11 +74,6 @@ class Database {
     void add_results_batch (const std::vector<Result>& results); // Transactional batch insert
     std::vector<Result> get_results (const std::string& run_id);
 
-    // Transaction helpers
-    void begin_transaction ();
-    void commit_transaction ();
-    void rollback_transaction ();
-
     // Config Entries - Structured configuration with metadata
     void save_config_entry (const ConfigEntry& entry);
     std::optional<ConfigEntry> get_config_entry (const std::string& key);
@@ -139,8 +91,19 @@ class Database {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 
-    // Helper function to get all requests (non-template, can access impl_)
-    std::vector<Request> _get_all_requests_for_collection (const std::string& collection_id);
+    /**
+     * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked error.
+     *
+     * On a busy error the mutex is released *before* sleeping (exponential
+     * backoff, @p base * (attempt+1)), then the call is retried - so a retry
+     * never stalls other endpoints that need the same mutex. Non-busy
+     * exceptions rethrow immediately; busy exhaustion after @p attempts logs
+     * and rethrows. @p what names the operation for log messages.
+     */
+    void retry_on_busy (const char* what,
+    int attempts,
+    std::chrono::milliseconds base,
+    const std::function<void ()>& fn);
 };
 
 } // namespace vayu::db

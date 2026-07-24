@@ -16,6 +16,7 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <sstream>
 #include <utility>
 
 namespace vayu::http::routes {
@@ -44,11 +45,48 @@ const std::string& id) {
     return { 200, vayu::json::serialize (*request) };
 }
 
+/**
+ * Testable core of GET /requests: one DB fetch, one serialized JSON array.
+ *
+ * The rows arrive already ordered by `order` (get_requests_in_collection has
+ * the ORDER BY), matching the ordering contract collections have had all
+ * along. Each row is serialized into its own buffer inside the try, so a row
+ * that fails to serialize is skipped whole - it cannot leave a half-written
+ * item behind and corrupt the array, and one bad row does not fail the whole
+ * response. Extracted for requests_route_test.cpp, same as
+ * get_request_response above.
+ */
+std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id) {
+    auto requests = db.get_requests_in_collection (collection_id);
+
+    std::ostringstream out;
+    out << "[";
+    bool is_first = true;
+    for (const auto& r : requests) {
+        std::ostringstream item;
+        try {
+            vayu::json::serialize_to_stream (r, item);
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "GET /requests - Error serializing request " + r.id + ": " +
+            std::string (e.what ()));
+            continue;
+        }
+        if (!is_first) {
+            out << ",";
+        }
+        is_first = false;
+        out << item.str ();
+    }
+    out << "]";
+    return out.str ();
+}
+
 void register_request_routes (RouteContext& ctx) {
     /**
      * GET /requests
-     * Retrieves all requests belonging to a specific collection.
-     * Uses streaming/chunked response to prevent OOM on large collections.
+     * Retrieves all requests belonging to a specific collection, ordered by
+     * their `order` field (matching GET /collections).
      * Query params: collectionId (required) - The collection ID to fetch requests from.
      * Returns: Array of request objects with method, url, headers, body, scripts, etc.
      */
@@ -58,46 +96,8 @@ void register_request_routes (RouteContext& ctx) {
                 std::string collection_id =
                 req.get_param_value ("collectionId");
                 vayu::utils::log_info (
-                "GET /requests - Streaming requests for collection: " + collection_id);
-
-                // Use streaming response to avoid loading all requests into memory
-                // Build response incrementally by iterating through requests
-                std::ostringstream response_stream;
-                response_stream << "[";
-
-                bool is_first        = true;
-                size_t request_count = 0;
-
-                // Iterate through requests and stream them one by one
-                ctx.db.iterate_requests_in_collection (collection_id,
-                [&response_stream, &is_first, &request_count] (
-                const vayu::db::Request& r) -> bool {
-                    try {
-                        // Write comma before each item except the first
-                        if (!is_first) {
-                            response_stream << ",";
-                        }
-                        is_first = false;
-
-                        // Serialize request directly to stream
-                        vayu::json::serialize_to_stream (r, response_stream);
-
-                        request_count++;
-                        return true; // Continue iteration
-                    } catch (const std::exception& e) {
-                        vayu::utils::log_error (
-                        "GET /requests - Error serializing request " + r.id +
-                        ": " + std::string (e.what ()));
-                        // Continue with next request instead of failing entire response
-                        return true;
-                    }
-                });
-
-                response_stream << "]";
-
-                vayu::utils::log_debug ("GET /requests - Streamed " +
-                std::to_string (request_count) + " requests");
-                res.set_content (response_stream.str (), "application/json");
+                "GET /requests - Fetching requests for collection: " + collection_id);
+                res.set_content (list_requests_body (ctx.db, collection_id), "application/json");
             } else {
                 vayu::utils::log_warning (
                 "GET /requests - Missing required param: collectionId");

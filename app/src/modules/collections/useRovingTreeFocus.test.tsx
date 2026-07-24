@@ -10,6 +10,7 @@ const activate = vi.fn();
 const toggle = vi.fn();
 const del = vi.fn();
 const menu = vi.fn();
+const rename = vi.fn();
 
 /**
  * Mirrors the real shape: collections are treeitems with aria-expanded whose
@@ -33,6 +34,9 @@ function Tree({ expanded }: { expanded: boolean }) {
 						<button tabIndex={-1} data-tree-menu onClick={menu}>
 							menu
 						</button>
+						<button tabIndex={-1} data-tree-rename onClick={rename}>
+							rename
+						</button>
 					</div>
 					{expanded && (
 						<div>
@@ -42,6 +46,9 @@ function Tree({ expanded }: { expanded: boolean }) {
 								</button>
 								<button tabIndex={-1} data-tree-delete onClick={del}>
 									del
+								</button>
+								<button tabIndex={-1} data-tree-rename onClick={rename}>
+									rename
 								</button>
 							</div>
 							<div role="treeitem" tabIndex={-1} data-name="req-2" />
@@ -65,6 +72,7 @@ describe("useRovingTreeFocus", () => {
 		toggle.mockClear();
 		del.mockClear();
 		menu.mockClear();
+		rename.mockClear();
 	});
 
 	it("makes the tree a single tab stop", () => {
@@ -167,6 +175,19 @@ describe("useRovingTreeFocus", () => {
 		expect(menu).toHaveBeenCalledTimes(1);
 		key("ContextMenu");
 		expect(menu).toHaveBeenCalledTimes(2);
+	});
+
+	// F2 is the keyboard path to the rename control the ⋯ menu also offers.
+	it("renames the focused row with F2", () => {
+		render(<Tree expanded />);
+		byName("demo").focus();
+		key("F2");
+		expect(rename).toHaveBeenCalledTimes(1);
+
+		// Works on a leaf request row too, not only collections.
+		byName("req-1").focus();
+		key("F2");
+		expect(rename).toHaveBeenCalledTimes(2);
 	});
 
 	it("ignores arrow keys while renaming in a text field", () => {

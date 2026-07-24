@@ -568,8 +568,16 @@ export default function CollectionTree() {
 		>
 			<div ref={treeRef} className="flex h-full flex-col">
 				{/* New Collection Form */}
+				{/*
+				 * px-3 pt-2 is not decorative. The DrawerPanel body scrolls
+				 * (overflow-y-auto overflow-x-hidden) and is flush so rows run edge
+				 * to edge, so it clips at its own edge - and this field's focus ring
+				 * is drawn *outside* its border box. Flush against the top-left, the
+				 * ring was clipped; the padding gives it room. Same fix the History
+				 * search field uses (see HistoryList).
+				 */}
 				{creatingCollection && (
-					<div className="flex gap-2 mb-2">
+					<div className="flex gap-2 mb-2 px-3 pt-2">
 						<Input
 							type="text"
 							value={newCollectionName}

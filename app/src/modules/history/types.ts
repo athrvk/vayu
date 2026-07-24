@@ -32,7 +32,6 @@ export interface PerformanceTabProps extends TabProps {
 
 export interface LoadTestDetailProps {
 	report: RunReport;
-	onBack: () => void;
 	runId: string;
 }
 
