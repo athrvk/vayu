@@ -140,7 +140,12 @@ export function responseFromRunResult(
 		...sentSide(trace),
 		body,
 		bodyType: detectBodyType(body),
-		size: body.length,
+		// `size` is what the pane's byte count shows. When the body was truncated
+		// for storage the stored slice is not the real size, so prefer the
+		// original `bodyBytes` the engine recorded and fall back to the slice.
+		size: trace.response.bodyBytes ?? body.length,
+		bodyTruncated: trace.response.bodyTruncated,
+		bodyBytes: trace.response.bodyBytes,
 		time: result.latencyMs || 0,
 		timing: timingFromTrace(trace, result.latencyMs),
 		restoredFrom,

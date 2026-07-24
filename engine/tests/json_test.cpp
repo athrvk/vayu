@@ -248,5 +248,95 @@ TEST (JsonTest, SerializesMetric) {
     EXPECT_EQ (json["labels"]["region"], "us-east-1");
 }
 
+// ============================================================================
+// build_design_trace - body caps + truncation metadata
+// ============================================================================
+
+namespace {
+
+vayu::Request make_trace_request (const std::string& body) {
+    vayu::Request req;
+    req.method            = vayu::HttpMethod::POST;
+    req.url               = "http://example.test/";
+    req.headers["Accept"] = "application/json";
+    req.body.mode         = vayu::BodyMode::Text;
+    req.body.content      = body;
+    return req;
+}
+
+vayu::Response make_trace_response (const std::string& body) {
+    vayu::Response resp;
+    resp.status_code = 200;
+    resp.status_text = "OK";
+    resp.body        = body;
+    return resp;
+}
+
+} // namespace
+
+TEST (BuildDesignTrace, TruncatesOversizedBodiesAndRecordsMetadata) {
+    const size_t cap = 8;
+    // Both bodies exceed the cap.
+    auto req  = make_trace_request ("REQUESTBODY");   // 11 bytes
+    auto resp = make_trace_response ("RESPONSEBODY"); // 12 bytes
+
+    auto trace = build_design_trace (req, resp, cap);
+
+    // Response body: stored slice is exactly the cap, metadata reflects the original.
+    ASSERT_TRUE (trace["response"].contains ("body"));
+    EXPECT_EQ (trace["response"]["body"].get<std::string> ().size (), cap);
+    EXPECT_EQ (trace["response"]["body"], "RESPONSE");
+    EXPECT_TRUE (trace["response"]["bodyTruncated"].get<bool> ());
+    EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 12u);
+
+    // Request body is capped the same way.
+    EXPECT_EQ (trace["request"]["body"].get<std::string> ().size (), cap);
+    EXPECT_EQ (trace["request"]["body"], "REQUESTB");
+    EXPECT_TRUE (trace["request"]["bodyTruncated"].get<bool> ());
+    EXPECT_EQ (trace["request"]["bodyBytes"].get<size_t> (), 11u);
+}
+
+TEST (BuildDesignTrace, StoresUnderCapBodyVerbatimWithoutMetadata) {
+    const size_t cap = 1024;
+    auto req  = make_trace_request ("small-request");
+    auto resp = make_trace_response ("small-response");
+
+    auto trace = build_design_trace (req, resp, cap);
+
+    EXPECT_EQ (trace["response"]["body"], "small-response");
+    EXPECT_FALSE (trace["response"].contains ("bodyTruncated"));
+    EXPECT_FALSE (trace["response"].contains ("bodyBytes"));
+
+    EXPECT_EQ (trace["request"]["body"], "small-request");
+    EXPECT_FALSE (trace["request"].contains ("bodyTruncated"));
+    EXPECT_FALSE (trace["request"].contains ("bodyBytes"));
+}
+
+TEST (BuildDesignTrace, InvalidUtf8SliceDumpsWithReplacement) {
+    // A cap that splits a multi-byte UTF-8 sequence must not make dump() throw.
+    const size_t cap = 4;
+    // "abc" + a 2-byte sequence (0xC3 0xA9 = e-acute); cap 4 keeps the lead byte only.
+    auto resp  = make_trace_response (std::string ("abc\xC3\xA9"));
+    auto req   = make_trace_request ("x");
+    auto trace = build_design_trace (req, resp, cap);
+
+    EXPECT_TRUE (trace["response"]["bodyTruncated"].get<bool> ());
+    EXPECT_NO_THROW (
+    (void)trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace));
+}
+
+TEST (BuildDesignTrace, ErrorResponseWritesEnvelopeNotBody) {
+    auto req         = make_trace_request ("x");
+    vayu::Response resp;
+    resp.status_code    = 0;
+    resp.error_code     = vayu::ErrorCode::ConnectionFailed;
+    resp.error_message  = "could not connect";
+    auto trace = build_design_trace (req, resp, 1024);
+
+    EXPECT_FALSE (trace.contains ("response"));
+    EXPECT_EQ (trace["error_type"], "CONNECTION_FAILED");
+    EXPECT_EQ (trace["error_message"], "could not connect");
+}
+
 } // namespace
 } // namespace vayu::json

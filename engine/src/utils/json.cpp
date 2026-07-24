@@ -153,6 +153,62 @@ const std::vector<vayu::db::Result>& results) {
     json["result"] = out;
 }
 
+namespace {
+
+// Store a body string onto @p node, capping it at @p max_body_bytes. Records
+// bodyTruncated + bodyBytes (the original length) when the body is cut so a
+// reader can tell a stored slice from the whole body.
+void store_capped_body (nlohmann::json& node, const std::string& body, size_t max_body_bytes) {
+    if (body.size () > max_body_bytes) {
+        node["body"]          = body.substr (0, max_body_bytes);
+        node["bodyTruncated"] = true;
+        node["bodyBytes"]     = body.size ();
+    } else {
+        node["body"] = body;
+    }
+}
+
+} // namespace
+
+nlohmann::json build_design_trace (const vayu::Request& request,
+const vayu::Response& response,
+size_t max_body_bytes) {
+    const bool has_error = response.has_error ();
+
+    nlohmann::json trace;
+    trace["request"] = { { "method", to_string (request.method) },
+        { "url", request.url }, { "headers", request.headers } };
+    if (!request.body.content.empty ()) {
+        store_capped_body (trace["request"], request.body.content, max_body_bytes);
+    }
+
+    if (!has_error) {
+        nlohmann::json resp;
+        resp["headers"] = response.headers;
+        store_capped_body (resp, response.body, max_body_bytes);
+        trace["response"] = std::move (resp);
+    } else {
+        trace["error_type"]    = to_string (response.error_code);
+        trace["error_message"] = response.error_message;
+    }
+
+    // Timing information: each phase is written only when non-zero (a reused
+    // connection has no connect/tls phase).
+    const auto& timing = response.timing;
+    if (timing.dns_ms > 0)
+        trace["dnsMs"] = timing.dns_ms;
+    if (timing.connect_ms > 0)
+        trace["connectMs"] = timing.connect_ms;
+    if (timing.tls_ms > 0)
+        trace["tlsMs"] = timing.tls_ms;
+    if (timing.first_byte_ms > 0)
+        trace["firstByteMs"] = timing.first_byte_ms;
+    if (timing.download_ms > 0)
+        trace["downloadMs"] = timing.download_ms;
+
+    return trace;
+}
+
 Json serialize (const vayu::db::Collection& c) {
     Json json;
     json["id"] = c.id;

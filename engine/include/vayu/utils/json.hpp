@@ -76,6 +76,24 @@ const vayu::db::Run& run,
 const std::vector<vayu::db::Result>& results);
 
 /**
+ * Build the trace JSON stored in `results.trace_data` for a design-mode run.
+ *
+ * Mirrors what `store_result` (engine/src/http/routes/execution.cpp) persists:
+ * the outgoing request, the response headers/body (or the error envelope), and
+ * the per-phase timing breakdown.
+ *
+ * The request and response bodies are capped at @p max_body_bytes. When either
+ * is cut, its node gains `bodyTruncated: true` and `bodyBytes` (the original
+ * byte length) so a reader can tell a stored slice from the whole body. The cut
+ * is on a raw byte boundary - the body is an opaque string - so the caller must
+ * dump with `error_handler_t::replace` in case the slice splits a UTF-8
+ * sequence. See docs/engine/db-schema.md (results.trace_data).
+ */
+[[nodiscard]] nlohmann::json build_design_trace (const vayu::Request& request,
+const vayu::Response& response,
+size_t max_body_bytes);
+
+/**
  * @brief Deserialize a Request from JSON
  */
 [[nodiscard]] Result<Request> deserialize_request (const Json& json);

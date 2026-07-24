@@ -32,6 +32,7 @@
 #include <sqlite3.h>
 #include <sqlite_orm/sqlite_orm.h>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -532,6 +533,16 @@ void Database::init () {
     "wal_checkpoint=" + std::to_string (wal_checkpoint) + " pages, " +
     "busy_timeout=" + std::to_string (busy_timeout) + "ms, " +
     "synchronous=" + std::to_string (synchronous) + ")");
+
+    // Trim accumulated run history on startup (design-mode clicks and load runs
+    // are otherwise append-only). Best-effort: a prune failure must not block a
+    // successful startup.
+    try {
+        prune_runs_configured ();
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "Startup run pruning failed: " + std::string (e.what ()));
+    }
 }
 
 // ============================================================================
@@ -765,6 +776,80 @@ void Database::delete_run (const std::string& id) {
     impl_->storage.remove_all<Metric> (where (c (&Metric::run_id) == id));
     impl_->storage.remove_all<Result> (where (c (&Result::run_id) == id));
     impl_->storage.remove<Run> (id);
+}
+
+// Retention: drop runs beyond the count cap and/or older than the age cap.
+void Database::prune_runs (int max_runs, int max_age_days) {
+    // Both limits off - nothing to do (0 = unlimited for each).
+    if (max_runs <= 0 && max_age_days <= 0) {
+        return;
+    }
+
+    // 1. Select victim ids under the lock, then release it before deleting so
+    //    the (potentially large) delete loop batches its own locking below.
+    std::vector<std::string> victims;
+    {
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+
+        // Newest first, matching get_all_runs / the count cap's "most-recent N".
+        auto runs = impl_->storage.get_all<Run> (order_by (&Run::start_time).desc ());
+
+        const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                            .count ();
+        // 0 disables the age cap; guard the multiply against overflow.
+        const int64_t age_cutoff =
+        max_age_days > 0 ? now - static_cast<int64_t> (max_age_days) * 86'400'000LL : 0;
+
+        int kept = 0;
+        for (const auto& run : runs) {
+            // In-flight runs are never pruned and do not count toward the cap.
+            if (run.status == RunStatus::Running || run.status == RunStatus::Pending) {
+                continue;
+            }
+            const bool over_count = (max_runs > 0) && (kept >= max_runs);
+            const bool too_old = (max_age_days > 0) && (run.start_time < age_cutoff);
+            if (over_count || too_old) {
+                victims.push_back (run.id);
+            } else {
+                ++kept;
+            }
+        }
+    }
+
+    if (victims.empty ()) {
+        return;
+    }
+
+    // 2. Delete via the delete_run cascade, batched so a huge backlog does not
+    //    hold the DB mutex for seconds. The lock is re-taken per batch and
+    //    released between them, letting /health, SSE and the runs poll interleave.
+    constexpr size_t BATCH_SIZE = 100;
+    for (size_t start = 0; start < victims.size (); start += BATCH_SIZE) {
+        const size_t end = std::min (start + BATCH_SIZE, victims.size ());
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+        impl_->storage.transaction ([&] {
+            for (size_t i = start; i < end; ++i) {
+                const auto& id = victims[i];
+                impl_->storage.remove_all<Metric> (where (c (&Metric::run_id) == id));
+                impl_->storage.remove_all<Result> (where (c (&Result::run_id) == id));
+                impl_->storage.remove<Run> (id);
+            }
+            return true; // Commit
+        });
+    }
+
+    vayu::utils::log_info ("Pruned " + std::to_string (victims.size ()) +
+    " old run(s) (max_runs=" + std::to_string (max_runs) +
+    ", max_age_days=" + std::to_string (max_age_days) + ")");
+}
+
+void Database::prune_runs_configured () {
+    const int max_runs =
+    get_config_int ("maxRunsRetained", vayu::core::constants::database::MAX_RUNS_RETAINED);
+    const int max_age_days =
+    get_config_int ("runRetentionDays", vayu::core::constants::database::RUN_RETENTION_DAYS);
+    prune_runs (max_runs, max_age_days);
 }
 
 // ============================================================================
@@ -1275,6 +1360,36 @@ void Database::seed_default_config () {
     "1024",      // 1KB
     "104857600", // 100MB
     now });
+
+    upsert_config (ConfigEntry{ "maxTraceBodyBytes",
+    std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES), "integer",
+    "Maximum Stored Trace Body Size",
+    "Largest request/response body kept in a design run's stored trace. "
+    "Bodies over this size are truncated in the database (the response viewer "
+    "shows a notice and re-sending fetches the full body), so downloading one "
+    "huge response does not bloat storage forever. Default 1MB.",
+    "observability", std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES),
+    "1024",       // 1KB
+    "104857600",  // 100MB
+    now });
+
+    upsert_config (ConfigEntry{ "maxRunsRetained",
+    std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED), "integer",
+    "Maximum Runs Retained",
+    "Keep at most this many most-recent runs; older runs (and their metrics and "
+    "results) are pruned automatically at startup and after each run finishes. "
+    "In-progress runs are never pruned. Set to 0 to keep all runs. Default 200.",
+    "observability", std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED),
+    "0", "100000", now });
+
+    upsert_config (ConfigEntry{ "runRetentionDays",
+    std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS), "integer",
+    "Run Retention (Days)",
+    "Delete runs older than this many days (with their metrics and results) "
+    "automatically at startup and after each run finishes. In-progress runs are "
+    "never pruned. Set to 0 to keep runs regardless of age. Default 30.",
+    "observability", std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS),
+    "0", "3650", now });
 
     upsert_config (ConfigEntry{ "sseConnectTimeout",
     std::to_string (vayu::core::constants::sse::CONNECT_TIMEOUT_MS), "integer", "SSE Connection Timeout",

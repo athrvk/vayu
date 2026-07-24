@@ -188,6 +188,15 @@ export interface ResponseState {
 	bodyRaw?: string;
 	bodyType: "json" | "html" | "xml" | "text" | "binary";
 	size: number;
+	/**
+	 * Set when this response was restored from a stored run whose body the engine
+	 * truncated for storage (`maxTraceBodyBytes`). `body` then holds only the
+	 * stored slice, and `bodyBytes` is the original length. Drives the truncation
+	 * notice in the response viewer; re-sending fetches the full body.
+	 */
+	bodyTruncated?: boolean;
+	/** The response body's original byte length, present only when truncated. */
+	bodyBytes?: number;
 	time: number;
 	timing?: ResponseTiming;
 	/**
