@@ -17,6 +17,7 @@
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/http/pkce.hpp"
 #include "vayu/utils/encoding.hpp"
+#include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include <httplib.h>
@@ -66,7 +67,7 @@ std::map<std::string, std::string> parse_query (const std::string& query) {
 }
 
 std::string generate_attempt_id () {
-    return "oauth_" + std::to_string (now_ms ()) + "_" + pkce::random_token (6);
+    return vayu::utils::generate_id ("oauth_");
 }
 
 } // namespace
