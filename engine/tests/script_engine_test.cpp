@@ -567,6 +567,65 @@ TEST_F (ScriptEngineTest, EnvironmentSet) {
     EXPECT_EQ (env["new_var"].value, "new_value");
 }
 
+// Regression for #110: pm.*.set() on an existing key must preserve the
+// variable's secret flag, enabled flag and type - only the value changes. The
+// pre-fix whole-record replace silently un-masked a secret variable in the UI
+// and reset its type. Mutation-check: restore the Variable{value,false,true}
+// assignment in set_variable_preserving and the secret/type asserts here fail.
+TEST_F (ScriptEngineTest, SetPreservesSecretFlagAndType) {
+    env["token"] = Variable{ "old", true, true, "json" };
+
+    auto result = engine.execute_test (R"(
+        pm.environment.set("token", "rotated");
+        pm.test("dummy", function() {});
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_EQ (env["token"].value, "rotated"); // value updated
+    EXPECT_TRUE (env["token"].secret);         // secret preserved
+    EXPECT_TRUE (env["token"].enabled);        // enabled preserved
+    EXPECT_EQ (env["token"].type, "json");     // type preserved
+}
+
+// A brand-new key still gets the current defaults (not secret, enabled, string).
+TEST_F (ScriptEngineTest, SetNewKeyGetsDefaults) {
+    auto result = engine.execute_test (R"(
+        pm.environment.set("fresh", "value");
+        pm.test("dummy", function() {});
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_TRUE (env.count ("fresh"));
+    EXPECT_EQ (env["fresh"].value, "value");
+    EXPECT_FALSE (env["fresh"].secret);
+    EXPECT_TRUE (env["fresh"].enabled);
+    EXPECT_EQ (env["fresh"].type, "string");
+}
+
+// Guards that the collectionVariables setter is wired to the shared helper too
+// (all three setters must preserve, not just pm.environment).
+TEST_F (ScriptEngineTest, CollectionVariableSetPreservesSecretFlagAndType) {
+    Environment collVars;
+    collVars["cv_token"] = Variable{ "old", true, true, "json" };
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.response            = &response;
+    ctx.collectionVariables = &collVars;
+
+    auto result = engine.execute (R"(
+        pm.collectionVariables.set("cv_token", "rotated");
+    )",
+    ctx);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_EQ (collVars["cv_token"].value, "rotated");
+    EXPECT_TRUE (collVars["cv_token"].secret);
+    EXPECT_EQ (collVars["cv_token"].type, "json");
+}
+
 // ============================================================================
 // Console Output Tests
 // ============================================================================

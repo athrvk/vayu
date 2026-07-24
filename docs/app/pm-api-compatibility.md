@@ -26,7 +26,10 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Console             | `console.log/info/warn/error`                                                    |
 
 Variable writes persist to the scope they target (environment / collection / globals) and
-participate in [variable resolution](./variable-resolution.md).
+participate in [variable resolution](./variable-resolution.md). Calling `set(name, value)`
+on a variable that already exists updates only its value - the existing `secret` flag,
+`enabled` flag and `type` are preserved. A `set` on a new name creates it with the defaults
+(not secret, enabled, `type: "string"`).
 
 ### Assertion chains (`pm.expect` / `pm.response.to`)
 
