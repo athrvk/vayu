@@ -1378,7 +1378,9 @@ void Database::seed_default_config () {
     "Maximum Runs Retained",
     "Keep at most this many most-recent runs; older runs (and their metrics and "
     "results) are pruned automatically at startup and after each run finishes. "
-    "In-progress runs are never pruned. Set to 0 to keep all runs. Default 200.",
+    "Higher values - or 0 for unlimited - keep more history but grow the database "
+    "file on disk and slow down loading the run history. In-progress runs are "
+    "never pruned. Default 200.",
     "observability", std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED),
     "0", "100000", now });
 
@@ -1386,8 +1388,9 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS), "integer",
     "Run Retention (Days)",
     "Delete runs older than this many days (with their metrics and results) "
-    "automatically at startup and after each run finishes. In-progress runs are "
-    "never pruned. Set to 0 to keep runs regardless of age. Default 30.",
+    "automatically at startup and after each run finishes. Higher values - or 0 "
+    "to keep runs forever - retain more history at the cost of a larger database "
+    "file on disk. In-progress runs are never pruned. Default 30.",
     "observability", std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS),
     "0", "3650", now });
 
