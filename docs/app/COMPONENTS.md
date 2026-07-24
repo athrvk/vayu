@@ -270,6 +270,7 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 - `ResponseActions.tsx` - the copy/download pair
 - `ResponseHeadersPanel.tsx` - the Headers tab body
 - `tab-trigger.ts` - `RESPONSE_TAB_TRIGGER`, the underline-on-active class
+- `phase-tips.ts` - `PHASE_TIPS`, the five per-phase timing tooltips (DNS -> Connect -> TLS -> TTFB -> Download), shared so every renderer of those numbers reads one string
 
 > **Two shells, shared parts.** The request builder has its own richer
 > `components/ResponseViewer/` (console output, test results, cookies, timing,
