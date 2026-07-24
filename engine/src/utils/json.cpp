@@ -153,6 +153,34 @@ const std::vector<vayu::db::Result>& results) {
     json["result"] = out;
 }
 
+namespace {
+
+// Cap a single trace node's `body` string in place. Records bodyTruncated +
+// bodyBytes (the original length) when the body is cut so a reader can tell a
+// stored slice from the whole body.
+void cap_node_body (nlohmann::json& node, size_t max_body_bytes) {
+    if (!node.is_object () || !node.contains ("body") || !node["body"].is_string ()) {
+        return;
+    }
+    const std::string body = node["body"].get<std::string> ();
+    if (body.size () > max_body_bytes) {
+        node["body"]          = body.substr (0, max_body_bytes);
+        node["bodyTruncated"] = true;
+        node["bodyBytes"]     = body.size ();
+    }
+}
+
+} // namespace
+
+void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes) {
+    if (trace.contains ("request")) {
+        cap_node_body (trace["request"], max_body_bytes);
+    }
+    if (trace.contains ("response")) {
+        cap_node_body (trace["response"], max_body_bytes);
+    }
+}
+
 Json serialize (const vayu::db::Collection& c) {
     Json json;
     json["id"] = c.id;
@@ -414,17 +442,18 @@ Json serialize (const Response& response) {
         json["errorMessage"] = response.error_message;
     }
 
-    // Timing
+    // Timing. Same `*Ms` key convention as the stored trace (store_result /
+    // load_strategy), so the live response and a restored one need no renaming.
     Json timing;
-    timing["total"]      = response.timing.total_ms;
-    timing["wire"]       = response.timing.wire_ms;
-    timing["queueWait"]  = response.timing.queue_wait_ms;
-    timing["dns"]        = response.timing.dns_ms;
-    timing["connect"]    = response.timing.connect_ms;
-    timing["tls"]        = response.timing.tls_ms;
-    timing["firstByte"]  = response.timing.first_byte_ms;
-    timing["download"]   = response.timing.download_ms;
-    json["timing"]       = timing;
+    timing["totalMs"]     = response.timing.total_ms;
+    timing["wireMs"]      = response.timing.wire_ms;
+    timing["queueWaitMs"] = response.timing.queue_wait_ms;
+    timing["dnsMs"]       = response.timing.dns_ms;
+    timing["connectMs"]   = response.timing.connect_ms;
+    timing["tlsMs"]       = response.timing.tls_ms;
+    timing["firstByteMs"] = response.timing.first_byte_ms;
+    timing["downloadMs"]  = response.timing.download_ms;
+    json["timing"]        = timing;
 
     return json;
 }

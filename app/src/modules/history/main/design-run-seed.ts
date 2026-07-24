@@ -68,6 +68,14 @@ export interface DesignRunSeed {
 	 * mode. `undefined` when the run recorded no auth (mode "none" or absent).
 	 */
 	recordedAuthMode?: string;
+	/**
+	 * True when the engine truncated this run's stored request body
+	 * (`maxTraceBodyBytes`). The editable copy still shows the full body from the
+	 * config snapshot (which is not capped), but "Save this run to the request"
+	 * must not write a possibly-incomplete body back - see
+	 * {@link applyRunToRequest}. Read from `trace.request.bodyTruncated`.
+	 */
+	requestBodyTruncated?: boolean;
 }
 
 function toHeaderItems(headers: Record<string, string> | undefined) {
@@ -140,5 +148,7 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 		// "none" carries no information the absence would not, so normalise it away.
 		recordedAuthMode:
 			snapshot.auth?.mode && snapshot.auth.mode !== "none" ? snapshot.auth.mode : undefined,
+		// Only surfaces `true`; an untruncated run leaves it undefined.
+		requestBodyTruncated: trace?.request?.bodyTruncated ? true : undefined,
 	};
 }

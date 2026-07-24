@@ -12,6 +12,13 @@
  * paths share one implementation and it can be unit-tested in isolation.
  *
  * Note the field rename: domain apikey uses `in`, the editor uses `addTo`.
+ *
+ * Modes the editor cannot edit (digest/aws/ntlm) are *not* collapsed to "none".
+ * That collapse is the data-loss bug this file used to have: an imported digest
+ * request read as "No Auth", and the very next autosave wrote `{ mode: "none" }`
+ * back, destroying config the user was never shown. The mode is now carried
+ * through verbatim (see {@link AuthConfigState.nonEditable}) and round-trips
+ * unchanged - the AuthPanel surfaces it, mirroring the collection AuthTab.
  */
 
 import type { Collection, RequestAuth } from "@/types";
@@ -40,8 +47,13 @@ export function authToEditor(auth: RequestAuth): {
 			return { authType: "oauth2", authConfig: { oauth2: auth.config } };
 		case "inherit":
 			return { authType: "inherit", authConfig: {} };
+		case "digest":
+		case "aws":
+		case "ntlm":
+			// Stored but not editable: keep the whole config so the round-trip
+			// through the editor returns it unchanged instead of dropping it.
+			return { authType: auth.mode, authConfig: { nonEditable: auth } };
 		default:
-			// none, plus the stored-but-not-editable modes (digest/aws/ntlm)
 			return { authType: "none", authConfig: {} };
 	}
 }
@@ -68,6 +80,12 @@ export function editorToAuth(authType: AuthType, authConfig: AuthConfigState): R
 			return { mode: "oauth2", config: authConfig.oauth2 ?? defaultOAuth2Config() };
 		case "inherit":
 			return { mode: "inherit" };
+		case "digest":
+		case "aws":
+		case "ntlm":
+			// Hand back exactly what was loaded. The fallback only fires if the
+			// mode was set without its config, which the mappers never do.
+			return authConfig.nonEditable ?? { mode: authType, config: {} };
 		default:
 			return { mode: "none" };
 	}

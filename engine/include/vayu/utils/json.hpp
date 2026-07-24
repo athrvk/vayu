@@ -76,6 +76,21 @@ const vayu::db::Run& run,
 const std::vector<vayu::db::Result>& results);
 
 /**
+ * Cap the request/response body strings in a design-run trace, in place.
+ *
+ * Applied to the trace built by `build_result_trace`
+ * (engine/src/http/routes/execution.cpp) before it is persisted to
+ * `results.trace_data`, so one large exchange cannot bloat the DB forever. When
+ * a `body` exceeds @p max_body_bytes it is cut to that many bytes and its node
+ * gains `bodyTruncated: true` and `bodyBytes` (the original byte length) so a
+ * reader can tell a stored slice from the whole body. The cut is on a raw byte
+ * boundary - the body is an opaque string - so the caller must dump with
+ * `error_handler_t::replace` in case the slice splits a UTF-8 sequence. See
+ * docs/engine/db-schema.md (results.trace_data).
+ */
+void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes);
+
+/**
  * @brief Deserialize a Request from JSON
  */
 [[nodiscard]] Result<Request> deserialize_request (const Json& json);

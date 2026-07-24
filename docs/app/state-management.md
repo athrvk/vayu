@@ -304,7 +304,10 @@ UI-only: Search, filter (type/status), and sort (newest/oldest) for the history 
 }
 ```
 
-**Helper:** `filterRuns(runs, filters)` applies filters and sorting to server data.
+**Helper:** `filterRuns(runs, filters)` applies **type/status filtering and
+sorting** to the loaded pages. Search is **not** handled here: `searchQuery` is
+debounced into the server-side `q` param (see `useRunsQuery`) so it covers all
+runs, not just the pages loaded into the sidebar.
 
 **Key Methods:**
 ```typescript
@@ -388,13 +391,33 @@ Located in `app/src/services/queries/` (or `hooks/`), with types and cache inval
 
 #### Runs & History
 
-- **`useRunsQuery()`** - Fetch all runs
-- **`useRunQuery(runId)`** - Fetch single run
+- **`useRunsQuery(q?)`** - Run history as an **infinite query** over the
+  paginated `GET /runs` `{data, pagination}` envelope, newest first. Mirrors
+  `useRunTimeSeriesQuery`'s `getNextPageParam` on the same envelope shape;
+  `fetchNextPage` pages older runs in on demand. The 5s `refetchInterval` keeps
+  the loaded pages fresh - in the default (unpaged) state that is **only the
+  first page**, so new runs (which land on page 1 under `start_time DESC`)
+  appear without re-fetching older pages. `q` is the optional server-side search.
+  - **`flattenRunPages(data)`** - flatten the pages into a de-duped `Run[]`
+    (dedupe by id guards the momentary double-row a head insertion can cause
+    across two refetched pages). **`runsTotal(data)`** - the server's total from
+    the first page.
+- **`useAllRunsQuery()`** - Every run (all pages) as a flat list, for callers
+  that need the whole set rather than a polled page (Settings' count + clear).
+  Not polled.
+- **`useLastDesignRunQuery(requestId)`** - The most recent completed design run
+  for a request, in **one** filtered call
+  (`?requestId=&type=design&status=completed&limit=1`) - the server sorts
+  `start_time DESC`, so its single row is the answer. No client-side
+  download-and-filter.
+- **`useRunQuery(runId)`** - Fetch single run (full `configSnapshot`)
 - **`useRunReportQuery(runId)`** - Fetch final report for a run
 
 **Mutations:**
 - **`useStopRunMutation()`** - Stop a running load test
-- **`useDeleteRunMutation()`** - Delete a run
+- **`useDeleteRunMutation()`** - Delete a run. Patches every infinite-list cache
+  variant in place (drops the row, decrements the mirrored `total`) plus the
+  all-runs cache.
 
 #### Engine Health & Config
 
