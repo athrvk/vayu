@@ -15,6 +15,8 @@
 export { default as UnifiedResponseViewer } from "./UnifiedResponseViewer";
 export { default as ResponseBody } from "./ResponseBody";
 export { default as HeadersViewer, CompactHeadersViewer } from "./HeadersViewer";
+export { StatusCodeBadge } from "./StatusCodeBadge";
+export type { StatusCodeBadgeProps } from "./StatusCodeBadge";
 
 // Pieces shared by the two response viewers. They are two different shells -
 // seven tabs from live context, three from a stored run - so these are the
@@ -26,6 +28,9 @@ export { RESPONSE_TAB_TRIGGER } from "./tab-trigger";
 export type { ResponseStatusBarProps } from "./ResponseStatusBar";
 export type { ResponseActionsProps } from "./ResponseActions";
 export type { ResponseHeadersPanelProps } from "./ResponseHeadersPanel";
+
+// Per-phase timing tooltips, shared by every renderer of the five network phases.
+export { PHASE_TIPS } from "./phase-tips";
 
 // Utilities
 export {
