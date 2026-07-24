@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <sqlite3.h>
 
+#include <chrono>
 #include <filesystem>
 #include <set>
 #include <string>
@@ -410,6 +411,134 @@ TEST_F (DatabaseTest, RecreatesIndexesOnExistingDatabase) {
         EXPECT_TRUE (recreated.contains (expected))
         << "sync_schema did not recreate: " << expected;
     }
+}
+
+// ============================================================================
+// Run retention (prune_runs)
+// ============================================================================
+
+namespace {
+
+// A terminal run with an explicit id/start_time, plus one metric and one result
+// so prune's cascade delete is observable.
+void seed_run_with_children (Database& db,
+const std::string& id,
+int64_t start_time,
+vayu::RunStatus status = vayu::RunStatus::Completed) {
+    vayu::db::Run run;
+    run.id              = id;
+    run.type            = vayu::RunType::Design;
+    run.status          = status;
+    run.start_time      = start_time;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+
+    vayu::db::Metric m;
+    m.run_id    = id;
+    m.timestamp = start_time;
+    m.name      = vayu::MetricName::TotalRequests;
+    m.value     = 1.0;
+    db.add_metric (m);
+
+    vayu::db::Result r;
+    r.run_id      = id;
+    r.timestamp   = start_time;
+    r.status_code = 200;
+    r.status_text = "OK";
+    r.latency_ms  = 1.0;
+    r.trace_data  = "{}";
+    db.add_result (r);
+}
+
+std::set<std::string> run_ids (Database& db) {
+    std::set<std::string> ids;
+    for (const auto& r : db.get_all_runs ()) {
+        ids.insert (r.id);
+    }
+    return ids;
+}
+
+} // namespace
+
+TEST_F (DatabaseTest, PruneRunsByCountKeepsMostRecentAndCascades) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    // Five terminal runs, oldest first by start_time.
+    for (int i = 1; i <= 5; ++i) {
+        seed_run_with_children (db, "run_" + std::to_string (i), i * 1000);
+    }
+
+    // Keep the 2 most-recent; age cap disabled.
+    db.prune_runs (2, 0);
+
+    auto ids = run_ids (db);
+    EXPECT_EQ (ids.size (), 2u);
+    EXPECT_TRUE (ids.count ("run_5"));
+    EXPECT_TRUE (ids.count ("run_4"));
+
+    // The pruned runs took their metrics and results with them.
+    EXPECT_TRUE (db.get_metrics ("run_1").empty ());
+    EXPECT_TRUE (db.get_results ("run_1").empty ());
+    // The survivors kept theirs.
+    EXPECT_EQ (db.get_metrics ("run_5").size (), 1u);
+    EXPECT_EQ (db.get_results ("run_5").size (), 1u);
+}
+
+TEST_F (DatabaseTest, PruneRunsByAgeDeletesOldOnly) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                        .count ();
+    const int64_t day = 86'400'000LL;
+
+    seed_run_with_children (db, "fresh", now - 1 * day);
+    seed_run_with_children (db, "stale", now - 40 * day);
+
+    // Count cap disabled; drop anything older than 30 days.
+    db.prune_runs (0, 30);
+
+    auto ids = run_ids (db);
+    EXPECT_TRUE (ids.count ("fresh"));
+    EXPECT_FALSE (ids.count ("stale"));
+    EXPECT_TRUE (db.get_metrics ("stale").empty ());
+    EXPECT_TRUE (db.get_results ("stale").empty ());
+}
+
+TEST_F (DatabaseTest, PruneRunsNeverDeletesInFlightRuns) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    // A running and a pending run sit "beyond" the cap by start_time, but must
+    // survive; they also must not count toward the cap, so the one terminal run
+    // is kept even with max_runs = 1.
+    seed_run_with_children (db, "running", 1000, vayu::RunStatus::Running);
+    seed_run_with_children (db, "pending", 2000, vayu::RunStatus::Pending);
+    seed_run_with_children (db, "done", 3000, vayu::RunStatus::Completed);
+
+    db.prune_runs (1, 0);
+
+    auto ids = run_ids (db);
+    EXPECT_TRUE (ids.count ("running"));
+    EXPECT_TRUE (ids.count ("pending"));
+    EXPECT_TRUE (ids.count ("done"));
+    EXPECT_EQ (ids.size (), 3u);
+}
+
+TEST_F (DatabaseTest, PruneRunsZeroLimitsDisableEachCap) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    const int64_t old_time = 1000; // ancient by wall-clock, so an age cap would bite
+    for (int i = 1; i <= 4; ++i) {
+        seed_run_with_children (db, "run_" + std::to_string (i), old_time + i);
+    }
+
+    // Both caps disabled: nothing is pruned even though every run is ancient.
+    db.prune_runs (0, 0);
+    EXPECT_EQ (run_ids (db).size (), 4u);
 }
 
 } // namespace

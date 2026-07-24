@@ -280,10 +280,18 @@ export interface RunResultTrace {
 		url?: string;
 		headers?: Record<string, string>;
 		body?: string;
+		/** Set by `store_result` when the request body exceeded `maxTraceBodyBytes`. */
+		bodyTruncated?: boolean;
+		/** The request body's original byte length, present only when truncated. */
+		bodyBytes?: number;
 	};
 	response?: {
 		headers?: Record<string, string>;
 		body?: unknown;
+		/** Set by `store_result` when the response body exceeded `maxTraceBodyBytes`. */
+		bodyTruncated?: boolean;
+		/** The response body's original byte length, present only when truncated. */
+		bodyBytes?: number;
 	};
 }
 

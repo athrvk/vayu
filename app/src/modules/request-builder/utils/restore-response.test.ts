@@ -121,6 +121,44 @@ describe("responseFromRunResult", () => {
 		expect(restored?.body).toBe("");
 		expect(restored?.bodyType).toBe("text");
 	});
+
+	/**
+	 * The engine caps a stored trace body at `maxTraceBodyBytes`. When it does,
+	 * the trace carries `bodyTruncated` / `bodyBytes`, and the restore must pass
+	 * them through so ResponseViewer can show the truncation notice - and report
+	 * the *original* size, not the stored slice's length. Reverting the mapping
+	 * in `responseFromRunResult` fails this test.
+	 */
+	it("surfaces a truncated response body's flag and original size", () => {
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					request: { method: "GET", url: "https://api.example.test/big", headers: {} },
+					response: {
+						headers: { "content-type": "application/json" },
+						body: "STORED_SLICE",
+						bodyTruncated: true,
+						bodyBytes: 5_242_880,
+					},
+				},
+			})
+		);
+
+		expect(restored?.bodyTruncated).toBe(true);
+		expect(restored?.bodyBytes).toBe(5_242_880);
+		// `size` shows the original length, not the 12-char stored slice.
+		expect(restored?.size).toBe(5_242_880);
+		expect(restored?.body).toBe("STORED_SLICE");
+	});
+
+	it("leaves the truncation fields unset for an untruncated body", () => {
+		const restored = responseFromRunResult(sample());
+
+		expect(restored?.bodyTruncated).toBeUndefined();
+		expect(restored?.bodyBytes).toBeUndefined();
+		// Falls back to the stored body's own length.
+		expect(restored?.size).toBe('{"ok":true}'.length);
+	});
 });
 
 /**

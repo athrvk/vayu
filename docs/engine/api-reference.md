@@ -117,6 +117,17 @@ min/max):
 `default` are always strings; `type` is one of `integer`, `number`, `boolean`,
 or `string`.
 
+The Settings panel renders entries dynamically, so new keys appear without app
+changes. Three `observability` keys govern how much run history the engine keeps:
+
+| Key                 | Default   | Range        | Effect |
+|---------------------|-----------|--------------|--------|
+| `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
+| `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results) are pruned at startup and after each run finishes. `0` = unlimited. |
+| `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
+
+In-progress (`running`/`pending`) runs are never pruned.
+
 ### POST /config
 
 Update one or more configuration entries. Two body shapes are accepted:
@@ -999,6 +1010,13 @@ run.
   }
 }
 ```
+
+If the engine truncated a body for storage (over `maxTraceBodyBytes`), the
+affected `trace.request` and/or `trace.response` object carries
+`"bodyTruncated": true` and `"bodyBytes": <original length>`; its `body` then
+holds only the first `maxTraceBodyBytes` of the original. Absent when the body
+fit. Clients surface this as a "body truncated for storage" notice and re-send
+to fetch the whole body.
 
 ### POST /runs/:runId/stop
 

@@ -260,11 +260,34 @@ const vayu::Response& response) {
         db_result.latency_ms  = response.timing.total_ms;
         db_result.error       = has_error ? response.error_message : "";
 
-        db_result.trace_data = build_result_trace (request, response).dump ();
+        // Build the full-fidelity trace, then cap the request/response bodies at
+        // the configured limit so one large exchange cannot bloat the DB forever.
+        // When a body is cut, cap_trace_bodies records bodyTruncated/bodyBytes.
+        nlohmann::json trace = build_result_trace (request, response);
+        const auto max_trace_body_bytes = static_cast<size_t> (db.get_config_int (
+        "maxTraceBodyBytes",
+        static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
+        vayu::json::cap_trace_bodies (trace, max_trace_body_bytes);
+
+        // A capped body may split a UTF-8 sequence, and the raw response body can
+        // be arbitrary bytes - dump with error_handler_t::replace so a lone
+        // continuation byte becomes U+FFFD instead of throwing (import.cpp uses
+        // the same guard).
+        db_result.trace_data =
+        trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
         db.add_result (db_result);
 
         auto status = has_error ? vayu::RunStatus::Failed : vayu::RunStatus::Completed;
         db.update_run_status_with_retry (run_id, status);
+
+        // A design run reached a terminal status - trim the run history so
+        // per-request clicks do not accumulate forever (retention knobs, or 0
+        // to disable). Best-effort: a prune failure must not fail the request.
+        try {
+            db.prune_runs_configured ();
+        } catch (const std::exception& e) {
+            vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
+        }
 
     } catch (const std::exception& e) {
         vayu::utils::log_error ("Failed to save result: " + std::string (e.what ()));

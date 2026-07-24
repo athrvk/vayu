@@ -80,6 +80,25 @@ class Database {
     int64_t count_runs (const RunFilter& filter);
     void delete_run (const std::string& id);
 
+    /**
+     * @brief Prune old runs (and their cascaded metrics/results) by two limits.
+     *
+     * A run is a victim when it falls beyond @p max_runs most-recent runs
+     * (ordered by start_time) OR its start_time is older than @p max_age_days.
+     * Either limit is disabled by passing 0. Runs still `running`/`pending` are
+     * never pruned and never count toward @p max_runs. Deletion goes through the
+     * `delete_run` cascade in start_time-batched transactions, releasing the DB
+     * mutex between batches so a large backlog cannot stall other endpoints.
+     */
+    void prune_runs (int max_runs, int max_age_days);
+
+    /**
+     * @brief Prune runs using the configured `maxRunsRetained` /
+     * `runRetentionDays` knobs. Called at startup and after a run reaches a
+     * terminal status.
+     */
+    void prune_runs_configured ();
+
     // Metrics
     void add_metric (const Metric& metric);
     void add_metrics_batch (const std::vector<Metric>& metrics); // Transactional batch insert
