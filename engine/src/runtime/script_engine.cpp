@@ -937,6 +937,20 @@ JSValue js_pm_environment_get (JSContext* ctx, JSValueConst this_val, int argc, 
     return JS_UNDEFINED;
 }
 
+// Update a variable's value while preserving an existing key's secret, enabled
+// and type fields; a brand-new key gets the current defaults. Shared by the
+// environment/globals/collectionVariables pm.*.set() bindings so a script that
+// re-sets an existing (e.g. secret) variable does not silently strip its flag
+// or reset its type.
+void set_variable_preserving (Environment& map, const std::string& key, std::string value) {
+    auto it = map.find (key);
+    if (it != map.end ()) {
+        it->second.value = std::move (value); // preserve secret, enabled, type
+    } else {
+        map[key] = Variable{ std::move (value), false, true }; // new var: current defaults
+    }
+}
+
 JSValue js_pm_environment_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 2) {
         return JS_UNDEFINED;
@@ -950,7 +964,7 @@ JSValue js_pm_environment_set (JSContext* ctx, JSValueConst this_val, int argc, 
     std::string key   = js_to_string (ctx, argv[0]);
     std::string value = js_to_string (ctx, argv[1]);
 
-    (*data->environment)[key] = Variable{ value, false, true };
+    set_variable_preserving (*data->environment, key, std::move (value));
 
     return JS_UNDEFINED;
 }
@@ -998,7 +1012,7 @@ JSValue js_pm_globals_set (JSContext* ctx, JSValueConst this_val, int argc, JSVa
     std::string key   = js_to_string (ctx, argv[0]);
     std::string value = js_to_string (ctx, argv[1]);
 
-    (*data->globals)[key] = Variable{ value, false, true };
+    set_variable_preserving (*data->globals, key, std::move (value));
 
     return JS_UNDEFINED;
 }
@@ -1046,7 +1060,7 @@ JSValue js_pm_collectionVariables_set (JSContext* ctx, JSValueConst this_val, in
     std::string key   = js_to_string (ctx, argv[0]);
     std::string value = js_to_string (ctx, argv[1]);
 
-    (*data->collectionVariables)[key] = Variable{ value, false, true };
+    set_variable_preserving (*data->collectionVariables, key, std::move (value));
 
     return JS_UNDEFINED;
 }
