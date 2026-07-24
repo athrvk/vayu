@@ -252,6 +252,7 @@ add_library(vayu_core STATIC
     src/utils/json.cpp
     src/utils/logger.cpp
     src/utils/metrics_helper.cpp
+    src/utils/id.cpp
     src/db/database.cpp
     src/core/load_strategy.cpp
     src/core/run_manager.cpp
@@ -403,6 +404,7 @@ if(VAYU_BUILD_TESTS)
         tests/pkce_test.cpp
         tests/debug_redact_test.cpp
         tests/oauth_authorize_test.cpp
+        tests/id_test.cpp
         src/http/routes/import.cpp
         src/http/routes/config.cpp
         src/http/routes/requests.cpp
