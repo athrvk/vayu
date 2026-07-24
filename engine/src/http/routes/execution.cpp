@@ -24,6 +24,7 @@
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/runtime/script_engine.hpp"
+#include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -310,7 +311,7 @@ void register_execution_routes (RouteContext& ctx) {
         vayu::http::read_script (json, "postRequestScripts", "postRequestScript");
 
         // Create Run record
-        run_id = "run_" + std::to_string (now_ms ());
+        run_id = vayu::utils::generate_id ("run_");
         vayu::db::Run run;
         run.id              = run_id;
         run.type            = vayu::RunType::Design;
@@ -480,7 +481,7 @@ void register_execution_routes (RouteContext& ctx) {
         }
 
         // Create run record
-        std::string run_id = "run_" + std::to_string (now_ms ());
+        std::string run_id = vayu::utils::generate_id ("run_");
         vayu::db::Run run;
         run.id              = run_id;
         run.type            = vayu::RunType::Load;
