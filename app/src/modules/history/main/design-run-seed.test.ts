@@ -135,8 +135,7 @@ describe("seedFromRun", () => {
 		it("takes auth from the live request, the only place it exists", () => {
 			const { request } = seedFromRun(run(), liveRequest);
 
-			expect(request.authType).toBe("bearer");
-			expect(request.authConfig?.token).toBe("FRESH-TOKEN");
+			expect(request.auth).toEqual({ mode: "bearer", token: "FRESH-TOKEN" });
 		});
 
 		it("returns the mode the run actually sent, separate from the live auth", () => {
@@ -170,10 +169,10 @@ describe("seedFromRun", () => {
 			expect(auth?.value).toBe("Bearer SECRET");
 		});
 
-		it("sets authType to none, because auth is already inside those headers", () => {
+		it("sets auth to none, because auth is already inside those headers", () => {
 			const { request } = seedFromRun(run(), null);
 
-			expect(request.authType).toBe("none");
+			expect(request.auth).toEqual({ mode: "none" });
 		});
 	});
 

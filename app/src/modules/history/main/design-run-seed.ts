@@ -19,9 +19,8 @@
  *                     sanitize_config_snapshot keeps only the auth mode
  */
 
-import type { Run, Request, ScriptPart, KeyValueEntry } from "@/types";
+import type { Run, Request, RequestAuth, ScriptPart, KeyValueEntry } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
-import { authToEditor } from "@/modules/request-builder/utils/auth-mapping";
 import { toKeyValueItems } from "@/modules/request-builder/utils/key-value";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
@@ -112,9 +111,7 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 	const headers = liveRequest
 		? toHeaderItems(snapshot.headers)
 		: toHeaderItems(trace?.request?.headers);
-	const auth = liveRequest
-		? authToEditor(liveRequest.auth)
-		: { authType: "none" as const, authConfig: {} };
+	const auth: RequestAuth = liveRequest ? liveRequest.auth : { mode: "none" };
 
 	const body = snapshot.body;
 	const bodyMode = (body?.mode ?? "none") as RequestState["bodyMode"];
@@ -134,8 +131,7 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			urlEncoded: toKeyValueItems(
 				bodyMode === "x-www-form-urlencoded" ? (body?.fields ?? []) : []
 			),
-			authType: auth.authType,
-			authConfig: auth.authConfig,
+			auth,
 			preRequestScript: ownScript(snapshot.preRequestScripts),
 			testScript: ownScript(snapshot.postRequestScripts),
 			followRedirects: snapshot.followRedirects ?? DEFAULT_FOLLOW_REDIRECTS,

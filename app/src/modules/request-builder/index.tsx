@@ -37,12 +37,7 @@ import { Button } from "@/components/ui";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
-import {
-	authToEditor,
-	editorToAuth,
-	resolveInheritedAuth,
-	authToRecord,
-} from "./utils/auth-mapping";
+import { resolveAuthForSend } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries, toFlatHeaders } from "./utils/key-value";
 import { generateUUID } from "./utils/id";
 import { scriptParts } from "./utils/script-parts";
@@ -109,9 +104,9 @@ export default function RequestBuilder() {
 		const req = pendingLoadTestRequest;
 		if (!req) return null;
 		let auth: RequestAuth | undefined;
-		if (req.authType === "oauth2") {
-			auth = editorToAuth("oauth2", req.authConfig);
-		} else if (req.authType === "inherit") {
+		if (req.auth.mode === "oauth2") {
+			auth = req.auth;
+		} else if (req.auth.mode === "inherit") {
 			for (let i = collectionAncestors.length - 1; i >= 0; i--) {
 				if (collectionAncestors[i].auth.mode !== "none") {
 					auth = collectionAncestors[i].auth;
@@ -146,10 +141,6 @@ export default function RequestBuilder() {
 		const urlEncodedFields =
 			"fields" in body && body.mode === "x-www-form-urlencoded" ? body.fields : [];
 
-		const auth = fetchedRequest.auth;
-		// Map the domain auth (discriminated by mode) onto the flat editor state.
-		const { authType, authConfig } = authToEditor(auth);
-
 		return {
 			id: fetchedRequest.id,
 			name: fetchedRequest.name,
@@ -162,8 +153,7 @@ export default function RequestBuilder() {
 			body: rawBody,
 			formData: toKeyValueItems(formFields),
 			urlEncoded: toKeyValueItems(urlEncodedFields),
-			authType,
-			authConfig,
+			auth: fetchedRequest.auth,
 			preRequestScript: fetchedRequest.preRequestScript,
 			testScript: fetchedRequest.postRequestScript,
 			followRedirects: fetchedRequest.followRedirects,
@@ -198,18 +188,10 @@ export default function RequestBuilder() {
 				const execBody = buildExecBody(request, resolveString);
 
 				// Resolve auth - walk collection chain for inherit, resolve variables for concrete
-				let execAuth: Record<string, unknown> | undefined;
-				if (request.authType === "inherit") {
-					execAuth = resolveInheritedAuth(collectionAncestors);
-					if (execAuth) execAuth = resolveObject(execAuth) as Record<string, unknown>;
-				} else if (request.authType !== "none") {
-					const concreteAuth = editorToAuth(
-						request.authType,
-						request.authConfig
-					) as Exclude<RequestAuth, { mode: "inherit" }>;
-					const raw = authToRecord(concreteAuth);
-					execAuth = raw ? (resolveObject(raw) as Record<string, unknown>) : undefined;
-				}
+				const rawAuth = resolveAuthForSend(request.auth, collectionAncestors);
+				const execAuth = rawAuth
+					? (resolveObject(rawAuth) as Record<string, unknown>)
+					: undefined;
 
 				// Script parts: the collection chain root to leaf, then the
 				// request's own. The engine joins them and runs the result as
@@ -320,8 +302,7 @@ export default function RequestBuilder() {
 				bodyPayload = { mode: "none" };
 			}
 
-			// Build RequestAuth from UI state
-			const authPayload: RequestAuth = editorToAuth(request.authType, request.authConfig);
+			const authPayload: RequestAuth = request.auth;
 
 			await updateRequestMutation.mutateAsync({
 				id: fetchedRequest.id,
@@ -426,21 +407,13 @@ export default function RequestBuilder() {
 				}
 
 				// Resolve auth for load test (same inherit logic as regular execute)
-				let loadTestAuth: Record<string, unknown> | undefined;
-				if (pendingLoadTestRequest.authType === "inherit") {
-					loadTestAuth = resolveInheritedAuth(collectionAncestors);
-					if (loadTestAuth)
-						loadTestAuth = resolveObject(loadTestAuth) as Record<string, unknown>;
-				} else if (pendingLoadTestRequest.authType !== "none") {
-					const concreteAuth = editorToAuth(
-						pendingLoadTestRequest.authType,
-						pendingLoadTestRequest.authConfig
-					) as Exclude<RequestAuth, { mode: "inherit" }>;
-					const raw = authToRecord(concreteAuth);
-					loadTestAuth = raw
-						? (resolveObject(raw) as Record<string, unknown>)
-						: undefined;
-				}
+				const rawLoadTestAuth = resolveAuthForSend(
+					pendingLoadTestRequest.auth,
+					collectionAncestors
+				);
+				const loadTestAuth = rawLoadTestAuth
+					? (resolveObject(rawLoadTestAuth) as Record<string, unknown>)
+					: undefined;
 
 				// Convert LoadTestConfig to StartLoadTestRequest (flat structure)
 				const apiRequest: StartLoadTestRequest = {

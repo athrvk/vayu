@@ -66,7 +66,7 @@ These remain **client-side, once per engine client**:
 
 - **Renderer:** `app/src/hooks/useVariableResolver.ts` + inline in
   `app/src/modules/request-builder/index.tsx` (execute + load paths) +
-  `app/src/modules/request-builder/utils/auth-mapping.ts`.
+  `app/src/modules/request-builder/utils/auth-resolution.ts`.
 - **MCP:** `app/electron/mcp/resolve.ts` - a faithful port of the renderer
   pipeline (added when MCP became a second engine client; see PR / `mcp.md`).
 

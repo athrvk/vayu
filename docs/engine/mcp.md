@@ -185,7 +185,7 @@ clients to agree.
 
 Because MCP talks to the engine directly, it must do that preparation itself.
 `resolve.ts` is the main-process port of the renderer pipeline
-(`useVariableResolver.ts` + `request-builder/index.tsx` + `auth-mapping.ts` +
+(`useVariableResolver.ts` + `request-builder/index.tsx` + `auth-resolution.ts` +
 `utils/script-parts.ts`) and is applied so a tool call behaves like the app
 clicking Send:
 

@@ -46,11 +46,7 @@ import { useSessionStore, useToastStore } from "@/stores";
 import { Button, Badge } from "@/components/ui";
 import { ErrorState } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
-import {
-	editorToAuth,
-	resolveInheritedAuth,
-	authToRecord,
-} from "@/modules/request-builder/utils/auth-mapping";
+import { resolveAuthForSend } from "@/modules/request-builder/utils/auth-resolution";
 import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
 import {
 	buildExecBody,
@@ -60,7 +56,7 @@ import { generateUUID } from "@/modules/request-builder/utils/id";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { seedFromRun } from "./design-run-seed";
 import SaveRunToRequestDialog from "./SaveRunToRequestDialog";
-import type { Run, RequestAuth, ScriptPart } from "@/types";
+import type { Run, ScriptPart } from "@/types";
 
 interface DesignRunViewProps {
 	run: Run;
@@ -81,7 +77,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	 *
 	 * Three outcomes, and all three have to be kept apart, because `seedFromRun`
 	 * treats a falsy `liveRequest` as "the request was deleted" - it seeds the
-	 * recorded wire headers, `Authorization` included, and `authType: "none"`:
+	 * recorded wire headers, `Authorization` included, and `auth: { mode: "none" }`:
 	 *
 	 * - **still loading.** `data` is falsy but the answer is not in yet. Seeding
 	 *   now bakes in the deleted-request seed, and the provider never corrects
@@ -187,18 +183,10 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 				 * put the recorded `Authorization` into the headers above, so the
 				 * replay goes out exactly as it ran.
 				 */
-				let execAuth: Record<string, unknown> | undefined;
-				if (request.authType === "inherit") {
-					execAuth = resolveInheritedAuth(collectionAncestors);
-					if (execAuth) execAuth = resolveObject(execAuth) as Record<string, unknown>;
-				} else if (request.authType !== "none") {
-					const concreteAuth = editorToAuth(
-						request.authType,
-						request.authConfig
-					) as Exclude<RequestAuth, { mode: "inherit" }>;
-					const raw = authToRecord(concreteAuth);
-					execAuth = raw ? (resolveObject(raw) as Record<string, unknown>) : undefined;
-				}
+				const rawAuth = resolveAuthForSend(request.auth, collectionAncestors);
+				const execAuth = rawAuth
+					? (resolveObject(rawAuth) as Record<string, unknown>)
+					: undefined;
 
 				const preScriptParts = replayParts(
 					seed.collectionPreScripts,
