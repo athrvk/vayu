@@ -94,7 +94,14 @@ export default function ResponseViewer() {
 	// from some restored traces, and `consoleLogs`/`testResults` only when a
 	// script produced them - so the tab set shrinks as you switch responses.
 	const hasTiming = !!response.timing;
-	const hasConsole = !!response.consoleLogs && response.consoleLogs.length > 0;
+	const hasConsoleLogs = !!response.consoleLogs && response.consoleLogs.length > 0;
+	// A failing pre/post-request script must surface even when it threw before
+	// logging anything - a typo or ReferenceError produces `preScriptError` with
+	// empty `consoleLogs`, so gating the Console tab on logs alone hid the error
+	// behind a normal-looking 200 (issue #111). Show the tab when either exists;
+	// `ConsoleOutput` already renders the error cards above the (empty) log area.
+	const hasScriptError = !!response.preScriptError || !!response.postScriptError;
+	const hasConsole = hasConsoleLogs || hasScriptError;
 	const hasTests = !!response.testResults && response.testResults.length > 0;
 	const hasRaw = !!response.rawRequest;
 
@@ -199,9 +206,17 @@ export default function ResponseViewer() {
 							>
 								<Terminal className="w-4 h-4 mr-1.5" />
 								Console
-								<Badge variant="secondary" className="ml-1.5 text-xs">
-									{response.consoleLogs!.length}
-								</Badge>
+								{hasConsoleLogs ? (
+									<Badge variant="secondary" className="ml-1.5 text-xs">
+										{response.consoleLogs!.length}
+									</Badge>
+								) : (
+									// Script error with no logs: flag the failure instead
+									// of a misleading "0" log count (issue #111).
+									<Badge variant="destructive" className="ml-1.5 text-xs">
+										Error
+									</Badge>
+								)}
 							</TabsTrigger>
 						)}
 						{hasTests && (

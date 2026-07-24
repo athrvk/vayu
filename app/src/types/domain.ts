@@ -267,6 +267,16 @@ export interface RunResultTrace {
 	message?: string;
 	/** The design-mode writer's failure text (`store_result`, execution.cpp). */
 	error_message?: string;
+	/**
+	 * Per-test validation failures from a load run's `validate_scripts`
+	 * (`run_manager.cpp`), stored on the summary result row's trace. Each entry
+	 * is a `"<test name>: <assertion>"` line (or a `Script error:` / `Exception:`
+	 * line when the whole script threw). Written by the engine but rendered
+	 * nowhere before issue #111.
+	 */
+	failures?: string[];
+	totalFailed?: number;
+	totalPassed?: number;
 	headers?: Record<string, string>;
 	body?: string;
 	// Design-mode traces (`POST /request`) nest the exchange instead of
