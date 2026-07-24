@@ -69,6 +69,7 @@ const DEFAULT_OPTIONS = {
 	autoIndent: "full",
 	autoClosingBrackets: "always",
 	autoClosingQuotes: "always",
+	cursorSmoothCaretAnimation: "on",
 } satisfies EditorOptions;
 
 export interface CodeEditorProps {
