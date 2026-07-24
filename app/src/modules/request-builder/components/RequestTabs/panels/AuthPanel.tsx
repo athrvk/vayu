@@ -27,7 +27,9 @@ import {
 	SecretInput,
 } from "@/components/ui";
 import { OAuth2Form, type OAuth2TextInput } from "@/components/shared/OAuth2Form";
+import { Callout } from "@/components/shared";
 import { defaultOAuth2Config } from "@/services/oauth/defaults";
+import { UNEDITABLE_AUTH_LABELS, isUneditableAuthMode } from "@/constants/auth-modes";
 import { useRequestBuilderContext } from "../../../context";
 import VariableInput from "../../../shared/VariableInput";
 import type { AuthType, AuthConfigState } from "../../../types";
@@ -86,14 +88,28 @@ export default function AuthPanel() {
 		updateField("authConfig", { ...authConfig, ...updates });
 	};
 
+	// digest/aws/ntlm are stored but not editable here (the engine can't resolve
+	// them). Name the real mode and warn instead of showing the "No Auth" empty
+	// state, which is what the picker would fall back to - the same treatment the
+	// collection AuthTab gives them. Selecting any type below replaces it.
+	const uneditableLabel = isUneditableAuthMode(authType)
+		? UNEDITABLE_AUTH_LABELS[authType]
+		: null;
+
 	return (
 		<div className="space-y-6">
 			{/* Auth Type Selector */}
 			<div className="space-y-2">
 				<Label>Authentication Type</Label>
-				<Select value={authType} onValueChange={handleTypeChange}>
+				<Select value={uneditableLabel ? "" : authType} onValueChange={handleTypeChange}>
 					<SelectTrigger className="w-auto">
-						<SelectValue />
+						<SelectValue
+							placeholder={
+								uneditableLabel
+									? `${uneditableLabel} (not editable here)`
+									: undefined
+							}
+						/>
 					</SelectTrigger>
 					<SelectContent>
 						{AUTH_TYPES.map((type) => {
@@ -113,6 +129,14 @@ export default function AuthPanel() {
 
 			{/* Inherit resolution */}
 			{authType === "inherit" && <AuthInheritBanner collectionId={request.collectionId} />}
+
+			{/* Stored-but-not-editable mode (imported digest/aws/ntlm) */}
+			{uneditableLabel && (
+				<Callout severity="warning" title={`${uneditableLabel} auth is set`}>
+					It was imported and can't be edited here yet - it is still sent with this
+					request. Picking a type above replaces it.
+				</Callout>
+			)}
 
 			{/* Auth Configuration */}
 			{authType === "none" && (

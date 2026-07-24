@@ -18,6 +18,7 @@ import type {
 	HttpMethod,
 	KeyValueEntry,
 	OAuth2Config,
+	RequestAuth,
 	ResolvedVariable,
 	ScriptPart,
 	VariableScope,
@@ -60,7 +61,23 @@ export interface TabInfo {
 // Auth Types
 // ============================================================================
 
-export type AuthType = "none" | "inherit" | "bearer" | "basic" | "api-key" | "oauth2";
+/**
+ * The editor's auth discriminant. `api-key` renames the domain's `apikey`; the
+ * rest match. `digest` / `aws` / `ntlm` are *not* offered in the picker - the
+ * engine cannot resolve them - but a request can be stored with one (imports
+ * produce them), so the editor carries the mode to surface it rather than
+ * collapsing it to "none" and rewriting it away on the next autosave.
+ */
+export type AuthType =
+	| "none"
+	| "inherit"
+	| "bearer"
+	| "basic"
+	| "api-key"
+	| "oauth2"
+	| "digest"
+	| "aws"
+	| "ntlm";
 
 /**
  * Flat auth fields backing the request builder's Auth tab. Which fields are
@@ -76,6 +93,13 @@ export interface AuthConfigState {
 	value?: string;
 	addTo?: "header" | "query";
 	oauth2?: OAuth2Config;
+	/**
+	 * Verbatim domain config for a stored-but-not-editable mode
+	 * (digest/aws/ntlm). No field of it is editable here, so it is kept whole
+	 * and round-tripped by {@link authToEditor}/{@link editorToAuth} rather than
+	 * flattened - autosave must return exactly what it loaded.
+	 */
+	nonEditable?: Extract<RequestAuth, { mode: "digest" | "aws" | "ntlm" }>;
 }
 
 export interface AuthConfig {
