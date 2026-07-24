@@ -60,8 +60,20 @@ void validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& 
     db.add_metric ({ 0, context->run_id, now_ms (),
     vayu::MetricName::TestsSampled, static_cast<double> (samples.size ()), "" });
 
-    // Create script engine for validation
-    vayu::runtime::ScriptEngine engine;
+    // Create script engine for validation, bounded by the same timeout/limits
+    // the execute path reads so an infinite-loop test script cannot spin the
+    // run's worker thread forever.
+    vayu::runtime::ScriptConfig script_config;
+    script_config.timeout_ms     = static_cast<uint64_t> (db.get_config_int (
+    "scriptTimeout", vayu::core::constants::script_engine::TIMEOUT_MS));
+    script_config.memory_limit   = static_cast<size_t> (db.get_config_int (
+    "scriptMemoryLimit", vayu::core::constants::script_engine::MEMORY_LIMIT));
+    script_config.stack_size     = static_cast<size_t> (db.get_config_int (
+    "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
+    script_config.enable_console = db.get_config_bool (
+    "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
+
+    vayu::runtime::ScriptEngine engine (script_config);
     vayu::Environment env;
 
     // Build a dummy request for script context (HTTP request fields are at root level)

@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <limits>
 #include <mutex>
 #include <sstream>
@@ -1097,6 +1098,25 @@ void setup_pm_object (JSContext* ctx) {
 // ScriptEngine Implementation
 // ============================================================================
 
+// Per-runtime deadline state for the interrupt handler. One instance is owned by
+// each pooled JSRuntime (stored as its runtime opaque) and refreshed before every
+// execution. QuickJS runtimes are single-threaded, and each pooled context pair is
+// used by one thread at a time, so no synchronization is needed here.
+struct RuntimeState {
+    bool enabled = false; // false => no wall-clock limit (timeout_ms == 0)
+    std::chrono::steady_clock::time_point deadline{};
+};
+
+// QuickJS calls this periodically during evaluation. Returning non-zero aborts
+// the current JS_Eval with an InternalError, which the execute() exception path
+// turns into result.error_message.
+extern "C" int script_interrupt_handler (JSRuntime* /*rt*/, void* opaque) {
+    auto* state = static_cast<RuntimeState*> (opaque);
+    if (!state || !state->enabled)
+        return 0;
+    return std::chrono::steady_clock::now () > state->deadline ? 1 : 0;
+}
+
 class ScriptEngine::Impl {
     public:
     ScriptConfig config;
@@ -1112,8 +1132,10 @@ class ScriptEngine::Impl {
     ~Impl () {
         std::lock_guard<std::mutex> lock (pool_mutex);
         for (auto& pair : context_pool) {
+            auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (pair.first));
             JS_FreeContext (pair.second);
             JS_FreeRuntime (pair.first);
+            delete rt_state;
         }
         context_pool.clear ();
     }
@@ -1133,6 +1155,13 @@ class ScriptEngine::Impl {
 
         JS_SetMemoryLimit (rt, config.memory_limit);
         JS_SetMaxStackSize (rt, config.stack_size);
+
+        // Install a wall-clock deadline interrupt so infinite-loop scripts
+        // cannot hang the thread. The RuntimeState is owned by this runtime
+        // (freed in ~Impl) and refreshed before each execute().
+        auto* rt_state = new RuntimeState ();
+        JS_SetRuntimeOpaque (rt, rt_state);
+        JS_SetInterruptHandler (rt, &script_interrupt_handler, rt_state);
 
         // Register Expectation class
         if (expect_class_id == 0) {
@@ -1180,6 +1209,16 @@ class ScriptEngine::Impl {
             return result;
         }
 
+        // Refresh the per-execution deadline. A pooled context reused for the next
+        // script gets a fresh budget; timeout_ms == 0 disables the wall-clock limit.
+        if (auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt))) {
+            rt_state->enabled = config.timeout_ms != 0;
+            if (rt_state->enabled) {
+                rt_state->deadline = std::chrono::steady_clock::now () +
+                std::chrono::milliseconds (config.timeout_ms);
+            }
+        }
+
         // Set up context data
         ContextData ctx_data;
         ctx_data.request             = ctx.request;
@@ -1207,9 +1246,18 @@ class ScriptEngine::Impl {
         wrapped_script.size (), "<script>", JS_EVAL_TYPE_GLOBAL);
 
         if (JS_IsException (eval_result)) {
-            JSValue exc          = JS_GetException (js_ctx);
-            result.success       = false;
-            result.error_message = js_to_string (js_ctx, exc);
+            JSValue exc    = JS_GetException (js_ctx);
+            result.success = false;
+            // If the deadline interrupt fired, report a clear timeout message
+            // rather than QuickJS's raw "interrupted" InternalError.
+            auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt));
+            if (rt_state && rt_state->enabled &&
+            std::chrono::steady_clock::now () > rt_state->deadline) {
+                result.error_message = "Script execution timed out after " +
+                std::to_string (config.timeout_ms) + "ms";
+            } else {
+                result.error_message = js_to_string (js_ctx, exc);
+            }
             JS_FreeValue (js_ctx, exc);
         } else {
             result.success = true;
