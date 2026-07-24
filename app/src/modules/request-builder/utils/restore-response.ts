@@ -26,13 +26,13 @@ import { buildRawRequest } from "@/components/shared/response-viewer";
 export type RunResultSample = NonNullable<RunReport["results"]>[number];
 
 /**
- * Rebuild the timing breakdown from a stored trace.
- *
- * The engine writes each phase only when it is non-zero (a reused connection
- * has no `connectMs`/`tlsMs`), so a missing phase means zero, not unknown.
- * `wire`/`queueWait` are deliberately absent: the design-mode writer records
- * the five phases and `latency_ms` only, and the Timing tab already treats
- * both as optional.
+ * Rebuild the timing breakdown from a stored trace. The stored trace and the
+ * live `/execute` response share one key convention (`dnsMs`…`downloadMs`), so
+ * no renaming happens here - only defaulting: the engine writes each phase
+ * only when it is non-zero (a reused connection has no `connectMs`/`tlsMs`),
+ * so a missing phase means zero, not unknown. `wireMs`/`queueWaitMs` are
+ * deliberately absent: the design-mode writer records the five phases and
+ * `latency_ms` only, and the Timing tab already treats both as optional.
  *
  * Returns `undefined` when the trace carries no phase at all, so the caller
  * does not surface a Timing tab that would render an all-zero timeline.
@@ -45,12 +45,12 @@ export function timingFromTrace(
 	if (!phases.some((v) => typeof v === "number")) return undefined;
 
 	return {
-		total: latencyMs ?? trace.totalMs ?? 0,
-		dns: trace.dnsMs ?? 0,
-		connect: trace.connectMs ?? 0,
-		tls: trace.tlsMs ?? 0,
-		firstByte: trace.firstByteMs ?? 0,
-		download: trace.downloadMs ?? 0,
+		totalMs: latencyMs ?? trace.totalMs ?? 0,
+		dnsMs: trace.dnsMs ?? 0,
+		connectMs: trace.connectMs ?? 0,
+		tlsMs: trace.tlsMs ?? 0,
+		firstByteMs: trace.firstByteMs ?? 0,
+		downloadMs: trace.downloadMs ?? 0,
 	};
 }
 

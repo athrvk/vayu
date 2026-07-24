@@ -57,12 +57,12 @@ describe("responseFromRunResult", () => {
 		// The regression: this was undefined, which hides the whole Timing tab.
 		expect(restored?.timing).toBeDefined();
 		expect(restored?.timing).toEqual({
-			total: 254.5,
-			dns: 4.2,
-			connect: 21.7,
-			tls: 63.1,
-			firstByte: 160.4,
-			download: 5.1,
+			totalMs: 254.5,
+			dnsMs: 4.2,
+			connectMs: 21.7,
+			tlsMs: 63.1,
+			firstByteMs: 160.4,
+			downloadMs: 5.1,
 		});
 	});
 
@@ -161,7 +161,7 @@ describe("a run that failed before reaching the server", () => {
 		const restored = responseFromRunResult(failed);
 
 		expect(restored?.rawRequest).toContain("GET / HTTP/1.1");
-		expect(restored?.timing?.dns).toBe(12);
+		expect(restored?.timing?.dnsMs).toBe(12);
 	});
 
 	it("falls back to the result's own error text", () => {
@@ -183,20 +183,20 @@ describe("timingFromTrace", () => {
 		const timing = timingFromTrace({ dnsMs: 0.4, firstByteMs: 88.2, downloadMs: 1.1 }, 90.3);
 
 		expect(timing).toEqual({
-			total: 90.3,
-			dns: 0.4,
-			connect: 0,
-			tls: 0,
-			firstByte: 88.2,
-			download: 1.1,
+			totalMs: 90.3,
+			dnsMs: 0.4,
+			connectMs: 0,
+			tlsMs: 0,
+			firstByteMs: 88.2,
+			downloadMs: 1.1,
 		});
 	});
 
-	it("leaves wire and queueWait unset - the design-mode writer omits them", () => {
+	it("leaves wireMs and queueWaitMs unset - the design-mode writer omits them", () => {
 		const timing = timingFromTrace({ firstByteMs: 12 }, 14);
 
-		expect(timing).not.toHaveProperty("wire");
-		expect(timing).not.toHaveProperty("queueWait");
+		expect(timing).not.toHaveProperty("wireMs");
+		expect(timing).not.toHaveProperty("queueWaitMs");
 	});
 
 	it("is undefined when no phase was stored, so no empty Timing tab appears", () => {
@@ -205,6 +205,6 @@ describe("timingFromTrace", () => {
 	});
 
 	it("falls back to the trace total when the result carries no latency", () => {
-		expect(timingFromTrace({ totalMs: 77, firstByteMs: 70 }, undefined)?.total).toBe(77);
+		expect(timingFromTrace({ totalMs: 77, firstByteMs: 70 }, undefined)?.totalMs).toBe(77);
 	});
 });

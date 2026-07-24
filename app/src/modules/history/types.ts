@@ -39,7 +39,7 @@ export interface LoadTestDetailProps {
  * One sampled request/response outcome from a run report. Derived from the
  * domain type (`RunReport.results[]`) rather than restated, so a field added to
  * the engine's trace surfaces here without a hand-edit. The element type carries
- * the shared {@link RunResultTrace}, whose phase fields use the `*Ms` dialect.
+ * the shared {@link RunResultTrace} (`*Ms` phase fields, like all timing).
  */
 export type SampleResult = NonNullable<RunReport["results"]>[number];
 

@@ -63,35 +63,35 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 		{
 			key: "dns",
 			label: "DNS",
-			value: timing.dns,
+			value: timing.dnsMs,
 			color: "hsl(var(--chart-2))",
 			tip: "Hostname → IP resolution. Usually a few ms once cached; >50ms suggests slow DNS or a fresh lookup.",
 		},
 		{
 			key: "connect",
 			label: "Connect",
-			value: timing.connect,
+			value: timing.connectMs,
 			color: "hsl(var(--chart-4))",
 			tip: "TCP three-way handshake. Zero on connection reuse (HTTP keep-alive / HTTP/2).",
 		},
 		{
 			key: "tls",
 			label: "TLS",
-			value: timing.tls,
+			value: timing.tlsMs,
 			color: "hsl(var(--chart-5))",
 			tip: "SSL/TLS handshake (HTTPS only). Zero for plain HTTP and on resumed connections.",
 		},
 		{
 			key: "ttfb",
 			label: "TTFB",
-			value: timing.firstByte,
+			value: timing.firstByteMs,
 			color: "hsl(var(--primary))",
 			tip: "Time to first byte - server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
 		},
 		{
 			key: "download",
 			label: "Download",
-			value: timing.download,
+			value: timing.downloadMs,
 			color: "hsl(var(--success))",
 			tip: "Response body transfer time. Large for big payloads or slow links; near-zero for small JSON.",
 		},
@@ -156,23 +156,23 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 
 			{/* Summary: wire vs generator-side overhead vs perceived total. */}
 			<div className="mt-3.5 pt-3 border-t border-dashed border-border flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px]">
-				{timing.wire !== undefined && (
+				{timing.wireMs !== undefined && (
 					<TimingStat
 						label="Wire"
-						value={timing.wire}
+						value={timing.wireMs}
 						tip="libcurl transfer time - DNS + connect + TLS + send + receive."
 					/>
 				)}
-				{timing.queueWait !== undefined && (
+				{timing.queueWaitMs !== undefined && (
 					<TimingStat
 						label="Queue"
-						value={timing.queueWait}
+						value={timing.queueWaitMs}
 						tip="Generator-side overhead (perceived − wire). Near-zero for a single request; grows under load."
 					/>
 				)}
 				<TimingStat
 					label="Total"
-					value={timing.total}
+					value={timing.totalMs}
 					tip="Perceived latency: submit → completion. What the response header shows."
 					emphasized
 				/>

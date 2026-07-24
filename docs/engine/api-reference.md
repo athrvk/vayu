@@ -623,23 +623,25 @@ the request was configured with.
 **Response:**
 ```json
 {
-  "runId": "run_1234567890",
-  "statusCode": 200,
+  "status": 200,
   "statusText": "OK",
   "headers": {
     "content-type": "application/json"
   },
-  "body": "{\"id\":1,\"name\":\"John\"}",
+  "requestHeaders": { "accept": "*/*" },
+  "rawRequest": "GET /users HTTP/1.1\n...",
+  "body": { "id": 1, "name": "John" },
+  "bodyRaw": "{\"id\":1,\"name\":\"John\"}",
   "bodySize": 20,
   "timing": {
-    "total": 245.5,
-    "wire": 245.1,
-    "queueWait": 0.4,
-    "dns": 5.2,
-    "connect": 12.3,
-    "tls": 45.1,
-    "firstByte": 180.2,
-    "download": 2.7
+    "totalMs": 245.5,
+    "wireMs": 245.1,
+    "queueWaitMs": 0.4,
+    "dnsMs": 5.2,
+    "connectMs": 12.3,
+    "tlsMs": 45.1,
+    "firstByteMs": 180.2,
+    "downloadMs": 2.7
   },
   "testResults": [
     {
@@ -651,16 +653,15 @@ the request was configured with.
 }
 ```
 
-**Two timing dialects, on purpose.** The synchronous `/execute` response above
-names the phases **without** the `Ms` suffix (`firstByte`, `dns`, `download`,
-…; `serialize(Response)` in `engine/src/utils/json.cpp`). The **stored** trace
-for the same exchange - written to the run's `results` row by `store_result`
-(design mode) and `load_strategy` (load mode), and returned inside
-`GET /runs/:runId/report` `results[].trace` - names them **with** the suffix
-(`firstByteMs`, `dnsMs`, `downloadMs`, …). The renderer consumes the first
-directly (`ResponseTiming`) and adapts the second at one boundary when it
-restores a design run (`restore-response.ts`). The two dialects are the wire
-contract; do not "fix" one to match the other without updating that adapter.
+**One timing convention.** The `timing` keys above are the same `*Ms` names the
+stored trace uses (`store_result` / `load_strategy` → `results[].trace` in
+`GET /runs/:runId/report`), so a live response and a restored one need no
+renaming. The two shapes still differ in *coverage*, not naming: the live
+response always carries all eight fields, while the stored trace omits
+zero-valued phases and never records `wireMs`/`queueWaitMs` (see
+[db-schema.md](db-schema.md)). Earlier releases named the live response's keys
+without the suffix (`firstByte`, `dns`, …); consumers of the raw `/execute`
+body written against that dialect must switch to the `*Ms` names.
 
 ### POST /runs
 
