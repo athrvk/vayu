@@ -59,6 +59,29 @@ function run(overrides: Partial<Run> = {}): Run {
 	} as Run;
 }
 
+/** A run whose stored request body the engine truncated (over maxTraceBodyBytes). */
+function truncatedRun(): Run {
+	return run({
+		result: {
+			timestamp: 1_750_000_000_000,
+			statusCode: 200,
+			statusText: "OK",
+			latencyMs: 12,
+			trace: {
+				request: {
+					method: "POST",
+					url: "https://api.example.test/users?page=2",
+					headers: { "X-Plain": "visible" },
+					body: "SLICE",
+					bodyTruncated: true,
+					bodyBytes: 5_242_880,
+				},
+				response: { headers: {}, body: "{}" },
+			},
+		},
+	});
+}
+
 /** The saved request as it reads today - deliberately different from the run. */
 function liveRequest(overrides: Partial<Request> = {}): Request {
 	return {
@@ -118,6 +141,30 @@ describe("applyRunToRequest", () => {
 		// live request holds, which is the one thing that cannot be recovered.
 		expect(patch).not.toHaveProperty("auth");
 		expect(Object.keys(patch)).not.toContain("auth");
+	});
+
+	it("never writes a truncated request body back to the saved request", () => {
+		// The lock: the engine caps a stored trace body at maxTraceBodyBytes, so a
+		// truncated run holds only a slice. Writing that slice onto the saved
+		// request would silently corrupt it, so the body must be left off the
+		// patch entirely - the same treatment auth gets. Reverting the guard in
+		// applyRunToRequest makes this fail.
+		const live = liveRequest();
+		const patch = applyRunToRequest(seedFromRun(truncatedRun(), live), live);
+
+		expect(patch).not.toHaveProperty("body");
+		expect(patch).not.toHaveProperty("bodyType");
+		// The rest of the request still saves.
+		expect(patch.method).toBe("POST");
+		expect(patch.url).toBe("https://api.example.test/users?page=2");
+	});
+
+	it("writes the body normally when the run was not truncated", () => {
+		const live = liveRequest();
+		const patch = applyRunToRequest(seedFromRun(run(), live), live);
+
+		expect(patch.body).toEqual({ mode: "json", content: '{"a":1}' });
+		expect(patch.bodyType).toBe("json");
 	});
 
 	it("omits scripts entirely for a run that has only the old glued string", () => {
@@ -283,6 +330,17 @@ describe("buildChangeset", () => {
 		const written = (patch.headers ?? []).map((h) => h.key.toLowerCase());
 		expect(written).not.toContain("x-vayu-version");
 		expect(written).not.toContain("x-request-id");
+	});
+
+	it("shows Body as a kept row with a reason when the run was truncated", () => {
+		const live = liveRequest();
+		const body = buildChangeset(seedFromRun(truncatedRun(), live), live).find(
+			(i) => i.field === "Body"
+		);
+
+		expect(body).toBeDefined();
+		expect(body!.state).toBe("kept");
+		expect(body!.note).toMatch(/truncat|too large|incomplete/i);
 	});
 
 	it("shows only the kept rows when the request already matches the run", () => {

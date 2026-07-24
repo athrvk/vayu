@@ -50,27 +50,19 @@ export const useHistoryStore = create<HistoryUIState>((set) => ({
 }));
 
 /**
- * Helper function to filter and sort runs
- * Use with TanStack Query data: filterRuns(runsQuery.data ?? [], store)
+ * Filter (by type/status) and sort a run list. Search is *not* handled here:
+ * it moved server-side to the `q` param so it covers all runs, not just the
+ * pages loaded into the sidebar (see `useRunsQuery`). Type/status/sort stay
+ * client-side, applied over the currently loaded pages.
+ * Use with the flattened infinite-query data.
  */
 export function filterRuns(
 	runs: Run[],
-	filters: Pick<HistoryUIState, "searchQuery" | "filterType" | "filterStatus" | "sortBy">
+	filters: Pick<HistoryUIState, "filterType" | "filterStatus" | "sortBy">
 ): Run[] {
-	const { searchQuery, filterType, filterStatus, sortBy } = filters;
+	const { filterType, filterStatus, sortBy } = filters;
 
 	let filtered = runs;
-
-	// Apply search filter
-	if (searchQuery.trim()) {
-		const query = searchQuery.toLowerCase();
-		filtered = filtered.filter(
-			(run) =>
-				run.id.toLowerCase().includes(query) ||
-				(run.requestId && run.requestId.toLowerCase().includes(query)) ||
-				run.configSnapshot?.url?.toLowerCase().includes(query)
-		);
-	}
 
 	// Apply type filter
 	if (filterType !== "all") {

@@ -38,3 +38,16 @@ export const ENGINE_MAX_DEFAULT_TIMEOUT_MS = 300_000;
 
 /** Page size when fetching time-series stats for a run. */
 export const STATS_PAGE_LIMIT = 5000;
+
+/**
+ * Page size for the paginated `GET /runs` history list. The engine caps a page
+ * at 500; the history sidebar polls only the first page (newest runs land on
+ * page 1 under start_time DESC) and pages older runs in on demand.
+ */
+export const RUNS_PAGE_LIMIT = 50;
+
+/**
+ * Page size the MCP `list_runs` tool requests - a single bounded first page,
+ * so an agent gets recent runs without downloading unbounded history.
+ */
+export const MCP_RUNS_PAGE_LIMIT = 100;

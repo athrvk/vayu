@@ -72,3 +72,25 @@ TEST (RunRoute, DesignRunWithNoResultsStaysQuiet) {
 
     EXPECT_FALSE (json.contains ("result"));
 }
+
+// A truncated design-run trace round-trips: the bodyTruncated / bodyBytes keys
+// store_result writes survive parsing and reach GET /runs/:id's result.trace, so
+// the app readers can surface the notice.
+TEST (RunRoute, DesignRunPassesTruncationFieldsThrough) {
+    auto run    = make_run ("run_trunc", vayu::RunType::Design);
+    auto result = make_result ("run_trunc");
+    result.trace_data =
+    R"({"request":{"method":"POST","url":"http://x/","body":"REQ",)"
+    R"("bodyTruncated":true,"bodyBytes":2048},)"
+    R"("response":{"headers":{},"body":"RES","bodyTruncated":true,"bodyBytes":4096}})";
+
+    auto json = vayu::json::serialize (run);
+    vayu::json::attach_design_result (json, run, { result });
+
+    ASSERT_TRUE (json.contains ("result"));
+    const auto& trace = json["result"]["trace"];
+    EXPECT_TRUE (trace["response"]["bodyTruncated"].get<bool> ());
+    EXPECT_EQ (trace["response"]["bodyBytes"].get<int> (), 4096);
+    EXPECT_TRUE (trace["request"]["bodyTruncated"].get<bool> ());
+    EXPECT_EQ (trace["request"]["bodyBytes"].get<int> (), 2048);
+}

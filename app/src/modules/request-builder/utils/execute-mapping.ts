@@ -124,7 +124,7 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		body,
 		bodyRaw,
 		bodyType: bodyTypeFromContentType(result.headers),
-		time: result.timing?.total || 0,
+		time: result.timing?.totalMs || 0,
 		timing: result.timing,
 		size: result.bodySize || 0,
 		errorCode: result.errorCode,

@@ -42,6 +42,47 @@ int resolve_request_timeout_ms (const nlohmann::json& json, int configured_defau
     return configured_default;
 }
 
+// Build the trace_data JSON a design run persists for its single exchange.
+// Non-static (tested by execution_trace_test.cpp): the stored trace is a
+// contract - restore-response.ts rebuilds the response pane from it after a
+// restart, so what lands here decides what a restored tab can show.
+//
+// Timing carries all eight keys, unconditionally, the same `*Ms` set the live
+// /execute response serializes (json.cpp) and the load-mode success writer
+// stores (load_strategy.cpp). A skipped phase (reused connection, plain HTTP)
+// is stored as 0, exactly as the live response reports it. Rows written before
+// this change omitted zero phases and the three totals, so readers must keep
+// defaulting missing keys.
+nlohmann::json build_result_trace (const vayu::Request& request,
+const vayu::Response& response) {
+    nlohmann::json trace;
+    trace["request"] = { { "method", to_string (request.method) },
+        { "url", request.url }, { "headers", request.headers } };
+    if (!request.body.content.empty ()) {
+        trace["request"]["body"] = request.body.content;
+    }
+
+    if (!response.has_error ()) {
+        trace["response"] = { { "headers", response.headers },
+            { "body", response.body } };
+    } else {
+        trace["error_type"]    = to_string (response.error_code);
+        trace["error_message"] = response.error_message;
+    }
+
+    const auto& timing   = response.timing;
+    trace["totalMs"]     = timing.total_ms;
+    trace["wireMs"]      = timing.wire_ms;
+    trace["queueWaitMs"] = timing.queue_wait_ms;
+    trace["dnsMs"]       = timing.dns_ms;
+    trace["connectMs"]   = timing.connect_ms;
+    trace["tlsMs"]       = timing.tls_ms;
+    trace["firstByteMs"] = timing.first_byte_ms;
+    trace["downloadMs"]  = timing.download_ms;
+
+    return trace;
+}
+
 namespace {
 
 // Helper function to parse variables JSON string to Environment
@@ -219,40 +260,34 @@ const vayu::Response& response) {
         db_result.latency_ms  = response.timing.total_ms;
         db_result.error       = has_error ? response.error_message : "";
 
-        // Build trace data
-        nlohmann::json trace;
-        trace["request"] = { { "method", to_string (request.method) },
-            { "url", request.url }, { "headers", request.headers } };
-        if (!request.body.content.empty ()) {
-            trace["request"]["body"] = request.body.content;
-        }
+        // Build the full-fidelity trace, then cap the request/response bodies at
+        // the configured limit so one large exchange cannot bloat the DB forever.
+        // When a body is cut, cap_trace_bodies records bodyTruncated/bodyBytes.
+        nlohmann::json trace = build_result_trace (request, response);
+        const auto max_trace_body_bytes = static_cast<size_t> (db.get_config_int (
+        "maxTraceBodyBytes",
+        static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
+        vayu::json::cap_trace_bodies (trace, max_trace_body_bytes);
 
-        if (!has_error) {
-            trace["response"] = { { "headers", response.headers },
-                { "body", response.body } };
-        } else {
-            trace["error_type"]    = to_string (response.error_code);
-            trace["error_message"] = response.error_message;
-        }
-
-        // Timing information
-        const auto& timing = response.timing;
-        if (timing.dns_ms > 0)
-            trace["dnsMs"] = timing.dns_ms;
-        if (timing.connect_ms > 0)
-            trace["connectMs"] = timing.connect_ms;
-        if (timing.tls_ms > 0)
-            trace["tlsMs"] = timing.tls_ms;
-        if (timing.first_byte_ms > 0)
-            trace["firstByteMs"] = timing.first_byte_ms;
-        if (timing.download_ms > 0)
-            trace["downloadMs"] = timing.download_ms;
-
-        db_result.trace_data = trace.dump ();
+        // A capped body may split a UTF-8 sequence, and the raw response body can
+        // be arbitrary bytes - dump with error_handler_t::replace so a lone
+        // continuation byte becomes U+FFFD instead of throwing (import.cpp uses
+        // the same guard).
+        db_result.trace_data =
+        trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
         db.add_result (db_result);
 
         auto status = has_error ? vayu::RunStatus::Failed : vayu::RunStatus::Completed;
         db.update_run_status_with_retry (run_id, status);
+
+        // A design run reached a terminal status - trim the run history so
+        // per-request clicks do not accumulate forever (retention knobs, or 0
+        // to disable). Best-effort: a prune failure must not fail the request.
+        try {
+            db.prune_runs_configured ();
+        } catch (const std::exception& e) {
+            vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
+        }
 
     } catch (const std::exception& e) {
         vayu::utils::log_error ("Failed to save result: " + std::string (e.what ()));
