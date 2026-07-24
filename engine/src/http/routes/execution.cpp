@@ -235,18 +235,21 @@ const vayu::Response& response) {
             trace["error_message"] = response.error_message;
         }
 
-        // Timing information
-        const auto& timing = response.timing;
-        if (timing.dns_ms > 0)
-            trace["dnsMs"] = timing.dns_ms;
-        if (timing.connect_ms > 0)
-            trace["connectMs"] = timing.connect_ms;
-        if (timing.tls_ms > 0)
-            trace["tlsMs"] = timing.tls_ms;
-        if (timing.first_byte_ms > 0)
-            trace["firstByteMs"] = timing.first_byte_ms;
-        if (timing.download_ms > 0)
-            trace["downloadMs"] = timing.download_ms;
+        // Timing information - all eight keys, unconditionally, so the stored
+        // trace matches the live /execute response and the load-mode success
+        // writer (load_strategy.cpp) key for key. A skipped phase (reused
+        // connection, plain HTTP) is stored as 0, exactly as the live response
+        // reports it. Rows written before this change omitted zero phases and
+        // the three totals, so readers must keep defaulting missing keys.
+        const auto& timing   = response.timing;
+        trace["totalMs"]     = timing.total_ms;
+        trace["wireMs"]      = timing.wire_ms;
+        trace["queueWaitMs"] = timing.queue_wait_ms;
+        trace["dnsMs"]       = timing.dns_ms;
+        trace["connectMs"]   = timing.connect_ms;
+        trace["tlsMs"]       = timing.tls_ms;
+        trace["firstByteMs"] = timing.first_byte_ms;
+        trace["downloadMs"]  = timing.download_ms;
 
         db_result.trace_data = trace.dump ();
         db.add_result (db_result);

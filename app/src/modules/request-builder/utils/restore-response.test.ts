@@ -178,8 +178,8 @@ describe("a run that failed before reaching the server", () => {
 });
 
 describe("timingFromTrace", () => {
-	it("treats an omitted phase as zero - the engine only writes non-zero phases", () => {
-		// Reused connection: no TCP handshake, no TLS, so neither key is written.
+	it("treats an omitted phase as zero - older engines only wrote non-zero phases", () => {
+		// Reused connection: no TCP handshake, no TLS, so neither key was written.
 		const timing = timingFromTrace({ dnsMs: 0.4, firstByteMs: 88.2, downloadMs: 1.1 }, 90.3);
 
 		expect(timing).toEqual({
@@ -192,7 +192,28 @@ describe("timingFromTrace", () => {
 		});
 	});
 
-	it("leaves wireMs and queueWaitMs unset - the design-mode writer omits them", () => {
+	it("passes wireMs and queueWaitMs through when the trace stored them", () => {
+		// The current design-mode writer stores all eight keys (store_result,
+		// execution.cpp), so a restored Timing tab shows Wire and Queue too.
+		const timing = timingFromTrace(
+			{
+				totalMs: 90.3,
+				wireMs: 89.9,
+				queueWaitMs: 0.4,
+				dnsMs: 0.4,
+				connectMs: 0,
+				tlsMs: 0,
+				firstByteMs: 88.2,
+				downloadMs: 1.1,
+			},
+			90.3
+		);
+
+		expect(timing?.wireMs).toBe(89.9);
+		expect(timing?.queueWaitMs).toBe(0.4);
+	});
+
+	it("leaves wireMs and queueWaitMs unset on rows older engines wrote without them", () => {
 		const timing = timingFromTrace({ firstByteMs: 12 }, 14);
 
 		expect(timing).not.toHaveProperty("wireMs");

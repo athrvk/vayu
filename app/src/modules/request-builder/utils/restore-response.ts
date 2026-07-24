@@ -28,11 +28,12 @@ export type RunResultSample = NonNullable<RunReport["results"]>[number];
 /**
  * Rebuild the timing breakdown from a stored trace. The stored trace and the
  * live `/execute` response share one key convention (`dnsMs`…`downloadMs`), so
- * no renaming happens here - only defaulting: the engine writes each phase
- * only when it is non-zero (a reused connection has no `connectMs`/`tlsMs`),
- * so a missing phase means zero, not unknown. `wireMs`/`queueWaitMs` are
- * deliberately absent: the design-mode writer records the five phases and
- * `latency_ms` only, and the Timing tab already treats both as optional.
+ * no renaming happens here - only defaulting for rows written by older
+ * engines, which omitted zero-valued phases (a reused connection stored no
+ * `connectMs`/`tlsMs`) and never stored `wireMs`/`queueWaitMs`. The current
+ * writer stores all eight keys, so on fresh rows the restored Timing tab shows
+ * exactly what the live one did, Wire and Queue included; on old rows a
+ * missing phase means zero and Wire/Queue stay absent.
  *
  * Returns `undefined` when the trace carries no phase at all, so the caller
  * does not surface a Timing tab that would render an all-zero timeline.
@@ -46,6 +47,8 @@ export function timingFromTrace(
 
 	return {
 		totalMs: latencyMs ?? trace.totalMs ?? 0,
+		...(typeof trace.wireMs === "number" && { wireMs: trace.wireMs }),
+		...(typeof trace.queueWaitMs === "number" && { queueWaitMs: trace.queueWaitMs }),
 		dnsMs: trace.dnsMs ?? 0,
 		connectMs: trace.connectMs ?? 0,
 		tlsMs: trace.tlsMs ?? 0,

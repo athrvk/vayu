@@ -655,12 +655,13 @@ the request was configured with.
 
 **One timing convention.** The `timing` keys above are the same `*Ms` names the
 stored trace uses (`store_result` / `load_strategy` → `results[].trace` in
-`GET /runs/:runId/report`), so a live response and a restored one need no
-renaming. The two shapes still differ in *coverage*, not naming: the live
-response always carries all eight fields, while the stored trace omits
-zero-valued phases and never records `wireMs`/`queueWaitMs` (see
-[db-schema.md](db-schema.md)). Earlier releases named the live response's keys
-without the suffix (`firstByte`, `dns`, …); consumers of the raw `/execute`
+`GET /runs/:runId/report`), and the design-mode writer stores all eight keys
+unconditionally - so a live response and one restored from the stored trace
+carry the same fields with the same names, Wire/Queue included. Traces written
+by earlier releases differ two ways, and readers must tolerate both: stored
+rows omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`
+(see [db-schema.md](db-schema.md)), and the live response named its keys
+without the suffix (`firstByte`, `dns`, …) - consumers of the raw `/execute`
 body written against that dialect must switch to the `*Ms` names.
 
 ### POST /runs

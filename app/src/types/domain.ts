@@ -252,6 +252,10 @@ export interface RunConfigSnapshot {
  */
 export interface RunResultTrace {
 	totalMs?: number;
+	/** libcurl's transfer time; `queueWaitMs` is generator-side overhead. Both
+	 * writers store them now, but rows persisted by older engines lack them. */
+	wireMs?: number;
+	queueWaitMs?: number;
 	dnsMs?: number;
 	connectMs?: number;
 	tlsMs?: number;
@@ -340,8 +344,8 @@ export interface LoadTestConfig {
  * The field names are the engine's wire keys - the same `*Ms` convention the
  * stored trace ({@link RunResultTrace}) uses, so a live response and one
  * restored from a stored design run agree without renaming. `wireMs` /
- * `queueWaitMs` are the two the design-mode writer omits, so they are absent
- * on a restored response; every consumer must treat both as optional.
+ * `queueWaitMs` stay optional because traces stored by older engines omitted
+ * them (current ones store all eight); consumers must treat both as optional.
  */
 export interface ResponseTiming {
 	totalMs: number;
