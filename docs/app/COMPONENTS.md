@@ -128,7 +128,7 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 | `context/RequestBuilderProvider.tsx`, `context/RequestBuilderContext.tsx` | Local request-editing state + the execute/save/load-test callbacks |
 | `components/RequestBuilderLayout.tsx` | Resizable vertical layout composing UrlBar / RequestTabs / ResponseViewer |
 | `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` - method dropdown, URL input (variable highlighting), Send + Load Test buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
-| `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel`, `InheritedScriptsNotice`, `SettingsPanel`. `AuthPanel` supports None / Bearer / Basic / API Key / **OAuth 2.0** (via the shared [`OAuth2Form`](#shared-oauth-20-form)). `PreScriptPanel` and `TestScriptPanel` each render `InheritedScriptsNotice` (the script equivalent of `AuthInheritBanner`) to name which ancestor collections contribute a pre-request or test script; it accepts an optional `entries` prop so a stored-run view can supply parts directly instead of reading the live chain. `SettingsPanel` holds the per-request redirect policy (**Follow redirects** + **Maximum redirects**); the tab strip badges it via `isRedirectPolicyNonDefault` (in `utils/request-state`) only when the request departs from the engine defaults |
+| `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel`, `InheritedScriptsNotice`, `SettingsPanel`. `AuthPanel` owns the mode picker (it is the only host that offers `inherit`) and delegates every field group to the shared [`AuthFields`](#shared-auth-fields), injecting a variable-aware `VariableInput`; OAuth 2.0 reaches [`OAuth2Form`](#shared-oauth-20-form) through it. `PreScriptPanel` and `TestScriptPanel` each render `InheritedScriptsNotice` (the script equivalent of `AuthInheritBanner`) to name which ancestor collections contribute a pre-request or test script; it accepts an optional `entries` prop so a stored-run view can supply parts directly instead of reading the live chain. `SettingsPanel` holds the per-request redirect policy (**Follow redirects** + **Maximum redirects**); the tab strip badges it via `isRedirectPolicyNonDefault` (in `utils/request-state`) only when the request departs from the engine defaults |
 | `components/ResponseViewer/` | `index`, `ResponseCookies`, `ResponseTimingTab`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` (status bar, actions and the Headers tab now come from `shared/response-viewer/`) |
 | `components/RequestDescription.tsx` | Editable request description |
 | `components/LoadTestConfigDialog.tsx` | Load-test configuration dialog (mode, duration, RPS, concurrency, …). Renders `OAuth2LoadTestGuard` when the request's effective auth is OAuth 2.0 |
@@ -172,7 +172,7 @@ Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows n
 | Tab | Component | Notes |
 |---|---|---|
 | Info | `InfoTab.tsx` | Name, description, request count |
-| Auth | `AuthTab.tsx` | Collection-level auth (concrete; never `inherit`) |
+| Auth | `AuthTab.tsx` | Collection-level auth (concrete; never `inherit`). Mode picker + hints only - the fields are the shared [`AuthFields`](#shared-auth-fields) |
 | Pre-request | `ScriptTab.tsx` (`kind="pre"`) | Collection pre-request script |
 | Post-request | `ScriptTab.tsx` (`kind="post"`) | Collection post-request script |
 | Variables | `VariablesTab.tsx` | Collection-scoped variables (count badge) |
@@ -289,6 +289,34 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 >
 > Adding a genuinely shared piece: put it here and consume it from both. Adding
 > something only one shell needs: leave it in that shell.
+
+## Shared Auth Fields (`components/shared/AuthFields/`)
+
+The one editor for a request's or collection's **concrete** auth, consumed by the
+request builder's `AuthPanel` and the collection `AuthTab`. Both hosts hold the
+domain `RequestAuth` shape, so the component reads `mode` and `in` directly -
+there is no editor-local vocabulary and nothing to translate at the boundary.
+
+- `AuthFields.tsx` - the None / Bearer / Basic / API Key field groups, and
+  oauth2 delegated to [`OAuth2Form`](#shared-oauth-20-form). Takes an **injected
+  `TextInput`** (the same contract `OAuth2Form` defines) so the builder supplies
+  a variable-aware token editor while the collection editor takes the default
+  plain input, which accents `{{var}}`. `noAuthDescription` is host-supplied: a
+  request sends nothing, a collection hands nothing down, and those are different
+  statements under one empty state.
+- `types.ts` - `AuthFieldsProps`, `AuthTextInput`, `EditableAuth`.
+
+What stays with each host: the mode picker (only the request offers `inherit`),
+the collection's per-mode inheritance hints, and the "stored but not editable"
+warning for `digest`/`aws`/`ntlm` - modes the engine cannot resolve, which both
+editors surface rather than collapse to "none". `AuthFields` renders nothing for
+them and carries their config through untouched.
+
+Mode names and the editable list live in `constants/auth-modes.ts`
+(`AUTH_MODE_LABELS`, `EDITABLE_AUTH_MODES`), which every auth surface reads -
+including `AuthInheritBanner`. Four places used to name the modes independently
+and had drifted; `auth-modes.test.ts` and `AuthFields/auth-editor-parity.test.tsx`
+hold that line, the latter by rendering both hosts and comparing what they show.
 
 ## Shared OAuth 2.0 Form (`components/shared/OAuth2Form/`)
 

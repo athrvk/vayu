@@ -318,7 +318,7 @@ Preparing a request before it executes - resolving `{{variables}}` and resolving
 is therefore **duplicated** across the two engine clients:
 
 - **Renderer:** `app/src/hooks/useVariableResolver.ts` + inline in
-  `app/src/modules/request-builder/index.tsx` + `utils/auth-mapping.ts`.
+  `app/src/modules/request-builder/index.tsx` + `utils/auth-resolution.ts`.
 - **MCP:** `app/electron/mcp/resolve.ts`.
 
 Composing the collection-chain + request pre/post scripts is **no longer** part

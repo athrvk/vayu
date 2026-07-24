@@ -17,6 +17,9 @@ export * from "./response-viewer";
 // OAuth 2.0 auth form
 export * from "./OAuth2Form";
 
+// The one editor for concrete auth (both the request and collection auth tabs)
+export * from "./AuthFields";
+
 // One notice treatment: warnings, blockers and confirmations
 export * from "./Callout";
 export * from "./callout-severity";

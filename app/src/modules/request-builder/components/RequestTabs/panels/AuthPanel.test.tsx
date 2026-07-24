@@ -13,25 +13,30 @@
  *
  * A request imported with digest/aws/ntlm auth read as "No Auth" and, because
  * the builder autosaves, the next edit silently wrote `{ mode: "none" }` back -
- * destroying config the user was never shown. The panel must now name the
- * stored mode and warn, exactly as the collection AuthTab does; `auth-mapping`
- * keeps the config so the round-trip no longer loses it.
+ * destroying config the user was never shown. The panel must name the stored
+ * mode and warn, exactly as the collection AuthTab does, and hand the config
+ * back untouched on save.
+ *
+ * The round-trip used to be a translation (`authToEditor`/`editorToAuth`) that
+ * these tests had to go through; the panel now holds the domain `RequestAuth`
+ * itself, so a stored mode survives by construction rather than by mapping.
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TooltipProvider } from "@/components/ui";
 import { RequestBuilderContext } from "../../../context";
 import type { RequestBuilderContextValue, RequestState } from "../../../types";
-import { authToEditor } from "../../../utils/auth-mapping";
 import type { RequestAuth } from "@/types";
 import AuthPanel from "./AuthPanel";
 
 function renderPanel(auth: RequestAuth) {
-	const { authType, authConfig } = authToEditor(auth);
-	const request = { authType, authConfig, collectionId: null } as unknown as RequestState;
+	const updateField = vi.fn();
+	const request = { auth, collectionId: null } as unknown as RequestState;
 	const ctx = {
 		request,
-		updateField: vi.fn(),
+		updateField,
 		setRequest: vi.fn(),
 		resolveString: (s: string) => s,
 		// The editable branches render VariableInput, which reads these.
@@ -40,11 +45,19 @@ function renderPanel(auth: RequestAuth) {
 		resolveVariables: (s: string) => s,
 		updateVariable: vi.fn(),
 	} as unknown as RequestBuilderContextValue;
-	return render(
-		<RequestBuilderContext.Provider value={ctx}>
-			<AuthPanel />
-		</RequestBuilderContext.Provider>
+	// The inherit banner queries the collection chain, and the oauth2 fields
+	// render tooltips - both are mounted at the app root in real use.
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	const result = render(
+		<QueryClientProvider client={client}>
+			<TooltipProvider>
+				<RequestBuilderContext.Provider value={ctx}>
+					<AuthPanel />
+				</RequestBuilderContext.Provider>
+			</TooltipProvider>
+		</QueryClientProvider>
 	);
+	return { ...result, updateField };
 }
 
 describe("AuthPanel with an auth mode it cannot edit", () => {
@@ -80,6 +93,46 @@ describe("AuthPanel with an editable mode", () => {
 		renderPanel({ mode: "none" });
 		expect(
 			screen.getByText(/No authentication will be sent with this request/i)
+		).toBeInTheDocument();
+	});
+
+	it("renders no credential fields for inherit - the banner resolves it instead", () => {
+		renderPanel({ mode: "inherit" });
+		expect(screen.queryByLabelText(/Token/i)).not.toBeInTheDocument();
+		expect(
+			screen.queryByText(/No authentication will be sent with this request/i)
+		).not.toBeInTheDocument();
+	});
+});
+
+describe("AuthPanel writes the domain shape", () => {
+	/*
+	 * The panel used to write a flat editor state (`authType` + `authConfig`,
+	 * where apikey was "api-key" and `in` was `addTo`) that a mapper converted on
+	 * every load, save and execute. It writes `RequestAuth` now, so picking a mode
+	 * must store the domain object itself - a reappearing second vocabulary turns
+	 * this red rather than being absorbed by a translation layer.
+	 */
+	it("stores the domain default for a newly picked mode", () => {
+		const { updateField } = renderPanel({ mode: "none" });
+
+		fireEvent.click(screen.getByRole("combobox"));
+		fireEvent.click(screen.getByRole("option", { name: /API Key/i }));
+
+		expect(updateField).toHaveBeenCalledWith("auth", {
+			mode: "apikey",
+			key: "",
+			value: "",
+			in: "header",
+		});
+	});
+
+	it("offers inherit, which the collection editor must not", () => {
+		// A collection is always a source; only a request may defer to its parent.
+		renderPanel({ mode: "none" });
+		fireEvent.click(screen.getByRole("combobox"));
+		expect(
+			screen.getByRole("option", { name: /Inherit from Collection/i })
 		).toBeInTheDocument();
 	});
 });

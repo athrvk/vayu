@@ -39,7 +39,7 @@ describe("parseCommand - curl", () => {
 		expect(r.method).toBe("GET");
 		expect(r.url).toBe("https://api.example.com/users");
 		expect(r.bodyMode).toBe("none");
-		expect(r.authType).toBe("none");
+		expect(r.auth).toEqual({ mode: "none" });
 		expect(r.headers).toEqual([]);
 	});
 
@@ -165,29 +165,24 @@ describe("parseCommand - curl", () => {
 
 	test("-u basic auth", () => {
 		const r = parseCommand(`curl https://x.com -u 'admin:secret'`)!;
-		expect(r.authType).toBe("basic");
-		expect(r.authConfig.username).toBe("admin");
-		expect(r.authConfig.password).toBe("secret");
+		expect(r.auth).toEqual({ mode: "basic", username: "admin", password: "secret" });
 	});
 
 	test("--oauth2-bearer → bearer auth", () => {
 		const r = parseCommand(`curl https://x.com --oauth2-bearer 'tok-123'`)!;
-		expect(r.authType).toBe("bearer");
-		expect(r.authConfig.token).toBe("tok-123");
+		expect(r.auth).toEqual({ mode: "bearer", token: "tok-123" });
 		// The flag maps to typed auth, not a raw header.
 		expect(r.headers).toEqual([]);
 	});
 
 	test("--oauth2-bearer=token inline form, preserves {{variables}}", () => {
 		const r = parseCommand(`curl https://x.com --oauth2-bearer={{token}}`)!;
-		expect(r.authType).toBe("bearer");
-		expect(r.authConfig.token).toBe("{{token}}");
+		expect(r.auth).toEqual({ mode: "bearer", token: "{{token}}" });
 	});
 
 	test("--oauth2-bearer wins over -u", () => {
 		const r = parseCommand(`curl https://x.com -u 'a:b' --oauth2-bearer 'tok'`)!;
-		expect(r.authType).toBe("bearer");
-		expect(r.authConfig.token).toBe("tok");
+		expect(r.auth).toEqual({ mode: "bearer", token: "tok" });
 	});
 
 	test("-I → HEAD", () => {
@@ -288,9 +283,7 @@ describe("parseCommand - wget", () => {
 		`wget --password=secret --user=admin https://x.com`,
 	])("user/password order-independent: %s", (cmd) => {
 		const r = parseCommand(cmd)!;
-		expect(r.authType).toBe("basic");
-		expect(r.authConfig.username).toBe("admin");
-		expect(r.authConfig.password).toBe("secret");
+		expect(r.auth).toEqual({ mode: "basic", username: "admin", password: "secret" });
 	});
 
 	test("--post-file is skipped (not mapped to form-data)", () => {
@@ -324,8 +317,7 @@ describe("parseCommand - failure modes", () => {
 			body: "",
 			formData: [],
 			urlEncoded: [],
-			authType: "none",
-			authConfig: {},
+			auth: { mode: "none" },
 		});
 	});
 });

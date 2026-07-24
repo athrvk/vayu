@@ -46,7 +46,7 @@ export default function RequestTabs() {
 		{
 			id: "auth",
 			label: "Auth",
-			badge: request.authType !== "none" ? 1 : undefined,
+			badge: request.auth.mode !== "none" ? 1 : undefined,
 		},
 		{
 			id: "pre-script",
