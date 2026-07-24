@@ -14,7 +14,66 @@
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <optional>
+#include <unordered_set>
+#include <utility>
+
 namespace vayu::http::routes {
+
+/**
+ * Testable core of the parent-id validation for POST /collections, returning
+ * an error response {http_status, json_body} when the proposed parent would
+ * form a cycle in the collection tree, or std::nullopt when the assignment is
+ * legal.
+ *
+ * Two shapes are rejected, both with 400:
+ *   - Self-parent (`parentId == id`): a collection cannot be its own parent.
+ *   - Reparent into a descendant: walking the proposed parent's ancestor chain
+ *     reaches the collection being saved, so the move would make a node its own
+ *     ancestor. A cycle here is what let `delete_collection`'s BFS loop forever
+ *     under the global DB mutex, hanging every endpoint (see issue #79).
+ *
+ * The walk carries a visited set so pre-existing corrupt data (a cycle written
+ * before this validation existed) cannot hang the validator itself. A parent id
+ * that does not resolve to a stored collection ends the walk cleanly - parent
+ * *existence* is intentionally not required here, because the import
+ * orchestrator creates collections in bulk and an existence check would couple
+ * this fix to import ordering.
+ *
+ * Extracted so the wiring is covered without an in-process HTTP server - see
+ * collections_route_test.cpp. The error body matches send_error's flat
+ * `{"error": message}` shape.
+ */
+std::optional<std::pair<int, nlohmann::json>> validate_parent_assignment (
+vayu::db::Database& db, const std::string& id,
+const std::optional<std::string>& parent_id) {
+    if (!parent_id.has_value ()) {
+        return std::nullopt; // No parent -> no cycle possible.
+    }
+    if (*parent_id == id) {
+        return std::make_pair (400,
+        nlohmann::json{ { "error", "A collection cannot be its own parent" } });
+    }
+
+    std::unordered_set<std::string> visited;
+    std::optional<std::string> cursor = parent_id;
+    while (cursor.has_value ()) {
+        if (*cursor == id) {
+            return std::make_pair (400,
+            nlohmann::json{
+            { "error", "Cannot move a collection into its own descendant" } });
+        }
+        if (!visited.insert (*cursor).second) {
+            break; // Already seen -> pre-existing corrupt cycle; stop, bounded.
+        }
+        auto ancestor = db.get_collection (*cursor);
+        if (!ancestor.has_value ()) {
+            break; // Chain ends at a missing parent; existence is not required.
+        }
+        cursor = ancestor->parent_id;
+    }
+    return std::nullopt;
+}
 
 void register_collection_routes (RouteContext& ctx) {
     /**
@@ -134,6 +193,20 @@ void register_collection_routes (RouteContext& ctx) {
 
             if (is_update) {
                 c.updated_at = now_ms ();
+            }
+
+            // Reject writes that would put a cycle in the collection tree
+            // (self-parent, or reparent into a descendant) before they reach
+            // the DB - a cycle makes cascade delete loop forever under the
+            // global mutex. Cycle/self checks only; parent existence is not
+            // required (import creates collections in bulk).
+            if (auto err = validate_parent_assignment (ctx.db, c.id, c.parent_id)) {
+                vayu::utils::log_warning (
+                "POST /collections - Rejected cyclic parent for id=" + c.id + ": " +
+                (*err).second["error"].get<std::string> ());
+                res.status = (*err).first;
+                res.set_content ((*err).second.dump (), "application/json");
+                return;
             }
 
             std::string parent_id = c.parent_id.value_or ("root");

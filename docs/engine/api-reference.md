@@ -177,9 +177,24 @@ Create or update a collection. If `id` is provided and exists, performs an updat
 
 **Response:** The saved collection object.
 
+**Errors:** `parentId` is validated to keep the collection tree acyclic, since a
+cycle would make the cascade delete below loop forever. Both cases return `400`
+with the flat `{"error": message}` shape:
+
+- `parentId` equal to the collection's own `id` - `{"error": "A collection cannot be its own parent"}`.
+- `parentId` pointing at one of the collection's own descendants (a reparent that
+  would form a cycle) - `{"error": "Cannot move a collection into its own descendant"}`.
+
+Parent *existence* is intentionally not checked: the import orchestrator creates
+collections in bulk, so requiring the parent to exist first would couple to
+import ordering. Only self-parent and descendant cycles are rejected.
+
 ### DELETE /collections/:id
 
-Delete a collection and all its requests (cascading delete).
+Delete a collection and all its requests (cascading delete). The cascade removes
+every descendant collection and its requests in a single transaction, and
+terminates even if the stored `parent_id` tree contains a cycle (see
+[db-schema.md](db-schema.md) - collections).
 
 **Response:**
 ```json
