@@ -623,13 +623,15 @@ the request was configured with.
 **Response:**
 ```json
 {
-  "runId": "run_1234567890",
-  "statusCode": 200,
+  "status": 200,
   "statusText": "OK",
   "headers": {
     "content-type": "application/json"
   },
-  "body": "{\"id\":1,\"name\":\"John\"}",
+  "requestHeaders": { "accept": "*/*" },
+  "rawRequest": "GET /users HTTP/1.1\n...",
+  "body": { "id": 1, "name": "John" },
+  "bodyRaw": "{\"id\":1,\"name\":\"John\"}",
   "bodySize": 20,
   "timing": {
     "totalMs": 245.5,
@@ -650,6 +652,17 @@ the request was configured with.
   "consoleLogs": []
 }
 ```
+
+**One timing convention.** The `timing` keys above are the same `*Ms` names the
+stored trace uses (`store_result` / `load_strategy` → `results[].trace` in
+`GET /runs/:runId/report`), and the design-mode writer stores all eight keys
+unconditionally - so a live response and one restored from the stored trace
+carry the same fields with the same names, Wire/Queue included. Traces written
+by earlier releases differ two ways, and readers must tolerate both: stored
+rows omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`
+(see [db-schema.md](db-schema.md)), and the live response named its keys
+without the suffix (`firstByte`, `dns`, …) - consumers of the raw `/execute`
+body written against that dialect must switch to the `*Ms` names.
 
 ### POST /runs
 

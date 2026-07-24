@@ -64,35 +64,35 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 		{
 			key: "dns",
 			label: "DNS",
-			value: timing.dns,
+			value: timing.dnsMs,
 			color: "hsl(var(--chart-2))",
 			tip: PHASE_TIPS.dns,
 		},
 		{
 			key: "connect",
 			label: "Connect",
-			value: timing.connect,
+			value: timing.connectMs,
 			color: "hsl(var(--chart-4))",
 			tip: PHASE_TIPS.connect,
 		},
 		{
 			key: "tls",
 			label: "TLS",
-			value: timing.tls,
+			value: timing.tlsMs,
 			color: "hsl(var(--chart-5))",
 			tip: PHASE_TIPS.tls,
 		},
 		{
 			key: "ttfb",
 			label: "TTFB",
-			value: timing.firstByte,
+			value: timing.firstByteMs,
 			color: "hsl(var(--primary))",
 			tip: PHASE_TIPS.ttfb,
 		},
 		{
 			key: "download",
 			label: "Download",
-			value: timing.download,
+			value: timing.downloadMs,
 			color: "hsl(var(--success))",
 			tip: PHASE_TIPS.download,
 		},
@@ -157,23 +157,23 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 
 			{/* Summary: wire vs generator-side overhead vs perceived total. */}
 			<div className="mt-3.5 pt-3 border-t border-dashed border-border flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px]">
-				{timing.wire !== undefined && (
+				{timing.wireMs !== undefined && (
 					<TimingStat
 						label="Wire"
-						value={timing.wire}
+						value={timing.wireMs}
 						tip="libcurl transfer time - DNS + connect + TLS + send + receive."
 					/>
 				)}
-				{timing.queueWait !== undefined && (
+				{timing.queueWaitMs !== undefined && (
 					<TimingStat
 						label="Queue"
-						value={timing.queueWait}
+						value={timing.queueWaitMs}
 						tip="Generator-side overhead (perceived − wire). Near-zero for a single request; grows under load."
 					/>
 				)}
 				<TimingStat
 					label="Total"
-					value={timing.total}
+					value={timing.totalMs}
 					tip="Perceived latency: submit → completion. What the response header shows."
 					emphasized
 				/>

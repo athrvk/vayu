@@ -11,14 +11,14 @@ import ResponseTimingTab from "./ResponseTimingTab";
 import type { ResponseTiming } from "../../types";
 
 const sample: ResponseTiming = {
-	total: 1011,
-	wire: 1008,
-	queueWait: 0.2,
-	dns: 64,
-	connect: 214,
-	tls: 517,
-	firstByte: 213,
-	download: 0,
+	totalMs: 1011,
+	wireMs: 1008,
+	queueWaitMs: 0.2,
+	dnsMs: 64,
+	connectMs: 214,
+	tlsMs: 517,
+	firstByteMs: 213,
+	downloadMs: 0,
 };
 
 describe("ResponseTimingTab", () => {
@@ -59,12 +59,12 @@ describe("ResponseTimingTab", () => {
 
 	it("omits Wire and Queue when those fields are absent (restored responses)", () => {
 		const minimal: ResponseTiming = {
-			total: 42,
-			dns: 5,
-			connect: 10,
-			tls: 20,
-			firstByte: 7,
-			download: 0,
+			totalMs: 42,
+			dnsMs: 5,
+			connectMs: 10,
+			tlsMs: 20,
+			firstByteMs: 7,
+			downloadMs: 0,
 		};
 		render(<ResponseTimingTab timing={minimal} />);
 		expect(screen.queryByText("Wire")).not.toBeInTheDocument();
@@ -74,14 +74,14 @@ describe("ResponseTimingTab", () => {
 
 	it("handles all-zero phases without dividing by zero", () => {
 		const zero: ResponseTiming = {
-			total: 0,
-			wire: 0,
-			queueWait: 0,
-			dns: 0,
-			connect: 0,
-			tls: 0,
-			firstByte: 0,
-			download: 0,
+			totalMs: 0,
+			wireMs: 0,
+			queueWaitMs: 0,
+			dnsMs: 0,
+			connectMs: 0,
+			tlsMs: 0,
+			firstByteMs: 0,
+			downloadMs: 0,
 		};
 		render(<ResponseTimingTab timing={zero} />);
 		// Every phase share is 0% - at least the five legend rows render it.
