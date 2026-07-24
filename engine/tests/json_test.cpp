@@ -142,7 +142,7 @@ TEST (JsonTest, SerializesResponse) {
     EXPECT_EQ (json["statusText"], "OK");
     EXPECT_EQ (json["headers"]["content-type"], "application/json");
     EXPECT_EQ (json["body"]["success"], true); // Parsed as JSON
-    EXPECT_DOUBLE_EQ (json["timing"]["total"], 123.45);
+    EXPECT_DOUBLE_EQ (json["timing"]["totalMs"], 123.45);
 }
 
 TEST (JsonTest, SerializesError) {

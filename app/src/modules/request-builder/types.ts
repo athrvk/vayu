@@ -18,7 +18,9 @@ import type {
 	HttpMethod,
 	KeyValueEntry,
 	OAuth2Config,
+	RequestAuth,
 	ResolvedVariable,
+	ResponseTiming,
 	ScriptPart,
 	VariableScope,
 } from "@/types";
@@ -60,7 +62,23 @@ export interface TabInfo {
 // Auth Types
 // ============================================================================
 
-export type AuthType = "none" | "inherit" | "bearer" | "basic" | "api-key" | "oauth2";
+/**
+ * The editor's auth discriminant. `api-key` renames the domain's `apikey`; the
+ * rest match. `digest` / `aws` / `ntlm` are *not* offered in the picker - the
+ * engine cannot resolve them - but a request can be stored with one (imports
+ * produce them), so the editor carries the mode to surface it rather than
+ * collapsing it to "none" and rewriting it away on the next autosave.
+ */
+export type AuthType =
+	| "none"
+	| "inherit"
+	| "bearer"
+	| "basic"
+	| "api-key"
+	| "oauth2"
+	| "digest"
+	| "aws"
+	| "ntlm";
 
 /**
  * Flat auth fields backing the request builder's Auth tab. Which fields are
@@ -76,6 +94,13 @@ export interface AuthConfigState {
 	value?: string;
 	addTo?: "header" | "query";
 	oauth2?: OAuth2Config;
+	/**
+	 * Verbatim domain config for a stored-but-not-editable mode
+	 * (digest/aws/ntlm). No field of it is editable here, so it is kept whole
+	 * and round-tripped by {@link authToEditor}/{@link editorToAuth} rather than
+	 * flattened - autosave must return exactly what it loaded.
+	 */
+	nonEditable?: Extract<RequestAuth, { mode: "digest" | "aws" | "ntlm" }>;
 }
 
 export interface AuthConfig {
@@ -150,26 +175,12 @@ export interface RequestState {
 // ============================================================================
 
 /**
- * Per-request timing breakdown (milliseconds). Phase fields (dns…download) are
- * sequential segments of the request; `wire` is libcurl's transfer time and
- * `queueWait` is generator-side overhead (total − wire).
- *
+ * Per-request timing breakdown. Declared once in the domain types (it is the
+ * `POST /execute` wire shape) and re-exported here for the builder's consumers.
  * Present on a live execute, and again when a response is restored from the
- * last stored design run - the engine writes the five phases into that run's
- * trace (`store_result`, engine/src/http/routes/execution.cpp). `wire` and
- * `queueWait` are the two the design-mode writer omits, so they are absent on a
- * restored response; every consumer must treat both as optional.
+ * last stored design run (`restore-response.ts`).
  */
-export interface ResponseTiming {
-	total: number;
-	wire?: number;
-	queueWait?: number;
-	dns: number;
-	connect: number;
-	tls: number;
-	firstByte: number;
-	download: number;
-}
+export type { ResponseTiming } from "@/types";
 
 /** Which stored run a response was rebuilt from, and when that run happened. */
 export interface RestoredFrom {
