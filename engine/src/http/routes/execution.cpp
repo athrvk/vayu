@@ -42,6 +42,47 @@ int resolve_request_timeout_ms (const nlohmann::json& json, int configured_defau
     return configured_default;
 }
 
+// Build the trace_data JSON a design run persists for its single exchange.
+// Non-static (tested by execution_trace_test.cpp): the stored trace is a
+// contract - restore-response.ts rebuilds the response pane from it after a
+// restart, so what lands here decides what a restored tab can show.
+//
+// Timing carries all eight keys, unconditionally, the same `*Ms` set the live
+// /execute response serializes (json.cpp) and the load-mode success writer
+// stores (load_strategy.cpp). A skipped phase (reused connection, plain HTTP)
+// is stored as 0, exactly as the live response reports it. Rows written before
+// this change omitted zero phases and the three totals, so readers must keep
+// defaulting missing keys.
+nlohmann::json build_result_trace (const vayu::Request& request,
+const vayu::Response& response) {
+    nlohmann::json trace;
+    trace["request"] = { { "method", to_string (request.method) },
+        { "url", request.url }, { "headers", request.headers } };
+    if (!request.body.content.empty ()) {
+        trace["request"]["body"] = request.body.content;
+    }
+
+    if (!response.has_error ()) {
+        trace["response"] = { { "headers", response.headers },
+            { "body", response.body } };
+    } else {
+        trace["error_type"]    = to_string (response.error_code);
+        trace["error_message"] = response.error_message;
+    }
+
+    const auto& timing   = response.timing;
+    trace["totalMs"]     = timing.total_ms;
+    trace["wireMs"]      = timing.wire_ms;
+    trace["queueWaitMs"] = timing.queue_wait_ms;
+    trace["dnsMs"]       = timing.dns_ms;
+    trace["connectMs"]   = timing.connect_ms;
+    trace["tlsMs"]       = timing.tls_ms;
+    trace["firstByteMs"] = timing.first_byte_ms;
+    trace["downloadMs"]  = timing.download_ms;
+
+    return trace;
+}
+
 namespace {
 
 // Helper function to parse variables JSON string to Environment
@@ -219,39 +260,7 @@ const vayu::Response& response) {
         db_result.latency_ms  = response.timing.total_ms;
         db_result.error       = has_error ? response.error_message : "";
 
-        // Build trace data
-        nlohmann::json trace;
-        trace["request"] = { { "method", to_string (request.method) },
-            { "url", request.url }, { "headers", request.headers } };
-        if (!request.body.content.empty ()) {
-            trace["request"]["body"] = request.body.content;
-        }
-
-        if (!has_error) {
-            trace["response"] = { { "headers", response.headers },
-                { "body", response.body } };
-        } else {
-            trace["error_type"]    = to_string (response.error_code);
-            trace["error_message"] = response.error_message;
-        }
-
-        // Timing information - all eight keys, unconditionally, so the stored
-        // trace matches the live /execute response and the load-mode success
-        // writer (load_strategy.cpp) key for key. A skipped phase (reused
-        // connection, plain HTTP) is stored as 0, exactly as the live response
-        // reports it. Rows written before this change omitted zero phases and
-        // the three totals, so readers must keep defaulting missing keys.
-        const auto& timing   = response.timing;
-        trace["totalMs"]     = timing.total_ms;
-        trace["wireMs"]      = timing.wire_ms;
-        trace["queueWaitMs"] = timing.queue_wait_ms;
-        trace["dnsMs"]       = timing.dns_ms;
-        trace["connectMs"]   = timing.connect_ms;
-        trace["tlsMs"]       = timing.tls_ms;
-        trace["firstByteMs"] = timing.first_byte_ms;
-        trace["downloadMs"]  = timing.download_ms;
-
-        db_result.trace_data = trace.dump ();
+        db_result.trace_data = build_result_trace (request, response).dump ();
         db.add_result (db_result);
 
         auto status = has_error ? vayu::RunStatus::Failed : vayu::RunStatus::Completed;
