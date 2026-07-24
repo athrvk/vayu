@@ -196,8 +196,11 @@ inline auto make_storage (const std::string& path) {
     make_index ("idx_requests_collection_id", &Request::collection_id),
     // The cascade-delete BFS in delete_collection walks one lookup per node.
     make_index ("idx_collections_parent_id", &Collection::parent_id),
-    // get_all_runs sorts the whole table on every GET /runs.
+    // get_all_runs / get_runs_paginated sort the whole table on every GET /runs.
     make_index ("idx_runs_start_time", &Run::start_time),
+    // GET /runs?requestId= (and useLastDesignRunQuery's single-run lookup)
+    // filter on request_id; the design-run seed hits this per opened request.
+    make_index ("idx_runs_request_id", &Run::request_id),
 
     // ─────────────── PROJECT MANAGEMENT TABLES ───────────────
 
@@ -757,6 +760,41 @@ void Database::update_run_status_with_retry (const std::string& id, RunStatus st
 std::vector<Run> Database::get_all_runs () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<Run> (order_by (&Run::start_time).desc ());
+}
+
+namespace {
+// Compose the sqlite_orm WHERE for a RunFilter. Each optional filter becomes
+// `(column == value) OR <inactive>`, where <inactive> is a bound `true` when
+// the filter is unset - so an unset field is a wildcard and the same compiled
+// expression serves every filter combination (no per-combination branching).
+// `q` is a substring LIKE over config_snapshot (see RunFilter's contract).
+auto run_filter_where (const RunFilter& filter) {
+    const bool no_type   = !filter.type.has_value ();
+    const bool no_status = !filter.status.has_value ();
+    const bool no_req    = !filter.request_id.has_value ();
+    const bool no_q      = !filter.q.has_value () || filter.q->empty ();
+
+    const RunType type_val     = filter.type.value_or (RunType::Design);
+    const RunStatus status_val = filter.status.value_or (RunStatus::Pending);
+    const std::string req_val  = filter.request_id.value_or ("");
+    const std::string q_pat    = "%" + (filter.q ? *filter.q : std::string{}) + "%";
+
+    return where ((c (&Run::type) == type_val || no_type) &&
+    (c (&Run::status) == status_val || no_status) &&
+    (c (&Run::request_id) == req_val || no_req) &&
+    (like (&Run::config_snapshot, q_pat) || no_q));
+}
+} // namespace
+
+std::vector<Run> Database::get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<Run> (run_filter_where (filter),
+    order_by (&Run::start_time).desc (), sqlite_orm::limit (offset, limit));
+}
+
+int64_t Database::count_runs (const RunFilter& filter) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<Run> (run_filter_where (filter));
 }
 
 // Cascade delete: removes metrics and results first

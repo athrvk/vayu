@@ -70,11 +70,21 @@ export const RUN_REPORT_RESOURCE = {
 	listRuns: (ctx: ToolContext, signal?: AbortSignal) => ctx.client.listRuns(signal),
 };
 
-/** Best-effort extraction of run IDs from the loosely-typed `/runs` payload. */
+/**
+ * Best-effort extraction of run IDs from the loosely-typed `/runs` payload.
+ * Accepts both the paginated `{data: [...]}` envelope (current) and a bare
+ * array (the legacy no-param shape), so it survives either.
+ */
 export function extractRunIds(runs: unknown): string[] {
-	if (!Array.isArray(runs)) return [];
+	const rows =
+		Array.isArray(runs)
+			? runs
+			: runs && typeof runs === "object" && Array.isArray((runs as { data?: unknown }).data)
+				? (runs as { data: unknown[] }).data
+				: null;
+	if (!rows) return [];
 	const ids: string[] = [];
-	for (const r of runs) {
+	for (const r of rows) {
 		if (r && typeof r === "object") {
 			const rec = r as Record<string, unknown>;
 			const id = rec.id ?? rec.runId ?? rec._id;

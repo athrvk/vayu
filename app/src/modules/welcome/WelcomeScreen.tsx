@@ -28,6 +28,7 @@ import {
 import {
 	useCollectionsQuery,
 	useRunsQuery,
+	flattenRunPages,
 	useCreateRequestMutation,
 	useCreateCollectionMutation,
 } from "@/queries";
@@ -56,12 +57,14 @@ export default function WelcomeScreen() {
 		refetch: refetchCollections,
 	} = useCollectionsQuery();
 	const {
-		data: runs = [],
+		data: runsData,
 		isLoading: runsLoading,
 		isError: runsFailed,
 		error: runsError,
 		refetch: refetchRuns,
 	} = useRunsQuery();
+	// Flatten the loaded pages; the Launcher only shows the most recent handful.
+	const runs = flattenRunPages(runsData);
 	const createRequestMutation = useCreateRequestMutation();
 	const createCollectionMutation = useCreateCollectionMutation();
 

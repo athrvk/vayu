@@ -56,6 +56,7 @@ const queryState = {
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => queryState.collections,
 	useRunsQuery: () => queryState.runs,
+	flattenRunPages: (d: Run[] | undefined) => d ?? [],
 	useCreateRequestMutation: () => ({ mutateAsync: vi.fn() }),
 	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn() }),
 	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map() }),

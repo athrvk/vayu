@@ -304,7 +304,8 @@ for fresh **and** pre-existing databases, so adding an index is additive and nee
 | `idx_results_run_id`         | `results.run_id`        | `get_results` and the `remove_all` in `delete_run`                                                                                                |
 | `idx_requests_collection_id` | `requests.collection_id`| `get_requests_in_collection` (every sidebar load) and cascade delete                                                                              |
 | `idx_collections_parent_id`  | `collections.parent_id` | The cascade-delete BFS in `Database::delete_collection`, which does one lookup per node in the subtree                                            |
-| `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs`, which sorts on every `GET /runs`                                                                                                  |
+| `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs` and `get_runs_paginated`, which sort `start_time DESC` on every `GET /runs`                                                        |
+| `idx_runs_request_id`        | `runs.request_id`       | `GET /runs?requestId=` and `useLastDesignRunQuery`'s single-run lookup (`get_runs_paginated` with a `request_id` filter)                          |
 
 `metrics` and `results` are the unbounded-growth tables - a load run writes roughly 20 metric
 rows per second - so without `run_id` indexes a lookup slows down with every run ever recorded,
