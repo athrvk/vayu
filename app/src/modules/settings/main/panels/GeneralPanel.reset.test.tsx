@@ -27,7 +27,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import GeneralPanel from "./GeneralPanel";
 
 vi.mock("@/queries/runs", () => ({
-	useRunsQuery: () => ({ data: [] }),
+	useAllRunsQuery: () => ({ data: [] }),
 	useInvalidateRuns: () => vi.fn(),
 }));
 

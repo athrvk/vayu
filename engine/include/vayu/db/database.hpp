@@ -19,6 +19,20 @@
 #include "vayu/types.hpp"
 
 namespace vayu::db {
+
+/**
+ * Optional filters for the paginated GET /runs list. An unset field is a
+ * wildcard - it does not constrain the query. `q` is a case-insensitive
+ * substring matched against the stored `config_snapshot` text (via SQL LIKE);
+ * it may over-match JSON keys/structure, which is acceptable for a search box.
+ */
+struct RunFilter {
+    std::optional<RunType> type;
+    std::optional<RunStatus> status;
+    std::optional<std::string> request_id;
+    std::optional<std::string> q;
+};
+
 class Database {
     public:
     explicit Database (const std::string& db_path);
@@ -59,6 +73,11 @@ class Database {
     void update_run_status_with_retry (const std::string& id, RunStatus status, int max_retries = 3);
     void update_run_end_time (const std::string& id); // Update end_time without changing status
     std::vector<Run> get_all_runs ();
+    // Paginated, filtered run list ordered start_time DESC (newest first) - the
+    // only order the UI uses. count_runs returns the total matching @p filter
+    // (ignoring limit/offset) for the pagination envelope.
+    std::vector<Run> get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset);
+    int64_t count_runs (const RunFilter& filter);
     void delete_run (const std::string& id);
 
     /**

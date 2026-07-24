@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => mocks.collections,
 	useRunsQuery: () => mocks.runs,
+	// The mock feeds a flat array as `data`; WelcomeScreen pipes it through
+	// flattenRunPages, so identity here keeps the flat fixtures unchanged.
+	flattenRunPages: (d: Run[] | undefined) => d ?? [],
 	useCreateRequestMutation: () => ({ mutateAsync: mocks.createRequest }),
 	useCreateCollectionMutation: () => ({ mutateAsync: mocks.createCollection }),
 	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map() }),
