@@ -44,7 +44,22 @@ describe("auth-mapping", () => {
 		expect(auth).toEqual({ mode: "oauth2", config: defaultOAuth2Config() });
 	});
 
-	it("maps unknown/non-editable modes to none", () => {
-		expect(authToEditor({ mode: "ntlm", config: {} }).authType).toBe("none");
+	// Regression: the editor cannot edit digest/aws/ntlm, but it used to collapse
+	// them to "none" on load. The next autosave then wrote `{ mode: "none" }`
+	// back, destroying imported config the user was never shown. They must now
+	// carry the real mode and round-trip byte-for-byte.
+	it("preserves stored-but-not-editable modes instead of collapsing to none", () => {
+		const cases: RequestAuth[] = [
+			{ mode: "digest", config: { username: "u", realm: "r", nonce: "n" } },
+			{ mode: "aws", config: { accessKey: "AK", secretKey: "SK", region: "us-east-1" } },
+			{ mode: "ntlm", config: { domain: "CORP", username: "u", password: "p" } },
+		];
+		for (const auth of cases) {
+			const { authType, authConfig } = authToEditor(auth);
+			// The picker never offers these, but the mode is carried so the panel
+			// can name it rather than reading "No Auth".
+			expect(authType).toBe(auth.mode);
+			expect(editorToAuth(authType, authConfig)).toEqual(auth);
+		}
 	});
 });
