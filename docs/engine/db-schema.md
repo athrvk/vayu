@@ -282,7 +282,7 @@ than assuming all eight are there and flat:
 |--------|----------------------------|
 | Load run, success sample (`load_strategy.cpp`) | timing only, flat, all eight keys - and only when `save_timing_breakdown` is on or the sample crossed `slow_threshold_ms` (which also adds `isSlow` / `thresholdMs`) |
 | Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0` |
-| Design mode (`store_result` in `execution.cpp`) | the five phase keys flat (`dnsMs`…`downloadMs`), **each only when non-zero** - a reused connection writes no `connectMs`/`tlsMs`. No `totalMs`/`wireMs`/`queueWaitMs`; perceived total lives in the `latency_ms` column. Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). |
+| Design mode (`store_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`). Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
 
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
 (config, `observability`, default 5 MiB) before storage, so downloading one 50 MB response does
@@ -295,9 +295,10 @@ not live in SQLite forever. When a body is cut, its node gains two keys:
 
 The cut is on a raw byte boundary (the body is an opaque string), so a split UTF-8 sequence is
 possible; `store_result` dumps the trace with `error_handler_t::replace`, turning a stray
-continuation byte into U+FFFD rather than throwing. The cap is built by
-`vayu::json::build_design_trace` (`utils/json.cpp`). It applies **only** to the design-mode
-writer - the load-run writers store timing/error envelopes, not bodies.
+continuation byte into U+FFFD rather than throwing. The cap is applied by
+`vayu::json::cap_trace_bodies` (`utils/json.cpp`) to the trace `build_result_trace`
+(`execution.cpp`) produces. It applies **only** to the design-mode writer - the load-run writers
+store timing/error envelopes, not bodies.
 
 That design-mode subset is what rebuilds the request builder's response pane (Timing tab included)
 after a restart - see `app/src/modules/request-builder/utils/restore-response.ts`, which surfaces

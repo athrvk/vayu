@@ -26,6 +26,7 @@ import {
 	SelectValue,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
+import { UNEDITABLE_AUTH_LABELS, isUneditableAuthMode } from "@/constants/auth-modes";
 import { cn } from "@/lib/utils";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
@@ -37,8 +38,10 @@ import { defaultOAuth2Config } from "@/services/oauth/defaults";
 type CollectionAuthMode = "none" | "bearer" | "basic" | "apikey" | "oauth2";
 type CollectionAuth = Collection["auth"];
 
-/**
- * Display names for the modes this tab stores but cannot edit.
+/*
+ * Display names for the modes this tab stores but cannot edit live in
+ * `@/constants/auth-modes` (`UNEDITABLE_AUTH_LABELS`) - the request `AuthPanel`
+ * surfaces the same modes and shares that list.
  *
  * OAuth 2.0 used to be here. It is editable now: the engine resolves it, an
  * import can produce it, requests inherit it, and `OAuth2Form` was written to be
@@ -48,12 +51,6 @@ type CollectionAuth = Collection["auth"];
  * digest/aws/ntlm stay: the engine has no resolution for them, so offering them
  * here would let you configure something that silently does nothing.
  */
-const UNEDITABLE_LABELS: Record<string, string> = {
-	digest: "Digest",
-	aws: "AWS Signature",
-	ntlm: "NTLM",
-};
-
 const AUTH_OPTIONS: { value: CollectionAuthMode; label: string; hint: string }[] = [
 	{
 		value: "none",
@@ -149,7 +146,11 @@ export default function AuthTab({ collection }: AuthTabProps) {
 	}, [collection.id, resetSave]);
 
 	const mode = asEditable(auth);
-	const uneditableLabel = mode === null ? (UNEDITABLE_LABELS[auth.mode] ?? auth.mode) : null;
+	// `mode === null` is exactly the digest/aws/ntlm set, but the guard also
+	// narrows the index type for `UNEDITABLE_AUTH_LABELS`.
+	const uneditableLabel = isUneditableAuthMode(auth.mode)
+		? UNEDITABLE_AUTH_LABELS[auth.mode]
+		: null;
 	const hint = useMemo(() => AUTH_OPTIONS.find((o) => o.value === mode)?.hint, [mode]);
 
 	const isDirty = useMemo(

@@ -252,6 +252,10 @@ export interface RunConfigSnapshot {
  */
 export interface RunResultTrace {
 	totalMs?: number;
+	/** libcurl's transfer time; `queueWaitMs` is generator-side overhead. Both
+	 * writers store them now, but rows persisted by older engines lack them. */
+	wireMs?: number;
+	queueWaitMs?: number;
 	dnsMs?: number;
 	connectMs?: number;
 	tlsMs?: number;
@@ -339,6 +343,29 @@ export interface LoadTestConfig {
 	max_in_flight?: number;
 }
 
+/**
+ * Per-request timing breakdown (milliseconds), as `POST /execute` returns it
+ * (`serialize(Response)`, engine/src/utils/json.cpp). Phase fields
+ * (dns…download) are sequential segments of the request; `wireMs` is libcurl's
+ * transfer time and `queueWaitMs` is generator-side overhead (total − wire).
+ *
+ * The field names are the engine's wire keys - the same `*Ms` convention the
+ * stored trace ({@link RunResultTrace}) uses, so a live response and one
+ * restored from a stored design run agree without renaming. `wireMs` /
+ * `queueWaitMs` stay optional because traces stored by older engines omitted
+ * them (current ones store all eight); consumers must treat both as optional.
+ */
+export interface ResponseTiming {
+	totalMs: number;
+	wireMs?: number;
+	queueWaitMs?: number;
+	dnsMs: number;
+	connectMs: number;
+	tlsMs: number;
+	firstByteMs: number;
+	downloadMs: number;
+}
+
 export interface HttpResponse {
 	status: number;
 	statusText: string;
@@ -348,16 +375,7 @@ export interface HttpResponse {
 	body: unknown;
 	bodyRaw: string;
 	bodySize: number;
-	timing: {
-		total: number;
-		wire?: number;
-		queueWait?: number;
-		dns: number;
-		connect: number;
-		tls: number;
-		firstByte: number;
-		download: number;
-	};
+	timing: ResponseTiming;
 	errorCode?: string;
 	errorMessage?: string;
 }

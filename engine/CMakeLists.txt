@@ -384,6 +384,7 @@ if(VAYU_BUILD_TESTS)
         tests/rate_limit_test.cpp
         tests/metrics_helper_test.cpp
         tests/metrics_collector_test.cpp
+        tests/execution_trace_test.cpp
         tests/import_route_test.cpp
         tests/config_route_test.cpp
         tests/requests_route_test.cpp

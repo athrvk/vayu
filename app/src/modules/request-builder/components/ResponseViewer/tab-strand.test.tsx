@@ -63,7 +63,7 @@ function fullResponse(): ResponseState {
 		bodyType: "json",
 		size: BODY.length,
 		time: 34,
-		timing: { total: 34, dns: 1, connect: 2, tls: 3, firstByte: 20, download: 8 },
+		timing: { totalMs: 34, dnsMs: 1, connectMs: 2, tlsMs: 3, firstByteMs: 20, downloadMs: 8 },
 		consoleLogs: ["hello from a script"],
 		testResults: [{ name: "status is 200", passed: true }],
 	};

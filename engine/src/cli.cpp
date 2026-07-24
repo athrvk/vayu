@@ -156,12 +156,12 @@ vayu::Response parse_daemon_response (const std::string& json_str) {
 
     if (json.contains ("timing")) {
         const auto& t                 = json["timing"];
-        response.timing.total_ms      = t.value ("total", 0.0);
-        response.timing.dns_ms        = t.value ("dns", 0.0);
-        response.timing.connect_ms    = t.value ("connect", 0.0);
-        response.timing.tls_ms        = t.value ("tls", 0.0);
-        response.timing.first_byte_ms = t.value ("firstByte", 0.0);
-        response.timing.download_ms   = t.value ("download", 0.0);
+        response.timing.total_ms      = t.value ("totalMs", 0.0);
+        response.timing.dns_ms        = t.value ("dnsMs", 0.0);
+        response.timing.connect_ms    = t.value ("connectMs", 0.0);
+        response.timing.tls_ms        = t.value ("tlsMs", 0.0);
+        response.timing.first_byte_ms = t.value ("firstByteMs", 0.0);
+        response.timing.download_ms   = t.value ("downloadMs", 0.0);
     }
 
     return response;

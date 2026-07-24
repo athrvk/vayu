@@ -155,58 +155,30 @@ const std::vector<vayu::db::Result>& results) {
 
 namespace {
 
-// Store a body string onto @p node, capping it at @p max_body_bytes. Records
-// bodyTruncated + bodyBytes (the original length) when the body is cut so a
-// reader can tell a stored slice from the whole body.
-void store_capped_body (nlohmann::json& node, const std::string& body, size_t max_body_bytes) {
+// Cap a single trace node's `body` string in place. Records bodyTruncated +
+// bodyBytes (the original length) when the body is cut so a reader can tell a
+// stored slice from the whole body.
+void cap_node_body (nlohmann::json& node, size_t max_body_bytes) {
+    if (!node.is_object () || !node.contains ("body") || !node["body"].is_string ()) {
+        return;
+    }
+    const std::string body = node["body"].get<std::string> ();
     if (body.size () > max_body_bytes) {
         node["body"]          = body.substr (0, max_body_bytes);
         node["bodyTruncated"] = true;
         node["bodyBytes"]     = body.size ();
-    } else {
-        node["body"] = body;
     }
 }
 
 } // namespace
 
-nlohmann::json build_design_trace (const vayu::Request& request,
-const vayu::Response& response,
-size_t max_body_bytes) {
-    const bool has_error = response.has_error ();
-
-    nlohmann::json trace;
-    trace["request"] = { { "method", to_string (request.method) },
-        { "url", request.url }, { "headers", request.headers } };
-    if (!request.body.content.empty ()) {
-        store_capped_body (trace["request"], request.body.content, max_body_bytes);
+void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes) {
+    if (trace.contains ("request")) {
+        cap_node_body (trace["request"], max_body_bytes);
     }
-
-    if (!has_error) {
-        nlohmann::json resp;
-        resp["headers"] = response.headers;
-        store_capped_body (resp, response.body, max_body_bytes);
-        trace["response"] = std::move (resp);
-    } else {
-        trace["error_type"]    = to_string (response.error_code);
-        trace["error_message"] = response.error_message;
+    if (trace.contains ("response")) {
+        cap_node_body (trace["response"], max_body_bytes);
     }
-
-    // Timing information: each phase is written only when non-zero (a reused
-    // connection has no connect/tls phase).
-    const auto& timing = response.timing;
-    if (timing.dns_ms > 0)
-        trace["dnsMs"] = timing.dns_ms;
-    if (timing.connect_ms > 0)
-        trace["connectMs"] = timing.connect_ms;
-    if (timing.tls_ms > 0)
-        trace["tlsMs"] = timing.tls_ms;
-    if (timing.first_byte_ms > 0)
-        trace["firstByteMs"] = timing.first_byte_ms;
-    if (timing.download_ms > 0)
-        trace["downloadMs"] = timing.download_ms;
-
-    return trace;
 }
 
 Json serialize (const vayu::db::Collection& c) {
@@ -470,17 +442,18 @@ Json serialize (const Response& response) {
         json["errorMessage"] = response.error_message;
     }
 
-    // Timing
+    // Timing. Same `*Ms` key convention as the stored trace (store_result /
+    // load_strategy), so the live response and a restored one need no renaming.
     Json timing;
-    timing["total"]      = response.timing.total_ms;
-    timing["wire"]       = response.timing.wire_ms;
-    timing["queueWait"]  = response.timing.queue_wait_ms;
-    timing["dns"]        = response.timing.dns_ms;
-    timing["connect"]    = response.timing.connect_ms;
-    timing["tls"]        = response.timing.tls_ms;
-    timing["firstByte"]  = response.timing.first_byte_ms;
-    timing["download"]   = response.timing.download_ms;
-    json["timing"]       = timing;
+    timing["totalMs"]     = response.timing.total_ms;
+    timing["wireMs"]      = response.timing.wire_ms;
+    timing["queueWaitMs"] = response.timing.queue_wait_ms;
+    timing["dnsMs"]       = response.timing.dns_ms;
+    timing["connectMs"]   = response.timing.connect_ms;
+    timing["tlsMs"]       = response.timing.tls_ms;
+    timing["firstByteMs"] = response.timing.first_byte_ms;
+    timing["downloadMs"]  = response.timing.download_ms;
+    json["timing"]        = timing;
 
     return json;
 }
