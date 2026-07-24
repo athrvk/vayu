@@ -191,7 +191,7 @@ pm.test('Response time is acceptable', function() {
 pm.test('Returns array of users', function() {
   const users = pm.response.json();
   pm.expect(users).to.be.an('array');
-  pm.expect(users).to.have.length.above(0);
+  pm.expect(users.length).to.be.above(0);
   pm.expect(users[0]).to.have.property('id');
 });
 ```

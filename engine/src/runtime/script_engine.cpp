@@ -536,6 +536,296 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
     return JS_UNDEFINED;
 }
 
+// Terminal getters: assert on property access (Chai/Postman paren-less idiom).
+// Each honors the tracked `negated` flag, throws on failure, and returns the
+// expectation object so a chain can continue.
+
+JSValue expect_null_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    bool is_null = JS_IsNull (state->actual);
+    bool pass    = state->negated ? !is_null : is_null;
+
+    if (!pass) {
+        const char* msg = state->negated ? "Expected value to not be null" :
+                                           "Expected value to be null";
+        return JS_ThrowTypeError (ctx, "%s", msg);
+    }
+
+    return JS_DupValue (ctx, this_val);
+}
+
+JSValue expect_undefined_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    bool is_undef = JS_IsUndefined (state->actual);
+    bool pass     = state->negated ? !is_undef : is_undef;
+
+    if (!pass) {
+        const char* msg = state->negated ?
+        "Expected value to not be undefined" :
+        "Expected value to be undefined";
+        return JS_ThrowTypeError (ctx, "%s", msg);
+    }
+
+    return JS_DupValue (ctx, this_val);
+}
+
+JSValue expect_ok_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    bool is_ok = JS_ToBool (ctx, state->actual) == 1;
+    bool pass  = state->negated ? !is_ok : is_ok;
+
+    if (!pass) {
+        const char* msg = state->negated ? "Expected value to not be truthy" :
+                                           "Expected value to be truthy";
+        return JS_ThrowTypeError (ctx, "%s", msg);
+    }
+
+    return JS_DupValue (ctx, this_val);
+}
+
+JSValue expect_empty_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    bool is_empty = false;
+    if (JS_IsString (state->actual)) {
+        is_empty = js_to_string (ctx, state->actual).empty ();
+    } else if (QJS_IsArray (ctx, state->actual)) {
+        JSValue length = JS_GetPropertyStr (ctx, state->actual, "length");
+        uint32_t len   = 0;
+        JS_ToUint32 (ctx, &len, length);
+        JS_FreeValue (ctx, length);
+        is_empty = (len == 0);
+    } else if (JS_IsObject (state->actual)) {
+        JSPropertyEnum* tab = nullptr;
+        uint32_t count      = 0;
+        if (JS_GetOwnPropertyNames (ctx, &tab, &count, state->actual,
+            JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
+            is_empty = (count == 0);
+            for (uint32_t i = 0; i < count; i++) {
+                JS_FreeAtom (ctx, tab[i].atom);
+            }
+            js_free (ctx, tab);
+        }
+    }
+
+    bool pass = state->negated ? !is_empty : is_empty;
+
+    if (!pass) {
+        const char* msg = state->negated ? "Expected value to not be empty" :
+                                           "Expected value to be empty";
+        return JS_ThrowTypeError (ctx, "%s", msg);
+    }
+
+    return JS_DupValue (ctx, this_val);
+}
+
+// Callable matchers documented in pm-api-compatibility.md but previously absent.
+
+JSValue expect_least (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "least() requires an argument");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    double actual, expected;
+    if (JS_ToFloat64 (ctx, &actual, state->actual) < 0 ||
+    JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
+        return JS_ThrowTypeError (ctx, "least() requires numeric values");
+    }
+
+    bool at_least = actual >= expected;
+    bool pass     = state->negated ? !at_least : at_least;
+
+    if (!pass) {
+        std::string msg = "Expected " + std::to_string (actual) +
+        (state->negated ? " to not be at least " : " to be at least ") +
+        std::to_string (expected);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue expect_most (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "most() requires an argument");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    double actual, expected;
+    if (JS_ToFloat64 (ctx, &actual, state->actual) < 0 ||
+    JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
+        return JS_ThrowTypeError (ctx, "most() requires numeric values");
+    }
+
+    bool at_most = actual <= expected;
+    bool pass    = state->negated ? !at_most : at_most;
+
+    if (!pass) {
+        std::string msg = "Expected " + std::to_string (actual) +
+        (state->negated ? " to not be at most " : " to be at most ") +
+        std::to_string (expected);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "length() requires an argument");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    JSValue length_val = JS_GetPropertyStr (ctx, state->actual, "length");
+    if (JS_IsUndefined (length_val)) {
+        JS_FreeValue (ctx, length_val);
+        return JS_ThrowTypeError (ctx, "length() requires a value with a length");
+    }
+
+    double actual_len, expected;
+    JS_ToFloat64 (ctx, &actual_len, length_val);
+    JS_FreeValue (ctx, length_val);
+    if (JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
+        return JS_ThrowTypeError (ctx, "length() requires a numeric argument");
+    }
+
+    bool matches = (actual_len == expected);
+    bool pass    = state->negated ? !matches : matches;
+
+    if (!pass) {
+        std::string msg = "Expected length " + std::to_string (actual_len) +
+        (state->negated ? " to not equal " : " to equal ") + std::to_string (expected);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue expect_a (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "a() requires a type name");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    std::string type_name;
+    if (JS_IsNull (state->actual)) {
+        type_name = "null";
+    } else if (JS_IsUndefined (state->actual)) {
+        type_name = "undefined";
+    } else if (QJS_IsArray (ctx, state->actual)) {
+        type_name = "array";
+    } else if (JS_IsString (state->actual)) {
+        type_name = "string";
+    } else if (JS_IsNumber (state->actual)) {
+        type_name = "number";
+    } else if (JS_IsBool (state->actual)) {
+        type_name = "boolean";
+    } else if (JS_IsFunction (ctx, state->actual)) {
+        type_name = "function";
+    } else if (JS_IsObject (state->actual)) {
+        type_name = "object";
+    } else {
+        type_name = "undefined";
+    }
+
+    std::string expected = js_to_string (ctx, argv[0]);
+    for (auto& c : expected) {
+        c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+    }
+
+    bool matches = (type_name == expected);
+    bool pass    = state->negated ? !matches : matches;
+
+    if (!pass) {
+        std::string msg = "Expected type " + type_name +
+        (state->negated ? " to not be " : " to be ") + expected;
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue expect_match (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "match() requires a regular expression");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    JSValue test_fn = JS_GetPropertyStr (ctx, argv[0], "test");
+    if (!JS_IsFunction (ctx, test_fn)) {
+        JS_FreeValue (ctx, test_fn);
+        return JS_ThrowTypeError (ctx, "match() requires a regular expression");
+    }
+
+    std::string subject = js_to_string (ctx, state->actual);
+    JSValue arg         = JS_NewString (ctx, subject.c_str ());
+    JSValue result      = JS_Call (ctx, test_fn, argv[0], 1, &arg);
+    JS_FreeValue (ctx, arg);
+    JS_FreeValue (ctx, test_fn);
+
+    if (JS_IsException (result)) {
+        JS_FreeValue (ctx, result);
+        return JS_EXCEPTION;
+    }
+
+    bool matched = JS_ToBool (ctx, result) == 1;
+    JS_FreeValue (ctx, result);
+    bool pass = state->negated ? !matched : matched;
+
+    if (!pass) {
+        std::string msg = state->negated ?
+        "Expected '" + subject + "' to not match the pattern" :
+        "Expected '" + subject + "' to match the pattern";
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
 JSValue create_expectation (JSContext* ctx, JSValue actual) {
     JSValue obj = JS_NewObjectClass (ctx, static_cast<int> (expect_class_id));
     if (JS_IsException (obj)) {
@@ -569,16 +859,48 @@ JSValue create_expectation (JSContext* ctx, JSValue actual) {
     JS_NewCFunction (ctx, expect_to_getter, "have", 0), JS_UNDEFINED, 0);
     JS_FreeAtom (ctx, have_atom);
 
-    // Add assertion methods
+    // Add "at" getter for chaining (for `.at.least(n)` / `.at.most(n)`)
+    JSAtom at_atom = JS_NewAtom (ctx, "at");
+    JS_DefinePropertyGetSet (ctx, obj, at_atom,
+    JS_NewCFunction (ctx, expect_to_getter, "at", 0), JS_UNDEFINED, 0);
+    JS_FreeAtom (ctx, at_atom);
+
+    // Terminal matchers assert on access (Chai/Postman paren-less idiom), so
+    // register them as getters rather than function-valued properties - a bare
+    // `.to.be.true` must run the check, not silently return an uncalled function.
+    struct TerminalGetter {
+        const char* name;
+        JSCFunction* fn;
+    };
+    const TerminalGetter terminals[] = { { "exist", expect_exist },
+        { "true", expect_true }, { "false", expect_false },
+        { "null", expect_null_getter }, { "undefined", expect_undefined_getter },
+        { "ok", expect_ok_getter }, { "empty", expect_empty_getter } };
+    for (const auto& t : terminals) {
+        JSAtom atom = JS_NewAtom (ctx, t.name);
+        JS_DefinePropertyGetSet (
+        ctx, obj, atom, JS_NewCFunction (ctx, t.fn, t.name, 0), JS_UNDEFINED, 0);
+        JS_FreeAtom (ctx, atom);
+    }
+
+    // Add callable assertion methods
     JS_SetPropertyStr (ctx, obj, "equal", JS_NewCFunction (ctx, expect_equal, "equal", 1));
     JS_SetPropertyStr (ctx, obj, "eql", JS_NewCFunction (ctx, expect_equal, "eql", 1));
-    JS_SetPropertyStr (ctx, obj, "exist", JS_NewCFunction (ctx, expect_exist, "exist", 0));
-    JS_SetPropertyStr (ctx, obj, "true", JS_NewCFunction (ctx, expect_true, "true", 0));
-    JS_SetPropertyStr (ctx, obj, "false", JS_NewCFunction (ctx, expect_false, "false", 0));
     JS_SetPropertyStr (ctx, obj, "above", JS_NewCFunction (ctx, expect_above, "above", 1));
     JS_SetPropertyStr (ctx, obj, "below", JS_NewCFunction (ctx, expect_below, "below", 1));
+    JS_SetPropertyStr (ctx, obj, "least", JS_NewCFunction (ctx, expect_least, "least", 1));
+    JS_SetPropertyStr (ctx, obj, "most", JS_NewCFunction (ctx, expect_most, "most", 1));
     JS_SetPropertyStr (
     ctx, obj, "include", JS_NewCFunction (ctx, expect_include, "include", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "contain", JS_NewCFunction (ctx, expect_include, "contain", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "length", JS_NewCFunction (ctx, expect_length, "length", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "lengthOf", JS_NewCFunction (ctx, expect_length, "lengthOf", 1));
+    JS_SetPropertyStr (ctx, obj, "a", JS_NewCFunction (ctx, expect_a, "a", 1));
+    JS_SetPropertyStr (ctx, obj, "an", JS_NewCFunction (ctx, expect_a, "an", 1));
+    JS_SetPropertyStr (ctx, obj, "match", JS_NewCFunction (ctx, expect_match, "match", 1));
     JS_SetPropertyStr (ctx, obj, "property",
     JS_NewCFunction (ctx, expect_have_property, "property", 2));
 
@@ -745,23 +1067,27 @@ JSValue js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, 
 }
 
 JSValue js_response_have_jsonBody (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    if (argc < 1) {
-        return JS_ThrowTypeError (ctx, "jsonBody() requires a property path");
-    }
-
     auto* data = get_context_data (ctx);
     if (!data->response) {
         return JS_ThrowInternalError (ctx, "No response available");
     }
 
-    std::string prop_path = js_to_string (ctx, argv[0]);
-
     // Parse body as JSON
     JSValue json = JS_ParseJSON (ctx, data->response->body.c_str (),
     data->response->body.size (), "<response>");
     if (JS_IsException (json)) {
+        // Swallow the parse exception so we report a clean assertion failure.
+        JS_FreeValue (ctx, JS_GetException (ctx));
         return JS_ThrowTypeError (ctx, "Response body is not valid JSON");
     }
+
+    // No-arg form asserts only that the body is valid JSON (Postman semantics).
+    if (argc < 1) {
+        JS_FreeValue (ctx, json);
+        return JS_UNDEFINED;
+    }
+
+    std::string prop_path = js_to_string (ctx, argv[0]);
 
     // Navigate to the property
     JSValue current              = JS_DupValue (ctx, json);
