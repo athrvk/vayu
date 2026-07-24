@@ -51,7 +51,7 @@ export default function SamplesTab({ report }: TabProps) {
 				{report.results.map((sample: SampleResult, idx: number) => (
 					<SampleRequestCard
 						key={idx}
-						sample={sample as SampleResult}
+						sample={sample}
 						index={idx}
 						isExpanded={expandedIndex === idx}
 						onToggle={() => setExpandedIndex(expandedIndex === idx ? null : idx)}

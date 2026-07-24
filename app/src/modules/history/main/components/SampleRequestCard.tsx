@@ -130,9 +130,11 @@ export default function SampleRequestCard({
 						<UnifiedResponseViewer
 							response={{
 								body:
-									typeof sample.trace.response.body === "object"
-										? JSON.stringify(sample.trace.response.body, null, 2)
-										: sample.trace.response.body || "",
+									typeof sample.trace.response.body === "string"
+										? sample.trace.response.body
+										: sample.trace.response.body == null
+											? ""
+											: JSON.stringify(sample.trace.response.body, null, 2),
 								headers: sample.trace.response.headers || {},
 								status: sample.statusCode,
 							}}

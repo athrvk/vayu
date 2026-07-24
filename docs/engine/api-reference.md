@@ -632,14 +632,14 @@ the request was configured with.
   "body": "{\"id\":1,\"name\":\"John\"}",
   "bodySize": 20,
   "timing": {
-    "totalMs": 245.5,
-    "wireMs": 245.1,
-    "queueWaitMs": 0.4,
-    "dnsMs": 5.2,
-    "connectMs": 12.3,
-    "tlsMs": 45.1,
-    "firstByteMs": 180.2,
-    "downloadMs": 2.7
+    "total": 245.5,
+    "wire": 245.1,
+    "queueWait": 0.4,
+    "dns": 5.2,
+    "connect": 12.3,
+    "tls": 45.1,
+    "firstByte": 180.2,
+    "download": 2.7
   },
   "testResults": [
     {
@@ -650,6 +650,17 @@ the request was configured with.
   "consoleLogs": []
 }
 ```
+
+**Two timing dialects, on purpose.** The synchronous `/execute` response above
+names the phases **without** the `Ms` suffix (`firstByte`, `dns`, `download`,
+…; `serialize(Response)` in `engine/src/utils/json.cpp`). The **stored** trace
+for the same exchange - written to the run's `results` row by `store_result`
+(design mode) and `load_strategy` (load mode), and returned inside
+`GET /runs/:runId/report` `results[].trace` - names them **with** the suffix
+(`firstByteMs`, `dnsMs`, `downloadMs`, …). The renderer consumes the first
+directly (`ResponseTiming`) and adapts the second at one boundary when it
+restores a design run (`restore-response.ts`). The two dialects are the wire
+contract; do not "fix" one to match the other without updating that adapter.
 
 ### POST /runs
 
