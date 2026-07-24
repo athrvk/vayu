@@ -76,6 +76,134 @@ const std::optional<std::string>& parent_id) {
     return std::nullopt;
 }
 
+/**
+ * Applies the request body onto `c` under the one null-vs-absent rule (see the
+ * helpers in routes.hpp). Shared by the create and update cores so the two
+ * verbs cannot drift apart on what a field means - the only thing that differs
+ * between them is `is_create`.
+ *
+ * Returns an error response when a no-default field (`name`) is missing or
+ * null, or when the proposed parent would form a cycle; nullopt on success.
+ */
+static std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (
+vayu::db::Database& db,
+vayu::db::Collection& c,
+const nlohmann::json& json,
+bool is_create) {
+    if (auto err = apply_required_string_field (json, "name", c.name, is_create)) {
+        return err;
+    }
+
+    apply_string_field (json, "description", c.description, "", is_create);
+
+    if (json.contains ("parentId")) {
+        c.parent_id = json["parentId"].is_null () ?
+        std::nullopt :
+        std::optional<std::string> (json["parentId"].get<std::string> ());
+    } else if (is_create) {
+        c.parent_id = std::nullopt;
+    }
+
+    if (json.contains ("order") && !json["order"].is_null ()) {
+        c.order = json["order"].get<int> ();
+    } else if (is_create) {
+        // Absent or null on create: append after the current siblings so a new
+        // collection lands at the end rather than colliding on 0.
+        auto all      = db.get_collections ();
+        int max_order = -1;
+        for (const auto& col : all) {
+            if (col.parent_id == c.parent_id && col.order > max_order) {
+                max_order = col.order;
+            }
+        }
+        c.order = max_order + 1;
+    } else if (json.contains ("order")) {
+        c.order = 0; // Explicit null on update -> reset to the column default.
+    }
+
+    apply_json_field (json, "variables", c.variables, "{}", is_create);
+    // Collection auth is never 'inherit' - a collection is the root of a chain.
+    apply_json_field (json, "auth", c.auth, R"({"mode":"none"})", is_create);
+    apply_string_field (json, "preRequestScript", c.pre_request_script, "", is_create);
+    apply_string_field (json, "postRequestScript", c.post_request_script, "", is_create);
+
+    // Reject writes that would put a cycle in the collection tree (self-parent,
+    // or reparent into a descendant) before they reach the DB - a cycle makes
+    // cascade delete loop forever under the global mutex. Cycle/self checks
+    // only; parent existence is not required (import creates in bulk).
+    if (auto err = validate_parent_assignment (db, c.id, c.parent_id)) {
+        return err;
+    }
+    return std::nullopt;
+}
+
+/**
+ * Testable core of POST /collections - **create only**, returning
+ * {http_status, json_body}.
+ *
+ * POST used to be a silent upsert, so a stale or typo'd id quietly created a
+ * second record instead of failing, and an id collision merged two records into
+ * one. Now an id that already exists is a 409 and the caller is told to use
+ * PUT; POST only ever creates. A client-supplied id is still honoured on create
+ * because the import orchestrator pre-assigns ids to wire the tree together
+ * before persisting (that need goes away with #96, and #97 then rejects the
+ * field outright); an absent id is generated engine-side.
+ */
+std::pair<int, nlohmann::json>
+create_collection_response (vayu::db::Database& db, const nlohmann::json& json) {
+    std::string id;
+    if (json.contains ("id") && !json["id"].is_null ()) {
+        id = json["id"].get<std::string> ();
+    } else {
+        id = vayu::utils::generate_id ("col_");
+    }
+
+    if (db.get_collection (id).has_value ()) {
+        return { 409,
+            nlohmann::json{ { "error",
+            "Collection '" + id + "' already exists; use PUT /collections/:id to update" } } };
+    }
+
+    vayu::db::Collection c;
+    c.id         = id;
+    c.created_at = now_ms ();
+    c.updated_at = now_ms ();
+
+    if (auto err = apply_collection_fields (db, c, json, /*is_create=*/true)) {
+        return *err;
+    }
+
+    db.create_collection (c);
+    return { 200, vayu::json::serialize (c) };
+}
+
+/**
+ * Testable core of PUT /collections/:id - **update only**, returning
+ * {http_status, json_body}. A missing id is a 404 rather than a silent create.
+ *
+ * Semantics are merge-patch: absent fields keep their stored value. We use PUT
+ * loosely rather than adding a separate PATCH verb (documented in
+ * api-reference.md) because that is what the update branch has always done and
+ * what every renderer call site expects.
+ */
+std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json) {
+    auto existing = db.get_collection (id);
+    if (!existing) {
+        return { 404, nlohmann::json{ { "error", "Collection not found" } } };
+    }
+
+    vayu::db::Collection c = *existing;
+    if (auto err = apply_collection_fields (db, c, json, /*is_create=*/false)) {
+        return *err;
+    }
+    c.updated_at = now_ms ();
+
+    db.create_collection (c);
+    return { 200, vayu::json::serialize (c) };
+}
+
 void register_collection_routes (RouteContext& ctx) {
     /**
      * GET /collections
@@ -97,129 +225,63 @@ void register_collection_routes (RouteContext& ctx) {
 
     /**
      * POST /collections
-     * Creates or updates a collection in the database.
-     * If 'id' is provided and exists, performs a partial update.
-     * Otherwise, creates a new collection (requires 'name').
-     * Body params: id (optional string), name (string), parentId (optional
-     * string), order (optional int) Returns: The saved collection object.
+     * Creates a collection. Create only - an `id` that already exists is a 409
+     * pointing at PUT, never a silent update (issue #95).
+     * Body params: id (optional string - generated when absent), name
+     * (required string), description, parentId, order, variables, auth,
+     * preRequestScript, postRequestScript.
+     * Returns: The created collection object, 409 on an existing id, or 400.
      */
     ctx.server.Post ("/collections",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
-            auto json = nlohmann::json::parse (req.body);
-
-            std::string id;
-            if (json.contains ("id") && !json["id"].is_null ()) {
-                id = json["id"].get<std::string> ();
+            auto json           = nlohmann::json::parse (req.body);
+            auto [status, body] = create_collection_response (ctx.db, json);
+            if (status != 200) {
+                vayu::utils::log_warning ("POST /collections - " +
+                std::to_string (status) + ": " + body["error"].get<std::string> ());
             } else {
-                id = vayu::utils::generate_id ("col_");
+                vayu::utils::log_info (
+                "POST /collections - Created collection: id=" + body["id"].get<std::string> () +
+                ", name=" + body["name"].get<std::string> ());
             }
-
-            vayu::db::Collection c;
-            auto existing  = ctx.db.get_collection (id);
-            bool is_update = existing.has_value ();
-
-            if (existing) {
-                c = *existing;
-            } else {
-                if (!json.contains ("name") || json["name"].is_null ()) {
-                    vayu::utils::log_warning (
-                    "POST /collections - Missing required field: name");
-                    send_error (res, 400, "Missing required field: name");
-                    return;
-                }
-                c.id         = id;
-                c.created_at = now_ms ();
-                c.updated_at = now_ms ();
-                c.order      = 0;
-            }
-
-            if (json.contains ("name") && !json["name"].is_null ()) {
-                c.name = json["name"].get<std::string> ();
-            }
-
-            if (json.contains ("description")) {
-                c.description = json["description"].is_null ()
-                ? ""
-                : json["description"].get<std::string> ();
-            }
-
-            if (json.contains ("parentId")) {
-                if (json["parentId"].is_null ()) {
-                    c.parent_id = std::nullopt;
-                } else {
-                    c.parent_id = json["parentId"].get<std::string> ();
-                }
-            }
-
-            if (json.contains ("order") && !json["order"].is_null ()) {
-                c.order = json["order"].get<int> ();
-            } else if (!is_update) {
-                // New collection: assign next order among siblings for stable ordering
-                auto all      = ctx.db.get_collections ();
-                int max_order = -1;
-                for (const auto& col : all) {
-                    if (col.parent_id == c.parent_id && col.order > max_order) {
-                        max_order = col.order;
-                    }
-                }
-                c.order = max_order + 1;
-            }
-
-            // Collection variables
-            if (json.contains ("variables")) {
-                c.variables = json["variables"].is_null () ? "{}" : json["variables"].dump ();
-            } else if (!is_update) {
-                c.variables = "{}";
-            }
-
-            // Collection auth - never 'inherit'; defaults to {mode: "none"}
-            if (json.contains ("auth")) {
-                c.auth = json["auth"].is_null () ? "{\"mode\":\"none\"}" : json["auth"].dump ();
-            } else if (!is_update) {
-                c.auth = "{\"mode\":\"none\"}";
-            }
-
-            if (json.contains ("preRequestScript")) {
-                c.pre_request_script = json["preRequestScript"].is_null ()
-                ? ""
-                : json["preRequestScript"].get<std::string> ();
-            }
-
-            if (json.contains ("postRequestScript")) {
-                c.post_request_script = json["postRequestScript"].is_null ()
-                ? ""
-                : json["postRequestScript"].get<std::string> ();
-            }
-
-            if (is_update) {
-                c.updated_at = now_ms ();
-            }
-
-            // Reject writes that would put a cycle in the collection tree
-            // (self-parent, or reparent into a descendant) before they reach
-            // the DB - a cycle makes cascade delete loop forever under the
-            // global mutex. Cycle/self checks only; parent existence is not
-            // required (import creates collections in bulk).
-            if (auto err = validate_parent_assignment (ctx.db, c.id, c.parent_id)) {
-                vayu::utils::log_warning (
-                "POST /collections - Rejected cyclic parent for id=" + c.id + ": " +
-                (*err).second["error"].get<std::string> ());
-                res.status = (*err).first;
-                res.set_content ((*err).second.dump (), "application/json");
-                return;
-            }
-
-            std::string parent_id = c.parent_id.value_or ("root");
-            vayu::utils::log_info ("POST /collections - " +
-            std::string (is_update ? "Updating" : "Creating") +
-            " collection: id=" + c.id + ", name=" + c.name + ", parent_id=" + parent_id);
-
-            ctx.db.create_collection (c);
-            res.set_content (vayu::json::serialize (c).dump (), "application/json");
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "POST /collections - Error: " + std::string (e.what ()));
+            send_error (res, 400, e.what ());
+        }
+    });
+
+    /**
+     * PUT /collections/:id
+     * Updates an existing collection (merge-patch: absent fields keep their
+     * value, null resets to the default). Update only - a missing id is a 404,
+     * never a silent create (issue #95).
+     * Path params: id - The collection ID to update.
+     * Returns: The updated collection object, 404 if it does not exist, or 400.
+     */
+    ctx.server.Put (R"(/collections/([^/]+))",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        std::string collection_id = req.matches[1];
+        try {
+            auto json = nlohmann::json::parse (req.body);
+            auto [status, body] = update_collection_response (ctx.db, collection_id, json);
+            if (status != 200) {
+                vayu::utils::log_warning ("PUT /collections/:id - " +
+                std::to_string (status) + " for id=" + collection_id + ": " +
+                body["error"].get<std::string> ());
+            } else {
+                vayu::utils::log_info (
+                "PUT /collections/:id - Updated collection: id=" + collection_id +
+                ", name=" + body["name"].get<std::string> ());
+            }
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "PUT /collections/:id - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });
