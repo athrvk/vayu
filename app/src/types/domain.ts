@@ -252,6 +252,10 @@ export interface RunConfigSnapshot {
  */
 export interface RunResultTrace {
 	totalMs?: number;
+	/** libcurl's transfer time; `queueWaitMs` is generator-side overhead. Both
+	 * writers store them now, but rows persisted by older engines lack them. */
+	wireMs?: number;
+	queueWaitMs?: number;
 	dnsMs?: number;
 	connectMs?: number;
 	tlsMs?: number;
@@ -286,10 +290,18 @@ export interface RunResultTrace {
 		url?: string;
 		headers?: Record<string, string>;
 		body?: string;
+		/** Set by `store_result` when the request body exceeded `maxTraceBodyBytes`. */
+		bodyTruncated?: boolean;
+		/** The request body's original byte length, present only when truncated. */
+		bodyBytes?: number;
 	};
 	response?: {
 		headers?: Record<string, string>;
 		body?: unknown;
+		/** Set by `store_result` when the response body exceeded `maxTraceBodyBytes`. */
+		bodyTruncated?: boolean;
+		/** The response body's original byte length, present only when truncated. */
+		bodyBytes?: number;
 	};
 }
 
@@ -308,17 +320,60 @@ export interface RunResult {
 	trace?: RunResultTrace;
 }
 
+/**
+ * The compact per-row summary the paginated `GET /runs` list carries in place
+ * of the full {@link RunConfigSnapshot}. Exactly the six keys the history and
+ * dashboard list UIs read; each is omitted by the engine when absent from the
+ * stored snapshot. The full snapshot is still available on `GET /runs/:id`.
+ */
+export interface RunSummary {
+	url?: string;
+	method?: string;
+	mode?: string;
+	duration?: string;
+	concurrency?: number;
+	comment?: string;
+}
+
 export interface Run {
 	id: string;
 	type: "load" | "design";
 	status: "pending" | "running" | "completed" | "stopped" | "failed";
 	startTime: number; // Unix timestamp in ms
 	endTime: number;
+	/**
+	 * Present on list rows from the paginated `GET /runs`. The single-run
+	 * `GET /runs/:id` returns {@link configSnapshot} instead.
+	 */
+	summary?: RunSummary;
+	/** Full snapshot - present on `GET /runs/:id`, not on paginated list rows. */
 	configSnapshot?: RunConfigSnapshot;
 	requestId?: string | null;
 	environmentId?: string | null;
 	/** The exchange, present only for a design run once it has completed or failed. */
 	result?: RunResult;
+}
+
+/** The `{data, pagination}` envelope the paginated `GET /runs` returns. */
+export interface RunListResponse {
+	data: Run[];
+	pagination: {
+		total: number;
+		limit: number;
+		offset: number;
+		hasMore: boolean;
+		returned: number;
+	};
+}
+
+/** Server-side filters for the paginated `GET /runs` list. */
+export interface RunListParams {
+	limit?: number;
+	offset?: number;
+	type?: "load" | "design";
+	status?: Run["status"];
+	requestId?: string;
+	q?: string;
 }
 
 /** Load-test execution strategy. Single source of truth for the mode union. */
@@ -341,6 +396,29 @@ export interface LoadTestConfig {
 	max_in_flight?: number;
 }
 
+/**
+ * Per-request timing breakdown (milliseconds), as `POST /execute` returns it
+ * (`serialize(Response)`, engine/src/utils/json.cpp). Phase fields
+ * (dns…download) are sequential segments of the request; `wireMs` is libcurl's
+ * transfer time and `queueWaitMs` is generator-side overhead (total − wire).
+ *
+ * The field names are the engine's wire keys - the same `*Ms` convention the
+ * stored trace ({@link RunResultTrace}) uses, so a live response and one
+ * restored from a stored design run agree without renaming. `wireMs` /
+ * `queueWaitMs` stay optional because traces stored by older engines omitted
+ * them (current ones store all eight); consumers must treat both as optional.
+ */
+export interface ResponseTiming {
+	totalMs: number;
+	wireMs?: number;
+	queueWaitMs?: number;
+	dnsMs: number;
+	connectMs: number;
+	tlsMs: number;
+	firstByteMs: number;
+	downloadMs: number;
+}
+
 export interface HttpResponse {
 	status: number;
 	statusText: string;
@@ -350,16 +428,7 @@ export interface HttpResponse {
 	body: unknown;
 	bodyRaw: string;
 	bodySize: number;
-	timing: {
-		total: number;
-		wire?: number;
-		queueWait?: number;
-		dns: number;
-		connect: number;
-		tls: number;
-		firstByte: number;
-		download: number;
-	};
+	timing: ResponseTiming;
 	errorCode?: string;
 	errorMessage?: string;
 }

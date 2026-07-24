@@ -26,13 +26,14 @@ import { buildRawRequest } from "@/components/shared/response-viewer";
 export type RunResultSample = NonNullable<RunReport["results"]>[number];
 
 /**
- * Rebuild the timing breakdown from a stored trace.
- *
- * The engine writes each phase only when it is non-zero (a reused connection
- * has no `connectMs`/`tlsMs`), so a missing phase means zero, not unknown.
- * `wire`/`queueWait` are deliberately absent: the design-mode writer records
- * the five phases and `latency_ms` only, and the Timing tab already treats
- * both as optional.
+ * Rebuild the timing breakdown from a stored trace. The stored trace and the
+ * live `/execute` response share one key convention (`dnsMs`…`downloadMs`), so
+ * no renaming happens here - only defaulting for rows written by older
+ * engines, which omitted zero-valued phases (a reused connection stored no
+ * `connectMs`/`tlsMs`) and never stored `wireMs`/`queueWaitMs`. The current
+ * writer stores all eight keys, so on fresh rows the restored Timing tab shows
+ * exactly what the live one did, Wire and Queue included; on old rows a
+ * missing phase means zero and Wire/Queue stay absent.
  *
  * Returns `undefined` when the trace carries no phase at all, so the caller
  * does not surface a Timing tab that would render an all-zero timeline.
@@ -45,12 +46,14 @@ export function timingFromTrace(
 	if (!phases.some((v) => typeof v === "number")) return undefined;
 
 	return {
-		total: latencyMs ?? trace.totalMs ?? 0,
-		dns: trace.dnsMs ?? 0,
-		connect: trace.connectMs ?? 0,
-		tls: trace.tlsMs ?? 0,
-		firstByte: trace.firstByteMs ?? 0,
-		download: trace.downloadMs ?? 0,
+		totalMs: latencyMs ?? trace.totalMs ?? 0,
+		...(typeof trace.wireMs === "number" && { wireMs: trace.wireMs }),
+		...(typeof trace.queueWaitMs === "number" && { queueWaitMs: trace.queueWaitMs }),
+		dnsMs: trace.dnsMs ?? 0,
+		connectMs: trace.connectMs ?? 0,
+		tlsMs: trace.tlsMs ?? 0,
+		firstByteMs: trace.firstByteMs ?? 0,
+		downloadMs: trace.downloadMs ?? 0,
 	};
 }
 
@@ -140,7 +143,12 @@ export function responseFromRunResult(
 		...sentSide(trace),
 		body,
 		bodyType: detectBodyType(body),
-		size: body.length,
+		// `size` is what the pane's byte count shows. When the body was truncated
+		// for storage the stored slice is not the real size, so prefer the
+		// original `bodyBytes` the engine recorded and fall back to the slice.
+		size: trace.response.bodyBytes ?? body.length,
+		bodyTruncated: trace.response.bodyTruncated,
+		bodyBytes: trace.response.bodyBytes,
 		time: result.latencyMs || 0,
 		timing: timingFromTrace(trace, result.latencyMs),
 		restoredFrom,

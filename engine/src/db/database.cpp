@@ -32,6 +32,7 @@
 #include <sqlite3.h>
 #include <sqlite_orm/sqlite_orm.h>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -196,8 +197,11 @@ inline auto make_storage (const std::string& path) {
     make_index ("idx_requests_collection_id", &Request::collection_id),
     // The cascade-delete BFS in delete_collection walks one lookup per node.
     make_index ("idx_collections_parent_id", &Collection::parent_id),
-    // get_all_runs sorts the whole table on every GET /runs.
+    // get_all_runs / get_runs_paginated sort the whole table on every GET /runs.
     make_index ("idx_runs_start_time", &Run::start_time),
+    // GET /runs?requestId= (and useLastDesignRunQuery's single-run lookup)
+    // filter on request_id; the design-run seed hits this per opened request.
+    make_index ("idx_runs_request_id", &Run::request_id),
 
     // ─────────────── PROJECT MANAGEMENT TABLES ───────────────
 
@@ -532,6 +536,16 @@ void Database::init () {
     "wal_checkpoint=" + std::to_string (wal_checkpoint) + " pages, " +
     "busy_timeout=" + std::to_string (busy_timeout) + "ms, " +
     "synchronous=" + std::to_string (synchronous) + ")");
+
+    // Trim accumulated run history on startup (design-mode clicks and load runs
+    // are otherwise append-only). Best-effort: a prune failure must not block a
+    // successful startup.
+    try {
+        prune_runs_configured ();
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "Startup run pruning failed: " + std::string (e.what ()));
+    }
 }
 
 // ============================================================================
@@ -759,12 +773,121 @@ std::vector<Run> Database::get_all_runs () {
     return impl_->storage.get_all<Run> (order_by (&Run::start_time).desc ());
 }
 
+namespace {
+// Compose the sqlite_orm WHERE for a RunFilter. Each optional filter becomes
+// `(column == value) OR <inactive>`, where <inactive> is a bound `true` when
+// the filter is unset - so an unset field is a wildcard and the same compiled
+// expression serves every filter combination (no per-combination branching).
+// `q` is a substring LIKE over config_snapshot (see RunFilter's contract).
+auto run_filter_where (const RunFilter& filter) {
+    const bool no_type   = !filter.type.has_value ();
+    const bool no_status = !filter.status.has_value ();
+    const bool no_req    = !filter.request_id.has_value ();
+    const bool no_q      = !filter.q.has_value () || filter.q->empty ();
+
+    const RunType type_val     = filter.type.value_or (RunType::Design);
+    const RunStatus status_val = filter.status.value_or (RunStatus::Pending);
+    const std::string req_val  = filter.request_id.value_or ("");
+    const std::string q_pat    = "%" + (filter.q ? *filter.q : std::string{}) + "%";
+
+    return where ((c (&Run::type) == type_val || no_type) &&
+    (c (&Run::status) == status_val || no_status) &&
+    (c (&Run::request_id) == req_val || no_req) &&
+    (like (&Run::config_snapshot, q_pat) || no_q));
+}
+} // namespace
+
+std::vector<Run> Database::get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<Run> (run_filter_where (filter),
+    order_by (&Run::start_time).desc (), sqlite_orm::limit (offset, limit));
+}
+
+int64_t Database::count_runs (const RunFilter& filter) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<Run> (run_filter_where (filter));
+}
+
 // Cascade delete: removes metrics and results first
 void Database::delete_run (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     impl_->storage.remove_all<Metric> (where (c (&Metric::run_id) == id));
     impl_->storage.remove_all<Result> (where (c (&Result::run_id) == id));
     impl_->storage.remove<Run> (id);
+}
+
+// Retention: drop runs beyond the count cap and/or older than the age cap.
+void Database::prune_runs (int max_runs, int max_age_days) {
+    // Both limits off - nothing to do (0 = unlimited for each).
+    if (max_runs <= 0 && max_age_days <= 0) {
+        return;
+    }
+
+    // 1. Select victim ids under the lock, then release it before deleting so
+    //    the (potentially large) delete loop batches its own locking below.
+    std::vector<std::string> victims;
+    {
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+
+        // Newest first, matching get_all_runs / the count cap's "most-recent N".
+        auto runs = impl_->storage.get_all<Run> (order_by (&Run::start_time).desc ());
+
+        const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                            .count ();
+        // 0 disables the age cap; guard the multiply against overflow.
+        const int64_t age_cutoff =
+        max_age_days > 0 ? now - static_cast<int64_t> (max_age_days) * 86'400'000LL : 0;
+
+        int kept = 0;
+        for (const auto& run : runs) {
+            // In-flight runs are never pruned and do not count toward the cap.
+            if (run.status == RunStatus::Running || run.status == RunStatus::Pending) {
+                continue;
+            }
+            const bool over_count = (max_runs > 0) && (kept >= max_runs);
+            const bool too_old = (max_age_days > 0) && (run.start_time < age_cutoff);
+            if (over_count || too_old) {
+                victims.push_back (run.id);
+            } else {
+                ++kept;
+            }
+        }
+    }
+
+    if (victims.empty ()) {
+        return;
+    }
+
+    // 2. Delete via the delete_run cascade, batched so a huge backlog does not
+    //    hold the DB mutex for seconds. The lock is re-taken per batch and
+    //    released between them, letting /health, SSE and the runs poll interleave.
+    constexpr size_t BATCH_SIZE = 100;
+    for (size_t start = 0; start < victims.size (); start += BATCH_SIZE) {
+        const size_t end = std::min (start + BATCH_SIZE, victims.size ());
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+        impl_->storage.transaction ([&] {
+            for (size_t i = start; i < end; ++i) {
+                const auto& id = victims[i];
+                impl_->storage.remove_all<Metric> (where (c (&Metric::run_id) == id));
+                impl_->storage.remove_all<Result> (where (c (&Result::run_id) == id));
+                impl_->storage.remove<Run> (id);
+            }
+            return true; // Commit
+        });
+    }
+
+    vayu::utils::log_info ("Pruned " + std::to_string (victims.size ()) +
+    " old run(s) (max_runs=" + std::to_string (max_runs) +
+    ", max_age_days=" + std::to_string (max_age_days) + ")");
+}
+
+void Database::prune_runs_configured () {
+    const int max_runs =
+    get_config_int ("maxRunsRetained", vayu::core::constants::database::MAX_RUNS_RETAINED);
+    const int max_age_days =
+    get_config_int ("runRetentionDays", vayu::core::constants::database::RUN_RETENTION_DAYS);
+    prune_runs (max_runs, max_age_days);
 }
 
 // ============================================================================
@@ -1275,6 +1398,39 @@ void Database::seed_default_config () {
     "1024",      // 1KB
     "104857600", // 100MB
     now });
+
+    upsert_config (ConfigEntry{ "maxTraceBodyBytes",
+    std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES), "integer",
+    "Maximum Stored Trace Body Size",
+    "Largest request/response body kept in a design run's stored trace. "
+    "Bodies over this size are truncated in the database (the response viewer "
+    "shows a notice and re-sending fetches the full body), so downloading one "
+    "huge response does not bloat storage forever. Default 5MB.",
+    "observability", std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES),
+    "1024",       // 1KB
+    "104857600",  // 100MB
+    now });
+
+    upsert_config (ConfigEntry{ "maxRunsRetained",
+    std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED), "integer",
+    "Maximum Runs Retained",
+    "Keep at most this many most-recent runs; older runs (and their metrics and "
+    "results) are pruned automatically at startup and after each run finishes. "
+    "Higher values - or 0 for unlimited - keep more history but grow the database "
+    "file on disk and slow down loading the run history. In-progress runs are "
+    "never pruned. Default 200.",
+    "observability", std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED),
+    "0", "100000", now });
+
+    upsert_config (ConfigEntry{ "runRetentionDays",
+    std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS), "integer",
+    "Run Retention (Days)",
+    "Delete runs older than this many days (with their metrics and results) "
+    "automatically at startup and after each run finishes. Higher values - or 0 "
+    "to keep runs forever - retain more history at the cost of a larger database "
+    "file on disk. In-progress runs are never pruned. Default 30.",
+    "observability", std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS),
+    "0", "3650", now });
 
     upsert_config (ConfigEntry{ "sseConnectTimeout",
     std::to_string (vayu::core::constants::sse::CONNECT_TIMEOUT_MS), "integer", "SSE Connection Timeout",

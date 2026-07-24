@@ -590,6 +590,14 @@ RunManager& manager) {
         context->should_stop ? vayu::RunStatus::Stopped : vayu::RunStatus::Completed;
         db.update_run_status_with_retry (context->run_id, final_status);
 
+        // Terminal status reached - trim old runs per the retention knobs.
+        // Best-effort: a prune failure must not fail the completed run.
+        try {
+            db.prune_runs_configured ();
+        } catch (const std::exception& e) {
+            vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
+        }
+
         if (verbose) {
             vayu::utils::log_info (
             "Load test " + context->run_id + " " + vayu::to_string (final_status));
@@ -621,6 +629,13 @@ RunManager& manager) {
             db.add_metric (
             { 0, context->run_id, now_ms (), vayu::MetricName::Completed, 1.0, "" });
         } catch (...) {
+        }
+
+        // Failed is terminal too - prune per the retention knobs, best-effort.
+        try {
+            db.prune_runs_configured ();
+        } catch (const std::exception& ex) {
+            vayu::utils::log_warning ("Run pruning failed: " + std::string (ex.what ()));
         }
     }
 

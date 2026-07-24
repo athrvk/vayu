@@ -28,7 +28,12 @@
  * script inside the request permanently - the next send would glue it on again
  * and run it twice.
  *
- * Neither is silent: {@link buildChangeset} emits both as `kept` rows, in the
+ * **Body, for a run whose stored request body was truncated.** The engine caps
+ * a stored trace body at `maxTraceBodyBytes`, so such a run holds only a slice
+ * of what was sent; writing that slice back would corrupt the saved body. When
+ * `seed.requestBodyTruncated` is set the body is left off the patch.
+ *
+ * None is silent: {@link buildChangeset} emits each as a `kept` row, in the
  * same list as every change, with the reason inline. That is what makes "an
  * older run saves fewer fields" visible rather than surprising.
  */
@@ -311,7 +316,20 @@ export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetIte
 	scalar("URL", live.url, patch.url ?? live.url);
 	keyValues("Params", live.params ?? [], patch.params ?? []);
 	keyValues("Headers", live.headers ?? [], patch.headers ?? []);
-	scalar("Body", describeBody(live.body), describeBody(patch.body ?? live.body));
+	// A truncated run stores only a slice of its request body, so the body is not
+	// written (applyRunToRequest omits it). Shown as a kept row with the reason,
+	// the same way Auth is - never silently dropped.
+	if (seed.requestBodyTruncated) {
+		items.push({
+			field: "Body",
+			state: "kept",
+			detail: "kept",
+			value: describeBody(live.body),
+			note: "This run's request body was too large to store in full, so only a slice was kept. It is not written back, to avoid overwriting the saved body with an incomplete copy.",
+		});
+	} else {
+		scalar("Body", describeBody(live.body), describeBody(patch.body ?? live.body));
+	}
 
 	if (isLegacyRun(seed)) {
 		items.push({
@@ -363,11 +381,19 @@ export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateReq
 		// with current values on load, so writing a run's stale X-Vayu-Version /
 		// X-Request-ID would pin an old version onto the request.
 		headers: userEntries(items(request.headers)),
-		body,
-		bodyType: body.mode,
 		followRedirects: request.followRedirects ?? live.followRedirects,
 		maxRedirects: request.maxRedirects ?? live.maxRedirects,
 	};
+
+	// The body is only written when the run's stored request body was not
+	// truncated. A truncated run holds only a slice of what was sent, and writing
+	// that slice back would silently corrupt the saved request - so the body (and
+	// bodyType) are left off the patch entirely, the same way auth never is. Note
+	// there is no `body: undefined`, which some serialisers would still send.
+	if (!seed.requestBodyTruncated) {
+		patch.body = body;
+		patch.bodyType = body.mode;
+	}
 
 	if (!isLegacyRun(seed)) {
 		patch.preRequestScript = request.preRequestScript ?? "";

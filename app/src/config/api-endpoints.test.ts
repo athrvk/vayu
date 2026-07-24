@@ -29,6 +29,21 @@ describe("API_ENDPOINTS canonical routes", () => {
 		expect(API_ENDPOINTS.RUN_STOP("r1")).toBe("/runs/r1/stop");
 	});
 
+	it("builds the paginated /runs list URL with only the given params", () => {
+		expect(API_ENDPOINTS.RUNS_LIST({ limit: 50, offset: 0 })).toBe("/runs?limit=50&offset=0");
+		expect(
+			API_ENDPOINTS.RUNS_LIST({
+				requestId: "req_1",
+				type: "design",
+				status: "completed",
+				limit: 1,
+			})
+		).toBe("/runs?limit=1&type=design&status=completed&requestId=req_1");
+		expect(API_ENDPOINTS.RUNS_LIST({ q: "users api" })).toBe("/runs?q=users+api");
+		// No params -> bare /runs, which the engine treats as the legacy array.
+		expect(API_ENDPOINTS.RUNS_LIST({})).toBe("/runs");
+	});
+
 	it("uses /runs/:id/live for live SSE metrics", () => {
 		expect(API_ENDPOINTS.METRICS_LIVE("r1")).toBe("/runs/r1/live");
 		expect(API_ENDPOINTS.METRICS_LIVE("r1")).not.toContain("/metrics/live/");

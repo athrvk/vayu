@@ -35,29 +35,13 @@ export interface LoadTestDetailProps {
 	runId: string;
 }
 
-export interface SampleResult {
-	timestamp: number;
-	statusCode: number;
-	latencyMs: number;
-	error?: string;
-	trace?: {
-		dnsMs?: number;
-		connectMs?: number;
-		tlsMs?: number;
-		firstByteMs?: number;
-		downloadMs?: number;
-		request?: {
-			method?: string;
-			url?: string;
-			headers?: Record<string, string>;
-			body?: string;
-		};
-		response?: {
-			headers?: Record<string, string>;
-			body?: any;
-		};
-	};
-}
+/**
+ * One sampled request/response outcome from a run report. Derived from the
+ * domain type (`RunReport.results[]`) rather than restated, so a field added to
+ * the engine's trace surfaces here without a hand-edit. The element type carries
+ * the shared {@link RunResultTrace} (`*Ms` phase fields, like all timing).
+ */
+export type SampleResult = NonNullable<RunReport["results"]>[number];
 
 /**
  * Time-series metrics response from GET /runs/:runId/metrics
