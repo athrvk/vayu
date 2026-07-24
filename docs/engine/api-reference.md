@@ -47,6 +47,66 @@ canonical paths.
 `GET /stats/:id` in its **SSE** mode is legacy DB-polling and is retained
 wholesale (no canonical rename); prefer `GET /runs/:id/live` for live metrics.
 
+## Resource writes: create vs update
+
+Collections, requests and environments follow one write contract. `/globals` is
+a singleton and stays POST-only, so it is exempt.
+
+| Verb | Path | Meaning | Wrong-target status |
+|------|------|---------|---------------------|
+| `POST` | `/<resource>` | **Create only.** | `409` when the `id` already exists |
+| `PUT` | `/<resource>/:id` | **Update only** (merge-patch). | `404` when the `id` does not exist |
+
+The `409` body names the update path, e.g.
+`{"error": "Collection 'col_1' already exists; use PUT /collections/:id to update"}`.
+
+`PUT` is used loosely as a merge-patch rather than a whole-record replace: an
+omitted field keeps its stored value. We deliberately did not add a separate
+`PATCH` verb - merge-patch is what the update path has always done, and every
+client call site expects it. The `:id` in the path is the record's identity; the
+body carries the changed fields only.
+
+A `POST` may still carry its own `id` on create (the import orchestrator
+pre-assigns ids so it can wire `parentId` / `collectionId` across a whole tree
+before anything is persisted). When `id` is omitted the engine generates one via
+`generate_id`, giving the `<prefix>_<uuidv4>` form.
+
+### The null-vs-absent rule
+
+One rule, identical for every field of all three resources:
+
+| | Field absent | Field explicitly `null` |
+|---|---|---|
+| **Create (`POST`)** | use the default | use the default |
+| **Update (`PUT`)** | keep the current value | reset to the default |
+
+The defaults are `{}` for `variables`, the resource's own default for `auth`
+(`{"mode":"none"}` for a collection, `{"mode":"inherit"}` for a request), `[]`
+for `params` / `headers`, `""` for `description` and the two script fields,
+`{"mode":"none"}` for a request `body`, `0` for `order` on update, `true` for
+`followRedirects`, `10` for `maxRedirects`, and `false` for `isActive`.
+
+A field that has **no** default cannot be reset, so `null` is a `400` on either
+verb rather than a silently discarded write. Those fields are a collection's
+`name`, an environment's `name`, and a request's `collectionId`, `name`,
+`method` and `url`. Each is also required on create.
+
+### Behavior change (pre-1.0)
+
+`POST /<resource>` used to be a silent upsert on all three resources, so a
+client could send an update as a POST. That no longer works and now returns
+`409`; external scripts that relied on POST-as-update must switch to
+`PUT /<resource>/:id`. Two bugs went with the old behavior and are fixed here:
+
+- A stale or typo'd `id` silently **created** a second record instead of
+  failing, and an `id` collision silently **merged** two records into one.
+- `POST /environments` had no null guard, so `{"variables": null}` stored the
+  literal four-character text `null` - JSON that parses but is not an object, so
+  every reader saw an environment with no variables and no error. It now resets
+  to `{}` like every other resource.
+- `environments.isActive` was honored only on create; it now follows the rule on
+  both verbs.
+
 ## Health & Configuration
 
 ### GET /health
@@ -162,22 +222,48 @@ List all collections.
 
 ### POST /collections
 
-Create or update a collection. If `id` is provided and exists, performs an update.
+Create a collection. **Create only** - see
+[Resource writes](#resource-writes-create-vs-update) for the shared contract and
+the null-vs-absent rule.
 
 **Request:**
 ```json
 {
-  "id": "col_1234567890",  // Optional, auto-generated if omitted
-  "name": "My API",
+  "id": "col_1234567890",  // Optional, engine-generated if omitted
+  "name": "My API",        // Required, no default (null is a 400)
   "parentId": null,         // Optional, null for root
-  "order": 0,               // Optional
+  "order": 0,               // Optional, appended after siblings if omitted
   "variables": {}           // Optional, collection-scoped variables
 }
 ```
 
-**Response:** The saved collection object.
+**Response:** The created collection object.
 
-**Errors:** `parentId` is validated to keep the collection tree acyclic, since a
+**Errors:** `409` if `id` already exists (use `PUT /collections/:id`); `400` if
+`name` is missing or `null`, or on a cycle (below).
+
+### PUT /collections/:id
+
+Update an existing collection. **Update only** - a `404` when the id does not
+exist, never a silent create. The body is a merge-patch: an omitted field keeps
+its value, an explicit `null` resets it to the default.
+
+**Request:**
+```json
+{
+  "name": "Renamed",       // Optional; null is a 400 (no default)
+  "parentId": null,         // Optional, null moves it to the root
+  "variables": null         // Optional, null resets to {}
+}
+```
+
+**Response:** The updated collection object.
+
+**Errors:** `404` if the collection does not exist; `400` on a `null` `name` or
+on a cycle (below).
+
+**Cycle validation (both verbs):** `parentId` is validated to keep the
+collection tree acyclic, since a
 cycle would make the cascade delete below loop forever. Both cases return `400`
 with the flat `{"error": message}` shape:
 
@@ -288,34 +374,53 @@ unreachable engine, and must not treat a transport failure as "deleted".
 
 ### POST /requests
 
-Create or update a request. If `id` is provided and exists, performs an update.
+Create a request. **Create only** - see
+[Resource writes](#resource-writes-create-vs-update) for the shared contract and
+the null-vs-absent rule.
 
 **Request:**
 ```json
 {
-  "id": "req_1234567890",           // Optional, auto-generated if omitted
-  "collectionId": "col_1234567890", // Required for new requests
-  "name": "Get Users",               // Required for new requests
-  "method": "GET",                   // Required for new requests: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS
-  "url": "{{baseUrl}}/users",        // Required for new requests
-  "params": {},                      // Optional, query parameters
-  "headers": {},                     // Optional, request headers
-  "body": "",                        // Optional, request body
+  "id": "req_1234567890",           // Optional, engine-generated if omitted
+  "collectionId": "col_1234567890", // Required, no default (null is a 400)
+  "name": "Get Users",               // Required, no default (null is a 400)
+  "method": "GET",                   // Required: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS
+  "url": "{{baseUrl}}/users",        // Required, no default (null is a 400)
+  "params": [],                      // Optional, array of {key, value, enabled}
+  "headers": [],                     // Optional, array of {key, value, enabled}
+  "body": {"mode": "none"},          // Optional, request body
   "bodyType": "none",                // Optional: "none", "json", "text", "form-data", "x-www-form-urlencoded"
   "auth": {},                        // Optional, authentication config
   "preRequestScript": "",            // Optional, JavaScript pre-request script
   "postRequestScript": "",           // Optional, JavaScript test script
+  "order": 0,                        // Optional, position within the collection
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
   "maxRedirects": 10                 // Optional, hops while following, clamped to 0..100. Default 10
 }
 ```
 
-Omitting `followRedirects` / `maxRedirects` on an **update** leaves the stored
-values untouched; on a **create** they fall back to the column defaults
-(`true` / `10`). A non-boolean `followRedirects` or a non-integer
-`maxRedirects` is ignored rather than rejected.
+**Response:** The created request object.
 
-**Response:** The saved request object.
+**Errors:** `409` if `id` already exists (use `PUT /requests/:id`); `400` if a
+required field is missing or `null`, on an unrecognized `method`, or on a
+`params` / `headers` entry that is not `{key: string, value: string, enabled: bool}`.
+
+### PUT /requests/:id
+
+Update an existing request. **Update only** - a `404` when the id does not
+exist, never a silent create. Merge-patch body, same rule as collections.
+
+**Request:** any subset of the `POST /requests` fields, minus `id` (it is the
+path). Omitting `followRedirects` / `maxRedirects` leaves the stored values
+untouched; sending `null` resets them to `true` / `10`. A non-boolean
+`followRedirects` or a non-integer `maxRedirects` is ignored rather than
+rejected. `maxRedirects` is clamped to `0..100` on the way in.
+
+**Response:** The updated request object.
+
+**Errors:** `404` if the request does not exist; `400` on a `null`
+`collectionId` / `name` / `method` / `url`, an unrecognized `method`, or a
+malformed `params` / `headers` entry.
 
 ### DELETE /requests/:id
 
@@ -390,14 +495,18 @@ List all environments.
 
 ### POST /environments
 
-Create or update an environment.
+Create an environment. **Create only** - see
+[Resource writes](#resource-writes-create-vs-update) for the shared contract and
+the null-vs-absent rule.
 
 **Request:**
 ```json
 {
-  "id": "env_1234567890",  // Optional, auto-generated if omitted
-  "name": "Production",    // Required for new environments
-  "variables": {            // Optional
+  "id": "env_1234567890",  // Optional, engine-generated if omitted
+  "name": "Production",    // Required, no default (null is a 400)
+  "description": "",        // Optional
+  "isActive": false,        // Optional
+  "variables": {            // Optional, null resets to {}
     "baseUrl": {
       "value": "https://api.example.com",
       "enabled": true,
@@ -407,7 +516,34 @@ Create or update an environment.
 }
 ```
 
-**Response:** The saved environment object.
+**Response:** The created environment object.
+
+**Errors:** `409` if `id` already exists (use `PUT /environments/:id`); `400` if
+`name` is missing or `null`.
+
+### PUT /environments/:id
+
+Update an existing environment. **Update only** - a `404` when the id does not
+exist, never a silent create. Merge-patch body, same rule as collections.
+
+`variables` replaces the whole map, so a caller doing a partial edit reads the
+current map first and sends the merged result (this is what the MCP
+`update_environment` tool does). Sending `variables: null` resets it to `{}` -
+it no longer stores the literal string `null`, which is the bug this verb split
+fixed. `isActive` is honored here too; it used to be read only on create.
+
+**Request:**
+```json
+{
+  "name": "Production",    // Optional; null is a 400 (no default)
+  "variables": {},          // Optional, null resets to {}
+  "isActive": true          // Optional, null resets to false
+}
+```
+
+**Response:** The updated environment object.
+
+**Errors:** `404` if the environment does not exist; `400` on a `null` `name`.
 
 ### DELETE /environments/:id
 

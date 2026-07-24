@@ -24,17 +24,22 @@ export const API_ENDPOINTS = {
 	HEALTH: `/health`,
 	CONFIG: `/config`,
 
-	// Collections
+	// Collections. POST the collection path to create; PUT the by-id path to
+	// update. The engine split the verbs in #95 - POST no longer upserts, so an
+	// update sent as a POST is a 409, and a create sent as a PUT is a 404.
 	COLLECTIONS: `/collections`,
 	COLLECTION_BY_ID: (id: string) => `/collections/${id}`,
+	COLLECTIONS_UPDATE: (id: string) => `/collections/${id}`,
 
 	// Requests
 	REQUESTS: `/requests`,
 	REQUEST_BY_ID: (id: string) => `/requests/${id}`,
+	REQUESTS_UPDATE: (id: string) => `/requests/${id}`,
 
 	// Environments
 	ENVIRONMENTS: `/environments`,
 	ENVIRONMENT_BY_ID: (id: string) => `/environments/${id}`,
+	ENVIRONMENTS_UPDATE: (id: string) => `/environments/${id}`,
 
 	// Global Variables
 	GLOBALS: `/globals`,

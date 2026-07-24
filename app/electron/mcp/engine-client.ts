@@ -146,15 +146,20 @@ export class EngineClient {
 		return this.request("POST", "/config", payload, signal);
 	}
 
-	// --- Write: saved requests / environments (upserts) ----------------------
+	// --- Write: saved requests / environments --------------------------------
+	//
+	// POST creates, PUT updates - the engine split the verbs in #95, so these
+	// are no longer interchangeable: a POST carrying a known id is a 409, and a
+	// PUT to an unknown id is a 404.
 
+	/** Create a saved request: `POST /requests` (the engine assigns the id). */
 	createRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/requests", payload, signal);
 	}
 
-	/** Upsert an environment: `POST /environments` (include `id` to update). */
-	upsertEnvironment(payload: unknown, signal?: AbortSignal): Promise<unknown> {
-		return this.request("POST", "/environments", payload, signal);
+	/** Update an environment: `PUT /environments/:id` (merge-patch body). */
+	updateEnvironment(id: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("PUT", `/environments/${encodeURIComponent(id)}`, payload, signal);
 	}
 
 	// --- Execute -------------------------------------------------------------

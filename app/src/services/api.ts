@@ -108,7 +108,12 @@ export const apiService = {
 	},
 
 	async updateCollection(data: UpdateCollectionRequest): Promise<Collection> {
-		const response = await httpClient.post<any>(API_ENDPOINTS.COLLECTIONS, data);
+		// PUT, not POST: since #95 the engine's POST is create-only and answers a
+		// known id with 409. The id travels in the path (it is the identity);
+		// the rest of the object is a merge-patch, where an omitted field keeps
+		// its stored value and an explicit null resets it to the default.
+		const { id, ...patch } = data;
+		const response = await httpClient.put<any>(API_ENDPOINTS.COLLECTIONS_UPDATE(id), patch);
 		return CollectionTransformer.toFrontend(response);
 	},
 
@@ -142,7 +147,9 @@ export const apiService = {
 
 	async updateRequest(data: UpdateRequestRequest): Promise<Request> {
 		console.log("Updating request with data:", data);
-		const response = await httpClient.post<Request>(API_ENDPOINTS.REQUESTS, data);
+		// PUT, not POST - see updateCollection above for why.
+		const { id, ...patch } = data;
+		const response = await httpClient.put<Request>(API_ENDPOINTS.REQUESTS_UPDATE(id), patch);
 		return RequestTransformer.toFrontend(response);
 	},
 
@@ -165,7 +172,9 @@ export const apiService = {
 	},
 
 	async updateEnvironment(data: UpdateEnvironmentRequest): Promise<Environment> {
-		return await httpClient.post<Environment>(API_ENDPOINTS.ENVIRONMENTS, data);
+		// PUT, not POST - see updateCollection above for why.
+		const { id, ...patch } = data;
+		return await httpClient.put<Environment>(API_ENDPOINTS.ENVIRONMENTS_UPDATE(id), patch);
 	},
 
 	async deleteEnvironment(id: string): Promise<void> {
