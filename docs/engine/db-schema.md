@@ -178,6 +178,18 @@ reduced to just `{"mode": "..."}` (via `sanitize_config_snapshot` in
 `utils/json.cpp`) - an allowlist, so no current or future auth field
 (`clientSecret`, `password`, tokens) leaks into a stored run.
 
+**Retention** - runs are append-only in normal use (every design-mode click adds a `runs` row,
+every load run its `metrics`/`results`), so `Database::prune_runs(max_runs, max_age_days)` trims
+the history. A run is a victim when it falls **beyond the `maxRunsRetained` most-recent runs**
+(ordered by `start_time`) **or** its `start_time` is older than **`runRetentionDays`** days;
+either knob is disabled by `0`. Runs still `running`/`pending` are never pruned and never count
+toward the cap. Deletion goes through the `delete_run` cascade (runs + their `metrics` + their
+`results`), batched inside transactions that release the DB mutex between batches so a large
+backlog cannot stall `/health`, SSE, or the runs poll. `prune_runs_configured()` reads the two
+knobs (config, `observability`, defaults 200 / 30) and runs at **startup** (`Database::init`) and
+after a run reaches a **terminal** status (design mode's `store_result`, and the load-run
+completion/failure paths in `run_manager.cpp`).
+
 ---
 
 ### `oauth_tokens`
@@ -272,8 +284,25 @@ than assuming all eight are there and flat:
 | Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0` |
 | Design mode (`store_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`). Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
 
+The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
+(config, `observability`, default 5 MiB) before storage, so downloading one 50 MB response does
+not live in SQLite forever. When a body is cut, its node gains two keys:
+
+| Key on `request` / `response` | Type | Meaning |
+|-------------------------------|------|---------|
+| `bodyTruncated`               | bool | Present and `true` only when the stored `body` is a prefix, not the whole body |
+| `bodyBytes`                   | int  | The **original** body length in bytes (the stored `body` is the first `maxTraceBodyBytes` of it) |
+
+The cut is on a raw byte boundary (the body is an opaque string), so a split UTF-8 sequence is
+possible; `store_result` dumps the trace with `error_handler_t::replace`, turning a stray
+continuation byte into U+FFFD rather than throwing. The cap is applied by
+`vayu::json::cap_trace_bodies` (`utils/json.cpp`) to the trace `build_result_trace`
+(`execution.cpp`) produces. It applies **only** to the design-mode writer - the load-run writers
+store timing/error envelopes, not bodies.
+
 That design-mode subset is what rebuilds the request builder's response pane (Timing tab included)
-after a restart - see `app/src/modules/request-builder/utils/restore-response.ts`.
+after a restart - see `app/src/modules/request-builder/utils/restore-response.ts`, which surfaces
+`bodyTruncated`/`bodyBytes` as a "body truncated for storage" notice.
 
 A design run has exactly one `results` row. `GET /runs/:runId` serves it (as `result`)
 alongside the run itself, in addition to `GET /runs/:runId/report`'s `results` array - the
@@ -313,7 +342,8 @@ for fresh **and** pre-existing databases, so adding an index is additive and nee
 | `idx_results_run_id`         | `results.run_id`        | `get_results` and the `remove_all` in `delete_run`                                                                                                |
 | `idx_requests_collection_id` | `requests.collection_id`| `get_requests_in_collection` (every sidebar load) and cascade delete                                                                              |
 | `idx_collections_parent_id`  | `collections.parent_id` | The cascade-delete BFS in `Database::delete_collection`, which does one lookup per node in the subtree                                            |
-| `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs`, which sorts on every `GET /runs`                                                                                                  |
+| `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs` and `get_runs_paginated`, which sort `start_time DESC` on every `GET /runs`                                                        |
+| `idx_runs_request_id`        | `runs.request_id`       | `GET /runs?requestId=` and `useLastDesignRunQuery`'s single-run lookup (`get_runs_paginated` with a `request_id` filter)                          |
 
 `metrics` and `results` are the unbounded-growth tables - a load run writes roughly 20 metric
 rows per second - so without `run_id` indexes a lookup slows down with every run ever recorded,

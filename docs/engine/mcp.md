@@ -125,7 +125,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_collections`     | read     | `GET /collections`                           | -                          |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | -                          |
 | `list_environments`    | read     | `GET /environments`                          | -                          |
-| `list_runs`            | read     | `GET /runs`                                  | -                          |
+| `list_runs`            | read     | `GET /runs?limit=100`                        | First page (100) of the `{data, pagination}` envelope; rows carry a compact summary |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | -                          |
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | -                          |
@@ -223,7 +223,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 
 | URI                         | Contents                         |
 | --------------------------- | -------------------------------- |
-| `vayu://runs`               | All runs, newest first.          |
+| `vayu://runs`               | Recent runs (first page, 100), newest first. |
 | `vayu://collections`        | All request collections.         |
 | `vayu://environments`       | All environments.                |
 | `vayu://config`             | Engine configuration entries.    |

@@ -47,6 +47,12 @@ canonical paths.
 `GET /stats/:id` in its **SSE** mode is legacy DB-polling and is retained
 wholesale (no canonical rename); prefer `GET /runs/:id/live` for live metrics.
 
+`GET /runs` with **no query params** is likewise a deprecated shape: it returns
+the pre-pagination bare array of full-`configSnapshot` rows. Passing any
+pagination/filter param returns the `{data, pagination}` envelope with compact
+`summary` rows (see [GET /runs](#get-runs)). The no-param array is removed at the
+next minor release.
+
 ## Resource writes: create vs update
 
 Collections, requests and environments follow one write contract. `/globals` is
@@ -170,6 +176,17 @@ min/max):
 `min` and `max` are present only for entries that declare them. `value` and
 `default` are always strings; `type` is one of `integer`, `number`, `boolean`,
 or `string`.
+
+The Settings panel renders entries dynamically, so new keys appear without app
+changes. Three `observability` keys govern how much run history the engine keeps:
+
+| Key                 | Default   | Range        | Effect |
+|---------------------|-----------|--------------|--------|
+| `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
+| `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results) are pruned at startup and after each run finishes. `0` = unlimited. |
+| `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
+
+In-progress (`running`/`pending`) runs are never pruned.
 
 ### POST /config
 
@@ -1026,9 +1043,55 @@ are configurable via `POST /config`.
 
 ### GET /runs
 
-List all test runs (both design mode and load tests).
+List test runs (both design mode and load tests), newest first
+(`start_time DESC` - the only order the UI uses). Rows carry a compact
+`summary` rather than the full `configSnapshot`, so the polled history sidebar
+stays cheap as history grows.
 
-**Response:**
+**Query parameters** (passing **any** of them opts into the paginated envelope):
+- `limit` - page size (default 50, invalid/&le;0 falls back to 50, capped at 500).
+- `offset` - rows to skip (default 0, negative floored to 0).
+- `type` - `design` | `load` (an unrecognised value is ignored, not an error).
+- `status` - a `RunStatus` string (`pending` | `running` | `completed` | `failed` | `stopped`; unrecognised ignored).
+- `requestId` - exact match on the run's linked request.
+- `q` - case-insensitive substring **over the stored `config_snapshot` text**
+  (SQL `LIKE`). It searches the raw snapshot, so it may over-match JSON keys or
+  structure - acceptable for a search box.
+
+**`summary`** carries exactly these six keys, each **omitted** when absent from
+the snapshot (a malformed snapshot yields an empty `summary`, never a `500`):
+`url`, `method`, `mode`, `duration`, `concurrency`, `comment`. The full snapshot
+stays available on `GET /runs/:runId`.
+
+**Response (envelope):**
+```json
+{
+  "data": [
+    {
+      "id": "run_1234567890",
+      "requestId": "req_1234567890",
+      "environmentId": null,
+      "type": "load",
+      "status": "completed",
+      "startTime": 1234567890,
+      "endTime": 1234567891,
+      "summary": {
+        "url": "https://api.example.com/users",
+        "method": "GET",
+        "mode": "constant_rps",
+        "duration": "60s",
+        "concurrency": 100,
+        "comment": "nightly"
+      }
+    }
+  ],
+  "pagination": { "total": 812, "limit": 50, "offset": 0, "hasMore": true, "returned": 50 }
+}
+```
+
+**Legacy no-param behavior (deprecated, removed next minor).** A request with
+**no query params at all** returns today's bare array of full-`configSnapshot`
+rows unchanged, so external scripts keep working:
 ```json
 [
   {
@@ -1043,6 +1106,10 @@ List all test runs (both design mode and load tests).
   }
 ]
 ```
+This legacy branch is a temporary alias (like those in
+[Deprecated aliases](#deprecated-aliases)) and is removed at the next minor
+release; new callers should always pass pagination params and read the
+`{data, pagination}` envelope.
 
 ### GET /runs/:runId
 
@@ -1079,6 +1146,13 @@ run.
   }
 }
 ```
+
+If the engine truncated a body for storage (over `maxTraceBodyBytes`), the
+affected `trace.request` and/or `trace.response` object carries
+`"bodyTruncated": true` and `"bodyBytes": <original length>`; its `body` then
+holds only the first `maxTraceBodyBytes` of the original. Absent when the body
+fit. Clients surface this as a "body truncated for storage" notice and re-send
+to fetch the whole body.
 
 ### POST /runs/:runId/stop
 

@@ -31,7 +31,9 @@ import {
 	ResponseActions,
 	ResponseHeadersPanel,
 	RESPONSE_TAB_TRIGGER,
+	formatSize,
 } from "@/components/shared/response-viewer";
+import { Callout } from "@/components/shared";
 import ResponseCookies from "./ResponseCookies";
 import ResponseTimingTab from "./ResponseTimingTab";
 import ConsoleOutput from "./ConsoleOutput";
@@ -247,12 +249,31 @@ export default function ResponseViewer() {
 				 * always rendered together.
 				 */}
 				<TabsContent value="body" className="mt-0 flex-1 overflow-hidden">
-					<SharedResponseBody
-						body={response.body}
-						bodyRaw={response.bodyRaw}
-						headers={response.headers}
-						showModeToggle
-					/>
+					<div className="flex flex-col h-full">
+						{/*
+						 * The engine caps a stored trace body at `maxTraceBodyBytes`,
+						 * so a response restored from a run (cold start, or a design
+						 * run opened from History) may hold only the stored slice.
+						 * Say so, and how to get the whole thing back.
+						 */}
+						{response.bodyTruncated && (
+							<div className="px-4 pt-3 shrink-0">
+								<Callout severity="warning" title="Body truncated for storage">
+									Only the first {formatSize(response.body.length)} of{" "}
+									{formatSize(response.bodyBytes ?? response.body.length)} was
+									kept. Re-send the request to view the full response.
+								</Callout>
+							</div>
+						)}
+						<div className="flex-1 min-h-0">
+							<SharedResponseBody
+								body={response.body}
+								bodyRaw={response.bodyRaw}
+								headers={response.headers}
+								showModeToggle
+							/>
+						</div>
+					</div>
 				</TabsContent>
 				<TabsContent value="headers" className="mt-0 flex-1 overflow-hidden">
 					<ResponseHeadersPanel

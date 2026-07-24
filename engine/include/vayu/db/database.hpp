@@ -19,6 +19,20 @@
 #include "vayu/types.hpp"
 
 namespace vayu::db {
+
+/**
+ * Optional filters for the paginated GET /runs list. An unset field is a
+ * wildcard - it does not constrain the query. `q` is a case-insensitive
+ * substring matched against the stored `config_snapshot` text (via SQL LIKE);
+ * it may over-match JSON keys/structure, which is acceptable for a search box.
+ */
+struct RunFilter {
+    std::optional<RunType> type;
+    std::optional<RunStatus> status;
+    std::optional<std::string> request_id;
+    std::optional<std::string> q;
+};
+
 class Database {
     public:
     explicit Database (const std::string& db_path);
@@ -59,7 +73,31 @@ class Database {
     void update_run_status_with_retry (const std::string& id, RunStatus status, int max_retries = 3);
     void update_run_end_time (const std::string& id); // Update end_time without changing status
     std::vector<Run> get_all_runs ();
+    // Paginated, filtered run list ordered start_time DESC (newest first) - the
+    // only order the UI uses. count_runs returns the total matching @p filter
+    // (ignoring limit/offset) for the pagination envelope.
+    std::vector<Run> get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset);
+    int64_t count_runs (const RunFilter& filter);
     void delete_run (const std::string& id);
+
+    /**
+     * @brief Prune old runs (and their cascaded metrics/results) by two limits.
+     *
+     * A run is a victim when it falls beyond @p max_runs most-recent runs
+     * (ordered by start_time) OR its start_time is older than @p max_age_days.
+     * Either limit is disabled by passing 0. Runs still `running`/`pending` are
+     * never pruned and never count toward @p max_runs. Deletion goes through the
+     * `delete_run` cascade in start_time-batched transactions, releasing the DB
+     * mutex between batches so a large backlog cannot stall other endpoints.
+     */
+    void prune_runs (int max_runs, int max_age_days);
+
+    /**
+     * @brief Prune runs using the configured `maxRunsRetained` /
+     * `runRetentionDays` knobs. Called at startup and after a run reaches a
+     * terminal status.
+     */
+    void prune_runs_configured ();
 
     // Metrics
     void add_metric (const Metric& metric);

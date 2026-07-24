@@ -22,6 +22,8 @@ import type {
 	GlobalVariables,
 	VariableValue,
 	Run,
+	RunListResponse,
+	RunListParams,
 	RunReport,
 	EngineHealth,
 	SanityResult,
@@ -57,6 +59,7 @@ import {
 	PROXIED_TIMEOUT_GRACE_MS,
 	ENGINE_MAX_DEFAULT_TIMEOUT_MS,
 	STATS_PAGE_LIMIT,
+	RUNS_PAGE_LIMIT,
 } from "@/config/network";
 
 /**
@@ -206,9 +209,36 @@ export const apiService = {
 	},
 
 	// Run Management
-	async listRuns(): Promise<Run[]> {
-		// Backend returns flat array directly
-		return await httpClient.get<Run[]>(API_ENDPOINTS.RUNS);
+	/**
+	 * List runs, newest first, as a `{data, pagination}` envelope. Passing
+	 * pagination/filter params opts into the envelope; the history sidebar polls
+	 * the first page and pages older runs in on demand.
+	 */
+	async listRuns(params: RunListParams = {}): Promise<RunListResponse> {
+		const { limit = RUNS_PAGE_LIMIT, offset = 0, type, status, requestId, q } = params;
+		return await httpClient.get<RunListResponse>(
+			API_ENDPOINTS.RUNS_LIST({ limit, offset, type, status, requestId, q })
+		);
+	},
+
+	/**
+	 * Fetch every run matching @p params by paging to exhaustion. For callers
+	 * that genuinely need the whole set (clearing all history, counting) rather
+	 * than a polled page. Rows still carry the compact `summary`, so this stays
+	 * cheap even over a large history.
+	 */
+	async listAllRuns(params: Omit<RunListParams, "limit" | "offset"> = {}): Promise<Run[]> {
+		const limit = 500; // Engine's max page size.
+		const all: Run[] = [];
+		let offset = 0;
+		// Bounded by pagination.hasMore; the engine caps limit at 500.
+		for (;;) {
+			const page = await this.listRuns({ ...params, limit, offset });
+			all.push(...page.data);
+			if (!page.pagination.hasMore) break;
+			offset += page.pagination.limit;
+		}
+		return all;
 	},
 
 	async getRun(id: string): Promise<Run> {

@@ -5,11 +5,11 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Search, Clock } from "lucide-react";
 import { useTabsStore, useLayoutStore } from "@/stores";
 import { useHistoryStore, filterRuns } from "@/modules/history/history-store";
-import { useRunsQuery, useDeleteRunMutation } from "@/queries";
+import { useRunsQuery, useDeleteRunMutation, flattenRunPages, runsTotal } from "@/queries";
 import {
 	DrawerPanel,
 	EmptyState,
@@ -50,15 +50,36 @@ export default function HistoryList() {
 	const navigateToRunDetail = (runId: string) => openTab({ type: "run", entityId: runId });
 	const navigateToHistory = () => activateDrawerView("history");
 
-	// Use TanStack Query for runs data
-	const { data: allRuns = [], isLoading, isError, error, refetch } = useRunsQuery();
+	// Debounce the search box into the server-side `q` param so a search covers
+	// all runs (not just loaded pages) without a request per keystroke.
+	const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
+	useEffect(() => {
+		const t = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+		return () => clearTimeout(t);
+	}, [searchQuery]);
+
+	// Infinite runs query over the paginated envelope; polls the first page.
+	const {
+		data,
+		isLoading,
+		isError,
+		error,
+		refetch,
+		fetchNextPage,
+		hasNextPage,
+		isFetchingNextPage,
+	} = useRunsQuery(debouncedSearch);
 	const deleteRunMutation = useDeleteRunMutation();
 
 	const [deletingId, setDeletingId] = useState<string | null>(null);
 	const [deleteConfirmRunId, setDeleteConfirmRunId] = useState<string | null>(null);
 
-	// Filter and sort runs using the helper function
-	const runs = filterRuns(allRuns, { searchQuery, filterType, filterStatus, sortBy });
+	// Flatten (de-duped) the loaded pages, then apply the client-side type/
+	// status/sort filters over them. `total` is the server's count for the
+	// current search.
+	const allRuns = flattenRunPages(data);
+	const total = runsTotal(data);
+	const runs = filterRuns(allRuns, { filterType, filterStatus, sortBy });
 
 	/*
 	 * The drawer has three sibling views. The collections tree already tells the
@@ -79,7 +100,7 @@ export default function HistoryList() {
 		? allRuns.find((r) => r.id === deleteConfirmRunId)
 		: null;
 	const deleteConfirmLabel =
-		runToDelete?.configSnapshot?.url ??
+		runToDelete?.summary?.url ??
 		(deleteConfirmRunId ? `${deleteConfirmRunId.slice(0, 8)}…` : "");
 
 	const handleDeleteClick = (runId: string, event: React.MouseEvent) => {
@@ -106,9 +127,9 @@ export default function HistoryList() {
 		<DrawerPanel
 			title="History"
 			actions={
-				allRuns.length > 0 ? (
+				total > 0 ? (
 					<span className="text-xs text-muted-foreground shrink-0">
-						{allRuns.length} {allRuns.length === 1 ? "run" : "runs"}
+						{total} {total === 1 ? "run" : "runs"}
 					</span>
 				) : undefined
 			}
@@ -242,6 +263,20 @@ export default function HistoryList() {
 									isSelected={selectedRunId === run.id}
 								/>
 							))}
+
+						{/* Older runs page in on demand - the poll only refreshes
+						    the first page. */}
+						{!isLoading && !showError && hasNextPage && (
+							<Button
+								variant="ghost"
+								size="sm"
+								className="w-full"
+								onClick={() => void fetchNextPage()}
+								disabled={isFetchingNextPage}
+							>
+								{isFetchingNextPage ? "Loading…" : "Load older runs"}
+							</Button>
+						)}
 					</div>
 				</div>
 

@@ -388,6 +388,7 @@ if(VAYU_BUILD_TESTS)
         tests/import_route_test.cpp
         tests/config_route_test.cpp
         tests/requests_route_test.cpp
+        tests/runs_route_test.cpp
         tests/collections_route_test.cpp
         tests/resource_write_route_test.cpp
         tests/stats_route_test.cpp
@@ -409,6 +410,7 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/import.cpp
         src/http/routes/config.cpp
         src/http/routes/requests.cpp
+        src/http/routes/runs.cpp
         src/http/routes/collections.cpp
         src/http/routes/environments.cpp
         src/http/routes/metrics.cpp

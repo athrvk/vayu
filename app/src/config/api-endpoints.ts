@@ -53,6 +53,27 @@ export const API_ENDPOINTS = {
 
 	// Runs
 	RUNS: `/runs`,
+	// Paginated, filtered list. Passing any param opts into the `{data,
+	// pagination}` envelope; a bare `/runs` (no params) still returns the
+	// legacy bare array (removed next minor).
+	RUNS_LIST: (params: {
+		limit?: number;
+		offset?: number;
+		type?: string;
+		status?: string;
+		requestId?: string;
+		q?: string;
+	}) => {
+		const qs = new URLSearchParams();
+		if (params.limit !== undefined) qs.set("limit", String(params.limit));
+		if (params.offset !== undefined) qs.set("offset", String(params.offset));
+		if (params.type) qs.set("type", params.type);
+		if (params.status) qs.set("status", params.status);
+		if (params.requestId) qs.set("requestId", params.requestId);
+		if (params.q) qs.set("q", params.q);
+		const s = qs.toString();
+		return s ? `/runs?${s}` : `/runs`;
+	},
 	RUN_BY_ID: (id: string) => `/runs/${id}`,
 	RUN_REPORT: (id: string) => `/runs/${id}/report`,
 	RUN_STOP: (id: string) => `/runs/${id}/stop`,
