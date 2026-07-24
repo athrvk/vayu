@@ -245,6 +245,163 @@ TEST_F (ScriptEngineTest, ExpectTrueFalse) {
     EXPECT_TRUE (result.success);
 }
 
+// Mutation-checked: the paren-less terminal must actually run the assertion.
+// Before the getter fix `.to.be.true` was a discarded function reference, so a
+// deliberately-wrong assertion still passed. This asserts the failing case fails.
+TEST_F (ScriptEngineTest, ExpectTrueFalseAssertsOnAccess) {
+    auto result = engine.execute_test (R"(
+        pm.test("false is not true", function() {
+            pm.expect(false).to.be.true;
+        });
+
+        pm.test("true is not false", function() {
+            pm.expect(true).to.be.false;
+        });
+
+        pm.test("negation works", function() {
+            pm.expect(false).to.not.be.true;
+        });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 3);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_FALSE (result.tests[0].error_message.empty ());
+    EXPECT_FALSE (result.tests[1].passed);
+    EXPECT_TRUE (result.tests[2].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectNullUndefinedOkEmpty) {
+    auto result = engine.execute_test (R"(
+        pm.test("null", function() { pm.expect(null).to.be.null; });
+        pm.test("undefined", function() { pm.expect(undefined).to.be.undefined; });
+        pm.test("ok", function() { pm.expect(1).to.be.ok; });
+        pm.test("not ok", function() { pm.expect(0).to.not.be.ok; });
+        pm.test("empty string", function() { pm.expect("").to.be.empty; });
+        pm.test("empty array", function() { pm.expect([]).to.be.empty; });
+        pm.test("empty object", function() { pm.expect({}).to.be.empty; });
+        pm.test("non-empty array", function() { pm.expect([1]).to.not.be.empty; });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectNullFailsForNonNull) {
+    auto result = engine.execute_test (R"(
+        pm.test("1 is not null", function() { pm.expect(1).to.be.null; });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectLength) {
+    auto result = engine.execute_test (R"(
+        pm.test("array length", function() { pm.expect([1,2,3]).to.have.length(3); });
+        pm.test("string lengthOf", function() { pm.expect("abcd").to.have.lengthOf(4); });
+        pm.test("wrong length not", function() { pm.expect([1,2]).to.not.have.length(3); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectLengthFailsNotThrows) {
+    auto result = engine.execute_test (R"(
+        pm.test("wrong length", function() { pm.expect([1,2,3]).to.have.length(2); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    // A mismatch must fail, not throw "not a function".
+    EXPECT_EQ (result.tests[0].error_message.find ("not a function"), std::string::npos);
+}
+
+TEST_F (ScriptEngineTest, ExpectTypeMatcher) {
+    auto result = engine.execute_test (R"(
+        pm.test("string", function() { pm.expect("hi").to.be.a("string"); });
+        pm.test("number", function() { pm.expect(5).to.be.a("number"); });
+        pm.test("array", function() { pm.expect([1]).to.be.an("array"); });
+        pm.test("object", function() { pm.expect({}).to.be.an("object"); });
+        pm.test("wrong type", function() { pm.expect("hi").to.not.be.a("number"); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectTypeMatcherFails) {
+    auto result = engine.execute_test (R"(
+        pm.test("string is not number", function() { pm.expect("hi").to.be.a("number"); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_EQ (result.tests[0].error_message.find ("not a function"), std::string::npos);
+}
+
+TEST_F (ScriptEngineTest, ExpectMatchRegex) {
+    auto result = engine.execute_test (R"(
+        pm.test("matches", function() { pm.expect("hello123").to.match(/[0-9]+/); });
+        pm.test("does not match", function() { pm.expect("hello").to.not.match(/[0-9]+/); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectMatchFails) {
+    auto result = engine.execute_test (R"(
+        pm.test("no digits", function() { pm.expect("hello").to.match(/[0-9]+/); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectAtLeastAtMost) {
+    auto result = engine.execute_test (R"(
+        pm.test("at least equal boundary", function() { pm.expect(5).to.be.at.least(5); });
+        pm.test("at least above", function() { pm.expect(10).to.be.at.least(5); });
+        pm.test("at most equal boundary", function() { pm.expect(5).to.be.at.most(5); });
+        pm.test("at most below", function() { pm.expect(3).to.be.at.most(5); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectAtLeastFails) {
+    auto result = engine.execute_test (R"(
+        pm.test("4 is not at least 5", function() { pm.expect(4).to.be.at.least(5); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectContain) {
+    auto result = engine.execute_test (R"(
+        pm.test("string contain", function() { pm.expect("hello world").to.contain("world"); });
+        pm.test("array contain", function() { pm.expect([1,2,3]).to.contain(2); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
 // ============================================================================
 // pm.response Tests
 // ============================================================================
@@ -279,6 +436,31 @@ TEST_F (ScriptEngineTest, ResponseJson) {
     request, response, env);
 
     EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ResponseHasJsonBodyNoArg) {
+    auto result = engine.execute_test (R"(
+        pm.test("body is valid JSON", function() {
+            pm.response.to.have.jsonBody();
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ResponseJsonBodyNoArgFailsOnNonJson) {
+    response.body = "this is not json";
+    auto result   = engine.execute_test (R"(
+        pm.test("invalid json fails", function() {
+            pm.response.to.have.jsonBody();
+        });
+    )",
+      request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
 }
 
 TEST_F (ScriptEngineTest, ResponseHeaders) {
@@ -421,8 +603,7 @@ TEST_F (ScriptEngineTest, ComposedPartsShareOneScope) {
         {"origin":"request","script":"console.log(\"got \" + shared);"}
       ]
     })");
-    auto script =
-    vayu::http::read_script (json, "preRequestScripts", "preRequestScript");
+    auto script = vayu::http::read_script (json, "preRequestScripts", "preRequestScript");
 
     ScriptContext ctx;
     ctx.request = &request;
