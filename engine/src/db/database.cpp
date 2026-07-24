@@ -34,6 +34,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -728,37 +729,10 @@ void Database::update_run_end_time (const std::string& id) {
 }
 
 void Database::update_run_status_with_retry (const std::string& id, RunStatus status, int max_retries) {
-    for (int attempt = 0; attempt < max_retries; attempt++) {
-        try {
-            update_run_status (id, status);
-            return; // Success
-        } catch (const std::system_error& e) {
-            std::string error_msg = e.what ();
-            // Check if it's a database lock error
-            if (error_msg.find ("database is locked") != std::string::npos ||
-            error_msg.find ("SQLITE_BUSY") != std::string::npos) {
-                if (attempt == max_retries - 1) {
-                    // Last attempt failed, rethrow
-                    vayu::utils::log_error (
-                    "Failed to update run status after " +
-                    std::to_string (max_retries) + " attempts: " + error_msg);
-                    throw;
-                }
-                // Wait before retry with exponential backoff
-                vayu::utils::log_debug ("Database locked, retrying in " +
-                std::to_string (100 * (attempt + 1)) + "ms (attempt " +
-                std::to_string (attempt + 1) + "/" + std::to_string (max_retries) + ")");
-                std::this_thread::sleep_for (
-                std::chrono::milliseconds (100 * (attempt + 1)));
-            } else {
-                // Different error, rethrow immediately
-                throw;
-            }
-        } catch (...) {
-            // Non-system_error exceptions, rethrow immediately
-            throw;
-        }
-    }
+    // Public signature is unchanged (real callers in runs.cpp, execution.cpp,
+    // load_strategy.cpp); delegate to the shared busy-retry helper.
+    retry_on_busy ("update run status", max_retries,
+    std::chrono::milliseconds (100), [&] { update_run_status (id, status); });
 }
 
 std::vector<Run> Database::get_all_runs () {
@@ -779,82 +753,24 @@ void Database::delete_run (const std::string& id) {
 // ============================================================================
 
 void Database::add_metric (const Metric& metric) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    const int max_retries = 3;
-    for (int attempt = 0; attempt < max_retries; attempt++) {
-        try {
-            impl_->storage.insert (metric);
-            return; // Success
-        } catch (const std::system_error& e) {
-            std::string error_msg = e.what ();
-            // Check if it's a database lock error
-            if (error_msg.find ("database is locked") != std::string::npos ||
-            error_msg.find ("SQLITE_BUSY") != std::string::npos) {
-                if (attempt == max_retries - 1) {
-                    // Last attempt failed, rethrow
-                    vayu::utils::log_error ("Failed to add metric after " +
-                    std::to_string (max_retries) + " attempts: " + error_msg);
-                    throw;
-                }
-                // Wait before retry with exponential backoff
-                std::this_thread::sleep_for (
-                std::chrono::milliseconds (50 * (attempt + 1)));
-            } else {
-                // Different error, rethrow immediately
-                throw;
-            }
-        } catch (...) {
-            // Non-system_error exceptions, rethrow immediately
-            throw;
-        }
-    }
+    retry_on_busy ("add metric", 5, std::chrono::milliseconds (100),
+    [&] { impl_->storage.insert (metric); });
 }
 
 // Batch insert with transaction for better performance and reduced lock
 // contention Includes retry logic to handle database lock contention
 void Database::add_metrics_batch (const std::vector<Metric>& metrics) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     if (metrics.empty ())
         return;
 
-    const int max_retries = 5;
-    for (int attempt = 0; attempt < max_retries; attempt++) {
-        try {
-            impl_->storage.transaction ([&] {
-                for (const auto& metric : metrics) {
-                    impl_->storage.insert (metric);
-                }
-                return true; // Commit
-            });
-            return; // Success
-        } catch (const std::system_error& e) {
-            std::string error_msg = e.what ();
-            // Check if it's a database lock error
-            if (error_msg.find ("database is locked") != std::string::npos ||
-            error_msg.find ("SQLITE_BUSY") != std::string::npos) {
-                if (attempt == max_retries - 1) {
-                    // Last attempt failed, rethrow
-                    vayu::utils::log_error (
-                    "Failed to store metrics batch after " +
-                    std::to_string (max_retries) + " attempts: " + error_msg);
-                    throw;
-                }
-                // Wait before retry with exponential backoff
-                vayu::utils::log_debug (
-                "Database locked during metrics batch, retrying in " +
-                std::to_string (100 * (attempt + 1)) + "ms (attempt " +
-                std::to_string (attempt + 1) + "/" + std::to_string (max_retries) + ")");
-                std::this_thread::sleep_for (
-                std::chrono::milliseconds (100 * (attempt + 1)));
-            } else {
-                // Different error, rethrow immediately
-                throw;
+    retry_on_busy ("store metrics batch", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            for (const auto& metric : metrics) {
+                impl_->storage.insert (metric);
             }
-        } catch (...) {
-            // Non-system_error exceptions, rethrow immediately
-            throw;
-        }
-    }
+            return true; // Commit
+        });
+    });
 }
 
 std::vector<Metric> Database::get_metrics (const std::string& run_id) {
@@ -897,48 +813,17 @@ void Database::add_result (const Result& result) {
 // Batch insert with transaction for better performance
 // Includes retry logic to handle database lock contention
 void Database::add_results_batch (const std::vector<Result>& results) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     if (results.empty ())
         return;
 
-    const int max_retries = 5;
-    for (int attempt = 0; attempt < max_retries; attempt++) {
-        try {
-            impl_->storage.transaction ([&] {
-                for (const auto& result : results) {
-                    impl_->storage.insert (result);
-                }
-                return true; // Commit
-            });
-            return; // Success
-        } catch (const std::system_error& e) {
-            std::string error_msg = e.what ();
-            // Check if it's a database lock error
-            if (error_msg.find ("database is locked") != std::string::npos ||
-            error_msg.find ("SQLITE_BUSY") != std::string::npos) {
-                if (attempt == max_retries - 1) {
-                    // Last attempt failed, rethrow
-                    vayu::utils::log_error (
-                    "Failed to flush results batch after " +
-                    std::to_string (max_retries) + " attempts: " + error_msg);
-                    throw;
-                }
-                // Wait before retry with exponential backoff
-                vayu::utils::log_debug (
-                "Database locked during results batch, retrying in " +
-                std::to_string (100 * (attempt + 1)) + "ms (attempt " +
-                std::to_string (attempt + 1) + "/" + std::to_string (max_retries) + ")");
-                std::this_thread::sleep_for (
-                std::chrono::milliseconds (100 * (attempt + 1)));
-            } else {
-                // Different error, rethrow immediately
-                throw;
+    retry_on_busy ("flush results batch", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            for (const auto& result : results) {
+                impl_->storage.insert (result);
             }
-        } catch (...) {
-            // Non-system_error exceptions, rethrow immediately
-            throw;
-        }
-    }
+            return true; // Commit
+        });
+    });
 }
 
 std::vector<Result> Database::get_results (const std::string& run_id) {
@@ -947,22 +832,42 @@ std::vector<Result> Database::get_results (const std::string& run_id) {
 }
 
 // ============================================================================
-// Transaction Helpers
+// Busy-retry helper - shared by the four write paths above
 // ============================================================================
 
-void Database::begin_transaction () {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    impl_->storage.begin_transaction ();
-}
-
-void Database::commit_transaction () {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    impl_->storage.commit ();
-}
-
-void Database::rollback_transaction () {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    impl_->storage.rollback ();
+void Database::retry_on_busy (const char* what,
+int attempts,
+std::chrono::milliseconds base,
+const std::function<void ()>& fn) {
+    for (int attempt = 0; attempt < attempts; attempt++) {
+        try {
+            std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+            fn ();
+            return; // Success
+        } catch (const std::system_error& e) {
+            std::string error_msg = e.what ();
+            // Only SQLite busy/locked errors are retried; sqlite_orm surfaces
+            // them as std::system_error with these substrings in what().
+            const bool busy = error_msg.find ("database is locked") != std::string::npos ||
+            error_msg.find ("SQLITE_BUSY") != std::string::npos;
+            if (!busy) {
+                throw; // Different error, rethrow immediately
+            }
+            if (attempt == attempts - 1) {
+                // Busy persisted through every attempt - log and rethrow.
+                vayu::utils::log_error (std::string ("Failed to ") + what +
+                " after " + std::to_string (attempts) + " attempts: " + error_msg);
+                throw;
+            }
+            vayu::utils::log_debug (std::string ("Database locked during ") + what +
+            ", retrying in " + std::to_string (base.count () * (attempt + 1)) + "ms (attempt " +
+            std::to_string (attempt + 1) + "/" + std::to_string (attempts) + ")");
+        }
+        // The lock_guard scope above has ended: we sleep *without* holding the
+        // mutex so a busy retry never stalls other endpoints (/health, SSE,
+        // the runs poll) that serialize on the same lock.
+        std::this_thread::sleep_for (base * (attempt + 1));
+    }
 }
 
 // ============================================================================

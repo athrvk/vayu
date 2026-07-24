@@ -379,6 +379,7 @@ if(VAYU_BUILD_TESTS)
         tests/event_loop_test.cpp
         tests/sse_test.cpp
         tests/db_test.cpp
+        tests/db_concurrency_test.cpp
         tests/rate_limit_test.cpp
         tests/metrics_helper_test.cpp
         tests/metrics_collector_test.cpp
