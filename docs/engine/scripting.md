@@ -191,7 +191,7 @@ pm.test('Response time is acceptable', function() {
 pm.test('Returns array of users', function() {
   const users = pm.response.json();
   pm.expect(users).to.be.an('array');
-  pm.expect(users).to.have.length.above(0);
+  pm.expect(users.length).to.be.above(0);
   pm.expect(users[0]).to.have.property('id');
 });
 ```
@@ -213,7 +213,10 @@ QuickJS supports ES2020 features with some limitations:
 - **No Node.js APIs**: No `require()`, `fs`, `http`, etc.
 - **Sandboxed**: No filesystem or network access
 - **Memory limit**: 64MB per script execution
-- **Timeout**: 5 seconds per script
+- **Timeout**: 5 seconds per script (default), enforced by a wall-clock deadline - an
+  infinite-loop script is aborted and reported as an error rather than hanging the
+  engine. Configurable via the `scriptTimeout` setting (milliseconds); `0` disables
+  the limit.
 
 ## Script Execution Context
 
