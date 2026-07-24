@@ -24,9 +24,6 @@ export const TIMING = {
 	/** Radix tooltip open delay used across the app. */
 	TOOLTIP_DELAY_MS: 150,
 
-	/** Delay to disambiguate single click from double click in tree items. */
-	TREE_CLICK_DELAY_MS: 80,
-
 	/** Engine health poll interval while the app is open. */
 	HEALTH_CHECK_INTERVAL_MS: 30_000,
 

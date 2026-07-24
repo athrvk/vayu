@@ -257,6 +257,13 @@ export interface RequestBuilderContextValue {
 	executeRequest: () => Promise<void>;
 	saveRequest: () => Promise<void>;
 	startLoadTest: () => void;
+	/**
+	 * Whether this builder can start a load test at all. False for a detached
+	 * copy (a past design run replayed in the builder), which is given no
+	 * `onStartLoadTest` - so the UrlBar hides the Load Test button rather than
+	 * showing one that does nothing.
+	 */
+	canStartLoadTest: boolean;
 }
 
 // Re-export from centralized types for backward compatibility

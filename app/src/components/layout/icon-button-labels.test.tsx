@@ -80,8 +80,10 @@ describe("icon-only buttons have accessible names", () => {
 
 	it("finds icon buttons to check (guards the scan itself)", () => {
 		// A renamed primitive or a broken glob would match nothing, and every
-		// assertion below would then vacuously pass.
-		expect(iconTags.length).toBeGreaterThan(10);
+		// assertion below would then vacuously pass. The floor only has to be
+		// clear of zero - kept well below the real count so removing a button
+		// (e.g. the run header's back button) does not trip the guard.
+		expect(iconTags.length).toBeGreaterThan(5);
 	});
 
 	it("names every icon-only Button", () => {

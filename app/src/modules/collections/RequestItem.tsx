@@ -5,13 +5,11 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useRef } from "react";
 import { Loader2, Trash2, Edit2, Copy } from "lucide-react";
 import type { Request } from "@/types";
 import { Input } from "@/components/ui";
 import { RowActionsMenu, MethodBadge, TruncatedText } from "@/components/shared";
 import { cn } from "@/lib/utils";
-import { TIMING } from "@/config/timing";
 import { INDENT_STEP } from "@/constants/layout";
 
 export interface RequestItemProps {
@@ -50,38 +48,19 @@ export default function RequestItem({
 	onStartRename,
 	onDuplicate,
 }: RequestItemProps) {
-	const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-	const CLICK_DELAY_MS = TIMING.TREE_CLICK_DELAY_MS;
-
-	const handleClick = () => {
+	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
-
-		// Clear any existing timeout
-		if (clickTimeoutRef.current) {
-			clearTimeout(clickTimeoutRef.current);
-			clickTimeoutRef.current = null;
-			// This was a double-click, don't trigger single click
-			return;
-		}
-
-		// Set timeout for single click
-		clickTimeoutRef.current = setTimeout(() => {
-			onSelect(collectionId, request.id);
-			clickTimeoutRef.current = null;
-		}, CLICK_DELAY_MS); // 80ms delay to detect double-click
+		// The second click of a double-click also fires `click`; ignore it so the
+		// double-click starts a rename. The first click already opened the request
+		// (opening is idempotent), so there is nothing to defer - and none of the
+		// 80ms delay that made a single click to open feel laggy.
+		if (e.detail > 1) return;
+		onSelect(collectionId, request.id);
 	};
 
 	const handleDoubleClick = (e: React.MouseEvent) => {
 		e.stopPropagation();
 		if (isDeleting || isRenaming) return;
-
-		// Clear single click timeout
-		if (clickTimeoutRef.current) {
-			clearTimeout(clickTimeoutRef.current);
-			clickTimeoutRef.current = null;
-		}
-
 		onStartRename?.(request);
 	};
 
@@ -152,10 +131,18 @@ export default function RequestItem({
 			)}
 
 			{/*
-			 * Delete moved into the ⋯ menu, but the Delete key still targets a
-			 * data-tree-delete element (see useRovingTreeFocus). This is that
-			 * target: never shown, never announced - a keyboard path only.
+			 * Keyboard-only targets for the roving tree (see useRovingTreeFocus):
+			 * F2 clicks data-tree-rename, Delete clicks data-tree-delete. Never
+			 * shown, never announced - the same actions live in the ⋯ menu.
 			 */}
+			<button
+				type="button"
+				className="hidden"
+				aria-hidden="true"
+				tabIndex={-1}
+				data-tree-rename
+				onClick={() => onStartRename?.(request)}
+			/>
 			<button
 				type="button"
 				className="hidden"
