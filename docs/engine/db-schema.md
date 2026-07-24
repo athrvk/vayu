@@ -276,7 +276,7 @@ than assuming all eight are there and flat:
 | Design mode (`store_result` in `execution.cpp`) | the five phase keys flat (`dnsMs`…`downloadMs`), **each only when non-zero** - a reused connection writes no `connectMs`/`tlsMs`. No `totalMs`/`wireMs`/`queueWaitMs`; perceived total lives in the `latency_ms` column. Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). |
 
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
-(config, `observability`, default 1 MiB) before storage, so downloading one 50 MB response does
+(config, `observability`, default 5 MiB) before storage, so downloading one 50 MB response does
 not live in SQLite forever. When a body is cut, its node gains two keys:
 
 | Key on `request` / `response` | Type | Meaning |

@@ -127,9 +127,9 @@ namespace json {
 constexpr int DEFAULT_INDENT = 2;
 /// Maximum size for JSON field parsing to prevent OOM (10MB)
 constexpr size_t MAX_FIELD_SIZE = 10 * 1024 * 1024;
-/// Maximum request/response body bytes stored per design-run trace (1MB).
+/// Maximum request/response body bytes stored per design-run trace (5MB).
 /// Larger bodies are truncated in results.trace_data with bodyTruncated set.
-constexpr size_t MAX_TRACE_BODY_BYTES = 1024 * 1024;
+constexpr size_t MAX_TRACE_BODY_BYTES = 5 * 1024 * 1024;
 } // namespace json
 
 /**

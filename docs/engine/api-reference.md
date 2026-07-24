@@ -116,7 +116,7 @@ changes. Three `observability` keys govern how much run history the engine keeps
 
 | Key                 | Default   | Range        | Effect |
 |---------------------|-----------|--------------|--------|
-| `maxTraceBodyBytes` | `1048576` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
+| `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results) are pruned at startup and after each run finishes. `0` = unlimited. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
 

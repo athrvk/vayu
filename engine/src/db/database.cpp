@@ -1367,7 +1367,7 @@ void Database::seed_default_config () {
     "Largest request/response body kept in a design run's stored trace. "
     "Bodies over this size are truncated in the database (the response viewer "
     "shows a notice and re-sending fetches the full body), so downloading one "
-    "huge response does not bloat storage forever. Default 1MB.",
+    "huge response does not bloat storage forever. Default 5MB.",
     "observability", std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES),
     "1024",       // 1KB
     "104857600",  // 100MB
