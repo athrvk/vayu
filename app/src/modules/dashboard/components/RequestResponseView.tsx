@@ -26,19 +26,13 @@ import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Clock } from "luc
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
+import {
+	StatusCodeBadge,
+	CompactHeadersViewer,
+	ResponseBody,
+	PHASE_TIPS,
+} from "@/components/shared/response-viewer";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
-
-// Per-phase explanations for the network timing breakdown. Kept in sync with
-// the wording in ResponseTimingTab (request-builder), which explains the same
-// DNS → Connect → TLS → TTFB → Download sequence.
-const PHASE_TIPS = {
-	dns: "Hostname → IP resolution. Usually a few ms once cached; >50ms suggests slow DNS or a fresh lookup.",
-	connect: "TCP three-way handshake. Zero on connection reuse (HTTP keep-alive / HTTP/2).",
-	tls: "SSL/TLS handshake (HTTPS only). Zero for plain HTTP and on resumed connections.",
-	ttfb: "Time to first byte - server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
-	download:
-		"Response body transfer time. Large for big payloads or slow links; near-zero for small JSON.",
-} as const;
 
 // Helper to format timestamp
 function formatTime(timestamp: number): string {
@@ -52,14 +46,6 @@ function formatTime(timestamp: number): string {
 	// Add milliseconds manually
 	const ms = String(date.getMilliseconds()).padStart(3, "0");
 	return `${timeStr}.${ms}`;
-}
-
-// Helper to get status badge variant
-function getStatusBadgeVariant(code: number): "default" | "secondary" | "destructive" | "outline" {
-	if (code === 0) return "destructive";
-	if (code >= 200 && code < 300) return "default";
-	if (code >= 400) return "destructive";
-	return "secondary";
 }
 
 export default function RequestResponseView({ report }: RequestResponseViewProps) {
@@ -308,6 +294,52 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									const isError = !!result.error || result.statusCode === 0;
 									const isSlow = result.trace?.isSlow;
 
+									// One data-driven list, not five hand-rolled cards each
+									// with its own `.toFixed(1)`. `formatPhaseDuration` (imported
+									// above and already used for the run-level averages) keeps
+									// the significant-digit ladder a raw fixed precision drops -
+									// a 0.04ms cached DNS lookup no longer rounds to `0.0ms`.
+									const timingPhases: {
+										label: string;
+										value: number;
+										tip: string;
+									}[] = (
+										[
+											{
+												label: "DNS",
+												value: result.trace?.dnsMs,
+												tip: PHASE_TIPS.dns,
+											},
+											{
+												label: "Connect",
+												value: result.trace?.connectMs,
+												tip: PHASE_TIPS.connect,
+											},
+											{
+												label: "TLS",
+												value: result.trace?.tlsMs,
+												tip: PHASE_TIPS.tls,
+											},
+											{
+												label: "TTFB",
+												value: result.trace?.firstByteMs,
+												tip: PHASE_TIPS.ttfb,
+											},
+											{
+												label: "Download",
+												value: result.trace?.downloadMs,
+												tip: PHASE_TIPS.download,
+											},
+										] as {
+											label: string;
+											value: number | undefined;
+											tip: string;
+										}[]
+									).filter(
+										(p): p is { label: string; value: number; tip: string } =>
+											p.value !== undefined
+									);
+
 									return (
 										<div key={index} className="border-b last:border-b-0">
 											{/* Result Header - Clickable */}
@@ -338,16 +370,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 													</span>
 
 													{/* Status Code */}
-													<Badge
-														variant={getStatusBadgeVariant(
-															result.statusCode
-														)}
-														className="font-mono shrink-0"
-													>
-														{result.statusCode === 0
-															? "ERR"
-															: result.statusCode}
-													</Badge>
+													<StatusCodeBadge
+														status={result.statusCode}
+														statusText={result.statusText}
+														className="shrink-0"
+													/>
 
 													{/* Latency */}
 													<span
@@ -402,115 +429,47 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																</div>
 															)}
 
-															{/* Timing Breakdown - using camelCase field names from backend */}
-															{(result.trace.dnsMs !== undefined ||
-																result.trace.connectMs !==
-																	undefined ||
-																result.trace.tlsMs !== undefined ||
-																result.trace.firstByteMs !==
-																	undefined ||
-																result.trace.downloadMs !==
-																	undefined) && (
+															{/* Timing Breakdown - camelCase phase fields from the
+															    load-test trace, formatted through the shared
+															    `formatPhaseDuration`. */}
+															{timingPhases.length > 0 && (
 																<div className="space-y-1">
 																	<p className="text-xs font-medium text-muted-foreground">
 																		Timing Breakdown
 																	</p>
 																	<div className="grid grid-cols-[repeat(auto-fit,minmax(90px,1fr))] gap-2 text-xs">
-																		{result.trace.dnsMs !==
-																			undefined && (
-																			<div className="bg-card border border-border rounded-md p-2 text-center">
-																				<p className="text-muted-foreground">
-																					DNS{" "}
-																					<InfoChip
-																						tip={
-																							PHASE_TIPS.dns
+																		{timingPhases.map(
+																			(phase) => {
+																				const d =
+																					formatPhaseDuration(
+																						phase.value
+																					);
+																				return (
+																					<div
+																						key={
+																							phase.label
 																						}
-																					/>
-																				</p>
-																				<p className="font-mono font-medium">
-																					{result.trace.dnsMs.toFixed(
-																						1
-																					)}
-																					ms
-																				</p>
-																			</div>
-																		)}
-																		{result.trace.connectMs !==
-																			undefined && (
-																			<div className="bg-card border border-border rounded-md p-2 text-center">
-																				<p className="text-muted-foreground">
-																					Connect{" "}
-																					<InfoChip
-																						tip={
-																							PHASE_TIPS.connect
-																						}
-																					/>
-																				</p>
-																				<p className="font-mono font-medium">
-																					{result.trace.connectMs.toFixed(
-																						1
-																					)}
-																					ms
-																				</p>
-																			</div>
-																		)}
-																		{result.trace.tlsMs !==
-																			undefined && (
-																			<div className="bg-card border border-border rounded-md p-2 text-center">
-																				<p className="text-muted-foreground">
-																					TLS{" "}
-																					<InfoChip
-																						tip={
-																							PHASE_TIPS.tls
-																						}
-																					/>
-																				</p>
-																				<p className="font-mono font-medium">
-																					{result.trace.tlsMs.toFixed(
-																						1
-																					)}
-																					ms
-																				</p>
-																			</div>
-																		)}
-																		{result.trace
-																			.firstByteMs !==
-																			undefined && (
-																			<div className="bg-card border border-border rounded-md p-2 text-center">
-																				<p className="text-muted-foreground">
-																					TTFB{" "}
-																					<InfoChip
-																						tip={
-																							PHASE_TIPS.ttfb
-																						}
-																					/>
-																				</p>
-																				<p className="font-mono font-medium">
-																					{result.trace.firstByteMs.toFixed(
-																						1
-																					)}
-																					ms
-																				</p>
-																			</div>
-																		)}
-																		{result.trace.downloadMs !==
-																			undefined && (
-																			<div className="bg-card border border-border rounded-md p-2 text-center">
-																				<p className="text-muted-foreground">
-																					Download{" "}
-																					<InfoChip
-																						tip={
-																							PHASE_TIPS.download
-																						}
-																					/>
-																				</p>
-																				<p className="font-mono font-medium">
-																					{result.trace.downloadMs.toFixed(
-																						1
-																					)}
-																					ms
-																				</p>
-																			</div>
+																						className="bg-card border border-border rounded-md p-2 text-center"
+																					>
+																						<p className="text-muted-foreground">
+																							{
+																								phase.label
+																							}{" "}
+																							<InfoChip
+																								tip={
+																									phase.tip
+																								}
+																							/>
+																						</p>
+																						<p className="font-mono font-medium">
+																							{
+																								d.value
+																							}
+																							{d.unit}
+																						</p>
+																					</div>
+																				);
+																			}
 																		)}
 																	</div>
 																</div>
@@ -541,45 +500,36 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																</div>
 															)}
 
-															{/* Response Headers */}
-															{result.trace.headers &&
-																Object.keys(result.trace.headers)
-																	.length > 0 && (
-																	<div className="space-y-1">
-																		<p className="text-xs font-medium text-muted-foreground">
-																			Response Headers
-																		</p>
-																		<div className="bg-muted p-2 rounded-md text-xs font-mono max-h-32 overflow-auto">
-																			{Object.entries(
-																				result.trace.headers
-																			).map(
-																				([key, value]) => (
-																					<div
-																						key={key}
-																						className="flex gap-2"
-																					>
-																						<span className="text-muted-foreground">
-																							{key}:
-																						</span>
-																						<span className="break-all">
-																							{value}
-																						</span>
-																					</div>
-																				)
-																			)}
-																		</div>
-																	</div>
-																)}
+															{/* Response Headers - the shared compact viewer. It
+															    declares its own `surface-sunken`, so its row rules
+															    resolve correctly on this `bg-muted/30` panel where a
+															    bare `border-rule` would fall back to invisible. */}
+															{result.trace.headers && (
+																<CompactHeadersViewer
+																	headers={result.trace.headers}
+																	title="Response Headers"
+																	className="max-h-40 overflow-auto"
+																/>
+															)}
 
-															{/* Response Body */}
+															{/* Response Body - the shared viewer (pretty/raw/preview
+															    with body-type detection), not a raw `<pre>`. */}
 															{result.trace.body && (
 																<div className="space-y-1">
 																	<p className="text-xs font-medium text-muted-foreground">
 																		Response Body
 																	</p>
-																	<pre className="bg-muted p-2 rounded-md text-xs font-mono max-h-48 overflow-auto whitespace-pre-wrap break-all">
-																		{result.trace.body}
-																	</pre>
+																	<div className="h-48 overflow-hidden rounded-md border border-border">
+																		<ResponseBody
+																			body={result.trace.body}
+																			headers={
+																				result.trace
+																					.headers || {}
+																			}
+																			height="100%"
+																			compact
+																		/>
+																	</div>
 																</div>
 															)}
 														</>
