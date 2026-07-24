@@ -153,6 +153,34 @@ const std::vector<vayu::db::Result>& results) {
     json["result"] = out;
 }
 
+namespace {
+
+// Cap a single trace node's `body` string in place. Records bodyTruncated +
+// bodyBytes (the original length) when the body is cut so a reader can tell a
+// stored slice from the whole body.
+void cap_node_body (nlohmann::json& node, size_t max_body_bytes) {
+    if (!node.is_object () || !node.contains ("body") || !node["body"].is_string ()) {
+        return;
+    }
+    const std::string body = node["body"].get<std::string> ();
+    if (body.size () > max_body_bytes) {
+        node["body"]          = body.substr (0, max_body_bytes);
+        node["bodyTruncated"] = true;
+        node["bodyBytes"]     = body.size ();
+    }
+}
+
+} // namespace
+
+void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes) {
+    if (trace.contains ("request")) {
+        cap_node_body (trace["request"], max_body_bytes);
+    }
+    if (trace.contains ("response")) {
+        cap_node_body (trace["response"], max_body_bytes);
+    }
+}
+
 Json serialize (const vayu::db::Collection& c) {
     Json json;
     json["id"] = c.id;

@@ -242,4 +242,44 @@ describe("seedFromRun", () => {
 			expect(seed.request.preRequestScript).toBe("");
 		});
 	});
+
+	describe("a truncated request body", () => {
+		// The engine sets bodyTruncated on the trace when a stored body exceeded
+		// maxTraceBodyBytes. The seed must carry the flag so Save can refuse to
+		// write an incomplete body back.
+		function truncatedRun(): Run {
+			return run({
+				result: {
+					timestamp: 1_750_000_000_000,
+					statusCode: 200,
+					statusText: "OK",
+					latencyMs: 12,
+					trace: {
+						request: {
+							method: "POST",
+							url: "https://api.example.test/users?page=2",
+							headers: { "X-Plain": "visible" },
+							body: "SLICE",
+							bodyTruncated: true,
+							bodyBytes: 5_242_880,
+						},
+						response: { headers: {}, body: "{}" },
+					},
+				},
+			});
+		}
+
+		it("sets requestBodyTruncated from the trace", () => {
+			expect(seedFromRun(truncatedRun(), liveRequest).requestBodyTruncated).toBe(true);
+		});
+
+		it("carries the flag whether or not the request still exists", () => {
+			// Read the same way in both the live-request and request-gone branches.
+			expect(seedFromRun(truncatedRun(), null).requestBodyTruncated).toBe(true);
+		});
+
+		it("leaves it undefined for an untruncated run", () => {
+			expect(seedFromRun(run(), liveRequest).requestBodyTruncated).toBeUndefined();
+		});
+	});
 });
