@@ -11,6 +11,7 @@
  */
 
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -111,7 +112,7 @@ void register_collection_routes (RouteContext& ctx) {
             if (json.contains ("id") && !json["id"].is_null ()) {
                 id = json["id"].get<std::string> ();
             } else {
-                id = "col_" + std::to_string (now_ms ());
+                id = vayu::utils::generate_id ("col_");
             }
 
             vayu::db::Collection c;
