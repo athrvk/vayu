@@ -302,14 +302,21 @@ showToast({                                     // returns the toast id
 ```
 
 Variants are `info` | `success` | `warning` | `error`, with durations of 4s / 4s
-/ 6s / 10s from `TOAST_DURATION_MS`. `warning` is for a refusal ("A load test is
-already running") as distinct from a failure.
+/ 6s / 10s from `TIMING.TOAST_DURATION_MS`. `warning` is for a refusal ("A load
+test is already running") as distinct from a failure.
 
 Two policies live here because the primitive has no opinion on them: an
 identical message and variant already on screen is **collapsed rather than
 stacked**, and past `MAX_TOASTS` (4) the oldest is dropped. Removal is driven by
 the primitive's `onOpenChange(false)`, which covers timeout, close button and
-swipe alike, so there is one removal path rather than three.
+swipe alike, so there is one removal path rather than three - but it *closes*
+the toast rather than dropping it, and the entry leaves the queue
+`TIMING.TOAST_EXIT_MS` later so the exit animation has frames to run in.
+
+**The values are not in the store.** Delays live in `config/timing.ts`
+(`TOAST_DURATION_MS`, `TOAST_EXIT_MS`) with every other UI-facing delay in the
+app, and the stack cap in `constants/toast.ts` (`MAX_TOASTS`). The store holds
+behaviour, not configuration.
 
 See `docs/design-system.md` -> Toasts for the visual tokens.
 

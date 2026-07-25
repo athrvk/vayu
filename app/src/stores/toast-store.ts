@@ -16,7 +16,7 @@
  * exit animation keys off.
  *
  * One timer is still ours, and it is not the dismiss timer: **a dismissed toast
- * is closed first and dropped `TOAST_EXIT_MS` later.** Deleting the entry inside
+ * is closed first and dropped `TIMING.TOAST_EXIT_MS` later.** Deleting the entry inside
  * `onOpenChange(false)` unmounts the element in the same update that sets
  * `data-state="closed"`, and Radix cannot animate a node whose parent has
  * already removed it - the exit never gets a frame, and only the enter animation
@@ -33,44 +33,17 @@
  * reason `sonner` was not adopted.
  *
  * What is left is the two policies the primitive has no opinion about: dedup
- * and a cap.
+ * and a cap. The values themselves are not here - the delays live in
+ * `config/timing.ts` and the cap in `constants/toast.ts`, so this file holds
+ * behaviour rather than configuration.
  */
 
 import { create } from "zustand";
 
+import { TIMING } from "@/config/timing";
+import { MAX_TOASTS } from "@/constants/toast";
+
 export type ToastVariant = "info" | "success" | "warning" | "error";
-
-/**
- * Per variant, not one constant.
- *
- * A confirmation is read at a glance; a failure has to be read, and often names
- * a cause from the engine ("database is locked") that takes longer to take in.
- * The primitive pauses all of these on hover, focus and window blur, so these
- * are floors rather than hard limits.
- */
-export const TOAST_DURATION_MS: Record<ToastVariant, number> = {
-	info: 4000,
-	success: 4000,
-	warning: 6000,
-	error: 10000,
-};
-
-/**
- * Four is what fits above the fold at this width without the oldest sliding off
- * the top of the screen. Past that the oldest is dropped: a burst of failures
- * used to stack unbounded, and the ones that ran off-screen were unreachable
- * and undismissable.
- */
-export const MAX_TOASTS = 4;
-
-/**
- * How long a closed toast is kept before it is dropped from the queue. Must stay
- * in step with the exit animation on `ui/toast.tsx` (`duration-200`); shorter and
- * the node vanishes mid-animation, longer and a dismissed toast lingers doing
- * nothing. Under `prefers-reduced-motion` the animation collapses to ~0 and this
- * is simply an unnoticed 200ms in the queue.
- */
-export const TOAST_EXIT_MS = 200;
 
 export interface ToastAction {
 	label: string;
@@ -86,9 +59,9 @@ export interface Toast {
 	message: string;
 	variant: ToastVariant;
 	action?: ToastAction;
-	/** Handed to the primitive; see TOAST_DURATION_MS. */
+	/** Handed to the primitive; see TIMING.TOAST_DURATION_MS. */
 	duration: number;
-	/** False once dismissed, while the exit animation plays. See TOAST_EXIT_MS. */
+	/** False once dismissed, while the exit animation plays. See TIMING.TOAST_EXIT_MS. */
 	open: boolean;
 }
 
@@ -104,7 +77,7 @@ interface ToastState {
 	toasts: Toast[];
 	/** Returns the toast id, so a caller can dismiss it before it expires. */
 	showToast: (input: string | ToastOptions, variant?: ToastVariant) => string;
-	/** Closes the toast; it leaves the queue TOAST_EXIT_MS later. */
+	/** Closes the toast; it leaves the queue TIMING.TOAST_EXIT_MS later. */
 	dismissToast: (id: string) => void;
 	dismissAll: () => void;
 }
@@ -122,7 +95,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
 			message: opts.message,
 			variant: opts.variant ?? "info",
 			...(opts.action ? { action: opts.action } : {}),
-			duration: opts.duration ?? TOAST_DURATION_MS[opts.variant ?? "info"],
+			duration: opts.duration ?? TIMING.TOAST_DURATION_MS[opts.variant ?? "info"],
 			open: true,
 		};
 
@@ -151,7 +124,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
 		}));
 		setTimeout(() => {
 			set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
-		}, TOAST_EXIT_MS);
+		}, TIMING.TOAST_EXIT_MS);
 	},
 
 	dismissAll: () => {

@@ -26,7 +26,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import { useToastStore, type ToastVariant } from "@/stores/toast-store";
-import { TOAST_DURATION_MS, MAX_TOASTS, TOAST_EXIT_MS } from "@/stores/toast-store";
+import { TIMING } from "@/config/timing";
+import { MAX_TOASTS } from "@/constants/toast";
 import Toaster from "./Toaster";
 
 function show(message: string, variant: ToastVariant = "info") {
@@ -164,7 +165,9 @@ describe("Toaster", () => {
 		});
 
 		it("gives a failure longer to be read than a confirmation", () => {
-			expect(TOAST_DURATION_MS.error).toBeGreaterThan(TOAST_DURATION_MS.success);
+			expect(TIMING.TOAST_DURATION_MS.error).toBeGreaterThan(
+				TIMING.TOAST_DURATION_MS.success
+			);
 		});
 	});
 
@@ -183,7 +186,7 @@ describe("Toaster", () => {
 			 * element in the same update that sets `data-state="closed"`, and Radix
 			 * cannot animate a node its parent has already removed - the exit never
 			 * gets a frame and only the enter animation ships. The fix is that a
-			 * dismissed toast is *closed* first and dropped TOAST_EXIT_MS later.
+			 * dismissed toast is *closed* first and dropped TIMING.TOAST_EXIT_MS later.
 			 *
 			 * This asserts the store contract, which is the half that is ours. It
 			 * cannot assert the node stays mounted: Radix keeps a closed toast alive
@@ -215,7 +218,7 @@ describe("Toaster", () => {
 					screen.getByRole("button", { name: "Dismiss notification" }).click();
 				});
 				expect(useToastStore.getState().toasts).toHaveLength(1);
-				act(() => void vi.advanceTimersByTime(TOAST_EXIT_MS + 10));
+				act(() => void vi.advanceTimersByTime(TIMING.TOAST_EXIT_MS + 10));
 				expect(useToastStore.getState().toasts).toHaveLength(0);
 			} finally {
 				vi.useRealTimers();

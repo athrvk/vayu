@@ -21,11 +21,12 @@
  * `--destructive` is `0 62.8% 30.6%` there, and at 40% over `--popover`
  * (`240 6% 11%`) there is almost nothing left to see.
  *
- * One token family for all four variants. Per the design system the three
- * status tokens are not interchangeable: `--status-*` for an icon or rule,
- * `--status-*-text` where the colour *is* the text, `--status-*-fill` only
- * under a white label. These are icons and rails, so they take the bare
- * `--status-*`, and `border-destructive` is gone.
+ * One token family for all four variants, but not one tier. Per the design
+ * system the three status tokens are not interchangeable: `--status-*` for a
+ * rule, `--status-*-text` where the colour *is* the text, `--status-*-fill` only
+ * under a white label. So the rail takes the bare `--status-*` and the glyph -
+ * painted with a `text-` utility - takes `--status-*-text`. `border-destructive`
+ * is gone.
  *
  * The outer edge stays `border-border`. That edge faces the canvas, which is
  * the case the design system calls correct for `border-border`; it is
@@ -81,9 +82,9 @@ const toastVariants = cva(
 		// motion` is already collapsed globally in index.css, so there is nothing
 		// to add here.
 		// duration-200 is pinned rather than left to the default because the store
-		// holds a dismissed toast for exactly TOAST_EXIT_MS before dropping it. The
-		// two have to agree: shorter here and the node lingers after the animation,
-		// longer and it is cut off mid-flight.
+		// holds a dismissed toast for exactly TIMING.TOAST_EXIT_MS before dropping
+		// it. The two have to agree: shorter here and the node lingers after the
+		// animation, longer and it is cut off mid-flight.
 		"transition-all duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out",
 		"data-[state=open]:slide-in-from-bottom-2 data-[state=open]:fade-in-0",
 		"data-[state=closed]:slide-out-to-right-full data-[state=closed]:fade-out-80",

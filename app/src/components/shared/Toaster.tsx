@@ -65,7 +65,7 @@ export default function Toaster() {
 					duration={duration}
 					// Controlled, so the toast can sit in the closed state while its
 					// exit animation runs. `dismissToast` flips this to false and
-					// drops the entry TOAST_EXIT_MS later; removing it here instead
+					// drops the entry TIMING.TOAST_EXIT_MS later; removing it here instead
 					// would unmount the node before Radix could animate it.
 					open={open}
 					// Fires for a timeout, the close button and a completed swipe
