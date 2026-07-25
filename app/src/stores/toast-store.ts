@@ -5,13 +5,23 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+/* global setTimeout */
+
 /**
  * Toast Store
  *
  * The queue behind the toast UI. It holds *what* to show; the Radix Toast
  * primitive in `components/ui/toast.tsx` owns *when* - the dismiss timer,
  * pausing on hover, focus and window blur, swipe, and the open/closed state the
- * exit animation keys off. So there is no `setTimeout` here any more.
+ * exit animation keys off.
+ *
+ * One timer is still ours, and it is not the dismiss timer: **a dismissed toast
+ * is closed first and dropped `TOAST_EXIT_MS` later.** Deleting the entry inside
+ * `onOpenChange(false)` unmounts the element in the same update that sets
+ * `data-state="closed"`, and Radix cannot animate a node whose parent has
+ * already removed it - the exit never gets a frame, and only the enter animation
+ * ships. Holding the entry for the length of the animation is what gives the
+ * primitive something to animate.
  *
  * This store used to carry that timer, and a note that the toast was "kept
  * in-house (rather than a toast library) so toasts render through the app's
@@ -53,6 +63,15 @@ export const TOAST_DURATION_MS: Record<ToastVariant, number> = {
  */
 export const MAX_TOASTS = 4;
 
+/**
+ * How long a closed toast is kept before it is dropped from the queue. Must stay
+ * in step with the exit animation on `ui/toast.tsx` (`duration-200`); shorter and
+ * the node vanishes mid-animation, longer and a dismissed toast lingers doing
+ * nothing. Under `prefers-reduced-motion` the animation collapses to ~0 and this
+ * is simply an unnoticed 200ms in the queue.
+ */
+export const TOAST_EXIT_MS = 200;
+
 export interface ToastAction {
 	label: string;
 	/** Spoken instead of the label where the label alone is not self-explanatory. */
@@ -69,6 +88,8 @@ export interface Toast {
 	action?: ToastAction;
 	/** Handed to the primitive; see TOAST_DURATION_MS. */
 	duration: number;
+	/** False once dismissed, while the exit animation plays. See TOAST_EXIT_MS. */
+	open: boolean;
 }
 
 export interface ToastOptions {
@@ -83,6 +104,7 @@ interface ToastState {
 	toasts: Toast[];
 	/** Returns the toast id, so a caller can dismiss it before it expires. */
 	showToast: (input: string | ToastOptions, variant?: ToastVariant) => string;
+	/** Closes the toast; it leaves the queue TOAST_EXIT_MS later. */
 	dismissToast: (id: string) => void;
 	dismissAll: () => void;
 }
@@ -101,6 +123,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
 			variant: opts.variant ?? "info",
 			...(opts.action ? { action: opts.action } : {}),
 			duration: opts.duration ?? TOAST_DURATION_MS[opts.variant ?? "info"],
+			open: true,
 		};
 
 		/*
@@ -119,7 +142,19 @@ export const useToastStore = create<ToastState>((set, get) => ({
 		return resolved.id;
 	},
 
-	dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+	dismissToast: (id) => {
+		const target = get().toasts.find((t) => t.id === id);
+		if (!target || !target.open) return; // already closing; do not re-arm
 
-	dismissAll: () => set({ toasts: [] }),
+		set((s) => ({
+			toasts: s.toasts.map((t) => (t.id === id ? { ...t, open: false } : t)),
+		}));
+		setTimeout(() => {
+			set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+		}, TOAST_EXIT_MS);
+	},
+
+	dismissAll: () => {
+		for (const t of get().toasts) get().dismissToast(t.id);
+	},
 }));

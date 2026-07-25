@@ -51,9 +51,19 @@ function ToastViewport({
 		<ToastPrimitives.Viewport
 			data-slot="toast-viewport"
 			className={cn(
-				// z-[100] clears the dialogs at z-50: SaveRunToRequestDialog
-				// reports its failure while still open, so the toast has to sit
-				// over the overlay rather than under it.
+				/*
+				 * z-[100] against the dialogs' z-50, but the number is not what
+				 * settles it: a dialog portals to `document.body` while this
+				 * viewport lives inside `#root`, so they are sibling subtrees and a
+				 * stacking context on any ancestor would scope this z-index inside
+				 * it and let DOM order win instead. It matters because
+				 * `SaveRunToRequestDialog` reports its failure while still open -
+				 * the one path where losing would make a failure invisible.
+				 *
+				 * So it was hit-tested rather than reasoned about:
+				 * `elementFromPoint` at the toast's centre, with an overlay and
+				 * panel mounted at z-50, returns the toast's own content.
+				 */
 				"fixed bottom-4 right-4 z-[100] flex max-h-screen w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none",
 				className
 			)}
@@ -70,7 +80,11 @@ const toastVariants = cva(
 		// the exit reads as the same gesture a swipe would make. `prefers-reduced-
 		// motion` is already collapsed globally in index.css, so there is nothing
 		// to add here.
-		"transition-all data-[state=open]:animate-in data-[state=closed]:animate-out",
+		// duration-200 is pinned rather than left to the default because the store
+		// holds a dismissed toast for exactly TOAST_EXIT_MS before dropping it. The
+		// two have to agree: shorter here and the node lingers after the animation,
+		// longer and it is cut off mid-flight.
+		"transition-all duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out",
 		"data-[state=open]:slide-in-from-bottom-2 data-[state=open]:fade-in-0",
 		"data-[state=closed]:slide-out-to-right-full data-[state=closed]:fade-out-80",
 		// Swipe follows the pointer, then animates out past the threshold.

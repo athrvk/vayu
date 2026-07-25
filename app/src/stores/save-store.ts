@@ -73,7 +73,6 @@ interface SaveState {
 	startSaving: () => void;
 	completeSave: () => void;
 	failSave: (error: string) => void;
-	clearError: () => void;
 	reset: () => void;
 
 	// Context management
@@ -139,8 +138,6 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			set({ status: "error", pendingSaveId: null });
 			useToastStore.getState().showToast(error, "error");
 		},
-
-		clearError: () => set({ status: "idle" }),
 
 		reset: () =>
 			set({

@@ -33,9 +33,11 @@
  * nothing is assertive - `type="background"` on the primitive. That argument is
  * unchanged by the swap and is recorded at `ui/toast.tsx`.
  *
- * `ToastProvider` also gives the viewport a hotkey (F8 by default) that moves
- * focus into the stack, which is why the label below names it: Radix builds the
- * region's accessible name from that string.
+ * `ToastProvider` also gives the viewport a hotkey - F8 by default - that moves
+ * focus into the stack, and advertises it in the viewport's accessible name
+ * ("Notifications (F8)", Radix's default, confirmed in the browser). The `label`
+ * passed here is a different string: it prefixes the announced text, not the
+ * region name, which comes from `ToastViewport`'s own `label`.
  */
 
 import {
@@ -56,15 +58,20 @@ export default function Toaster() {
 
 	return (
 		<ToastProvider swipeDirection="right" label="Notification">
-			{toasts.map(({ id, title, message, variant, action, duration }) => (
+			{toasts.map(({ id, title, message, variant, action, duration, open }) => (
 				<Toast
 					key={id}
 					variant={variant}
 					duration={duration}
+					// Controlled, so the toast can sit in the closed state while its
+					// exit animation runs. `dismissToast` flips this to false and
+					// drops the entry TOAST_EXIT_MS later; removing it here instead
+					// would unmount the node before Radix could animate it.
+					open={open}
 					// Fires for a timeout, the close button and a completed swipe
-					// alike, so removal has one path rather than three.
-					onOpenChange={(open) => {
-						if (!open) dismissToast(id);
+					// alike, so dismissal has one path rather than three.
+					onOpenChange={(next) => {
+						if (!next) dismissToast(id);
 					}}
 				>
 					<ToastIcon variant={variant} />

@@ -26,7 +26,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import { useToastStore, type ToastVariant } from "@/stores/toast-store";
-import { TOAST_DURATION_MS, MAX_TOASTS } from "@/stores/toast-store";
+import { TOAST_DURATION_MS, MAX_TOASTS, TOAST_EXIT_MS } from "@/stores/toast-store";
 import Toaster from "./Toaster";
 
 function show(message: string, variant: ToastVariant = "info") {
@@ -173,7 +173,53 @@ describe("Toaster", () => {
 			render(<Toaster />);
 			show("Save failed", "error");
 			fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
-			expect(useToastStore.getState().toasts).toHaveLength(0);
+			// Closed, not yet dropped - see the two tests below.
+			expect(useToastStore.getState().toasts[0]?.open).toBe(false);
+		});
+
+		it("closes the toast before dropping it, so the exit has something to play", () => {
+			/*
+			 * Deleting the store entry inside `onOpenChange(false)` unmounts the
+			 * element in the same update that sets `data-state="closed"`, and Radix
+			 * cannot animate a node its parent has already removed - the exit never
+			 * gets a frame and only the enter animation ships. The fix is that a
+			 * dismissed toast is *closed* first and dropped TOAST_EXIT_MS later.
+			 *
+			 * This asserts the store contract, which is the half that is ours. It
+			 * cannot assert the node stays mounted: Radix keeps a closed toast alive
+			 * only while an animation is running, and jsdom runs none, so Presence
+			 * unmounts it at once here regardless of which behaviour shipped. The
+			 * motion itself was verified in a browser.
+			 *
+			 * The assertion this replaces - "the toast vanished" - passed precisely
+			 * when the bug was present.
+			 */
+			render(<Toaster />);
+			show("Save failed", "error");
+			const id = useToastStore.getState().toasts[0]?.id;
+
+			fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+
+			const after = useToastStore.getState().toasts;
+			expect(after).toHaveLength(1);
+			expect(after[0]?.id).toBe(id);
+			expect(after[0]?.open).toBe(false);
+		});
+
+		it("drops it once the exit has had its time", () => {
+			vi.useFakeTimers();
+			try {
+				render(<Toaster />);
+				show("Save failed", "error");
+				act(() => {
+					screen.getByRole("button", { name: "Dismiss notification" }).click();
+				});
+				expect(useToastStore.getState().toasts).toHaveLength(1);
+				act(() => void vi.advanceTimersByTime(TOAST_EXIT_MS + 10));
+				expect(useToastStore.getState().toasts).toHaveLength(0);
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
 		it("gives the close control a focus ring and a target bigger than its icon", () => {
@@ -199,7 +245,8 @@ describe("Toaster", () => {
 			});
 			fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 			expect(onClick).toHaveBeenCalledOnce();
-			expect(useToastStore.getState().toasts).toHaveLength(0);
+			// Closed on the way out, dropped after the exit - see "dismissal".
+			expect(useToastStore.getState().toasts[0]?.open).toBe(false);
 		});
 
 		it("renders a title above the message when one is given", () => {
