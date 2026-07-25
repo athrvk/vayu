@@ -288,6 +288,8 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
+| POST | `/collections`, `/requests`, `/environments` | **Create only** - 409 on an existing id |
+| PUT | `/collections/:id`, `/requests/:id`, `/environments/:id` | **Update only** (merge-patch) - 404 on a missing id |
 
 The pre-consolidation paths (`POST /request`, `POST /run`, `GET /run/:id[/report|/stop]`,
 `DELETE /run/:id`, `GET /metrics/live/:runId`, `GET /stats/:runId?format=json`) still
@@ -295,8 +297,22 @@ work as **deprecated aliases** and will be removed in a future minor release; `G
 /stats/:runId` in its SSE mode is retained wholesale. See `docs/engine/api-reference.md`
 (Deprecated aliases) for full reference.
 
-Two things worth knowing before you design around them:
+Three things worth knowing before you design around them:
 
+- **POST creates, PUT updates - they are not interchangeable.** `POST
+  /<resource>` on an id that already exists is a `409`, and `PUT
+  /<resource>/:id` on one that does not is a `404`; POST-as-upsert is gone
+  (issue #95). One null-vs-absent rule covers all three resources: on create
+  absent and `null` both mean "use the default", on update absent means "keep"
+  and `null` means "reset to the default", and a field with no default (a
+  collection's / environment's `name`, a request's `collectionId` / `name` /
+  `method` / `url`) rejects `null` with a `400` instead of ignoring the write.
+  The rule lives in one place per side - `apply_*_field` in
+  `engine/include/vayu/http/routes.hpp`, and `apiService.updateX` in
+  `app/src/services/api.ts` - so add fields there rather than re-deriving the
+  rule per handler. A client-supplied `id` on **create** is still accepted,
+  solely because the import orchestrator pre-assigns ids (#96 removes the need,
+  #97 then rejects the field).
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
   to load a restored request tab or a design-run copy on cold start - one round
   trip, not the old scan of every collection's list. A `404` means the request

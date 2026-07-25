@@ -133,7 +133,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `run_request`          | execute  | `POST /execute`                              | allowlist                  |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /execute` (×N)     | allowlist per host         |
 | `create_request`       | write    | `POST /requests`                             | write toggle               |
-| `update_environment`   | write    | `GET`+`POST /environments` (fetch-merge)     | write toggle               |
+| `update_environment`   | write    | `GET`+`PUT /environments/:id` (fetch-merge)  | write toggle               |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
 | `start_load_run`       | load     | `POST /runs`                                 | allowlist + caps + confirm |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
@@ -150,8 +150,11 @@ Notes:
   entry's label). Such values are saved, but the running engine keeps the old
   value until it is restarted, so the tool says so in its text output too.
 - **`update_environment`** fetches the environment and merges the supplied
-  variables (the engine's upsert replaces the whole variables blob), so partial
-  updates preserve untouched variables and the name.
+  variables (`PUT /environments/:id` replaces the whole variables blob), so
+  partial updates preserve untouched variables and the name. It is a `PUT`, not
+  a `POST`: since #95 the engine's `POST /environments` is create-only and would
+  answer an existing id with a `409`. `create_request` stays a `POST` for the
+  same reason - it creates, and lets the engine assign the id.
 - **`run_collection_smoke`** runs each saved request once and returns a structured
   pass/fail matrix (2xx–3xx status + all tests passing = pass). Each request is
   composed exactly as the app's **Send** would (see *Request composition* below).

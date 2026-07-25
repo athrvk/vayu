@@ -12,10 +12,12 @@ Component (Auto-Applied) - WHERE            Type (Manual, pick one) - WHAT
   component:ci        ⚪  CI config            type:perf          🟧  Speed/resource
   component:build     ⚫  Build system         type:test          🟦  Tests/benchmarks
 
-Area (engine sub-areas, auto-applied)        Status (PRs, manual)
+Area (feature sub-areas, auto-applied)       Status (PRs, manual)
   area:http       HTTP server, SSE             status:needs-review  🟧  Awaiting review
-  area:auth       OAuth2, authentication        status:blocked       🔴  Waiting on something
-  area:metrics    Metrics, statistics           status:ready-merge   🟢  Approved
+  area:auth       OAuth2, authentication       status:blocked       🔴  Waiting on something
+  area:metrics    Metrics, statistics          status:ready-merge   🟢  Approved
+  area:scripting  QuickJS, pm.* API
+  area:mcp        MCP server (in the app)
 
                                               Priority (issues, manual)
 Special                                        priority:critical  🔴  Blocks other work
@@ -45,7 +47,7 @@ These labels indicate **where** in the codebase a change lands. **Applied automa
 
 ### Area Labels (`area:*`)
 
-These labels narrow down sub-areas **within the engine**. Useful for routing engine changes to appropriate reviewers. These are path-based and not manually applied.
+These labels narrow a change to a **feature sub-area**, one level finer than `component:*`. Useful for routing to the right reviewer. These are path-based and not manually applied. All but `area:mcp` are engine sub-areas.
 
 | Label | Description | Applies to |
 |-------|-------------|-----------|
@@ -53,8 +55,11 @@ These labels narrow down sub-areas **within the engine**. Useful for routing eng
 | `area:auth` | Authentication, OAuth2, authorization | Any file under `engine/**` with `auth` or `oauth` in its name - also matches `area:http`, since auth lives under `engine/src/http/` today |
 | `area:metrics` | Metrics collection, statistics, measurement | Any file under `engine/**` with `metrics` in its name |
 | `area:scripting` | QuickJS runtime, script execution, pm.* API | `engine/src/runtime/**` |
+| `area:mcp` | MCP server, tools, resources, prompts | `app/electron/mcp/**`, plus any file under `app/**` with `mcp` or `Mcp` in its name |
 
-`area:auth`/`area:metrics` match by filename convention (see "zero-maintenance" below); a file that doesn't follow it won't be caught - use a manual label as a fallback.
+`area:auth`/`area:metrics`/`area:mcp` match by filename convention (see "zero-maintenance" below); a file that doesn't follow it won't be caught - use a manual label as a fallback.
+
+**`area:mcp` is the one `area:*` outside the engine.** The MCP server is TypeScript in the app tree, proxying the engine's HTTP API, so it earns `component:app` - `area:mcp` is what distinguishes it from any other app change. The name wildcard is spelled twice (`*mcp*` and `*Mcp*`) because globs are case-sensitive and the settings panel is PascalCase.
 
 ### Type Labels (`type:*`)
 
@@ -124,14 +129,14 @@ These labels indicate **urgency**. Apply manually based on impact and timeline.
 1. **Component:** Add one `component:*` label to indicate where the issue lives. This may be auto-applied if the issue references a specific file.
 2. **Type:** Add one `type:*` label to indicate what kind of work it is.
 3. **Priority:** Add one `priority:*` label if it's urgent.
-4. **Area (engine only):** Add an `area:*` label if it's an engine issue that fits a sub-area.
+4. **Area:** Add an `area:*` label if the issue fits a sub-area (engine sub-areas, or `area:mcp`).
 5. **Special:** Add special labels as needed (`good first issue`, `help wanted`, `documentation`, etc.).
 
 ### For Pull Requests
 
 1. **Component:** Auto-applied based on changed files. Override if the labeler got it wrong.
 2. **Type:** Applied manually to describe the kind of change.
-3. **Area (engine only):** Auto-applied for engine files in a sub-area.
+3. **Area:** Auto-applied for files in a sub-area (engine sub-areas, or the MCP server in the app).
 4. **Status:** Apply `status:needs-review` when ready, update to `status:ready-merge` when approved.
 5. **Special:** Add as needed.
 
@@ -143,19 +148,20 @@ The `.github/labeler.yml` file defines path-based rules that automatically apply
 
 Exact paths/patterns for each rule are in the category tables above (`Auto-applied when` / `Applies to` columns); `release` triggers on `VERSION` alone, which also matches `component:build`.
 
-`component:database` and `area:*` rules are kept strictly inside `engine/**` -
-a `docs/engine/*.md` change earns `documentation`, not a component/area label
-for code it never touched.
+`component:database` and every `area:*` rule are kept strictly inside a *code*
+tree - `engine/**` for all of them except `area:mcp`, which is scoped to
+`app/**`. The point is that a `docs/engine/*.md` change earns `documentation`,
+not a component/area label for code it never touched.
 
 If a PR changes files in multiple categories, it gets all matching labels. A release PR touching `app/`, `engine/`, and build files will earn `component:app`, `component:engine`, and `component:build`.
 
 ### Most rules are zero-maintenance; `component:build` is not
 
 `component:app`, `component:engine`, `component:ci`, `component:database`,
-`area:http`, `area:auth`, `area:metrics`, and `area:scripting` are all either
-a directory glob or a filename-convention wildcard - a new file placed in the
-right directory, or named the way every existing file in that area is named,
-gets labeled automatically with no `labeler.yml` change.
+`area:http`, `area:auth`, `area:metrics`, `area:scripting`, and `area:mcp` are
+all either a directory glob or a filename-convention wildcard - a new file
+placed in the right directory, or named the way every existing file in that
+area is named, gets labeled automatically with no `labeler.yml` change.
 
 `component:build` is the one rule left as an enumerated file list, because
 build/version manifests don't share a naming convention (`build.py`,
@@ -186,6 +192,7 @@ exception: kept and restyled as manual-only companions to `component:ci` /
 | Database schema migration | `component:engine`, `component:database` | `type:enhancement`, `documentation` (if adding schema docs) |
 | Perf improvement to the request scheduler | `component:engine`, `area:http` | `type:perf`, `priority:high` |
 | Test for the QuickJS sandbox | `component:engine`, `area:scripting` | `type:test` |
+| New tool added to the MCP server | `component:app`, `area:mcp` | `type:feature`, `documentation` (if updating `docs/engine/mcp.md`) |
 
 ## Applying Labels to the Repository
 

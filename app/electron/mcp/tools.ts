@@ -674,12 +674,15 @@ export const TOOLS: McpTool[] = [
 			for (const [key, value] of Object.entries(vars as Record<string, string>)) {
 				mergedVars[key] = { value: String(value), enabled: true };
 			}
+			// PUT carries the id in the path, so the body is the patch only. The
+			// name is still sent because the engine treats it as having no
+			// default - omitting it would keep the stored name, but sending the
+			// caller's rename in the same call is the point of the `name` arg.
 			const payload: Record<string, unknown> = {
-				id: environmentId,
 				name: str(args, "name") ?? (typeof existing.name === "string" ? existing.name : ""),
 				variables: mergedVars,
 			};
-			return callEngine(() => ctx.client.upsertEnvironment(payload, signal));
+			return callEngine(() => ctx.client.updateEnvironment(environmentId, payload, signal));
 		},
 	},
 	{
