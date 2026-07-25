@@ -23,7 +23,7 @@
  * module MCP requests would ship unresolved `{{vars}}`, no auth, and no scripts.
  * This module is the main-process counterpart of the renderer pipeline
  * (`useVariableResolver.ts` + `request-builder/index.tsx` +
- * `utils/auth-mapping.ts`); the two must stay in agreement on precedence and
+ * `utils/auth-resolution.ts`); the two must stay in agreement on precedence and
  * `inherit`/script semantics. Everything here is pure and transport-agnostic
  * except {@link loadResolutionContext}, which reads the data it needs via the
  * engine client.

@@ -8,7 +8,7 @@
 /**
  * AuthInheritBanner
  *
- * Shown in the request AuthPanel when authType === "inherit". Walks the
+ * Shown in the request AuthPanel when the request's auth mode is "inherit". Walks the
  * ancestor chain of the request's collection, finds the nearest collection
  * with auth.mode !== "none", and renders:
  *   - a summary line: effective auth type + resolved source name
@@ -23,29 +23,30 @@ import { cn } from "@/lib/utils";
 import { useCollectionAncestors } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { VARIABLE_SPLIT_PATTERN, isVariableToken } from "@/constants/variables";
+import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
 
 interface AuthInheritBannerProps {
 	collectionId: string | null | undefined;
 }
 
+/**
+ * What to call this collection's auth, and the credential hint to preview under
+ * it. The name comes from the shared registry: this used to hold a fourth
+ * private list, which had drifted to rendering raw `OAUTH2` / `AWS` for modes
+ * the two pickers called "OAuth 2.0" and "AWS Signature".
+ */
 function describeAuth(c: Collection): { label: string; secret: string | null } {
 	const auth = c.auth;
+	const label = AUTH_MODE_LABELS[auth.mode];
 	switch (auth.mode) {
-		case "none":
-			return { label: "No Auth", secret: null };
 		case "bearer":
-			return { label: "Bearer Token", secret: auth.token || null };
+			return { label, secret: auth.token || null };
 		case "basic":
-			return { label: "Basic Auth", secret: auth.username || null };
+			return { label, secret: auth.username || null };
 		case "apikey":
-			return { label: "API Key", secret: auth.key || null };
-		case "oauth2":
-		case "digest":
-		case "aws":
-		case "ntlm":
-			return { label: auth.mode.toUpperCase(), secret: null };
+			return { label, secret: auth.key || null };
 		default:
-			return { label: "No Auth", secret: null };
+			return { label, secret: null };
 	}
 }
 
