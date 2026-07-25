@@ -17,6 +17,14 @@ copyright: Engine AGPL-3.0 &middot; App Apache-2.0
 theme:
   name: material
   language: en
+  # Inter, plus the app's mono (--font-mono in app/src/index.css). Both are
+  # already in the app's own font list (app/index.html), so the site and the UI
+  # draw from one family set. Material fetches them from Google Fonts, which it
+  # already did for its default Roboto - this changes which fonts are requested,
+  # not whether any are.
+  font:
+    text: Inter
+    code: JetBrains Mono
   # Both are the app's own icon. There is no such file under docs/ - the path is
   # populated at build time by .github/hooks/brand_assets.py, which reads
   # shared/icon_png/vayu_icon_256x256.png (the same source setup_icons in
@@ -34,7 +42,10 @@ theme:
     - navigation.footer
     - navigation.indexes
     - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.path
     - navigation.sections
+    - navigation.tabs
     - navigation.top
     - navigation.tracking
     - search.highlight
@@ -62,9 +73,9 @@ theme:
 
 nav:
   - Home: index.md
-  - Architecture: architecture.md
-  - Building from Source: building.md
-  - Design System: design-system.md
+  - Get Started:
+      - System Architecture: architecture.md
+      - Building from Source: building.md
   - Engine:
       - Architecture: engine/architecture.md
       - HTTP API Reference: engine/api-reference.md
@@ -77,6 +88,7 @@ nav:
   - App:
       - Architecture: app/architecture.md
       - Components: app/COMPONENTS.md
+      - Design System: design-system.md
       - State Management: app/state-management.md
       - API Integration: app/api-integration.md
       - Variable Resolution: app/variable-resolution.md

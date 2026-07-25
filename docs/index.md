@@ -1,3 +1,9 @@
+---
+hide:
+  - navigation
+  - toc
+---
+
 # Vayu Documentation
 
 Vayu is an open source desktop app that merges a REST/GraphQL request builder
@@ -8,6 +14,12 @@ It is built as a **sidecar**: an Electron + React UI (the manager) talks to a
 C++20 daemon (the engine) over HTTP on `127.0.0.1:9876`. The split is what lets
 the UI stay responsive while the engine saturates a target at tens of thousands
 of requests per second.
+
+[Read the architecture](architecture.md){ .md-button .md-button--primary }
+[Engine HTTP API](engine/api-reference.md){ .md-button }
+[Download](https://github.com/athrvk/vayu/releases/latest){ .md-button }
+
+![The load-test dashboard: throughput, latency percentiles and error counters streaming live from the C++ engine.](images/vayu-loadtest.png){ .shot }
 
 <div class="grid cards" markdown>
 
