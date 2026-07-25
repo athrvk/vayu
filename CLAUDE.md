@@ -378,6 +378,61 @@ Release notes live on the [GitHub Releases](https://github.com/athrvk/vayu/relea
 
 **Authoring the notes (Claude's job before tagging).** When preparing a release, write `.github/release-notes/vX.Y.Z.md` in the format above, derived from `git log vPREV..vX.Y.Z`; read a recent entry to match voice. The file *is* the release body, so it needs no tooling to publish - CI handles it. Because the workflow resolves the file from the tagged commit's tree, the notes file must be committed **before** the tag is pushed (i.e., it rides along in the release PR). To correct a published release's notes after the fact, edit the file, then either re-run the release workflow or update the release body by hand.
 
+## Labels and Issue Organization
+
+Repository labels are organized by **semantic purpose**, not color. This enables consistent triaging, routing, and filtering across issues and pull requests.
+
+**See `.github/LABELING.md` for the complete guide.** Below is a quick reference:
+
+### Label Categories
+
+**Component labels** (auto-applied by path-based rules):
+- `component:app` - Electron + React UI changes
+- `component:engine` - C++ engine daemon changes
+- `component:database` - SQLite store (subset of engine)
+- `component:ci` - GitHub Actions / CI configuration
+- `component:build` - Build system (CMake, vcpkg, VERSION, build.py)
+
+**Area labels** (engine sub-areas, auto-applied):
+- `area:http` - HTTP server, routes, SSE
+- `area:auth` - Authentication, OAuth2
+- `area:metrics` - Metrics collection
+- `area:scripting` - QuickJS runtime, script execution
+
+**Type labels** (manual, describe the change):
+- `type:bug` - Bug fix
+- `type:feature` - New user-facing feature
+- `type:enhancement` - Enhancement to existing feature
+- `type:perf` - Performance optimization
+- `type:test` - Tests, benchmarks, test infrastructure
+
+**Status labels** (workflow state, applied by reviewers):
+- `status:needs-review` - Awaiting review
+- `status:blocked` - Blocked on external work
+- `status:ready-merge` - Approved, ready to merge
+
+**Priority labels** (urgency):
+- `priority:critical` - Needs immediate attention
+- `priority:high` - Should be tackled soon
+- `priority:low` - Nice-to-have
+
+**Special labels**:
+- `good first issue` - Suitable for newcomers
+- `help wanted` - Needs outside expertise
+- `documentation` - Docs-related work
+- `dependencies` - Dependency updates
+- `breaking-change` / `severity:blocking` - API-breaking or blocking
+- `flaky`, `memory-leak`, `performance` - Quality concerns
+- `duplicate`, `wontfix`, `invalid` - Triage outcomes
+
+### For Contributors
+
+1. **Issues:** Add `component:*` (auto or manual), one `type:*`, and `priority:*` if urgent
+2. **PRs:** Component labels auto-apply by path; add `type:*` manually; reviewers add `status:*`
+3. **Automation:** Component and area labels apply automatically based on changed files
+
+**Run `.github/scripts/setup-labels.py` to create or update all labels in a new repository** (requires `GITHUB_TOKEN`).
+
 ## Docs - keep them in step with the code
 
 **If you change something a doc describes, update that doc in the same commit.**
