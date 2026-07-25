@@ -94,9 +94,17 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # This trio is version-coupled through the Pages artifact format, so the
+      # pairing is taken verbatim from GitHub's own starter workflow
+      # (actions/starter-workflows, pages/static.yml) rather than each action
+      # being bumped to its newest major independently. `upload-pages-artifact`
+      # has a v5 and `configure-pages` a v6, but GitHub still ships v3 and v5
+      # alongside `deploy-pages@v5`. Nothing on a pull request exercises this
+      # job (it is skipped), so a bad pin here would only surface as a failed
+      # deploy on master.
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
