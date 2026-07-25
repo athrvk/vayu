@@ -122,7 +122,7 @@ export function Dock() {
 	const { drawerOpen, drawerView, activateDrawerView, contextBarOpen, toggleContextBar } =
 		useLayoutStore();
 	const { isEngineConnected } = useEngineStore();
-	const { status: saveStatus, errorMessage: saveError } = useSaveStore();
+	const saveStatus = useSaveStore((s) => s.status);
 
 	return (
 		<TooltipProvider>
@@ -173,24 +173,19 @@ export function Dock() {
 						<span className="text-xs text-muted-foreground">Saved</span>
 					)}
 					{/*
-					 * The reason, not just the fact. `save-store` records an
-					 * `errorMessage` on every failure - "database is locked", "disk
-					 * full" - and nothing read it, so every failure looked the same
-					 * and none of them said what to do about it. Same shape as three
-					 * failures found in the dashboard: state written, never read.
+					 * No error line here any more, on purpose.
 					 *
-					 * `title` carries the full text because the strip is narrow and
-					 * the message comes from the engine, so its length is not ours to
-					 * predict.
+					 * This strip used to render `save-store`'s `errorMessage`,
+					 * added because a bare "Save failed" never said *why*. The
+					 * reason still has to reach the user; it now arrives as a
+					 * toast, which is where every other failure in the app is
+					 * reported, and which - unlike a 60-character truncated span
+					 * with the rest in a `title` - has room for an engine message
+					 * like "database is locked".
+					 *
+					 * Guarded by `Dock.save-error.test.tsx`: same requirement, a
+					 * failure says why, asserted against the toast instead.
 					 */}
-					{saveStatus === "error" && (
-						<span
-							className="max-w-60 truncate text-xs text-destructive-text"
-							title={saveError ?? undefined}
-						>
-							{saveError ? `Save failed - ${saveError}` : "Save failed"}
-						</span>
-					)}
 
 					{/*
 					 * Full muted-foreground, not /50. At half opacity the version

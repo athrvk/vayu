@@ -1319,6 +1319,49 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
 )} />
 ```
 
+### Toasts
+
+Transient report of an action the user just took. The queue is
+`stores/toast-store.ts`; the surface is the shadcn/Radix primitive in
+`components/ui/toast.tsx`, rendered once by `components/shared/Toaster.tsx`.
+
+**The variant is carried by an icon and a left rail, never by colour alone.**
+The version this replaced signalled variant with a 40%-alpha border and nothing
+else, and in dark mode `--destructive` at 40% over `--popover` left an error and
+an info toast near-identical. All four variants now come from one token family:
+
+| Variant | Icon | Rail (a rule) | Glyph (a foreground) | Duration |
+|---------|------|---------------|----------------------|----------|
+| `info` | `Info` | `border-l-border` | `text-muted-foreground` | 4s |
+| `success` | `CheckCircle2` | `border-l-status-success` | `text-status-success-text` | 4s |
+| `warning` | `AlertTriangle` | `border-l-status-warning` | `text-status-warning-text` | 6s |
+| `error` | `XCircle` | `border-l-status-error` | `text-status-error-text` | 10s |
+
+The rail and the glyph take **different tiers of the same family on purpose**: a
+rail is a rule and takes the bare `--status-*`, a glyph is painted with a `text-`
+utility and takes `--status-*-text`, the tier tuned to be read against a
+background. `status-color-tokens.test.ts` enforces the second half repo-wide.
+Neither ever takes `--status-*-fill`, which is only correct under a white label.
+
+The shell keeps `bg-popover` with a `border-border` edge. That edge faces the
+canvas, which is the case `border-border` is for. It is deliberately **not**
+`border-rule`: no `surface-popover` class is declared, and `border-rule` under no
+declared surface falls back to the invisible default.
+
+Durations are floors, not limits - the primitive pauses them on hover, focus and
+window blur. A failure gets longer than a confirmation because it often carries a
+cause from the engine ("database is locked") that takes longer to take in.
+
+**Queue policy** lives in the store, because the primitive has no opinion on it:
+an identical message and variant already on screen is collapsed rather than
+stacked (the OAuth2 guard retries; an SSE stream can fail on every reconnect),
+and past four the oldest is dropped so a burst cannot run off-screen where it is
+unreachable and undismissable.
+
+**Everything is polite, including errors** (`type="background"`). A toast
+dismisses itself on a timer and always reports something the user just asked
+for, so interrupting what they are reading is the wrong trade.
+
 ### Destructive Actions
 
 ```tsx

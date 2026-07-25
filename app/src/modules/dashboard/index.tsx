@@ -218,10 +218,18 @@ export default function LoadTestDashboard() {
 				// A toast rather than the report Callout: this is the outcome of
 				// an action the user just took, not a state of the page.
 				console.error("Failed to stop run:", error);
-				showToast(
-					error instanceof Error ? error.message : "Couldn't stop the run",
-					"error"
-				);
+				showToast({
+					message: error instanceof Error ? error.message : "Couldn't stop the run",
+					variant: "error",
+					// The run is still generating load, so the retry is the whole
+					// point of telling them. Chasing the Stop button back down in
+					// the header is a worse version of the same click.
+					action: {
+						label: "Try again",
+						altText: "Try stopping the run again",
+						onClick: () => void handleStop(),
+					},
+				});
 			} finally {
 				setStopping(false);
 			}

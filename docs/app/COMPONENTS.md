@@ -106,7 +106,7 @@ Resize handle on the right edge (double-click resets to defaults). Visibility to
 Footer bar (h-8, shrink-0). Horizontal layout:
 
 - **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U), Settings (⌘,). Each activates its Drawer view; active state highlights when the drawer is open on that view. Settings sits here too because it is now a Drawer view like the rest.
-- **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved / error), app version.
+- **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved), app version. A save *failure* is not shown here - it is reported as a toast, like every other failure in the app.
 - **Right - toggles:** Context bar toggle (⌘I).
 
 ## Request Builder (`modules/request-builder/`)
@@ -257,6 +257,19 @@ It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restor
 Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel - the renderer cannot open arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged Electron window.
 
 Design rationale: `app/src/modules/welcome/README.md`
+
+## Toaster (`components/shared/Toaster.tsx`)
+
+Mounted once by `App.tsx`. Renders the queue in `stores/toast-store.ts` through
+the shadcn/Radix primitive in `components/ui/toast.tsx`, which owns the dismiss
+timer, pausing on hover / focus / window blur, swipe-to-dismiss, and the
+`data-state` the exit animation keys off. `F8` moves focus into the stack.
+
+Toasts are the app's **single** channel for reporting the outcome of an action
+the user took, including save failures (see `save-store.failSave`). Four
+variants - `info`, `success`, `warning`, `error` - each carried by an icon and a
+left rail rather than colour alone; tokens and durations in
+`docs/design-system.md` -> Toasts.
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 

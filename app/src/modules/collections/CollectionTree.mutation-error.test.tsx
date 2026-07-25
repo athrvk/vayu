@@ -12,7 +12,7 @@
  * A failed create or delete used to resolve to nothing at all.
  *
  * Rename was the only handler in the tree that caught anything - it reports
- * through `useSaveStore.failSave`, which puts "Save failed" in the Dock. Create
+ * through `useSaveStore.failSave`, which now raises an error toast. Create
  * and delete called `mutateAsync` bare, so a rejection became an unhandled
  * promise: the confirm dialog had already closed, the row un-dimmed, and the
  * collection stayed exactly where it was with no explanation. That reads as "my
@@ -24,7 +24,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
-import { useSaveStore } from "@/stores";
+import { useSaveStore, useToastStore } from "@/stores";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 
@@ -68,6 +68,7 @@ beforeEach(() => {
 	deleteRequest.mockReset();
 	createCollection.mockReset();
 	useSaveStore.getState().reset();
+	useToastStore.setState({ toasts: [] });
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["c1"]) });
 });
 
@@ -85,7 +86,7 @@ describe("CollectionTree when a mutation rejects", () => {
 		fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
 
 		await waitFor(() => expect(useSaveStore.getState().status).toBe("error"));
-		expect(useSaveStore.getState().errorMessage).toMatch(/database is locked/i);
+		expect(useToastStore.getState().toasts[0]?.message).toMatch(/database is locked/i);
 	});
 
 	it("reports a failed create and keeps the typed name to retry with", async () => {
@@ -98,7 +99,7 @@ describe("CollectionTree when a mutation rejects", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
 
 		await waitFor(() => expect(useSaveStore.getState().status).toBe("error"));
-		expect(useSaveStore.getState().errorMessage).toMatch(/disk full/i);
+		expect(useToastStore.getState().toasts[0]?.message).toMatch(/disk full/i);
 		expect(screen.getByPlaceholderText(/Collection name/i)).toHaveValue("Payments");
 	});
 

@@ -151,12 +151,21 @@ Orchestrates auto-save across the app with a registry of saveable contexts (e.g.
 {
   status: "idle" | "pending" | "saving" | "saved" | "error"
   lastSavedAt: number | null
-  errorMessage: string | null
   pendingSaveId: string | null
   activeContextId: string | null
   contexts: Map<string, SaveContext>  // Saveable entities
 }
 ```
+
+**`failSave` is the app's single failure seam.** It sets `status: "error"` *and*
+raises an error toast carrying the reason. Eight call sites reach it - the
+collection tree's create / delete / duplicate / rename, `useSaveManager`,
+`SettingsMain`, `VariableTableEditor` - and doing the reporting here rather than
+at each of them means a new caller cannot forget to report.
+
+There is no `errorMessage` field. The reason travels in the toast; the store
+holds only the status the Dock renders. The field used to exist and its sole
+reader was the Dock's error line, which the toast replaced.
 
 **SaveContext:**
 ```typescript
@@ -265,6 +274,44 @@ Simple modal state for the collection import dialog.
 ```typescript
 const { isOpen, open, close } = useImportModalStore();
 ```
+
+#### `toast-store.ts` - Transient Notifications
+
+The queue behind the toasts. It holds *what* to show; the Radix primitive in
+`components/ui/toast.tsx` owns *when* - the dismiss timer, pausing on hover,
+focus and window blur, swipe, and the open/closed state the exit animation keys
+off. There is no `setTimeout` in the store.
+
+**State:**
+```typescript
+{
+  toasts: Toast[]   // { id, title?, message, variant, action?, duration }
+}
+```
+
+**Key Methods:**
+```typescript
+const { showToast, dismissToast, dismissAll } = useToastStore();
+
+showToast("Run history cleared", "success");   // string form, still supported
+showToast({                                     // returns the toast id
+  message: "Couldn't stop the run",
+  variant: "error",
+  action: { label: "Try again", onClick: retry },
+});
+```
+
+Variants are `info` | `success` | `warning` | `error`, with durations of 4s / 4s
+/ 6s / 10s from `TOAST_DURATION_MS`. `warning` is for a refusal ("A load test is
+already running") as distinct from a failure.
+
+Two policies live here because the primitive has no opinion on them: an
+identical message and variant already on screen is **collapsed rather than
+stacked**, and past `MAX_TOASTS` (4) the oldest is dropped. Removal is driven by
+the primitive's `onOpenChange(false)`, which covers timeout, close button and
+swipe alike, so there is one removal path rather than three.
+
+See `docs/design-system.md` -> Toasts for the visual tokens.
 
 ### Module-Local Stores
 
