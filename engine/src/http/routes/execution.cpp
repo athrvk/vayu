@@ -417,8 +417,9 @@ void register_execution_routes (RouteContext& ctx) {
         }
 
         // Take the request built above (auth already resolved into headers/url,
-        // so pm.request reflects the real outgoing set). It may be further
-        // modified by the pre-request script.
+        // so pm.request reflects the real outgoing set). This is what gets
+        // sent: the pre-request script only reads it, and writes to
+        // `pm.request` are discarded (see docs/app/pm-api-compatibility.md).
         auto request = std::move (built.request);
 
         // Auth failure: record a failed result against the run and return the

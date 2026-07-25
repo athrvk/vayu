@@ -538,6 +538,40 @@ TEST_F (ScriptEngineTest, RequestHeaders) {
     EXPECT_TRUE (result.success);
 }
 
+// `pm.request` is a read-only snapshot: built as a plain JS object for the
+// script and never read back, so a pre-request script cannot change what is
+// sent. Both docs say so (docs/engine/scripting.md,
+// docs/app/pm-api-compatibility.md); this pins the contract so implementing
+// write-back becomes a deliberate change that also updates them.
+TEST_F (ScriptEngineTest, PreRequestWritesToPmRequestAreDiscarded) {
+    Request req;
+    req.method       = HttpMethod::GET;
+    req.url          = "https://api.example.com/users";
+    req.headers      = { { "Content-Type", "application/json" } };
+    req.body.mode    = BodyMode::Text;
+    req.body.content = "original";
+
+    auto result = engine.execute_prerequest (R"(
+        pm.request.url = "https://evil.example.com/";
+        pm.request.method = "DELETE";
+        pm.request.headers["X-Signature"] = "injected";
+        pm.request.headers["Content-Type"] = "text/plain";
+        pm.request.body = "tampered";
+        // The writes land on the JS object - proving the assignments ran and the
+        // assertions below are about the C++ Request, not a script that no-opped.
+        pm.environment.set("jsSideUrl", pm.request.url);
+    )",
+    req, env);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_EQ (env.at ("jsSideUrl").value, "https://evil.example.com/");
+    EXPECT_EQ (req.url, "https://api.example.com/users");
+    EXPECT_EQ (req.method, HttpMethod::GET);
+    EXPECT_EQ (req.headers.count ("X-Signature"), 0U);
+    EXPECT_EQ (req.headers.at ("Content-Type"), "application/json");
+    EXPECT_EQ (req.body.content, "original");
+}
+
 // ============================================================================
 // pm.environment Tests
 // ============================================================================

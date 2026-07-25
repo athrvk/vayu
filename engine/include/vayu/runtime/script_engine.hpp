@@ -93,8 +93,14 @@ class ScriptEngine {
 
     /**
      * @brief Execute a pre-request script
+     *
+     * The request is exposed to the script as `pm.request`, a read-only
+     * snapshot. Nothing is read back out of the JS object, so the script
+     * cannot change what is sent - see docs/engine/scripting.md and
+     * docs/app/pm-api-compatibility.md.
+     *
      * @param script JavaScript code
-     * @param request Request to potentially modify
+     * @param request Read by the script via `pm.request`; never written back
      * @param env Environment variables
      * @return Script result
      */

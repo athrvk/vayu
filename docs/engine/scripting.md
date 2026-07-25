@@ -93,6 +93,14 @@ pm.request.headers           // Request headers (object)
 pm.request.body              // Request body (string, if any)
 ```
 
+`pm.request` is a **read-only snapshot** of the request the engine is about to send
+(auth already resolved into headers/URL). It is a plain JavaScript object built for
+the script and never read back afterwards, so assigning to it - `pm.request.url = …`,
+`pm.request.headers['X-Sig'] = …` - changes only that throwaway object and is silently
+discarded. There are no `headers.add/upsert/remove` mutators either. See
+[Request mutation & URL variables](../app/pm-api-compatibility.md#request-mutation--url-variables)
+for the full compatibility notes and what it would take to support this.
+
 ## Environment Variables (`pm.environment`)
 
 Access and modify environment variables:
@@ -165,17 +173,23 @@ pm.environment.set('token', json.token);
 
 ### Pre-request Script
 
-Modify request before sending:
+Inspect the outgoing request and stage variables for later runs:
 
 ```javascript
-// Add timestamp header
-pm.request.headers['X-Timestamp'] = Date.now().toString();
+// Inspect what is about to be sent (read-only)
+console.log(pm.request.method, pm.request.url);
 
-// Add signature header
-const secret = pm.environment.get('secret');
-const data = pm.request.body + secret;
-pm.request.headers['X-Signature'] = computeHash(data);
+// Stage a value for subsequent runs - it does NOT affect this request
+pm.environment.set('lastRunAt', Date.now().toString());
 ```
+
+> **Not supported:** a pre-request script cannot change the outgoing request.
+> Writing to `pm.request` (headers, body, URL, method) is discarded, and setting a
+> variable that a `{{placeholder}}` in the URL references does not re-resolve it -
+> placeholders are substituted app-side before the payload reaches the engine, so the
+> new value only applies to later runs. Signing or stamping a request from a script is
+> therefore not possible today; see
+> [Request mutation & URL variables](../app/pm-api-compatibility.md#request-mutation--url-variables).
 
 ### Response Time Assertion
 
@@ -223,7 +237,8 @@ QuickJS supports ES2020 features with some limitations:
 ### Pre-request Scripts
 
 - Execute before sending the HTTP request
-- Can modify `pm.request` (headers, body)
+- Can **read** `pm.request` (method, url, headers, body) - it is a snapshot; writes to it
+  are discarded and the request is sent unchanged
 - Can access `pm.environment` and `pm.variables`
 - Cannot access `pm.response` (request hasn't been sent yet)
 
