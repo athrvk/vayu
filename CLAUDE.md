@@ -394,6 +394,10 @@ Release notes live on the [GitHub Releases](https://github.com/athrvk/vayu/relea
 
 **Authoring the notes (Claude's job before tagging).** When preparing a release, write `.github/release-notes/vX.Y.Z.md` in the format above, derived from `git log vPREV..vX.Y.Z`; read a recent entry to match voice. The file *is* the release body, so it needs no tooling to publish - CI handles it. Because the workflow resolves the file from the tagged commit's tree, the notes file must be committed **before** the tag is pushed (i.e., it rides along in the release PR). To correct a published release's notes after the fact, edit the file, then either re-run the release workflow or update the release body by hand.
 
+## Labels and Issue Organization
+
+Repository labels are organized by semantic purpose with a color strategy that separates WHERE changes land (`component:*`, cool/neutral colors) from WHAT kind of change they are (`type:*`, semantic colors) - e.g. `component:engine` (teal) and `type:bug` (red) no longer look alike. **See `.github/LABELING.md` for the full category breakdown, color table, and auto-labeling rules** (driven by `.github/labeler.yml`).
+
 ## Docs - keep them in step with the code
 
 **If you change something a doc describes, update that doc in the same commit.**

@@ -1309,10 +1309,12 @@ void Database::seed_default_config () {
 
     upsert_config (ConfigEntry{ "scriptTimeout",
     std::to_string (vayu::core::constants::script_engine::TIMEOUT_MS), "integer", "Script Execution Timeout",
-    "Max runtime for pre/post-request scripts. Prevents infinite loops. "
-    "Value is in milliseconds (5000 = 5 seconds).",
+    "Max runtime in milliseconds for pre/post-request scripts "
+    "(5000 = 5 seconds). A script that exceeds this is aborted and "
+    "reported as an error, so an infinite loop cannot hang the "
+    "engine. Set to 0 to disable the limit (not recommended).",
     "scripting_sandbox", std::to_string (vayu::core::constants::script_engine::TIMEOUT_MS),
-    "100", "60000", now });
+    "0", "60000", now });
 
     upsert_config (ConfigEntry{ "scriptEnableConsole",
     vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
