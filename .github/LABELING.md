@@ -2,19 +2,43 @@
 
 This document describes the labeling system used in the athrvk/vayu repository. Labels help categorize issues and pull requests, making it easier to navigate, filter, and prioritize work.
 
+## Quick Reference
+
+```
+Component (Auto-Applied) - WHERE            Type (Manual, pick one) - WHAT
+  component:app       🔵  UI                  type:bug           🔴  Broken behavior
+  component:engine    🟦  Engine core          type:feature       🟢  New capability
+  component:database  🟪  Storage              type:enhancement   🔵  Improvement
+  component:ci        ⚪  CI config            type:perf          🟧  Speed/resource
+  component:build     ⚫  Build system         type:test          🟦  Tests/benchmarks
+
+Area (engine sub-areas, auto-applied)        Status (PRs, manual)
+  area:http       HTTP server, SSE             status:needs-review  🟧  Awaiting review
+  area:auth       OAuth2, authentication        status:blocked       🔴  Waiting on something
+  area:metrics    Metrics, statistics           status:ready-merge   🟢  Approved
+
+                                              Priority (issues, manual)
+Special                                        priority:critical  🔴  Blocks other work
+  documentation      🔵  Docs, guides           priority:high      🟧  Important
+  good first issue   🟦  Newcomer-friendly      priority:low       🟢  Nice-to-have
+  help wanted        🟪  Needs expertise
+  severity:blocking  🔴  Breaking change
+  dependencies       ⚪  Dependency updates
+```
+
 ## Label Categories
 
 ### Component Labels (`component:*`)
 
-These labels indicate where in the codebase a change lands. **Applied automatically** by path-based rules in `.github/labeler.yml`.
+These labels indicate **where** in the codebase a change lands. **Applied automatically** by path-based rules in `.github/labeler.yml`. Component labels use **cool/neutral colors** (blue, teal, purple, gray) to visually distinguish them from type labels.
 
 | Label | Color | Description | Auto-applied when |
 |-------|-------|-------------|------------------|
-| `component:app` | Blue | Electron + React UI | Changes in `app/**` |
-| `component:engine` | Orange | C++20 engine (daemon, HTTP, scripting) | Changes in `engine/**` |
-| `component:database` | Red-orange | Database schema, SQLite persistence | Changes in `engine/src/db/**`, `engine/tests/db_test.cpp`, etc. |
-| `component:ci` | Gray | GitHub Actions, CI configuration | Changes in `.github/**` |
-| `component:build` | Gray | CMake, vcpkg, version, build script | Changes to `build.py`, `VERSION`, etc. |
+| `component:app` | Blue (#3498DB) | Electron + React UI | Changes in `app/**` |
+| `component:engine` | Teal (#16A085) | C++20 engine (daemon, HTTP, scripting) | Changes in `engine/**` |
+| `component:database` | Purple (#8E44AD) | Database schema, SQLite persistence | Changes in `engine/src/db/**`, `engine/tests/db_test.cpp`, etc. |
+| `component:ci` | Gray (#95A5A6) | GitHub Actions, CI configuration | Changes in `.github/**` |
+| `component:build` | Dark Gray (#7F8C8D) | CMake, vcpkg, version, build script | Changes to `build.py`, `VERSION`, etc. |
 
 **Note:** `component:database` is a subset of `component:engine`, so database changes earn both labels.
 
@@ -31,15 +55,15 @@ These labels narrow down sub-areas **within the engine**. Useful for routing eng
 
 ### Type Labels (`type:*`)
 
-These labels describe the **kind of change**. **Applied manually**—they describe intent, not just what files were touched. Pick the single most appropriate type.
+These labels describe the **kind of change** (the WHAT). **Applied manually**—they describe intent, not just what files were touched. Pick the single most appropriate type. Type labels use **semantic colors** (red for problems, green for features, blue for improvements, amber for warnings/optimization) to visually distinguish them from component labels.
 
 | Label | Color | Description | Use when |
 |-------|-------|-------------|----------|
-| `type:bug` | Red | Bug fix | Fixing broken behavior |
-| `type:feature` | Purple | New user-facing feature | Adding a new capability users can see |
-| `type:enhancement` | Blue | Enhancement to existing feature | Improving an existing feature |
-| `type:perf` | Orange | Performance optimization | Improving speed, latency, or resource use |
-| `type:test` | Teal | Tests, benchmarks, test infrastructure | Adding or improving tests |
+| `type:bug` | Red (#E74C3C) | Bug fix | Fixing broken behavior |
+| `type:feature` | Green (#27AE60) | New user-facing feature | Adding a new capability users can see |
+| `type:enhancement` | Blue (#3498DB) | Enhancement to existing feature | Improving an existing feature |
+| `type:perf` | Amber (#F39C12) | Performance optimization | Improving speed, latency, or resource use |
+| `type:test` | Teal (#16A085) | Tests, benchmarks, test infrastructure | Adding or improving tests |
 
 ### Status Labels (`status:*`)
 
@@ -47,9 +71,9 @@ These labels track the **workflow state** of a pull request. Applied manually by
 
 | Label | Color | Meaning | Use when |
 |-------|-------|---------|----------|
-| `status:needs-review` | Amber | Awaiting review | PR is ready but hasn't been reviewed yet |
-| `status:blocked` | Dark red | Blocked | PR is waiting on something external (another PR, CI fix, decision) |
-| `status:ready-merge` | Green | Ready to merge | PR is approved and ready to go in |
+| `status:needs-review` | Amber (#F39C12) | Awaiting review | PR is ready but hasn't been reviewed yet |
+| `status:blocked` | Dark red (#C0392B) | Blocked | PR is waiting on something external (another PR, CI fix, decision) |
+| `status:ready-merge` | Green (#27AE60) | Ready to merge | PR is approved and ready to go in |
 
 ### Priority Labels (`priority:*`)
 
@@ -57,37 +81,37 @@ These labels indicate **urgency**. Apply manually based on impact and timeline.
 
 | Label | Color | Meaning |
 |-------|-------|---------|
-| `priority:critical` | Dark red | Needs immediate attention; blocks other work |
-| `priority:high` | Amber | Important, should be tackled soon |
-| `priority:low` | Green | Nice-to-have, can wait |
+| `priority:critical` | Dark red (#C0392B) | Needs immediate attention; blocks other work |
+| `priority:high` | Amber (#F39C12) | Important, should be tackled soon |
+| `priority:low` | Green (#27AE60) | Nice-to-have, can wait |
 
 ### Severity Labels
 
 | Label | Color | Meaning | Use when |
 |-------|-------|---------|----------|
-| `severity:blocking` | Red | Breaking change or blocking issue | Change breaks existing behavior or API |
-| `breaking-change` | Red | Major version bump required | Synonym for severity:blocking |
+| `severity:blocking` | Red (#E74C3C) | Breaking change or blocking issue | Change breaks existing behavior or API |
+| `breaking-change` | Red (#E74C3C) | Major version bump required | Synonym for severity:blocking |
 
 ### Special Labels
 
 | Label | Color | Description | Use when |
 |-------|-------|-------------|----------|
-| `documentation` | Blue | Documentation, guides, examples | Changes to docs or a PR needs doc updates |
-| `good first issue` | Teal | Good for newcomers to tackle | Issue suitable for a first-time contributor |
-| `help wanted` | Purple | Extra attention or help needed | Issue is in scope but we need outside expertise |
-| `dependencies` | Gray | Dependency updates | Updating packages or dependencies |
-| `duplicate` | Light gray | This issue or PR already exists | Close as duplicate |
-| `wontfix` | Light gray | This will not be worked on | Close issue that won't be addressed |
-| `invalid` | Light gray | Invalid or incomplete | Close issue that's not applicable |
-| `question` | Gold | Further information is requested | Issue needs clarification |
-| `github_actions` | Gray | GitHub Actions related | Workflows or action-specific issues |
-| `flaky` | Orange | Flaky test or unreliable behavior | Test intermittently fails |
-| `memory-leak` | Red | Memory leak detected | Suspected or confirmed memory leak |
-| `performance` | Orange | Performance-related issue | Used for tracking perf problems (use `type:perf` for PRs) |
-| `scripting` | Gray | QuickJS scripting engine | Runtime or script-related |
-| `build` | Gray | Build-related | Used manually; path-based label is `component:build` |
-| `ci` | Gray | CI/CD related | Used manually; path-based label is `component:ci` |
-| `correctness` | Red | Correctness issue | Logic error or incorrect behavior |
+| `documentation` | Blue (#3498DB) | Documentation, guides, examples | Changes to docs or a PR needs doc updates |
+| `good first issue` | Teal (#16A085) | Good for newcomers to tackle | Issue suitable for a first-time contributor |
+| `help wanted` | Purple (#8E44AD) | Extra attention or help needed | Issue is in scope but we need outside expertise |
+| `dependencies` | Gray (#95A5A6) | Dependency updates | Updating packages or dependencies |
+| `duplicate` | Light gray (#BBBFC4) | This issue or PR already exists | Close as duplicate |
+| `wontfix` | Light gray (#BBBFC4) | This will not be worked on | Close issue that won't be addressed |
+| `invalid` | Light gray (#BBBFC4) | Invalid or incomplete | Close issue that's not applicable |
+| `question` | Gold (#D4AF37) | Further information is requested | Issue needs clarification |
+| `github_actions` | Gray (#95A5A6) | GitHub Actions related | Workflows or action-specific issues |
+| `flaky` | Amber (#F39C12) | Flaky test or unreliable behavior | Test intermittently fails |
+| `memory-leak` | Red (#E74C3C) | Memory leak detected | Suspected or confirmed memory leak |
+| `performance` | Amber (#F39C12) | Performance-related issue | Used for tracking perf problems (use `type:perf` for PRs) |
+| `scripting` | Gray (#95A5A6) | QuickJS scripting engine | Runtime or script-related |
+| `build` | Gray (#95A5A6) | Build-related | Used manually; path-based label is `component:build` |
+| `ci` | Gray (#95A5A6) | CI/CD related | Used manually; path-based label is `component:ci` |
+| `correctness` | Red (#E74C3C) | Correctness issue | Logic error or incorrect behavior |
 
 ## Labeling Guidelines
 
@@ -128,40 +152,32 @@ The `.github/labeler.yml` file defines path-based rules that automatically apply
 
 If a PR changes files in multiple categories, it gets all matching labels. A release PR touching `app/`, `engine/`, and build files will earn `component:app`, `component:engine`, and `component:build`.
 
-## Setting Up Labels
-
-### Initial Setup
-
-To create all labels in a new repository:
-
-```bash
-python3 .github/scripts/setup-labels.py
-```
-
-This script:
-- Creates new labels according to the schema above
-- Updates existing labels if colors or descriptions have changed
-- Requires `GITHUB_TOKEN` with `repo` scope
-
-### Keeping Labels in Sync
-
-The label schema is defined in `.github/scripts/setup-labels.py`. When the schema changes:
-
-1. Update `setup-labels.py` with the new definitions
-2. Run the script to sync the repository
-
 ## Label Colors and Semantics
 
-Colors are chosen for **semantic meaning**, not just aesthetics:
+Colors follow a **two-part strategy** for semantic clarity:
 
-- **Warm colors (orange, red):** Critical issues, core components, performance, blocking
-- **Cool colors (blue):** App, UI, general features
-- **Gray:** Infrastructure, sub-areas, build, CI
-- **Green:** Ready, success, low priority
-- **Purple:** Features, help wanted
-- **Teal:** Testing, good first issues
+### Component Labels (WHERE) — Cool/Neutral Colors
+Component labels use **cool and neutral colors** to describe where changes land:
+- **Blue (#3498DB):** App (Electron + React UI)
+- **Teal (#16A085):** Engine (C++20 core)
+- **Purple (#8E44AD):** Database (storage)
+- **Gray (#95A5A6, #7F8C8D):** Infrastructure (CI, build)
 
-This makes scanning a list of labels quick: warm labels jump out as urgent or important, cool labels indicate app work, gray indicates infrastructure.
+### Type Labels (WHAT) — Semantic Colors
+Type labels use **semantic colors** to describe what kind of change:
+- **Red (#E74C3C):** Bug (problem/breaking)
+- **Green (#27AE60):** Feature (new/success)
+- **Blue (#3498DB):** Enhancement (improvement)
+- **Amber (#F39C12):** Performance/Warning (optimization/caution)
+- **Teal (#16A085):** Test (quality)
+
+### Status/Priority — Action Colors
+Status and priority labels use semantic colors for workflow clarity:
+- **Red (#C0392B, #E74C3C):** Blocking, critical, urgent
+- **Amber (#F39C12):** Waiting, high priority
+- **Green (#27AE60):** Ready, low priority, success
+
+**Why this separation matters:** When scanning a PR, component colors (cool/neutral) instantly show WHERE changes land, while type colors (semantic) show WHAT kind of work. This visual separation makes label intent unmistakable at a glance—for example, `component:engine` (teal) and `type:bug` (red) no longer look alike.
 
 ## Migration from Old Labels
 
@@ -199,3 +215,7 @@ Existing issues and PRs keep their old labels; they are not retroactively update
 
 - Auto-labels: `component:engine`, `area:scripting`
 - Manual labels: `type:test`
+
+## Applying Labels to the Repository
+
+There is no script in this repo for creating/updating GitHub labels—label colors and descriptions above must be applied directly in the repository's label settings (**Settings → Labels**) or via the GitHub API/CLI (`gh label create` / `gh label edit`) by someone with write access. Existing labels not covered above (manual `priority:*`, `status:*`, etc.) are created on first use.
