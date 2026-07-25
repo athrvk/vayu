@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{#
+  Social preview tags and structured data.
+
+  Material emits <title>, <meta name="description"> and the canonical link on its
+  own, but no Open Graph or Twitter tags - so a link to this site pasted into
+  Slack, X or LinkedIn rendered as a bare URL. These fill that in for every page,
+  using the page's own title/description and falling back to the site's.
+
+  The alternative was Material's `social` plugin, which renders a per-page OG
+  image at build time. It needs cairo/pango/libffi system packages in CI, which is
+  a real cost for a docs job that currently installs one wheel; the product
+  screenshot works as a static preview image and needs nothing. Revisit if
+  per-page previews become worth the build dependency.
+#}
+{% block extrahead %}
+  {#
+    Mirrors Material's own <title> logic (a front-matter title wins, and the site
+    name is appended to it), so the social card and the tab never disagree. The
+    home page would otherwise share a card titled just "Vayu", which says nothing
+    to someone seeing the link cold.
+  #}
+  {% if page.meta and page.meta.title %}
+    {% set title = page.meta.title ~ " - " ~ config.site_name %}
+  {% elif page.is_homepage %}
+    {% set title = config.site_name %}
+  {% else %}
+    {% set title = page.title ~ " - " ~ config.site_name %}
+  {% endif %}
+  {% set description = page.meta.description if page.meta and page.meta.description else config.site_description %}
+  {% set image = config.site_url ~ "images/vayu-loadtest.png" %}
+
+  <meta property="og:type" content="{{ 'website' if page.is_homepage else 'article' }}">
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ title }}">
+  <meta property="og:description" content="{{ description }}">
+  <meta property="og:image" content="{{ image }}">
+  <meta property="og:image:alt" content="Vayu's load-test dashboard showing live throughput, latency percentiles and error counters.">
+  <meta property="og:url" content="{{ page.canonical_url }}">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ title }}">
+  <meta name="twitter:description" content="{{ description }}">
+  <meta name="twitter:image" content="{{ image }}">
+
+  {#
+    SoftwareApplication on the home page only - it describes the product, not each
+    document. Deliberately carries no aggregateRating or review: Vayu has no
+    collected ratings, and inventing them to chase a rich result would be
+    fabricating data. Version is not pinned here either, since it would go stale
+    on every release with nothing to catch it.
+  #}
+  {% if page.is_homepage %}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Vayu",
+      "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "API client and load testing tool",
+      "operatingSystem": "Windows 10, Windows 11, macOS, Linux",
+      "description": {{ config.site_description | tojson }},
+      "url": {{ config.site_url | tojson }},
+      "downloadUrl": "https://github.com/athrvk/vayu/releases/latest",
+      "installUrl": "https://github.com/athrvk/vayu/releases/latest",
+      "codeRepository": "https://github.com/athrvk/vayu",
+      "license": "https://github.com/athrvk/vayu/blob/master/LICENSE",
+      "isAccessibleForFree": true,
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "screenshot": {{ image | tojson }},
+      "featureList": [
+        "REST and GraphQL request builder",
+        "Native C++ load testing with live metrics over SSE",
+        "Import Postman, Insomnia, OpenAPI 3.0 and Swagger 2.0 collections",
+        "Postman-compatible pm.* test scripts",
+        "OAuth 2.0, Bearer, Basic and API key auth",
+        "Fully offline - no account, no telemetry, no cloud sync"
+      ],
+      "author": {
+        "@type": "Person",
+        "name": "athrvk",
+        "url": "https://github.com/athrvk"
+      }
+    }
+  </script>
+  {% endif %}
+{% endblock %}
