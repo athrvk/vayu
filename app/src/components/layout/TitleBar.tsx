@@ -19,7 +19,7 @@
 
 import { useEffect, useState } from "react";
 import { Minus, X, Maximize2, Square, Check, ChevronDown, Cloud } from "lucide-react";
-import { useSessionStore } from "@/stores";
+import { useSessionStore, useToastStore } from "@/stores";
 import { useEnvironmentsQuery } from "@/queries";
 import {
 	DropdownMenu,
@@ -82,7 +82,29 @@ function WindowControls() {
 function EnvSwitcher() {
 	const { activeEnvironmentId, setActiveEnvironmentId } = useSessionStore();
 	const { data: environments = [] } = useEnvironmentsQuery();
+	const showToast = useToastStore((s) => s.showToast);
 	const activeEnv = environments.find((e) => e.id === activeEnvironmentId);
+
+	/*
+	 * Switching environment is a silent change with loud consequences: every
+	 * {{variable}} in every open request resolves against the new one, so the
+	 * same Send can hit a different host. The only feedback was this button's
+	 * own label, which the user is not looking at once the menu closes over it.
+	 *
+	 * Confirms the destination rather than the act ("Environment: Staging", not
+	 * "Environment switched"), so the toast still answers the question a glance
+	 * is actually asking. Selecting the environment already active changes
+	 * nothing and says nothing.
+	 */
+	const selectEnvironment = (id: string | null) => {
+		if (id === activeEnvironmentId) return;
+		setActiveEnvironmentId(id);
+		const name = id ? environments.find((e) => e.id === id)?.name : null;
+		showToast({
+			message: name ? `Environment: ${name}` : "Environment cleared",
+			variant: "info",
+		});
+	};
 
 	return (
 		<DropdownMenu>
@@ -105,17 +127,14 @@ function EnvSwitcher() {
 				</button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="min-w-44">
-				<DropdownMenuItem
-					onClick={() => setActiveEnvironmentId(null)}
-					className="text-xs gap-2"
-				>
+				<DropdownMenuItem onClick={() => selectEnvironment(null)} className="text-xs gap-2">
 					<span className="flex-1">No Environment</span>
 					{!activeEnv && <Check className="w-3.5 h-3.5" />}
 				</DropdownMenuItem>
 				{environments.map((env) => (
 					<DropdownMenuItem
 						key={env.id}
-						onClick={() => setActiveEnvironmentId(env.id)}
+						onClick={() => selectEnvironment(env.id)}
 						className="text-xs gap-2"
 					>
 						<span className="flex-1 truncate">{env.name}</span>

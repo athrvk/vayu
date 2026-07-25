@@ -1,0 +1,129 @@
+/**
+ * @vitest-environment jsdom
+ */
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * Switching environment has to say so.
+ *
+ * It is a silent change with loud consequences: every `{{variable}}` in every
+ * open request resolves against the new environment, so the same Send can hit a
+ * different host. The only feedback was the switcher's own label - which the
+ * open menu is covering at the moment of the click, and which the user is not
+ * looking at afterwards.
+ *
+ * The no-op case is the one worth pinning. Re-picking the environment already
+ * active is the most likely way to use this menu (opening it to check *which*
+ * one is active, then closing it), and a toast there would be pure noise.
+ */
+
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
+
+/*
+ * TitleBar reads `window.electronAPI` at module scope and renders nothing
+ * without it, so the stub has to be in place before the import is evaluated -
+ * `vi.hoisted` is the only thing that runs early enough. A plain
+ * `vi.stubGlobal` at module scope runs *after* the hoisted imports and the
+ * component would already have decided it was not in Electron.
+ */
+vi.hoisted(() => {
+	Object.defineProperty(globalThis.window, "electronAPI", {
+		// Linux is the branch that also renders WindowControls, which calls these
+		// on mount - so the stub has to be a working surface, not just a platform.
+		value: {
+			platform: "linux",
+			windowIsMaximized: () => Promise.resolve(false),
+			onWindowMaximized: () => () => {},
+			windowMinimize: () => {},
+			windowMaximize: () => {},
+			windowClose: () => {},
+		},
+		writable: true,
+		configurable: true,
+	});
+});
+
+import { useToastStore, useSessionStore } from "@/stores";
+import TitleBar from "./TitleBar";
+
+const environments = [
+	{ id: "env-1", name: "Staging" },
+	{ id: "env-2", name: "Production" },
+];
+
+vi.mock("@/queries", () => ({
+	useEnvironmentsQuery: () => ({ data: environments }),
+}));
+
+beforeEach(() => {
+	cleanup();
+	useToastStore.setState({ toasts: [] });
+	useSessionStore.setState({ activeEnvironmentId: null });
+});
+
+/*
+ * Radix opens a dropdown on pointerdown, not click, and jsdom fires no pointer
+ * events from `fireEvent.click`. Keyboard activation is the reliable path here
+ * and exercises the same open handler.
+ *
+ * The menu genuinely has to open: without it the "stays quiet" cases below
+ * would pass for the wrong reason - no menu, no click, no toast.
+ */
+function openMenu() {
+	const trigger = screen.getByRole("button", { name: /switch environment/i });
+	fireEvent.keyDown(trigger, { key: "Enter" });
+	// Fail loudly here rather than letting a silent no-op look like a pass.
+	const menu = screen.getByRole("menu");
+	expect(menu).toBeInTheDocument();
+	// Scoped: the trigger shows the active environment's name too, so an
+	// unscoped getByText matches both it and the menu item.
+	return within(menu);
+}
+
+const messages = () => useToastStore.getState().toasts.map((t) => t.message);
+
+describe("environment switch notification", () => {
+	it("names the environment it switched to", () => {
+		render(<TitleBar />);
+		const menu = openMenu();
+		fireEvent.click(menu.getByText("Staging"));
+
+		expect(useSessionStore.getState().activeEnvironmentId).toBe("env-1");
+		// The destination, not the act: the toast answers "which one am I on now".
+		expect(messages()).toEqual(["Environment: Staging"]);
+		expect(useToastStore.getState().toasts[0].variant).toBe("info");
+	});
+
+	it("says so when the environment is cleared", () => {
+		useSessionStore.setState({ activeEnvironmentId: "env-1" });
+		render(<TitleBar />);
+		const menu = openMenu();
+		fireEvent.click(menu.getByText("No Environment"));
+
+		expect(useSessionStore.getState().activeEnvironmentId).toBeNull();
+		expect(messages()).toEqual(["Environment cleared"]);
+	});
+
+	it("stays quiet when the chosen environment is already active", () => {
+		useSessionStore.setState({ activeEnvironmentId: "env-1" });
+		render(<TitleBar />);
+		const menu = openMenu();
+		fireEvent.click(menu.getByText("Staging"));
+
+		expect(messages()).toEqual([]);
+	});
+
+	it("stays quiet when No Environment is re-picked from cleared", () => {
+		render(<TitleBar />);
+		const menu = openMenu();
+		fireEvent.click(menu.getByText("No Environment"));
+
+		expect(messages()).toEqual([]);
+	});
+});
