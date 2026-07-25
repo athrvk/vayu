@@ -3,6 +3,6 @@
 # the published site without a commit here.
 #
 #   pip install -r requirements-docs.txt
-#   mkdocs serve          # local preview on http://127.0.0.1:8000
-#   mkdocs build --strict # what CI runs
+#   mkdocs serve -f .github/mkdocs.yml          # preview on 127.0.0.1:8000/vayu/
+#   mkdocs build --strict -f .github/mkdocs.yml # what CI runs
 mkdocs-material==9.7.7

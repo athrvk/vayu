@@ -25,7 +25,7 @@ from mkdocs.structure.files import File, Files
 
 # Resolved from this file rather than the working directory, so it holds however
 # mkdocs was invoked.
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # The 256px PNG: large enough for a retina header logo, and every browser scales
 # it down for the tab. The .ico set exists too but buys nothing here - PNG

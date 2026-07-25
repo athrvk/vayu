@@ -24,7 +24,9 @@ on:
       - master
     paths:
       - 'docs/**'
-      - 'mkdocs.yml'
+      - '.github/mkdocs.yml'
+      - '.github/hooks/**'
+      - 'shared/icon_png/**'
       - 'requirements-docs.txt'
       - '.github/workflows/docs.yml'
   pull_request:
@@ -32,7 +34,9 @@ on:
       - master
     paths:
       - 'docs/**'
-      - 'mkdocs.yml'
+      - '.github/mkdocs.yml'
+      - '.github/hooks/**'
+      - 'shared/icon_png/**'
       - 'requirements-docs.txt'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
@@ -82,9 +86,13 @@ jobs:
       # `--strict` promotes MkDocs warnings to failures, which is what makes the
       # pull-request run worth having: these docs cross-link heavily by relative
       # `.md` path and by heading anchor, and both are validated here (see the
-      # `validation:` block in mkdocs.yml).
+      # `validation:` block in .github/mkdocs.yml).
+      #
+      # `-f` is required: the config lives in .github/, not the repo root, so
+      # bare `mkdocs build` cannot find it. site_dir is ../site, so the output
+      # still lands at the repo root and the upload path below is unchanged.
       - name: Build site
-        run: mkdocs build --strict
+        run: mkdocs build --strict -f .github/mkdocs.yml
 
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request'
