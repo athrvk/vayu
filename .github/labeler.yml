@@ -1,43 +1,50 @@
 # Path-based labels for pull requests, applied by .github/workflows/labeler.yml.
 #
 # Labels are not created on demand: every key here must already exist in the
-# repository or the run fails on it. `ci` and `build` were added alongside this
-# file; `app`, `engine`, `database` and `documentation` already existed.
+# repository or the run fails on it. All label names below must be pre-created
+# in the repository settings.
 #
 # Overlap is expected and fine. A change to `.github/release-notes/*.md` is both
-# `ci` and `documentation`, and a release bump touching both trees earns `app`,
-# `engine` and `build` at once. These describe where a change lands, not what
-# kind of change it is, so `bug` and `enhancement` stay manual.
+# `ci` and `documentation`, and a release bump touching both trees earns
+# `component:app`, `component:engine` and `component:build` at once.
+# These describe where a change lands, not what kind of change it is, so `type:bug`,
+# `type:enhancement` and the rest stay manual.
 
-app:
+# Component labels - where the change lands
+component:app:
   - changed-files:
       - any-glob-to-any-file: 'app/**'
 
-engine:
+component:engine:
   - changed-files:
       - any-glob-to-any-file: 'engine/**'
 
-# A subset of `engine`, so a database change earns both labels - which is the
-# point of a finer label, and consistent with the overlap noted above. The
-# store is one translation unit plus its header, test and schema doc, so this
-# is an explicit file list rather than a directory. Uses the existing
-# `database` label; there is no separate `db` label.
-database:
+# A subset of `component:engine`, so a database change earns both labels.
+# This is intentional: the point of a finer label is to subset while keeping
+# the parent category. `engine/src/db/**` and `engine/include/vayu/db/**` are
+# directories, so new files there are covered automatically. Tests aren't
+# under a `db/` directory, so instead of enumerating them by name (a new
+# db_*_test.cpp silently earning no label until someone remembers to add it
+# here), match the `db_` naming convention every db test already follows.
+# Kept strictly inside `engine/**` - a doc-only change to db-schema.md is
+# `documentation`, not `component:database`, so it doesn't earn a component
+# label its content never touched.
+component:database:
   - changed-files:
       - any-glob-to-any-file:
           - 'engine/src/db/**'
           - 'engine/include/vayu/db/**'
-          - 'engine/tests/db_test.cpp'
-          - 'docs/engine/db-schema.md'
+          - 'engine/tests/db_*'
 
-ci:
+component:ci:
   - changed-files:
       - any-glob-to-any-file: '.github/**'
 
-# The build system spans both trees and the repo root, so this one is a list of
-# specific files rather than a directory: the version manifests, the CMake
-# configuration, the dependency manifests and the build script itself.
-build:
+# The build system spans both trees and the repo root. This is an explicit file
+# list rather than a directory: version manifests, CMake configuration,
+# dependency manifests, and build script. `scripts/**` covers the pre-commit
+# hook and build/test tooling.
+component:build:
   - changed-files:
       - any-glob-to-any-file:
           - 'build.py'
@@ -47,9 +54,59 @@ build:
           - 'engine/vcpkg.json'
           - 'app/package.json'
           - 'app/pnpm-lock.yaml'
+          - 'scripts/**'
+
+# VERSION only changes as part of a version-bump commit (see Releasing in
+# CLAUDE.md), so this is a reliable marker for a release PR - distinct from
+# component:build, which VERSION also matches and keeps earning.
+release:
+  - changed-files:
+      - any-glob-to-any-file: 'VERSION'
 
 documentation:
   - changed-files:
       - any-glob-to-any-file:
           - 'docs/**'
           - '**/*.md'
+
+# Area labels - sub-areas within engine. Kept strictly inside `engine/**`,
+# same reasoning as `component:database`: a doc-only change earns
+# `documentation`, not an `area:*` label whose code it didn't touch.
+#
+# area:auth and area:metrics match by naming convention (`*auth*`/`*oauth*`,
+# `*metrics*`) instead of an enumerated file list. Auth and metrics code
+# doesn't live under its own directory - auth is mixed into `engine/src/http/`
+# alongside every other HTTP concern, metrics is split across `core/`,
+# `http/routes/` and `utils/` - so a directory glob can't isolate it and an
+# enumerated list silently misses every new file until someone remembers to
+# add it (this happened twice: area:auth pointed at a path that never
+# existed, area:metrics missed its own header). A name-based wildcard picks
+# up any new file that follows the convention every existing auth/oauth/
+# metrics file already follows, with no per-file maintenance. Verified
+# against the current tree: `*auth*`/`*oauth*` and `*metrics*` match only the
+# real auth/oauth/metrics files under `engine/`, nothing else.
+area:http:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'engine/src/http/**'
+          - 'engine/include/vayu/http/**'
+
+# Overlaps area:http, since auth/oauth files live under engine/src/http/ -
+# intentional, same subset pattern as component:database inside
+# component:engine.
+area:auth:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'engine/**/*auth*'
+          - 'engine/**/*oauth*'
+
+area:metrics:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'engine/**/*metrics*'
+
+area:scripting:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'engine/src/runtime/**'
+          - 'engine/include/vayu/runtime/**'
