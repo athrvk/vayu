@@ -47,10 +47,28 @@ an explicit `aria-atomic="false"`, and no per-toast live regions. Six tests in
 
 ## Decisions taken
 
-- **Stay in-house.** The store's header comment records this as deliberate, so
-  toasts render through the app's design tokens. Modernize rather than adopt
-  sonner. No new dependency, no vendor CSS to re-theme, and the a11y work and
-  its six tests survive.
+- **Build on the shadcn/Radix Toast primitive.** `@radix-ui/react-toast` is
+  added and `components/ui/toast.tsx` is created in the shadcn shape, styled
+  with Vayu tokens.
+
+  The app is already a shadcn project (`components.json`, twelve Radix packages,
+  `ui/index.ts` says "Re-exported from shadcn/ui with Vayu theming") and every
+  other overlay - dialog, popover, select, dropdown, tooltip - is a Radix
+  primitive. The toast was the one hand-rolled exception, and it sits in
+  `components/shared/` rather than `components/ui/` because it was never
+  installed as one.
+
+  The store's header comment ("kept in-house ... so toasts render through the
+  app's design tokens") is honoured rather than reversed: a shadcn primitive is
+  source in our own repo with our own token classes. That comment is updated to
+  record the distinction, since taken literally it would also have ruled out
+  `dialog.tsx`.
+
+  Rejected: `sonner`, which shadcn's docs now recommend, because it ships its
+  own CSS to re-theme and is furthest from the existing setup. Rejected:
+  continuing hand-rolled, because roughly 150 lines of timer, pause, swipe and
+  exit-animation code would be written by hand to reach where the primitive
+  starts.
 - **Full unification onto toasts.** Every failure - including save failures -
   is reported by a toast. The Dock's error line is removed.
 
@@ -64,6 +82,31 @@ an explicit `aria-atomic="false"`, and no per-toast live regions. Six tests in
   left for a follow-up.
 
 ## Design
+
+### 0. What the primitive provides
+
+Choosing Radix removes work rather than adding it. Verified against the Radix
+Toast documentation:
+
+| Need | Source |
+|------|--------|
+| Auto-dismiss timer | `Toast.Root duration` (provider default 5000ms) |
+| Pause on hover, focus **and window blur** | built in |
+| Swipe to dismiss | built in, `swipeDirection` / `swipeThreshold` |
+| Exit animation | `data-state="open" \| "closed"` |
+| Jump focus to the toasts | `Toast.Provider hotkey`, default `F8` |
+| Announcement politeness | `Toast.Root type="foreground" \| "background"` |
+
+Window-blur pausing and the F8 hotkey are both better than the hand-rolled plan,
+and the hotkey is the keyboard affordance this file most lacked.
+
+`data-state` means the exit animation uses the same `tw-animate-css` classes as
+`dialog.tsx`, `popover.tsx` and `select.tsx` already do, so the two-phase
+"mark exiting, drop later" hack the hand-rolled design needed is gone.
+
+Everything in the table is therefore **removed from the store's
+responsibilities**: no `setTimeout`, no `pauseTimers` / `resumeTimers`, no
+`expiresAt` bookkeeping.
 
 ### 1. Store - `toast-store.ts`
 
@@ -91,43 +134,83 @@ export interface Toast {
 	variant: ToastVariant;
 	action?: ToastAction;
 	duration: number;
-	expiresAt: number;
 }
 ```
 
-Behaviour:
+The store becomes a **pure queue** - add, remove, and the two policies Radix has
+no opinion about:
 
-- **Per-variant durations.** `info` / `success` 4s, `warning` 6s, `error` 10s. A
-  failure needs longer than a confirmation; hover-pause covers the rest.
-- **Dedup.** An identical `message` + `variant` already on screen refreshes its
-  timer instead of stacking. The OAuth guard and SSE paths can fire repeatedly.
+- **Per-variant durations.** `info` / `success` 4s, `warning` 6s, `error` 10s,
+  passed straight to `Toast.Root duration`. A failure needs longer than a
+  confirmation; the primitive's hover/focus/blur pausing covers the rest.
+- **Dedup.** An identical `message` + `variant` already on screen is not
+  stacked; its entry is re-inserted so the primitive restarts its timer. The
+  OAuth guard and SSE paths can fire repeatedly.
 - **Cap of 4**, oldest evicted, so a burst cannot run off-screen.
-- **`pauseTimers()` / `resumeTimers()`** for hover. Timers live in a
-  module-level `Map` keyed by id; pausing stores the remaining ms, resuming
-  re-arms from it. Testable with fake timers.
 - **`dismissAll()`**.
-- Dismissing early clears the pending timeout rather than leaving it to fire.
+
+Removal is driven by `Toast.Root onOpenChange(false)`, which the primitive fires
+for timeout, close button and swipe alike - so there is one removal path rather
+than three.
 
 `warning` ships with real writers - the two "A load test is already running"
 call sites in `request-builder/index.tsx` (360, 377) move to it. A refusal is
 not the same event as an error, and today they render identically.
 
-### 2. Component - `Toaster.tsx`
+### 2. Components - `ui/toast.tsx` and `shared/Toaster.tsx`
 
-The viewport element and every ARIA attribute stay byte-identical. All six
-existing tests must pass **unmodified** - that is the acceptance check on this
-section.
+Two files, matching how the app already splits primitives from shell:
 
-Per toast, added: a variant icon, an optional bold title, an optional action
-button, a left accent rail in the variant's status token, enter/exit animation,
-hover-to-pause on the viewport, and a dismiss button with `p-1 -m-1` hit
-padding, a radius token and a `focus-visible` ring.
+- **`components/ui/toast.tsx`** - the shadcn primitive. Re-exports
+  `ToastProvider`, `ToastViewport`, `Toast`, `ToastTitle`, `ToastDescription`,
+  `ToastAction`, `ToastClose`, with a `cva` variant map over Vayu tokens.
+  Exported from `ui/index.ts` like every other primitive.
+- **`components/shared/Toaster.tsx`** - keeps its path, and keeps its job:
+  subscribe to the store and render one `<Toast>` per entry. It stops owning
+  timers and ARIA.
 
-Exit animation needs the toast to outlive its removal, so dismissal is two
-phase: mark `exiting`, drop after the animation duration.
+Per toast: a variant icon, an optional `ToastTitle`, the message as
+`ToastDescription`, an optional `ToastAction`, a left accent rail in the
+variant's status token, and a `ToastClose` with `p-1 -m-1` hit padding, a radius
+token and a `focus-visible` ring.
 
 `prefers-reduced-motion` needs no new work - `index.css:1110` already collapses
 all animation globally, and `reduced-motion.test.ts` guards it.
+
+#### The accessibility contract - what carries over, and what must be re-verified
+
+This is the real cost of the decision and the part most likely to go wrong.
+
+The current `Toaster.tsx` carries 40 lines of rationale over 30 lines of code,
+and six tests asserting `role="status"`, `aria-live="polite"` and an explicit
+`aria-atomic="false"` **on the container**. Radix does not use that shape. Those
+six assertions will not hold, and the tests are rewritten.
+
+Two things must survive the swap, and they are different in kind:
+
+1. **The decision that everything is polite, nothing assertive.** The existing
+   comment argues it: a toast auto-dismisses on a timer, and every toast here
+   reports the outcome of an action the user just took, so interrupting is the
+   wrong trade. That reasoning is unchanged by the primitive, and it maps onto
+   Radix's `type` prop - **every toast uses `type="background"`**, including
+   errors. The rationale comment moves to the new file rather than being
+   deleted; it is the record of a decision, not a description of the old code.
+2. **The guarantee that a toast is actually announced.** The old code earned
+   this the hard way (a region that appears with its content is commonly not
+   announced at all). Radix has its own solution to the same problem.
+
+**Verification, not assumption.** The Radix documentation describes the
+announcement model but does not pin the rendered elements or attributes, and
+this design deliberately does not guess them. The implementation step is:
+render the primitive in jsdom, inspect the actual DOM, and write the new tests
+against what is observed. If the observed behaviour does not preserve
+guarantee 2, that is a finding to report rather than paper over.
+
+Note the standing guidance that screen-reader work is deprioritised for this
+desktop tool: the goal here is **not to add ARIA**, it is to not silently lose a
+property the codebase already paid for. The keyboard and contrast wins - F8,
+the focus ring, the real hit target, icon-plus-colour instead of colour alone -
+are the parts that carry direct value.
 
 ### 3. Tokens
 
@@ -171,11 +254,13 @@ by scanning source. The variant classes arrive through a
 class that arrives in a variable - the badge-hover lesson.
 
 - Variant styling: each of the four renders its own icon and rail class.
-- Dedup: the same message twice yields one toast with a refreshed timer.
+- Dedup: the same message twice yields one toast.
 - Cap: a fifth toast evicts the oldest.
-- Pause/resume: fake timers, hover holds a toast past its duration.
 - Action: the button renders, fires `onClick`, and dismisses.
-- Dismiss clears the pending timer.
+- Removal: `onOpenChange(false)` drops the entry from the store.
+- Rewritten a11y tests, derived from the primitive's **observed** DOM rather
+  than from the old hand-rolled shape, asserting the announcement guarantee and
+  that every toast is `type="background"`.
 - Replacement for `Dock.save-error.test.tsx`: `failSave("database is locked")`
   produces a toast whose text contains the reason, and the Dock no longer
   renders an error span. Same guarantee - a failure says *why* - moved to the
@@ -199,16 +284,31 @@ prettier-clean.
 
 ## Out of scope
 
-- Swapping in a toast library.
+- `sonner`, and any runtime toast library other than the Radix primitive.
 - The OAuth "open the Auth tab" navigation action.
 - A notification history or centre.
 - Native OS notifications (`app/electron/` has no `Notification` surface today).
+- Migrating other overlays; only the toast changes.
 
 ## Acceptance
 
-- The six existing `Toaster.test.tsx` tests pass unmodified.
 - Error and success are distinguishable in **both** themes by icon and rail, not
   only by a 40%-alpha border.
 - A failed collection delete says why, and does not say "Save failed".
 - Nothing writes a field no layer reads.
+- The announcement guarantee is re-verified against the primitive's observed
+  DOM, and every toast is `type="background"`.
+- The dismiss control has a visible focus ring and a hit target larger than its
+  14px icon; `F8` moves focus to the viewport.
 - `pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm format:check` green.
+
+## Risks
+
+- **The a11y swap is the one-way door.** If the primitive's observed behaviour
+  does not preserve the announcement guarantee, stop and report rather than
+  shipping a quieter toast than the one being replaced.
+- **A new runtime dependency** (`@radix-ui/react-toast`) ships in the app
+  bundle. Consistent with the twelve Radix packages already present.
+- **`save-store` will import `toast-store`**, coupling two stores. Accepted
+  because the alternative - editing eight call sites - risks missing one, and a
+  missed site is a silently unreported failure.
