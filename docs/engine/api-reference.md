@@ -56,7 +56,9 @@ next minor release.
 ## Resource writes: create vs update
 
 Collections, requests and environments follow one write contract. `/globals` is
-a singleton and stays POST-only, so it is exempt.
+a singleton and stays POST-only, so it is exempt from the **verb split** below -
+but not from the null-vs-absent rule, which it follows with every write treated
+as a create (see [POST /globals](#post-globals)).
 
 | Verb | Path | Meaning | Wrong-target status |
 |------|------|---------|---------------------|
@@ -613,6 +615,16 @@ Set global variables.
 ```
 
 **Response:** The saved globals object.
+
+Globals is a singleton, so there is no create/update pair: a `POST` **replaces**
+the whole set rather than merging into it. Every write is therefore a create as
+far as the [null-vs-absent rule](#the-null-vs-absent-rule) goes - `variables`
+absent and `variables: null` both mean the default, `{}`.
+
+`variables: null` used to store the literal four-character text `null`, which
+parses as JSON but is not an object. `GET /globals` returns `{}` for anything it
+cannot read as an object, so the failure showed up as globals silently
+disappearing rather than as an error.
 
 ## Authentication
 
