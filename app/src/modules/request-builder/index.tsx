@@ -346,7 +346,7 @@ export default function RequestBuilder() {
 			// user to it instead of starting another.
 			if (useDashboardStore.getState().isStreaming) {
 				openTab({ type: "dashboard", entityId: null });
-				showToast("A load test is already running", "info");
+				showToast("A load test is already running", "warning");
 				return;
 			}
 			setPendingLoadTestRequest(request);
@@ -363,7 +363,7 @@ export default function RequestBuilder() {
 			// Defensive re-check in case a run started while the dialog was open.
 			if (useDashboardStore.getState().isStreaming) {
 				openTab({ type: "dashboard", entityId: null });
-				showToast("A load test is already running", "info");
+				showToast("A load test is already running", "warning");
 				setShowLoadTestDialog(false);
 				return;
 			}

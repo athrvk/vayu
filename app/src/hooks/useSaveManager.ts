@@ -42,8 +42,6 @@ interface UseSaveManagerReturn {
 	status: "idle" | "pending" | "saving" | "saved" | "error";
 	/** Whether currently saving */
 	isSaving: boolean;
-	/** Error message if save failed */
-	errorMessage: string | null;
 }
 
 export function useSaveManager({
@@ -55,7 +53,6 @@ export function useSaveManager({
 }: UseSaveManagerOptions): UseSaveManagerReturn {
 	const {
 		status,
-		errorMessage,
 		markPendingSave,
 		startSaving,
 		completeSave,
@@ -240,6 +237,5 @@ export function useSaveManager({
 		forceSave,
 		status,
 		isSaving: status === "saving",
-		errorMessage,
 	};
 }

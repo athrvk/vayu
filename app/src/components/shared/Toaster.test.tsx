@@ -9,92 +9,258 @@
  */
 
 /**
- * These assert *structure only*. jsdom announces nothing and does no hit-testing,
- * so nothing here proves a screen reader speaks a toast, and the click test does
- * not prove `pointer-events` is right - the class assertions cover that instead.
+ * These assert against the DOM Radix actually renders, which was read off a
+ * probe render rather than taken from the docs - the docs describe the
+ * announcement model but do not pin the markup.
+ *
+ * jsdom announces nothing, so none of this proves a screen reader speaks a
+ * toast. What it does prove is the structural property the hand-rolled version
+ * was built around and that a swap could silently drop: the live region exists
+ * in the DOM *before* it has content.
+ *
+ * Variant styling is asserted by rendering and reading `className`, never by
+ * scanning this file's source. The variant class arrives through a binding, and
+ * a source scan cannot see a class that arrives in a variable.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
-import { useToastStore } from "@/stores";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
+import { useToastStore, type ToastVariant } from "@/stores/toast-store";
+import { TIMING } from "@/config/timing";
+import { MAX_TOASTS } from "@/constants/toast";
 import Toaster from "./Toaster";
 
-/** Seed without going through showToast(), which arms a real 4s timer. */
-function seed(...toasts: { id: string; message: string; variant: "info" | "success" | "error" }[]) {
-	useToastStore.setState({ toasts });
+function show(message: string, variant: ToastVariant = "info") {
+	act(() => {
+		useToastStore.getState().showToast(message, variant);
+	});
 }
 
+/** Radix defers the announce text by a frame so the region pre-exists it. */
+async function settleFrames() {
+	await act(async () => {
+		await new Promise((r) => globalThis.requestAnimationFrame(() => r(null)));
+		await new Promise((r) => globalThis.requestAnimationFrame(() => r(null)));
+	});
+}
+
+const announceRegions = () => document.querySelectorAll('span[role="status"]');
+
 function toastElementFor(message: string): HTMLElement {
-	const el = screen.getByText(message).closest("div");
-	if (!el) throw new Error(`no toast element wrapping ${message}`);
-	return el as HTMLElement;
+	const el = screen.getByText(message).closest("li");
+	if (!el) throw new Error(`no toast <li> wrapping ${message}`);
+	return el;
 }
 
 describe("Toaster", () => {
-	beforeEach(() => {
-		useToastStore.setState({ toasts: [] });
-	});
-
+	beforeEach(() => useToastStore.setState({ toasts: [] }));
 	afterEach(() => {
 		cleanup();
 		useToastStore.setState({ toasts: [] });
 	});
 
-	it("keeps the live region in the DOM when there are no toasts", () => {
-		// The whole point of the fix: the region must pre-exist the message, or
-		// assistive tech has nothing to observe a change on.
-		render(<Toaster />);
-		expect(useToastStore.getState().toasts).toHaveLength(0);
-		expect(screen.getByRole("status")).toBeInTheDocument();
+	describe("the announcement guarantee", () => {
+		it("mounts the live region empty, then fills it", async () => {
+			// The property the hand-rolled Toaster existed to protect: a region
+			// that first appears *together with* its content is commonly not
+			// announced at all. Radix reaches it differently - one region per
+			// toast rather than one persistent shared region - so this asserts the
+			// guarantee, not the old mechanism.
+			render(<Toaster />);
+			expect(announceRegions()).toHaveLength(0);
+
+			show("database is locked", "error");
+			expect(announceRegions()).toHaveLength(1);
+			expect(announceRegions()[0]?.textContent).toBe("");
+
+			await settleFrames();
+			expect(announceRegions()[0]?.textContent).toContain("database is locked");
+		});
+
+		it("keeps every toast polite, including errors", async () => {
+			/*
+			 * Inherited decision, deliberately re-asserted after the swap. A toast
+			 * dismisses itself on a timer and always reports something the user
+			 * just asked for, so interrupting what they are reading is the wrong
+			 * trade. Radix spells this `type="background"`, which is not visible in
+			 * the DOM - what it produces is `aria-live="polite"`. `type="foreground"`
+			 * would render "assertive" here, so this assertion is what pins it.
+			 */
+			render(<Toaster />);
+			show("Request failed", "error");
+			await settleFrames();
+			expect(announceRegions()[0]).toHaveAttribute("aria-live", "polite");
+		});
+
+		it("gives each toast its own region rather than one shared one", async () => {
+			// Why the old explicit aria-atomic="false" is gone rather than ported:
+			// it existed because one region held the whole stack and would
+			// re-announce all of it on each arrival. One region per toast makes
+			// role="status"'s implicit atomic=true the correct value.
+			render(<Toaster />);
+			show("first");
+			show("second");
+			await settleFrames();
+			expect(announceRegions()).toHaveLength(2);
+		});
 	});
 
-	it("marks that region polite and switches aria-atomic off explicitly", () => {
-		render(<Toaster />);
-		const region = screen.getByRole("status");
-		expect(region).toHaveAttribute("aria-live", "polite");
-		/*
-		 * `not.toHaveAttribute("aria-atomic", "true")` is not enough, and an
-		 * earlier version of this test made exactly that mistake: ARIA gives
-		 * `role="status"` an *implicit* `aria-atomic="true"`, so an absent
-		 * attribute leaves the region atomic. Chrome's accessibility tree
-		 * reported `status atomic live="polite"` with nothing set. Atomic here
-		 * re-announces the whole stack on every new toast, so the attribute has
-		 * to be present and false.
-		 */
-		expect(region).toHaveAttribute("aria-atomic", "false");
+	describe("variant signal", () => {
+		// Rendered, not scanned: these classes arrive via `variant={toast.variant}`.
+		it.each([
+			["success", "border-l-status-success", "text-status-success-text"],
+			["warning", "border-l-status-warning", "text-status-warning-text"],
+			["error", "border-l-status-error", "text-status-error-text"],
+			["info", "border-l-border", "text-muted-foreground"],
+		] as const)("gives %s its own rail and icon colour", (variant, rail, iconClass) => {
+			render(<Toaster />);
+			show(`a ${variant} toast`, variant);
+			const el = toastElementFor(`a ${variant} toast`);
+			expect(el.className).toContain(rail);
+			expect(el.querySelector("svg")?.getAttribute("class")).toContain(iconClass);
+		});
+
+		it("carries an icon, so the variant does not rest on colour alone", () => {
+			// The defect this replaces: variant was a 40%-alpha border and nothing
+			// else, which in dark mode left error and info near-identical.
+			render(<Toaster />);
+			show("Save failed", "error");
+			expect(toastElementFor("Save failed").querySelector("svg")).toBeInTheDocument();
+		});
+
+		it("never signals a variant with the -fill token", () => {
+			// -fill is the solid chip colour, only correct under a white label.
+			// Using it as a foreground is the most common colour bug in this repo.
+			render(<Toaster />);
+			show("Save failed", "error");
+			expect(toastElementFor("Save failed").innerHTML).not.toContain("status-error-fill");
+		});
 	});
 
-	it("does not make each toast its own live region", () => {
-		seed({ id: "a", message: "Run history cleared", variant: "success" });
-		render(<Toaster />);
-		const toast = toastElementFor("Run history cleared");
-		expect(toast).not.toHaveAttribute("role");
-		expect(toast).not.toHaveAttribute("aria-live");
+	describe("queue policy", () => {
+		it("collapses a repeat instead of stacking it", () => {
+			// The OAuth2 guard retries and an SSE stream can fail every reconnect;
+			// four copies of one sentence say nothing the first did not.
+			render(<Toaster />);
+			show("Token refresh failed", "error");
+			show("Token refresh failed", "error");
+			expect(useToastStore.getState().toasts).toHaveLength(1);
+			expect(screen.getAllByText("Token refresh failed")).toHaveLength(1);
+		});
+
+		it("treats the same text in another variant as a different toast", () => {
+			render(<Toaster />);
+			show("Done", "success");
+			show("Done", "info");
+			expect(useToastStore.getState().toasts).toHaveLength(2);
+		});
+
+		it("drops the oldest past the cap rather than running off-screen", () => {
+			render(<Toaster />);
+			for (let i = 0; i < MAX_TOASTS + 2; i++) show(`toast ${i}`);
+			const { toasts } = useToastStore.getState();
+			expect(toasts).toHaveLength(MAX_TOASTS);
+			expect(toasts.map((t) => t.message)).not.toContain("toast 0");
+			expect(toasts.map((t) => t.message)).toContain(`toast ${MAX_TOASTS + 1}`);
+		});
+
+		it("gives a failure longer to be read than a confirmation", () => {
+			expect(TIMING.TOAST_DURATION_MS.error).toBeGreaterThan(
+				TIMING.TOAST_DURATION_MS.success
+			);
+		});
 	});
 
-	it("renders a queued toast's message inside the live region", () => {
-		seed({ id: "a", message: "Failed to create request", variant: "error" });
-		render(<Toaster />);
-		const region = screen.getByRole("status");
-		expect(region).toContainElement(screen.getByText("Failed to create request"));
+	describe("dismissal", () => {
+		it("dismisses through the labelled close button", () => {
+			render(<Toaster />);
+			show("Save failed", "error");
+			fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+			// Closed, not yet dropped - see the two tests below.
+			expect(useToastStore.getState().toasts[0]?.open).toBe(false);
+		});
+
+		it("closes the toast before dropping it, so the exit has something to play", () => {
+			/*
+			 * Deleting the store entry inside `onOpenChange(false)` unmounts the
+			 * element in the same update that sets `data-state="closed"`, and Radix
+			 * cannot animate a node its parent has already removed - the exit never
+			 * gets a frame and only the enter animation ships. The fix is that a
+			 * dismissed toast is *closed* first and dropped TIMING.TOAST_EXIT_MS later.
+			 *
+			 * This asserts the store contract, which is the half that is ours. It
+			 * cannot assert the node stays mounted: Radix keeps a closed toast alive
+			 * only while an animation is running, and jsdom runs none, so Presence
+			 * unmounts it at once here regardless of which behaviour shipped. The
+			 * motion itself was verified in a browser.
+			 *
+			 * The assertion this replaces - "the toast vanished" - passed precisely
+			 * when the bug was present.
+			 */
+			render(<Toaster />);
+			show("Save failed", "error");
+			const id = useToastStore.getState().toasts[0]?.id;
+
+			fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+
+			const after = useToastStore.getState().toasts;
+			expect(after).toHaveLength(1);
+			expect(after[0]?.id).toBe(id);
+			expect(after[0]?.open).toBe(false);
+		});
+
+		it("drops it once the exit has had its time", () => {
+			vi.useFakeTimers();
+			try {
+				render(<Toaster />);
+				show("Save failed", "error");
+				act(() => {
+					screen.getByRole("button", { name: "Dismiss notification" }).click();
+				});
+				expect(useToastStore.getState().toasts).toHaveLength(1);
+				act(() => void vi.advanceTimersByTime(TIMING.TOAST_EXIT_MS + 10));
+				expect(useToastStore.getState().toasts).toHaveLength(0);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("gives the close control a focus ring and a target bigger than its icon", () => {
+			// The old button had neither: a 14px hit area with no focused state.
+			render(<Toaster />);
+			show("Save failed", "error");
+			const close = screen.getByRole("button", { name: "Dismiss notification" });
+			expect(close.className).toContain("focus-visible:ring-2");
+			expect(close.className).toContain("p-1");
+		});
 	});
 
-	it("lets the viewport pass pointer events through while each toast takes them", () => {
-		// jsdom loads no CSS and does no hit-testing, so this is a class-level
-		// assertion, not a behavioural one.
-		seed({ id: "a", message: "Save failed", variant: "error" });
-		render(<Toaster />);
-		expect(screen.getByRole("status")).toHaveClass("pointer-events-none");
-		expect(toastElementFor("Save failed")).toHaveClass("pointer-events-auto");
-	});
+	describe("actions", () => {
+		it("renders an action and dismisses once it is taken", () => {
+			const onClick = vi.fn();
+			render(<Toaster />);
+			act(() => {
+				useToastStore.getState().showToast({
+					message: "Couldn't stop the run",
+					variant: "error",
+					action: { label: "Retry", onClick },
+				});
+			});
+			fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+			expect(onClick).toHaveBeenCalledOnce();
+			// Closed on the way out, dropped after the exit - see "dismissal".
+			expect(useToastStore.getState().toasts[0]?.open).toBe(false);
+		});
 
-	it("dismisses a toast through its labelled button", () => {
-		seed({ id: "a", message: "Save failed", variant: "error" });
-		render(<Toaster />);
-		fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
-		expect(screen.queryByText("Save failed")).not.toBeInTheDocument();
-		expect(useToastStore.getState().toasts).toHaveLength(0);
-		// ...and the region survives the last toast leaving.
-		expect(screen.getByRole("status")).toBeInTheDocument();
+		it("renders a title above the message when one is given", () => {
+			render(<Toaster />);
+			act(() => {
+				useToastStore
+					.getState()
+					.showToast({ title: "Save failed", message: "database is locked" });
+			});
+			expect(screen.getByText("Save failed")).toBeInTheDocument();
+			expect(screen.getByText("database is locked")).toBeInTheDocument();
+		});
 	});
 });

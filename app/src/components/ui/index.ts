@@ -62,6 +62,19 @@ export {
 
 export { Tabs, TabsList, TabsTrigger, TabsContent } from "./tabs";
 
+export {
+	ToastProvider,
+	ToastViewport,
+	Toast,
+	ToastIcon,
+	ToastTitle,
+	ToastDescription,
+	ToastAction,
+	ToastClose,
+	toastVariants,
+} from "./toast";
+export type { ToastVariantName } from "./toast";
+
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./tooltip";
 export { TooltipIconButton } from "./tooltip-icon-button";
 export type { TooltipIconButtonProps } from "./tooltip-icon-button";
