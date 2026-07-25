@@ -8,7 +8,10 @@
 /**
  * Custom TitleBar Component
  *
- * h-[38px] - must match TITLEBAR_HEIGHT in electron/constants.ts
+ * Height comes from --titlebar-height, not a bare h-[38px], because the toast
+ * viewport subtracts it when the stack is anchored to the top of the window.
+ * The value must still match TITLEBAR_HEIGHT in electron/constants.ts, which
+ * sizes the real window frame and cannot read a CSS variable.
  * macOS: traffic lights inset (~80px), no HTML controls
  * Windows: native overlay handles controls - no HTML buttons
  * Linux: custom HTML min/max/close buttons
@@ -131,7 +134,7 @@ export default function TitleBar() {
 		// <header>: the app's banner region, so it is reachable as a landmark
 		// rather than being an unnamed div in the accessibility tree.
 		<header
-			className="titlebar h-[38px] flex items-center bg-panel border-b border-border shrink-0 select-none"
+			className="titlebar h-[var(--titlebar-height)] flex items-center bg-panel border-b border-border shrink-0 select-none"
 			style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 		>
 			{/* macOS: space for native traffic lights */}

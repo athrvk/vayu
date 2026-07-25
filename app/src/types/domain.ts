@@ -594,7 +594,13 @@ export interface ConfigEntry {
 }
 
 /** Client-side settings panels (localStorage-backed prefs, rendered by app panels). */
-export type ClientSettingsCategory = "appearance" | "editor" | "dashboard" | "general" | "mcp";
+export type ClientSettingsCategory =
+	| "appearance"
+	| "editor"
+	| "dashboard"
+	| "notifications"
+	| "general"
+	| "mcp";
 
 /** Engine settings categories (data-driven from the engine `/config` API). */
 export type EngineSettingsCategory =

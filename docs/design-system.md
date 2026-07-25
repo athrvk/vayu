@@ -1381,6 +1381,33 @@ Transient report of an action the user just took. The queue is
 `stores/toast-store.ts`; the surface is the shadcn/Radix primitive in
 `components/ui/toast.tsx`, rendered once by `components/shared/Toaster.tsx`.
 
+**Four things about toasts are user-configurable** (Settings -> Notifications,
+persisted in `client-settings-store` as `notifications`, options and defaults in
+`constants/toast.ts`):
+
+| Setting | Values | Default | Applied |
+|---------|--------|---------|---------|
+| `position` | 6: each corner plus top/bottom centre | `bottom-right` | `Toaster` (viewport class + swipe side) |
+| `durationScale` | `short` 0.5x, `default` 1x, `long` 2x, `never` | `default` | at enqueue |
+| `maxVisible` | 1-8 | 4 | at enqueue |
+| `minSeverity` | `all`, `warning`, `error`, `none` | `all` | at enqueue |
+
+Three of the four are resolved **when a toast is enqueued**, not when it is
+drawn, so changing them does not restyle what is already on screen. That is why
+the panel has a Preview button.
+
+The duration setting is a **multiplier over the per-variant durations in the
+table below**, never a replacement for them: those are tuned so a failure
+outlasts a confirmation, and a flat "5 seconds for everything" would throw that
+away. `never` resolves to a 24h sentinel rather than `Infinity`, because the
+primitive arms a real `setTimeout` and a non-finite delay there is coerced to 1.
+
+**Every position clears the chrome on its own edge**, via `--dock-height` at the
+bottom and `--titlebar-height` at the top - never a round number. The stack is
+`position: fixed`, so it anchors to the window rather than the layout, and a
+plain `bottom-4` once put it on top of the Dock. `toast-position.test.tsx`
+checks all six.
+
 **The icon carries the variant; the rail reinforces it.** Never colour alone.
 The version this replaced signalled variant with a 40%-alpha border and nothing
 else: `border-destructive/40` measured **1.16:1** against the toast surface in

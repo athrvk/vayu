@@ -374,6 +374,22 @@
 		 * either file pointing at the other. Theme-independent, so declared once.
 		 */
 		--dock-height: 2rem;
+
+		/*
+		 * Height of the TitleBar, the strip holding the document tabs.
+		 *
+		 * Same reason as --dock-height, at the other edge. The toast stack can
+		 * now be anchored to the top of the window, and `position: fixed` means
+		 * it would sit on top of the tab strip unless it subtracts this. Two
+		 * files had the 38px independently - TitleBar.tsx and TITLEBAR_HEIGHT in
+		 * electron/constants.ts - and the toast viewport would have been a third.
+		 * Theme-independent, so declared once.
+		 *
+		 * The Electron constant cannot read a CSS variable, so it stays the
+		 * source of truth for the window frame; this mirrors it for the renderer,
+		 * and `toast-position.test.tsx` holds the two together.
+		 */
+		--titlebar-height: 38px;
 	}
 
 	/* ── Accent color schemes (light mode) ── */
