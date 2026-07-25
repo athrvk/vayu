@@ -35,6 +35,7 @@ import {
 import { EmptyState, ErrorState } from "@/components/shared";
 import { Button } from "@/components/ui";
 import { useEngine, useVariableResolver } from "@/hooks";
+import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
 import { resolveAuthForSend } from "./utils/auth-resolution";
@@ -240,7 +241,14 @@ export default function RequestBuilder() {
 						"error"
 					);
 				} else if (result.errorCode === "AUTH_FAILED") {
-					showToast(result.errorMessage || "OAuth 2.0 token request failed", "error");
+					// The engine's message names JSON fields (accessTokenUrl); the user
+					// is looking at a form that labels them (Access Token URL).
+					showToast(
+						result.errorMessage
+							? humanizeOAuth2Error(result.errorMessage)
+							: "OAuth 2.0 token request failed",
+						"error"
+					);
 				}
 
 				// Refresh variables so script-set values (e.g. pm.environment.set) appear in the UI

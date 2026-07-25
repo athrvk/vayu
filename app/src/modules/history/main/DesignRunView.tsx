@@ -54,6 +54,7 @@ import {
 } from "@/modules/request-builder/utils/execute-mapping";
 import { generateUUID } from "@/modules/request-builder/utils/id";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
+import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { seedFromRun } from "./design-run-seed";
 import SaveRunToRequestDialog from "./SaveRunToRequestDialog";
 import type { Run, ScriptPart } from "@/types";
@@ -228,7 +229,13 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						"error"
 					);
 				} else if (result.errorCode === "AUTH_FAILED") {
-					showToast(result.errorMessage || "OAuth 2.0 token request failed", "error");
+					// Same engine message, same relabelling as the builder's send path.
+					showToast(
+						result.errorMessage
+							? humanizeOAuth2Error(result.errorMessage)
+							: "OAuth 2.0 token request failed",
+						"error"
+					);
 				}
 
 				// A resend is a new run, so History has to hear about it.
