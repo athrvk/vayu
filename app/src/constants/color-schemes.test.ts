@@ -92,6 +92,50 @@ describe("accent colour schemes", () => {
 		}
 	});
 
+	it("makes a desaturated scheme declare its own --primary-text", () => {
+		/*
+		 * `--primary-text` is the accent when the accent *is* the label, and it
+		 * defaults to `--primary` - correct for seven of the eight schemes,
+		 * because what separates an active tab from an inactive one is almost
+		 * entirely saturation, not lightness. Measured on `--card`, accent text
+		 * and `--muted-foreground` sit within a 1.01-1.56 contrast ratio in every
+		 * scheme; the eye reads "coloured vs grey", and 55-95% saturation against
+		 * an inactive 4-5% carries it.
+		 *
+		 * Graphite is S=12%/15% - it is the only desaturated scheme, which
+		 * `docs/design-system.md` notes as what makes it distinct in the picker.
+		 * It therefore has neither a lightness gap nor a saturation gap, and must
+		 * separate by lightness instead.
+		 *
+		 * The rule is derived from the saturation rather than hardcoded to
+		 * "graphite", so the next desaturated scheme cannot ship the same bug.
+		 * `--primary-text` is deliberately NOT in REQUIRED: inheriting it is the
+		 * correct behaviour for a saturated scheme, not a forgotten block.
+		 */
+		const saturation = (b: string) =>
+			Number(/--primary:\s*[\d.]+\s+([\d.]+)%/.exec(b)?.[1] ?? NaN);
+
+		let checked = 0;
+		for (const { value } of COLOR_SCHEMES) {
+			for (const dark of [false, true]) {
+				const b = block(value, dark) ?? "";
+				const s = saturation(b);
+				expect(s, `${value} (${dark ? "dark" : "light"}): no --primary to read`).not.toBeNaN();
+				if (s >= 25) continue;
+				checked++;
+				expect(
+					b,
+					`"${value}" has --primary at ${s}% saturation, too little to separate an ` +
+						`active label from --muted-foreground by hue. It must declare its own ` +
+						`--primary-text (${dark ? "dark" : "light"} block).`
+				).toContain("--primary-text:");
+			}
+		}
+		// Guards the guard: if no scheme is desaturated, the loop above asserts
+		// nothing and passes for free.
+		expect(checked).toBeGreaterThan(0);
+	});
+
 	it("has no orphan CSS blocks for schemes the registry does not offer", () => {
 		// Widened deliberately: COLOR_SCHEMES is `as const`, so the inferred Set is
 		// of the literal union and will not accept an arbitrary string scraped out

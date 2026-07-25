@@ -12,6 +12,7 @@
 	--color-popover-foreground: hsl(var(--popover-foreground));
 	--color-primary: hsl(var(--primary));
 	--color-primary-fill: hsl(var(--primary-fill));
+	--color-primary-text: hsl(var(--primary-text));
 	--color-primary-foreground: hsl(var(--primary-foreground));
 	--color-secondary: hsl(var(--secondary));
 	--color-secondary-foreground: hsl(var(--secondary-foreground));
@@ -153,12 +154,35 @@
 		--popover: 0 0% 100%;
 		--popover-foreground: 240 6% 10%;
 
-		/* Primary - Sunset orange (default). --primary is the accent (text/border/
-		 * tints); --primary-fill is the button-background value (white labels).
-		 * They match in light mode and diverge in dark (see .dark). */
+		/* Primary. --primary is the accent (text/border/tints); --primary-fill is
+		 * the button-background value (white labels). They match in light mode
+		 * and diverge in dark (see .dark). The values here are Sunset; the
+		 * default scheme is Ocean, applied by [data-color-scheme] below. */
 		--primary: 24 90% 46%;
 		--primary-fill: 24 90% 46%;
 		--primary-foreground: 0 0% 100%;
+
+		/*
+		 * The accent when the accent *is* the label, and has to separate from
+		 * --muted-foreground beside it.
+		 *
+		 * That separation is carried almost entirely by saturation, not
+		 * lightness: accent text and muted text sit within a 1.01-1.56 contrast
+		 * ratio of each other in every scheme, so the eye reads "coloured vs
+		 * grey". With 55-95% saturation against an inactive 4-5% that is plenty,
+		 * which is why this defaults to --primary and seven of the eight schemes
+		 * never override it.
+		 *
+		 * `graphite` does. It is the only desaturated scheme (S=12%/15%), so it
+		 * has no hue to spend and must separate by lightness instead - the same
+		 * bind --primary-fill exists to solve, answered the same way. Retuning
+		 * its --primary is not an option: that also paints its buttons, ring and
+		 * --chart-1.
+		 *
+		 * Declared once here rather than per theme: `.dark` sits on the same
+		 * element as `:root`, so var(--primary) already resolves per theme.
+		 */
+		--primary-text: var(--primary);
 
 		/* Secondary */
 		--secondary: 240 5% 94%;
@@ -440,6 +464,12 @@
 		--ring: 220 12% 46%;
 		--variable: 220 12% 46%;
 		--chart-1: 220 12% 46%;
+		/* The only scheme that overrides --primary-text - see the note on the
+		 * token in :root. At 46% this measured 1.14 against --muted-foreground,
+		 * i.e. the same brightness, with no saturation to tell them apart; 26%
+		 * takes it to 1.86, and the label's own contrast on --card from 4.94 to
+		 * 10.46. */
+		--primary-text: 220 12% 26%;
 	}
 
 	/* ── Dark mode ── */
@@ -639,6 +669,9 @@
 		--ring: 220 15% 72%;
 		--variable: 220 15% 72%;
 		--chart-1: 220 15% 72%;
+		/* 72% measured 1.23 against --muted-foreground; 86% takes it to 1.81,
+		 * and the label on --card from 8.31 to 12.29. */
+		--primary-text: 220 15% 86%;
 	}
 }
 

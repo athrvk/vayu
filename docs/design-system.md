@@ -136,12 +136,42 @@ Rule: white-labelled solid fills use `bg-primary-fill`; everything else accent
 uses `--primary`. `--primary-foreground` (white) sits on the fill.
 
 ```css
-/* Sunset (default) */
+/* Sunset (the values below; the default scheme is Ocean) */
 --primary:       24 90% 46%;   /* light - deep accent */    /* dark: 24 95% 58% (brighter) */
 --primary-fill:  24 90% 46%;   /* both modes - white-safe button fill */
+--primary-text:  var(--primary);   /* accent as a label - see below */
 --primary-foreground: 0 0% 100%;
 --ring / --variable: track --primary
 ```
+
+**`--primary-text` - the accent when the accent *is* the label.** Used by the
+section tabs for the active trigger (`text-primary-text`), where the accent has
+to separate not from the surface but from the `--muted-foreground` label beside
+it.
+
+That separation is carried almost entirely by **saturation**, not lightness.
+Measured on `--card`, accent text and muted text sit within a **1.01-1.56**
+contrast ratio of each other in every scheme - effectively the same brightness -
+so what the eye reads is "coloured vs grey". At 55-95% saturation against an
+inactive 4-5% that is plenty, which is why `--primary-text` defaults to
+`--primary` and seven of the eight schemes never override it.
+
+`graphite` overrides it, because it is the only desaturated scheme (S=12% light,
+15% dark) and so has no hue to spend: `220 12% 26%` light and `220 15% 86%`
+dark, which take its active-vs-inactive separation from 1.14 to 1.86 and 1.23 to
+1.81. Retuning graphite's `--primary` instead is not an option - that also
+paints its buttons, ring and `--chart-1`, and would give it near-black buttons.
+This is the same bind `--primary-fill` exists to solve, answered the same way.
+
+**Adding a scheme:** override `--primary-text` only if the accent's saturation
+is under about 25%. `color-schemes.test.ts` derives that rule from the
+stylesheet rather than naming graphite, so a new desaturated scheme fails until
+it declares one. It is deliberately *not* in that test's `REQUIRED` list -
+inheriting it is correct for a saturated scheme, not a forgotten block.
+
+Note the ratios above are between two *foreground* colours; neither WCAG nor
+APCA is defined for that, so treat them as a discriminability proxy rather than
+a conformance figure.
 
 ### Semantic Status Colors
 
@@ -711,6 +741,10 @@ to Lc 22–37.
 | `coral` | `0 68% 54%` | `0 80% 68%` | `0 68% 54%` |
 | `magenta` | `305 72% 45%` | `305 85% 70%` | `305 72% 45%` |
 | `graphite` | `220 12% 46%` | `220 15% 72%` | `220 12% 46%` |
+
+Every scheme also resolves `--primary-text` (the accent as a label). It tracks
+`--primary` for all of these except `graphite`, which sets `220 12% 26%` light
+and `220 15% 86%` dark - see **Primary (Accent Color)** above for why.
 
 **Adding a scheme.** Edit `constants/color-schemes.ts` and `index.css` - nothing
 else. `color-schemes.test.ts` asserts the two agree, in both themes, because a
