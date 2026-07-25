@@ -16,6 +16,11 @@
  * - Server's HTTP status code is always in the response body, never translated to engine status
  */
 
+#include <cmath>
+#include <optional>
+#include <regex>
+#include <string>
+
 #include "vayu/core/constants.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
@@ -300,7 +305,121 @@ const vayu::Response& response) {
     }
 }
 
+// One numeric field of a run config: what it is called on the wire, and the
+// closed interval it must fall in. Kept as data so the four checks below read
+// as a table rather than four hand-written branches that can drift apart.
+struct NumericRunField {
+    const char* key;
+    int64_t min;
+    int64_t max;
+    const char* why; // appended to the message, explains the bound
+};
+
+// Reject a numeric field that is present but of the wrong JSON type or outside
+// its range. Absent is always fine - every field has a default.
+std::optional<std::string> check_numeric_field (const nlohmann::json& config,
+const NumericRunField& field) {
+    if (!config.contains (field.key) || config[field.key].is_null ()) {
+        return std::nullopt;
+    }
+    const auto& value = config[field.key];
+    if (!value.is_number ()) {
+        return std::string ("'") + field.key + "' must be a number (got " +
+        std::string (value.type_name ()) + ")";
+    }
+    // Read as a double first: an integer read of a fractional or huge value is
+    // itself undefined, and this is the guard that has to be total.
+    const double raw = value.get<double> ();
+    if (!std::isfinite (raw) || raw < static_cast<double> (field.min) ||
+    raw > static_cast<double> (field.max)) {
+        return std::string ("'") + field.key + "' must be between " +
+        std::to_string (field.min) + " and " + std::to_string (field.max) +
+        " (got " + value.dump () + "). " + field.why;
+    }
+    return std::nullopt;
+}
+
 } // namespace
+
+/**
+ * @brief Validate a POST /runs config before the run row is created.
+ *
+ * Every field below is read downstream with `config.value (...)` and cast to
+ * `size_t` or fed to a modulo, in code that runs on a detached worker thread
+ * with no `catch` above it. Out of range there is not a bad run, it is a dead
+ * daemon: `success_sample_rate: 0` is `% 0` (SIGFPE), `concurrency: -1` becomes
+ * ~1.8e19 eagerly pre-allocated curl handles, `timeout: 0` leaves transfers
+ * that never expire, and a JSON-number `duration` throws out of `RunContext`'s
+ * constructor *after* the run row exists, stranding it `pending` forever.
+ *
+ * So this runs in the route, before `create_run`: a rejected request must leave
+ * no trace. Non-static - `run_config_validation_test.cpp` drives it directly.
+ *
+ * @return The reason the config is invalid, or `std::nullopt` if it is usable.
+ */
+std::optional<std::string> validate_run_config (const nlohmann::json& config) {
+    if (!config.is_object ()) {
+        return "Run config must be a JSON object";
+    }
+
+    // `duration` is the one non-numeric field here, and the only one whose bad
+    // value throws rather than miscomputes: `RunContext` reads it as a string.
+    if (config.contains ("duration") && !config["duration"].is_null ()) {
+        const auto& duration = config["duration"];
+        if (!duration.is_string ()) {
+            return "'duration' must be a string with a unit, e.g. \"60s\" "
+                   "(got " +
+            std::string (duration.type_name ()) + ")";
+        }
+        // Accept an optional unit: the unit-aware parser is #126's, and a bare
+        // "60" is what a client that never read the docs sends. This only has
+        // to separate "parses to something positive" from "wedges the run".
+        static const std::regex duration_pattern (
+        R"(^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h)?\s*$)", std::regex::icase);
+        std::smatch match;
+        const std::string text = duration.get<std::string> ();
+        if (!std::regex_match (text, match, duration_pattern)) {
+            return "'duration' must be a number with an optional unit "
+                   "(ms|s|m|h), e.g. \"60s\" (got \"" +
+            text + "\")";
+        }
+        // The regex already proved group 1 is a plain decimal, so `stod` cannot
+        // fail on it - but this guard exists precisely because a conversion
+        // threw somewhere nobody was catching, so it stays total here too.
+        double magnitude = 0.0;
+        try {
+            magnitude = std::stod (match[1].str ());
+        } catch (const std::exception&) {
+            magnitude = 0.0; // out of double's range; falls into the check below
+        }
+        if (!(magnitude > 0.0)) {
+            return "'duration' must be greater than zero (got \"" + text + "\")";
+        }
+    }
+
+    namespace limits               = vayu::core::constants::run_config;
+    const NumericRunField fields[] = {
+        { "success_sample_rate", 1, 100000,
+        "It is a sampling period (keep 1 in N), and 0 is a division by zero." },
+        { "response_sample_rate", 1, 100000,
+        "It is a sampling period (keep 1 in N), and 0 is a division by zero." },
+        { "max_response_samples", 0, limits::MAX_RESPONSE_SAMPLES,
+        "Each retained sample holds a full response body." },
+        { "concurrency", 1, limits::MAX_CONCURRENCY,
+        "Connections are pre-allocated per worker before any traffic flows." },
+        { "timeout", 1, 86400000,
+        "A transfer with no timeout never completes, so the run can never "
+        "reach "
+        "a terminal status." },
+    };
+    for (const auto& field : fields) {
+        if (auto reason = check_numeric_field (config, field)) {
+            return reason;
+        }
+    }
+
+    return std::nullopt;
+}
 
 void register_execution_routes (RouteContext& ctx) {
     /**
@@ -512,6 +631,23 @@ void register_execution_routes (RouteContext& ctx) {
             vayu::utils::log_warning (
             "POST /runs - Missing mode/duration/iterations config");
             send_error (res, 400, "Must specify either 'mode' with 'duration' or 'iterations'");
+            return;
+        }
+
+        // Range-check the numeric config *before* the run row exists, so a
+        // rejected request leaves nothing behind. The nested error shape is
+        // deliberate: the app's http-client reads `errorData.error.message`
+        // and drops the flat `{"error": "..."}` body, which would surface this
+        // as a bare "HTTP 400" with no reason (same shape as the auth
+        // pre-flight below and POST /config).
+        if (auto invalid = validate_run_config (json)) {
+            vayu::utils::log_warning ("POST /runs - Invalid run config: " + *invalid);
+            res.status = 400;
+            res.set_content (
+            nlohmann::json{
+            { "error", { { "code", "invalid_run_config" }, { "message", *invalid } } } }
+            .dump (),
+            "application/json");
             return;
         }
 

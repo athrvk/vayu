@@ -36,6 +36,15 @@ export const LOAD_TEST_LIMITS = {
 	ITERATIONS: { MIN: 1, MAX: 1_000_000 },
 	RAMP_DURATION_S: { MIN: 1, MAX: 3600 },
 	START_CONCURRENCY: { MIN: 1, MAX: 1000 },
-	SAMPLE_RATE_PCT: { MIN: 0, MAX: 100 },
+	/**
+	 * MIN is 1, not 0. The value is sent as `success_sample_rate`, which the
+	 * engine uses as a sampling *period* - `counter % success_sample_rate` - so
+	 * a 0 was an integer division by zero that killed the whole daemon mid-run,
+	 * reachable by dragging this slider to its left stop. The engine now rejects
+	 * it with a 400 (and clamps defensively); this keeps the control from
+	 * offering a value no run can use. "Keep no success traces" is still
+	 * expressible - that is what the Save timing breakdown toggle does.
+	 */
+	SAMPLE_RATE_PCT: { MIN: 1, MAX: 100 },
 	SLOW_THRESHOLD_MS: { MIN: 0, MAX: 60_000 },
 } as const;

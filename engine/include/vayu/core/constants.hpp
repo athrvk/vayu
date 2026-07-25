@@ -80,6 +80,27 @@ constexpr long TCP_KEEPALIVE_INTERVAL_SECONDS = 30;
 } // namespace event_loop
 
 /**
+ * @brief Accepted ranges for a POST /runs load-test config.
+ *
+ * These are crash guards, not policy: every client caps itself far lower
+ * (the load dialog offers concurrency <= 1000, the MCP tool has a
+ * user-settable cap). They exist because each field is read with
+ * `config.value(...)` and cast to `size_t`, so a negative becomes ~1.8e19 and
+ * an out-of-range value reaches an eager allocation or a modulo before
+ * anything else can reject it.
+ */
+namespace run_config {
+/// Upper bound on a run's `concurrency`. `EventLoopConfig::max_concurrent` is
+/// an *eager* per-worker curl-handle pre-allocation, so an unbounded value
+/// allocates until malloc fails. Ten times the per-worker ceiling leaves every
+/// realistic run untouched while keeping the pre-allocation finite.
+constexpr int64_t MAX_CONCURRENCY = 10 * static_cast<int64_t> (event_loop::MAX_CONCURRENT);
+/// Upper bound on `max_response_samples` (each retained sample holds a full
+/// response body, and the vector is reserved up front).
+constexpr int64_t MAX_RESPONSE_SAMPLES = 1000000;
+} // namespace run_config
+
+/**
  * @brief Server configuration
  */
 namespace server {

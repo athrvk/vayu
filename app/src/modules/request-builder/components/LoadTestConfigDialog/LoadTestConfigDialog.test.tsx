@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
 import LoadTestConfigDialog from "./index";
 import type { LoadTestConfig } from "@/types";
+import { STORAGE_KEYS } from "@/constants/storage-keys";
 
 vi.mock("../OAuth2LoadTestGuard", () => ({
 	default: () => null,
@@ -283,5 +284,39 @@ describe("ramp start concurrency", () => {
 		pickProfile("Ramp-Up");
 		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "3" } });
 		expect(screen.getByText(/Climbs from 3 to 10 connections/i)).toBeInTheDocument();
+	});
+});
+
+/**
+ * `success_sample_rate` is a sampling *period* engine-side (`counter % rate`),
+ * not a share, so a 0 was an integer division by zero that killed the daemon
+ * mid-run - and this slider's left stop used to be 0. The engine now rejects it
+ * with a 400, but a control that offers a value no run can accept is still
+ * broken, so the floor is pinned here rather than only in the engine.
+ */
+describe("success sample rate can never be the divide-by-zero value", () => {
+	const rateSlider = () => screen.getByLabelText(/success sample rate/i) as HTMLInputElement;
+
+	it("does not offer 0 as the slider minimum", () => {
+		open();
+		fireEvent.click(screen.getByRole("button", { name: /recording/i }));
+		expect(Number(rateSlider().min)).toBeGreaterThanOrEqual(1);
+	});
+
+	it("raises a 0 restored from a config saved before the floor existed", () => {
+		// Written by an older build, which allowed it. Defaulting is not enough
+		// here - `saved.sampleRate ?? default` keeps a 0, because 0 is present.
+		localStorage.setItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG, JSON.stringify({ sampleRate: 0 }));
+		const { onStart } = open();
+		expect(started(onStart).data_sample_rate).toBeGreaterThanOrEqual(1);
+	});
+
+	it("still sends a rate the user chose", () => {
+		// The floor must not have become a pin: an ordinary value still rides
+		// through untouched.
+		const { onStart } = open();
+		fireEvent.click(screen.getByRole("button", { name: /recording/i }));
+		fireEvent.change(rateSlider(), { target: { value: "50" } });
+		expect(started(onStart).data_sample_rate).toBe(50);
 	});
 });

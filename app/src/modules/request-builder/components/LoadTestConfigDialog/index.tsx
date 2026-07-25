@@ -190,8 +190,15 @@ export default function LoadTestConfigDialog({
 	const [maxInFlight, setMaxInFlight] = useState<string>(
 		saved.maxInFlight != null ? String(saved.maxInFlight) : ""
 	);
+	// Clamped, not just defaulted: the slider's minimum used to be 0, so a
+	// config saved before that changed can still restore a 0 - which the engine
+	// now rejects with a 400 (it was a division by zero in the metrics
+	// collector). Raising it to the new floor keeps that saved config runnable.
 	const [sampleRate, setSampleRate] = useState(
-		saved.sampleRate ?? LOAD_TEST_DEFAULTS.SAMPLE_RATE_PCT
+		Math.max(
+			saved.sampleRate ?? LOAD_TEST_DEFAULTS.SAMPLE_RATE_PCT,
+			LOAD_TEST_LIMITS.SAMPLE_RATE_PCT.MIN
+		)
 	);
 	const [slowThreshold, setSlowThreshold] = useState(
 		saved.slowThreshold ?? LOAD_TEST_DEFAULTS.SLOW_THRESHOLD_MS
@@ -475,7 +482,7 @@ export default function LoadTestConfigDialog({
 									className="w-full accent-primary"
 								/>
 								<div className="flex justify-between text-[11px] text-muted-foreground">
-									<span>0% - errors only</span>
+									<span>1% - errors and a trickle</span>
 									<span>100% - everything</span>
 								</div>
 							</div>

@@ -251,7 +251,7 @@ export interface StartLoadTestRequest {
 	maxInFlight?: number; // Max concurrent in-flight requests before drops/queue. Default per-strategy.
 
 	// Data capture options
-	success_sample_rate?: number; // 0-100
+	success_sample_rate?: number; // 1-100; the engine rejects 0 (it is a divisor)
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
 	tests?: ScriptPart[];

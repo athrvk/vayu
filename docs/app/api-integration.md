@@ -380,6 +380,15 @@ await apiService.startLoadTest({
 });
 ```
 
+The engine range-checks this payload before it creates the run row and answers a
+violation with `400 invalid_run_config` (accepted ranges are tabulated under
+[POST /runs](../engine/api-reference.md#post-runs)). The renderer's own floors
+live in `LOAD_TEST_LIMITS` (`src/constants/load-test.ts`) and must stay at or
+inside the engine's: `SAMPLE_RATE_PCT.MIN` is `1` rather than `0` because the
+value is sent as `success_sample_rate`, which the engine uses as a sampling
+period (`counter % rate`) - a `0` there was a division by zero. "Keep no success
+traces" is the **Save timing breakdown** toggle, not a rate of zero.
+
 ## Error Handling
 
 ### HTTP Errors
