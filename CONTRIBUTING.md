@@ -252,6 +252,37 @@ Currently, the app does not have automated tests. If you add tests:
 - Use Vitest for unit tests
 - Use Playwright for E2E tests (if needed)
 
+## Documentation
+
+Everything in `docs/` is published to **[athrvk.github.io/vayu](https://athrvk.github.io/vayu/)**
+by `.github/workflows/docs.yml` on every push to `master` that touches the docs.
+The site is built with [MkDocs Material](https://squidfunk.github.io/mkdocs-material/)
+from `mkdocs.yml` at the repo root.
+
+```bash
+pip install -r requirements-docs.txt
+mkdocs serve            # live preview on http://127.0.0.1:8000
+mkdocs build --strict   # exactly what CI runs
+```
+
+Two rules when you add or change a doc:
+
+- **Add the page to the `nav:` in `mkdocs.yml`.** A file that is not in the nav
+  still builds and is still reachable by URL, but it never appears in the
+  sidebar, so in practice nobody finds it.
+- **Keep cross-links relative and anchors real.** `mkdocs build --strict` fails
+  on a relative `.md` link that does not resolve and on a `#heading-anchor` that
+  does not exist, and the pull-request run does the same. Anchors follow GitHub's
+  slug rules (configured in `mkdocs.yml`), so a link that works in GitHub's
+  markdown view works on the site, and vice versa. Note that a heading such as
+  `## Shared Auth Fields (components/shared/AuthFields/)` slugifies to
+  `#shared-auth-fields-componentssharedauthfields` - the parenthetical is part of
+  the anchor.
+
+Links out of `docs/` (to `SECURITY.md`, `LICENSE`, `CONTRIBUTING.md`) must be
+absolute `https://github.com/athrvk/vayu/blob/master/...` URLs: those files are
+outside the published tree, so a relative path 404s on the site.
+
 ## Commit Messages
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):

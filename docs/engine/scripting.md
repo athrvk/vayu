@@ -301,4 +301,4 @@ Test failures don't stop script execution - all tests run and results are collec
 
 ## API Reference
 
-For complete API documentation, see the [Scripting Completions API](../api-reference.md#scripting) which lists all available `pm.*` functions and properties.
+For complete API documentation, see the [Scripting Completions API](api-reference.md#scripting) which lists all available `pm.*` functions and properties.
