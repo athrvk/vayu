@@ -36,7 +36,7 @@ These labels indicate **where** in the codebase a change lands. **Applied automa
 |-------|-------|-------------|------------------|
 | `component:app` | Blue (#3498DB) | Electron + React UI | Changes in `app/**` |
 | `component:engine` | Teal (#16A085) | C++20 engine (daemon, HTTP, scripting) | Changes in `engine/**` |
-| `component:database` | Purple (#8E44AD) | Database schema, SQLite persistence | Changes in `engine/src/db/**`, `engine/tests/db_test.cpp`, etc. |
+| `component:database` | Purple (#8E44AD) | Database schema, SQLite persistence | Changes in `engine/src/db/**`, `engine/include/vayu/db/**`, `engine/tests/db_*` |
 | `component:ci` | Gray (#95A5A6) | GitHub Actions, CI configuration | Changes in `.github/**` |
 | `component:build` | Dark Gray (#7F8C8D) | CMake, vcpkg, version, build script | Changes to `build.py`, `VERSION`, etc. |
 
@@ -49,9 +49,15 @@ These labels narrow down sub-areas **within the engine**. Useful for routing eng
 | Label | Description | Applies to |
 |-------|-------------|-----------|
 | `area:http` | HTTP server, routes, SSE, request/response handling | `engine/src/http/**` |
-| `area:auth` | Authentication, OAuth2, authorization | `auth_resolver*`, `oauth*` files under `engine/src/http/` and `engine/include/vayu/http/` - also matches `area:http`, since auth lives there |
-| `area:metrics` | Metrics collection, statistics, measurement | `metrics_collector*`, `metrics_helper*` files (src, include, and the HTTP metrics route) |
+| `area:auth` | Authentication, OAuth2, authorization | Any file under `engine/**` with `auth` or `oauth` in its name - also matches `area:http`, since auth lives under `engine/src/http/` today |
+| `area:metrics` | Metrics collection, statistics, measurement | Any file under `engine/**` with `metrics` in its name |
 | `area:scripting` | QuickJS runtime, script execution, pm.* API | `engine/src/runtime/**` |
+
+`area:auth` and `area:metrics` match by filename convention rather than an
+enumerated list, so a new auth/oauth/metrics file gets the label automatically
+as long as its name follows the pattern every existing file in that area
+already uses - no `labeler.yml` edit needed. A file that doesn't follow the
+convention won't be caught; use a manual label as a fallback.
 
 ### Type Labels (`type:*`)
 
@@ -141,13 +147,13 @@ The `.github/labeler.yml` file defines path-based rules that automatically apply
 
 - **`component:app`** → `app/**`
 - **`component:engine`** → `engine/**`
-- **`component:database`** → `engine/src/db/**`, `engine/include/vayu/db/**`, `engine/tests/db_test.cpp`, `engine/tests/db_concurrency_test.cpp`
+- **`component:database`** → `engine/src/db/**`, `engine/include/vayu/db/**`, `engine/tests/db_*`
 - **`component:ci`** → `.github/**`
 - **`component:build`** → `build.py`, `VERSION`, CMake files, vcpkg.json, `app/package.json`, `scripts/**`, etc.
 - **`documentation`** → `docs/**`, `**/*.md`
 - **`area:http`** → `engine/src/http/**`
-- **`area:auth`** → `auth_resolver*`, `oauth*` files under `engine/src/http/`
-- **`area:metrics`** → `metrics_collector*`, `metrics_helper*` files
+- **`area:auth`** → any `engine/**` file with `auth` or `oauth` in its name
+- **`area:metrics`** → any `engine/**` file with `metrics` in its name
 - **`area:scripting`** → `engine/src/runtime/**`
 
 `component:database` and `area:*` rules are kept strictly inside `engine/**` -
@@ -156,22 +162,23 @@ for code it never touched.
 
 If a PR changes files in multiple categories, it gets all matching labels. A release PR touching `app/`, `engine/`, and build files will earn `component:app`, `component:engine`, and `component:build`.
 
-### When adding a new file, check `.github/labeler.yml`
+### Most rules are zero-maintenance; `component:build` is not
 
-`component:database`, `component:build`, `area:auth`, and `area:metrics` are
-**explicit file lists**, not directory globs - `engine/src/db/**` is the only
-rule in this set that's a directory match. Adding a new file to one of these
-areas (a new db table's source file, a new auth/oauth file, a new metrics
-source or test) does **not** get labeled unless the path is added to the
-matching rule in `.github/labeler.yml`, and the labeler fails silently -
-no error, the PR just doesn't get the label. This bit us already: `area:auth`
-pointed at a path that never existed, and `area:metrics` missed the header,
-route, and helper files sitting right next to the one file it did match.
-When a PR adds a new file under `engine/src/db/`, `engine/src/http/`
-(auth/oauth), `engine/src/core/metrics_collector*`, `engine/src/utils/metrics_helper*`,
-or a new build/version manifest, add it to the corresponding rule in the
-same PR. `component:app`, `component:engine`, `component:ci`, `area:http`,
-and `area:scripting` are directory globs and need no such review.
+`component:app`, `component:engine`, `component:ci`, `component:database`,
+`area:http`, `area:auth`, `area:metrics`, and `area:scripting` are all either
+a directory glob or a filename-convention wildcard - a new file placed in the
+right directory, or named the way every existing file in that area is named,
+gets labeled automatically with no `labeler.yml` change.
+
+`component:build` is the one rule left as an enumerated file list, because
+build/version manifests don't share a naming convention (`build.py`,
+`VERSION`, `CMakeLists.txt`, `vcpkg.json`, `package.json` are all different
+names by nature of what they are) or a common directory (they're scattered
+across the repo root, `engine/`, and `app/`). When a new build-system file is
+added that doesn't already match an existing entry, add it to
+`component:build` in the same PR - the labeler fails silently on a miss here,
+same as it did for `area:auth` and `area:metrics` before they were converted
+to wildcards.
 
 ## Label Colors and Semantics
 

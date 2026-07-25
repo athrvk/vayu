@@ -21,9 +21,12 @@ component:engine:
 
 # A subset of `component:engine`, so a database change earns both labels.
 # This is intentional: the point of a finer label is to subset while keeping
-# the parent category. The store is one translation unit plus header and
-# tests, so this is an explicit file list rather than a directory. Kept
-# strictly inside `engine/**` - a doc-only change to db-schema.md is
+# the parent category. `engine/src/db/**` and `engine/include/vayu/db/**` are
+# directories, so new files there are covered automatically. Tests aren't
+# under a `db/` directory, so instead of enumerating them by name (a new
+# db_*_test.cpp silently earning no label until someone remembers to add it
+# here), match the `db_` naming convention every db test already follows.
+# Kept strictly inside `engine/**` - a doc-only change to db-schema.md is
 # `documentation`, not `component:database`, so it doesn't earn a component
 # label its content never touched.
 component:database:
@@ -31,8 +34,7 @@ component:database:
       - any-glob-to-any-file:
           - 'engine/src/db/**'
           - 'engine/include/vayu/db/**'
-          - 'engine/tests/db_test.cpp'
-          - 'engine/tests/db_concurrency_test.cpp'
+          - 'engine/tests/db_*'
 
 component:ci:
   - changed-files:
@@ -62,39 +64,39 @@ documentation:
 
 # Area labels - sub-areas within engine. Kept strictly inside `engine/**`,
 # same reasoning as `component:database`: a doc-only change earns
-# `documentation`, not an `area:*` label whose code it didn't touch. Auth and
-# oauth files live under `engine/src/http/`, so `area:auth` overlaps
-# `area:http` on those files - intentional, same subset pattern as
-# `component:database` inside `component:engine`.
+# `documentation`, not an `area:*` label whose code it didn't touch.
+#
+# area:auth and area:metrics match by naming convention (`*auth*`/`*oauth*`,
+# `*metrics*`) instead of an enumerated file list. Auth and metrics code
+# doesn't live under its own directory - auth is mixed into `engine/src/http/`
+# alongside every other HTTP concern, metrics is split across `core/`,
+# `http/routes/` and `utils/` - so a directory glob can't isolate it and an
+# enumerated list silently misses every new file until someone remembers to
+# add it (this happened twice: area:auth pointed at a path that never
+# existed, area:metrics missed its own header). A name-based wildcard picks
+# up any new file that follows the convention every existing auth/oauth/
+# metrics file already follows, with no per-file maintenance. Verified
+# against the current tree: `*auth*`/`*oauth*` and `*metrics*` match only the
+# real auth/oauth/metrics files under `engine/`, nothing else.
 area:http:
   - changed-files:
       - any-glob-to-any-file:
           - 'engine/src/http/**'
           - 'engine/include/vayu/http/**'
 
+# Overlaps area:http, since auth/oauth files live under engine/src/http/ -
+# intentional, same subset pattern as component:database inside
+# component:engine.
 area:auth:
   - changed-files:
       - any-glob-to-any-file:
-          - 'engine/src/http/auth_resolver*'
-          - 'engine/src/http/oauth*'
-          - 'engine/src/http/routes/oauth*'
-          - 'engine/include/vayu/http/auth_resolver*'
-          - 'engine/include/vayu/http/oauth*'
-          - 'engine/tests/auth_resolver_test.cpp'
-          - 'engine/tests/oauth_authorize_test.cpp'
-          - 'engine/tests/oauth_client_test.cpp'
-          - 'engine/tests/oauth_route_test.cpp'
+          - 'engine/**/*auth*'
+          - 'engine/**/*oauth*'
 
 area:metrics:
   - changed-files:
       - any-glob-to-any-file:
-          - 'engine/src/core/metrics_collector*'
-          - 'engine/include/vayu/core/metrics_collector*'
-          - 'engine/src/http/routes/metrics.cpp'
-          - 'engine/src/utils/metrics_helper*'
-          - 'engine/include/vayu/utils/metrics_helper*'
-          - 'engine/tests/metrics_collector_test.cpp'
-          - 'engine/tests/metrics_helper_test.cpp'
+          - 'engine/**/*metrics*'
 
 area:scripting:
   - changed-files:
