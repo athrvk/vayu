@@ -261,9 +261,19 @@ from `mkdocs.yml` at the repo root.
 
 ```bash
 pip install -r requirements-docs.txt
-mkdocs serve            # live preview on http://127.0.0.1:8000
+mkdocs serve            # live preview on http://127.0.0.1:8000/vayu/
 mkdocs build --strict   # exactly what CI runs
 ```
+
+The preview path includes `/vayu/` because the site is a project page served from
+a subdirectory; `http://127.0.0.1:8000/` redirects there.
+
+The site's favicon and header logo are **not** files under `docs/`.
+`hooks/brand_assets.py` pulls `shared/icon_png/vayu_icon_256x256.png` into the
+build, so the docs share one icon with the installers and cannot drift from
+them. Do not add a copy under `docs/images/` - if the brand icon is regenerated,
+the site picks it up on the next build. A missing source file fails the build
+rather than publishing a broken favicon.
 
 Two rules when you add or change a doc:
 

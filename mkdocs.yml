@@ -17,12 +17,12 @@ copyright: Engine AGPL-3.0 &middot; App Apache-2.0
 theme:
   name: material
   language: en
-  # Both are the app's own icon, copied from shared/icon_png/vayu_icon_256x256.png
-  # (the source the installers are built from - see setup_icons in build.py).
-  # MkDocs can only read assets under docs_dir, hence the copy rather than a
-  # reference; if the brand icon is ever regenerated, re-copy this one too.
-  # Without these the site shows Material's default book glyph in the tab and
-  # the header.
+  # Both are the app's own icon. There is no such file under docs/ - the path is
+  # populated at build time by hooks/brand_assets.py, which reads
+  # shared/icon_png/vayu_icon_256x256.png (the same source setup_icons in
+  # build.py hands to the installers) so the site cannot drift from the app's
+  # icon. Without these the site shows Material's default book glyph in the tab
+  # and the header.
   favicon: images/vayu-icon.png
   logo: images/vayu-icon.png
   icon:
@@ -128,6 +128,9 @@ extra_css:
 
 plugins:
   - search
+
+hooks:
+  - hooks/brand_assets.py
 
 # Broken cross-references are a build failure in CI (`mkdocs build --strict`),
 # which is the point: these docs cross-link heavily by relative `.md` path.
