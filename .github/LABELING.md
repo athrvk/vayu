@@ -54,11 +54,7 @@ These labels narrow down sub-areas **within the engine**. Useful for routing eng
 | `area:metrics` | Metrics collection, statistics, measurement | Any file under `engine/**` with `metrics` in its name |
 | `area:scripting` | QuickJS runtime, script execution, pm.* API | `engine/src/runtime/**` |
 
-`area:auth` and `area:metrics` match by filename convention rather than an
-enumerated list, so a new auth/oauth/metrics file gets the label automatically
-as long as its name follows the pattern every existing file in that area
-already uses - no `labeler.yml` edit needed. A file that doesn't follow the
-convention won't be caught; use a manual label as a fallback.
+`area:auth`/`area:metrics` match by filename convention (see "zero-maintenance" below); a file that doesn't follow it won't be caught - use a manual label as a fallback.
 
 ### Type Labels (`type:*`)
 
@@ -145,19 +141,7 @@ These labels indicate **urgency**. Apply manually based on impact and timeline.
 
 The `.github/labeler.yml` file defines path-based rules that automatically apply component and area labels to pull requests when they touch certain files. The labeler runs on every PR open/update via `.github/workflows/labeler.yml`.
 
-### Current Auto-Labeling Rules
-
-- **`component:app`** → `app/**`
-- **`component:engine`** → `engine/**`
-- **`component:database`** → `engine/src/db/**`, `engine/include/vayu/db/**`, `engine/tests/db_*`
-- **`component:ci`** → `.github/**`
-- **`component:build`** → `build.py`, `VERSION`, CMake files, vcpkg.json, `app/package.json`, `scripts/**`, etc.
-- **`release`** → `VERSION` (also earns `component:build`, since `VERSION` matches both rules)
-- **`documentation`** → `docs/**`, `**/*.md`
-- **`area:http`** → `engine/src/http/**`
-- **`area:auth`** → any `engine/**` file with `auth` or `oauth` in its name
-- **`area:metrics`** → any `engine/**` file with `metrics` in its name
-- **`area:scripting`** → `engine/src/runtime/**`
+Exact paths/patterns for each rule are in the category tables above (`Auto-applied when` / `Applies to` columns); `release` triggers on `VERSION` alone, which also matches `component:build`.
 
 `component:database` and `area:*` rules are kept strictly inside `engine/**` -
 a `docs/engine/*.md` change earns `documentation`, not a component/area label
@@ -183,33 +167,6 @@ added that doesn't already match an existing entry, add it to
 same as it did for `area:auth` and `area:metrics` before they were converted
 to wildcards.
 
-## Label Colors and Semantics
-
-Colors follow a **two-part strategy** for semantic clarity:
-
-### Component Labels (WHERE) — Cool/Neutral Colors
-Component labels use **cool and neutral colors** to describe where changes land:
-- **Blue (#3498DB):** App (Electron + React UI)
-- **Teal (#16A085):** Engine (C++20 core)
-- **Purple (#8E44AD):** Database (storage)
-- **Gray (#95A5A6, #7F8C8D):** Infrastructure (CI, build)
-
-### Type Labels (WHAT) — Semantic Colors
-Type labels use **semantic colors** to describe what kind of change:
-- **Red (#E74C3C):** Bug (problem/breaking)
-- **Green (#27AE60):** Feature (new/success)
-- **Blue (#3498DB):** Enhancement (improvement)
-- **Amber (#F39C12):** Performance/Warning (optimization/caution)
-- **Teal (#16A085):** Test (quality)
-
-### Status/Priority — Action Colors
-Status and priority labels use semantic colors for workflow clarity:
-- **Red (#C0392B, #E74C3C):** Blocking, critical, urgent
-- **Amber (#F39C12):** Waiting, high priority
-- **Green (#27AE60):** Ready, low priority, success
-
-**Why this separation matters:** When scanning a PR, component colors (cool/neutral) instantly show WHERE changes land, while type colors (semantic) show WHAT kind of work. This visual separation makes label intent unmistakable at a glance—for example, `component:engine` (teal) and `type:bug` (red) no longer look alike.
-
 ## Migration from Old Labels
 
 This system replaced a flat label set. `app`, `engine`, `database`, `bug`,
@@ -222,30 +179,13 @@ exception: kept and restyled as manual-only companions to `component:ci` /
 
 ## Examples
 
-### A bug fix in the app's dashboard
-
-- Auto-labels: `component:app`
-- Manual labels: `type:bug`
-
-### A new OAuth 2.0 feature in the engine
-
-- Auto-labels: `component:engine`, `area:http`, `area:auth` (auth code lives under `engine/src/http/`, so both area labels apply)
-- Manual labels: `type:feature`, `priority:high`, `status:needs-review`
-
-### A database schema migration
-
-- Auto-labels: `component:engine`, `component:database`
-- Manual labels: `type:enhancement`, `documentation` (if adding schema docs)
-
-### A performance improvement to the request scheduler
-
-- Auto-labels: `component:engine`, `area:http`
-- Manual labels: `type:perf`, `priority:high`
-
-### A test for the QuickJS sandbox
-
-- Auto-labels: `component:engine`, `area:scripting`
-- Manual labels: `type:test`
+| Scenario | Auto-labels | Manual labels |
+|---|---|---|
+| Bug fix in the app's dashboard | `component:app` | `type:bug` |
+| New OAuth 2.0 feature in the engine | `component:engine`, `area:http`, `area:auth` (auth lives under `engine/src/http/`, so both area labels apply) | `type:feature`, `priority:high`, `status:needs-review` |
+| Database schema migration | `component:engine`, `component:database` | `type:enhancement`, `documentation` (if adding schema docs) |
+| Perf improvement to the request scheduler | `component:engine`, `area:http` | `type:perf`, `priority:high` |
+| Test for the QuickJS sandbox | `component:engine`, `area:scripting` | `type:test` |
 
 ## Applying Labels to the Repository
 
