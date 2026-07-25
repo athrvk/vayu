@@ -107,6 +107,25 @@ describe("ghost trigger colours", () => {
 		expect(screen.getByRole("tab", { name: "Variables" }).className).toMatch(/\brounded-sm\b/);
 	});
 
+	it("marks the active tab with a shape, not only a colour", () => {
+		render(<Fixture />);
+		const trigger = screen.getByRole("tab", { name: "Variables" });
+
+		/*
+		 * Colour and weight alone are not enough. Graphite's accent is a neutral,
+		 * so its active label differs from an inactive one in lightness only, and
+		 * 12px at 600 against 500 is a difference you have to hunt for - which is
+		 * exactly the report that put this indicator here. A rule is a shape, and
+		 * no accent scheme can wash a shape out.
+		 */
+		expect(trigger.className).toContain("data-[state=active]:after:bg-primary");
+		// --primary, not --primary-text: this is an indicator, not a label.
+		expect(trigger.className).not.toContain("after:bg-primary-text");
+		// Absolutely positioned, so the band stays 24px rather than growing by 2.
+		expect(trigger.className).toContain("after:absolute");
+		expect(trigger.className).toContain("relative");
+	});
+
 	it("gives the list no rule or fill of its own", () => {
 		render(<Fixture />);
 		const list = screen.getByRole("tablist");

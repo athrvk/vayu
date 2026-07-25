@@ -149,6 +149,14 @@ section tabs for the active trigger (`text-primary-text`), where the accent has
 to separate not from the surface but from the `--muted-foreground` label beside
 it.
 
+It is not sufficient on its own, and the tabs pair it with a 2px underline on
+`--primary`. Colour plus weight leaves the active tab hard to find in graphite,
+where the accent is a neutral: the label then differs from an inactive one in
+lightness alone, and 12px at 600 against 500 is a difference you have to hunt
+for. A rule is a *shape*, which no accent can wash out. Note the split - the
+label takes `--primary-text` and the indicator takes `--primary`, because one is
+text and the other is an indicator.
+
 That separation is carried almost entirely by **saturation**, not lightness.
 Measured on `--card`, accent text and muted text sit within a **1.01-1.56**
 contrast ratio of each other in every scheme - effectively the same brightness -

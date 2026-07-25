@@ -76,17 +76,29 @@ function TabsTrigger({
 		<TabsPrimitive.Trigger
 			data-slot="tabs-trigger"
 			className={cn(
-				"inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm",
+				"relative inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm",
 				"text-xs font-medium text-muted-foreground",
 				"ring-offset-background transition-colors",
 				"hover:text-foreground",
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 				"disabled:pointer-events-none disabled:opacity-50",
-				// Both halves are `data-[state=]` variants rather than swapped
-				// classes, so the class list is identical in either state and only
+				// Every state change here is a `data-[state=]` variant rather than a
+				// swapped class, so the class list is identical either way and only
 				// the attribute moves. Paired with TabLabel, activating a tab
 				// changes nothing that affects layout.
 				"data-[state=active]:text-primary-text data-[state=active]:font-semibold",
+				// The indicator. Absolutely positioned inside the existing bottom
+				// padding, so it adds no height - the band stays 24px.
+				//
+				// Colour and weight alone are not enough, and graphite is the proof:
+				// its accent is a neutral, so the active label differs from an
+				// inactive one only in lightness, and 12px at 600 against 500 is a
+				// difference you have to go looking for. A rule is a *shape*, which
+				// no accent scheme can wash out. `--primary` rather than
+				// `--primary-text` because this is an indicator, not a label - the
+				// split the design system already draws.
+				"after:absolute after:inset-x-1.5 after:-bottom-px after:h-[2px] after:rounded-full",
+				"after:bg-transparent data-[state=active]:after:bg-primary",
 				SIZE[size ?? inherited],
 				className
 			)}
