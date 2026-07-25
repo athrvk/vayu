@@ -571,7 +571,14 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				/>
 			)}
 
-			{/* Variables Table */}
+			{/*
+			 * This scrolls, and `overflow-y-auto` computes `overflow-x` to `auto`
+			 * too, so the box clips on all four sides at its padding box. Embedded
+			 * (Collection Detail) it carries `p-0`, so anything flush against the
+			 * left edge loses the outer half of its focus ring; standalone it
+			 * carries `p-4` and nothing notices. The clearance that fixes it lives
+			 * on the checkbox cell below, not here - see the comment there.
+			 */}
 			<div className={cn("flex-1 overflow-y-auto", embedded ? "p-0" : "p-4")}>
 				<table className="w-full">
 					<thead>
@@ -598,7 +605,21 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 							return (
 								<tr key={index} className="group">
-									<td className="py-1">
+									{/*
+									 * `px-1` is clearance for the focus ring, not decoration.
+									 * The baseline draws it 1px wide at `outline-offset: 2px`,
+									 * i.e. 3px outside the box, and this cell sits against the
+									 * scroll container's clip edge when embedded - so with no
+									 * horizontal padding the ring lost its left side.
+									 *
+									 * Clearance rather than `.panel-clip` on the container: the
+									 * same native checkbox appears in the request builder's
+									 * key-value rows, where `KeyValueRow`'s `p-1` gives it the
+									 * same 4px and the ring reads as an outset hairline with a
+									 * gap. Tucking this one inward would have made one control
+									 * look like two, depending on the screen.
+									 */}
+									<td className="py-1 px-1">
 										<input
 											type="checkbox"
 											checked={variable.enabled}
