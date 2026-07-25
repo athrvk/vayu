@@ -43,12 +43,13 @@ export default function RunItem({
 		return formatRelativeTime(new Date(timestamp).toISOString());
 	};
 
-	// Get URL and method from configSnapshot (unified flat structure)
+	// Read from the compact list-row summary (paginated GET /runs). The full
+	// configSnapshot lives only on GET /runs/:id, which the list does not fetch.
 	const getRequestInfo = () => {
-		if (!run.configSnapshot) return { url: null, method: null };
-		const url = run.configSnapshot.url || null;
-		const method = run.configSnapshot.method || "GET";
-		const type = run.configSnapshot.mode;
+		if (!run.summary) return { url: null, method: null };
+		const url = run.summary.url || null;
+		const method = run.summary.method || "GET";
+		const type = run.summary.mode;
 		return { url, method, type };
 	};
 
@@ -170,18 +171,18 @@ export default function RunItem({
 				)}
 
 				{/* Config Info (if load test) */}
-				{run.type === "load" && run.configSnapshot && (
+				{run.type === "load" && run.summary && (
 					<div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1.5 flex-wrap">
-						{run.configSnapshot.duration && (
+						{run.summary.duration && (
 							<span className="flex items-center gap-1 shrink-0">
 								<Clock className="w-3 h-3" />
-								{run.configSnapshot.duration}
+								{run.summary.duration}
 							</span>
 						)}
-						{run.configSnapshot.concurrency && (
+						{run.summary.concurrency && (
 							<span className="flex items-center gap-1 shrink-0">
 								<Activity className="w-3 h-3" />
-								{run.configSnapshot.concurrency} workers
+								{run.summary.concurrency} workers
 							</span>
 						)}
 						{loadTestType && (
@@ -194,9 +195,9 @@ export default function RunItem({
 				)}
 
 				{/* Comment if exists */}
-				{run.configSnapshot?.comment && (
+				{run.summary?.comment && (
 					<p className="text-xs text-muted-foreground italic mt-1.5 break-words">
-						"{run.configSnapshot.comment}"
+						"{run.summary.comment}"
 					</p>
 				)}
 			</div>

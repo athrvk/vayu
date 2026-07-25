@@ -128,8 +128,13 @@ export class EngineClient {
 		return arr.find((e) => e && typeof e === "object" && e.id === id) ?? null;
 	}
 
+	/**
+	 * First page of run history (newest first), bounded so an agent never pulls
+	 * unbounded history. Returns the `{data, pagination}` envelope; `data` rows
+	 * carry the compact `summary`, not the full config_snapshot.
+	 */
 	listRuns(signal?: AbortSignal): Promise<unknown> {
-		return this.request("GET", "/runs", undefined, signal);
+		return this.request("GET", "/runs?limit=100&offset=0", undefined, signal);
 	}
 
 	getRunReport(runId: string, signal?: AbortSignal): Promise<unknown> {

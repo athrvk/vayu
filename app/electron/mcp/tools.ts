@@ -427,7 +427,10 @@ export const TOOLS: McpTool[] = [
 		name: "list_runs",
 		category: "read",
 		description:
-			"List past runs (both single Design-mode requests and load tests), newest first.",
+			"List recent past runs (both single Design-mode requests and load tests), " +
+			"newest first. Returns a {data, pagination} envelope bounded to the first " +
+			"100 runs; each row carries a compact summary (url/method/mode/duration/" +
+			"concurrency/comment), not the full config snapshot.",
 		readOnly: true,
 		annotations: {
 			title: "List runs",

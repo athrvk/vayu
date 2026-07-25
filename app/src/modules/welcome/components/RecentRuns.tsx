@@ -17,8 +17,8 @@
  * Completed · 2 hours ago" five times over, with nothing to tell one row from
  * the next - you had to open a run to find out which one it was.
  *
- * The identifier is the method and URL from `configSnapshot`, which is what the
- * history sidebar shows for the same records. Not the request's *name*: a run
+ * The identifier is the method and URL from the run `summary`, which is what
+ * the history sidebar shows for the same records. Not the request's *name*: a run
  * stores no name, and `requestId` is only set for design runs, so most rows -
  * every load test - would have nothing to look up. The snapshot's URL is
  * always there, and it is the truth about what was actually sent, even if the
@@ -65,8 +65,8 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 			<div className="flex flex-col">
 				{recent.map((run) => {
 					const status = statusLabel(run.status);
-					const url = run.configSnapshot?.url;
-					const method = run.configSnapshot?.method;
+					const url = run.summary?.url;
+					const method = run.summary?.method;
 					return (
 						<button
 							key={run.id}

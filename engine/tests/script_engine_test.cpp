@@ -8,6 +8,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
+
 #include "vayu/http/script_parts.hpp"
 #include "vayu/types.hpp"
 
@@ -243,6 +245,163 @@ TEST_F (ScriptEngineTest, ExpectTrueFalse) {
     EXPECT_TRUE (result.success);
 }
 
+// Mutation-checked: the paren-less terminal must actually run the assertion.
+// Before the getter fix `.to.be.true` was a discarded function reference, so a
+// deliberately-wrong assertion still passed. This asserts the failing case fails.
+TEST_F (ScriptEngineTest, ExpectTrueFalseAssertsOnAccess) {
+    auto result = engine.execute_test (R"(
+        pm.test("false is not true", function() {
+            pm.expect(false).to.be.true;
+        });
+
+        pm.test("true is not false", function() {
+            pm.expect(true).to.be.false;
+        });
+
+        pm.test("negation works", function() {
+            pm.expect(false).to.not.be.true;
+        });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 3);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_FALSE (result.tests[0].error_message.empty ());
+    EXPECT_FALSE (result.tests[1].passed);
+    EXPECT_TRUE (result.tests[2].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectNullUndefinedOkEmpty) {
+    auto result = engine.execute_test (R"(
+        pm.test("null", function() { pm.expect(null).to.be.null; });
+        pm.test("undefined", function() { pm.expect(undefined).to.be.undefined; });
+        pm.test("ok", function() { pm.expect(1).to.be.ok; });
+        pm.test("not ok", function() { pm.expect(0).to.not.be.ok; });
+        pm.test("empty string", function() { pm.expect("").to.be.empty; });
+        pm.test("empty array", function() { pm.expect([]).to.be.empty; });
+        pm.test("empty object", function() { pm.expect({}).to.be.empty; });
+        pm.test("non-empty array", function() { pm.expect([1]).to.not.be.empty; });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectNullFailsForNonNull) {
+    auto result = engine.execute_test (R"(
+        pm.test("1 is not null", function() { pm.expect(1).to.be.null; });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectLength) {
+    auto result = engine.execute_test (R"(
+        pm.test("array length", function() { pm.expect([1,2,3]).to.have.length(3); });
+        pm.test("string lengthOf", function() { pm.expect("abcd").to.have.lengthOf(4); });
+        pm.test("wrong length not", function() { pm.expect([1,2]).to.not.have.length(3); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectLengthFailsNotThrows) {
+    auto result = engine.execute_test (R"(
+        pm.test("wrong length", function() { pm.expect([1,2,3]).to.have.length(2); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    // A mismatch must fail, not throw "not a function".
+    EXPECT_EQ (result.tests[0].error_message.find ("not a function"), std::string::npos);
+}
+
+TEST_F (ScriptEngineTest, ExpectTypeMatcher) {
+    auto result = engine.execute_test (R"(
+        pm.test("string", function() { pm.expect("hi").to.be.a("string"); });
+        pm.test("number", function() { pm.expect(5).to.be.a("number"); });
+        pm.test("array", function() { pm.expect([1]).to.be.an("array"); });
+        pm.test("object", function() { pm.expect({}).to.be.an("object"); });
+        pm.test("wrong type", function() { pm.expect("hi").to.not.be.a("number"); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectTypeMatcherFails) {
+    auto result = engine.execute_test (R"(
+        pm.test("string is not number", function() { pm.expect("hi").to.be.a("number"); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_EQ (result.tests[0].error_message.find ("not a function"), std::string::npos);
+}
+
+TEST_F (ScriptEngineTest, ExpectMatchRegex) {
+    auto result = engine.execute_test (R"(
+        pm.test("matches", function() { pm.expect("hello123").to.match(/[0-9]+/); });
+        pm.test("does not match", function() { pm.expect("hello").to.not.match(/[0-9]+/); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectMatchFails) {
+    auto result = engine.execute_test (R"(
+        pm.test("no digits", function() { pm.expect("hello").to.match(/[0-9]+/); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectAtLeastAtMost) {
+    auto result = engine.execute_test (R"(
+        pm.test("at least equal boundary", function() { pm.expect(5).to.be.at.least(5); });
+        pm.test("at least above", function() { pm.expect(10).to.be.at.least(5); });
+        pm.test("at most equal boundary", function() { pm.expect(5).to.be.at.most(5); });
+        pm.test("at most below", function() { pm.expect(3).to.be.at.most(5); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectAtLeastFails) {
+    auto result = engine.execute_test (R"(
+        pm.test("4 is not at least 5", function() { pm.expect(4).to.be.at.least(5); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectContain) {
+    auto result = engine.execute_test (R"(
+        pm.test("string contain", function() { pm.expect("hello world").to.contain("world"); });
+        pm.test("array contain", function() { pm.expect([1,2,3]).to.contain(2); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
 // ============================================================================
 // pm.response Tests
 // ============================================================================
@@ -277,6 +436,31 @@ TEST_F (ScriptEngineTest, ResponseJson) {
     request, response, env);
 
     EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ResponseHasJsonBodyNoArg) {
+    auto result = engine.execute_test (R"(
+        pm.test("body is valid JSON", function() {
+            pm.response.to.have.jsonBody();
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ResponseJsonBodyNoArgFailsOnNonJson) {
+    response.body = "this is not json";
+    auto result   = engine.execute_test (R"(
+        pm.test("invalid json fails", function() {
+            pm.response.to.have.jsonBody();
+        });
+    )",
+      request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
 }
 
 TEST_F (ScriptEngineTest, ResponseHeaders) {
@@ -383,6 +567,65 @@ TEST_F (ScriptEngineTest, EnvironmentSet) {
     EXPECT_EQ (env["new_var"].value, "new_value");
 }
 
+// Regression for #110: pm.*.set() on an existing key must preserve the
+// variable's secret flag, enabled flag and type - only the value changes. The
+// pre-fix whole-record replace silently un-masked a secret variable in the UI
+// and reset its type. Mutation-check: restore the Variable{value,false,true}
+// assignment in set_variable_preserving and the secret/type asserts here fail.
+TEST_F (ScriptEngineTest, SetPreservesSecretFlagAndType) {
+    env["token"] = Variable{ "old", true, true, "json" };
+
+    auto result = engine.execute_test (R"(
+        pm.environment.set("token", "rotated");
+        pm.test("dummy", function() {});
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_EQ (env["token"].value, "rotated"); // value updated
+    EXPECT_TRUE (env["token"].secret);         // secret preserved
+    EXPECT_TRUE (env["token"].enabled);        // enabled preserved
+    EXPECT_EQ (env["token"].type, "json");     // type preserved
+}
+
+// A brand-new key still gets the current defaults (not secret, enabled, string).
+TEST_F (ScriptEngineTest, SetNewKeyGetsDefaults) {
+    auto result = engine.execute_test (R"(
+        pm.environment.set("fresh", "value");
+        pm.test("dummy", function() {});
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_TRUE (env.count ("fresh"));
+    EXPECT_EQ (env["fresh"].value, "value");
+    EXPECT_FALSE (env["fresh"].secret);
+    EXPECT_TRUE (env["fresh"].enabled);
+    EXPECT_EQ (env["fresh"].type, "string");
+}
+
+// Guards that the collectionVariables setter is wired to the shared helper too
+// (all three setters must preserve, not just pm.environment).
+TEST_F (ScriptEngineTest, CollectionVariableSetPreservesSecretFlagAndType) {
+    Environment collVars;
+    collVars["cv_token"] = Variable{ "old", true, true, "json" };
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.response            = &response;
+    ctx.collectionVariables = &collVars;
+
+    auto result = engine.execute (R"(
+        pm.collectionVariables.set("cv_token", "rotated");
+    )",
+    ctx);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_EQ (collVars["cv_token"].value, "rotated");
+    EXPECT_TRUE (collVars["cv_token"].secret);
+    EXPECT_EQ (collVars["cv_token"].type, "json");
+}
+
 // ============================================================================
 // Console Output Tests
 // ============================================================================
@@ -419,8 +662,7 @@ TEST_F (ScriptEngineTest, ComposedPartsShareOneScope) {
         {"origin":"request","script":"console.log(\"got \" + shared);"}
       ]
     })");
-    auto script =
-    vayu::http::read_script (json, "preRequestScripts", "preRequestScript");
+    auto script = vayu::http::read_script (json, "preRequestScripts", "preRequestScript");
 
     ScriptContext ctx;
     ctx.request = &request;
@@ -552,4 +794,79 @@ TEST_F (ScriptEngineTest, ContextPooling) {
         ASSERT_EQ (result.tests.size (), 1);
         EXPECT_TRUE (result.tests[0].passed);
     }
+}
+
+// ============================================================================
+// Script Execution Timeout Tests (#107)
+// ============================================================================
+
+// A non-allocating infinite loop must be interrupted by the wall-clock deadline
+// rather than hanging the calling thread. Mutation-check: revert the
+// JS_SetInterruptHandler wiring in acquire_context/execute and this test hangs.
+TEST_F (ScriptEngineTest, InfiniteLoopTimesOut) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 200;
+    ScriptEngine timeout_engine (cfg);
+
+    ScriptContext ctx;
+    ctx.response = &response;
+
+    const auto start   = std::chrono::steady_clock::now ();
+    auto result        = timeout_engine.execute ("while (true) {}", ctx);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - start)
+                         .count ();
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("timed out"), std::string::npos)
+    << "error was: " << result.error_message;
+    // Should abort near the deadline, not run indefinitely. Generous upper bound to
+    // stay robust on slow CI while still proving the loop does not run forever.
+    EXPECT_LT (elapsed, 5000) << "took " << elapsed << "ms";
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// A fast script under the limit must not be falsely aborted by the deadline.
+TEST_F (ScriptEngineTest, FastScriptUnderTimeoutStillPasses) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 200;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (R"(
+        pm.test("Fast test", function() {
+            pm.expect(1).to.equal(1);
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_TRUE (result.error_message.empty ());
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed);
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// timeout_ms == 0 disables the wall-clock limit (escape hatch); a bounded loop
+// still completes normally with no false timeout.
+TEST_F (ScriptEngineTest, ZeroTimeoutDisablesLimit) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 0;
+    ScriptEngine no_timeout_engine (cfg);
+
+    ScriptContext ctx;
+    auto result = no_timeout_engine.execute (
+    "var n = 0; for (var i = 0; i < 100000; i++) { n += i; } n", ctx);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_TRUE (result.error_message.empty ());
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
 }

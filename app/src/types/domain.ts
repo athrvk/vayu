@@ -271,6 +271,16 @@ export interface RunResultTrace {
 	message?: string;
 	/** The design-mode writer's failure text (`store_result`, execution.cpp). */
 	error_message?: string;
+	/**
+	 * Per-test validation failures from a load run's `validate_scripts`
+	 * (`run_manager.cpp`), stored on the summary result row's trace. Each entry
+	 * is a `"<test name>: <assertion>"` line (or a `Script error:` / `Exception:`
+	 * line when the whole script threw). Written by the engine but rendered
+	 * nowhere before issue #111.
+	 */
+	failures?: string[];
+	totalFailed?: number;
+	totalPassed?: number;
 	headers?: Record<string, string>;
 	body?: string;
 	// Design-mode traces (`POST /request`) nest the exchange instead of
@@ -310,17 +320,60 @@ export interface RunResult {
 	trace?: RunResultTrace;
 }
 
+/**
+ * The compact per-row summary the paginated `GET /runs` list carries in place
+ * of the full {@link RunConfigSnapshot}. Exactly the six keys the history and
+ * dashboard list UIs read; each is omitted by the engine when absent from the
+ * stored snapshot. The full snapshot is still available on `GET /runs/:id`.
+ */
+export interface RunSummary {
+	url?: string;
+	method?: string;
+	mode?: string;
+	duration?: string;
+	concurrency?: number;
+	comment?: string;
+}
+
 export interface Run {
 	id: string;
 	type: "load" | "design";
 	status: "pending" | "running" | "completed" | "stopped" | "failed";
 	startTime: number; // Unix timestamp in ms
 	endTime: number;
+	/**
+	 * Present on list rows from the paginated `GET /runs`. The single-run
+	 * `GET /runs/:id` returns {@link configSnapshot} instead.
+	 */
+	summary?: RunSummary;
+	/** Full snapshot - present on `GET /runs/:id`, not on paginated list rows. */
 	configSnapshot?: RunConfigSnapshot;
 	requestId?: string | null;
 	environmentId?: string | null;
 	/** The exchange, present only for a design run once it has completed or failed. */
 	result?: RunResult;
+}
+
+/** The `{data, pagination}` envelope the paginated `GET /runs` returns. */
+export interface RunListResponse {
+	data: Run[];
+	pagination: {
+		total: number;
+		limit: number;
+		offset: number;
+		hasMore: boolean;
+		returned: number;
+	};
+}
+
+/** Server-side filters for the paginated `GET /runs` list. */
+export interface RunListParams {
+	limit?: number;
+	offset?: number;
+	type?: "load" | "design";
+	status?: Run["status"];
+	requestId?: string;
+	q?: string;
 }
 
 /** Load-test execution strategy. Single source of truth for the mode union. */

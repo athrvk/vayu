@@ -15,25 +15,179 @@
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/metrics_helper.hpp"
 
+#include <algorithm>
+#include <utility>
+
 namespace vayu::http::routes {
+
+namespace {
+
+// Copy src[key] to dst[key] when present and not null. Shared by the list-row
+// `summary` builder and the report route's `config_obj` (which adds a few
+// renamed keys on top) so the two extract config fields the same way.
+void add_if_present (nlohmann::json& dst, const nlohmann::json& src, const char* key) {
+    if (src.contains (key) && !src[key].is_null ())
+        dst[key] = src[key];
+}
+
+// The compact list-row summary: exactly the six keys the history/dashboard
+// list UIs read, each omitted when absent from the snapshot. A malformed
+// config_snapshot yields an empty object, never an error - the full snapshot
+// stays available on GET /runs/:id.
+nlohmann::json build_run_summary (const std::string& config_snapshot) {
+    nlohmann::json summary = nlohmann::json::object ();
+    try {
+        auto config = nlohmann::json::parse (config_snapshot);
+        if (config.is_object ()) {
+            for (const char* key :
+            { "url", "method", "mode", "duration", "concurrency", "comment" }) {
+                add_if_present (summary, config, key);
+            }
+        }
+    } catch (...) {
+        // Malformed snapshot -> empty summary (never a 500).
+    }
+    return summary;
+}
+
+// Serialize one run into a list row: identity + status + the compact summary,
+// deliberately *without* the full config_snapshot (that is what makes the list
+// cheap). Mirrors the camelCase keys vayu::json::serialize(Run) emits.
+nlohmann::json serialize_run_row (const vayu::db::Run& run) {
+    nlohmann::json row;
+    row["id"]        = run.id;
+    row["type"]      = vayu::to_string (run.type);
+    row["status"]    = vayu::to_string (run.status);
+    row["startTime"] = run.start_time;
+    row["endTime"]   = run.end_time;
+    row["requestId"] =
+    run.request_id.has_value () ? nlohmann::json (*run.request_id) : nlohmann::json (nullptr);
+    row["environmentId"] = run.environment_id.has_value () ?
+    nlohmann::json (*run.environment_id) :
+    nlohmann::json (nullptr);
+    row["summary"] = build_run_summary (run.config_snapshot);
+    return row;
+}
+
+} // namespace
+
+/**
+ * Testable core of the paginated GET /runs list, returning {http_status,
+ * json_body}. Always 200 - a list of zero rows is a valid list, not a 404.
+ *
+ * `limit`/`offset` arrive already parsed and clamped by the caller (limit
+ * default 50, capped at 500; offset floored at 0); `filter` holds the already
+ * validated type/status/requestId/q constraints. Rows carry the compact
+ * `summary` (six keys) instead of the full `config_snapshot`, wrapped in the
+ * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86).
+ *
+ * Extracted so the envelope shape, clamping and filtering are covered without
+ * an in-process HTTP server - see runs_route_test.cpp. Exceptions propagate to
+ * the route's try/catch (500).
+ */
+std::pair<int, nlohmann::json> get_runs_response (vayu::db::Database& db,
+const vayu::db::RunFilter& filter, int64_t limit, int64_t offset) {
+    const int64_t total = db.count_runs (filter);
+    auto runs           = db.get_runs_paginated (filter, limit, offset);
+
+    nlohmann::json data = nlohmann::json::array ();
+    for (const auto& run : runs) {
+        data.push_back (serialize_run_row (run));
+    }
+
+    nlohmann::json response;
+    response["data"]                   = std::move (data);
+    response["pagination"]["total"]    = total;
+    response["pagination"]["limit"]    = limit;
+    response["pagination"]["offset"]   = offset;
+    response["pagination"]["hasMore"]  = (offset + static_cast<int64_t> (runs.size ())) < total;
+    response["pagination"]["returned"] = runs.size ();
+    return { 200, response };
+}
 
 void register_run_routes (RouteContext& ctx) {
     /**
-     * GET /runs
-     * Retrieves all test runs from the database.
-     * Returns both "design" mode single requests and "load" mode test runs.
+     * GET /runs?limit=&offset=&type=&status=&requestId=&q=
+     * Lists test runs (both "design" single requests and "load" tests), newest
+     * first. Rows carry a compact `summary` (url/method/mode/duration/
+     * concurrency/comment) instead of the full config_snapshot, wrapped in the
+     * `{data, pagination}` envelope.
+     *
+     * Query params:
+     * - limit: page size, default 50, capped at 500
+     * - offset: rows to skip, floored at 0
+     * - type: "design" | "load" (invalid -> ignored)
+     * - status: RunStatus string (invalid -> ignored)
+     * - requestId: exact match
+     * - q: case-insensitive substring over the stored config_snapshot text
+     *
+     * Back-compat (removed next minor): a request with *no* query params at all
+     * returns the legacy bare array of full-configSnapshot rows unchanged, so
+     * external scripts keep working. Any recognised param opts into the envelope.
      */
-    ctx.server.Get ("/runs", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_info ("GET /runs - Fetching all runs");
-        try {
-            auto runs                = ctx.db.get_all_runs ();
-            nlohmann::json json_runs = nlohmann::json::array ();
-            for (const auto& run : runs) {
-                json_runs.push_back (vayu::json::serialize (run));
+    ctx.server.Get ("/runs", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        const bool wants_envelope = req.has_param ("limit") || req.has_param ("offset") ||
+        req.has_param ("type") || req.has_param ("status") ||
+        req.has_param ("requestId") || req.has_param ("q");
+
+        if (!wants_envelope) {
+            // Legacy no-param path: today's bare array, byte-shape-identical.
+            vayu::utils::log_info ("GET /runs - Fetching all runs (legacy)");
+            try {
+                auto runs                = ctx.db.get_all_runs ();
+                nlohmann::json json_runs = nlohmann::json::array ();
+                for (const auto& run : runs) {
+                    json_runs.push_back (vayu::json::serialize (run));
+                }
+                vayu::utils::log_debug (
+                "GET /runs - Returning " + std::to_string (runs.size ()) + " runs");
+                res.set_content (json_runs.dump (), "application/json");
+            } catch (const std::exception& e) {
+                vayu::utils::log_error ("GET /runs - Error: " + std::string (e.what ()));
+                send_error (res, 500, e.what ());
             }
-            vayu::utils::log_debug (
-            "GET /runs - Returning " + std::to_string (runs.size ()) + " runs");
-            res.set_content (json_runs.dump (), "application/json");
+            return;
+        }
+
+        // Parse + clamp pagination; validate filters (invalid enum -> ignored).
+        int64_t limit = 50;
+        if (req.has_param ("limit")) {
+            try {
+                limit = std::stoll (req.get_param_value ("limit"));
+            } catch (...) {
+                limit = 50;
+            }
+            if (limit <= 0)
+                limit = 50;
+            limit = std::min<int64_t> (limit, 500); // Cap page size.
+        }
+        int64_t offset = 0;
+        if (req.has_param ("offset")) {
+            try {
+                offset = std::stoll (req.get_param_value ("offset"));
+            } catch (...) {
+                offset = 0;
+            }
+            if (offset < 0)
+                offset = 0;
+        }
+
+        vayu::db::RunFilter filter;
+        if (req.has_param ("type"))
+            filter.type = vayu::parse_run_type (req.get_param_value ("type"));
+        if (req.has_param ("status"))
+            filter.status = vayu::parse_run_status (req.get_param_value ("status"));
+        if (req.has_param ("requestId"))
+            filter.request_id = req.get_param_value ("requestId");
+        if (req.has_param ("q"))
+            filter.q = req.get_param_value ("q");
+
+        vayu::utils::log_info ("GET /runs - Listing runs (limit=" +
+        std::to_string (limit) + ", offset=" + std::to_string (offset) + ")");
+        try {
+            auto [status, body] = get_runs_response (ctx.db, filter, limit, offset);
+            res.status          = status;
+            res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error ("GET /runs - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
@@ -351,24 +505,16 @@ void register_run_routes (RouteContext& ctx) {
                 }
 
                 nlohmann::json config_obj;
-                if (config.contains ("mode"))
-                    config_obj["mode"] = config["mode"];
-                if (config.contains ("duration"))
-                    config_obj["duration"] = config["duration"];
+                // Straight copies share the list-row summary's helper; `rps`
+                // is the one rename (-> targetRps), so it stays inline.
+                for (const char* key : { "mode", "duration", "concurrency",
+                     "startConcurrency", "rampUpDuration", "timeout", "comment" }) {
+                    add_if_present (config_obj, config, key);
+                }
                 if (config.contains ("rps"))
                     config_obj["targetRps"] = config["rps"];
                 if (config.contains ("targetRps"))
                     config_obj["targetRps"] = config["targetRps"];
-                if (config.contains ("concurrency"))
-                    config_obj["concurrency"] = config["concurrency"];
-                if (config.contains ("startConcurrency"))
-                    config_obj["startConcurrency"] = config["startConcurrency"];
-                if (config.contains ("rampUpDuration"))
-                    config_obj["rampUpDuration"] = config["rampUpDuration"];
-                if (config.contains ("timeout"))
-                    config_obj["timeout"] = config["timeout"];
-                if (config.contains ("comment") && !config["comment"].is_null ())
-                    config_obj["comment"] = config["comment"];
 
                 if (!config_obj.empty ()) {
                     metadata["configuration"] = config_obj;

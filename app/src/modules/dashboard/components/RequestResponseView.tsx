@@ -22,7 +22,7 @@ import {
 	ScrollArea,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Clock } from "lucide-react";
+import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Clock, XCircle } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
@@ -428,6 +428,52 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																	</span>
 																</div>
 															)}
+
+															{/* Per-test validation failures
+															    (`validate_scripts` in
+															    run_manager.cpp). Before #111 the
+															    summary row showed only the opaque
+															    `ERR` chip and a count - never which
+															    assertions failed or why. Modelled on
+															    the request-builder Tests tab. */}
+															{result.trace.failures &&
+																result.trace.failures.length >
+																	0 && (
+																	<div className="space-y-1">
+																		<p className="text-xs font-medium text-muted-foreground">
+																			Failed Tests
+																			{result.trace
+																				.totalFailed !==
+																				undefined && (
+																				<span className="ml-1">
+																					(
+																					{
+																						result.trace
+																							.totalFailed
+																					}
+																					)
+																				</span>
+																			)}
+																		</p>
+																		<div className="space-y-1.5">
+																			{result.trace.failures.map(
+																				(failure, i) => (
+																					<div
+																						key={i}
+																						className="flex items-start gap-2 bg-status-error/10 border border-status-error/20 rounded-md p-2"
+																					>
+																						<XCircle className="w-4 h-4 text-status-error-text mt-0.5 shrink-0" />
+																						<pre className="text-xs text-status-error-text font-mono whitespace-pre-wrap break-words flex-1 min-w-0">
+																							{
+																								failure
+																							}
+																						</pre>
+																					</div>
+																				)
+																			)}
+																		</div>
+																	</div>
+																)}
 
 															{/* Timing Breakdown - camelCase phase fields from the
 															    load-test trace, formatted through the shared

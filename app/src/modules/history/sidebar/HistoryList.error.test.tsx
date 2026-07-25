@@ -33,19 +33,45 @@ import { TooltipProvider } from "@/components/ui";
 import HistoryList from "./HistoryList";
 
 const refetch = vi.fn();
-const queryState = {
-	runs: {
-		data: [] as unknown[],
+
+// Wrap rows in the infinite-query envelope shape HistoryList flattens.
+function infinite(rows: unknown[], total = rows.length) {
+	return {
+		pages: [
+			{
+				data: rows,
+				pagination: { total, limit: 50, offset: 0, hasMore: false, returned: rows.length },
+			},
+		],
+		pageParams: [0],
+	};
+}
+
+function state(over: Record<string, unknown> = {}) {
+	return {
+		data: infinite([]),
 		isLoading: false,
 		isError: false,
 		error: null as Error | null,
 		refetch,
-	},
+		fetchNextPage: vi.fn(),
+		hasNextPage: false,
+		isFetchingNextPage: false,
+		...over,
+	};
+}
+
+const queryState = {
+	runs: state() as ReturnType<typeof state>,
 };
 
 vi.mock("@/queries", () => ({
 	useRunsQuery: () => queryState.runs,
 	useDeleteRunMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	flattenRunPages: (d: { pages?: Array<{ data: unknown[] }> } | undefined) =>
+		d?.pages?.flatMap((p) => p.data) ?? [],
+	runsTotal: (d: { pages?: Array<{ pagination: { total: number } }> } | undefined) =>
+		d?.pages?.[0]?.pagination.total ?? 0,
 }));
 
 // Stubbed so a fixture run only needs the fields `filterRuns` reads. RunItem's
@@ -54,13 +80,7 @@ vi.mock("./RunItem", () => ({
 	default: ({ run }: { run: { id: string } }) => <div>run-{run.id}</div>,
 }));
 
-const failed = {
-	data: [] as unknown[],
-	isLoading: false,
-	isError: true,
-	error: new Error("Failed to fetch"),
-	refetch,
-};
+const failed = state({ isError: true, error: new Error("Failed to fetch") });
 
 function renderList() {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -75,7 +95,7 @@ function renderList() {
 
 beforeEach(() => {
 	refetch.mockReset();
-	queryState.runs = { data: [], isLoading: false, isError: false, error: null, refetch };
+	queryState.runs = state();
 });
 
 describe("HistoryList when the runs query fails", () => {
@@ -102,13 +122,11 @@ describe("HistoryList when the runs query fails", () => {
 	it("keeps a working list when a background refetch fails", () => {
 		// TanStack keeps the last good data through a failed refetch. Replacing
 		// a populated list with an error pane takes away more than it says.
-		queryState.runs = {
-			data: [{ id: "r1", type: "load", status: "completed", startTime: 1 }],
-			isLoading: false,
+		queryState.runs = state({
+			data: infinite([{ id: "r1", type: "load", status: "completed", startTime: 1 }]),
 			isError: true,
 			error: new Error("Failed to fetch"),
-			refetch,
-		};
+		});
 		renderList();
 
 		expect(screen.getByText("run-r1")).toBeInTheDocument();

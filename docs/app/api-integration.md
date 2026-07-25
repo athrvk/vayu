@@ -149,8 +149,12 @@ apiService.startLoadTest(data): Promise<StartLoadTestResponse>
 #### Run Management
 
 ```typescript
-apiService.listRuns(): Promise<Run[]>
-apiService.getRun(id): Promise<Run>
+// Paginated, filtered history (newest first). Rows carry a compact `summary`
+// (url/method/mode/duration/concurrency/comment), not the full configSnapshot.
+apiService.listRuns(params?: RunListParams): Promise<RunListResponse>
+// Every page as a flat list (Settings' count + clear).
+apiService.listAllRuns(params?): Promise<Run[]>
+apiService.getRun(id): Promise<Run>            // full configSnapshot
 apiService.getRunReport(id): Promise<RunReport>
 apiService.stopRun(id): Promise<StopRunResponse>
 apiService.deleteRun(id): Promise<void>

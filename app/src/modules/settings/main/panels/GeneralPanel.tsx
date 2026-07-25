@@ -29,7 +29,7 @@ import {
 import { modKey } from "@/lib/platform";
 import { useClientSettingsStore } from "@/stores";
 import { useToastStore } from "@/stores";
-import { useRunsQuery, useInvalidateRuns } from "@/queries/runs";
+import { useAllRunsQuery, useInvalidateRuns } from "@/queries/runs";
 import { apiService } from "@/services";
 import { AUTO_SAVE_DELAY_OPTIONS } from "@/constants/client-settings";
 import { OptionButtons, ToggleRow } from "./SettingControls";
@@ -48,7 +48,9 @@ export default function GeneralPanel() {
 	const setAutoSave = useClientSettingsStore((s) => s.setAutoSave);
 	const resetAll = useClientSettingsStore((s) => s.resetAll);
 
-	const { data: runs = [] } = useRunsQuery();
+	// The whole history (all pages) - this panel counts and clears every run,
+	// not just a polled page.
+	const { data: runs = [] } = useAllRunsQuery();
 	const invalidateRuns = useInvalidateRuns();
 	const showToast = useToastStore((s) => s.showToast);
 	const [clearing, setClearing] = useState(false);
