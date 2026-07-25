@@ -39,4 +39,32 @@ export const TIMING = {
 	REPORT_INITIAL_DELAY_MS: 3000,
 	REPORT_RETRY_DELAY_MS: 1000,
 	REPORT_MAX_ATTEMPTS: 5,
+
+	/**
+	 * Toast auto-dismiss, per variant, handed to the Radix primitive.
+	 *
+	 * Per variant rather than one constant: a confirmation is read at a glance,
+	 * while a failure has to be read and often names a cause from the engine
+	 * ("database is locked") that takes longer to take in. These are floors, not
+	 * limits - the primitive pauses them on hover, focus and window blur.
+	 */
+	TOAST_DURATION_MS: {
+		info: 4000,
+		success: 4000,
+		warning: 6000,
+		error: 10000,
+	},
+
+	/**
+	 * How long a dismissed toast is kept before it leaves the queue.
+	 *
+	 * Must stay in step with the exit animation on `ui/toast.tsx`
+	 * (`duration-200`). It exists because deleting the entry the moment the toast
+	 * closes unmounts the element in the same update that sets
+	 * `data-state="closed"`, and Radix cannot animate a node whose parent has
+	 * already removed it - the exit gets no frame and only the enter animation
+	 * ships. Shorter than the animation and the node vanishes mid-flight; longer
+	 * and a dismissed toast lingers doing nothing.
+	 */
+	TOAST_EXIT_MS: 200,
 } as const;
