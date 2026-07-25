@@ -60,7 +60,15 @@ export {
 	DropdownMenuRadioGroup,
 } from "./dropdown-menu";
 
-export { Tabs, TabsList, TabsTrigger, TabsContent } from "./tabs";
+export {
+	Tabs,
+	TabsList,
+	TabsTrigger,
+	TabsContent,
+	TabLabel,
+	TabCount,
+	TabErrorDot,
+} from "./tabs";
 
 export {
 	ToastProvider,
