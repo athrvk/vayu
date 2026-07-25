@@ -24,6 +24,7 @@ Special                                        priority:critical  🔴  Blocks o
   help wanted        🟪  Needs expertise
   severity:blocking  🔴  Breaking change
   dependencies       ⚪  Dependency updates
+  release            🟡  Version-bump PR (auto)
 ```
 
 ## Label Categories
@@ -118,6 +119,7 @@ These labels indicate **urgency**. Apply manually based on impact and timeline.
 | `build` | Gray (#95A5A6) | Build-related | Used manually; path-based label is `component:build` |
 | `ci` | Gray (#95A5A6) | CI/CD related | Used manually; path-based label is `component:ci` |
 | `correctness` | Red (#E74C3C) | Correctness issue | Logic error or incorrect behavior |
+| `release` | Yellow (#F1C40F) | Version-bump / release PR | Auto-applied whenever `VERSION` changes |
 
 ## Labeling Guidelines
 
@@ -150,6 +152,7 @@ The `.github/labeler.yml` file defines path-based rules that automatically apply
 - **`component:database`** → `engine/src/db/**`, `engine/include/vayu/db/**`, `engine/tests/db_*`
 - **`component:ci`** → `.github/**`
 - **`component:build`** → `build.py`, `VERSION`, CMake files, vcpkg.json, `app/package.json`, `scripts/**`, etc.
+- **`release`** → `VERSION` (also earns `component:build`, since `VERSION` matches both rules)
 - **`documentation`** → `docs/**`, `**/*.md`
 - **`area:http`** → `engine/src/http/**`
 - **`area:auth`** → any `engine/**` file with `auth` or `oauth` in its name
@@ -209,26 +212,13 @@ Status and priority labels use semantic colors for workflow clarity:
 
 ## Migration from Old Labels
 
-This labeling system replaced a simpler, flat set of labels. The flat labels
-fell into two groups, and each was handled differently:
-
-- **`app`, `engine`, `database`** were pure path classifiers with a direct
-  1:1 replacement (`component:app`, `component:engine`, `component:database`)
-  and no other purpose, so they were **deleted outright** once the new labels
-  existed. Any issue or PR that had one of these lost that label; it was not
-  carried forward or re-applied automatically. `bug`, `enhancement`, and
-  `test` were deleted at the same time for a different reason - they were
-  undocumented stragglers that predated this scheme entirely, duplicated
-  `type:bug`/`type:enhancement`/`type:test`, and were never referenced
-  anywhere in this guide.
-- **`ci`, `build`** were **kept**, restyled to the same gray as their
-  `component:*` counterparts, and repurposed as manual-only labels for
-  ci/build-related discussion that isn't tied to a specific changed path (see
-  the Special Labels table above) - distinct from `component:ci` /
-  `component:build`, which the labeler applies automatically by path.
-
-New work uses `component:*`, `area:*`, and `type:*` exclusively; none of the
-six deleted labels exist in the repository anymore.
+This system replaced a flat label set. `app`, `engine`, `database`, `bug`,
+`enhancement`, and `test` were deleted outright - not carried forward - in
+favor of `component:app`/`component:engine`/`component:database` and
+`type:*`. If an old issue or PR you're looking at references one of those six
+names, that's why it no longer resolves to a label. `ci` and `build` were the
+exception: kept and restyled as manual-only companions to `component:ci` /
+`component:build` (see Special Labels above), not replaced.
 
 ## Examples
 

@@ -56,6 +56,13 @@ component:build:
           - 'app/pnpm-lock.yaml'
           - 'scripts/**'
 
+# VERSION only changes as part of a version-bump commit (see Releasing in
+# CLAUDE.md), so this is a reliable marker for a release PR - distinct from
+# component:build, which VERSION also matches and keeps earning.
+release:
+  - changed-files:
+      - any-glob-to-any-file: 'VERSION'
+
 documentation:
   - changed-files:
       - any-glob-to-any-file:
