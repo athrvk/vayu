@@ -804,8 +804,22 @@ hides icons from a scale audit and lets off-grid values (15px) creep in. Use
 ## Geometry
 
 ```css
---radius: 0.375rem;   /* 6px - base border radius (default) */
+--radius: 0.375rem;      /* 6px - base border radius (default) */
+--dock-height: 2rem;     /* 32px - footer status strip */
 ```
+
+**`--dock-height` exists because a `fixed` element has to know it.** The Dock is
+the last row of the shell column, so the layout keeps everything else clear of
+it automatically. The toast viewport is `position: fixed` and anchors to the
+window instead, so it has to subtract the strip's height by hand - and with a
+plain `bottom-4` it did not, landing 16px off the window floor, inside the
+Dock's 32px band and covering its lower half, "Connected" and the version string
+included. Measured in the app: viewport bottom 704px against a Dock top of 688px.
+
+Both sides now go through the token - `h-[var(--dock-height)]` on the Dock,
+`bottom-[calc(var(--dock-height)+1rem)]` on the viewport - so the height cannot
+change in one place only. jsdom does no layout and cannot measure the overlap, so
+`toast-position.test.tsx` guards the *reference* on each side instead.
 
 | Class | Value | Follows the setting? |
 |-------|-------|----------------------|
@@ -1318,6 +1332,73 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
   status === "pending"   && "bg-muted-foreground"
 )} />
 ```
+
+### Toasts
+
+Transient report of an action the user just took. The queue is
+`stores/toast-store.ts`; the surface is the shadcn/Radix primitive in
+`components/ui/toast.tsx`, rendered once by `components/shared/Toaster.tsx`.
+
+**The icon carries the variant; the rail reinforces it.** Never colour alone.
+The version this replaced signalled variant with a 40%-alpha border and nothing
+else: `border-destructive/40` measured **1.16:1** against the toast surface in
+dark and 2.01:1 in light, while success's equivalent measured 2.21 / 1.42 - so
+the two were not reliably tellable apart in either theme, and error was
+effectively invisible in dark. All four variants now come from one token family:
+
+| Variant | Icon | Rail (a rule) | Glyph (a foreground) | Duration |
+|---------|------|---------------|----------------------|----------|
+| `info` | `Info` | `border-l-border` | `text-muted-foreground` | 4s |
+| `success` | `CheckCircle2` | `border-l-status-success` | `text-status-success-text` | 4s |
+| `warning` | `AlertTriangle` | `border-l-status-warning` | `text-status-warning-text` | 6s |
+| `error` | `XCircle` | `border-l-status-error` | `text-status-error-text` | 10s |
+
+Measured against the popover surface, light / dark:
+
+| Variant | Rail | Icon |
+|---------|------|------|
+| `info` | 1.30 / 1.00 | 5.61 / 6.77 |
+| `success` | 2.30 / 7.53 | 5.71 / 8.81 |
+| `warning` | 4.00 / 4.34 | 5.46 / 9.81 |
+| `error` | 3.78 / 4.59 | 5.88 / 5.85 |
+
+Two of those rows look wrong and are not. **`info` is the neutral variant and
+takes no accent rail on purpose** - `border-l-border` is invisible against the
+toast's own fill, and absence of a rail is itself the signal. And **success's
+rail on white is 2.30**, under the 3:1 a graphic needs when it is the *sole*
+carrier of meaning. It is not the sole carrier: every icon clears 5.4:1 in both
+themes. That is the whole reason the icon exists.
+
+The rail and the glyph take **different tiers of the same family on purpose**: a
+rail is a rule and takes the bare `--status-*`, a glyph is painted with a `text-`
+utility and takes `--status-*-text`, the tier tuned to be read against a
+background. `status-color-tokens.test.ts` enforces the second half repo-wide.
+Neither ever takes `--status-*-fill`, which is only correct under a white label.
+
+The shell keeps `bg-popover` with a `border-border` edge. That edge faces the
+canvas, which is the case `border-border` is for. It is deliberately **not**
+`border-rule`: no `surface-popover` class is declared, and `border-rule` under no
+declared surface falls back to the invisible default.
+
+**The stack sits above the Dock, not on it** -
+`bottom-[calc(var(--dock-height)+1rem)]`, keeping the same 1rem of air it has on
+its right edge. See **Geometry** for why that is a token and not a literal. It
+also clears dialogs at `z-50` on `z-[100]`, which is hit-tested rather than
+assumed, since a dialog portals to `body` while the viewport lives in `#root`.
+
+Durations are floors, not limits - the primitive pauses them on hover, focus and
+window blur. A failure gets longer than a confirmation because it often carries a
+cause from the engine ("database is locked") that takes longer to take in.
+
+**Queue policy** lives in the store, because the primitive has no opinion on it:
+an identical message and variant already on screen is collapsed rather than
+stacked (the OAuth2 guard retries; an SSE stream can fail on every reconnect),
+and past four the oldest is dropped so a burst cannot run off-screen where it is
+unreachable and undismissable.
+
+**Everything is polite, including errors** (`type="background"`). A toast
+dismisses itself on a timer and always reports something the user just asked
+for, so interrupting what they are reading is the wrong trade.
 
 ### Destructive Actions
 
