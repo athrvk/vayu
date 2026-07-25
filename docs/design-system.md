@@ -804,8 +804,22 @@ hides icons from a scale audit and lets off-grid values (15px) creep in. Use
 ## Geometry
 
 ```css
---radius: 0.375rem;   /* 6px - base border radius (default) */
+--radius: 0.375rem;      /* 6px - base border radius (default) */
+--dock-height: 2rem;     /* 32px - footer status strip */
 ```
+
+**`--dock-height` exists because a `fixed` element has to know it.** The Dock is
+the last row of the shell column, so the layout keeps everything else clear of
+it automatically. The toast viewport is `position: fixed` and anchors to the
+window instead, so it has to subtract the strip's height by hand - and with a
+plain `bottom-4` it did not, landing 16px off the window floor, inside the
+Dock's 32px band and covering its lower half, "Connected" and the version string
+included. Measured in the app: viewport bottom 704px against a Dock top of 688px.
+
+Both sides now go through the token - `h-[var(--dock-height)]` on the Dock,
+`bottom-[calc(var(--dock-height)+1rem)]` on the viewport - so the height cannot
+change in one place only. jsdom does no layout and cannot measure the overlap, so
+`toast-position.test.tsx` guards the *reference* on each side instead.
 
 | Class | Value | Follows the setting? |
 |-------|-------|----------------------|
@@ -1365,6 +1379,12 @@ The shell keeps `bg-popover` with a `border-border` edge. That edge faces the
 canvas, which is the case `border-border` is for. It is deliberately **not**
 `border-rule`: no `surface-popover` class is declared, and `border-rule` under no
 declared surface falls back to the invisible default.
+
+**The stack sits above the Dock, not on it** -
+`bottom-[calc(var(--dock-height)+1rem)]`, keeping the same 1rem of air it has on
+its right edge. See **Geometry** for why that is a token and not a literal. It
+also clears dialogs at `z-50` on `z-[100]`, which is hit-tested rather than
+assumed, since a dialog portals to `body` while the viewport lives in `#root`.
 
 Durations are floors, not limits - the primitive pauses them on hover, focus and
 window blur. A failure gets longer than a confirmation because it often carries a

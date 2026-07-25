@@ -126,7 +126,13 @@ export function Dock() {
 
 	return (
 		<TooltipProvider>
-			<div className="flex items-center h-8 px-2 gap-2 border-t border-border bg-panel shrink-0">
+			{/*
+			 * Height comes from --dock-height, not a bare `h-8`, because the toast
+			 * viewport is `fixed` and has to offset itself above this strip - see
+			 * `ui/toast.tsx`. Same value (2rem); the token is what keeps the two
+			 * from drifting apart.
+			 */}
+			<div className="flex items-center h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0">
 				{/* Left - drawer switchers.
 				    <nav>: these four choose what the sidebar shows, which is the
 				    app's primary navigation. Not role="toolbar" - that promises
