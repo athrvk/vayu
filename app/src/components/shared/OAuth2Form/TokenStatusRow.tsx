@@ -18,6 +18,7 @@ import {
 import { queryKeys } from "@/queries/keys";
 import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
 import { runInteractiveAuthorization } from "@/services/oauth/authorize";
+import { OAUTH2_FIELD_LABELS, humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { useToastStore } from "@/stores";
 import type { OAuth2Config } from "@/types";
 
@@ -29,6 +30,11 @@ interface TokenStatusRowProps {
 function maskToken(token: string): string {
 	if (token.length <= 10) return "••••";
 	return `${token.slice(0, 4)}…${token.slice(-4)}`;
+}
+
+function listPhrase(items: string[]): string {
+	if (items.length <= 1) return items[0] ?? "";
+	return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 function humanizeExpiry(expiresAt: number | null): string {
@@ -68,7 +74,25 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 	const interactive = resolvedConfig.grantType === "authorization_code";
 	const busy = fetchMutation.isPending || clearMutation.isPending || authorizing;
 
+	// What the engine needs before a token request can go anywhere: the authorize
+	// start rejects without authorizationUrl + clientId, the token endpoint without
+	// accessTokenUrl + clientId (clientId for every grant, not just the ones RFC
+	// 6749 requires it for). Presence only - the engine owns URL validity, and
+	// duplicating that rule here would be a second copy of it to keep in step;
+	// its 400 arrives relabelled instead (humanizeOAuth2Error).
+	const missingFields = useMemo(() => {
+		const missing: string[] = [];
+		if (interactive && !resolvedConfig.authorizationUrl) {
+			missing.push(OAUTH2_FIELD_LABELS.authorizationUrl);
+		}
+		if (!resolvedConfig.accessTokenUrl) missing.push(OAUTH2_FIELD_LABELS.accessTokenUrl);
+		if (!resolvedConfig.clientId) missing.push(OAUTH2_FIELD_LABELS.clientId);
+		return missing;
+	}, [interactive, resolvedConfig]);
+	const incomplete = missingFields.length > 0;
+
 	const handleGetToken = async () => {
+		if (incomplete) return;
 		if (interactive) {
 			// Engine-hosted loopback + PKCE; opens the system browser (or the
 			// embedded window when the config opts in).
@@ -80,7 +104,12 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 				}
 				showToast("Authorized", "success");
 			} catch (err) {
-				showToast(err instanceof Error ? err.message : "Authorization failed", "error");
+				showToast(
+					err instanceof Error
+						? humanizeOAuth2Error(err.message)
+						: "Authorization failed",
+					"error"
+				);
 			} finally {
 				setAuthorizing(false);
 			}
@@ -90,7 +119,10 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 			{ config: resolvedConfig, force: true },
 			{
 				onError: (err) => {
-					const message = err instanceof ApiError ? err.message : "Failed to get token";
+					const message =
+						err instanceof ApiError
+							? humanizeOAuth2Error(err.message)
+							: "Failed to get token";
 					showToast(message, "error");
 				},
 			}
@@ -101,14 +133,6 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 		if (!cacheKey) return;
 		clearMutation.mutate(cacheKey);
 	};
-
-	if (!cacheKey) {
-		return (
-			<p className="text-xs text-muted-foreground">
-				Enter the token URL and client ID to fetch a token.
-			</p>
-		);
-	}
 
 	const status = statusQuery.data;
 	const token = status?.found ? status.token : undefined;
@@ -135,6 +159,10 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 							{" · "}
 							{expired ? "expired" : humanizeExpiry(token.expiresAt)}
 						</span>
+					) : incomplete ? (
+						<span className="text-xs text-muted-foreground">
+							Enter the {listPhrase(missingFields)} to fetch a token
+						</span>
 					) : (
 						<span className="text-xs text-muted-foreground">No token cached</span>
 					)}
@@ -157,7 +185,12 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 							}
 						/>
 					)}
-					<Button size="sm" variant="outline" onClick={handleGetToken} disabled={busy}>
+					<Button
+						size="sm"
+						variant="outline"
+						onClick={handleGetToken}
+						disabled={busy || incomplete}
+					>
 						{fetchMutation.isPending || authorizing ? (
 							<Loader2 className="w-3.5 h-3.5 animate-spin" />
 						) : token && !expired ? (
@@ -180,6 +213,19 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 					)}
 				</div>
 			</div>
+
+			{/* A cached token survives edits that break the config - the cache key
+			    omits grantType, so switching Client Credentials → Authorization Code
+			    keeps the token on screen while the empty Authorization URL disables
+			    the action. The summary slot is taken by the token, so the reason goes
+			    below rather than nowhere. */}
+			{incomplete && token && (
+				<div className="border-t border-border px-3 py-2">
+					<p className="text-xs text-muted-foreground">
+						Enter the {listPhrase(missingFields)} to fetch a token
+					</p>
+				</div>
+			)}
 
 			{/* Full token disclosure - expands below, doesn't affect the row above */}
 			{revealed && token && (
