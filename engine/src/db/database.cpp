@@ -645,6 +645,40 @@ void Database::delete_request (const std::string& id) {
 }
 
 // ============================================================================
+// Bulk import - collections + requests + environments in one transaction
+// ============================================================================
+
+// A payload that fails to write leaves nothing behind (issue #96). Same shape as
+// add_metrics_batch: retry_on_busy holds the recursive mutex while the lambda
+// runs, and the lambda only touches the same storage handle.
+void Database::import_apply (const std::vector<Collection>& collections,
+const std::vector<Request>& requests,
+const std::vector<Environment>& environments) {
+    if (collections.empty () && requests.empty () && environments.empty ()) {
+        return;
+    }
+
+    vayu::utils::log_debug ("Applying import: " + std::to_string (collections.size ()) +
+    " collections, " + std::to_string (requests.size ()) + " requests, " +
+    std::to_string (environments.size ()) + " environments");
+
+    retry_on_busy ("apply import", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            for (const auto& c : collections) {
+                impl_->storage.replace (c);
+            }
+            for (const auto& r : requests) {
+                impl_->storage.replace (r);
+            }
+            for (const auto& e : environments) {
+                impl_->storage.replace (e);
+            }
+            return true; // Commit
+        });
+    });
+}
+
+// ============================================================================
 // Environments - Named variable sets (dev, staging, prod)
 // ============================================================================
 

@@ -130,8 +130,11 @@ apply_key_value_field (const nlohmann::json& json, const char* key, std::string&
  *
  * `collectionId`, `name`, `method` and `url` have no default, so each is
  * required on create and rejects an explicit null on either verb.
+ *
+ * Declared in routes.hpp because `POST /import/apply` applies the same fields to
+ * every request in a bulk payload (issue #96).
  */
-static std::optional<std::pair<int, nlohmann::json>>
+std::optional<std::pair<int, nlohmann::json>>
 apply_request_fields (vayu::db::Request& r, const nlohmann::json& json, bool is_create) {
     if (auto err = apply_required_string_field (
         json, "collectionId", r.collection_id, is_create)) {

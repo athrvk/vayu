@@ -33,8 +33,11 @@ namespace vayu::http::routes {
  *
  * `isActive` used to be honoured only on create, which left an update unable to
  * change it; it now follows the same rule on both verbs.
+ *
+ * Declared in routes.hpp because `POST /import/apply` applies the same fields to
+ * every environment in a bulk payload (issue #96).
  */
-static std::optional<std::pair<int, nlohmann::json>>
+std::optional<std::pair<int, nlohmann::json>>
 apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, bool is_create) {
     if (auto err = apply_required_string_field (json, "name", e.name, is_create)) {
         return err;

@@ -24,11 +24,11 @@ are detected, parsed into Vayu's internal draft model, and persisted.
 A raw import string flows through three stages:
 
 ```
-raw string ──▶ parseImport() ──▶ assignIds() ──▶ ImportOrchestrator.run()
-              (factory.ts)       (assign-ids.ts)   (orchestrator.ts)
-                  │                   │                  │
-            detect + parse      stamp col_/req_/    create tree (+envs),
-            → ImportResult      env_ UUIDs in-place rollback on failure
+raw string ──▶ parseImport() ──▶ assignTempIds() ──▶ ImportOrchestrator.run()
+              (factory.ts)       (assign-ids.ts)      (orchestrator.ts)
+                  │                   │                     │
+            detect + parse      stamp opaque temp     flatten to one
+            → ImportResult      ids (c1/r1/e1)        POST /import/apply
 ```
 
 ### 1. Detect + parse - `factory.ts`
@@ -46,27 +46,43 @@ The factory parses the raw text **once** and hands every detector the already-pa
 object (plus the raw string). This is a conscious divergence from the PRD's
 `detect(raw: string)` - detectors receive `(parsed, raw)`.
 
-### 2. Assign IDs - `assign-ids.ts`
+### 2. Assign temp IDs - `assign-ids.ts`
 
-`assignIds(result)` walks the draft tree and stamps every collection, request, and
-environment with a client-side UUID (`col_…` / `req_…` / `env_…`) **in place**, before any
-create call. This removes the engine's `now_ms()` id-collision risk and lets parent
-references resolve without server round-trips. The orchestrator throws if it sees an
-unassigned draft.
+`assignTempIds(result)` walks the draft tree and stamps every collection, request, and
+environment with a **temp id** (`c1` / `r1` / `e1` counters) **in place**, before the
+import is sent. These are opaque per-call strings, not record ids: they exist so one item
+in the payload can reference another (`parentTempId`, `collectionTempId`) while no real ids
+exist yet, and they are never stored. The orchestrator throws if it sees an unstamped
+draft.
+
+This used to mint real `col_…` / `req_…` / `env_…` UUIDs, because the orchestrator created
+items one POST at a time and had to wire the tree itself - which is the only reason
+`POST /<resource>` ever accepted a client-supplied `id`.
 
 ### 3. Persist - `orchestrator.ts`
 
 `ImportOrchestrator` takes an injected `ImportApi` (easy to fake in tests) and exposes
-`run(result, opts)`:
+`run(result, opts)`, which flattens the draft tree into **one**
+[`POST /import/apply`](../../engine/api-reference.md#post-importapply) call:
 
-- Creates each root collection, then `createTree` recurses: **collection → its requests →
-  child collections**, passing `order` indices. Each request is created with
-  `bodyType = body.mode` (the engine never derives this).
-- Environments are created **only if `opts.importEnvironments`** is true.
-- On any error mid-run it calls **`rollback()`** - best-effort deletion of every
-  already-created root collection (the engine's `delete_collection` cascades to descendant
-  collections + requests) and every created environment - then
-  rethrows the original error. Rollback completeness depends on that engine cascade.
+- Collections are flattened depth-first - **collection → its requests → child
+  collections** - carrying `order` indices and `parentTempId` (`null` for a root);
+  each request carries `collectionTempId` and `bodyType = body.mode` (the engine never
+  derives this).
+- Environments are included **only if `opts.importEnvironments`** is true.
+- The engine generates every real id and returns an `idMap` keyed by temp id. The
+  orchestrator checks that map covers every item it sent and throws
+  `Import incomplete: …` otherwise - a silently skipped item would otherwise read as a
+  clean import. Nothing else consumes the real ids: `useImportMutation` invalidates the
+  collection / request / environment queries, which refetch.
+- **No rollback.** The engine write is atomic (validation over the whole payload, then one
+  transaction), so a failure means nothing was persisted and the error the modal shows is
+  the engine's, naming the item that broke. The old per-item loop needed best-effort
+  deletion of already-created roots; that code is gone.
+
+`orchestrator.fixture-parity.test.ts` pins the payload against a reference implementation
+of that deleted per-item walk, per fixture, so the flattening cannot quietly drop a field
+or renumber an `order`.
 
 ---
 
@@ -90,7 +106,8 @@ orchestrator's job.
 
 ## Draft model (the parser output contract)
 
-Parsers emit drafts, not engine rows. IDs are absent until `assignIds` runs.
+Parsers emit drafts, not engine rows. A draft's `tempId` is absent until
+`assignTempIds` runs; no draft ever carries a real record id.
 
 **`ImportResult`**
 | Field | Type | Notes |

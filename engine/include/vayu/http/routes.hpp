@@ -179,6 +179,26 @@ apply_required_string_field (const nlohmann::json& json, const char* key, std::s
 }
 
 /**
+ * The per-resource field appliers, shared by the single-resource create/update
+ * cores and by `POST /import/apply` (issue #96). Bulk import must store exactly
+ * what `POST /<resource>` would store, so it calls these rather than re-deriving
+ * the null-vs-absent rule or the per-field validation - a second copy would
+ * drift the moment a field is added.
+ *
+ * Each returns an error response {http_status, json_body} when a no-default
+ * field is missing or null (or, for collections, when the proposed parent would
+ * form a cycle), and nullopt on success. `is_create` selects the absent-field
+ * behaviour; see the rule above. Defined in collections.cpp / requests.cpp /
+ * environments.cpp.
+ */
+std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (
+vayu::db::Database& db, vayu::db::Collection& c, const nlohmann::json& json, bool is_create);
+std::optional<std::pair<int, nlohmann::json>>
+apply_request_fields (vayu::db::Request& r, const nlohmann::json& json, bool is_create);
+std::optional<std::pair<int, nlohmann::json>>
+apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, bool is_create);
+
+/**
  * @brief Callback type for graceful shutdown
  * Called when /shutdown endpoint is hit to perform platform-specific cleanup
  */
