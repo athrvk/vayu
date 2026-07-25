@@ -99,6 +99,18 @@ class Database {
      */
     void prune_runs_configured ();
 
+    /**
+     * @brief Mark runs left `running`/`pending` by a previous process as failed.
+     *
+     * A crash, a kill, or the daemon's 5s forced-shutdown break abandons
+     * in-flight runs with no terminal status write, so `GET /runs` keeps
+     * reporting them as running forever. Called from `init()` - before the
+     * sweeper and the HTTP server start - so no live run can be caught by it.
+     *
+     * @return Number of rows reconciled.
+     */
+    size_t reconcile_orphaned_runs ();
+
     // Metrics
     void add_metric (const Metric& metric);
     void add_metrics_batch (const std::vector<Metric>& metrics); // Transactional batch insert

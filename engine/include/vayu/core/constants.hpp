@@ -69,8 +69,10 @@ namespace event_loop {
 constexpr size_t MAX_CONCURRENT = 1000;
 /// Maximum concurrent connections per host (per worker).
 constexpr size_t MAX_PER_HOST = 200;
-/// Timeout for event loop polling in milliseconds
-constexpr int POLL_TIMEOUT_MS = 10;
+/// Timeout for a worker's curl_multi_poll in milliseconds. Deliberately short:
+/// it only bounds how long a worker with active transfers blocks waiting for
+/// IO, and submit() interrupts the poll via curl_multi_wakeup anyway.
+constexpr int POLL_TIMEOUT_MS = 1;
 /// DNS cache timeout in seconds (avoids DNS resolver saturation)
 constexpr long DNS_CACHE_TIMEOUT_SECONDS = 300;
 /// TCP keep-alive idle time in seconds

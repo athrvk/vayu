@@ -527,6 +527,79 @@ TEST_F (DatabaseTest, PruneRunsNeverDeletesInFlightRuns) {
     EXPECT_EQ (ids.size (), 3u);
 }
 
+// ============================================================================
+// Startup reconciliation (reconcile_orphaned_runs)
+// ============================================================================
+
+namespace {
+int64_t now_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+    .count ();
+}
+} // namespace
+
+TEST_F (DatabaseTest, ReconcileMarksRunsAbandonedByAPreviousProcessFailed) {
+    // Recent start times: init() prunes by the real retention defaults, and an
+    // epoch-1970 row would be swept away before the assertions run.
+    const int64_t recent = now_ms ();
+
+    // A previous process died mid-run: its rows are still running/pending.
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        seed_run_with_children (db, "crashed", recent, vayu::RunStatus::Running);
+        seed_run_with_children (db, "never_started", recent + 1, vayu::RunStatus::Pending);
+        seed_run_with_children (db, "done", recent + 2, vayu::RunStatus::Completed);
+        seed_run_with_children (db, "stopped", recent + 3, vayu::RunStatus::Stopped);
+    }
+
+    // Next startup reconciles them, without touching terminal rows.
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto status_of = [&db] (const std::string& id) {
+        auto run = db.get_run (id);
+        EXPECT_TRUE (run.has_value ()) << "run vanished: " << id;
+        return run->status;
+    };
+
+    EXPECT_EQ (status_of ("crashed"), vayu::RunStatus::Failed);
+    EXPECT_EQ (status_of ("never_started"), vayu::RunStatus::Failed);
+    EXPECT_EQ (status_of ("done"), vayu::RunStatus::Completed);
+    EXPECT_EQ (status_of ("stopped"), vayu::RunStatus::Stopped);
+
+    // Already reconciled - a second pass has nothing to do.
+    EXPECT_EQ (db.reconcile_orphaned_runs (), 0u);
+}
+
+TEST_F (DatabaseTest, ReconcileKeepsTheEndTimeTheRunAlreadyRecorded) {
+    // update_run_end_time runs before the terminal status write, so a run can
+    // die with a real end_time stored; reconciliation must not overwrite it
+    // with the (arbitrarily much later) restart time.
+    constexpr int64_t RECORDED_END = 1'234'567'890;
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        vayu::db::Run run;
+        run.id              = "half_written";
+        run.type            = vayu::RunType::Load;
+        run.status          = vayu::RunStatus::Running;
+        run.start_time      = now_ms ();
+        run.end_time        = RECORDED_END;
+        run.config_snapshot = "{}";
+        db.create_run (run);
+    }
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto run = db.get_run ("half_written");
+    ASSERT_TRUE (run.has_value ());
+    EXPECT_EQ (run->status, vayu::RunStatus::Failed);
+    EXPECT_EQ (run->end_time, RECORDED_END);
+}
+
 TEST_F (DatabaseTest, PruneRunsZeroLimitsDisableEachCap) {
     Database db (TEST_DB_PATH);
     db.init ();

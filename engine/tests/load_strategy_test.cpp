@@ -412,3 +412,32 @@ TEST_F (LoadStrategyTest, TickEnrichmentMetricsCarryBytesDroppedStatus) {
     EXPECT_TRUE (brecv);
     EXPECT_TRUE (status);
 }
+
+// A transport-level Error result (curl-handle creation failure, or the
+// stop(false) cancellation drain) is a real completion. Dropping it would
+// leave requests_sent counted with no matching completion, so in_flight()
+// would stay permanently inflated and the closed-loop controller would keep
+// shrinking effective concurrency for the rest of the run.
+TEST_F (LoadStrategyTest, TransportErrorResultIsRecordedAndClearsInFlight) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-transport-error", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    ASSERT_EQ (context->in_flight (), 1u);
+
+    vayu::Error error;
+    error.code    = vayu::ErrorCode::InternalError;
+    error.message = "Failed to create curl handle";
+    vayu::core::handle_result (context, db, vayu::Result<vayu::Response> (error));
+
+    EXPECT_EQ (context->total_errors (), 1u);
+    EXPECT_EQ (context->total_requests (), 1u);
+    EXPECT_EQ (context->in_flight (), 0u);
+
+    const auto& errors = context->metrics_collector->errors ();
+    ASSERT_EQ (errors.size (), 1u);
+    EXPECT_NE (errors.front ().trace_data.find ("internal_error"), std::string::npos);
+    EXPECT_NE (errors.front ().trace_data.find ("Failed to create curl handle"),
+    std::string::npos);
+}

@@ -7,13 +7,32 @@
 
 #include "vayu/http/event_loop/event_loop_impl.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <thread>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/http/event_loop/event_loop_worker.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 
 namespace vayu::http::detail {
+
+EventLoopConfig per_worker_config (const EventLoopConfig& config, size_t num_workers) {
+    EventLoopConfig shard = config;
+    if (num_workers <= 1 || config.target_rps <= 0.0) {
+        return shard;
+    }
+
+    const auto workers = static_cast<double> (num_workers);
+    shard.target_rps   = config.target_rps / workers;
+
+    const double burst = config.burst_size > 0.0 ?
+    config.burst_size :
+    config.target_rps * vayu::core::constants::http::BURST_MULTIPLIER;
+    shard.burst_size   = std::max (burst / workers, 1.0);
+
+    return shard;
+}
 
 EventLoopImpl::EventLoopImpl (EventLoopConfig cfg) : config (std::move (cfg)) {
     // Determine number of workers
@@ -25,10 +44,11 @@ EventLoopImpl::EventLoopImpl (EventLoopConfig cfg) : config (std::move (cfg)) {
         }
     }
 
-    // Create workers
+    // Create workers, each rate-limited to its share of the aggregate budget.
+    const EventLoopConfig worker_config = per_worker_config (config, num_workers);
     workers.reserve (num_workers);
     for (size_t i = 0; i < num_workers; ++i) {
-        workers.push_back (std::make_unique<EventLoopWorker> (config));
+        workers.push_back (std::make_unique<EventLoopWorker> (worker_config));
     }
 }
 

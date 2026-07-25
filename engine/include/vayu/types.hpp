@@ -288,48 +288,6 @@ template <typename T> class Result {
 };
 
 // ============================================================================
-// SSE Types
-// ============================================================================
-
-/**
- * @brief A single Server-Sent Event
- */
-struct SseEvent {
-    /// Event type (defaults to "message" if not specified)
-    std::string type = "message";
-
-    /// Event data (may contain multiple lines joined by newlines)
-    std::string data;
-
-    /// Optional event ID for reconnection
-    std::optional<std::string> id;
-
-    /// Server-suggested retry interval in milliseconds
-    std::optional<int> retry_ms;
-};
-
-/**
- * @brief EventSource connection state
- */
-enum class EventSourceState {
-    Connecting, ///< Connection is being established
-    Open,       ///< Connection is open and receiving events
-    Closed      ///< Connection is closed
-};
-
-/**
- * @brief Convert state to string
- */
-inline const char* to_string (EventSourceState state) {
-    switch (state) {
-    case EventSourceState::Connecting: return "CONNECTING";
-    case EventSourceState::Open: return "OPEN";
-    case EventSourceState::Closed: return "CLOSED";
-    }
-    return "UNKNOWN";
-}
-
-// ============================================================================
 // Event Loop Types
 // ============================================================================
 

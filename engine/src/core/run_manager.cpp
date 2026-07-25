@@ -301,16 +301,31 @@ void RunManager::start_sweeper (std::function<int64_t ()> ttl_provider) {
             // ttl..1.5*ttl of completion; the 500ms cadence floor keeps a tiny
             // or zero TTL (retention disabled) from busy-looping. ttl==0 means
             // "evict immediately", which sweep_retained already handles.
-            int64_t ttl = std::max<int64_t> (sweeper_ttl_provider_ (), 0);
-            auto interval = std::chrono::milliseconds (std::max<int64_t> (ttl / 2, 500));
+            //
+            // The provider reads the DB (the daemon wires it to get_config_int),
+            // so it can throw; uncaught inside the sweeper thread that calls
+            // std::terminate and takes the whole daemon down over a housekeeping
+            // tick. A tick whose TTL could not be read is skipped rather than
+            // swept against a guessed TTL, which would evict retained runs early.
+            int64_t ttl   = 0;
+            bool have_ttl = true;
+            try {
+                ttl = std::max<int64_t> (sweeper_ttl_provider_ (), 0);
+            } catch (...) {
+                have_ttl = false;
+            }
+            auto interval = std::chrono::milliseconds (
+            have_ttl ? std::max<int64_t> (ttl / 2, 500) : 500);
             if (sweeper_cv_.wait_for (lock, interval, [this] { return sweeper_stop_; })) {
                 break;
             }
             lock.unlock ();
-            try {
-                sweep_retained (ttl);
-            } catch (...) {
-                // Defensive: never let an exception escape the sweeper thread.
+            if (have_ttl) {
+                try {
+                    sweep_retained (ttl);
+                } catch (...) {
+                    // Defensive: never let an exception escape the sweeper thread.
+                }
             }
             lock.lock ();
         }
@@ -625,9 +640,11 @@ RunManager& manager) {
             "/" + std::to_string (p95) + "/" + std::to_string (p99) + " ms");
         }
     } catch (const std::exception& e) {
-        // Stop background metrics collection
+        // Stop background metrics collection and join it, like the two inner
+        // failure paths do. Deferring the join to ~RunContext instead would run
+        // it under RunManager::mutex_ during a later sweep eviction.
         context->is_running = false;
-        std::this_thread::sleep_for (std::chrono::milliseconds (200));
+        if (context->metrics_thread.joinable ()) context->metrics_thread.join ();
 
         vayu::utils::log_error ("Load test error: " + std::string (e.what ()));
         try {

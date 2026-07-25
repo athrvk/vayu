@@ -373,8 +373,8 @@ void EventLoopWorker::run_loop () {
             if (still_running > 0) {
                 // Wait for IO activity, but allow interruption via curl_multi_wakeup
                 // Use a short timeout to keep checking the queue even if no IO events
-                // 1ms is generally fine IF we use wakeup
-                curl_multi_poll (multi_handle, nullptr, 0, 1, nullptr);
+                curl_multi_poll (multi_handle, nullptr, 0,
+                core::constants::event_loop::POLL_TIMEOUT_MS, nullptr);
             } else if (!stop_requested) {
                 // No active transfers, and no pending items recently.
                 // This is the idle storage.
