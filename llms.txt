@@ -21,12 +21,16 @@ Sidecar pattern: Electron UI (Manager) communicates with a C++20 daemon (Engine)
 
 ## Documentation
 
+Documentation site: https://athrvk.github.io/vayu/
+
 - [README](https://github.com/athrvk/vayu/blob/master/README.md)
-- [Architecture](https://github.com/athrvk/vayu/blob/master/docs/architecture.md)
-- [Engine API Reference](https://github.com/athrvk/vayu/blob/master/docs/engine/api-reference.md)
-- [Variable Resolution](https://github.com/athrvk/vayu/blob/master/docs/app/variable-resolution.md)
-- [DB Schema](https://github.com/athrvk/vayu/blob/master/docs/engine/db-schema.md)
-- [Building](https://github.com/athrvk/vayu/blob/master/docs/building.md)
+- [Architecture](https://athrvk.github.io/vayu/architecture/)
+- [Engine API Reference](https://athrvk.github.io/vayu/engine/api-reference/)
+- [Engine Scripting](https://athrvk.github.io/vayu/engine/scripting/)
+- [MCP Server](https://athrvk.github.io/vayu/engine/mcp/)
+- [Variable Resolution](https://athrvk.github.io/vayu/app/variable-resolution/)
+- [DB Schema](https://athrvk.github.io/vayu/engine/db-schema/)
+- [Building](https://athrvk.github.io/vayu/building/)
 
 ## Download
 

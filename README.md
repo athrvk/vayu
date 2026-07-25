@@ -181,6 +181,8 @@ See [Architecture Documentation](docs/architecture.md) for the full process mode
 
 ## Documentation
 
+**Full docs: [athrvk.github.io/vayu](https://athrvk.github.io/vayu/)** - searchable, and built from `docs/` on every push to `master`.
+
 | Document | Description |
 |---|---|
 | [Architecture](docs/architecture.md) | Sidecar pattern, process model, IPC |

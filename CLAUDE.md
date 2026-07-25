@@ -448,3 +448,30 @@ Module READMEs carry the *why* for their feature and are easy to miss:
 and `dashboard/`.
 
 Release notes live in `.github/release-notes/vX.Y.Z.md` - see **Releasing**.
+
+### `docs/` is published, so a broken link is a build failure
+
+`docs/` ships to <https://athrvk.github.io/vayu/> via MkDocs Material
+(`mkdocs.yml` at the root, `.github/workflows/docs.yml`, deps pinned in
+`requirements-docs.txt`). `mkdocs build --strict` runs on every docs-touching
+pull request and fails on an unresolvable relative `.md` link or a missing
+heading anchor, so:
+
+- **Add a new page to the `nav:` in `mkdocs.yml`** in the same commit. Off-nav
+  pages build and are reachable by URL, but never appear in the sidebar.
+- **Do not rename or move a doc file** without checking for readers. Tests read
+  doc paths (`app/src/design-system-doc.test.ts` reads `docs/design-system.md`),
+  and every relative cross-link is validated by the build.
+- **Anchors follow GitHub's slug rules** (`pymdownx.slugs.slugify` is configured
+  for exactly this), so one anchor form works both in GitHub's markdown view and
+  on the site. Heading punctuation counts: `## Shared Auth Fields
+  (components/shared/AuthFields/)` is `#shared-auth-fields-componentssharedauthfields`.
+- **Links out of `docs/`** (`SECURITY.md`, `LICENSE`, `CONTRIBUTING.md`) must be
+  absolute `https://github.com/athrvk/vayu/blob/master/...` URLs - those files
+  are outside the published tree.
+- **Jekyll is not an option here** and the workflow says why: Pages' default
+  Jekyll build runs Liquid over page content, and these docs contain 40+
+  `{{variable}}` examples (rendered as empty strings) plus `{% ... %}` (an
+  unknown tag, which fails the build). MkDocs never templates page content.
+
+Preview locally with `pip install -r requirements-docs.txt && mkdocs serve`.
