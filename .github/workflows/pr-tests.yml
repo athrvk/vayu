@@ -44,6 +44,12 @@ jobs:
           # Same list the trigger used to carry. Both `*.md` and `**/*.md` are
           # present because the first covers root-level files like README.md and
           # the second covers nested ones.
+          # The docs-site build machinery is excluded for the same reason
+          # `docs/**` is: none of it can affect the engine or the app. It is
+          # enumerated rather than covered by a `!.github/**` blanket, because a
+          # change to *this* workflow, or to codeql/labeler/release, must still
+          # run the matrix. Each of these is checked by the `Docs site` workflow
+          # instead, which runs `mkdocs build --strict` on the same paths.
           filters: |
             code:
               - '**'
@@ -53,6 +59,10 @@ jobs:
               - '!LICENSE'
               - '!.gitignore'
               - '!scripts/install-git-hooks.sh'
+              - '!.github/mkdocs.yml'
+              - '!.github/hooks/**'
+              - '!.github/workflows/docs.yml'
+              - '!requirements-docs.txt'
 
   test:
     name: Test on ${{ matrix.os }}

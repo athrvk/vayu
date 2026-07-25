@@ -9,14 +9,22 @@ repo_url: https://github.com/athrvk/vayu
 repo_name: athrvk/vayu
 edit_uri: edit/master/docs/
 
-docs_dir: docs
-site_dir: site
+docs_dir: ../docs
+site_dir: ../site
 
 copyright: Engine AGPL-3.0 &middot; App Apache-2.0
 
 theme:
   name: material
   language: en
+  # Both are the app's own icon. There is no such file under docs/ - the path is
+  # populated at build time by .github/hooks/brand_assets.py, which reads
+  # shared/icon_png/vayu_icon_256x256.png (the same source setup_icons in
+  # build.py hands to the installers) so the site cannot drift from the app's
+  # icon. Without these the site shows Material's default book glyph in the tab
+  # and the header.
+  favicon: images/vayu-icon.png
+  logo: images/vayu-icon.png
   icon:
     repo: fontawesome/brands/github
   features:
@@ -39,15 +47,15 @@ theme:
         name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: teal
-      accent: teal
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: teal
-      accent: teal
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to system preference
@@ -115,8 +123,14 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
 
+extra_css:
+  - stylesheets/extra.css
+
 plugins:
   - search
+
+hooks:
+  - hooks/brand_assets.py
 
 # Broken cross-references are a build failure in CI (`mkdocs build --strict`),
 # which is the point: these docs cross-link heavily by relative `.md` path.

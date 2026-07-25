@@ -452,12 +452,12 @@ Release notes live in `.github/release-notes/vX.Y.Z.md` - see **Releasing**.
 ### `docs/` is published, so a broken link is a build failure
 
 `docs/` ships to <https://athrvk.github.io/vayu/> via MkDocs Material
-(`mkdocs.yml` at the root, `.github/workflows/docs.yml`, deps pinned in
+(`.github/mkdocs.yml`, `.github/workflows/docs.yml`, deps pinned in
 `requirements-docs.txt`). `mkdocs build --strict` runs on every docs-touching
 pull request and fails on an unresolvable relative `.md` link or a missing
 heading anchor, so:
 
-- **Add a new page to the `nav:` in `mkdocs.yml`** in the same commit. Off-nav
+- **Add a new page to the `nav:` in `.github/mkdocs.yml`** in the same commit. Off-nav
   pages build and are reachable by URL, but never appear in the sidebar.
 - **Do not rename or move a doc file** without checking for readers. Tests read
   doc paths (`app/src/design-system-doc.test.ts` reads `docs/design-system.md`),
@@ -474,4 +474,8 @@ heading anchor, so:
   `{{variable}}` examples (rendered as empty strings) plus `{% ... %}` (an
   unknown tag, which fails the build). MkDocs never templates page content.
 
-Preview locally with `pip install -r requirements-docs.txt && mkdocs serve`.
+Preview locally with `pip install -r requirements-docs.txt && mkdocs serve -f
+.github/mkdocs.yml`. The `-f` is required - the config is not at the repo root -
+and the site serves under `/vayu/`. The favicon/logo are not files under `docs/`:
+`.github/hooks/brand_assets.py` pulls `shared/icon_png/vayu_icon_256x256.png`
+into the build, so do not add a copy.
