@@ -17,7 +17,7 @@
  * inputs, so they live here and both callers use them.
  *
  * Deliberately *not* moved: auth resolution (already shared via
- * `auth-mapping.ts`), the script-part list (each caller builds a different one -
+ * `auth-resolution.ts`), the script-part list (each caller builds a different one -
  * the builder walks the live collection chain, the run view replays what was
  * recorded), and the header/URL resolution, which differs in which variables
  * are in scope.

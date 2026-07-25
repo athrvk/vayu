@@ -408,6 +408,7 @@ if(VAYU_BUILD_TESTS)
         tests/debug_redact_test.cpp
         tests/oauth_authorize_test.cpp
         tests/id_test.cpp
+        tests/curl_utils_test.cpp
         src/http/routes/import.cpp
         src/http/routes/config.cpp
         src/http/routes/requests.cpp
