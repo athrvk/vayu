@@ -8,70 +8,94 @@
 /**
  * Toaster
  *
- * Renders the transient notifications queued in the toast-store as a bottom-right
- * stack. Styled with design tokens so it follows the active theme.
+ * Renders the queue in `stores/toast-store.ts` through the Radix toast
+ * primitive in `components/ui/toast.tsx`. Mounted once, in `App.tsx`.
  *
- * Accessibility - the viewport/toast split (mirrors Radix Toast and sonner):
+ * Accessibility - what changed, and what deliberately did not:
  *
- * The outer container is a *persistent viewport*. It renders even with zero
- * toasts, because a live region has to already be in the DOM for assistive tech
- * to observe a change to it; a region that appears together with its content is
- * commonly not announced at all. So the live semantics (`role="status"` +
- * `aria-live="polite"`) live on the container, and the individual toasts carry
- * none - a live region nested inside a live region is its own bug.
+ * The version this replaces was hand-rolled, and hand-rolled a live region:
+ * one `role="status"` container that outlived every toast, because a region
+ * that first appears together with its content is commonly not announced at
+ * all. It also had to set `aria-atomic="false"` explicitly, since `role=
+ * "status"` implies `true` and one shared region would otherwise re-announce
+ * the entire stack on every arrival.
  *
- * `aria-atomic="false"` is set explicitly, and has to be. ARIA gives
- * `role="status"` an implicit `aria-atomic="true"`, so leaving the attribute off
- * does not leave it false - Chrome's accessibility tree reported the region as
- * `status atomic live="polite"` with no attribute present, and adding
- * `aria-atomic="false"` was what removed it. Atomic here would re-announce the
- * whole stack every time a single toast arrives.
+ * Radix solves the same problem the other way round, and this was verified
+ * against the rendered DOM rather than assumed: it gives *each* toast its own
+ * visually-hidden `role="status" aria-live="polite"` region, mounts it **empty**,
+ * and injects the text a frame later. The region still pre-exists its own
+ * content, which is the property that mattered. And because each region holds
+ * one toast rather than the whole stack, the implicit `aria-atomic="true"` is
+ * now the correct value - so the explicit `false` is gone on purpose, not by
+ * omission.
  *
- * Everything is polite, nothing is assertive. Routing error toasts to a second
- * `role="alert"` region was considered and rejected: a toast auto-dismisses on a
- * timer, so interrupting whatever the user is currently reading is the wrong
- * trade, and every toast here reports the outcome of an action the user just
- * took - they are already waiting for the answer.
+ * What carried over untouched is the decision that everything is polite and
+ * nothing is assertive - `type="background"` on the primitive. That argument is
+ * unchanged by the swap and is recorded at `ui/toast.tsx`.
  *
- * The empty viewport still occupies its fixed bottom-right box, so it is
- * `pointer-events-none` and each toast re-enables `pointer-events-auto`;
- * otherwise it would sit invisibly over that corner of the app.
+ * `ToastProvider` also gives the viewport a hotkey - F8 by default - that moves
+ * focus into the stack, and advertises it in the viewport's accessible name
+ * ("Notifications (F8)", Radix's default, confirmed in the browser). The `label`
+ * passed here is a different string: it prefixes the announced text, not the
+ * region name, which comes from `ToastViewport`'s own `label`.
  */
 
-import { X } from "lucide-react";
+import {
+	Toast,
+	ToastAction,
+	ToastClose,
+	ToastDescription,
+	ToastIcon,
+	ToastProvider,
+	ToastTitle,
+	ToastViewport,
+} from "@/components/ui/toast";
 import { useToastStore } from "@/stores";
-import { cn } from "@/lib/utils";
 
 export default function Toaster() {
-	const { toasts, dismissToast } = useToastStore();
+	const toasts = useToastStore((s) => s.toasts);
+	const dismissToast = useToastStore((s) => s.dismissToast);
 
 	return (
-		<div
-			role="status"
-			aria-live="polite"
-			aria-atomic="false"
-			className="pointer-events-none fixed bottom-4 right-4 z-[100] flex flex-col gap-2 w-80 max-w-[calc(100vw-2rem)]"
-		>
-			{toasts.map((toast) => (
-				<div
-					key={toast.id}
-					className={cn(
-						"pointer-events-auto flex items-start gap-2 rounded-md border bg-popover px-3 py-2 text-popover-foreground shadow-lg",
-						toast.variant === "error" && "border-destructive/40",
-						toast.variant === "success" && "border-status-success/40",
-						toast.variant === "info" && "border-border"
-					)}
+		<ToastProvider swipeDirection="right" label="Notification">
+			{toasts.map(({ id, title, message, variant, action, duration, open }) => (
+				<Toast
+					key={id}
+					variant={variant}
+					duration={duration}
+					// Controlled, so the toast can sit in the closed state while its
+					// exit animation runs. `dismissToast` flips this to false and
+					// drops the entry TIMING.TOAST_EXIT_MS later; removing it here instead
+					// would unmount the node before Radix could animate it.
+					open={open}
+					// Fires for a timeout, the close button and a completed swipe
+					// alike, so dismissal has one path rather than three.
+					onOpenChange={(next) => {
+						if (!next) dismissToast(id);
+					}}
 				>
-					<span className="flex-1 text-sm leading-snug">{toast.message}</span>
-					<button
-						onClick={() => dismissToast(toast.id)}
-						className="text-muted-foreground hover:text-foreground"
-						aria-label="Dismiss notification"
-					>
-						<X className="w-3.5 h-3.5" />
-					</button>
-				</div>
+					<ToastIcon variant={variant} />
+					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+						{title ? <ToastTitle>{title}</ToastTitle> : null}
+						<ToastDescription className={title ? "text-muted-foreground" : undefined}>
+							{message}
+						</ToastDescription>
+						{action ? (
+							<ToastAction
+								// Radix requires this: it is what a screen reader is
+								// offered in place of a button it cannot reach before
+								// the toast expires.
+								altText={action.altText ?? action.label}
+								onClick={action.onClick}
+							>
+								{action.label}
+							</ToastAction>
+						) : null}
+					</div>
+					<ToastClose aria-label="Dismiss notification" />
+				</Toast>
 			))}
-		</div>
+			<ToastViewport />
+		</ToastProvider>
 	);
 }

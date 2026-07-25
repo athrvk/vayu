@@ -338,6 +338,18 @@
 
 		/* Geometry */
 		--radius: 0.375rem;
+
+		/*
+		 * Height of the Dock, the footer status strip.
+		 *
+		 * A token rather than a bare `h-8` because a second element has to know
+		 * it: the toast viewport is `position: fixed`, so it anchors to the window
+		 * rather than to the layout and has to subtract this height by hand or it
+		 * lands on top of the strip. It did - toasts covered the lower half of the
+		 * Dock, "Connected" and the version string included, with nothing in
+		 * either file pointing at the other. Theme-independent, so declared once.
+		 */
+		--dock-height: 2rem;
 	}
 
 	/* ── Accent color schemes (light mode) ── */

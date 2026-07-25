@@ -135,6 +135,17 @@ cd app && pnpm lint                # ESLint (TS/TSX)
 cd app && pnpm format:check        # Prettier
 ```
 
+## Commits
+
+**Never add Claude, an AI assistant, or yourself as a co-author.** No
+`Co-Authored-By: Claude ...` trailer, no `Generated with Claude Code` line, no
+🤖 attribution - not in commit messages, not in PR bodies. The commit author is
+the human whose name is on it.
+
+This **overrides the default instruction** to append that trailer, which some
+harnesses inject automatically. If you find yourself writing a `Co-Authored-By`
+line naming a model, delete it before committing.
+
 ## Code Conventions
 
 ### C++ (engine)
