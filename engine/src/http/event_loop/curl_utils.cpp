@@ -11,8 +11,10 @@
 
 #include <algorithm>
 #include <cassert>
+#include <charconv>
 #include <chrono>
 #include <regex>
+#include <system_error>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/event_loop/curl_callbacks.hpp"
@@ -34,20 +36,47 @@ std::string extract_hostname (const std::string& url) {
     return "";
 }
 
+namespace {
+
+/// Lowest and highest port a URL authority can name; anything else is not a
+/// port curl could dial, so it is treated as absent.
+constexpr int kMinPort = 1;
+constexpr int kMaxPort = 65535;
+
+int scheme_default_port (const std::string& url) {
+    if (url.find ("https://") == 0)
+        return 443;
+    if (url.find ("http://") == 0)
+        return 80;
+    return 443; // Default to HTTPS
+}
+
+} // namespace
+
 int extract_port (const std::string& url) {
     // Check for explicit port
     static const std::regex port_regex (
     R"(^(?:https?://)?[^:/\s]+:(\d+))", std::regex::optimize);
     std::smatch match;
     if (std::regex_search (url, match, port_regex) && match.size () > 1) {
-        return std::stoi (match[1].str ());
+        // The capture is an unbounded digit run from a user-supplied URL, so it
+        // can exceed any integer type. std::from_chars reports that in its
+        // return value where std::stoi would throw - and this runs on the event
+        // loop worker thread, which has no handler, so an escaping exception
+        // terminates the whole daemon.
+        const std::string digits = match[1].str ();
+        int port                 = 0;
+        const char* first        = digits.data ();
+        const char* last         = first + digits.size ();
+        const auto [ptr, ec]     = std::from_chars (first, last, port);
+        if (ec == std::errc () && ptr == last && port >= kMinPort && port <= kMaxPort) {
+            return port;
+        }
+        // Out of range for a port (or for int): fall through to the scheme
+        // default. curl rejects such a URL on its own; the value here only
+        // selects the DNS cache entry, so a wrong one must not be fabricated.
     }
-    // Default ports
-    if (url.find ("https://") == 0)
-        return 443;
-    if (url.find ("http://") == 0)
-        return 80;
-    return 443; // Default to HTTPS
+    return scheme_default_port (url);
 }
 
 Error curl_to_error (CURLcode code, const char* error_buffer) {

@@ -37,6 +37,10 @@ std::string extract_hostname (const std::string& url);
 
 /**
  * @brief Extract port from URL (defaults to 443 for https, 80 for http)
+ *
+ * A port outside 1..65535 - including one too large for `int` - is treated as
+ * absent and yields the scheme default. Never throws, for any input: this runs
+ * on the event loop worker thread, which has no exception handler.
  */
 int extract_port (const std::string& url);
 
