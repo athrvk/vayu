@@ -1,7 +1,9 @@
-site_name: Vayu Docs
+site_name: Vayu
+# Kept under 160 characters: search results truncate past roughly that, and this
+# string is both the fallback <meta name="description"> for every page and the
+# product description in the home page's structured data.
 site_description: >-
-  Documentation for Vayu - an open source desktop app for REST and GraphQL API
-  testing and native load testing, built on a C++20 engine and an Electron UI.
+  Free, open source desktop API client for REST and GraphQL with a native load tester built in. Import Postman collections. Runs offline, no account.
 site_url: https://athrvk.github.io/vayu/
 site_author: athrvk
 
@@ -17,6 +19,9 @@ copyright: Engine AGPL-3.0 &middot; App Apache-2.0
 theme:
   name: material
   language: en
+  # Adds Open Graph / Twitter card tags and the product's structured data, which
+  # Material does not emit by itself. Path is relative to this config file.
+  custom_dir: overrides
   # Inter, plus the app's mono (--font-mono in app/src/index.css). Both are
   # already in the app's own font list (app/index.html), so the site and the UI
   # draw from one family set. Material fetches them from Google Fonts, which it
@@ -72,39 +77,44 @@ theme:
         name: Switch to system preference
 
 nav:
+  # "Get Started" used to hold the architecture doc and the C++ build guide -
+  # a visitor clicking it expecting "how do I install this" got a CMake page.
+  # Installing now lives on Home, and the build guides are grouped as what they
+  # are. "App" became "Desktop App" because the site talks about the engine and
+  # the app in the same breath and only one of them is a thing you download.
   - Home: index.md
-  - Get Started:
-      - System Architecture: architecture.md
-      - Building from Source: building.md
+  - How It Works: architecture.md
   - Engine:
-      - Architecture: engine/architecture.md
-      - HTTP API Reference: engine/api-reference.md
-      - Scripting Runtime: engine/scripting.md
-      - Database Schema: engine/db-schema.md
-      - CLI: engine/cli.md
+      - Overview: engine/architecture.md
+      - HTTP API: engine/api-reference.md
+      - Test Scripting: engine/scripting.md
+      - Local Database: engine/db-schema.md
+      - Command Line: engine/cli.md
       - MCP Server: engine/mcp.md
       - Benchmarks: engine/benchmarks.md
-      - Building the Engine: engine/building.md
-  - App:
-      - Architecture: app/architecture.md
-      - Components: app/COMPONENTS.md
+  - Desktop App:
+      - Overview: app/architecture.md
+      - UI Components: app/COMPONENTS.md
       - Design System: design-system.md
       - State Management: app/state-management.md
-      - API Integration: app/api-integration.md
-      - Variable Resolution: app/variable-resolution.md
-      - Postman API Compatibility: app/pm-api-compatibility.md
-      - File Name Conventions: app/file-name-conventions.md
-      - Building the App: app/building.md
-      - Import Collections:
-          - Pipeline Overview: app/import-collections/README.md
+      - Talking to the Engine: app/api-integration.md
+      - Variables: app/variable-resolution.md
+      - Postman Script Support: app/pm-api-compatibility.md
+      - File Naming: app/file-name-conventions.md
+      - Importing Collections:
+          - How Import Works: app/import-collections/README.md
           - Postman: app/import-collections/postman.md
           - Insomnia v4: app/import-collections/insomnia-v4.md
           - OpenAPI 3.0: app/import-collections/openapi-v3.md
           - Swagger 2.0: app/import-collections/openapi-v2.md
+  - Build from Source:
+      - Overview: building.md
+      - Engine: engine/building.md
+      - Desktop App: app/building.md
   - Design Notes:
       - Request Storage: request-storage-design.md
-      - Lock File Handling: lock-file-handling.md
-      - Pending Backlog: plans/pending-backlog.md
+      - Lock Files: lock-file-handling.md
+      - Deferred Work: plans/pending-backlog.md
 
 markdown_extensions:
   - admonition

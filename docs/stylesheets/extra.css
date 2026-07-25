@@ -141,3 +141,31 @@
 	border-color: hsl(217 90% 66%);
 	color: hsl(225 14% 12%);
 }
+
+/* FAQ accordions. Material's `question` admonition is teal-green, which put seven
+ * bright green bars down a product page that is otherwise blue and neutral. Only
+ * the colour is changed: the chevron, the collapse behaviour and the icon are
+ * Material's. The icon keeps the accent so the rows still read as interactive
+ * rather than as inert boxes. */
+.md-typeset details.question {
+	border-color: var(--md-default-fg-color--lighter);
+}
+
+.md-typeset details.question > summary {
+	background-color: var(--md-default-fg-color--lightest);
+}
+
+.md-typeset details.question > summary::before {
+	background-color: var(--md-primary-fg-color);
+}
+
+/* The chevron is tinted from the same admonition colour as the icon, so it stayed
+ * green after the row went neutral. Muted foreground: it is an affordance, not a
+ * second accent competing with the icon. */
+.md-typeset details.question > summary::after {
+	background-color: var(--md-default-fg-color--light);
+}
+
+[data-md-color-scheme="slate"] .md-typeset details.question > summary::before {
+	background-color: hsl(217 90% 66%);
+}
