@@ -40,8 +40,14 @@ an explicit `aria-atomic="false"`, and no per-toast live regions. Six tests in
    `SettingsMain`, `VariableTableEditor`. The same event class reports to two
    surfaces depending on the file. A failed *delete* currently makes the Dock
    say "Save failed - ...", which is the wrong sentence.
-6. **Genuinely silent paths.** `DesignRunView.tsx:258` (replay failed),
-   `dashboard/index.tsx:99` and `:128` log to console and nothing else.
+6. ~~**Genuinely silent paths.**~~ **Withdrawn - this was wrong.** The initial
+   analysis called `DesignRunView.tsx:258` and `dashboard/index.tsx:99` / `:128`
+   silent because each opens with a bare `console.error`. Reading past that line
+   shows all three already report: `:128` sets `reportError`, rendered in a
+   Callout at `dashboard/index.tsx:405`; `DesignRunView` returns a synthetic
+   error response that renders in the response viewer; `:99` is a self-healing
+   reconnect with nothing to tell the user. Adding toasts there would
+   double-report. No change made.
 7. **Dead-end strings.** No toast can offer an action.
 8. **No documentation.** `docs/design-system.md` has no toast section.
 
@@ -256,8 +262,8 @@ hitting. `clearError` reduces to a status reset.
 
 The Dock keeps its `saving` / `saved` states and loses only the error span.
 
-Silent paths gain toasts: `DesignRunView.tsx:258`, `dashboard/index.tsx:99`
-and `:128`.
+No new toasts for the paths defect 6 named: they were already reported
+elsewhere, and a second surface would double-report.
 
 ### 5. Tests
 
@@ -266,7 +272,8 @@ by scanning source. The variant classes arrive through a
 `toast.variant === "error" && "..."` binding, and a source scan cannot see a
 class that arrives in a variable - the badge-hover lesson.
 
-- Variant styling: each of the four renders its own icon and rail class.
+- Variant styling: each of the four renders its own icon and rail class, and
+  none of them uses a `-fill` token as a foreground.
 - Dedup: the same message twice yields one toast.
 - Cap: a fifth toast evicts the oldest.
 - Action: the button renders, fires `onClick`, and dismisses.

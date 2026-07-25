@@ -80,6 +80,29 @@ const toastVariants = cva(
 	],
 	{
 		variants: {
+			/*
+			 * The rail reinforces; the **icon** is what actually carries the
+			 * variant. Measured against the popover surface in both themes:
+			 *
+			 *            rail light / dark      icon light / dark
+			 *   info       1.30 / 1.00           5.61 / 6.77
+			 *   success    2.30 / 7.53           5.71 / 8.81
+			 *   warning    4.00 / 4.34           5.46 / 9.81
+			 *   error      3.78 / 4.59           5.88 / 5.85
+			 *
+			 * Two things follow. `info` is the neutral variant and takes no accent
+			 * rail on purpose - `border-l-border` is invisible against the toast's
+			 * own fill, which is the intent, and its icon still reads at 5.6+.
+			 * And success's rail on white is only 2.30, under the 3:1 a graphic
+			 * would need if it were the *sole* signal - which is precisely why the
+			 * signal is not carried by colour alone. Every icon clears 5.4 in both
+			 * themes.
+			 *
+			 * For scale, the border this replaces (`border-destructive/40`, the
+			 * only variant marker there was) measured 1.16 in dark and 2.01 in
+			 * light, against success's 2.21 / 1.42 - so the two were not reliably
+			 * tellable apart in either theme, and error was near-invisible in dark.
+			 */
 			variant: {
 				info: "border-l-border",
 				success: "border-l-status-success",

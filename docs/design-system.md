@@ -1325,10 +1325,12 @@ Transient report of an action the user just took. The queue is
 `stores/toast-store.ts`; the surface is the shadcn/Radix primitive in
 `components/ui/toast.tsx`, rendered once by `components/shared/Toaster.tsx`.
 
-**The variant is carried by an icon and a left rail, never by colour alone.**
+**The icon carries the variant; the rail reinforces it.** Never colour alone.
 The version this replaced signalled variant with a 40%-alpha border and nothing
-else, and in dark mode `--destructive` at 40% over `--popover` left an error and
-an info toast near-identical. All four variants now come from one token family:
+else: `border-destructive/40` measured **1.16:1** against the toast surface in
+dark and 2.01:1 in light, while success's equivalent measured 2.21 / 1.42 - so
+the two were not reliably tellable apart in either theme, and error was
+effectively invisible in dark. All four variants now come from one token family:
 
 | Variant | Icon | Rail (a rule) | Glyph (a foreground) | Duration |
 |---------|------|---------------|----------------------|----------|
@@ -1336,6 +1338,22 @@ an info toast near-identical. All four variants now come from one token family:
 | `success` | `CheckCircle2` | `border-l-status-success` | `text-status-success-text` | 4s |
 | `warning` | `AlertTriangle` | `border-l-status-warning` | `text-status-warning-text` | 6s |
 | `error` | `XCircle` | `border-l-status-error` | `text-status-error-text` | 10s |
+
+Measured against the popover surface, light / dark:
+
+| Variant | Rail | Icon |
+|---------|------|------|
+| `info` | 1.30 / 1.00 | 5.61 / 6.77 |
+| `success` | 2.30 / 7.53 | 5.71 / 8.81 |
+| `warning` | 4.00 / 4.34 | 5.46 / 9.81 |
+| `error` | 3.78 / 4.59 | 5.88 / 5.85 |
+
+Two of those rows look wrong and are not. **`info` is the neutral variant and
+takes no accent rail on purpose** - `border-l-border` is invisible against the
+toast's own fill, and absence of a rail is itself the signal. And **success's
+rail on white is 2.30**, under the 3:1 a graphic needs when it is the *sole*
+carrier of meaning. It is not the sole carrier: every icon clears 5.4:1 in both
+themes. That is the whole reason the icon exists.
 
 The rail and the glyph take **different tiers of the same family on purpose**: a
 rail is a rule and takes the bare `--status-*`, a glyph is painted with a `text-`
