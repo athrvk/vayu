@@ -11,7 +11,7 @@
  * Tab navigation and content panels for request configuration
  */
 
-import { Tabs, TabsContent, TabsList, TabsTrigger, Badge } from "@/components/ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
 import type { RequestTab, TabInfo } from "../../types";
 import ParamsPanel from "./panels/ParamsPanel";
@@ -74,22 +74,11 @@ export default function RequestTabs() {
 			className="flex-1 flex flex-col overflow-hidden"
 		>
 			{/* Tab Headers */}
-			<TabsList className="flex w-full justify-start border-b border-border bg-transparent h-auto p-0 overflow-x-auto overflow-y-hidden flex-nowrap">
+			<TabsList className="w-full overflow-x-auto overflow-y-hidden flex-nowrap px-1">
 				{tabs.map((tab) => (
-					<TabsTrigger
-						key={tab.id}
-						value={tab.id}
-						className="relative shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2.5 text-sm font-medium"
-					>
-						{tab.label}
-						{tab.badge !== undefined && (
-							<Badge
-								variant="secondary"
-								className="ml-1.5 h-5 min-w-[20px] px-1.5 text-xs"
-							>
-								{tab.badge}
-							</Badge>
-						)}
+					<TabsTrigger key={tab.id} value={tab.id}>
+						<TabLabel>{tab.label}</TabLabel>
+						{tab.badge !== undefined && <TabCount value={tab.badge} />}
 					</TabsTrigger>
 				))}
 			</TabsList>
