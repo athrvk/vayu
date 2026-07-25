@@ -58,11 +58,24 @@ an explicit `aria-atomic="false"`, and no per-toast live regions. Six tests in
   `components/shared/` rather than `components/ui/` because it was never
   installed as one.
 
-  The store's header comment ("kept in-house ... so toasts render through the
-  app's design tokens") is honoured rather than reversed: a shadcn primitive is
-  source in our own repo with our own token classes. That comment is updated to
-  record the distinction, since taken literally it would also have ruled out
-  `dialog.tsx`.
+  **The superseded decision is rewritten, not left to rot.** The store's header
+  currently reads "Kept in-house (rather than a toast library) so toasts render
+  through the app's design tokens." That sentence stops being true the moment
+  this lands, and a stale rationale comment is worse than none - a later reader
+  would take it as a constraint. It is replaced with the reasoning that actually
+  applies:
+
+  > This store previously carried its own 4s `setTimeout` and a note that the
+  > toast was "kept in-house (rather than a toast library) so toasts render
+  > through the app's design tokens". The token concern was right and still
+  > holds - it just never required hand-rolling. A shadcn primitive is source in
+  > this repo wearing our own token classes, exactly like `dialog.tsx` and
+  > `popover.tsx`; taken literally the old note would have ruled those out too.
+  > What it actually ruled out was a library shipping its own CSS, which is
+  > still why `sonner` was not adopted.
+
+  The distinction the old wording missed: "no library" was never the goal, "no
+  vendor stylesheet" was.
 
   Rejected: `sonner`, which shadcn's docs now recommend, because it ships its
   own CSS to re-theme and is furthest from the existing setup. Rejected:
