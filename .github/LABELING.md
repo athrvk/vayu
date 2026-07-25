@@ -156,6 +156,23 @@ for code it never touched.
 
 If a PR changes files in multiple categories, it gets all matching labels. A release PR touching `app/`, `engine/`, and build files will earn `component:app`, `component:engine`, and `component:build`.
 
+### When adding a new file, check `.github/labeler.yml`
+
+`component:database`, `component:build`, `area:auth`, and `area:metrics` are
+**explicit file lists**, not directory globs - `engine/src/db/**` is the only
+rule in this set that's a directory match. Adding a new file to one of these
+areas (a new db table's source file, a new auth/oauth file, a new metrics
+source or test) does **not** get labeled unless the path is added to the
+matching rule in `.github/labeler.yml`, and the labeler fails silently -
+no error, the PR just doesn't get the label. This bit us already: `area:auth`
+pointed at a path that never existed, and `area:metrics` missed the header,
+route, and helper files sitting right next to the one file it did match.
+When a PR adds a new file under `engine/src/db/`, `engine/src/http/`
+(auth/oauth), `engine/src/core/metrics_collector*`, `engine/src/utils/metrics_helper*`,
+or a new build/version manifest, add it to the corresponding rule in the
+same PR. `component:app`, `component:engine`, `component:ci`, `area:http`,
+and `area:scripting` are directory globs and need no such review.
+
 ## Label Colors and Semantics
 
 Colors follow a **two-part strategy** for semantic clarity:
