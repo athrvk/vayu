@@ -37,8 +37,7 @@ export type ParsedRequest = Pick<
 	| "body"
 	| "formData"
 	| "urlEncoded"
-	| "authType"
-	| "authConfig"
+	| "auth"
 >;
 
 type CommandKind = "curl" | "wget";
@@ -173,18 +172,13 @@ function resolve(b: Builder): ParsedRequest {
 		if (!findHeader(b, "accept")) headers.push({ key: "Accept", value: "application/json" });
 	}
 
-	let authType: ParsedRequest["authType"] = "none";
-	const authConfig: RequestState["authConfig"] = {};
 	// Bearer (curl --oauth2-bearer) wins over basic if both are somehow present,
 	// mirroring curl sending the last-set Authorization scheme.
+	let auth: ParsedRequest["auth"] = { mode: "none" };
 	if (b.bearer !== null) {
-		authType = "bearer";
-		authConfig.token = b.bearer;
+		auth = { mode: "bearer", token: b.bearer };
 	} else if (b.basic) {
-		authType = "basic";
-		// Flat shape, matching what the Auth tab reads/writes.
-		authConfig.username = b.basic.username;
-		authConfig.password = b.basic.password;
+		auth = { mode: "basic", username: b.basic.username, password: b.basic.password };
 	}
 
 	// --- body ---------------------------------------------------------------
@@ -232,8 +226,7 @@ function resolve(b: Builder): ParsedRequest {
 		body,
 		formData,
 		urlEncoded,
-		authType,
-		authConfig,
+		auth,
 	};
 }
 

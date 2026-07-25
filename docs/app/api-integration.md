@@ -103,12 +103,34 @@ apiService.getConfig(): Promise<EngineConfig>
 apiService.updateConfig(config): Promise<EngineConfig>
 ```
 
+#### Create vs update
+
+For collections, requests and environments the engine splits the write verbs:
+`POST /<resource>` creates and answers a known `id` with `409`;
+`PUT /<resource>/:id` updates and answers an unknown `id` with `404`. They are
+not interchangeable, so `apiService` keeps one method per verb:
+
+- `createX(data)` posts the whole object to the collection path. `data` carries
+  no `id` for an interactive create; the **import** path is the one caller that
+  still supplies its own `id`, because it pre-assigns ids to wire `parentId` /
+  `collectionId` across the tree before anything is persisted.
+- `updateX(data)` takes `data.id`, puts it in the **path**, and sends the rest
+  of the object as a merge-patch body - an omitted field keeps its stored value,
+  an explicit `null` resets it to the default. The `id` is not repeated in the
+  body.
+
+The full contract, including the null-vs-absent table and which fields have no
+default, is in [engine/api-reference.md](../engine/api-reference.md) under
+"Resource writes". `src/services/api.write-verbs.test.ts` pins the method and
+path of every one of these calls - a regression here is invisible at every other
+layer, because the payload shape does not change.
+
 #### Collections
 
 ```typescript
 apiService.listCollections(): Promise<Collection[]>
-apiService.createCollection(data): Promise<Collection>
-apiService.updateCollection(data): Promise<Collection>
+apiService.createCollection(data): Promise<Collection>   // POST /collections
+apiService.updateCollection(data): Promise<Collection>   // PUT  /collections/:id
 apiService.deleteCollection(id): Promise<void>
 ```
 
@@ -117,8 +139,8 @@ apiService.deleteCollection(id): Promise<void>
 ```typescript
 apiService.listRequests(params?): Promise<Request[]>
 apiService.getRequest(id): Promise<Request>
-apiService.createRequest(data): Promise<Request>
-apiService.updateRequest(data): Promise<Request>
+apiService.createRequest(data): Promise<Request>         // POST /requests
+apiService.updateRequest(data): Promise<Request>         // PUT  /requests/:id
 apiService.deleteRequest(id): Promise<void>
 ```
 
@@ -127,8 +149,8 @@ apiService.deleteRequest(id): Promise<void>
 ```typescript
 apiService.listEnvironments(): Promise<Environment[]>
 apiService.getEnvironment(id): Promise<Environment>
-apiService.createEnvironment(data): Promise<Environment>
-apiService.updateEnvironment(data): Promise<Environment>
+apiService.createEnvironment(data): Promise<Environment> // POST /environments
+apiService.updateEnvironment(data): Promise<Environment> // PUT  /environments/:id
 apiService.deleteEnvironment(id): Promise<void>
 ```
 

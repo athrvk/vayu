@@ -390,6 +390,8 @@ if(VAYU_BUILD_TESTS)
         tests/requests_route_test.cpp
         tests/runs_route_test.cpp
         tests/collections_route_test.cpp
+        tests/resource_write_route_test.cpp
+        tests/globals_route_test.cpp
         tests/stats_route_test.cpp
         tests/execution_timeout_test.cpp
         tests/load_strategy_test.cpp
@@ -407,11 +409,14 @@ if(VAYU_BUILD_TESTS)
         tests/debug_redact_test.cpp
         tests/oauth_authorize_test.cpp
         tests/id_test.cpp
+        tests/curl_utils_test.cpp
         src/http/routes/import.cpp
         src/http/routes/config.cpp
         src/http/routes/requests.cpp
         src/http/routes/runs.cpp
         src/http/routes/collections.cpp
+        src/http/routes/environments.cpp
+        src/http/routes/globals.cpp
         src/http/routes/metrics.cpp
         src/http/routes/oauth.cpp
         src/http/routes/oauth_authorize.cpp
