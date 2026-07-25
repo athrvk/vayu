@@ -49,8 +49,8 @@ These labels narrow down sub-areas **within the engine**. Useful for routing eng
 | Label | Description | Applies to |
 |-------|-------------|-----------|
 | `area:http` | HTTP server, routes, SSE, request/response handling | `engine/src/http/**` |
-| `area:auth` | Authentication, OAuth2, authorization | Auth-related engine code |
-| `area:metrics` | Metrics collection, statistics, measurement | `metrics_collector*` files |
+| `area:auth` | Authentication, OAuth2, authorization | `auth_resolver*`, `oauth*` files under `engine/src/http/` and `engine/include/vayu/http/` - also matches `area:http`, since auth lives there |
+| `area:metrics` | Metrics collection, statistics, measurement | `metrics_collector*`, `metrics_helper*` files (src, include, and the HTTP metrics route) |
 | `area:scripting` | QuickJS runtime, script execution, pm.* API | `engine/src/runtime/**` |
 
 ### Type Labels (`type:*`)
@@ -141,14 +141,18 @@ The `.github/labeler.yml` file defines path-based rules that automatically apply
 
 - **`component:app`** → `app/**`
 - **`component:engine`** → `engine/**`
-- **`component:database`** → `engine/src/db/**`, `engine/include/vayu/db/**`, `engine/tests/db_test.cpp`, `docs/engine/db-schema.md`
+- **`component:database`** → `engine/src/db/**`, `engine/include/vayu/db/**`, `engine/tests/db_test.cpp`, `engine/tests/db_concurrency_test.cpp`
 - **`component:ci`** → `.github/**`
-- **`component:build`** → `build.py`, `VERSION`, CMake files, vcpkg.json, `app/package.json`, etc.
+- **`component:build`** → `build.py`, `VERSION`, CMake files, vcpkg.json, `app/package.json`, `scripts/**`, etc.
 - **`documentation`** → `docs/**`, `**/*.md`
 - **`area:http`** → `engine/src/http/**`
-- **`area:auth`** → Auth-related engine code
-- **`area:metrics`** → Metrics-related engine code
+- **`area:auth`** → `auth_resolver*`, `oauth*` files under `engine/src/http/`
+- **`area:metrics`** → `metrics_collector*`, `metrics_helper*` files
 - **`area:scripting`** → `engine/src/runtime/**`
+
+`component:database` and `area:*` rules are kept strictly inside `engine/**` -
+a `docs/engine/*.md` change earns `documentation`, not a component/area label
+for code it never touched.
 
 If a PR changes files in multiple categories, it gets all matching labels. A release PR touching `app/`, `engine/`, and build files will earn `component:app`, `component:engine`, and `component:build`.
 
@@ -198,7 +202,7 @@ Existing issues and PRs keep their old labels; they are not retroactively update
 
 ### A new OAuth 2.0 feature in the engine
 
-- Auto-labels: `component:engine`, `area:auth`
+- Auto-labels: `component:engine`, `area:http`, `area:auth` (auth code lives under `engine/src/http/`, so both area labels apply)
 - Manual labels: `type:feature`, `priority:high`, `status:needs-review`
 
 ### A database schema migration
