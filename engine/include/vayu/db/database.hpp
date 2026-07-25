@@ -81,6 +81,15 @@ class Database {
     void delete_run (const std::string& id);
 
     /**
+     * @brief Store the whole-run results summary (JSON) on the run row.
+     *
+     * Written once when a run reaches a terminal status; `GET /runs/:id/report`
+     * reads it instead of re-reducing the time-series. A missing run is logged
+     * and ignored (the run may have been deleted mid-flight), never an error.
+     */
+    void update_run_summary (const std::string& id, const std::string& summary);
+
+    /**
      * @brief Prune old runs (and their cascaded metrics/results) by two limits.
      *
      * A run is a victim when it falls beyond @p max_runs most-recent runs
@@ -99,7 +108,15 @@ class Database {
      */
     void prune_runs_configured ();
 
-    // Metrics
+    // Metric ticks - one wide row per tick; the current time-series storage.
+    void add_metric_tick (const MetricTick& tick);
+    // Ordered (timestamp, id) so a page boundary never splits a tick.
+    std::vector<MetricTick> get_metric_ticks_paginated (const std::string& run_id, int64_t limit, int64_t offset);
+    std::vector<MetricTick> get_metric_ticks_since (const std::string& run_id, int64_t last_id);
+    int64_t count_metric_ticks (const std::string& run_id);
+
+    // Metrics - the legacy EAV time series. No longer written; still read so
+    // runs recorded before `metric_ticks` keep rendering their charts/reports.
     void add_metric (const Metric& metric);
     void add_metrics_batch (const std::vector<Metric>& metrics); // Transactional batch insert
     std::vector<Metric> get_metrics (const std::string& run_id);
@@ -128,6 +145,15 @@ class Database {
     private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    /**
+     * @brief Delete a run and every child row it owns (ticks, metrics, results).
+     *
+     * The single definition of the run cascade - `delete_run` and `prune_runs`
+     * both call it, so a new child table is wired into both by editing one
+     * function. The caller must already hold the DB mutex.
+     */
+    void remove_run_cascade_locked (const std::string& id);
 
     /**
      * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked error.

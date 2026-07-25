@@ -946,6 +946,21 @@ capacity-breakpoint / saturation stats from stored data.
 
 A missing run returns `404` with `{"error":"Run not found"}`.
 
+**Storage (response shape unchanged).** Each `data[]` entry is one stored row of
+`metric_ticks` - the engine writes the tick object once, at write time, instead
+of the reader reassembling it from ~20 EAV `metrics` rows per second. Two things
+follow, both improvements the shape gives for free:
+
+- **Pagination is tick-aligned**: `limit`/`offset` count ticks, so
+  `pagination.total` is the number of ticks (not rows), and a page boundary can
+  no longer return a tick with half its fields zeroed.
+- **`elapsed_seconds` keeps counting across pages** (it is measured from the
+  run's first stored tick), and `requests_failed` carries the real error count
+  the row-order-dependent legacy derivation always reported as `0`.
+
+Runs recorded before `metric_ticks` existed are still served from their legacy
+rows, with exactly the response they produced before.
+
 ### GET /stats/:runId (deprecated)
 
 > **Prefer `GET /runs/:runId/live`** (above) for live dashboards - it replays a retained
@@ -975,6 +990,11 @@ data: {"totalRequests":6000,"totalErrors":30,"totalSuccess":5970,"errorRate":0.5
 - `currentRps`: Current requests per second
 - `activeConnections`: Active concurrent connections
 - `elapsedSeconds`: Elapsed time since test start
+
+For runs recorded since `metric_ticks`, this stream is fed from those rows; every
+field above comes from the stored tick except **`avgLatencyMs`, which stays `0`** -
+the per-tick object has never carried mean latency. `GET /runs/:runId/live` serves
+it (from the in-memory collector) and is the endpoint to use.
 
 ### GET /runs/:runId/live
 
@@ -1184,10 +1204,15 @@ Stop a running load test.
 
 > Alias: `GET /run/:runId/report` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
-Get the final report for a completed run. Reconstructed from the `runs`, `metrics`, and `results`
-tables (there is no stored `summary` blob). The response is a **nested** object; conditional
+Get the final report for a completed run. The response is a **nested** object; conditional
 sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, `testValidation`
 only when a test script ran).
+
+The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
+a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
+rows for the timing breakdown and the `results[]` array. A run recorded before that column
+existed is reconstructed from its legacy `metrics` rows exactly as before. **The response shape
+is the same either way** - only where the numbers are read from changed.
 
 **Response:**
 ```json

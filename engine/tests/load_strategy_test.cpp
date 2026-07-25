@@ -385,30 +385,31 @@ TEST_F (LoadStrategyTest, CapturesReceivedBytes) {
     EXPECT_GT (context->metrics_collector->total_bytes_received (), 20u);
 }
 
-// The per-tick enrichment rows (dropped / bytes / status-codes JSON) carry the
-// collector's current cumulative values. This is what collect_metrics persists
-// each second; tested via the extracted helper for determinism.
-TEST_F (LoadStrategyTest, TickEnrichmentMetricsCarryBytesDroppedStatus) {
+// The persisted tick carries the collector's current cumulative values
+// (dropped / bytes / status-code map). This is what collect_metrics stores each
+// second; tested via the extracted payload builder for determinism.
+TEST_F (LoadStrategyTest, MetricTickPayloadCarriesBytesDroppedStatus) {
     auto context = std::make_shared<vayu::core::RunContext> (
     "test-tick", nlohmann::json{ { "mode", "constant_rps" } });
-    context->metrics_collector->record_success (200, 5.0, 0.0, "");
-    context->metrics_collector->record_success (404, 5.0, 0.0, "");
-    context->metrics_collector->record_bytes (10, 1000);
-    context->metrics_collector->record_drop_batch (3);
+    auto& mc = *context->metrics_collector;
+    mc.record_success (200, 5.0, 0.0, "");
+    mc.record_success (404, 5.0, 0.0, "");
+    mc.record_bytes (10, 1000);
+    mc.record_drop_batch (3);
 
-    auto rows = vayu::core::build_tick_enrichment_metrics (context, 12345);
-    bool dropped = false, bsent = false, brecv = false, status = false;
-    for (const auto& m : rows) {
-        if (m.name == vayu::MetricName::DroppedRequests && m.value == 3.0) dropped = true;
-        if (m.name == vayu::MetricName::BytesSent && m.value == 10.0) bsent = true;
-        if (m.name == vayu::MetricName::BytesReceived && m.value == 1000.0) brecv = true;
-        if (m.name == vayu::MetricName::StatusCodes &&
-        m.labels.find ("\"200\"") != std::string::npos &&
-        m.labels.find ("\"404\"") != std::string::npos)
-            status = true;
-    }
-    EXPECT_TRUE (dropped);
-    EXPECT_TRUE (bsent);
-    EXPECT_TRUE (brecv);
-    EXPECT_TRUE (status);
+    vayu::core::MetricTickSample sample;
+    sample.timestamp        = 12345;
+    sample.dropped_requests = mc.dropped_requests ();
+    sample.bytes_sent       = mc.total_bytes_sent ();
+    sample.bytes_received   = mc.total_bytes_received ();
+    sample.status_codes     = mc.status_code_distribution ();
+
+    auto payload = vayu::core::build_metric_tick_payload (sample);
+    EXPECT_EQ (payload["timestamp"].get<int64_t> (), 12345);
+    EXPECT_EQ (payload["dropped_requests"].get<size_t> (), 3u);
+    EXPECT_EQ (payload["bytes_sent"].get<size_t> (), 10u);
+    EXPECT_EQ (payload["bytes_received"].get<size_t> (), 1000u);
+    ASSERT_TRUE (payload["status_codes"].is_object ());
+    EXPECT_EQ (payload["status_codes"]["200"].get<size_t> (), 1u);
+    EXPECT_EQ (payload["status_codes"]["404"].get<size_t> (), 1u);
 }

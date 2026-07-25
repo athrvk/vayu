@@ -100,8 +100,9 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   generator-internal `queue_wait` are tracked separately.
 - **Rich counters**: bytes sent/received, dropped requests (backpressure), queue-wait average,
   peak in-flight, and a full per-status-code distribution
-- **Batch DB writes**: Per-request results written after test completion; per-tick time-series
-  metrics persisted by the metrics thread during the run
+- **Batch DB writes**: Per-request results written after test completion; the metrics thread
+  persists one wide `metric_ticks` row per second during the run (the complete tick object,
+  built once at write time), and the whole-run `runs.summary` is written once at completion
 - **Error preservation**: All errors stored, success results sampled
 - **Response sampling**: Stores samples for deferred script validation
 

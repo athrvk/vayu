@@ -22,6 +22,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -31,6 +32,9 @@ namespace vayu::http::routes {
 // Defined in runs.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json> get_runs_response (vayu::db::Database& db,
 const vayu::db::RunFilter& filter, int64_t limit, int64_t offset);
+// Defined in runs.cpp; returns {http_status, json_body}.
+std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
+const std::string& run_id);
 } // namespace vayu::http::routes
 
 namespace {
@@ -254,6 +258,200 @@ TEST_F (RunsRouteTest, LegacySerializationKeepsConfigSnapshot) {
     EXPECT_FALSE (legacy.contains ("summary"));
     // Full snapshot, including keys the summary would drop.
     EXPECT_TRUE (legacy["configSnapshot"].contains ("headers"));
+}
+
+// ============================================================================
+// GET /runs/:id/report - the stored summary vs the legacy metric rows
+// ============================================================================
+
+namespace {
+
+// The whole-run results a completed load run stores on its row.
+vayu::core::RunSummaryInputs summary_inputs () {
+    vayu::core::RunSummaryInputs inputs;
+    inputs.total_requests    = 100;
+    inputs.rps               = 50.0;
+    inputs.send_rate         = 51.0;
+    inputs.throughput        = 49.5;
+    inputs.test_duration_s   = 2.0;
+    inputs.setup_overhead_s  = 0.25;
+    inputs.peak_concurrency  = 8;
+    inputs.dropped_requests  = 2;
+    inputs.queue_wait_avg_ms = 1.5;
+    inputs.bytes_sent        = 1024;
+    inputs.bytes_received    = 8192;
+    inputs.status_codes      = { { 200, 90 }, { 500, 7 }, { 0, 3 } };
+    inputs.latency.min       = 1.0;
+    inputs.latency.max       = 90.0;
+    inputs.latency.p50       = 10.0;
+    inputs.latency.p75       = 15.0;
+    inputs.latency.p90       = 20.0;
+    inputs.latency.p95       = 25.0;
+    inputs.latency.p99       = 30.0;
+    inputs.latency.p999      = 35.0;
+    inputs.latency_avg_ms    = 12.5;
+    inputs.tests             = vayu::core::ScriptValidationTotals{ 10, 9, 1 };
+    return inputs;
+}
+
+} // namespace
+
+TEST_F (RunsRouteTest, ReportMissingRunIs404) {
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_nope");
+    EXPECT_EQ (status, 404);
+    ASSERT_TRUE (body.contains ("error"));
+    EXPECT_TRUE (body["error"].is_string ());
+}
+
+// A completed run reports from its stored summary - no metric rows involved.
+TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
+    seed ({ .id = "run_sum", .start_time = 1000 });
+    db_->update_run_summary (
+    "run_sum", vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_sum");
+    ASSERT_EQ (status, 200);
+
+    const auto& summary = body["summary"];
+    EXPECT_EQ (summary["totalRequests"].get<size_t> (), 100u);
+    EXPECT_DOUBLE_EQ (summary["avgRps"].get<double> (), 50.0);
+    EXPECT_DOUBLE_EQ (summary["sendRate"].get<double> (), 51.0);
+    EXPECT_DOUBLE_EQ (summary["throughput"].get<double> (), 49.5);
+    EXPECT_DOUBLE_EQ (summary["testDuration"].get<double> (), 2.0);
+    EXPECT_DOUBLE_EQ (summary["setupOverhead"].get<double> (), 0.25);
+    EXPECT_EQ (summary["peakConcurrency"].get<size_t> (), 8u);
+    EXPECT_EQ (summary["droppedRequests"].get<size_t> (), 2u);
+    EXPECT_DOUBLE_EQ (summary["avgQueueWaitMs"].get<double> (), 1.5);
+    EXPECT_EQ (summary["bytesSent"].get<size_t> (), 1024u);
+    EXPECT_EQ (summary["bytesReceived"].get<size_t> (), 8192u);
+
+    // successful/failed are recounted from the stored distribution, so the 3
+    // transport errors (code 0) land on the failed side.
+    EXPECT_EQ (summary["successfulRequests"].get<size_t> (), 90u);
+    EXPECT_EQ (summary["failedRequests"].get<size_t> (), 10u);
+    EXPECT_DOUBLE_EQ (summary["errorRate"].get<double> (), 10.0);
+
+    const auto& latency = body["latency"];
+    EXPECT_DOUBLE_EQ (latency["min"].get<double> (), 1.0);
+    EXPECT_DOUBLE_EQ (latency["max"].get<double> (), 90.0);
+    EXPECT_DOUBLE_EQ (latency["avg"].get<double> (), 12.5);
+    EXPECT_DOUBLE_EQ (latency["p50"].get<double> (), 10.0);
+    EXPECT_DOUBLE_EQ (latency["p75"].get<double> (), 15.0);
+    EXPECT_DOUBLE_EQ (latency["p90"].get<double> (), 20.0);
+    EXPECT_DOUBLE_EQ (latency["p95"].get<double> (), 25.0);
+    EXPECT_DOUBLE_EQ (latency["p99"].get<double> (), 30.0);
+    EXPECT_DOUBLE_EQ (latency["p999"].get<double> (), 35.0);
+
+    // statusCodes / byStatusCode are integer-keyed maps, which nlohmann emits
+    // as arrays of [code, count] pairs sorted by code - the shape this endpoint
+    // has always returned.
+    ASSERT_TRUE (body["statusCodes"].is_array ());
+    ASSERT_EQ (body["statusCodes"].size (), 3u);
+    EXPECT_EQ (body["statusCodes"][1][0].get<int> (), 200);
+    EXPECT_EQ (body["statusCodes"][1][1].get<size_t> (), 90u);
+    ASSERT_TRUE (body["errors"]["byStatusCode"].is_array ());
+    EXPECT_EQ (body["errors"]["byStatusCode"][1][0].get<int> (), 500);
+    EXPECT_EQ (body["errors"]["byStatusCode"][1][1].get<size_t> (), 7u);
+
+    ASSERT_TRUE (body.contains ("testValidation"));
+    EXPECT_EQ (body["testValidation"]["samplesTested"].get<int> (), 10);
+    EXPECT_EQ (body["testValidation"]["testsPassed"].get<int> (), 9);
+    EXPECT_EQ (body["testValidation"]["testsFailed"].get<int> (), 1);
+}
+
+// A run without script validation keeps the section out entirely, rather than
+// reporting a run of zero tests that all passed.
+TEST_F (RunsRouteTest, ReportOmitsTestValidationWhenNoScriptRan) {
+    seed ({ .id = "run_no_tests", .start_time = 1000 });
+    auto inputs  = summary_inputs ();
+    inputs.tests = std::nullopt;
+    db_->update_run_summary (
+    "run_no_tests", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_tests");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("testValidation"));
+}
+
+// The trap the EAV schema set: per-tick percentile rows share their metric name
+// with the cumulative ones, and p75/p90/p999 were never label-guarded. With the
+// summary as the source, such a row cannot reach the report at all.
+TEST_F (RunsRouteTest, StoredSummaryWinsOverStrayPerTickPercentileRows) {
+    seed ({ .id = "run_trap", .start_time = 1000 });
+    db_->update_run_summary (
+    "run_trap", vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+
+    // A windowed (unlabeled) p90/p999 row from some tick late in the run.
+    for (auto name : { vayu::MetricName::LatencyP90, vayu::MetricName::LatencyP999 }) {
+        vayu::db::Metric m;
+        m.run_id    = "run_trap";
+        m.timestamp = 2000;
+        m.name      = name;
+        m.value     = 9999.0;
+        db_->add_metric (m);
+    }
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_trap");
+    ASSERT_EQ (status, 200);
+    EXPECT_DOUBLE_EQ (body["latency"]["p90"].get<double> (), 20.0);
+    EXPECT_DOUBLE_EQ (body["latency"]["p999"].get<double> (), 35.0);
+}
+
+// Runs recorded before the summary column still report from their EAV rows,
+// label guards and all.
+TEST_F (RunsRouteTest, ReportFallsBackToLegacyMetricRows) {
+    seed ({ .id = "run_legacy", .start_time = 1000 });
+
+    auto add = [&] (vayu::MetricName name, double value, const std::string& labels = "") {
+        vayu::db::Metric m;
+        m.run_id    = "run_legacy";
+        m.timestamp = 2000;
+        m.name      = name;
+        m.value     = value;
+        m.labels    = labels;
+        db_->add_metric (m);
+    };
+    add (vayu::MetricName::TotalRequests, 100.0);
+    add (vayu::MetricName::Rps, 50.0);
+    add (vayu::MetricName::TestDuration, 2.0);
+    add (vayu::MetricName::PeakConcurrency, 8.0);
+    add (vayu::MetricName::LatencyP50, 999.0);                        // windowed, unlabeled
+    add (vayu::MetricName::LatencyP50, 10.0, R"({"percentile":"p50"})"); // cumulative
+    add (vayu::MetricName::StatusCodes, 0.0, R"({"200":90,"500":10})");
+    add (vayu::MetricName::TestsSampled, 10.0);
+    add (vayu::MetricName::TestsPassed, 9.0);
+    add (vayu::MetricName::TestsFailed, 1.0);
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_legacy");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["summary"]["totalRequests"].get<size_t> (), 100u);
+    EXPECT_DOUBLE_EQ (body["summary"]["avgRps"].get<double> (), 50.0);
+    EXPECT_DOUBLE_EQ (body["summary"]["testDuration"].get<double> (), 2.0);
+    EXPECT_EQ (body["summary"]["peakConcurrency"].get<size_t> (), 8u);
+    // The labeled cumulative row wins over the windowed one, as it always did.
+    EXPECT_DOUBLE_EQ (body["latency"]["p50"].get<double> (), 10.0);
+    EXPECT_EQ (body["summary"]["successfulRequests"].get<size_t> (), 90u);
+    EXPECT_EQ (body["summary"]["failedRequests"].get<size_t> (), 10u);
+    ASSERT_TRUE (body.contains ("testValidation"));
+    EXPECT_EQ (body["testValidation"]["testsPassed"].get<int> (), 9);
+}
+
+// A summary that is not a JSON object is treated as absent, not as an empty
+// run: the legacy rows still produce a report.
+TEST_F (RunsRouteTest, MalformedSummaryFallsBackToLegacyMetricRows) {
+    seed ({ .id = "run_bad", .start_time = 1000 });
+    db_->update_run_summary ("run_bad", "not json at all");
+
+    vayu::db::Metric m;
+    m.run_id    = "run_bad";
+    m.timestamp = 2000;
+    m.name      = vayu::MetricName::TotalRequests;
+    m.value     = 7.0;
+    db_->add_metric (m);
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_bad");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["summary"]["totalRequests"].get<size_t> (), 7u);
 }
 
 } // namespace

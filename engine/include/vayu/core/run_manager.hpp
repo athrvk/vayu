@@ -14,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -118,14 +119,87 @@ struct RunContext {
 };
 
 /**
- * @brief Build the per-tick enrichment metric rows (dropped / bytes / status
- * codes) from the collector's current cumulative state. Extracted from
- * collect_metrics so it can be unit-tested deterministically.
+ * @brief One persisted metrics tick, in the field names the time-series
+ * response uses.
+ *
+ * The producer fills this once per DB-gated tick; `build_metric_tick_payload`
+ * turns it into the JSON stored in `metric_ticks.payload` and returned verbatim
+ * as one `data[]` entry by `GET /runs/:id/metrics`. Naming the fields after the
+ * response keys is deliberate - the struct *is* the wire shape, so a reader
+ * comparing the two has one mapping to check, not two.
  */
-[[nodiscard]] std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
-const std::shared_ptr<RunContext>& context,
-int64_t timestamp,
-const std::map<int, size_t>* status_snapshot = nullptr);
+struct MetricTickSample {
+    int64_t timestamp      = 0;   // Unix ms; the tick's single wall-clock sample
+    double elapsed_seconds = 0.0; // Seconds since the run's first persisted tick
+    size_t requests_completed = 0; // Responses received (success + error)
+    size_t requests_failed    = 0; // Of those, errors
+    double current_rps        = 0.0;
+    size_t current_concurrency = 0;
+    double send_rate           = 0.0;
+    double throughput          = 0.0;
+    size_t backpressure        = 0; // Sent but not yet responded
+    double error_rate          = 0.0; // Percent
+    size_t dropped_requests    = 0;
+    size_t bytes_sent          = 0;
+    size_t bytes_received      = 0;
+    std::map<int, size_t> status_codes; // Cumulative; code 0 = transport errors
+    // Windowed (rolling) percentiles for this tick, not cumulative.
+    double latency_p50_ms = 0.0;
+    double latency_p95_ms = 0.0;
+    double latency_p99_ms = 0.0;
+};
+
+/**
+ * @brief Serialize a tick sample into the stored `metric_ticks.payload` object.
+ *
+ * Key set and value types are the contract `GET /runs/:id/metrics` returns; the
+ * legacy EAV reader in `http/routes/metrics.cpp` builds the same object from
+ * ~18 rows, and stats_route_test.cpp pins the two against each other.
+ */
+[[nodiscard]] nlohmann::json build_metric_tick_payload (const MetricTickSample& sample);
+
+/** @brief Script-validation tallies, when deferred validation actually ran. */
+struct ScriptValidationTotals {
+    size_t sampled = 0;
+    size_t passed  = 0;
+    size_t failed  = 0;
+};
+
+/**
+ * @brief Whole-run results, the inputs to the stored `runs.summary` object.
+ *
+ * Everything `GET /runs/:id/report` used to re-derive by scanning the run's
+ * metric rows, known once at completion. `latency` holds the cumulative
+ * (whole-run) percentiles, never a window.
+ */
+struct RunSummaryInputs {
+    size_t total_requests     = 0;
+    double rps                = 0.0;
+    double send_rate          = 0.0;
+    double throughput         = 0.0;
+    double test_duration_s    = 0.0;
+    double setup_overhead_s   = 0.0;
+    size_t peak_concurrency   = 0;
+    size_t dropped_requests   = 0;
+    double queue_wait_avg_ms  = 0.0;
+    size_t bytes_sent         = 0;
+    size_t bytes_received     = 0;
+    std::map<int, size_t> status_codes;
+    MetricsCollector::Percentiles latency; // min/max/p50..p999, whole-run
+    double latency_avg_ms = 0.0; // Mean latency; the histogram does not carry it
+    // Absent when the run had no test script or no sampled responses - the
+    // report then omits its testValidation section, as it always has.
+    std::optional<ScriptValidationTotals> tests;
+};
+
+/**
+ * @brief Serialize whole-run results into the object stored in `runs.summary`.
+ *
+ * The report route reads exactly these keys (`http/routes/runs.cpp`), so the two
+ * sides are locked together by runs_route_test.cpp's summary round-trip rather
+ * than by convention.
+ */
+[[nodiscard]] nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs);
 
 /**
  * @brief Wrap a per-tick stats object as a wire-ready SSE "metrics" event,
