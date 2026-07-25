@@ -40,6 +40,17 @@ on:
 permissions:
   contents: read
 
+env:
+  # Silences the "Warning from the Material for MkDocs team" banner about MkDocs
+  # 2.0 (https://squidfunk.github.io/mkdocs-material/blog/2026/02/18/mkdocs-2.0/).
+  # It is an unconditional advisory from the theme, not a finding about this
+  # config: the build still succeeds, and it printed 14 red lines above every
+  # run. Our exposure is small anyway - the only plugin here is MkDocs' built-in
+  # `search` and there are no theme overrides - and the version is pinned in
+  # requirements-docs.txt, so nothing upstream can change this site without a
+  # commit. Unset this to see the banner again.
+  NO_MKDOCS_2_WARNING: '1'
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   # Superseded pull-request builds are throwaway; a superseded deploy is not -
