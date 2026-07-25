@@ -1,0 +1,306 @@
+/**
+ * @file tests/curl_transfer_test.cpp
+ * @brief Wire-level behaviour of the two curl paths - the event loop used by
+ *        load runs and the single-request Client used by design mode.
+ *
+ * Both are exercised for every property that must hold on both, because the
+ * two had already drifted: the timing clamps existed only in the Client, and
+ * the method/body ordering bug existed in both copies independently.
+ */
+
+#include <gtest/gtest.h>
+#include <httplib.h>
+
+#include <chrono>
+#include <string>
+#include <thread>
+
+#include "vayu/http/client.hpp"
+#include "vayu/http/event_loop.hpp"
+#include "vayu/http/event_loop/curl_utils.hpp"
+
+namespace {
+
+/// Answers with the method it was actually reached by, so a request that
+/// changed method on the wire is visible rather than merely suspected.
+class MethodEchoServer {
+    public:
+    MethodEchoServer () {
+        svr.Get ("/echo", [] (const httplib::Request& req, httplib::Response& res) {
+            res.set_content ("GET:" + req.body, "text/plain");
+        });
+        svr.Post ("/echo", [] (const httplib::Request& req, httplib::Response& res) {
+            res.set_content ("POST:" + req.body, "text/plain");
+        });
+        svr.Get ("/big", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content (std::string (kBigBodyBytes, 'x'), "text/plain");
+        });
+        svr.Get ("/small", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content ("ok", "text/plain");
+        });
+        svr.Get ("/slow", [] (const httplib::Request&, httplib::Response& res) {
+            std::this_thread::sleep_for (std::chrono::seconds (2));
+            res.set_content ("late", "text/plain");
+        });
+
+        port   = svr.bind_to_any_port ("127.0.0.1");
+        thread = std::thread ([this] () { svr.listen_after_bind (); });
+        svr.wait_until_ready ();
+    }
+
+    ~MethodEchoServer () {
+        svr.stop ();
+        if (thread.joinable ())
+            thread.join ();
+    }
+
+    std::string url (const std::string& path) const {
+        return "http://127.0.0.1:" + std::to_string (port) + path;
+    }
+
+    static constexpr size_t kBigBodyBytes = 256 * 1024;
+
+    httplib::Server svr;
+    std::thread thread;
+    int port = 0;
+};
+
+class CurlTransferTest : public ::testing::Test {
+    protected:
+    void SetUp () override {
+        vayu::http::global_init ();
+        server = std::make_unique<MethodEchoServer> ();
+    }
+
+    void TearDown () override {
+        server.reset ();
+        vayu::http::global_cleanup ();
+    }
+
+    vayu::Request get_with_body (const std::string& path) const {
+        vayu::Request request;
+        request.method       = vayu::HttpMethod::GET;
+        request.url          = server->url (path);
+        request.body.mode    = vayu::BodyMode::Json;
+        request.body.content = R"({"query":"search"})";
+        return request;
+    }
+
+    /// Run one request through the event loop with the given config.
+    vayu::Result<vayu::Response> run_once (const vayu::Request& request,
+    vayu::http::EventLoopConfig config = {}) {
+        vayu::http::EventLoop loop (config);
+        loop.start ();
+        auto handle = loop.submit_async (request);
+        auto result = handle.future.get ();
+        loop.stop ();
+        return result;
+    }
+
+    std::unique_ptr<MethodEchoServer> server;
+};
+
+} // namespace
+
+// ============================================================================
+// Method / body agreement on the wire
+// ============================================================================
+
+// CURLOPT_POSTFIELDS switches curl's method to POST, so a GET carrying a body
+// (Elasticsearch-style search) used to arrive as a POST - silently, with only
+// the server's log to show it. Mutation-check: set CURLOPT_HTTPGET instead of
+// re-asserting the method with CUSTOMREQUEST and the server answers "POST:".
+TEST_F (CurlTransferTest, EventLoopSendsGetWithABodyAsGet) {
+    auto result = run_once (get_with_body ("/echo"));
+
+    ASSERT_TRUE (result.is_ok ()) << "request failed";
+    EXPECT_EQ (result.value ().status_code, 200);
+    EXPECT_EQ (result.value ().body, R"(GET:{"query":"search"})")
+    << "a body-bearing GET must reach the server as a GET, body intact";
+}
+
+TEST_F (CurlTransferTest, ClientSendsGetWithABodyAsGet) {
+    vayu::http::Client client;
+    auto result = client.send (get_with_body ("/echo"));
+
+    ASSERT_TRUE (result.is_ok ()) << "request failed";
+    EXPECT_EQ (result.value ().body, R"(GET:{"query":"search"})");
+}
+
+// A body-free request of each shape still uses its ordinary curl option.
+TEST_F (CurlTransferTest, BodylessGetAndPostAreUnchanged) {
+    vayu::Request plain_get;
+    plain_get.method = vayu::HttpMethod::GET;
+    plain_get.url    = server->url ("/echo");
+    auto get_result  = run_once (plain_get);
+    ASSERT_TRUE (get_result.is_ok ());
+    EXPECT_EQ (get_result.value ().body, "GET:");
+
+    vayu::Request post;
+    post.method       = vayu::HttpMethod::POST;
+    post.url          = server->url ("/echo");
+    post.body.mode    = vayu::BodyMode::Json;
+    post.body.content = "payload";
+    auto post_result  = run_once (post);
+    ASSERT_TRUE (post_result.is_ok ());
+    EXPECT_EQ (post_result.value ().body, "POST:payload");
+}
+
+// HEAD with a body cannot be honoured (NOBODY resets the method and drops the
+// body), and used to go out as a POST. Both paths refuse it by name instead -
+// as a status-0 response, the shape every consumer already handles, not an
+// Error result that /execute's unguarded .value() would throw on.
+// Mutation-check: remove the validate_transferable call from either caller and
+// its case here reaches the server as "POST:".
+TEST_F (CurlTransferTest, HeadWithABodyIsRefusedByBothPaths) {
+    vayu::Request request = get_with_body ("/echo");
+    request.method        = vayu::HttpMethod::HEAD;
+
+    auto loop_result = run_once (request);
+    ASSERT_TRUE (loop_result.is_ok ())
+    << "refusal is a failed response, not an Error";
+    EXPECT_EQ (loop_result.value ().status_code, 0);
+    EXPECT_EQ (loop_result.value ().error_code, vayu::ErrorCode::InvalidMethod);
+
+    vayu::http::Client client;
+    auto client_result = client.send (request);
+    ASSERT_TRUE (client_result.is_ok ());
+    EXPECT_EQ (client_result.value ().status_code, 0);
+    EXPECT_EQ (client_result.value ().error_code, vayu::ErrorCode::InvalidMethod);
+    EXPECT_NE (client_result.value ().error_message.find ("HEAD"), std::string::npos);
+}
+
+// ============================================================================
+// Response body cap
+// ============================================================================
+
+// Without a cap, one transfer buffers the whole body and a run buffers
+// concurrency x that - and the bad_alloc would have to unwind through
+// libcurl's C frame. Mutation-check: drop the cap check in write_callback and
+// the oversized response succeeds with a 256KB body.
+TEST_F (CurlTransferTest, OversizedResponseBodyFailsTheTransferWithANamedCap) {
+    vayu::http::EventLoopConfig config;
+    config.max_response_body_bytes = 4096;
+
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server->url ("/big");
+
+    auto result = run_once (request, config);
+
+    ASSERT_TRUE (result.is_ok ())
+    << "a capped transfer is reported as a failed response";
+    const auto& response = result.value ();
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_NE (response.error_message.find ("maxResponseBodyBytes"), std::string::npos)
+    << "the error must name the cap that tripped: " << response.error_message;
+    EXPECT_LE (response.body.size (), config.max_response_body_bytes)
+    << "nothing past the cap may be buffered";
+}
+
+TEST_F (CurlTransferTest, BodyUnderTheCapIsStoredVerbatim) {
+    vayu::http::EventLoopConfig config;
+    config.max_response_body_bytes = 4096;
+
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server->url ("/small");
+
+    auto result = run_once (request, config);
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().status_code, 200);
+    EXPECT_EQ (result.value ().body, "ok");
+}
+
+TEST_F (CurlTransferTest, ZeroCapMeansUnbounded) {
+    vayu::http::EventLoopConfig config;
+    config.max_response_body_bytes = 0;
+
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server->url ("/big");
+
+    auto result = run_once (request, config);
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().body.size (), MethodEchoServer::kBigBodyBytes);
+}
+
+// ============================================================================
+// Timing on the event loop path
+// ============================================================================
+
+// The clamps lived only in the Client, so a load run against a plain-HTTP (or
+// keep-alive) target stored a negative tls_ms and an inflated first_byte_ms,
+// which the app renders verbatim. Mutation-check: revert curl_utils.cpp to the
+// raw successive differences and tls_ms comes back negative here.
+TEST_F (CurlTransferTest, EventLoopTimingPhasesAreNonNegativeAndTlsFreeOverPlainHttp) {
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server->url ("/small");
+
+    auto result = run_once (request);
+    ASSERT_TRUE (result.is_ok ());
+
+    const auto& t = result.value ().timing;
+    EXPECT_GE (t.dns_ms, 0.0);
+    EXPECT_GE (t.connect_ms, 0.0);
+    EXPECT_GE (t.tls_ms, 0.0);
+    EXPECT_GE (t.first_byte_ms, 0.0);
+    EXPECT_GE (t.download_ms, 0.0);
+    EXPECT_DOUBLE_EQ (t.tls_ms, 0.0) << "plain HTTP has no TLS phase";
+}
+
+// A failed transfer still connected, still sent bytes and still spent time.
+// extract_response used to return before reading any of it, so every error in
+// a load run contributed zero bytes to throughput and left load_strategy's
+// error-timing branch dead. Mutation-check: restore the early return and both
+// assertions below go to zero.
+TEST_F (CurlTransferTest, FailedTransferKeepsTheTimingAndBytesCurlMeasured) {
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = server->url ("/slow");
+    request.timeout_ms = 300;
+
+    auto result = run_once (request);
+
+    ASSERT_TRUE (result.is_ok ())
+    << "a timeout is reported as a failed response";
+    const auto& response = result.value ();
+    ASSERT_EQ (response.status_code, 0);
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::Timeout);
+    EXPECT_GT (response.timing.wire_ms, 100.0)
+    << "curl measured the time spent before the timeout";
+    EXPECT_GT (response.timing.bytes_up, 0u)
+    << "the request headers went out and must be counted";
+}
+
+// ============================================================================
+// Transfer submission failure
+// ============================================================================
+
+// A handle the multi rejects never produces a completion message, so the
+// discarded CURLMcode stranded the transfer: active_transfers never drained,
+// the run stayed "Running" and stop(true) waited forever. CURLM_OUT_OF_MEMORY
+// cannot be forced in-process; adding the same handle twice reproduces the
+// rejection deterministically. Mutation-check: return nullopt without checking
+// the code and this fails.
+TEST (AddToMulti, RejectedHandleIsReportedRatherThanDiscarded) {
+    vayu::http::global_init ();
+    CURLM* multi = curl_multi_init ();
+    CURL* easy   = curl_easy_init ();
+    ASSERT_NE (multi, nullptr);
+    ASSERT_NE (easy, nullptr);
+
+    EXPECT_FALSE (vayu::http::detail::add_to_multi (multi, easy).has_value ());
+
+    auto rejected = vayu::http::detail::add_to_multi (multi, easy);
+    ASSERT_TRUE (rejected.has_value ())
+    << "a rejected add must not look like success";
+    EXPECT_EQ (rejected->code, vayu::ErrorCode::InternalError);
+    EXPECT_NE (rejected->message.find ("Failed to submit transfer"), std::string::npos);
+
+    curl_multi_remove_handle (multi, easy);
+    curl_easy_cleanup (easy);
+    curl_multi_cleanup (multi);
+    vayu::http::global_cleanup ();
+}

@@ -16,8 +16,9 @@
 #include <sys/socket.h>
 #endif
 
+#include <algorithm>
 #include <chrono>
-#include <regex>
+#include <utility>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
@@ -32,17 +33,10 @@ namespace vayu::http::detail {
 // Static member definition
 DnsCache EventLoopWorker::dns_cache_;
 
-std::string DnsCache::resolve (const std::string& hostname) {
-    // Check cache first (read lock)
-    {
-        std::shared_lock<std::shared_mutex> lock (mutex_);
-        auto it = cache_.find (hostname);
-        if (it != cache_.end ()) {
-            return it->second;
-        }
-    }
+namespace {
 
-    // Not cached - resolve (no lock during DNS lookup)
+/// Blocking system lookup. Returns an empty string when the host has no address.
+std::string system_resolve (const std::string& hostname) {
     // Use AF_UNSPEC to allow both IPv4 and IPv6 - this matches curl's default behavior
     // and is critical for localhost which often resolves to ::1 (IPv6) on modern systems
     struct addrinfo hints = {};
@@ -84,23 +78,77 @@ std::string DnsCache::resolve (const std::string& hostname) {
         freeaddrinfo (result);
     }
 
-    // Cache the result (write lock)
-    if (!ip.empty ()) {
+    return ip;
+}
+
+/// Deliver a terminal result to whichever consumer a transfer has. Every path
+/// that gives up on a request before curl owns it ends here, so a request can
+/// never be dropped without completing.
+void complete_transfer (TransferData& data, Result<Response> result) {
+    if (data.callback) {
+        data.callback (data.request_id, result);
+    }
+    if (data.has_promise) {
+        data.promise.set_value (std::move (result));
+    }
+}
+
+} // namespace
+
+DnsCache::DnsCache () : resolver_ (system_resolve) {
+}
+
+DnsCache::DnsCache (Resolver resolver) : resolver_ (std::move (resolver)) {
+}
+
+bool dns_entry_is_fresh (bool negative, std::chrono::steady_clock::duration age, long ttl_seconds) {
+    if (ttl_seconds == 0) {
+        return false; // Caching disabled
+    }
+
+    long effective_ttl = ttl_seconds;
+    if (negative) {
+        const long negative_ttl = core::constants::event_loop::DNS_NEGATIVE_CACHE_SECONDS;
+        effective_ttl =
+        ttl_seconds < 0 ? negative_ttl : std::min (ttl_seconds, negative_ttl);
+    } else if (ttl_seconds < 0) {
+        return true; // Never expires
+    }
+
+    return age < std::chrono::seconds (effective_ttl);
+}
+
+bool DnsCache::is_fresh (const Entry& entry, long ttl_seconds) {
+    return dns_entry_is_fresh (entry.ip.empty (),
+    std::chrono::steady_clock::now () - entry.stored_at, ttl_seconds);
+}
+
+std::string DnsCache::resolve (const std::string& hostname, long ttl_seconds) {
+    // Check cache first (read lock)
+    {
+        std::shared_lock<std::shared_mutex> lock (mutex_);
+        auto it = cache_.find (hostname);
+        if (it != cache_.end () && is_fresh (it->second, ttl_seconds)) {
+            return it->second.ip;
+        }
+    }
+
+    // Not cached, or stale - resolve (no lock during the blocking lookup)
+    std::string ip = resolver_ (hostname);
+
+    if (ttl_seconds != 0) {
+        // Failures are stored too (as an empty ip), so an unresolvable host
+        // does not re-block this thread on every request.
         std::unique_lock<std::shared_mutex> lock (mutex_);
-        cache_[hostname] = ip;
+        cache_[hostname] = Entry{ ip, std::chrono::steady_clock::now () };
     }
 
     return ip;
 }
 
-std::string DnsCache::get (const std::string& hostname) const {
-    std::shared_lock<std::shared_mutex> lock (mutex_);
-    auto it = cache_.find (hostname);
-    return (it != cache_.end ()) ? it->second : "";
-}
-
-struct curl_slist* DnsCache::get_resolve_list (const std::string& hostname, int port) {
-    std::string ip = resolve (hostname);
+struct curl_slist*
+DnsCache::get_resolve_list (const std::string& hostname, int port, long ttl_seconds) {
+    std::string ip = resolve (hostname, ttl_seconds);
     if (ip.empty ()) {
         return nullptr;
     }
@@ -113,6 +161,11 @@ struct curl_slist* DnsCache::get_resolve_list (const std::string& hostname, int 
 void DnsCache::clear () {
     std::unique_lock<std::shared_mutex> lock (mutex_);
     cache_.clear ();
+}
+
+size_t DnsCache::size () const {
+    std::shared_lock<std::shared_mutex> lock (mutex_);
+    return cache_.size ();
 }
 
 // ============================================================================
@@ -230,16 +283,7 @@ void EventLoopWorker::stop (bool wait_for_pending) {
         // requests that were never started (still sitting in pending_queue).
         std::unique_ptr<TransferData> data;
         while (pending_queue.pop (data)) {
-            Error error;
-            error.code    = ErrorCode::InternalError;
-            error.message = "Request cancelled";
-
-            if (data->callback) {
-                data->callback (data->request_id, error);
-            }
-            if (data->has_promise) {
-                data->promise.set_value (error);
-            }
+            complete_transfer (*data, Error{ ErrorCode::InternalError, "Request cancelled" });
         }
     }
 }
@@ -293,33 +337,43 @@ void EventLoopWorker::run_loop () {
 
             did_work = true;
 
+            // A request curl cannot put on the wire as written is refused here
+            // rather than quietly sent as something else.
+            if (auto invalid = validate_transferable (data->request)) {
+                // Delivered as a failed *response*, the shape a request that
+                // never reached the wire already has everywhere else.
+                complete_transfer (*data, error_response (*invalid));
+                continue;
+            }
+
             // Acquire handle from pool (lock-free or specialized pool)
             CURL* easy = handle_pool_.acquire ();
             // Note: setup_easy_handle might take time, good to do it outside locks
             easy = setup_easy_handle (easy, data.get (), config, &dns_cache_);
 
-            if (easy) {
-                // Add to multi handle - this is fast
-                curl_multi_add_handle (multi_handle, easy);
-
-                // Track active transfer
-                {
-                    // No lock needed - private resource
-                    active_transfers[easy] = std::move (data);
-                    // Update atomic size
-                    current_active_count.store (
-                    active_transfers.size (), std::memory_order_relaxed);
-                    local_active++; // Local cache update for loop condition
-                }
-            } else {
+            if (!easy) {
                 // Handle creation failure
-                Error error;
-                error.code    = ErrorCode::InternalError;
-                error.message = "Failed to create curl handle";
-                if (data->callback)
-                    data->callback (data->request_id, error);
-                if (data->has_promise)
-                    data->promise.set_value (error);
+                complete_transfer (*data,
+                Error{ ErrorCode::InternalError, "Failed to create curl handle" });
+                continue;
+            }
+
+            // A handle the multi rejects never yields a completion message, so
+            // tracking it as active would strand it: the run never drains and
+            // stop(true) never returns.
+            if (auto rejected = add_to_multi (multi_handle, easy)) {
+                complete_transfer (*data, *rejected);
+                handle_pool_.release (easy);
+                continue;
+            }
+
+            // Track active transfer
+            {
+                // No lock needed - private resource
+                active_transfers[easy] = std::move (data);
+                // Update atomic size
+                current_active_count.store (active_transfers.size (), std::memory_order_relaxed);
+                local_active++; // Local cache update for loop condition
             }
         }
 
