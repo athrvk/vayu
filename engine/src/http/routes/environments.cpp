@@ -40,7 +40,9 @@ apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, 
         return err;
     }
     apply_string_field (json, "description", e.description, "", is_create);
-    apply_json_field (json, "variables", e.variables, "{}", is_create);
+    if (auto err = apply_json_field (json, "variables", e.variables, "{}", is_create)) {
+        return err;
+    }
     apply_bool_field (json, "isActive", e.is_active, false, is_create);
     return std::nullopt;
 }

@@ -99,6 +99,26 @@ verb rather than a silently discarded write. Those fields are a collection's
 `name`, an environment's `name`, and a request's `collectionId`, `name`,
 `method` and `url`. Each is also required on create.
 
+### Accepted field shapes
+
+A field that is present and not `null` must have the shape below, on both verbs.
+Anything else is a `400` naming the field, e.g.
+`{"error": "Invalid 'auth': must be a JSON object"}`.
+
+| Field | Shape |
+|---|---|
+| `variables` (collection / environment / globals) | object |
+| `auth` (collection / request) | object |
+| `body` (request) | object |
+| `params` / `headers` (request) | array of `{key: string, value: string, enabled: bool}` |
+
+Object-shaped fields are stored as JSON blobs, and every reader of one degrades
+quietly when it is not an object - `variables` reads back empty, a request `body`
+is dropped, and `auth` resolves to none, so a request the caller believes carries
+credentials goes out bare. The write is therefore rejected rather than stored:
+`{"variables": 42}` and `{"auth": "bearer"}` are `400`s, and the previously
+stored value is left untouched.
+
 ### Behavior change (pre-1.0)
 
 `POST /<resource>` used to be a silent upsert on all three resources, so a
@@ -624,7 +644,9 @@ absent and `variables: null` both mean the default, `{}`.
 `variables: null` used to store the literal four-character text `null`, which
 parses as JSON but is not an object. `GET /globals` returns `{}` for anything it
 cannot read as an object, so the failure showed up as globals silently
-disappearing rather than as an error.
+disappearing rather than as an error. A non-object `variables` (`42`, a string,
+an array) had the same effect and is now a `400` - see
+[Accepted field shapes](#accepted-field-shapes).
 
 ## Authentication
 
