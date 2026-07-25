@@ -39,11 +39,23 @@ vayu::Result<vayu::Response> result) {
     int slow_threshold_ms = context->config.value ("slow_threshold_ms", 1000);
     bool save_timing_breakdown = context->config.value ("save_timing_breakdown", false);
 
-    // client.send() now always returns Response (never Error), but Response may have error_code set
+    // A completed transfer always returns Response (never Error), with
+    // error_code set when it failed on the wire. An Error arrives only when the
+    // transfer never reached the wire at all - today that is cancellation on
+    // stop. Record it: the request was counted in requests_sent, so dropping it
+    // here would leave in_flight() permanently non-zero and under-count the
+    // run's total against what it actually submitted.
     if (result.is_error ()) {
-        // This should not happen anymore, but handle it for safety
-        vayu::utils::log_error (
-        "Unexpected error result in load_strategy::handle_result");
+        const auto& error = result.error ();
+        nlohmann::json error_json = { { "error_code", static_cast<int> (error.code) },
+            { "error_type", "cancelled" }, { "message", error.message },
+            { "request_number", context->total_requests () } };
+        context->metrics_collector->record_error (
+        error.code, error.message, error_json.dump ());
+
+        if (context->closed_loop.load (std::memory_order_relaxed)) {
+            context->notify_refill ();
+        }
         return;
     }
 

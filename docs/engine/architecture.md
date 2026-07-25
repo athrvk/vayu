@@ -86,6 +86,14 @@ Manages the lifecycle of load test runs:
 - **Retained finished runs**: Completed/failed/stopped runs are moved to a separate retained
   map rather than unregistered immediately, so a late SSE client still receives the full metric
   series. A TTL sweep evicts them after `liveRetentionMs` (default 60s).
+- **Stop discards, completion drains (with a deadline)**: a stopped run throws away its queued
+  backlog and cancels in-flight transfers, so a stop is not paced by the upstream; a run that
+  reaches the end of its duration waits for genuine in-flight requests, but no longer than
+  `timeout` + 2s. Cancelled requests are recorded as errors, so a run's submitted and recorded
+  counts still agree.
+- **The move to the retained map is the "worker is finished" signal**: it happens after the
+  final metrics flush and status update, which is what `DELETE /runs/:id` waits on before
+  removing rows (see the API reference).
 - **Graceful shutdown**: Stops active runs on daemon shutdown
 
 ### Metrics Collector

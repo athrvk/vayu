@@ -13,6 +13,7 @@
  */
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <future>
@@ -149,10 +150,20 @@ class EventLoop {
     /**
      * @brief Stop the event loop
      *
-     * Waits for all pending requests to complete.
-     * @param wait_for_pending If true, waits for pending requests; if false, cancels them
+     * @param wait_for_pending If true, queued requests are still sent and
+     *        in-flight ones are awaited. If false, both are cancelled: the
+     *        queued backlog is discarded without being sent, and every
+     *        in-flight transfer is removed from curl and completed with an
+     *        `ErrorCode::InternalError` "Request cancelled" result, so a stop
+     *        cannot be held hostage by an upstream that never answers.
+     * @param drain_timeout Upper bound on the wait when `wait_for_pending` is
+     *        true; whatever is still in flight when it expires is cancelled the
+     *        same way. Zero (the default) means wait indefinitely, which is
+     * only safe when every transfer carries a timeout of its own. Ignored when
+     *        `wait_for_pending` is false - that path cancels immediately.
      */
-    void stop (bool wait_for_pending = true);
+    void stop (bool wait_for_pending = true,
+    std::chrono::milliseconds drain_timeout = std::chrono::milliseconds::zero ());
 
     /**
      * @brief Check if the event loop is running

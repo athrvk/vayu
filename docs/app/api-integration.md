@@ -182,6 +182,15 @@ apiService.stopRun(id): Promise<StopRunResponse>
 apiService.deleteRun(id): Promise<void>
 ```
 
+`deleteRun` on a run that is still in progress stops it engine-side first, so it
+takes as long as the stop does, and it **rejects with a 409** if the run's worker
+has not finished writing in time - nothing is deleted in that case. Callers must
+handle that rejection: `HistoryList` turns it into a toast telling the user to
+retry, and Settings' *Clear run history* already counts per-run failures through
+`Promise.allSettled`. The engine's error body is a bare `{"error": "..."}`
+string, which `httpClient` cannot read into `ApiError.message` (it looks for
+`error.message`), so the wording is the caller's, keyed off `statusCode`.
+
 #### Scripting
 
 ```typescript

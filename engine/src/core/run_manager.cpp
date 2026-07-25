@@ -462,8 +462,25 @@ RunManager& manager) {
             return;
         }
 
-        // Wait for all requests to complete
-        context->event_loop->stop (true); // Wait for pending
+        // How the run lets go of the event loop depends on why it is ending.
+        //
+        // A user stop must stop *sending*: draining the queued backlog would
+        // keep the target under load after the stop was requested, and waiting
+        // on in-flight transfers hands the stop's latency to the upstream.
+        // stop(false) discards the backlog and cancels what is in flight.
+        //
+        // The natural end of the duration still lets genuine in-flight requests
+        // settle, but not forever: a request that has outlived its own timeout
+        // by the grace period is never going to answer, and waiting on it pins
+        // the run in `running` with no way out.
+        if (context->should_stop) {
+            context->event_loop->stop (false);
+        } else {
+            const int64_t drain_ms =
+            (timeout_ms > 0 ? timeout_ms : vayu::core::constants::server::DEFAULT_TIMEOUT_MS) +
+            vayu::core::constants::event_loop::STOP_DRAIN_GRACE_MS;
+            context->event_loop->stop (true, std::chrono::milliseconds (drain_ms));
+        }
 
         // Record test end time immediately (before cleanup overhead)
         auto test_end = std::chrono::steady_clock::now ();
