@@ -32,7 +32,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			name: "Dev",
 			variables: { baseUrl: { value: "x", enabled: true } },
 		}),
-		upsertEnvironment: vi.fn().mockResolvedValue({ id: "env_1", name: "Dev" }),
+		updateEnvironment: vi.fn().mockResolvedValue({ id: "env_1", name: "Dev" }),
 		...overrides,
 	} as unknown as EngineClient;
 }
@@ -196,9 +196,12 @@ describe("data-write tools", () => {
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBeFalsy();
-		const payload = (client.upsertEnvironment as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// PUT /environments/:id - the id is the path argument, not a body field.
+		const call = (client.updateEnvironment as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(call[0]).toBe("env_1");
+		const payload = call[1];
+		expect(payload).not.toHaveProperty("id");
 		expect(payload).toMatchObject({
-			id: "env_1",
 			name: "Dev",
 			variables: {
 				baseUrl: { value: "x", enabled: true },
@@ -215,7 +218,7 @@ describe("data-write tools", () => {
 			ctxWith(client, { allowWrites: false })
 		);
 		expect(res.isError).toBe(true);
-		expect(client.upsertEnvironment).not.toHaveBeenCalled();
+		expect(client.updateEnvironment).not.toHaveBeenCalled();
 	});
 });
 

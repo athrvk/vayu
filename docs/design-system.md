@@ -921,6 +921,31 @@ wrapper and the load-test dialog's "Recording & limits" card. Put it on the
 element carrying the overflow - not on the rows. For a one-off outside such a
 container, use the `.focus-ring-inset` utility.
 
+Two limits worth knowing before reaching for it. **`overflow-y-auto` clips
+horizontally too** - it computes `overflow-x` to `auto`, so a box that only
+meant to scroll vertically still cuts a ring off its left and right edges. And
+**`.panel-clip`'s element list is narrower than the baseline's**: it covers
+`button`, `[role="button"]` and `[tabindex]` only, so for `a[href]`, `input`,
+`select`, `textarea` and `summary` it is inert - the baseline still draws the
+ring 2px out and the panel still cuts it off. The `components/ui` primitives are
+unaffected either way, since they set `focus-visible:outline-none` and paint
+their own ring.
+
+**Prefer clearance to tucking-in for a control that also appears outside a
+clipping panel.** Both fix the clipping; only clearance keeps one control
+looking like one control. The row-enable checkbox is the worked example: a plain
+`<input type="checkbox">` in both the variables table and the request builder's
+key-value rows. `KeyValueRow` wraps its row in `p-1`, so the ring reads as an
+outset hairline with a 4px gap. The variables table's cell had no horizontal
+padding and sat against a `p-0` scroll container, so the ring lost its left side
+on Collection Detail but not on the Variables screen, where the container
+carries `p-4`. The fix is `px-1` on that cell - the same 4px - **not**
+`.panel-clip` on the container, which would have tucked this instance's ring
+inward and made the two checkboxes disagree. `focus-ring-clipping.test.tsx`
+guards both halves: the two checkboxes must declare equal clearance, and neither
+may sit under a `.panel-clip`. The clearance assertion alone would pass a change
+that re-broke the match.
+
 **Composite rows - `.focus-row`.** The baseline attaches the ring to whatever is
 *focusable*, which is only right when the focusable element is also what the user
 reads as the target. In a tree row it often isn't: a collection row is 220px with

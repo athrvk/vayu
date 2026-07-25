@@ -16,7 +16,9 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <sstream>
+#include <string>
 #include <utility>
 
 namespace vayu::http::routes {
@@ -82,6 +84,161 @@ std::string list_requests_body (vayu::db::Database& db, const std::string& colle
     return out.str ();
 }
 
+/**
+ * Validates a KeyValueEntry array field (`params` / `headers`) and stores it.
+ * Under the one null-vs-absent rule a null resets to `[]`; a present value must
+ * be an array whose every entry carries string `key`/`value` and boolean
+ * `enabled`. Returns the 400 body on a malformed entry, nullopt otherwise.
+ */
+static std::optional<std::pair<int, nlohmann::json>>
+apply_key_value_field (const nlohmann::json& json, const char* key, std::string& out, bool is_create) {
+    if (!json.contains (key)) {
+        if (is_create) {
+            out = "[]";
+        }
+        return std::nullopt;
+    }
+    const auto& value = json[key];
+    if (value.is_null ()) {
+        out = "[]";
+        return std::nullopt;
+    }
+    if (!value.is_array ()) {
+        return std::make_pair (400,
+        nlohmann::json{ { "error",
+        std::string ("Invalid '") + key + "': must be an array of {key, value, enabled}" } });
+    }
+    for (size_t i = 0; i < value.size (); ++i) {
+        const auto& entry = value[i];
+        if (!entry.contains ("key") || !entry["key"].is_string () ||
+        !entry.contains ("value") || !entry["value"].is_string () ||
+        !entry.contains ("enabled") || !entry["enabled"].is_boolean ()) {
+            return std::make_pair (400,
+            nlohmann::json{ { "error",
+            std::string ("Invalid ") + key + " entry at index " + std::to_string (i) +
+            ": missing required field (key, value, or enabled)" } });
+        }
+    }
+    out = value.dump ();
+    return std::nullopt;
+}
+
+/**
+ * Applies the request body onto `r` under the one null-vs-absent rule (see the
+ * helpers in routes.hpp). Shared by the create and update cores so the two
+ * verbs cannot drift apart on what a field means.
+ *
+ * `collectionId`, `name`, `method` and `url` have no default, so each is
+ * required on create and rejects an explicit null on either verb.
+ */
+static std::optional<std::pair<int, nlohmann::json>>
+apply_request_fields (vayu::db::Request& r, const nlohmann::json& json, bool is_create) {
+    if (auto err = apply_required_string_field (
+        json, "collectionId", r.collection_id, is_create)) {
+        return err;
+    }
+    if (auto err = apply_required_string_field (json, "name", r.name, is_create)) {
+        return err;
+    }
+
+    std::string method_str = to_string (r.method);
+    if (auto err = apply_required_string_field (json, "method", method_str, is_create)) {
+        return err;
+    }
+    auto method = vayu::parse_method (method_str);
+    if (!method) {
+        return std::make_pair (400, nlohmann::json{ { "error", "Invalid HTTP method" } });
+    }
+    r.method = *method;
+
+    if (auto err = apply_required_string_field (json, "url", r.url, is_create)) {
+        return err;
+    }
+
+    apply_string_field (json, "description", r.description, "", is_create);
+
+    if (auto err = apply_key_value_field (json, "params", r.params, is_create)) {
+        return err;
+    }
+    if (auto err = apply_key_value_field (json, "headers", r.headers, is_create)) {
+        return err;
+    }
+
+    apply_json_field (json, "body", r.body, R"({"mode":"none"})", is_create);
+    apply_string_field (json, "bodyType", r.body_type, "none", is_create);
+    // A request's auth may be 'inherit' - that is its default, and the app
+    // resolves the collection chain before the request is executed.
+    apply_json_field (json, "auth", r.auth, R"({"mode":"inherit"})", is_create);
+    apply_string_field (json, "preRequestScript", r.pre_request_script, "", is_create);
+    apply_string_field (json, "postRequestScript", r.post_request_script, "", is_create);
+    apply_int_field (json, "order", r.order, 0, is_create);
+    apply_bool_field (json, "followRedirects", r.follow_redirects, true, is_create);
+
+    apply_int_field (json, "maxRedirects", r.max_redirects, 10, is_create);
+    // Clamp to the range the UI offers; libcurl reads -1 as "unlimited", which
+    // is not a policy we want a stray value to select.
+    r.max_redirects = std::clamp (r.max_redirects, 0, 100);
+
+    return std::nullopt;
+}
+
+/**
+ * Testable core of POST /requests - **create only**, returning
+ * {http_status, json_body}. An id that already exists is a 409 pointing at PUT;
+ * POST never updates (issue #95). A client-supplied id is still honoured on
+ * create for the import orchestrator's benefit until #96 lands.
+ */
+std::pair<int, nlohmann::json>
+create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
+    std::string id;
+    if (json.contains ("id") && !json["id"].is_null ()) {
+        id = json["id"].get<std::string> ();
+    } else {
+        id = vayu::utils::generate_id ("req_");
+    }
+
+    if (db.get_request (id).has_value ()) {
+        return { 409,
+            nlohmann::json{ { "error",
+            "Request '" + id + "' already exists; use PUT /requests/:id to update" } } };
+    }
+
+    vayu::db::Request r;
+    r.id         = id;
+    r.created_at = now_ms ();
+    r.updated_at = now_ms ();
+
+    if (auto err = apply_request_fields (r, json, /*is_create=*/true)) {
+        return *err;
+    }
+
+    db.save_request (r);
+    return { 200, vayu::json::serialize (r) };
+}
+
+/**
+ * Testable core of PUT /requests/:id - **update only**, returning
+ * {http_status, json_body}. A missing id is a 404 rather than a silent create.
+ * Merge-patch semantics, same as collections.
+ */
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json) {
+    auto existing = db.get_request (id);
+    if (!existing) {
+        return { 404, nlohmann::json{ { "error", "Request not found" } } };
+    }
+
+    vayu::db::Request r = *existing;
+    if (auto err = apply_request_fields (r, json, /*is_create=*/false)) {
+        return *err;
+    }
+    r.updated_at = now_ms ();
+
+    db.save_request (r);
+    return { 200, vayu::json::serialize (r) };
+}
+
 void register_request_routes (RouteContext& ctx) {
     /**
      * GET /requests
@@ -138,173 +295,65 @@ void register_request_routes (RouteContext& ctx) {
 
     /**
      * POST /requests
-     * Creates or updates a request in the database.
-     * If 'id' is provided and exists, performs a partial update.
-     * Otherwise, creates a new request (requires 'collectionId', 'name',
-     * 'method', 'url'). Body params: id, collectionId, name, method, url,
-     * headers (object), body (any), auth (object), preRequestScript (string),
-     * postRequestScript (string), followRedirects (bool), maxRedirects (int)
-     * Returns: The saved request object.
+     * Creates a request. Create only - an `id` that already exists is a 409
+     * pointing at PUT, never a silent update (issue #95).
+     * Body params: id (optional string - generated when absent), collectionId,
+     * name, method, url (all required), description, params/headers (arrays of
+     * KeyValueEntry), body, bodyType, auth, preRequestScript,
+     * postRequestScript, order, followRedirects, maxRedirects.
+     * Returns: The created request object, 409 on an existing id, or 400.
      */
     ctx.server.Post (
     "/requests", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
-            auto json = nlohmann::json::parse (req.body);
-
-            std::string id;
-            if (json.contains ("id") && !json["id"].is_null ()) {
-                id = json["id"].get<std::string> ();
+            auto json           = nlohmann::json::parse (req.body);
+            auto [status, body] = create_request_response (ctx.db, json);
+            if (status != 200) {
+                vayu::utils::log_warning ("POST /requests - " +
+                std::to_string (status) + ": " + body["error"].get<std::string> ());
             } else {
-                id = vayu::utils::generate_id ("req_");
+                vayu::utils::log_info (
+                "POST /requests - Created request: id=" + body["id"].get<std::string> () +
+                ", name=" + body["name"].get<std::string> () +
+                ", method=" + body["method"].get<std::string> () +
+                ", url=" + body["url"].get<std::string> () +
+                ", collection_id=" + body["collectionId"].get<std::string> ());
             }
-
-            vayu::db::Request r;
-            auto existing  = ctx.db.get_request (id);
-            bool is_update = existing.has_value ();
-
-            if (existing) {
-                r = *existing;
-            } else {
-                if (!json.contains ("collectionId") || json["collectionId"].is_null ()) {
-                    vayu::utils::log_warning (
-                    "POST /requests - Missing required field: collectionId");
-                    send_error (res, 400, "Missing required field: collectionId");
-                    return;
-                }
-                if (!json.contains ("name") || json["name"].is_null ()) {
-                    vayu::utils::log_warning (
-                    "POST /requests - Missing required field: name");
-                    send_error (res, 400, "Missing required field: name");
-                    return;
-                }
-                if (!json.contains ("method") || json["method"].is_null ()) {
-                    vayu::utils::log_warning (
-                    "POST /requests - Missing required field: method");
-                    send_error (res, 400, "Missing required field: method");
-                    return;
-                }
-                if (!json.contains ("url") || json["url"].is_null ()) {
-                    vayu::utils::log_warning (
-                    "POST /requests - Missing required field: url");
-                    send_error (res, 400, "Missing required field: url");
-                    return;
-                }
-                r.id         = id;
-                r.created_at = now_ms ();
-                r.updated_at = now_ms ();
-            }
-
-            if (json.contains ("collectionId") && !json["collectionId"].is_null ()) {
-                r.collection_id = json["collectionId"].get<std::string> ();
-            }
-            if (json.contains ("name") && !json["name"].is_null ()) {
-                r.name = json["name"].get<std::string> ();
-            }
-            if (json.contains ("description")) {
-                r.description = json["description"].is_null ()
-                ? ""
-                : json["description"].get<std::string> ();
-            }
-            if (json.contains ("method") && !json["method"].is_null ()) {
-                auto method = vayu::parse_method (json["method"].get<std::string> ());
-                if (!method)
-                    throw std::runtime_error ("Invalid HTTP method");
-                r.method = *method;
-            }
-            if (json.contains ("url") && !json["url"].is_null ()) {
-                r.url = json["url"].get<std::string> ();
-            }
-
-            // Validate and store params - must be an array of KeyValueEntry
-            if (json.contains ("params")) {
-                const auto& p = json["params"];
-                if (!p.is_array () && !p.is_null ()) {
-                    send_error (res, 400,
-                    "Invalid 'params': must be an array of {key, value, enabled}");
-                    return;
-                }
-                if (p.is_array ()) {
-                    for (size_t i = 0; i < p.size (); ++i) {
-                        const auto& entry = p[i];
-                        if (!entry.contains ("key") || !entry["key"].is_string () ||
-                        !entry.contains ("value") || !entry["value"].is_string () ||
-                        !entry.contains ("enabled") || !entry["enabled"].is_boolean ()) {
-                            send_error (res, 400,
-                            "Invalid params entry at index " + std::to_string (i) +
-                            ": missing required field (key, value, or enabled)");
-                            return;
-                        }
-                    }
-                }
-                r.params = p.is_null () ? "[]" : p.dump ();
-            }
-
-            // Validate and store headers - must be an array of KeyValueEntry
-            if (json.contains ("headers")) {
-                const auto& h = json["headers"];
-                if (!h.is_array () && !h.is_null ()) {
-                    send_error (res, 400,
-                    "Invalid 'headers': must be an array of {key, value, enabled}");
-                    return;
-                }
-                if (h.is_array ()) {
-                    for (size_t i = 0; i < h.size (); ++i) {
-                        const auto& entry = h[i];
-                        if (!entry.contains ("key") || !entry["key"].is_string () ||
-                        !entry.contains ("value") || !entry["value"].is_string () ||
-                        !entry.contains ("enabled") || !entry["enabled"].is_boolean ()) {
-                            send_error (res, 400,
-                            "Invalid headers entry at index " + std::to_string (i) +
-                            ": missing required field (key, value, or enabled)");
-                            return;
-                        }
-                    }
-                }
-                r.headers = h.is_null () ? "[]" : h.dump ();
-            }
-
-            if (json.contains ("body"))
-                r.body = json["body"].is_null () ? "{\"mode\":\"none\"}" : json["body"].dump ();
-            if (json.contains ("bodyType") && !json["bodyType"].is_null ()) {
-                r.body_type = json["bodyType"].get<std::string> ();
-            }
-            if (json.contains ("auth"))
-                r.auth = json["auth"].is_null () ? "{\"mode\":\"inherit\"}" : json["auth"].dump ();
-            if (json.contains ("preRequestScript"))
-                r.pre_request_script = json["preRequestScript"].is_null ()
-                ? ""
-                : json["preRequestScript"].get<std::string> ();
-            if (json.contains ("postRequestScript"))
-                r.post_request_script = json["postRequestScript"].is_null ()
-                ? ""
-                : json["postRequestScript"].get<std::string> ();
-            if (json.contains ("order") && !json["order"].is_null ()) {
-                r.order = json["order"].get<int> ();
-            }
-            if (json.contains ("followRedirects") && json["followRedirects"].is_boolean ()) {
-                r.follow_redirects = json["followRedirects"].get<bool> ();
-            }
-            if (json.contains ("maxRedirects") && json["maxRedirects"].is_number_integer ()) {
-                // Clamp to the range the UI offers; libcurl reads -1 as
-                // "unlimited", which is not a policy we want a stray value to
-                // select.
-                int max_redirects = json["maxRedirects"].get<int> ();
-                r.max_redirects   = std::clamp (max_redirects, 0, 100);
-            }
-
-            if (is_update) {
-                r.updated_at = now_ms ();
-            }
-
-            vayu::utils::log_info ("POST /requests - " +
-            std::string (is_update ? "Updating" : "Creating") + " request: id=" +
-            r.id + ", name=" + r.name + ", method=" + to_string (r.method) +
-            ", url=" + r.url + ", collection_id=" + r.collection_id);
-
-            ctx.db.save_request (r);
-            res.set_content (vayu::json::serialize (r).dump (), "application/json");
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error ("POST /requests - Error: " + std::string (e.what ()));
+            send_error (res, 400, e.what ());
+        }
+    });
+
+    /**
+     * PUT /requests/:id
+     * Updates an existing request (merge-patch: absent fields keep their value,
+     * null resets to the default). Update only - a missing id is a 404, never a
+     * silent create (issue #95).
+     * Path params: id - The request ID to update.
+     * Returns: The updated request object, 404 if it does not exist, or 400.
+     */
+    ctx.server.Put (R"(/requests/([^/]+))",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        std::string request_id = req.matches[1];
+        try {
+            auto json = nlohmann::json::parse (req.body);
+            auto [status, body] = update_request_response (ctx.db, request_id, json);
+            if (status != 200) {
+                vayu::utils::log_warning ("PUT /requests/:id - " + std::to_string (status) +
+                " for id=" + request_id + ": " + body["error"].get<std::string> ());
+            } else {
+                vayu::utils::log_info (
+                "PUT /requests/:id - Updated request: id=" + request_id +
+                ", name=" + body["name"].get<std::string> ());
+            }
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "PUT /requests/:id - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });
