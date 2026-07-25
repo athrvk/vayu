@@ -185,13 +185,26 @@ Status and priority labels use semantic colors for workflow clarity:
 
 ## Migration from Old Labels
 
-This labeling system represents a migration from simpler, flat labels:
+This labeling system replaced a simpler, flat set of labels. The flat labels
+fell into two groups, and each was handled differently:
 
-- Old `app`, `engine`, `database` → New `component:app`, `component:engine`, `component:database`
-- Old `ci`, `build` → New `component:ci`, `component:build`
-- Manual type/priority labels remain but are now organized into named categories
+- **`app`, `engine`, `database`** were pure path classifiers with a direct
+  1:1 replacement (`component:app`, `component:engine`, `component:database`)
+  and no other purpose, so they were **deleted outright** once the new labels
+  existed. Any issue or PR that had one of these lost that label; it was not
+  carried forward or re-applied automatically. `bug`, `enhancement`, and
+  `test` were deleted at the same time for a different reason - they were
+  undocumented stragglers that predated this scheme entirely, duplicated
+  `type:bug`/`type:enhancement`/`type:test`, and were never referenced
+  anywhere in this guide.
+- **`ci`, `build`** were **kept**, restyled to the same gray as their
+  `component:*` counterparts, and repurposed as manual-only labels for
+  ci/build-related discussion that isn't tied to a specific changed path (see
+  the Special Labels table above) - distinct from `component:ci` /
+  `component:build`, which the labeler applies automatically by path.
 
-Existing issues and PRs keep their old labels; they are not retroactively updated. New work uses the new schema.
+New work uses `component:*`, `area:*`, and `type:*` exclusively; none of the
+six deleted labels exist in the repository anymore.
 
 ## Examples
 
