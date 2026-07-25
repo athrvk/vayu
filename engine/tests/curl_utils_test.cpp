@@ -7,7 +7,9 @@
 
 #include <gtest/gtest.h>
 
-#include <limits>
+// INT_MAX, not std::numeric_limits<int>::max() - curl.h drags in windows.h on
+// MSVC, whose `max` macro turns the call into a syntax error under /WX.
+#include <climits>
 #include <string>
 
 #include "vayu/http/event_loop/curl_utils.hpp"
@@ -32,8 +34,7 @@ TEST (ExtractPort, AbsurdlyLongDigitRunDoesNotThrow) {
     EXPECT_NO_THROW ({ (void)extract_port ("http://h:" + huge + "/"); });
     EXPECT_EQ (extract_port ("http://h:" + huge + "/"), 80);
 
-    const std::string past_int_max =
-    std::to_string (std::numeric_limits<int>::max ()) + "0";
+    const std::string past_int_max = std::to_string (INT_MAX) + "0";
     EXPECT_EQ (extract_port ("https://h:" + past_int_max + "/"), 443);
 }
 
