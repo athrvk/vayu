@@ -120,7 +120,10 @@ describe("accent colour schemes", () => {
 			for (const dark of [false, true]) {
 				const b = block(value, dark) ?? "";
 				const s = saturation(b);
-				expect(s, `${value} (${dark ? "dark" : "light"}): no --primary to read`).not.toBeNaN();
+				expect(
+					s,
+					`${value} (${dark ? "dark" : "light"}): no --primary to read`
+				).not.toBeNaN();
 				if (s >= 25) continue;
 				checked++;
 				expect(

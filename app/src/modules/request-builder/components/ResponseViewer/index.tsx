@@ -32,7 +32,6 @@ import {
 	Badge,
 	Kbd,
 } from "@/components/ui";
-import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context";
 import { modKey } from "@/lib/platform";
 import {

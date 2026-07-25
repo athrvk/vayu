@@ -141,12 +141,15 @@ function TabLabel({ children }: { children: string }) {
  * A superscript rather than the `h-5` `Badge` pill this replaces: the pill set
  * a 20px floor that no 24px band can accommodate, and it was the single reason
  * the old triggers had to stay 38px tall. This sets no height at all.
+ *
+ * 10px is the documented micro step - see type-scale.test.ts, which rejects the
+ * half-pixel sizes that come from nudging a number until it looks right.
  */
 function TabCount({ value, className }: { value: React.ReactNode; className?: string }) {
 	return (
 		<sup
 			className={cn(
-				"font-mono text-[9.5px] leading-none tabular-nums text-primary-text",
+				"font-mono text-[10px] leading-none tabular-nums text-primary-text",
 				className
 			)}
 		>
@@ -163,7 +166,13 @@ function TabCount({ value, className }: { value: React.ReactNode; className?: st
  * silently deleted the only signal that a script failed. Keeping the mark its
  * own element means the two can be controlled separately.
  */
-function TabErrorDot({ label = "Script error", className }: { label?: string; className?: string }) {
+function TabErrorDot({
+	label = "Script error",
+	className,
+}: {
+	label?: string;
+	className?: string;
+}) {
 	return (
 		<span
 			role="img"
