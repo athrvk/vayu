@@ -8,9 +8,9 @@
 /**
  * OAuth2Form - shared editor for an {@link OAuth2Config}. Rendered by the
  * request builder's Auth tab and (via an injected TextInput) the collection
- * auth editor. Non-interactive grants (client credentials, password) fetch
- * tokens directly; the Authorization Code flow is selectable but its token
- * action is gated until the interactive sign-in lands.
+ * auth editor. Non-interactive grants (client credentials, password) post
+ * straight to the token endpoint; the Authorization Code grant runs the
+ * interactive flow (engine-hosted loopback + PKCE) from the same action.
  */
 
 import { useMemo, useState } from "react";
@@ -29,6 +29,7 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui";
+import { OAUTH2_FIELD_LABELS } from "@/constants/oauth2-fields";
 import type { OAuth2Config, OAuth2GrantType } from "@/types";
 import TokenStatusRow from "./TokenStatusRow";
 import type { OAuth2FormProps, OAuth2TextInput } from "./types";
@@ -99,7 +100,7 @@ export default function OAuth2Form({
 	return (
 		<div className="space-y-4">
 			{field(
-				"Grant Type",
+				OAUTH2_FIELD_LABELS.grantType,
 				<Select value={grant} onValueChange={(g: OAuth2GrantType) => set("grantType", g)}>
 					<SelectTrigger className="w-64">
 						<SelectValue />
@@ -116,7 +117,7 @@ export default function OAuth2Form({
 
 			{isAuthCode &&
 				field(
-					"Authorization URL",
+					OAUTH2_FIELD_LABELS.authorizationUrl,
 					<TextInput
 						value={value.authorizationUrl ?? ""}
 						onChange={(v) => set("authorizationUrl", v)}
@@ -125,7 +126,7 @@ export default function OAuth2Form({
 				)}
 
 			{field(
-				"Access Token URL",
+				OAUTH2_FIELD_LABELS.accessTokenUrl,
 				<TextInput
 					value={value.accessTokenUrl}
 					onChange={(v) => set("accessTokenUrl", v)}
@@ -135,7 +136,7 @@ export default function OAuth2Form({
 
 			{isAuthCode &&
 				field(
-					"Callback URL",
+					OAUTH2_FIELD_LABELS.callbackUrl,
 					<TextInput
 						value={value.callbackUrl ?? ""}
 						onChange={(v) => set("callbackUrl", v)}
@@ -146,7 +147,7 @@ export default function OAuth2Form({
 
 			<div className="grid grid-cols-2 gap-4">
 				{field(
-					"Client ID",
+					OAUTH2_FIELD_LABELS.clientId,
 					<TextInput
 						value={value.clientId}
 						onChange={(v) => set("clientId", v)}

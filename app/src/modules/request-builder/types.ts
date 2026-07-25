@@ -17,7 +17,6 @@ import type {
 	BodyMode,
 	HttpMethod,
 	KeyValueEntry,
-	OAuth2Config,
 	RequestAuth,
 	ResolvedVariable,
 	ResponseTiming,
@@ -63,61 +62,20 @@ export interface TabInfo {
 // ============================================================================
 
 /**
- * The editor's auth discriminant. `api-key` renames the domain's `apikey`; the
- * rest match. `digest` / `aws` / `ntlm` are *not* offered in the picker - the
- * engine cannot resolve them - but a request can be stored with one (imports
- * produce them), so the editor carries the mode to surface it rather than
- * collapsing it to "none" and rewriting it away on the next autosave.
+ * The builder holds the domain {@link RequestAuth} verbatim - `mode`, and
+ * `apikey`'s `in`. It used to carry a second, flat vocabulary of its own
+ * (`AuthType` + `AuthConfigState`, where `apikey` was `api-key` and `in` was
+ * `addTo`), which existed only so the Auth tab could edit it, and which a
+ * translation layer had to keep in step with the domain on every load, save and
+ * execute. One shape means the shared `AuthFields` editor serves this host and
+ * the collection editor unchanged, and nothing can be lost in translation.
+ *
+ * `digest` / `aws` / `ntlm` are not offered in the picker - the engine cannot
+ * resolve them - but a request can be stored with one (imports produce them), so
+ * the union carries them and the panel surfaces them rather than collapsing them
+ * to "none" and rewriting them away on the next autosave.
  */
-export type AuthType =
-	| "none"
-	| "inherit"
-	| "bearer"
-	| "basic"
-	| "api-key"
-	| "oauth2"
-	| "digest"
-	| "aws"
-	| "ntlm";
-
-/**
- * Flat auth fields backing the request builder's Auth tab. Which fields are
- * populated depends on the active {@link AuthType}. The Auth tab, request
- * execution, and the curl importer all read/write this flat shape. OAuth 2.0
- * keeps its (larger) config in a nested object rather than flattening it.
- */
-export interface AuthConfigState {
-	token?: string;
-	username?: string;
-	password?: string;
-	key?: string;
-	value?: string;
-	addTo?: "header" | "query";
-	oauth2?: OAuth2Config;
-	/**
-	 * Verbatim domain config for a stored-but-not-editable mode
-	 * (digest/aws/ntlm). No field of it is editable here, so it is kept whole
-	 * and round-tripped by {@link authToEditor}/{@link editorToAuth} rather than
-	 * flattened - autosave must return exactly what it loaded.
-	 */
-	nonEditable?: Extract<RequestAuth, { mode: "digest" | "aws" | "ntlm" }>;
-}
-
-export interface AuthConfig {
-	type: AuthType;
-	bearer?: {
-		token: string;
-	};
-	basic?: {
-		username: string;
-		password: string;
-	};
-	apiKey?: {
-		key: string;
-		value: string;
-		addTo: "header" | "query";
-	};
-}
+export type { RequestAuth };
 
 // ============================================================================
 // Body Types
@@ -158,8 +116,7 @@ export interface RequestState {
 	urlEncoded: KeyValueItem[]; // Fields for x-www-form-urlencoded mode
 
 	// Auth
-	authType: AuthType;
-	authConfig: AuthConfigState;
+	auth: RequestAuth;
 
 	// Scripts
 	preRequestScript: string;

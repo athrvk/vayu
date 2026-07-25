@@ -69,9 +69,11 @@ documentation:
           - 'docs/**'
           - '**/*.md'
 
-# Area labels - sub-areas within engine. Kept strictly inside `engine/**`,
-# same reasoning as `component:database`: a doc-only change earns
-# `documentation`, not an `area:*` label whose code it didn't touch.
+# Area labels - a feature slice within a tree, one level finer than
+# `component:*`. Every rule is kept strictly inside a *code* tree (`engine/**`
+# or `app/**`), same reasoning as `component:database`: a doc-only change earns
+# `documentation`, not an `area:*` label whose code it didn't touch. All of
+# these are engine sub-areas except `area:mcp`, whose server lives in the app.
 #
 # area:auth and area:metrics match by naming convention (`*auth*`/`*oauth*`,
 # `*metrics*`) instead of an enumerated file list. Auth and metrics code
@@ -110,3 +112,25 @@ area:scripting:
       - any-glob-to-any-file:
           - 'engine/src/runtime/**'
           - 'engine/include/vayu/runtime/**'
+
+# The MCP server is TypeScript under `app/electron/mcp/` proxying the engine's
+# HTTP API, so it earns `component:app` and never `component:engine`. This is
+# the label that tells an MCP change apart from any other app change.
+#
+# Three globs, and none of them is redundant. A path is matched whole, so
+# `app/**/*mcp*` does *not* match `app/electron/mcp/tools.ts` - the final
+# segment (`tools.ts`) has to match, and it doesn't. The directory glob is what
+# covers the 21 files under the server; the name wildcards are what reach MCP
+# files living elsewhere in `app/`. Today `*Mcp*` earns exactly one
+# (`McpSettingsPanel.tsx`) and `*mcp*` earns none - it is spelled out anyway
+# because globs are case-sensitive, and a lowercase `mcp-*.ts` under `app/src/`
+# is the obvious next file this rule should catch without a change here.
+#
+# Scoped to `app/**` so `docs/engine/mcp.md` stays `documentation` only, like
+# every other rule here.
+area:mcp:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'app/electron/mcp/**'
+          - 'app/**/*mcp*'
+          - 'app/**/*Mcp*'
