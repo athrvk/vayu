@@ -36,6 +36,7 @@ vi.mock("@/queries", async (importOriginal) => ({
 }));
 
 const systemMenu = vi.fn();
+const windowClose = vi.fn();
 
 /**
  * `-webkit-app-region` is not on CSSStyleDeclaration in TypeScript's DOM lib,
@@ -54,7 +55,7 @@ function stubPlatform(platform: string) {
 			onWindowMaximized: () => () => {},
 			windowMinimize: () => {},
 			windowMaximize: () => {},
-			windowClose: () => {},
+			windowClose,
 		},
 		writable: true,
 		configurable: true,
@@ -83,6 +84,7 @@ function renderTitleBar(TitleBar: () => React.ReactNode) {
 beforeEach(() => {
 	cleanup();
 	systemMenu.mockClear();
+	windowClose.mockClear();
 });
 afterEach(() => vi.resetModules());
 
@@ -119,18 +121,40 @@ describe("app icon on Windows", () => {
 });
 
 describe("app icon elsewhere", () => {
-	it("stays a drag region on macOS and is not a control", async () => {
+	/*
+	 * The icon is Windows-only now. macOS states app identity in the Dock and the
+	 * menu bar and its traffic lights own this corner; GNOME's header bar has no
+	 * app icon and Vayu draws client-side decorations there. Both branches are
+	 * asserted rather than whichever platform this machine happens to be.
+	 */
+	it("is not rendered at all on macOS", async () => {
 		await renderFor("darwin");
 		expect(screen.queryByRole("button", { name: /system menu/i })).not.toBeInTheDocument();
-		const icon = screen.getByAltText("Vayu").parentElement!;
-		expect(appRegion(icon)).toBe("drag");
+		expect(screen.queryByAltText("Vayu")).not.toBeInTheDocument();
 	});
 
-	it("does not pop a menu on Linux", async () => {
+	it("is not rendered at all on Linux", async () => {
 		await renderFor("linux");
-		const icon = screen.getByAltText("Vayu").parentElement!;
-		fireEvent.click(icon);
-		fireEvent.contextMenu(icon);
+		expect(screen.queryByRole("button", { name: /system menu/i })).not.toBeInTheDocument();
 		expect(systemMenu).not.toHaveBeenCalled();
+	});
+});
+
+describe("Windows icon geometry", () => {
+	it("follows the spec's 16px icon at a 16px inset", async () => {
+		// "The size of the window icon is 16px by 16px", placed "16px from the
+		// left-most border". It was 20px at 12px.
+		await renderFor("win32");
+		const icon = screen.getByRole("button", { name: /system menu/i });
+		expect(icon.className).toContain("pl-4");
+		expect(icon.querySelector("img")?.className).toContain("w-4");
+	});
+
+	it("closes the window on double click", async () => {
+		// The icon's own convention, distinct from the rest of the bar, where a
+		// double click toggles maximise.
+		await renderFor("win32");
+		fireEvent.doubleClick(screen.getByRole("button", { name: /system menu/i }));
+		expect(windowClose).toHaveBeenCalledTimes(1);
 	});
 });

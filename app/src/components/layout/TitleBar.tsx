@@ -52,14 +52,14 @@ function WindowControls() {
 		>
 			<button
 				onClick={() => window.electronAPI?.windowMinimize()}
-				className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
+				className="h-full px-3 hover:bg-muted/50 transition-colors flex items-center justify-center"
 				aria-label="Minimize"
 			>
 				<Minus className="w-4 h-4 text-foreground/70" />
 			</button>
 			<button
 				onClick={() => window.electronAPI?.windowMaximize()}
-				className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
+				className="h-full px-3 hover:bg-muted/50 transition-colors flex items-center justify-center"
 				aria-label={isMaximized ? "Restore" : "Maximize"}
 			>
 				{isMaximized ? (
@@ -70,7 +70,7 @@ function WindowControls() {
 			</button>
 			<button
 				onClick={() => window.electronAPI?.windowClose()}
-				className="h-full px-4 hover:bg-destructive hover:text-destructive-foreground transition-colors flex items-center justify-center group"
+				className="h-full px-3 hover:bg-destructive hover:text-destructive-foreground transition-colors flex items-center justify-center group"
 				aria-label="Close"
 			>
 				<X className="w-4 h-4 text-foreground/70 group-hover:text-destructive-foreground" />
@@ -98,7 +98,6 @@ function WindowControls() {
  */
 function AppIcon() {
 	const openSystemMenu = (e: React.MouseEvent) => {
-		if (!isWindows) return;
 		e.preventDefault();
 		// Anchored to the icon's bottom-left, so the menu drops from the control
 		// rather than from the pointer - which is what the OS menu does.
@@ -106,20 +105,44 @@ function AppIcon() {
 		window.electronAPI?.windowSystemMenu({ x: r.left, y: r.bottom });
 	};
 
+	/*
+	 * Windows only.
+	 *
+	 * macOS states app identity twice already - the Dock icon and the menu bar -
+	 * and its traffic lights own this corner, so a logo beside them is the second
+	 * app mark in the same 124px. GNOME's header-bar contents are buttons, a
+	 * heading and menus, with no app icon, and Vayu draws client-side decorations
+	 * there; KDE shows one, but that is painted by the window manager, not the
+	 * app, so it is not Vayu's to place.
+	 *
+	 * On Windows it stays because it is a control, not branding - see the system
+	 * menu handler in electron/main.ts.
+	 */
+	if (!isWindows) return null;
+
 	return (
 		<div
-			className="flex items-center px-3 shrink-0"
-			style={{ WebkitAppRegion: isWindows ? "no-drag" : "drag" } as React.CSSProperties}
+			// 16px at a 16px inset, per the Windows title-bar spec: "the size of the
+			// window icon is 16px by 16px", placed "16px from the left-most border"
+			// and vertically centred. It was 20px at 12px.
+			className="flex items-center pl-4 pr-3 shrink-0"
+			style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
 			// Both buttons, because taking the icon out of the drag region is what
 			// removed the platform's own right-click menu.
 			onClick={openSystemMenu}
 			onContextMenu={openSystemMenu}
-			// Only interactive where it does something.
-			{...(isWindows
-				? { role: "button", "aria-label": "System menu", "aria-haspopup": "menu" as const }
-				: {})}
+			// Windows closes the window on a double-click of the icon. That is the
+			// icon's convention specifically - double-clicking the rest of the bar
+			// toggles maximise, which the drag region already gives us.
+			onDoubleClick={(e) => {
+				e.preventDefault();
+				window.electronAPI?.windowClose();
+			}}
+			role="button"
+			aria-label="System menu"
+			aria-haspopup="menu"
 		>
-			<img src={iconUrl} alt={isWindows ? "" : "Vayu"} className="w-5 h-5" />
+			<img src={iconUrl} alt="" className="w-4 h-4" />
 		</div>
 	);
 }
