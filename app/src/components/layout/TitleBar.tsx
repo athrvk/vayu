@@ -79,6 +79,51 @@ function WindowControls() {
 	);
 }
 
+/**
+ * The app icon, which on Windows is the system-menu control.
+ *
+ * Windows convention is that the title-bar icon opens the system menu on left
+ * click, on right click, and on Alt+Space. Vayu had the right-click half for
+ * free: a `-webkit-app-region: drag` area is treated as a non-client frame, and
+ * Windows pops the real menu on it. Left click could not be added on top,
+ * because a draggable area ignores every pointer event.
+ *
+ * So on Windows the icon leaves the drag region and both buttons are handled
+ * here, against a menu built in the main process. Elsewhere it stays a plain
+ * drag region - macOS and Linux have no such convention, and giving up the drag
+ * area there would cost something and buy nothing.
+ *
+ * Losing 44px of drag surface on Windows is not a regression: a real Win32
+ * title-bar icon is HTSYSMENU, which does not drag the window either.
+ */
+function AppIcon() {
+	const openSystemMenu = (e: React.MouseEvent) => {
+		if (!isWindows) return;
+		e.preventDefault();
+		// Anchored to the icon's bottom-left, so the menu drops from the control
+		// rather than from the pointer - which is what the OS menu does.
+		const r = e.currentTarget.getBoundingClientRect();
+		window.electronAPI?.windowSystemMenu({ x: r.left, y: r.bottom });
+	};
+
+	return (
+		<div
+			className="flex items-center px-3 shrink-0"
+			style={{ WebkitAppRegion: isWindows ? "no-drag" : "drag" } as React.CSSProperties}
+			// Both buttons, because taking the icon out of the drag region is what
+			// removed the platform's own right-click menu.
+			onClick={openSystemMenu}
+			onContextMenu={openSystemMenu}
+			// Only interactive where it does something.
+			{...(isWindows
+				? { role: "button", "aria-label": "System menu", "aria-haspopup": "menu" as const }
+				: {})}
+		>
+			<img src={iconUrl} alt={isWindows ? "" : "Vayu"} className="w-5 h-5" />
+		</div>
+	);
+}
+
 function EnvSwitcher() {
 	const { activeEnvironmentId, setActiveEnvironmentId } = useSessionStore();
 	const { data: environments = [] } = useEnvironmentsQuery();
@@ -162,12 +207,7 @@ export default function TitleBar() {
 			{/* Logo - all platforms. The icon is imported as a module, not referenced
 			    as "/icon.png": `base: "./"` means a root-absolute path does not
 			    resolve under the packaged file:// build. */}
-			<div
-				className="flex items-center px-3 shrink-0"
-				style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
-			>
-				<img src={iconUrl} alt="Vayu" className="w-5 h-5" />
-			</div>
+			<AppIcon />
 
 			{/* TabStrip - fills available width. This wrapper stays a drag region so
 			    the empty space to the right of the last tab moves the window on every

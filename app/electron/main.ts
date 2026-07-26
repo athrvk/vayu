@@ -533,6 +533,64 @@ function setupIpcHandlers() {
 		return mainWindow?.isMaximized() ?? false;
 	});
 
+	/**
+	 * The Windows system menu, popped from the title-bar app icon.
+	 *
+	 * Windows convention is that the icon *is* the system-menu control: left
+	 * click opens it, right click opens it, Alt+Space opens it. Vayu got the
+	 * right-click half for free, because a `-webkit-app-region: drag` area is
+	 * treated as a non-client frame and Windows pops the real menu on it. Left
+	 * click was missing, and it cannot be added to a drag region at all -
+	 * draggable areas ignore every pointer event.
+	 *
+	 * So the icon is marked `no-drag` on Windows and both buttons are handled
+	 * here. That trades the OS's own menu for this one, which is why the
+	 * right-click path had to be reimplemented in the same change rather than
+	 * left to the platform.
+	 *
+	 * The native alternative would be returning HTSYSMENU from WM_NCHITTEST for
+	 * the icon's rect, which is how Win32 does it and would have kept the real
+	 * menu. Electron does not handle WM_NCHITTEST in PreHandleMSG, and
+	 * hookWindowMessage callbacks cannot return a value to the OS
+	 * (electron/electron#8762), so it is unreachable without a native module.
+	 *
+	 * Move and Size are deliberately absent: both are Win32 modal drag loops
+	 * with no Electron equivalent, and a disabled item that never becomes
+	 * enabled is worse than one that was never offered.
+	 */
+	ipcMain.on("window:systemMenu", (_event, position?: { x: number; y: number }) => {
+		if (!mainWindow || process.platform !== "win32") return;
+		const maximized = mainWindow.isMaximized();
+		const menu = Menu.buildFromTemplate([
+			{
+				label: "Restore",
+				enabled: maximized,
+				click: () => mainWindow?.unmaximize(),
+			},
+			{
+				label: "Minimize",
+				click: () => mainWindow?.minimize(),
+			},
+			{
+				label: "Maximize",
+				enabled: !maximized,
+				click: () => mainWindow?.maximize(),
+			},
+			{ type: "separator" },
+			{
+				label: "Close",
+				accelerator: "Alt+F4",
+				click: () => mainWindow?.close(),
+			},
+		]);
+		// Rounded because Electron rejects fractional coordinates, and the
+		// renderer's getBoundingClientRect returns them on a scaled display.
+		menu.popup({
+			window: mainWindow,
+			...(position ? { x: Math.round(position.x), y: Math.round(position.y) } : {}),
+		});
+	});
+
 	// Listen for maximize/unmaximize to notify renderer
 	app.on("browser-window-created", (_event, window) => {
 		window.on("maximize", () => {

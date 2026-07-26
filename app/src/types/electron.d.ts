@@ -66,6 +66,8 @@ interface ElectronAPI {
 
 	// Window controls for custom titlebar
 	windowMinimize: () => void;
+	/** Windows only: opens the app-icon system menu at the given viewport point. */
+	windowSystemMenu: (position?: { x: number; y: number }) => void;
 	windowMaximize: () => void;
 	windowClose: () => void;
 	windowIsMaximized: () => Promise<boolean>;

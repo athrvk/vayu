@@ -53,6 +53,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	windowMaximize: () => ipcRenderer.send("window:maximize"),
 	windowClose: () => ipcRenderer.send("window:close"),
 	windowIsMaximized: (): Promise<boolean> => ipcRenderer.invoke("window:isMaximized"),
+	// Windows only: pops the app-icon system menu. See the handler in main.ts for
+	// why this is reimplemented rather than left to the platform.
+	windowSystemMenu: (position?: { x: number; y: number }): void =>
+		ipcRenderer.send("window:systemMenu", position),
 	onWindowMaximized: (callback: (isMaximized: boolean) => void) => {
 		const handler = (_event: unknown, isMaximized: boolean) => callback(isMaximized);
 		ipcRenderer.on("window:maximized", handler);
