@@ -139,7 +139,14 @@ describe("Shell sidebar auto-view effect", () => {
 		expect(drawerView).toBe("collections");
 	});
 
-	it("leaves the drawer view unchanged when a run tab becomes active", () => {
+	it("keeps a run tab on the History list", () => {
+		/*
+		 * This asserted the same thing while the effect had no `run` branch at
+		 * all, because it pre-set the view to "history" and checked it was still
+		 * "history" - true whether the effect wrote that value or nothing. It only
+		 * ever proved the drawer was not thrown *elsewhere*, which was the bug it
+		 * was written for. The open-from-closed case below is the half it missed.
+		 */
 		const tabId = "run-tab";
 		useLayoutStore.setState({ drawerView: "history" });
 		useTabsStore.setState({
@@ -199,5 +206,35 @@ describe("Shell sidebar auto-view effect", () => {
 		// The real flow: the Shell is already mounted and the active tab changes.
 		act(() => useTabsStore.setState({ activeTabId: "c1" }));
 		expect(useLayoutStore.getState().drawerView).toBe("collections");
+	});
+
+	it("opens the History drawer for a run tab when it was closed", () => {
+		// The reported gap: selecting a run left the sidebar shut, because the
+		// effect had no branch for `run` and so never called setDrawerOpen.
+		useLayoutStore.setState({ drawerOpen: false, drawerView: "collections" });
+		useTabsStore.setState({
+			openTabs: [{ id: "r1", type: "run", entityId: "run-1" }],
+			activeTabId: "r1",
+		});
+
+		renderShell();
+
+		expect(useLayoutStore.getState().drawerOpen).toBe(true);
+		expect(useLayoutStore.getState().drawerView).toBe("history");
+	});
+
+	it("follows a switch from a collection tab to a run tab", () => {
+		useTabsStore.setState({
+			openTabs: [
+				{ id: "c1", type: "collection", entityId: "col-1" },
+				{ id: "r1", type: "run", entityId: "run-1" },
+			],
+			activeTabId: "c1",
+		});
+		renderShell();
+		expect(useLayoutStore.getState().drawerView).toBe("collections");
+
+		act(() => useTabsStore.setState({ activeTabId: "r1" }));
+		expect(useLayoutStore.getState().drawerView).toBe("history");
 	});
 });

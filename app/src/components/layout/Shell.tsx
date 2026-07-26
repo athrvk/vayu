@@ -68,6 +68,20 @@ export default function Shell() {
 		} else if (activeTab?.type === "collection" || activeTab?.type === "request") {
 			setDrawerOpen(true);
 			setDrawerView("collections");
+		} else if (activeTab?.type === "run") {
+			/*
+			 * A run's list is History, so a run tab belongs with it - and with the
+			 * drawer open. It had no branch at all, which was not quite the same as
+			 * "leave it alone": the drawer never *opened*, so picking a run while it
+			 * was closed left the sidebar shut.
+			 *
+			 * The guard this has to respect is the older bug where opening a run
+			 * threw the user out of the History list. Selecting History satisfies
+			 * that rather than violating it - the failure then was landing
+			 * somewhere else.
+			 */
+			setDrawerOpen(true);
+			setDrawerView("history");
 		}
 	}, [activeTab?.type, activeTab?.entityId, setDrawerOpen, setDrawerView]);
 
