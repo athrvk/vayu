@@ -237,4 +237,39 @@ describe("Shell sidebar auto-view effect", () => {
 		act(() => useTabsStore.setState({ activeTabId: "r1" }));
 		expect(useLayoutStore.getState().drawerView).toBe("history");
 	});
+
+	it("leaves the drawer alone for a dashboard tab", () => {
+		/*
+		 * A load test is a detour from a request, not a list item - it opens only
+		 * from the request builder and its back button returns to the request. So
+		 * the drawer should still show Collections with that request on the way
+		 * back.
+		 *
+		 * Asserted from `collections` on purpose: pre-setting the value the effect
+		 * would write is what made the old run-tab guard vacuous.
+		 */
+		useLayoutStore.setState({ drawerOpen: true, drawerView: "collections" });
+		useTabsStore.setState({
+			openTabs: [{ id: "d1", type: "dashboard", entityId: null }],
+			activeTabId: "d1",
+		});
+
+		renderShell();
+
+		expect(useLayoutStore.getState().drawerView).toBe("collections");
+		expect(useLayoutStore.getState().drawerOpen).toBe(true);
+	});
+
+	it("does not force the drawer open for a dashboard tab", () => {
+		// If the user closed it before starting the run, it stays closed.
+		useLayoutStore.setState({ drawerOpen: false, drawerView: "collections" });
+		useTabsStore.setState({
+			openTabs: [{ id: "d1", type: "dashboard", entityId: null }],
+			activeTabId: "d1",
+		});
+
+		renderShell();
+
+		expect(useLayoutStore.getState().drawerOpen).toBe(false);
+	});
 });
