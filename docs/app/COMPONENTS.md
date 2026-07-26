@@ -179,6 +179,8 @@ Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows n
 
 `InheritanceChain.tsx` and `shared.tsx` are helpers used by these tabs (e.g. visualizing the auth/variable inheritance chain).
 
+Info, Auth and both Script tabs share one save model: an editable draft with a Save button gated on `isDirty` and a Reset, held by [`useEntityDraft()`](./state-management.md#useentitydraft---manual-draftsave-model). It is the manual counterpart to the request builder's `useSaveManager()` autosave, and it owns the mutation reset on a collection switch - that part had been hand-rolled per tab and one tab had omitted it.
+
 ## Load Test Dashboard (`modules/dashboard/`)
 
 Live load-test metrics. Entry: `modules/dashboard/index.tsx`.

@@ -8,6 +8,7 @@
 // Remaining hooks (not replaced by TanStack Query)
 export { useEngine } from "./useEngine";
 export { useSaveManager } from "./useSaveManager";
+export { useEntityDraft } from "./useEntityDraft";
 export { useVariableResolver } from "./useVariableResolver";
 export { useElectronTheme } from "./useElectronTheme";
 export { useResizable } from "./useResizable";

@@ -5,8 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useState } from "react";
 import { Button, Input, Textarea } from "@/components/ui";
+import { useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { Field, SaveFailed, Stat, formatRelative } from "./shared";
@@ -16,33 +16,34 @@ interface InfoTabProps {
 	requestCount: number;
 }
 
+interface InfoDraft {
+	name: string;
+	description: string;
+}
+
 export default function InfoTab({ collection, requestCount }: InfoTabProps) {
-	const [name, setName] = useState(collection.name);
-	const [description, setDescription] = useState(collection.description ?? "");
 	const updateCollection = useUpdateCollectionMutation();
 
-	// Resync the editable name/description drafts when the collection changes
-	// (component renders inline, not remounted per-collection). Can't be derived:
-	// these are user-editable drafts that diverge from props between edits and
-	// save. The effect also re-runs after save (name/description props update),
-	// which clears the post-trim divergence - `handleSave` persists `name.trim()`
-	// so the local draft would otherwise stay dirty against the trimmed saved
-	// value. A value-keyed render-phase reset would not preserve that resync.
-	useEffect(() => {
-		// eslint-disable-next-line react-hooks/set-state-in-effect
-		setName(collection.name);
-		setDescription(collection.description ?? "");
-	}, [collection.id, collection.name, collection.description]);
-
-	// The other half of that resync - see AuthTab. This component is reused
-	// across collection switches, and a mutation holds `isError` until the next
-	// mutate, so the failure notice has to be cleared with the drafts.
-	const resetSave = updateCollection.reset;
-	useEffect(() => {
-		resetSave();
-	}, [collection.id, resetSave]);
-
-	const isDirty = name !== collection.name || description !== (collection.description ?? "");
+	// Draft/resync/isDirty/mutation-reset all live in the shared hook - the
+	// three collection tabs used to hand-roll it one each, and this was the one
+	// that forgot to clear the mutation on a collection switch. See
+	// useEntityDraft.
+	//
+	// The resync also re-runs after a save (the props come back changed), which
+	// clears the post-trim divergence: `handleSave` persists `name.trim()`, so
+	// a draft with trailing whitespace would otherwise stay dirty against the
+	// trimmed saved value forever.
+	const {
+		draft,
+		setDraft,
+		isDirty,
+		reset: handleReset,
+	} = useEntityDraft<InfoDraft>({
+		entityKey: collection.id,
+		value: { name: collection.name, description: collection.description ?? "" },
+		mutation: updateCollection,
+	});
+	const { name, description } = draft;
 
 	const handleSave = () => {
 		if (!isDirty || !name.trim()) return;
@@ -53,17 +54,12 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 		});
 	};
 
-	const handleReset = () => {
-		setName(collection.name);
-		setDescription(collection.description ?? "");
-	};
-
 	return (
 		<div className="max-w-[540px] flex flex-col gap-5">
 			<Field label="Collection name">
 				<Input
 					value={name}
-					onChange={(e) => setName(e.target.value)}
+					onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
 					className="text-sm font-medium"
 				/>
 			</Field>
@@ -71,7 +67,7 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 			<Field label="Description" hint="Markdown supported">
 				<Textarea
 					value={description}
-					onChange={(e) => setDescription(e.target.value)}
+					onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
 					placeholder="Document this collection - what it covers, base URL, usage notes…"
 					className="min-h-[100px] text-sm leading-relaxed resize-y"
 				/>
