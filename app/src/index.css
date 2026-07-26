@@ -405,15 +405,21 @@
 	 * graph, so nothing else can.
 	 */
 	:root[data-platform="mac"] {
-		--titlebar-height: 28px;
+		/* Same 32px as the default today. Declared anyway: the height is a
+		 * per-platform value by design (the Electron map is the source of truth,
+		 * and `titlebar-height.test.ts` checks this selector against `darwin`), so
+		 * dropping it would make the two files silently disagree the moment the
+		 * platforms diverge again. */
+		--titlebar-height: 32px;
 		/*
 		 * Width reserved for the traffic lights, so the first tab does not sit
-		 * under them. 12px lead plus three 12px buttons on a 20px pitch ends at
-		 * 64px; 80 leaves a comfortable gap. Mirrors TRAFFIC_LIGHT_INSET in
+		 * under them. A 20px lead plus three 12px buttons on a 20px pitch ends at
+		 * 84px; 104 leaves a 20px gutter before the first tab. At 80 it was 16px,
+		 * which read as the lights being crammed against the tab strip. Mirrors TRAFFIC_LIGHT_INSET in
 		 * electron/constants.ts, which positions the buttons themselves -
 		 * titlebar-height.test.ts holds the two together.
 		 */
-		--traffic-light-inset: 80px;
+		--traffic-light-inset: 104px;
 	}
 
 	/* ── Accent color schemes (light mode) ── */

@@ -83,7 +83,7 @@ describe("title bar height", () => {
 	});
 
 	it("leaves room for the macOS traffic lights", () => {
-		// They are 12px, and Electron centres them via trafficLightPosition.
+		// The frame is 14px, centred via trafficLightPosition.
 		expect(electronHeight("darwin")).toBeGreaterThanOrEqual(24);
 	});
 
@@ -106,14 +106,19 @@ describe("title bar height", () => {
 		expect(constants).not.toMatch(/=\s*"#f2f0eb"/);
 	});
 
-	it("centres the macOS traffic lights on their real diameter", () => {
+	it("centres the macOS traffic lights on the frame Electron positions", () => {
 		// The buttons are 12px. The centring formula used 16, which put them 2px
 		// high at every bar height - unnoticeable at 38px, visible once the bar
 		// went to 28. Asserting the constant is what stops it drifting back.
 		const num = (name: string) =>
 			Number(new RegExp(`${name}\\s*=\\s*(\\d+)`).exec(constants)?.[1]);
-		expect(num("TRAFFIC_LIGHT_DIAMETER")).toBe(12);
-		expect(mainTs).toContain("TITLEBAR_HEIGHT - TRAFFIC_LIGHT_DIAMETER");
+		// 14: Electron positions the button *frame*, not the 12pt circle, and
+		// centring on the circle leaves the cluster a pixel off.
+		expect(num("TRAFFIC_LIGHT_FRAME_HEIGHT")).toBe(14);
+		expect(mainTs).toContain("TITLEBAR_HEIGHT - TRAFFIC_LIGHT_FRAME_HEIGHT");
+		// x clears the window's rounded top corner (~10-12px). At 12 the close
+		// button sat inside the curve, which no amount of vertical centring fixes.
+		expect(num("TRAFFIC_LIGHT_X")).toBeGreaterThanOrEqual(20);
 	});
 
 	it("reserves the same inset in both files", () => {
@@ -122,7 +127,8 @@ describe("title bar height", () => {
 		const inset = Number(/TRAFFIC_LIGHT_INSET\s*=\s*(\d+)/.exec(constants)?.[1]);
 		const css_ = Number(/--traffic-light-inset:\s*(\d+)px/.exec(css)?.[1]);
 		expect(inset).toBe(css_);
-		// It has to clear the group: 12px lead + three 12px buttons on a 20px pitch.
-		expect(inset).toBeGreaterThanOrEqual(64);
+		// It has to clear the group: a 20px lead plus three buttons on a 20px pitch
+		// ends at 84px, and the gutter after it should be visible.
+		expect(inset).toBeGreaterThanOrEqual(84);
 	});
 });

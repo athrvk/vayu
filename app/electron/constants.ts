@@ -56,15 +56,19 @@ export const WINDOW_MIN_HEIGHT = 768;
  * 48px variant exists for a searchbox or a person-picture, neither of which
  * this bar has - tabs do not call for extra height.
  *
- * **macOS runs 28px**, its own standard, which still clears the 12px traffic
- * lights with 8px of margin.
+ * **macOS matches it.** 28px is the macOS standard for a title bar holding a
+ * *title*; this one holds tabs, and the traffic lights are a fixed 12px object
+ * that needs air as well. Safari and Chrome both use a taller bar for the same
+ * reason. 32 gives the lights 10px above and below and keeps one number across
+ * the three platforms - the map stays per-platform because the mechanism is
+ * right even when the values agree.
  *
  * Linux follows Windows: Vayu draws its own decorations there, so there is no
  * system metric to match, and one fewer value to reason about is worth more
  * than a third opinion.
  */
 export const TITLEBAR_HEIGHT_BY_PLATFORM = {
-	darwin: 28,
+	darwin: 32,
 	win32: 32,
 	linux: 32,
 } as const;
@@ -72,17 +76,35 @@ export const TITLEBAR_HEIGHT_BY_PLATFORM = {
 /**
  * macOS traffic-light metrics.
  *
- * The buttons are **12px** across. The centring formula used 16, which put them
- * 2px high at every bar height - invisible at 38px, obvious at 28px once the
- * bar shrank. `TRAFFIC_LIGHT_INSET` is the width the renderer reserves for the
- * group so the first tab does not sit under it: 12px lead + three 12px buttons
- * on a 20px pitch ends at 64px, and 80 leaves a comfortable gap. It is mirrored
- * by `--traffic-light-inset` in index.css and held to it by
- * `titlebar-height.test.ts`.
+ * **14, not 12.** `trafficLightPosition` places the buttons' frame, not the
+ * visible circle - the circle is 12pt, the frame around it is not - so centring
+ * on 12 leaves the cluster a pixel off. 14 is what the Electron ecosystem
+ * centres on (`headerHeight / 2 - MACOS_TRAFFIC_LIGHTS_HEIGHT / 2`); it is a
+ * convention rather than a published Apple figure, so it is named here to be
+ * adjusted in one place if it proves wrong on a real machine.
+ *
+ * The original formula used 16, which was wrong in the other direction.
  */
-export const TRAFFIC_LIGHT_DIAMETER = 12;
-export const TRAFFIC_LIGHT_X = 12;
-export const TRAFFIC_LIGHT_INSET = 80;
+export const TRAFFIC_LIGHT_FRAME_HEIGHT = 14;
+/**
+ * Leading inset of the light cluster.
+ *
+ * 20px, not 12. macOS windows have rounded top corners of roughly 10-12px, and
+ * at x=12 the close button sits *inside* that curve - the visible area is being
+ * cut away diagonally behind it, so the button reads as misaligned no matter
+ * how exactly it is centred vertically. Apple's own inset clears the corner for
+ * this reason. Moving the cluster out of the curve is what makes the arithmetic
+ * centring look centred.
+ */
+export const TRAFFIC_LIGHT_X = 20;
+/**
+ * Width the renderer reserves for the cluster, so the first tab does not land
+ * under it. A 20px lead plus three buttons on a 20px pitch ends at 84px; 104
+ * leaves a 20px gutter. At 80 that gutter was 16px and the lights read as
+ * crammed against the tab strip. Mirrored by `--traffic-light-inset` in
+ * index.css and held to it by `titlebar-height.test.ts`.
+ */
+export const TRAFFIC_LIGHT_INSET = 104;
 
 /** Resolved for the running platform; unknown platforms get the Linux value. */
 export const TITLEBAR_HEIGHT: number =

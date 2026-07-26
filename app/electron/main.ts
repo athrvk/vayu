@@ -37,7 +37,7 @@ import {
 	WINDOW_MIN_HEIGHT,
 	TITLEBAR_HEIGHT,
 	TRAFFIC_LIGHT_X,
-	TRAFFIC_LIGHT_DIAMETER,
+	TRAFFIC_LIGHT_FRAME_HEIGHT,
 	TITLEBAR_BG_LIGHT,
 	TITLEBAR_BG_DARK,
 	TITLEBAR_FG_LIGHT,
@@ -97,14 +97,14 @@ function createWindow() {
 		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
-		// Centre the macOS traffic lights in the bar. The diameter is a named
-		// constant because the previous 16 was wrong - the buttons are 12px, so
-		// they sat 2px high, which only became visible once the bar went to 28.
+		// Centre the macOS traffic lights in the bar. The frame height is a named
+		// constant because it has been wrong twice: 16 originally, then 12 (the
+		// visible circle) - Electron positions the button frame, which is 14.
 		trafficLightPosition:
 			process.platform === "darwin"
 				? {
 						x: TRAFFIC_LIGHT_X,
-						y: Math.round((TITLEBAR_HEIGHT - TRAFFIC_LIGHT_DIAMETER) / 2),
+						y: Math.round((TITLEBAR_HEIGHT - TRAFFIC_LIGHT_FRAME_HEIGHT) / 2),
 					}
 				: undefined,
 		// Windows-only native overlay - Linux uses custom HTML buttons

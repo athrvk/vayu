@@ -146,3 +146,56 @@ describe("environment switch notification", () => {
 		expect(messages()).toEqual([]);
 	});
 });
+
+describe("environment selector tokens", () => {
+	/*
+	 * Two token mistakes this pins, both readable only against the design system:
+	 *
+	 * `--accent` is the *hover* background (`--accent-active` is the selected
+	 * one). It was the resting fill, hovering to `--accent/80` - so the control
+	 * got lighter under the pointer instead of more prominent.
+	 *
+	 * And `--scope-environment` is the app's colour for "environment": the
+	 * variable badges, the autocomplete and the variables tree all use it on the
+	 * documented solid-text-on-a-/10-tint convention. The control that *selects*
+	 * an environment was the one surface not saying it.
+	 */
+	const trigger = () => screen.getByRole("button", { name: /switch environment/i });
+
+	it("wears the environment scope colour once one is selected", () => {
+		useSessionStore.setState({ activeEnvironmentId: "env-1" });
+		renderTitleBar(TitleBar);
+		const cls = trigger().className;
+		expect(cls).toContain("bg-scope-environment/10");
+		expect(cls).toContain("text-scope-environment");
+		expect(cls).toContain("border-scope-environment/30");
+	});
+
+	it("never uses the hover token as a resting fill", () => {
+		useSessionStore.setState({ activeEnvironmentId: "env-1" });
+		renderTitleBar(TitleBar);
+		const cls = trigger().className;
+		// `bg-accent` at rest - the thing being fixed. `hover:bg-accent` is fine.
+		expect(cls).not.toMatch(/(^|\s)bg-accent(\s|$)/);
+		expect(cls).not.toContain("bg-accent/80");
+	});
+
+	it("stays muted with a transparent border when nothing is selected", () => {
+		renderTitleBar(TitleBar);
+		const cls = trigger().className;
+		expect(cls).toContain("text-muted-foreground");
+		// Border in both states so selecting does not resize the control by 2px.
+		expect(cls).toContain("border-transparent");
+		expect(cls).toContain("hover:bg-accent");
+	});
+
+	it("keeps a border in both states so the control does not resize", () => {
+		renderTitleBar(TitleBar);
+		const idle = trigger().className;
+		cleanup();
+		useSessionStore.setState({ activeEnvironmentId: "env-1" });
+		renderTitleBar(TitleBar);
+		const active = trigger().className;
+		for (const cls of [idle, active]) expect(cls).toMatch(/(^|\s)border(\s|$)/);
+	});
+});
