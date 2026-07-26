@@ -26,8 +26,14 @@
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-vi.mock("@/queries", () => ({ useEnvironmentsQuery: () => ({ data: [] }) }));
+// Spread the real module: TitleBar's subtree (TabStrip) reaches for several
+// queries, and listing them by hand breaks whenever that changes.
+vi.mock("@/queries", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries")>()),
+	useEnvironmentsQuery: () => ({ data: [] }),
+}));
 
 const systemMenu = vi.fn();
 
@@ -60,7 +66,18 @@ async function renderFor(platform: string) {
 	stubPlatform(platform);
 	vi.resetModules();
 	const { default: TitleBar } = await import("./TitleBar");
-	render(<TitleBar />);
+	renderTitleBar(TitleBar);
+}
+
+/** TabStrip resolves every tab's label through `useQueries`, so the title bar
+ *  needs a client even when the test is about the icon or the env switcher. */
+function renderTitleBar(TitleBar: () => React.ReactNode) {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	return render(
+		<QueryClientProvider client={client}>
+			<TitleBar />
+		</QueryClientProvider>
+	);
 }
 
 beforeEach(() => {

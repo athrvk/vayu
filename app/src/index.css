@@ -961,6 +961,21 @@
 	 * `--rule` is a variable, each theme gets the token that lands on ~1.29 -
 	 * which is the target the design system already states.
 	 */
+	/*
+	 * A label that is a URL path, cut from the left.
+	 *
+	 * `/v1/orders` and `/v1/orders/42` differ only in the part a normal ellipsis
+	 * removes first, so a right-hand cut turns two different tabs into the same
+	 * `/v1/or`. `direction: rtl` moves the ellipsis to the head;
+	 * `unicode-bidi: plaintext` stops the leading "/" being reordered to the end,
+	 * which is what makes the naive version render "v1/orders/" instead.
+	 */
+	.tab-path {
+		direction: rtl;
+		text-align: left;
+		unicode-bidi: plaintext;
+	}
+
 	.surface-card {
 		background-color: hsl(var(--card));
 		--rule: hsl(var(--border));

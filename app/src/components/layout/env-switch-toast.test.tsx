@@ -24,6 +24,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 /*
  * TitleBar reads `window.electronAPI` at module scope and renders nothing
@@ -57,9 +58,27 @@ const environments = [
 	{ id: "env-2", name: "Production" },
 ];
 
-vi.mock("@/queries", () => ({
+/*
+ * Spread the real module and override only the environments. Listing exports by
+ * hand broke every time TitleBar's subtree reached for another query - TabStrip
+ * resolves each tab's label through several - and the failure is a mock error,
+ * not a behaviour one.
+ */
+vi.mock("@/queries", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries")>()),
 	useEnvironmentsQuery: () => ({ data: environments }),
 }));
+
+/** TabStrip resolves every tab's label through `useQueries`, so the title bar
+ *  needs a client even when the test is about the icon or the env switcher. */
+function renderTitleBar(TitleBar: () => React.ReactNode) {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	return render(
+		<QueryClientProvider client={client}>
+			<TitleBar />
+		</QueryClientProvider>
+	);
+}
 
 beforeEach(() => {
 	cleanup();
@@ -90,7 +109,7 @@ const messages = () => useToastStore.getState().toasts.map((t) => t.message);
 
 describe("environment switch notification", () => {
 	it("names the environment it switched to", () => {
-		render(<TitleBar />);
+		renderTitleBar(TitleBar);
 		const menu = openMenu();
 		fireEvent.click(menu.getByText("Staging"));
 
@@ -102,7 +121,7 @@ describe("environment switch notification", () => {
 
 	it("says so when the environment is cleared", () => {
 		useSessionStore.setState({ activeEnvironmentId: "env-1" });
-		render(<TitleBar />);
+		renderTitleBar(TitleBar);
 		const menu = openMenu();
 		fireEvent.click(menu.getByText("No Environment"));
 
@@ -112,7 +131,7 @@ describe("environment switch notification", () => {
 
 	it("stays quiet when the chosen environment is already active", () => {
 		useSessionStore.setState({ activeEnvironmentId: "env-1" });
-		render(<TitleBar />);
+		renderTitleBar(TitleBar);
 		const menu = openMenu();
 		fireEvent.click(menu.getByText("Staging"));
 
@@ -120,7 +139,7 @@ describe("environment switch notification", () => {
 	});
 
 	it("stays quiet when No Environment is re-picked from cleared", () => {
-		render(<TitleBar />);
+		renderTitleBar(TitleBar);
 		const menu = openMenu();
 		fireEvent.click(menu.getByText("No Environment"));
 
