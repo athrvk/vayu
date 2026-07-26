@@ -183,15 +183,32 @@ function EnvSwitcher() {
 						// so its corners follow the Appearance → Roundedness setting.
 						// rounded-full is reserved for non-interactive indicators.
 						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-md shrink-0 transition-colors",
+						// Border on both states, transparent when idle, so selecting an
+						// environment does not resize the control by 2px.
+						"border",
 						activeEnv
-							? "bg-accent text-accent-foreground hover:bg-accent/80"
-							: "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+							? /*
+								 * `--scope-environment` is the app's colour for "environment" -
+								 * it is what the variable badges, the autocomplete and the
+								 * variables tree all use, on the documented "solid text on a
+								 * /10 tint" convention. The control that *selects* an
+								 * environment was the one place not saying it.
+								 *
+								 * It replaces `bg-accent`, which is the **hover** background
+								 * token (`--accent-active` is the selected one), used here as
+								 * a resting fill and then hovered to an alpha of itself.
+								 */
+								"bg-scope-environment/10 text-scope-environment border-scope-environment/30 hover:bg-scope-environment/20"
+							: "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
 					)}
 					aria-label="Switch environment"
 				>
 					<Cloud className="w-3 h-3 shrink-0" />
 					<span className="truncate">{activeEnv?.name ?? "No Environment"}</span>
-					<ChevronDown className="w-3 h-3 shrink-0 opacity-60" />
+					{/* Inherits the control's colour: the old `opacity-60` was a magic
+					    number that fought the tinted state, dimming an already-tinted
+					    foreground a second time. */}
+					<ChevronDown className="w-3 h-3 shrink-0" />
 				</button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="min-w-44">
@@ -225,7 +242,9 @@ export default function TitleBar() {
 			style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 		>
 			{/* macOS: space for native traffic lights */}
-			{isMac && <div className="w-20 shrink-0" />}
+			{/* Reserved for the traffic lights; the width is a token so it cannot
+			    drift from the position Electron gives them. */}
+			{isMac && <div className="shrink-0 w-[var(--traffic-light-inset)]" />}
 
 			{/* Logo - all platforms. The icon is imported as a module, not referenced
 			    as "/icon.png": `base: "./"` means a root-absolute path does not

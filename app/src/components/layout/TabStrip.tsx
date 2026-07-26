@@ -240,7 +240,8 @@ function TabItem({
 			tabIndex={rovingTabIndex}
 			data-tab-id={tab.id}
 			title={descriptor.title}
-			style={{ width, minWidth: width }}
+			// Opts out of the title bar's drag region so the tab is clickable.
+			style={{ width, minWidth: width, WebkitAppRegion: "no-drag" } as React.CSSProperties}
 			onClick={() => focusTab(tab.id)}
 			onKeyDown={(e) => {
 				if (e.key === "Enter" || e.key === " ") {
@@ -398,9 +399,17 @@ export function TabStrip() {
 			 * the parent so the measurement is of available space, not of itself.
 			 */
 			className="panel-clip flex h-full min-w-0 flex-1 items-stretch overflow-hidden"
-			// Tabs and the "+" button stay clickable; the slack to their right is
-			// left as a drag region by the parent so the window can be moved.
-			style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+			/*
+			 * No `app-region` here on purpose - the root inherits `drag` from the
+			 * wrapper in TitleBar, and each interactive child opts out individually
+			 * below.
+			 *
+			 * It used to be `no-drag` on this element, which was harmless only while
+			 * the strip sized to its content: the slack to the right of the last tab
+			 * belonged to the parent and stayed draggable. `flex-1` (needed so the
+			 * strip measures available space rather than its own tabs) made this
+			 * element span that slack, so the whole area stopped moving the window.
+			 */
 		>
 			{visible.map((i) => (
 				<TabItem
@@ -422,6 +431,7 @@ export function TabStrip() {
 					<DropdownMenuTrigger asChild>
 						<button
 							className="flex shrink-0 items-center gap-1 border-l border-border/40 px-2 text-xs font-mono text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+							style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
 							aria-label={`${overflowed.length} more tabs`}
 						>
 							+{overflowed.length}
@@ -461,7 +471,12 @@ export function TabStrip() {
 			<button
 				onClick={() => openTab({ type: "welcome", entityId: null })}
 				aria-label="New tab"
-				style={{ width: TAB_NEW_BUTTON_WIDTH }}
+				style={
+					{
+						width: TAB_NEW_BUTTON_WIDTH,
+						WebkitAppRegion: "no-drag",
+					} as React.CSSProperties
+				}
 				className="flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground"
 			>
 				<Plus className="w-3.5 h-3.5" />

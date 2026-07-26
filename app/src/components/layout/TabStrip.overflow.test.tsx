@@ -117,3 +117,46 @@ describe("tab strip width", () => {
 		expect(ids).toContain("t7");
 	});
 });
+
+describe("title bar drag region", () => {
+	/*
+	 * The empty space to the right of the last tab has to move the window. It
+	 * stopped doing so when the strip gained `flex-1`: the root carried
+	 * `app-region: no-drag`, which was harmless while the element sized to its
+	 * content - the slack belonged to the draggable parent - and swallowed the
+	 * whole bar once it spanned the full width.
+	 *
+	 * So the container must NOT opt out, and every interactive child must.
+	 */
+	const appRegion = (el: HTMLElement) =>
+		(el.style as CSSStyleDeclaration & { WebkitAppRegion?: string }).WebkitAppRegion;
+
+	it("leaves the strip itself draggable", () => {
+		stubStripWidth(2000);
+		renderStrip();
+		expect(appRegion(screen.getByRole("tablist"))).toBeFalsy();
+	});
+
+	it("opts every tab out, so tabs stay clickable", () => {
+		stubStripWidth(2000);
+		renderStrip();
+		for (const tab of screen.getAllByRole("tab")) {
+			expect(appRegion(tab)).toBe("no-drag");
+		}
+	});
+
+	it("opts the new-tab button out", () => {
+		stubStripWidth(2000);
+		renderStrip();
+		expect(appRegion(screen.getByLabelText("New tab"))).toBe("no-drag");
+	});
+
+	it("opts the overflow control out", () => {
+		stubStripWidth(320);
+		renderStrip();
+		const shown = screen.getAllByRole("tab").length;
+		expect(appRegion(screen.getByLabelText(`${TABS.length - shown} more tabs`))).toBe(
+			"no-drag"
+		);
+	});
+});

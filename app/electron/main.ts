@@ -36,6 +36,8 @@ import {
 	WINDOW_MIN_WIDTH,
 	WINDOW_MIN_HEIGHT,
 	TITLEBAR_HEIGHT,
+	TRAFFIC_LIGHT_X,
+	TRAFFIC_LIGHT_DIAMETER,
 	TITLEBAR_BG_LIGHT,
 	TITLEBAR_BG_DARK,
 	TITLEBAR_FG_LIGHT,
@@ -95,10 +97,15 @@ function createWindow() {
 		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
-		// Center the macOS traffic lights inside the titlebar (lights are ~16px)
+		// Centre the macOS traffic lights in the bar. The diameter is a named
+		// constant because the previous 16 was wrong - the buttons are 12px, so
+		// they sat 2px high, which only became visible once the bar went to 28.
 		trafficLightPosition:
 			process.platform === "darwin"
-				? { x: 12, y: Math.round((TITLEBAR_HEIGHT - 16) / 2) }
+				? {
+						x: TRAFFIC_LIGHT_X,
+						y: Math.round((TITLEBAR_HEIGHT - TRAFFIC_LIGHT_DIAMETER) / 2),
+					}
 				: undefined,
 		// Windows-only native overlay - Linux uses custom HTML buttons
 		titleBarOverlay:

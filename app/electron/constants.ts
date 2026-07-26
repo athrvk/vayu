@@ -69,6 +69,21 @@ export const TITLEBAR_HEIGHT_BY_PLATFORM = {
 	linux: 32,
 } as const;
 
+/**
+ * macOS traffic-light metrics.
+ *
+ * The buttons are **12px** across. The centring formula used 16, which put them
+ * 2px high at every bar height - invisible at 38px, obvious at 28px once the
+ * bar shrank. `TRAFFIC_LIGHT_INSET` is the width the renderer reserves for the
+ * group so the first tab does not sit under it: 12px lead + three 12px buttons
+ * on a 20px pitch ends at 64px, and 80 leaves a comfortable gap. It is mirrored
+ * by `--traffic-light-inset` in index.css and held to it by
+ * `titlebar-height.test.ts`.
+ */
+export const TRAFFIC_LIGHT_DIAMETER = 12;
+export const TRAFFIC_LIGHT_X = 12;
+export const TRAFFIC_LIGHT_INSET = 80;
+
 /** Resolved for the running platform; unknown platforms get the Linux value. */
 export const TITLEBAR_HEIGHT: number =
 	TITLEBAR_HEIGHT_BY_PLATFORM[process.platform as keyof typeof TITLEBAR_HEIGHT_BY_PLATFORM] ??

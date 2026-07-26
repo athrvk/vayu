@@ -39,6 +39,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 // is outside this project's module graph.
 const css = readFileSync(join(here, "index.css"), "utf8");
 const constants = readFileSync(join(here, "..", "electron", "constants.ts"), "utf8");
+// The centring formula itself lives where the window is created.
+const mainTs = readFileSync(join(here, "..", "electron", "main.ts"), "utf8");
 
 /** The `--titlebar-height` declared under a given selector, in px. */
 function cssHeight(selector: string | null): number | null {
@@ -63,6 +65,7 @@ describe("title bar height", () => {
 		// A guard that scanned an empty string passed for weeks elsewhere here.
 		expect(css.length).toBeGreaterThan(1000);
 		expect(constants).toContain("TITLEBAR_HEIGHT_BY_PLATFORM");
+		expect(mainTs.length).toBeGreaterThan(1000);
 	});
 
 	it("agrees between index.css and electron/constants.ts, per platform", () => {
@@ -101,5 +104,25 @@ describe("title bar height", () => {
 		// comment names it to explain the drift, and a guard that trips on its
 		// own documentation would just get the documentation deleted.
 		expect(constants).not.toMatch(/=\s*"#f2f0eb"/);
+	});
+
+	it("centres the macOS traffic lights on their real diameter", () => {
+		// The buttons are 12px. The centring formula used 16, which put them 2px
+		// high at every bar height - unnoticeable at 38px, visible once the bar
+		// went to 28. Asserting the constant is what stops it drifting back.
+		const num = (name: string) =>
+			Number(new RegExp(`${name}\\s*=\\s*(\\d+)`).exec(constants)?.[1]);
+		expect(num("TRAFFIC_LIGHT_DIAMETER")).toBe(12);
+		expect(mainTs).toContain("TITLEBAR_HEIGHT - TRAFFIC_LIGHT_DIAMETER");
+	});
+
+	it("reserves the same inset in both files", () => {
+		// Electron positions the buttons; the renderer reserves room so the first
+		// tab does not land on them. Two files, no shared module.
+		const inset = Number(/TRAFFIC_LIGHT_INSET\s*=\s*(\d+)/.exec(constants)?.[1]);
+		const css_ = Number(/--traffic-light-inset:\s*(\d+)px/.exec(css)?.[1]);
+		expect(inset).toBe(css_);
+		// It has to clear the group: 12px lead + three 12px buttons on a 20px pitch.
+		expect(inset).toBeGreaterThanOrEqual(64);
 	});
 });
