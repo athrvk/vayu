@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Shell from "./Shell";
 import { useTabsStore, useLayoutStore } from "@/stores";
@@ -161,5 +161,43 @@ describe("Shell sidebar auto-view effect", () => {
 
 		const { drawerView } = useLayoutStore.getState();
 		expect(drawerView).toBe("history");
+	});
+
+	/*
+	 * Switching *into* a collection tab, not mounting on one. The bug reported
+	 * here was that a collection tab loaded its detail pane but the sidebar did
+	 * not follow, while settings and request tabs did - and this effect treats
+	 * collection and request identically, which is what pointed the
+	 * investigation at CollectionTree's reveal effect instead. The Shell half is
+	 * pinned anyway, because it is the half that would silently regress if
+	 * someone trimmed the `||` in that condition.
+	 */
+	it("switches to collections view when a collection tab becomes active", () => {
+		const tabId = "collection-tab";
+		useTabsStore.setState({
+			openTabs: [{ id: tabId, type: "collection", entityId: "col-1" }],
+			activeTabId: tabId,
+		});
+
+		renderShell();
+
+		expect(useLayoutStore.getState().drawerView).toBe("collections");
+		expect(useLayoutStore.getState().drawerOpen).toBe(true);
+	});
+
+	it("follows a switch from a settings tab to a collection tab", () => {
+		useTabsStore.setState({
+			openTabs: [
+				{ id: "s1", type: "settings", entityId: null },
+				{ id: "c1", type: "collection", entityId: "col-1" },
+			],
+			activeTabId: "s1",
+		});
+		renderShell();
+		expect(useLayoutStore.getState().drawerView).toBe("settings");
+
+		// The real flow: the Shell is already mounted and the active tab changes.
+		act(() => useTabsStore.setState({ activeTabId: "c1" }));
+		expect(useLayoutStore.getState().drawerView).toBe("collections");
 	});
 });

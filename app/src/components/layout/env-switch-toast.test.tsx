@@ -162,13 +162,19 @@ describe("environment selector tokens", () => {
 	 */
 	const trigger = () => screen.getByRole("button", { name: /switch environment/i });
 
-	it("wears the environment scope colour once one is selected", () => {
+	it("tracks the accent once an environment is selected", () => {
+		// Every other selected surface follows the scheme - the Appearance cards,
+		// the active tab's rule. A pill on a fixed hue stayed blue while the
+		// accent was Coral, which made it look broken rather than deliberate.
 		useSessionStore.setState({ activeEnvironmentId: "env-1" });
 		renderTitleBar(TitleBar);
 		const cls = trigger().className;
-		expect(cls).toContain("bg-scope-environment/10");
-		expect(cls).toContain("text-scope-environment");
-		expect(cls).toContain("border-scope-environment/30");
+		expect(cls).toContain("bg-primary/10");
+		expect(cls).toContain("border-primary/30");
+		// --primary-text, not --primary: on graphite the accent is a neutral and
+		// would read as grey text on a grey tint.
+		expect(cls).toContain("text-primary-text");
+		expect(cls).not.toContain("scope-environment");
 	});
 
 	it("never uses the hover token as a resting fill", () => {

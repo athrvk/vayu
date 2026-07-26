@@ -94,43 +94,67 @@ export default function CollectionTree() {
 		[collections]
 	);
 
-	// Reveal the active request in the tree: expand its ancestor folders so the
-	// row is rendered, then (in the effect below) scroll it into view.
+	/*
+	 * Reveal whatever the active tab points at: expand its ancestor folders so
+	 * the row is rendered, then (in the effect below) scroll it into view.
+	 *
+	 * This used to handle requests only, which is why switching to a *collection*
+	 * tab looked like the sidebar ignored it - a collection nested inside a
+	 * collapsed parent has no row in the tree at all, so there was nothing to
+	 * highlight and nothing to scroll to. `selectedCollectionId` was computed and
+	 * then only used for a label and a highlight, so nothing revealed it.
+	 *
+	 * Settings and Variables never had the problem because they own a whole
+	 * drawer view; a request did not because of this effect. A collection fell
+	 * between the two.
+	 */
 	useEffect(() => {
-		if (!selectedRequestId) {
-			scrolledRequestRef.current = null;
-			return;
-		}
-		let owningCollectionId: string | undefined;
-		for (const [collectionId, reqs] of requestsByCollection) {
-			if (reqs.some((r) => r.id === selectedRequestId)) {
-				owningCollectionId = collectionId;
-				break;
+		if (!selectedRequestId) scrolledRequestRef.current = null;
+
+		// A collection reveals itself; a request reveals the collection holding it.
+		let target: string | undefined;
+		if (selectedCollectionId) {
+			target = selectedCollectionId;
+		} else if (selectedRequestId) {
+			for (const [collectionId, reqs] of requestsByCollection) {
+				if (reqs.some((r) => r.id === selectedRequestId)) {
+					target = collectionId;
+					break;
+				}
 			}
 		}
-		if (!owningCollectionId) return;
+		if (!target) return;
 
 		const ancestorChain: string[] = [];
-		let cursor: string | undefined = owningCollectionId;
+		let cursor: string | undefined = target;
 		while (cursor) {
 			ancestorChain.push(cursor);
 			cursor = collections.find((c) => c.id === cursor)?.parentId ?? undefined;
 		}
 		expandCollections(ancestorChain);
-	}, [selectedRequestId, requestsByCollection, collections, expandCollections]);
+	}, [
+		selectedRequestId,
+		selectedCollectionId,
+		requestsByCollection,
+		collections,
+		expandCollections,
+	]);
 
-	// Once the selected request's row exists (after ancestors expand), scroll it
-	// into view. Guarded by a ref so it only fires once per selection.
+	/*
+	 * Once the selected row exists (after ancestors expand), scroll it into view.
+	 * Guarded by a ref so it only fires once per selection - otherwise every
+	 * expand/collapse elsewhere in the tree would yank the view back.
+	 */
 	useEffect(() => {
-		if (!selectedRequestId || scrolledRequestRef.current === selectedRequestId) return;
-		const row = treeRef.current?.querySelector(
-			`[data-request-id="${CSS.escape(selectedRequestId)}"]`
-		);
+		const id = selectedCollectionId ?? selectedRequestId;
+		if (!id || scrolledRequestRef.current === id) return;
+		const attr = selectedCollectionId ? "data-collection-id" : "data-request-id";
+		const row = treeRef.current?.querySelector(`[${attr}="${CSS.escape(id)}"]`);
 		if (row) {
 			row.scrollIntoView({ block: "nearest" });
-			scrolledRequestRef.current = selectedRequestId;
+			scrolledRequestRef.current = id;
 		}
-	}, [selectedRequestId, expandedCollectionIds, requestsByCollection]);
+	}, [selectedRequestId, selectedCollectionId, expandedCollectionIds, requestsByCollection]);
 
 	const [creatingCollection, setCreatingCollection] = useState(false);
 	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID

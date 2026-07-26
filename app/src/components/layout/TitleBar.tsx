@@ -188,17 +188,22 @@ function EnvSwitcher() {
 						"border",
 						activeEnv
 							? /*
-								 * `--scope-environment` is the app's colour for "environment" -
-								 * it is what the variable badges, the autocomplete and the
-								 * variables tree all use, on the documented "solid text on a
-								 * /10 tint" convention. The control that *selects* an
-								 * environment was the one place not saying it.
+								 * Tracks the accent. Every other "this is selected" surface
+								 * in the app does - the Appearance cards, the active tab's
+								 * rule - so a pill that stayed blue while the accent was
+								 * Coral was the one thing not following the scheme.
 								 *
-								 * It replaces `bg-accent`, which is the **hover** background
-								 * token (`--accent-active` is the selected one), used here as
-								 * a resting fill and then hovered to an alpha of itself.
+								 * `--primary-text` for the label rather than `--primary`,
+								 * because here the accent *is* the text: on the graphite
+								 * scheme `--primary` is a neutral and would read as grey on
+								 * a grey tint.
+								 *
+								 * What it replaces is `bg-accent`, the **hover** background
+								 * token (`--accent-active` is the selected one), used as a
+								 * resting fill and hovered to an alpha of itself - so the
+								 * control got lighter under the pointer, not stronger.
 								 */
-								"bg-scope-environment/10 text-scope-environment border-scope-environment/30 hover:bg-scope-environment/20"
+								"bg-primary/10 text-primary-text border-primary/30 hover:bg-primary/20"
 							: "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
 					)}
 					aria-label="Switch environment"
