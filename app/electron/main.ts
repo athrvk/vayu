@@ -36,6 +36,12 @@ import {
 	WINDOW_MIN_WIDTH,
 	WINDOW_MIN_HEIGHT,
 	TITLEBAR_HEIGHT,
+	TITLEBAR_BG_LIGHT,
+	TITLEBAR_BG_DARK,
+	TITLEBAR_FG_LIGHT,
+	TITLEBAR_FG_DARK,
+	WINDOW_BG_LIGHT,
+	WINDOW_BG_DARK,
 	ENGINE_HOST,
 	ENGINE_PORT,
 	MCP_HOST,
@@ -98,8 +104,12 @@ function createWindow() {
 		titleBarOverlay:
 			process.platform === "win32"
 				? {
-						color: nativeTheme.shouldUseDarkColors ? "#111113" : "#f2f0eb",
-						symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f0eb" : "#111113",
+						color: nativeTheme.shouldUseDarkColors
+							? TITLEBAR_BG_DARK
+							: TITLEBAR_BG_LIGHT,
+						symbolColor: nativeTheme.shouldUseDarkColors
+							? TITLEBAR_FG_DARK
+							: TITLEBAR_FG_LIGHT,
 						height: TITLEBAR_HEIGHT,
 					}
 				: false,
@@ -109,7 +119,7 @@ function createWindow() {
 			preload: path.join(__dirname, "preload.js"),
 		},
 		title: "Vayu",
-		backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
+		backgroundColor: nativeTheme.shouldUseDarkColors ? WINDOW_BG_DARK : WINDOW_BG_LIGHT,
 		show: false, // Don't show until ready
 	});
 
@@ -147,8 +157,8 @@ function createWindow() {
 		// Update titlebar overlay color - Windows only
 		if (process.platform === "win32" && mainWindow) {
 			mainWindow.setTitleBarOverlay({
-				color: nativeTheme.shouldUseDarkColors ? "#111113" : "#f2f0eb",
-				symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f0eb" : "#111113",
+				color: nativeTheme.shouldUseDarkColors ? TITLEBAR_BG_DARK : TITLEBAR_BG_LIGHT,
+				symbolColor: nativeTheme.shouldUseDarkColors ? TITLEBAR_FG_DARK : TITLEBAR_FG_LIGHT,
 				height: TITLEBAR_HEIGHT,
 			});
 		}

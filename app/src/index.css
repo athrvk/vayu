@@ -389,7 +389,23 @@
 		 * source of truth for the window frame; this mirrors it for the renderer,
 		 * and `toast-position.test.tsx` holds the two together.
 		 */
-		--titlebar-height: 38px;
+		--titlebar-height: 32px;
+	}
+
+	/*
+	 * macOS runs a 28px title bar as its own standard, and 28 still clears the
+	 * 12px traffic lights with 8px of margin. Windows cannot follow it down: its
+	 * caption buttons are drawn by the OS at 46x32, so 32 is a floor there, not
+	 * a preference.
+	 *
+	 * `data-platform` is stamped before first paint by the inline script in
+	 * index.html, so the bar is never briefly the wrong height. The matching
+	 * numbers live in electron/constants.ts, and titlebar-height.test.ts holds
+	 * the two files together - the renderer and main tsconfigs share no module
+	 * graph, so nothing else can.
+	 */
+	:root[data-platform="mac"] {
+		--titlebar-height: 28px;
 	}
 
 	/* ── Accent color schemes (light mode) ── */

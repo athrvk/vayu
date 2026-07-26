@@ -60,14 +60,18 @@ describe("toast stack position", () => {
 		expect(declarations).toEqual(["2rem"]);
 	});
 
-	it("declares --titlebar-height once, matching the Electron frame", () => {
+	it("declares --titlebar-height for the toasts to subtract", () => {
+		// Only that the token exists and is a length. Its *value* is per platform
+		// (macOS 28px, Windows and Linux 32px) and is held against
+		// electron/constants.ts by titlebar-height.test.ts - asserting a single
+		// number here is what this test used to do, and it broke the moment the
+		// height became platform-dependent while saying nothing about toasts.
 		const declarations = [...css.matchAll(/--titlebar-height:\s*([^;]+);/g)].map((m) =>
 			m[1].trim()
 		);
-		expect(declarations).toEqual(["38px"]);
-		// The window frame is sized by Electron, which cannot read a CSS variable,
-		// so the two are held together here rather than by the type system.
-		expect(electronConstants).toContain("TITLEBAR_HEIGHT = 38");
+		expect(declarations.length).toBeGreaterThan(0);
+		for (const value of declarations) expect(value).toMatch(/^\d+px$/);
+		expect(electronConstants).toContain("TITLEBAR_HEIGHT");
 	});
 
 	it("clears the chrome on its own edge for every offered position", () => {
