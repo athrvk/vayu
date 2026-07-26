@@ -365,10 +365,26 @@ Used in `collections.variables`, `environments.variables`, and `globals.variable
   "value": "https://api.example.com",
   "enabled": true,
   "secret": false,
-  "type": "string"
+  "type": "string",
+  "createdAt": 1784967810149
 }
 ```
 
 `secret` is a UI masking hint only - values are not encrypted at rest. `type` is a UI/script
 conversion hint, one of `"string"` (default), `"number"`, `"boolean"`, `"json"` - it controls
 how scripts read the variable via `pm.*.get(...)`.
+
+`createdAt` (ms epoch) is the app's row-ordering key: the variables editor lists a scope
+oldest-first. It is **optional** - a row written before the field existed, or stripped by an
+engine older than the fix for issue #135, simply has none, and the app sorts an absent value as
+older than everything. Neither side may backfill it on an existing variable: stamping a legacy
+row at save time is what made it leapfrog the row the user had just added. Only the two places
+that genuinely create a variable stamp it - the app when the user types a new row, and the
+engine's `pm.*.set()` when a script introduces a key that did not exist.
+
+The engine round-trips the whole shape through `vayu::json::parse_variables` /
+`serialize_variables` (`engine/src/utils/json.cpp`) when `POST /execute` persists script-set
+variables. **A field added here must be added to both**, or a design run erases it from disk;
+`engine/tests/script_variables_test.cpp` pins the round trip field by field. `POST /execute`
+also skips the write entirely for a scope no script changed, so sending a request no longer
+touches a collection's / environment's `updated_at`.

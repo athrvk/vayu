@@ -292,7 +292,10 @@ export default function RequestBuilderProvider({
 		return result;
 	}, [resolverGetAllVariables]);
 
-	// Update variable value
+	// Update variable value. An existing variable is spread, so its creation
+	// time (the variables editor's row-ordering key) survives; one created here
+	// is stamped now, so it lands at the bottom of that scope's list rather than
+	// above every row that already existed (issue #135).
 	const updateVariable = useCallback(
 		(name: string, newValue: string, scope: VariableScope) => {
 			switch (scope) {
@@ -302,7 +305,11 @@ export default function RequestBuilderProvider({
 					if (updatedVars[name]) {
 						updatedVars[name] = { ...updatedVars[name], value: newValue };
 					} else {
-						updatedVars[name] = { value: newValue, enabled: true };
+						updatedVars[name] = {
+							value: newValue,
+							enabled: true,
+							createdAt: Date.now(),
+						};
 					}
 					updateGlobalsMutation.mutate({ variables: updatedVars });
 					break;
@@ -315,7 +322,11 @@ export default function RequestBuilderProvider({
 					if (updatedVars[name]) {
 						updatedVars[name] = { ...updatedVars[name], value: newValue };
 					} else {
-						updatedVars[name] = { value: newValue, enabled: true };
+						updatedVars[name] = {
+							value: newValue,
+							enabled: true,
+							createdAt: Date.now(),
+						};
 					}
 					updateCollectionMutation.mutate({ id: collectionId, variables: updatedVars });
 					break;
@@ -328,7 +339,11 @@ export default function RequestBuilderProvider({
 					if (updatedVars[name]) {
 						updatedVars[name] = { ...updatedVars[name], value: newValue };
 					} else {
-						updatedVars[name] = { value: newValue, enabled: true };
+						updatedVars[name] = {
+							value: newValue,
+							enabled: true,
+							createdAt: Date.now(),
+						};
 					}
 					updateEnvironmentMutation.mutate({
 						id: activeEnvironmentId,
