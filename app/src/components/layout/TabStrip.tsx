@@ -388,7 +388,16 @@ export function TabStrip() {
 			ref={listRef}
 			role="tablist"
 			onKeyDown={onKeyDown}
-			className="panel-clip flex h-full min-w-0 items-stretch overflow-hidden"
+			/*
+			 * `flex-1` is load-bearing, not cosmetic. The strip is a flex item, so
+			 * without it it sizes to its own content - and since it measures its own
+			 * clientWidth to decide how many tabs fit, that is a feedback loop:
+			 * measure the tabs, trim to fit "the space", the content shrinks, trim
+			 * again. It settled on a single tab with everything else in the overflow
+			 * menu regardless of how wide the window was. It has to be told to fill
+			 * the parent so the measurement is of available space, not of itself.
+			 */
+			className="panel-clip flex h-full min-w-0 flex-1 items-stretch overflow-hidden"
 			// Tabs and the "+" button stay clickable; the slack to their right is
 			// left as a drag region by the parent so the window can be moved.
 			style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
