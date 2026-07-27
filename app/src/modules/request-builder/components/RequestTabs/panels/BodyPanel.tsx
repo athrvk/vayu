@@ -50,7 +50,7 @@ import { cn } from "@/lib/utils";
 import GraphQLBody from "./body/GraphQLBody";
 import { contentTypeToAdd, contentTypeRow, withoutContentType } from "./body/content-type";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
-import { switchBody, type BodyDrafts } from "./body/body-drafts";
+import { switchBody, emptyDrafts, type BodyDrafts } from "./body/body-drafts";
 
 const BODY_MODES: { value: BodyMode; label: string; contentType: string | null }[] = [
 	{ value: "none", label: "None", contentType: null },
@@ -198,14 +198,20 @@ export default function BodyPanel() {
 	 *
 	 * A ref rather than state: nothing renders from it, and it must not cause a
 	 * re-render when stashed mid-switch.
+	 *
+	 * This panel is *not* remounted when you switch request tab - the provider
+	 * resets its state in an effect instead - so the ref outlives the request it
+	 * was filled for. The drafts therefore carry `requestId` and `switchBody`
+	 * drops any that belong to a different one.
 	 */
-	const draftsRef = useRef<BodyDrafts>({});
+	const draftsRef = useRef<BodyDrafts>(emptyDrafts(request.id));
 
 	const handleModeChange = (mode: BodyMode) => {
 		const { body, drafts } = switchBody(
 			request.bodyMode,
 			mode,
 			request.body ?? "",
+			request.id,
 			draftsRef.current
 		);
 		draftsRef.current = drafts;

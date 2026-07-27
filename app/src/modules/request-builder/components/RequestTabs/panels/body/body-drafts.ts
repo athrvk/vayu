@@ -26,6 +26,15 @@
  * These drafts live for as long as the panel does. They are deliberately *not*
  * persisted: a request has one body, and storing payloads it will never send
  * would put them in exports and in the engine's schema for no one to read.
+ *
+ * **They belong to one request, and the type says so.** `BodyPanel` is not
+ * remounted when you switch request tab - `RequestBuilderProvider` resets its
+ * state in an effect keyed on `initialRequest?.id` instead - so a ref holding
+ * drafts outlives the request that filled it. Stash request A's JSON, switch to
+ * request B, pick JSON there, and A's payload lands in B: the reported bug
+ * again, one step worse. Carrying `requestId` inside the drafts rather than
+ * beside them means there is no order of calls in which a caller can stash
+ * without saying whose body it is.
  */
 
 import type { BodyMode } from "../../../../types";
@@ -40,7 +49,15 @@ export function draftKey(mode: BodyMode): DraftKey | null {
 	return null;
 }
 
-export type BodyDrafts = Partial<Record<DraftKey, string>>;
+export interface BodyDrafts extends Partial<Record<DraftKey, string>> {
+	/** Whose body these are. Drafts do not survive a change of request. */
+	requestId: string | null;
+}
+
+/** The empty drafts a panel starts from, before any mode has been left. */
+export function emptyDrafts(requestId: string | null): BodyDrafts {
+	return { requestId };
+}
 
 export interface BodySwitch {
 	/** The body the new mode should show. */
@@ -55,18 +72,25 @@ export interface BodySwitch {
  * Returns the same body when both modes share a bucket, so JSON to text does
  * not clear the editor - the string is the same string, and only the
  * highlighting changes.
+ *
+ * `requestId` is the request being edited *now*. Drafts belonging to any other
+ * request are dropped rather than restored.
  */
 export function switchBody(
 	from: BodyMode,
 	to: BodyMode,
 	currentBody: string,
+	requestId: string | null,
 	drafts: BodyDrafts
 ): BodySwitch {
 	const fromKey = draftKey(from);
 	const toKey = draftKey(to);
 
+	// Someone else's drafts are not drafts, they are another request's payload.
+	const own: BodyDrafts = drafts.requestId === requestId ? drafts : emptyDrafts(requestId);
+
 	// Stash whatever the outgoing mode was holding, so returning to it restores.
-	const next: BodyDrafts = fromKey ? { ...drafts, [fromKey]: currentBody } : { ...drafts };
+	const next: BodyDrafts = fromKey ? { ...own, [fromKey]: currentBody } : { ...own };
 
 	// A mode with no body of its own leaves `request.body` untouched: switching
 	// to `none` and back should not have destroyed anything either.
