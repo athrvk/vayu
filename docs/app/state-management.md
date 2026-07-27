@@ -616,7 +616,6 @@ const {
   forceSave: () => Promise<void>
   status: "idle" | "pending" | "saving" | "saved" | "error"
   isSaving: boolean
-  errorMessage: string | null
 } = useSaveManager({
   entityId: string | null           // Unique ID for this entity
   contextName?: string              // Display name (e.g., "Request: GET /api")
@@ -627,11 +626,20 @@ const {
 ```
 
 **Features:**
-- **Debounced auto-save:** Triggers 3000ms after the last change (defined in `app/src/config/timing.ts` as `TIMING.AUTO_SAVE_DELAY_MS`)
+- **Debounced auto-save:** Triggers after the delay the user chose in Settings → General, defaulting to 5000ms (`autoSave.delayMs` in `client-settings-store`, options in `constants/client-settings.ts`)
 - **Context registration:** Automatically registers with `useSaveStore()` for app-wide Ctrl/Cmd+S integration and tab LRU coordination
 - **Save status:** Updates centralized save store so UI can show "Saving..." or "Saved" indicators
 - **Entity switching:** Flushes pending saves when entity ID changes (in cleanup, before unmounting)
-- **Fixed debounce:** Debounce is a fixed 3000ms constant; there is no `debounceMs` parameter
+- **No `debounceMs` parameter:** the delay is a user preference, not a per-caller
+  one, so the hook reads it from the store rather than taking it as an option.
+  Turning auto-save off in Settings leaves the entity marked dirty - Ctrl/Cmd+S
+  still saves it - but schedules nothing.
+
+`app/src/config/timing.ts` used to carry an `AUTO_SAVE_DELAY_MS: 3000` that
+nothing read and that this section documented as the source of truth. It is
+deleted; `timing-keys-have-readers.test.ts` now fails on any TIMING key without
+a reader, and `useSaveManager.autosave-setting.test.tsx` pins the Settings value
+to the timer that actually runs.
 
 **Usage:**
 ```typescript
