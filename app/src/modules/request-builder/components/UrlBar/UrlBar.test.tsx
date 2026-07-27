@@ -238,3 +238,36 @@ describe("button hover states", () => {
 		);
 	});
 });
+
+/**
+ * The row's controls sit on the app's own height step.
+ *
+ * They were `h-[34px]`, a value used in exactly four places - all of them this
+ * file - wedged between the two heights everything else uses (`h-8` in 43
+ * places, `h-9` in 16). It read as a considered number and was not one; it is
+ * the same drift `type-scale.test.ts` exists to catch for font sizes, in a
+ * dimension that has no equivalent guard.
+ *
+ * Pinned here rather than repo-wide: two other arbitrary heights exist and may
+ * be deliberate, and a guard that fails on things nobody has looked at gets
+ * switched off.
+ */
+describe("control heights", () => {
+	it("uses the shared step, not a one-off pixel value", () => {
+		const { container } = renderBar(true);
+		expect(container.innerHTML).not.toContain("h-[34px]");
+		for (const el of [
+			screen.getByRole("button", { name: /send/i }),
+			screen.getByRole("button", { name: /load test/i }),
+		]) {
+			expect(el.className).toContain("h-8");
+		}
+	});
+
+	it("gives the URL field the same height as the buttons beside it", () => {
+		// They are one visual row; a field a pixel off its neighbours is the kind
+		// of thing nobody can name but everybody sees.
+		const { container } = renderBar(true);
+		expect(container.querySelector(".surface-card")?.className).toContain("h-8");
+	});
+});

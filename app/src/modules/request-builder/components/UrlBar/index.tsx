@@ -31,6 +31,13 @@
  * Cmd/Ctrl+Enter and said so nowhere; Load Test had none. They come from
  * `constants/shortcuts.ts`, so the label and the handler cannot disagree.
  *
+ * **Controls are `h-8`, the app's own step.** They were `h-[34px]` - a value
+ * that appears nowhere else in the codebase, wedged between the two heights
+ * everything else uses (`h-8` in 43 places, `h-9` in 16). It looked deliberate
+ * and was not, which is the same drift the type scale has a guard for. With
+ * `py-1` the row is 40px rather than 46px, and that is its floor: this is one
+ * band doing real work continuously, not a permanent empty one.
+ *
  * **No icons and no inline keycaps.** Both were tried and both cost width in
  * the one row that has none to spare: the lightning bolt and the triangle each
  * added ~20px, and `Ctrl+Shift+↵` as a cap added ~70px to a nine-character
@@ -102,7 +109,7 @@ export default function UrlBar() {
 	const sendAlone = !canStartLoadTest;
 
 	return (
-		<div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-panel shrink-0">
+		<div className="flex items-center gap-2 px-3 py-1 border-b border-border bg-panel shrink-0">
 			{/*
 			    One field holding both the method and the URL.
 			    `border-input`, not `border-border`. This is a text field, and
@@ -118,7 +125,7 @@ export default function UrlBar() {
 					// `bg-*` utility beside it wins the cascade - so both are written,
 					// per docs/design-system.md. The separator below inherits `--rule`
 					// from here.
-					"flex flex-1 min-w-0 items-center h-[34px] rounded-md bg-card surface-card",
+					"flex flex-1 min-w-0 items-center h-8 rounded-md bg-card surface-card",
 					"border border-input transition-colors focus-within:border-primary"
 				)}
 			>
@@ -148,7 +155,7 @@ export default function UrlBar() {
 						onClick={executeRequest}
 						disabled={!canExecute}
 						className={cn(
-							"h-[34px] px-4 inline-flex items-center gap-1.5 shrink-0",
+							"h-8 px-4 inline-flex items-center gap-1.5 shrink-0",
 							"bg-primary-fill text-white text-xs font-semibold font-[inherit]",
 							"border border-primary-fill",
 							/*
@@ -188,7 +195,7 @@ export default function UrlBar() {
 						<button
 							onClick={viewRunningTest}
 							className={cn(
-								"h-[34px] px-3.5 inline-flex items-center gap-1.5 shrink-0",
+								"h-8 px-3.5 inline-flex items-center gap-1.5 shrink-0",
 								"text-xs font-semibold font-[inherit] transition-colors",
 								"text-status-success-text bg-status-success/10 hover:bg-status-success/20",
 								"border border-status-success/40 border-l-transparent",
@@ -209,7 +216,7 @@ export default function UrlBar() {
 								onClick={startLoadTest}
 								disabled={!canExecute}
 								className={cn(
-									"h-[34px] px-4 inline-flex items-center shrink-0",
+									"h-8 px-4 inline-flex items-center shrink-0",
 									"text-xs font-semibold font-[inherit]",
 									// A tint steps *up* rather than down: /10 to /20 is the same
 									// "one more step of itself" that /90 gives the solid fill.
