@@ -27,9 +27,19 @@
  * `--border-strong` (L 18%). Strengthening the border makes it fainter.
  * Whichever token is picked, one theme gets no edge at all.
  *
- * So there is no border to pick. The fill separates from the card on its own at
- * 1.180 light / 1.153 dark - the same in both - which is what the Quick
- * Reference slabs in the script panels have always relied on.
+ * So there was no border *token* to pick, and the slabs went without one,
+ * relying on the fill separating from the card at 1.180 light / 1.153 dark.
+ *
+ * **That is no longer the best available answer.** The measurement above is
+ * exactly what `surface-sunken` was introduced to solve: it is not a token but
+ * an alpha of `--foreground`, which flips with the theme and lands on 1.356
+ * light / 1.343 dark - parity a single token cannot give. The slabs declare
+ * that surface now and their rules say `border-rule`, so the outline is back
+ * and reads the same in both themes.
+ *
+ * The reasoning above is kept rather than deleted: it is why every *token* was
+ * rejected, and that part is still true. What changed is that the surface
+ * contract arrived after this was written.
  */
 
 import { useState, useMemo } from "react";
@@ -146,7 +156,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 								</Badge>
 							</CollapsibleTrigger>
 							<CollapsibleContent className="mt-2">
-								<div className="bg-muted p-3 rounded-md font-mono text-sm space-y-1">
+								<div className="surface-sunken p-3 rounded-md border border-rule font-mono text-sm space-y-1">
 									{preLogs.map((log, i) => (
 										<div key={i} className="flex items-start gap-2">
 											<Terminal className="w-4 h-4 text-status-running-text mt-0.5 flex-shrink-0" />
@@ -182,7 +192,7 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 								</Badge>
 							</CollapsibleTrigger>
 							<CollapsibleContent className="mt-2">
-								<div className="bg-muted p-3 rounded-md font-mono text-sm space-y-1">
+								<div className="surface-sunken p-3 rounded-md border border-rule font-mono text-sm space-y-1">
 									{testLogs.map((log, i) => (
 										<div key={i} className="flex items-start gap-2">
 											<Terminal className="w-4 h-4 text-status-success-text mt-0.5 flex-shrink-0" />
