@@ -25,6 +25,7 @@ import { render, screen } from "@testing-library/react";
 import { RequestBuilderContext } from "../../context";
 import type { RequestBuilderContextValue } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
+import { TooltipProvider } from "@/components/ui";
 import { formatChord } from "@/lib/platform";
 import { SEND_CHORD, LOAD_TEST_CHORD } from "@/constants/shortcuts";
 import UrlBar from "./index";
@@ -61,9 +62,13 @@ function ctx(canStartLoadTest: boolean): RequestBuilderContextValue {
 
 function renderBar(canStartLoadTest: boolean) {
 	return render(
-		<RequestBuilderContext.Provider value={ctx(canStartLoadTest)}>
-			<UrlBar />
-		</RequestBuilderContext.Provider>
+		// Both buttons carry their shortcut in a tooltip, and Radix throws
+		// without a provider ancestor. The app mounts one at its root.
+		<TooltipProvider>
+			<RequestBuilderContext.Provider value={ctx(canStartLoadTest)}>
+				<UrlBar />
+			</RequestBuilderContext.Provider>
+		</TooltipProvider>
 	);
 }
 
@@ -122,11 +127,29 @@ describe("the Send / Load Test group", () => {
 		expect(loadTest().className).toContain("text-xs");
 	});
 
-	it("advertises both shortcuts, which is new for one and news for both", () => {
-		// Send has been Cmd/Ctrl+Enter since forever and said so nowhere; Load
-		// Test had none at all.
+	it("keeps the labels to just the words, so the row stays narrow", () => {
+		// The chord was tried inside the buttons as a keycap and made them far
+		// too wide - `Ctrl+Shift+↵` is eleven characters riding a nine-character
+		// label, in the one row that has no width to spare. The icons went for
+		// the same reason.
 		renderBar(true);
-		expect(send().textContent).toContain(formatChord(SEND_CHORD));
-		expect(loadTest().textContent).toContain(formatChord(LOAD_TEST_CHORD));
+		expect(send().textContent?.trim()).toBe("Send");
+		expect(loadTest().textContent?.trim()).toBe("Load Test");
+	});
+
+	it("carries each shortcut in a tooltip instead", () => {
+		// Zero width, and where a shortcut conventionally lives. Radix only sets
+		// `aria-describedby` once the tooltip is *open*, and jsdom synthesises no
+		// hover - so this asserts the trigger is wired at all, which is the part
+		// that would silently vanish if the wrapper were dropped.
+		renderBar(true);
+		expect(send()).toHaveAttribute("data-state");
+		expect(loadTest()).toHaveAttribute("data-state");
+	});
+
+	it("still defines both chords, which the tooltips render", () => {
+		expect(formatChord(SEND_CHORD)).toMatch(/↵$/);
+		expect(formatChord(LOAD_TEST_CHORD)).toMatch(/↵$/);
+		expect(formatChord(LOAD_TEST_CHORD)).not.toBe(formatChord(SEND_CHORD));
 	});
 });

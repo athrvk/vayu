@@ -27,41 +27,57 @@
  * weight inside one colour. The shared edge is Load Test's own border with a
  * transparent left, which keeps both heights identical without a doubled line.
  *
- * **Both shortcuts are now real and both are visible.** Send has always been
+ * **Both shortcuts are now real, and both are on hover.** Send has always been
  * Cmd/Ctrl+Enter and said so nowhere; Load Test had none. They come from
  * `constants/shortcuts.ts`, so the label and the handler cannot disagree.
+ *
+ * **No icons and no inline keycaps.** Both were tried and both cost width in
+ * the one row that has none to spare: the lightning bolt and the triangle each
+ * added ~20px, and `Ctrl+Shift+↵` as a cap added ~70px to a nine-character
+ * label. The pair is ~140px now against ~186px before, and a tooltip carries
+ * the chord for free. The running state keeps a single pulsing dot, because a
+ * live run is the one thing here that a static colour cannot say.
  */
 
-import { Zap, Activity } from "lucide-react";
 import { useRequestBuilderContext } from "../../context";
 import { useDashboardStore, useTabsStore } from "@/stores";
-import { formatChord } from "@/lib/platform";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import { formatChord, type Chord } from "@/lib/platform";
 import { SEND_CHORD, LOAD_TEST_CHORD } from "@/constants/shortcuts";
 import { cn } from "@/lib/utils";
 import MethodSelector from "./MethodSelector";
 import UrlInput from "./UrlInput";
 
 /**
- * The shortcut hint riding inside a button.
+ * A button plus the shortcut that fires it, on hover.
  *
- * **Not the `Kbd` primitive**, which is checked for and deliberately not used
- * here. `Kbd` is a keycap - `bg-muted` with `text-foreground` and a
- * `border-border-strong` bottom edge - built to sit on a panel or a card. Inside
- * a `--primary-fill` button carrying a white label it would render as a grey
- * chip with dark text stamped on the accent, which is worse than no hint.
+ * The chord was tried *inside* the buttons first, as a keycap, and it made them
+ * far too wide - `Ctrl+Shift+↵` is eleven characters riding a label of nine, in
+ * a row whose whole complaint is that the URL does not get enough of it. A
+ * tooltip costs zero width and is where a shortcut conventionally lives.
  *
- * So this is a dimmed inline glyph instead: a footnote on the label, in the
- * label's own colour. On `--primary-fill` there is no second colour available
- * that is neither the white it already uses nor unreadable.
+ * The `Kbd` primitive is not used for the chord here either: it is a keycap
+ * built for `--muted` on a panel, and `TooltipContent` paints `--primary-fill`
+ * with a white label, so a cap would be a grey chip stamped on the accent.
+ * Plain mono at reduced opacity reads correctly on that fill.
  */
-function Kbd({ children, className }: { children: string; className?: string }) {
+function Hint({
+	chord,
+	label,
+	children,
+}: {
+	chord: Chord;
+	label: string;
+	children: React.ReactNode;
+}) {
 	return (
-		<kbd
-			aria-hidden="true"
-			className={cn("font-mono text-[10px] font-normal opacity-70", className)}
-		>
-			{children}
-		</kbd>
+		<Tooltip>
+			<TooltipTrigger asChild>{children}</TooltipTrigger>
+			<TooltipContent side="bottom" className="flex items-center gap-2">
+				<span>{label}</span>
+				<span className="font-mono opacity-70">{formatChord(chord)}</span>
+			</TooltipContent>
+		</Tooltip>
 	);
 }
 
@@ -109,40 +125,32 @@ export default function UrlBar() {
 				<UrlInput className="flex-1 min-w-0 h-full border-0 bg-transparent px-3 text-sm font-mono shadow-none rounded-none focus-within:ring-0" />
 			</div>
 
-			{/* Send + Load Test, attached. `[&>*:not(:first-child)]:rounded-l-none`
-			    style rules are spelled per member below rather than on the group,
-			    because the group has a one-member state and the rules differ. */}
+			{/* Send + Load Test, attached. The corner rules are spelled per member
+			    rather than on the group, because the group has a one-member state
+			    and the rules differ between them. */}
 			<div className="flex shrink-0">
-				<button
-					onClick={executeRequest}
-					disabled={!canExecute}
-					className={cn(
-						"h-[34px] px-3.5 inline-flex items-center gap-1.5 shrink-0",
-						"bg-primary-fill text-white text-xs font-semibold font-[inherit]",
-						"border border-primary-fill",
-						"disabled:opacity-50 transition-opacity",
-						sendAlone ? "rounded-md" : "rounded-l-md rounded-r-none"
-					)}
-				>
-					{isExecuting ? (
-						<>
-							<span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-[vayu-spin_0.7s_linear_infinite] inline-block" />
-							Sending
-						</>
-					) : (
-						<>
-							{/*
-							 * The triangle is decoration, but it is a text node, so it
-							 * lands in the button's accessible name - screen readers
-							 * announce U+25B6 by its Unicode name before the word
-							 * "Send". Hidden rather than removed: it is doing visual
-							 * work in a bar of otherwise identical-looking buttons.
-							 */}
-							<span aria-hidden="true">▶</span> Send
-							<Kbd>{formatChord(SEND_CHORD)}</Kbd>
-						</>
-					)}
-				</button>
+				<Hint chord={SEND_CHORD} label="Send request">
+					<button
+						onClick={executeRequest}
+						disabled={!canExecute}
+						className={cn(
+							"h-[34px] px-4 inline-flex items-center gap-1.5 shrink-0",
+							"bg-primary-fill text-white text-xs font-semibold font-[inherit]",
+							"border border-primary-fill",
+							"disabled:opacity-50 transition-opacity",
+							sendAlone ? "rounded-md" : "rounded-l-md rounded-r-none"
+						)}
+					>
+						{isExecuting ? (
+							<>
+								<span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-[vayu-spin_0.7s_linear_infinite] inline-block" />
+								Sending
+							</>
+						) : (
+							"Send"
+						)}
+					</button>
+				</Hint>
 
 				{/* Hidden entirely when the builder cannot load test - a detached copy
 				    of a past design run has no load-test handler, so showing the
@@ -152,40 +160,46 @@ export default function UrlBar() {
 						/* While a run is live this becomes a shortcut to the running
 						   dashboard (single-active-run policy), on the status tokens
 						   rather than the accent - it is reporting a state, not
-						   offering the same action. */
+						   offering the same action, and the colour is what says so
+						   now that the icon is gone. */
 						<button
 							onClick={viewRunningTest}
 							className={cn(
-								"h-[34px] px-3 inline-flex items-center gap-1.5 shrink-0",
+								"h-[34px] px-3.5 inline-flex items-center gap-1.5 shrink-0",
 								"text-xs font-semibold font-[inherit] transition-opacity",
 								"text-status-success-text bg-status-success/10",
 								"border border-status-success/40 border-l-transparent",
 								"rounded-r-md rounded-l-none"
 							)}
 						>
-							<Activity className="w-3.5 h-3.5" />
+							{/* The one mark kept: a run is *live*, and a static green
+							    tint alone does not say so. */}
+							<span
+								aria-hidden="true"
+								className="size-1.5 rounded-full bg-status-success animate-pulse"
+							/>
 							View running test
 						</button>
 					) : (
-						<button
-							onClick={startLoadTest}
-							disabled={!canExecute}
-							className={cn(
-								"h-[34px] px-3 inline-flex items-center gap-1.5 shrink-0",
-								"text-xs font-semibold font-[inherit]",
-								"text-primary-text bg-primary/10",
-								// The join: this member's own border, with the shared
-								// edge transparent. Two adjacent 1px borders would draw
-								// a 2px line and make the pair a pixel taller than Send.
-								"border border-primary/45 border-l-transparent",
-								"rounded-r-md rounded-l-none",
-								"disabled:opacity-50 transition-opacity"
-							)}
-						>
-							<Zap className="w-3.5 h-3.5" />
-							Load Test
-							<Kbd>{formatChord(LOAD_TEST_CHORD)}</Kbd>
-						</button>
+						<Hint chord={LOAD_TEST_CHORD} label="Start a load test">
+							<button
+								onClick={startLoadTest}
+								disabled={!canExecute}
+								className={cn(
+									"h-[34px] px-4 inline-flex items-center shrink-0",
+									"text-xs font-semibold font-[inherit]",
+									"text-primary-text bg-primary/10",
+									// The join: this member's own border, with the shared
+									// edge transparent. Two adjacent 1px borders would draw
+									// a 2px line and make the pair a pixel taller than Send.
+									"border border-primary/45 border-l-transparent",
+									"rounded-r-md rounded-l-none",
+									"disabled:opacity-50 transition-opacity"
+								)}
+							>
+								Load Test
+							</button>
+						</Hint>
 					))}
 			</div>
 		</div>

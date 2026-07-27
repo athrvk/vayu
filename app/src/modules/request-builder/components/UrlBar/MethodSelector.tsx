@@ -40,11 +40,30 @@ export default function MethodSelector() {
 				aria-label="HTTP method"
 				className={cn(
 					// Borderless and transparent: the field around it draws the box.
-					// `w-auto` so the trigger is as wide as its verb, and
-					// `rounded-none` so it does not round against the field's own
-					// corner a pixel away.
-					"h-full w-auto shrink-0 gap-1.5 rounded-none border-0 bg-transparent px-3 py-0 shadow-none",
+					// `w-auto` so the trigger is as wide as its verb.
+					"h-full w-auto shrink-0 gap-1.5 border-0 bg-transparent px-3 py-0 shadow-none",
 					"font-mono text-[11px] font-bold",
+					/*
+					 * It had no hover state at all after moving in here - the old
+					 * standalone control got its affordance from a `bg-accent` box,
+					 * and going transparent inside the field took that away without
+					 * putting anything back. A dropdown that does not respond to the
+					 * pointer does not look like a dropdown.
+					 *
+					 * `data-[state=open]` holds the wash while the menu is up, so the
+					 * trigger stays visibly the thing the list belongs to.
+					 */
+					"transition-colors hover:bg-accent data-[state=open]:bg-accent",
+					/*
+					 * Rounded on the left only, matching the field's own corner, so
+					 * the hover wash follows the curve instead of squaring off
+					 * against it. `rounded-l-md` rather than a pixel value: the app
+					 * has a user-facing Roundedness setting and a hardcoded radius
+					 * would ignore it. The field cannot use `overflow-hidden` to do
+					 * this clipping for us - it would also clip the URL input's
+					 * variable-autocomplete popover, which is positioned inside it.
+					 */
+					"rounded-l-md rounded-r-none",
 					// The field owns the focus ring; a second one inside it reads as
 					// two controls, which is exactly what this stopped being.
 					"focus:ring-0 focus:ring-offset-0",

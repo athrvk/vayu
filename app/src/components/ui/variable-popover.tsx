@@ -40,6 +40,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { Input } from "./input";
+import { Kbd } from "./kbd";
 import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
 import { VARIABLE_SCOPE_CONFIG, VARIABLE_SCOPE_DOT } from "@/constants/variables";
 import { cn } from "@/lib/utils";
@@ -51,6 +52,29 @@ export type { ResolvedVariable as VariableInfo };
 
 /** Highest precedence first - the scope a new variable most likely belongs in. */
 const SCOPE_PREFERENCE: VariableScope[] = ["environment", "collection", "global"];
+
+/**
+ * A **fixed-width** stand-in for a hidden secret.
+ *
+ * Deliberately not `"•".repeat(value.length)` and deliberately not a
+ * `type="password"` input holding the real string: both draw one dot per
+ * character, which tells anyone looking how long the secret is. A two-character
+ * value rendering as two dots is a meaningful leak, and it was also visibly
+ * inconsistent with the fixed eight-dot box that used to sit above it.
+ */
+const SECRET_MASK = "••••••••";
+
+/** The eye that swaps a hidden secret field for an editable one. */
+function RevealButton({ revealed, onToggle }: { revealed: boolean; onToggle: () => void }) {
+	return (
+		<TooltipIconButton
+			label={revealed ? "Hide value" : "Reveal value"}
+			icon={revealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+			onClick={onToggle}
+			className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
+		/>
+	);
+}
 
 export interface VariablePopoverProps {
 	/** Variable name */
@@ -261,82 +285,116 @@ export function VariablePopover({
 				onOpenAutoFocus={(e) => e.preventDefault()}
 			>
 				<div className="flex flex-col gap-2">
-					{/* Name + where it came from */}
-					<div className="flex flex-row items-baseline justify-between gap-2">
+					{/*
+					 * Name, whether it is a secret, and where it came from.
+					 *
+					 * `items-center` throughout, not `items-baseline`. Baseline
+					 * alignment lines up the *text* baselines of boxes whose contents
+					 * differ, and the Secret chip carries an icon while the scope badge
+					 * does not - so the two chips sat at visibly different heights.
+					 * Chips beside a title are centred, not baselined.
+					 *
+					 * Both chips are pinned to the same 18px so neither can drift when
+					 * one gains content the other has not.
+					 */}
+					<div className="flex flex-row items-center justify-between gap-2">
 						<span className="font-mono text-sm font-semibold truncate">{name}</span>
-						{varInfo ? (
-							<VariableScopeBadge scope={varInfo.scope} variant="full" />
-						) : (
-							<span className="shrink-0 rounded-md border border-destructive-text/40 px-1.5 text-[10px] text-destructive-text">
-								undefined
-							</span>
-						)}
+						<div className="flex shrink-0 items-center gap-1.5">
+							{/*
+							 * The secret mark sits here beside the scope rather than
+							 * owning a labelled row of its own. It is a property of the
+							 * variable, like its scope - not a section.
+							 */}
+							{isSecret && (
+								<span
+									title="Secret - hidden until revealed"
+									className="inline-flex h-[18px] items-center gap-1 rounded-md border border-warning-text/40 px-1.5 text-[10px] leading-none text-warning-text"
+								>
+									<KeyRound className="h-2.5 w-2.5" />
+									Secret
+								</span>
+							)}
+							{varInfo ? (
+								<VariableScopeBadge
+									scope={varInfo.scope}
+									variant="full"
+									className="h-[18px] leading-none"
+								/>
+							) : (
+								<span className="inline-flex h-[18px] items-center rounded-md border border-destructive-text/40 px-1.5 text-[10px] leading-none text-destructive-text">
+									undefined
+								</span>
+							)}
+						</div>
 					</div>
 
 					{resolved && varInfo ? (
 						<>
 							{/*
-							 * Masked read-only display, secrets only. Everything else
-							 * edits in place - the field below is the current value.
+							 * One field for a secret too.
+							 *
+							 * It used to be two, and they disagreed: a read-only box
+							 * printing a fixed `••••••••` sat above a `type="password"`
+							 * input printing the *real* value masked - so a two-character
+							 * secret showed eight dots in one box and two in the other,
+							 * and the second **leaked the length**. That is the same
+							 * duplicate the rest of this popover dropped, reintroduced
+							 * with a disclosure bug on top.
+							 *
+							 * Hidden, the field is read-only and shows a fixed-width mask,
+							 * so nothing about the value is inferable and it cannot be
+							 * edited blind. Revealing turns it into an ordinary editable
+							 * field - one control, two states, and the eye is the only
+							 * thing that moves between them.
 							 */}
-							{isSecret && (
-								<div className="flex flex-col gap-1">
-									<div className="flex items-center gap-1 text-[10px] text-warning-text">
-										<KeyRound className="w-3 h-3" />
-										Secret
+							{canEdit ? (
+								isSecret && !isSecretRevealed ? (
+									<div className="relative">
+										<Input
+											readOnly
+											value={varInfo.value ? SECRET_MASK : ""}
+											placeholder="not set"
+											aria-label={`Value of ${name} (hidden)`}
+											className="h-8 select-none pr-8 font-mono text-sm"
+										/>
+										<RevealButton
+											revealed={false}
+											onToggle={() => setIsSecretRevealed(true)}
+										/>
 									</div>
-									<div className="relative rounded-md bg-muted px-2 py-1.5 font-mono text-sm break-all">
-										{!isSecretRevealed ? (
-											<span className="select-none">••••••••</span>
-										) : varInfo.value ? (
-											varInfo.value
-										) : (
-											<span className="italic text-muted-foreground">
-												empty
-											</span>
-										)}
-										{varInfo.value && (
-											<TooltipIconButton
-												label={
-													isSecretRevealed ? "Hide value" : "Reveal value"
-												}
-												icon={
-													isSecretRevealed ? (
-														<EyeOff className="w-3 h-3" />
-													) : (
-														<Eye className="w-3 h-3" />
-													)
-												}
-												onClick={() =>
-													setIsSecretRevealed(!isSecretRevealed)
-												}
-												className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 text-muted-foreground hover:text-foreground"
+								) : (
+									<div className="relative">
+										<Input
+											value={editValue}
+											onChange={(e) => setEditValue(e.target.value)}
+											onKeyDown={handleKeyDown}
+											className={cn(
+												"h-8 font-mono text-sm",
+												isSecret && "pr-8"
+											)}
+											aria-label={`Value of ${name}`}
+											autoFocus
+										/>
+										{isSecret && (
+											<RevealButton
+												revealed
+												onToggle={() => setIsSecretRevealed(false)}
 											/>
 										)}
 									</div>
-								</div>
-							)}
-
-							{canEdit ? (
-								<Input
-									type={isSecret && !isSecretRevealed ? "password" : "text"}
-									value={editValue}
-									onChange={(e) => setEditValue(e.target.value)}
-									onKeyDown={handleKeyDown}
-									className="h-8 font-mono text-sm"
-									aria-label={`Value of ${name}`}
-									autoFocus
-								/>
+								)
 							) : (
-								!isSecret && (
-									<div className="rounded-md bg-muted px-2 py-1.5 font-mono text-sm break-all">
-										{varInfo.value || (
+								<div className="rounded-md bg-muted px-2 py-1.5 font-mono text-sm break-all">
+									{isSecret && !isSecretRevealed ? (
+										<span className="select-none">{SECRET_MASK}</span>
+									) : (
+										varInfo.value || (
 											<span className="italic text-muted-foreground">
 												empty
 											</span>
-										)}
-									</div>
-								)
+										)
+									)}
+								</div>
 							)}
 
 							{/*
@@ -360,8 +418,20 @@ export function VariablePopover({
 											"saves when you click away"
 										)}
 									</span>
-									<span className="shrink-0 font-mono opacity-80">
-										⏎ save · esc cancel
+									{/*
+									 * Real keycaps here, unlike the URL bar's buttons. This footer
+									 * sits on `bg-popover` - a surface - which is what `Kbd`'s
+									 * default tone is built for. The buttons could not use it:
+									 * they paint their own accent, and a `--muted` cap stamped on
+									 * that reads as a grey chip.
+									 */}
+									<span className="flex shrink-0 items-center gap-1">
+										<Kbd size="sm">↵</Kbd>
+										<span>save</span>
+										<Kbd size="sm" className="ml-1">
+											esc
+										</Kbd>
+										<span>cancel</span>
 									</span>
 								</div>
 							)}

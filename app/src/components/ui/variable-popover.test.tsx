@@ -90,9 +90,13 @@ describe("the value appears once", () => {
 		expect(within(panel).queryByText("Edit Value")).not.toBeInTheDocument();
 	});
 
-	it("keeps the masked block for a secret, which is the one case it earned", () => {
-		// A secret must stay hidden until deliberately revealed, so the editable
-		// field cannot simply *be* the value on screen.
+	it("gives a secret one field too, not two that disagree", () => {
+		/*
+		 * It was two: a read-only box printing a fixed eight dots, above a
+		 * `type="password"` input printing the *real* value masked - so a
+		 * two-character secret showed eight dots in one and two in the other.
+		 * One field now, hidden until revealed.
+		 */
 		renderPopover({
 			varInfo: {
 				value: "sk_live_abc",
@@ -102,8 +106,60 @@ describe("the value appears once", () => {
 			},
 		});
 		const panel = open();
-		expect(within(panel).getByText("••••••••")).toBeInTheDocument();
+		expect(within(panel).getAllByRole("textbox")).toHaveLength(1);
 		expect(within(panel).getByLabelText(/reveal value/i)).toBeInTheDocument();
+	});
+
+	it("masks at a fixed width, so the length cannot be counted off", () => {
+		// The disclosure bug in the old version: one dot per character told you
+		// exactly how long the secret was.
+		renderPopover({ varInfo: { value: "ab", scope: "environment", secret: true } });
+		const field = within(open()).getByRole("textbox") as HTMLInputElement;
+		expect(field.value).toBe("••••••••");
+		expect(field.value).not.toBe("••");
+	});
+
+	it("never puts a hidden secret's real value anywhere reachable", () => {
+		/*
+		 * `textContent` alone is not enough and a mutation proved it: putting the
+		 * real string in the input's `value` leaves `textContent` clean while the
+		 * secret is one DevTools inspection - or one autofill - away. Field
+		 * values and every attribute are checked too.
+		 */
+		renderPopover({
+			varInfo: { value: "sk_live_abcdef", scope: "environment", secret: true },
+		});
+		const panel = open();
+		expect(document.body.textContent).not.toContain("sk_live_abcdef");
+		for (const el of panel.querySelectorAll("input, textarea")) {
+			expect((el as HTMLInputElement).value).not.toContain("sk_live");
+		}
+		expect(panel.innerHTML).not.toContain("sk_live_abcdef");
+	});
+
+	it("cannot be edited blind - the hidden field is read-only", () => {
+		renderPopover({
+			varInfo: { value: "sk_live_abc", scope: "environment", secret: true },
+		});
+		expect(within(open()).getByRole("textbox")).toHaveAttribute("readonly");
+	});
+
+	it("becomes an ordinary editable field once revealed", () => {
+		renderPopover({
+			varInfo: { value: "sk_live_abc", scope: "environment", secret: true },
+		});
+		const panel = open();
+		fireEvent.click(within(panel).getByLabelText(/reveal value/i));
+		const field = within(panel).getByRole("textbox") as HTMLInputElement;
+		expect(field.value).toBe("sk_live_abc");
+		expect(field).not.toHaveAttribute("readonly");
+	});
+
+	it("says a secret is not set rather than drawing dots for nothing", () => {
+		renderPopover({ varInfo: { value: "", scope: "environment", secret: true } });
+		const panel = open();
+		expect((within(panel).getByRole("textbox") as HTMLInputElement).value).toBe("");
+		expect(within(panel).getByPlaceholderText("not set")).toBeInTheDocument();
 	});
 });
 
@@ -116,8 +172,13 @@ describe("where the value came from", () => {
 	});
 
 	it("shows the keys that already worked but were never mentioned", () => {
-		renderPopover();
-		expect(within(open()).getByText(/⏎ save/)).toBeInTheDocument();
+		// Real keycaps via the `Kbd` primitive - the footer sits on `bg-popover`,
+		// which is the surface that primitive is built for.
+		const panel = (renderPopover(), open());
+		const caps = panel.querySelectorAll('[data-slot="kbd"]');
+		expect([...caps].map((c) => c.textContent)).toEqual(["↵", "esc"]);
+		expect(within(panel).getByText("save")).toBeInTheDocument();
+		expect(within(panel).getByText("cancel")).toBeInTheDocument();
 	});
 
 	it("falls back to the old hint for a global, which has no source name", () => {

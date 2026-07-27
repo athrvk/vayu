@@ -98,9 +98,16 @@ describe("the hover preview", () => {
 });
 
 describe("secrets never appear on hover", () => {
-	it("masks the value", () => {
+	it("says it is a secret rather than drawing dots", () => {
+		/*
+		 * Dots on hover are the worst of both: they take the space of an answer,
+		 * say nothing the token's own colour did not, and invite a second look to
+		 * check you did not misread them. Whether it is *set* belongs in the
+		 * popover, where revealing is a deliberate act.
+		 */
 		renderToken({ secret: true, value: "sk_live_abcdef" });
-		expect(screen.getAllByText("••••••••").length).toBeGreaterThan(0);
+		expect(screen.getAllByText("secret").length).toBeGreaterThan(0);
+		expect(screen.queryByText("••••••••")).not.toBeInTheDocument();
 	});
 
 	it("does not put the secret anywhere in the document", () => {

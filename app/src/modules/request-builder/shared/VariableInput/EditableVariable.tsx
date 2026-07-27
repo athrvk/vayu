@@ -130,8 +130,23 @@ export default function EditableVariable({
 							<span className="italic opacity-90">not defined</span>
 						) : (
 							<span className="flex items-baseline gap-2">
-								<span className="font-mono break-all">
-									{secret ? "••••••••" : value || "empty"}
+								{/*
+								 * A secret says it *is* a secret rather than drawing a
+								 * row of dots. Dots on hover are the worst of both:
+								 * they occupy the space of an answer, tell you nothing
+								 * you did not already know from the token, and invite a
+								 * second look to check you did not misread them. The
+								 * word plus the source is the useful part - whether it
+								 * is set at all belongs in the popover, where revealing
+								 * is a deliberate act.
+								 */}
+								<span
+									className={cn(
+										"break-all",
+										secret ? "italic opacity-90" : "font-mono"
+									)}
+								>
+									{secret ? "secret" : value || "empty"}
 								</span>
 								{sourceName && (
 									<span className="shrink-0 text-primary-foreground/70">
