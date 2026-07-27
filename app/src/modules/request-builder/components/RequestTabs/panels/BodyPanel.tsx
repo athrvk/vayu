@@ -50,7 +50,7 @@ import { cn } from "@/lib/utils";
 import GraphQLBody from "./body/GraphQLBody";
 import { contentTypeToAdd, contentTypeRow, withoutContentType } from "./body/content-type";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
-import { switchBody, emptyDrafts, type BodyDrafts } from "./body/body-drafts";
+import { switchBody } from "../../../utils/body-drafts";
 
 const BODY_MODES: { value: BodyMode; label: string; contentType: string | null }[] = [
 	{ value: "none", label: "None", contentType: null },
@@ -144,7 +144,8 @@ function ResizeHandle({
 }
 
 export default function BodyPanel() {
-	const { request, updateField, resolveString } = useRequestBuilderContext();
+	const { request, updateField, resolveString, getBodyDrafts, setBodyDrafts } =
+		useRequestBuilderContext();
 	const [showResolved, setShowResolved] = useState(false);
 
 	// Drag-to-resize editor height, shared across body modes that host an editor.
@@ -187,34 +188,28 @@ export default function BodyPanel() {
 			])
 		);
 
-	/*
-	 * What each kind of body held, so switching mode does not destroy it.
-	 *
-	 * JSON, text and GraphQL all share `request.body` - the stored shape is one
-	 * discriminated union - so switching handed the same string to a different
-	 * reader. From JSON to GraphQL that meant the payload was read as a raw
-	 * query, and one keystroke later the body was
-	 * `{"query":"{\"merchant\":\"mrc_8813\"}"}` with the original gone.
-	 *
-	 * A ref rather than state: nothing renders from it, and it must not cause a
-	 * re-render when stashed mid-switch.
-	 *
-	 * This panel is *not* remounted when you switch request tab - the provider
-	 * resets its state in an effect instead - so the ref outlives the request it
-	 * was filled for. The drafts therefore carry `requestId` and `switchBody`
-	 * drops any that belong to a different one.
-	 */
-	const draftsRef = useRef<BodyDrafts>(emptyDrafts(request.id));
-
 	const handleModeChange = (mode: BodyMode) => {
+		/*
+		 * What each kind of body held, so switching mode does not destroy it.
+		 *
+		 * JSON, text and GraphQL all share `request.body` - the stored shape is
+		 * one discriminated union - so switching handed the same string to a
+		 * different reader. From JSON to GraphQL that meant the payload was read
+		 * as a raw query, and one keystroke later the body was
+		 * `{"query":"{\"merchant\":\"mrc_8813\"}"}` with the original gone.
+		 *
+		 * The drafts belong to the provider, not to this panel: Radix unmounts an
+		 * inactive `TabsContent`, so a panel-local ref would be discarded every
+		 * time you glanced at the Headers tab.
+		 */
 		const { body, drafts } = switchBody(
 			request.bodyMode,
 			mode,
 			request.body ?? "",
 			request.id,
-			draftsRef.current
+			getBodyDrafts()
 		);
-		draftsRef.current = drafts;
+		setBodyDrafts(drafts);
 		if (body !== (request.body ?? "")) updateField("body", body);
 
 		updateField("bodyMode", mode);

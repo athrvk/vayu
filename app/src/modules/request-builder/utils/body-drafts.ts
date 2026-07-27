@@ -23,21 +23,28 @@
  * into or out of it is what caused the damage. `form-data` and
  * `x-www-form-urlencoded` do not use `body` at all; they have their own arrays.
  *
- * These drafts live for as long as the panel does. They are deliberately *not*
- * persisted: a request has one body, and storing payloads it will never send
- * would put them in exports and in the engine's schema for no one to read.
+ * These drafts are deliberately *not* persisted: a request has one body, and
+ * storing payloads it will never send would put them in exports and in the
+ * engine's schema for no one to read.
  *
- * **They belong to one request, and the type says so.** `BodyPanel` is not
- * remounted when you switch request tab - `RequestBuilderProvider` resets its
- * state in an effect keyed on `initialRequest?.id` instead - so a ref holding
- * drafts outlives the request that filled it. Stash request A's JSON, switch to
- * request B, pick JSON there, and A's payload lands in B: the reported bug
- * again, one step worse. Carrying `requestId` inside the drafts rather than
- * beside them means there is no order of calls in which a caller can stash
- * without saying whose body it is.
+ * **They live in `RequestBuilderProvider`, not in `BodyPanel`.** The panel is
+ * the obvious home and the wrong one: Radix unmounts an inactive `TabsContent`,
+ * so stepping over to Headers and back tears `BodyPanel` down and takes a
+ * panel-local ref with it. You would stash your JSON behind GraphQL, glance at
+ * Headers, come back, and find the JSON gone. The provider survives that, which
+ * is the whole reason it holds them.
+ *
+ * **They belong to one request, and the type says so.** What the provider does
+ * *not* do is remount per request - it resets its state in an effect keyed on
+ * `initialRequest?.id` - so a ref living there outlives the request that filled
+ * it just as readily. Stash request A's JSON, switch to request B, pick JSON
+ * there, and A's payload lands in B: the reported bug again, one step worse.
+ * Carrying `requestId` inside the drafts rather than beside them means there is
+ * no order of calls in which a caller can stash without saying whose body it
+ * is, and no second reset to keep in step with the first.
  */
 
-import type { BodyMode } from "../../../../types";
+import type { BodyMode } from "../types";
 
 /** Which drafts bucket a mode reads and writes, or null if it has no body. */
 export type DraftKey = "raw" | "graphql";

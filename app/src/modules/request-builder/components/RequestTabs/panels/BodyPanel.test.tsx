@@ -33,6 +33,7 @@ import { TooltipProvider } from "@/components/ui";
 import { RequestBuilderContext } from "../../../context";
 import type { RequestBuilderContextValue } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
+import { emptyDrafts } from "../../../utils/body-drafts";
 import type { RequestState } from "../../../types";
 
 vi.mock("@/components/ui", async (importOriginal) => ({
@@ -50,6 +51,9 @@ function renderPanel(overrides: Partial<RequestState> = {}) {
 	const value = {
 		request,
 		updateField,
+		// BodyPanel stashes through these on a mode change.
+		getBodyDrafts: () => emptyDrafts(request.id),
+		setBodyDrafts: () => {},
 		resolveString: (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_m, n) => `resolved-${n}`),
 		// The form-data / urlencoded modes render the key/value table, which
 		// reaches VariableInput for every cell.

@@ -41,6 +41,7 @@ import { BODY_LANGUAGES } from "@/hooks/useVariableCompletionProvider";
 import { RequestBuilderContext } from "../../../../context";
 import type { RequestBuilderContextValue, RequestState, BodyMode } from "../../../../types";
 import { createDefaultRequestState } from "../../../../utils/request-state";
+import { emptyDrafts } from "../../../../utils/body-drafts";
 
 /** Every `language` a `CodeEditor` mounted with during a render. */
 const mounted: string[] = [];
@@ -60,6 +61,9 @@ function renderMode(bodyMode: BodyMode, overrides: Partial<RequestState> = {}) {
 	const value = {
 		request,
 		updateField: vi.fn(),
+		// BodyPanel stashes through these on a mode change.
+		getBodyDrafts: () => emptyDrafts(request.id),
+		setBodyDrafts: () => {},
 		resolveString: (s: string) => s,
 		getAllVariables: () => ({}),
 		getVariableOrigins: () => [],

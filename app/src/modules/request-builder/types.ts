@@ -13,6 +13,9 @@
  * adding an ephemeral `id` for stable React keys and a `system` flag.
  */
 
+// Type-only, and therefore safe despite `body-drafts` importing `BodyMode` back
+// from here: `import type` is erased, so no runtime cycle exists.
+import type { BodyDrafts } from "./utils/body-drafts";
 import type {
 	BodyMode,
 	HttpMethod,
@@ -189,6 +192,24 @@ export interface RequestBuilderContextValue {
 	request: RequestState;
 	setRequest: (request: Partial<RequestState>) => void;
 	updateField: <K extends keyof RequestState>(field: K, value: RequestState[K]) => void;
+
+	/**
+	 * What the body modes you are not looking at were holding, so switching mode
+	 * does not destroy them. See `utils/body-drafts.ts` for why there are two
+	 * buckets and not six.
+	 *
+	 * Backed by a ref in the provider, for two reasons that pull the same way:
+	 * nothing renders from it, so writing it must not cause a re-render
+	 * mid-switch; and Radix unmounts an inactive `TabsContent`, so a ref inside
+	 * `BodyPanel` would be thrown away the moment you glance at the Headers tab.
+	 *
+	 * A pair of accessors rather than the ref itself. Handing the ref out means
+	 * consumers assign to `.current` on a value they got from context, which the
+	 * React compiler's immutability rule rejects - correctly, since a context
+	 * value is meant to be read.
+	 */
+	getBodyDrafts: () => BodyDrafts;
+	setBodyDrafts: (drafts: BodyDrafts) => void;
 
 	// Response State
 	response: ResponseState | null;
