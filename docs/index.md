@@ -76,8 +76,8 @@ Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
 
 - :material-import: **Bring what you already have**
 
-    Import Postman v2.0/v2.1, Insomnia v4, OpenAPI 3.0, and Swagger 2.0 -
-    [what maps to what](app/import-collections/README.md).
+    Drop in a Postman, Insomnia, OpenAPI or Swagger export and keep your folders,
+    variables, auth and scripts. [What carries over](#bring-your-existing-collections).
 
 - :material-code-braces: **Keep your Postman tests**
 
@@ -101,6 +101,43 @@ Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
     requests and secrets never leave the machine.
 
 </div>
+
+## Bring your existing collections
+
+Switching tools is only cheap if your work comes with you. Drop in an export -
+the format is detected for you, no "which importer?" dialog - and Vayu rebuilds
+the tree, variables, auth and scripts.
+
+=== "Postman"
+
+    **v2.1 and v2.0 exports.** The folder tree, collection and folder variables,
+    auth (Bearer, Basic, API key, OAuth 2.0), pre-request and test scripts, query
+    parameters including disabled ones and their descriptions, and raw, JSON,
+    URL-encoded, form-data and GraphQL bodies.
+
+    Not carried: **environments** - Postman exports those as separate files, which
+    this importer does not read. Binary and file bodies are dropped and reported
+    with a count rather than silently, and Digest / AWS / NTLM auth imports as
+    data but will not execute.
+
+=== "Insomnia"
+
+    **Export v4.** Vayu rebuilds the workspace, folder and request tree from
+    Insomnia's flat resource list, and workspace **environments do come across**.
+
+    `{{var}}` templates are converted to Vayu's own. Nunjucks tags (`{% ... %}`)
+    and filtered expressions (`{{ x | filter }}`) are left verbatim as text, since
+    Vayu has no equivalent - they stay visible instead of silently breaking.
+
+=== "OpenAPI & Swagger"
+
+    **OpenAPI 3.0 and Swagger 2.0**, JSON or YAML. A spec describes endpoints
+    rather than recording requests, so Vayu generates **stubs**: one collection
+    per tag, a `{{baseUrl}}` variable from the server definition, parameters with
+    empty values, and a request body sampled from the schema. Auth schemes map
+    across, seeded with `{{variables}}` for you to fill in.
+
+[How import works, format by format](app/import-collections/README.md){ .md-button }
 
 ## How it fits together
 
@@ -219,10 +256,10 @@ persists.
 
 ??? question "Can I import my Postman collections?"
 
-    Yes. Postman Collection v2.0 and v2.1 exports, including folders,
-    environments, variables, auth settings, and pre/post-request scripts. Also
-    Insomnia v4, OpenAPI 3.0, and Swagger 2.0 - see
-    [how import works](app/import-collections/README.md).
+    Yes - v2.0 and v2.1 exports, including folders, collection variables, auth,
+    and pre/post-request scripts. Postman environments are a separate export and
+    are not read. Insomnia v4, OpenAPI 3.0 and Swagger 2.0 import too; see
+    [what carries over](#bring-your-existing-collections).
 
 ??? question "Will my Postman test scripts still run?"
 
