@@ -167,7 +167,10 @@ export function useSaveManager({
 	// Reset on entity change; flush pending edits for the *previous* entity in
 	// the cleanup. Cleanups run before the new render's ref-update effects, so
 	// performSave (keyed on the old entityId via useCallback) still sees the
-	// old onSaveRef - edits made <3s before switching are saved, not dropped.
+	// old onSaveRef - an edit still inside the auto-save delay when you switch
+	// is saved, not dropped. (The delay is the user's setting, default 5s; this
+	// said "<3s", which was the dead `TIMING.AUTO_SAVE_DELAY_MS`, not the one
+	// the hook reads.)
 	useEffect(() => {
 		reset();
 		return () => {
