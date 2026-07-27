@@ -98,7 +98,7 @@ export function setupOAuthIpcHandlers(): void {
 	// Loopback mode: open the system browser (engine hosts the callback listener).
 	// Only http(s) is ever a valid authorize URL - reject anything else so a
 	// compromised renderer can't hand arbitrary protocol handlers to the OS.
-	ipcMain.handle("oauth:openExternal", async (_e, url: string) => {
+	ipcMain.handle("shell:openExternalUrl", async (_e, url: string) => {
 		let scheme: string;
 		try {
 			scheme = new URL(url).protocol;

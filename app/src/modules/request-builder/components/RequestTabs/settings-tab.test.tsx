@@ -67,7 +67,11 @@ describe("Settings tab", () => {
 
 	it("does not badge while the request matches the engine defaults", () => {
 		renderTabs();
-		expect(settingsTab().textContent).toBe("Settings");
+		// The accessible name, not textContent: TabLabel renders a hidden bold
+		// twin of the label to reserve the active state's width, so textContent
+		// is "SettingsSettings" by design. The twin is aria-hidden, so the name
+		// stays exact - and the name is what a badge would actually change.
+		expect(settingsTab()).toHaveAccessibleName("Settings");
 	});
 
 	it("badges when following is turned off", () => {

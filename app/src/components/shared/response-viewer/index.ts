@@ -24,7 +24,6 @@ export type { StatusCodeBadgeProps } from "./StatusCodeBadge";
 export { ResponseStatusBar } from "./ResponseStatusBar";
 export { ResponseActions } from "./ResponseActions";
 export { ResponseHeadersPanel } from "./ResponseHeadersPanel";
-export { RESPONSE_TAB_TRIGGER } from "./tab-trigger";
 export type { ResponseStatusBarProps } from "./ResponseStatusBar";
 export type { ResponseActionsProps } from "./ResponseActions";
 export type { ResponseHeadersPanelProps } from "./ResponseHeadersPanel";

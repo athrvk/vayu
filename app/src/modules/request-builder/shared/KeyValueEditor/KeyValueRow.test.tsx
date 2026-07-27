@@ -29,29 +29,36 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
+import { TooltipProvider } from "@/components/ui";
 import KeyValueRow from "./KeyValueRow";
 
 vi.mock("../../context/RequestBuilderContext", () => ({
 	useRequestBuilderContext: () => ({
 		resolveString: (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_m, n) => `resolved-${n}`),
 		getAllVariables: () => ({}),
+		getVariableOrigins: () => [],
+		writableScopes: [],
 		updateVariable: () => {},
 	}),
 }));
 
 function row(overrides: Partial<Parameters<typeof KeyValueRow>[0]> = {}) {
 	const { container } = render(
-		<KeyValueRow
-			item={{ id: "r1", key: "Accept", value: "{{format}}", enabled: true }}
-			keyPlaceholder="Header"
-			valuePlaceholder="Value"
-			showResolved={true}
-			allowDisable={true}
-			readOnly={false}
-			onUpdate={() => {}}
-			onRemove={() => {}}
-			{...overrides}
-		/>
+		// The `{{format}}` token renders a variable chip, which hovers to a
+		// tooltip - Radix requires the provider the app mounts at its root.
+		<TooltipProvider>
+			<KeyValueRow
+				item={{ id: "r1", key: "Accept", value: "{{format}}", enabled: true }}
+				keyPlaceholder="Header"
+				valuePlaceholder="Value"
+				showResolved={true}
+				allowDisable={true}
+				readOnly={false}
+				onUpdate={() => {}}
+				onRemove={() => {}}
+				{...overrides}
+			/>
+		</TooltipProvider>
 	);
 	return container;
 }

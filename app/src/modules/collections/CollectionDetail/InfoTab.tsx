@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { Button, Input, Textarea } from "@/components/ui";
+import { Button, Input, MarkdownEditor } from "@/components/ui";
 import { useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
@@ -64,12 +64,31 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 				/>
 			</Field>
 
-			<Field label="Description" hint="Markdown supported">
-				<Textarea
+			{/*
+			 * This field has advertised "Markdown supported" beside a plain
+			 * textarea for as long as it has existed - stored as markdown, rendered
+			 * as never. It gets the same editor as a request's description: prose
+			 * when you are reading, source when you click in.
+			 *
+			 * The hint is gone because the behaviour now says it. `onCommit` is
+			 * omitted deliberately: this form saves explicitly through its Save
+			 * Changes button, unlike the request builder which persists on blur.
+			 */}
+			<Field label="Description">
+				<MarkdownEditor
 					value={description}
-					onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+					onChange={(value) => setDraft((d) => ({ ...d, description: value }))}
+					/*
+					 * A failed save means the stored text is not what is on
+					 * screen, and rendering shows what is stored - so it would
+					 * hide the edit behind a tidy view of the old value, directly
+					 * above the `SaveFailed` notice telling you to try again.
+					 */
+					keepSourceOpen={updateCollection.isError}
+					aria-label="Collection description"
 					placeholder="Document this collection - what it covers, base URL, usage notes…"
-					className="min-h-[100px] text-sm leading-relaxed resize-y"
+					emptyHint="Document this collection… Markdown is rendered when you click away."
+					minHeight="100px"
 				/>
 			</Field>
 

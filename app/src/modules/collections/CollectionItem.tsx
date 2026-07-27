@@ -140,6 +140,9 @@ export default function CollectionItem({
 			<div
 				role="treeitem"
 				tabIndex={-1}
+				// Lets the tree scroll a selected collection into view, the way
+				// `data-request-id` on RequestItem already does for a request.
+				data-collection-id={collection.id}
 				aria-expanded={isExpanded}
 				aria-selected={isSelected}
 				className={cn(

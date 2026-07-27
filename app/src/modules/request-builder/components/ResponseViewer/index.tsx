@@ -21,8 +21,17 @@
 
 import { useState } from "react";
 import { Terminal } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger, Badge, Kbd } from "@/components/ui";
-import { cn } from "@/lib/utils";
+import {
+	Tabs,
+	TabsContent,
+	TabsList,
+	TabsTrigger,
+	TabLabel,
+	TabCount,
+	TabErrorDot,
+	Badge,
+	Kbd,
+} from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
 import { modKey } from "@/lib/platform";
 import {
@@ -30,7 +39,6 @@ import {
 	ResponseStatusBar,
 	ResponseActions,
 	ResponseHeadersPanel,
-	RESPONSE_TAB_TRIGGER,
 	formatSize,
 } from "@/components/shared/response-viewer";
 import { Callout } from "@/components/shared";
@@ -151,7 +159,15 @@ export default function ResponseViewer() {
 
 	return (
 		<div className="flex-1 flex flex-col surface-card overflow-hidden">
-			{/* Response Header */}
+			{/*
+			 * Its own band, above the tabs.
+			 *
+			 * Folding it *into* the tab row was tried and is wrong: the status of a
+			 * response is the first thing you look at, and a row it shares with
+			 * eight tab triggers and the action buttons is not where a headline
+			 * goes. It stays a band and got denser instead - 40px to 32px, see
+			 * ResponseStatusBar.
+			 */}
 			<ResponseStatusBar
 				status={response.status}
 				statusText={response.statusText}
@@ -174,66 +190,56 @@ export default function ResponseViewer() {
 				    strip used to float free of the content). See index.css,
 				    "Surfaces, and the rule colour that reads on each". */}
 				<div className="flex items-center justify-between border-b border-rule px-4 gap-2">
-					<TabsList className="flex h-auto p-0 bg-transparent justify-start overflow-x-auto overflow-y-hidden flex-nowrap min-w-0">
-						<TabsTrigger value="body" className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}>
-							Body
+					{/*
+					    `min-w-0`, or the tabs cannot scroll. A flex item defaults to
+					    `min-width: auto` and refuses to shrink below its content, so
+					    `overflow-x-auto` never engages and the row overflows instead -
+					    pushing the status and actions out of the pane. It mattered less
+					    when the right-hand group was just the actions; it matters now
+					    that the response's own facts live there.
+					 */}
+					<TabsList className="min-w-0 overflow-x-auto overflow-y-hidden flex-nowrap">
+						<TabsTrigger value="body">
+							<TabLabel>Body</TabLabel>
 						</TabsTrigger>
-						<TabsTrigger
-							value="headers"
-							className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
-						>
-							Headers
-							<Badge variant="secondary" className="ml-1.5 text-xs">
-								{Object.keys(response.headers).length}
-							</Badge>
+						<TabsTrigger value="headers">
+							<TabLabel>Headers</TabLabel>
+							<TabCount value={Object.keys(response.headers).length} />
 						</TabsTrigger>
-						<TabsTrigger
-							value="cookies"
-							className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
-						>
-							Cookies
+						<TabsTrigger value="cookies">
+							<TabLabel>Cookies</TabLabel>
 						</TabsTrigger>
 						{hasTiming && (
-							<TabsTrigger
-								value="timing"
-								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
-							>
-								Timing
+							<TabsTrigger value="timing">
+								<TabLabel>Timing</TabLabel>
 							</TabsTrigger>
 						)}
 						{hasConsole && (
-							<TabsTrigger
-								value="console"
-								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
-							>
-								<Terminal className="w-4 h-4 mr-1.5" />
-								Console
+							<TabsTrigger value="console">
+								<Terminal className="w-3.5 h-3.5" />
+								<TabLabel>Console</TabLabel>
 								{hasConsoleLogs ? (
-									<Badge variant="secondary" className="ml-1.5 text-xs">
-										{response.consoleLogs!.length}
-									</Badge>
+									<TabCount value={response.consoleLogs!.length} />
 								) : (
 									// Script error with no logs: flag the failure instead
-									// of a misleading "0" log count (issue #111).
-									<Badge variant="destructive" className="ml-1.5 text-xs">
-										Error
-									</Badge>
+									// of a misleading "0" log count (issue #111). A dot
+									// rather than a count, so a future `count="none"`
+									// cannot silently delete the only failure signal.
+									<TabErrorDot />
 								)}
 							</TabsTrigger>
 						)}
 						{hasTests && (
-							<TabsTrigger
-								value="tests"
-								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
-							>
-								Tests
+							<TabsTrigger value="tests">
+								<TabLabel>Tests</TabLabel>
+								{/* A result, not a count - it keeps its chip. */}
 								<Badge
 									variant={
 										response.testResults!.every((t) => t.passed)
 											? "default"
 											: "destructive"
 									}
-									className="ml-1.5 text-xs"
+									className="ml-0.5 h-4 px-1 text-[10px]"
 								>
 									{response.testResults!.filter((t) => t.passed).length}/
 									{response.testResults!.length}
@@ -241,11 +247,8 @@ export default function ResponseViewer() {
 							</TabsTrigger>
 						)}
 						{hasRaw && (
-							<TabsTrigger
-								value="raw-request"
-								className={cn("shrink-0", RESPONSE_TAB_TRIGGER)}
-							>
-								Raw
+							<TabsTrigger value="raw-request">
+								<TabLabel>Raw</TabLabel>
 							</TabsTrigger>
 						)}
 					</TabsList>
