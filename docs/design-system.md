@@ -654,6 +654,11 @@ against its own tint over the worst surface of its theme, and clears 4.6:1.
 - Text color: `.method-get`, `.method-post`, `.method-put`, `.method-patch`, `.method-delete`, `.method-head`, `.method-options`
 - Background: `.bg-method-get`, `.bg-method-post`, etc.
 
+These exist but **nothing in `src/` currently uses them** - prefer
+`getMethodColor` below, which is the one path `MethodBadge`, the tab strip and
+the method selector all take. A second way to spell the same colour is a second
+place for it to drift.
+
 **`getMethodColor(method)`** in `app/src/utils/helpers.ts` returns `var(--method-xxx)` - the raw CSS variable reference. Callers construct full color values:
 
 ```tsx
@@ -685,14 +690,13 @@ const c = `var(--method-${method.toLowerCase()})`;
 </span>
 ```
 
-**MethodSelector** uses the `.method-get` etc. utility classes as Tailwind classNames:
+**MethodSelector** used to carry its own `METHOD_COLORS` map of those utility
+classes - a second source of truth for the same seven colours, and the kind that
+quietly stops matching. It now takes the `getMethodColor` path above, like
+`MethodBadge` and the tab strip:
 
 ```tsx
-const METHOD_COLORS: Record<HttpMethod, string> = {
-  GET: "method-get", POST: "method-post", PUT: "method-put",
-  PATCH: "method-patch", DELETE: "method-delete", HEAD: "method-head", OPTIONS: "method-options",
-};
-// Usage: className={cn("font-mono font-semibold", METHOD_COLORS[method])}
+style={{ color: `hsl(${getMethodColor(request.method)})` }}
 ```
 
 ### Charts
