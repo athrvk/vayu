@@ -8,24 +8,25 @@
 /**
  * MethodSelector Component
  *
- * HTTP method dropdown with color coding
+ * HTTP method dropdown, colour-coded, living *inside* the URL field.
+ *
+ * It used to be a separate bordered control at a fixed `w-[76px]` - a width
+ * sized for OPTIONS, so GET wasted about 40px of it on every request, and the
+ * row paid for a second border and a second gap on top. Since the two are one
+ * thought ("this request"), it now sits in the URL field's own border, the way
+ * a browser's protocol chip does, and sizes to its label.
+ *
+ * It stays a real dropdown rather than becoming a coloured rail with a text
+ * label: the method is changed often, and dropping the caret would make a
+ * control look like a status.
  */
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context";
 import { HTTP_METHODS } from "@/constants/http";
+import { getMethodColor } from "@/utils";
 import type { HttpMethod } from "@/types";
-
-const METHOD_COLORS: Record<HttpMethod, string> = {
-	GET: "method-get",
-	POST: "method-post",
-	PUT: "method-put",
-	PATCH: "method-patch",
-	DELETE: "method-delete",
-	HEAD: "method-head",
-	OPTIONS: "method-options",
-};
 
 export default function MethodSelector() {
 	const { request, updateField } = useRequestBuilderContext();
@@ -36,10 +37,25 @@ export default function MethodSelector() {
 			onValueChange={(value) => updateField("method", value as HttpMethod)}
 		>
 			<SelectTrigger
+				aria-label="HTTP method"
 				className={cn(
-					"w-[76px] h-[34px] font-mono font-bold text-[11px] bg-accent border-border",
-					METHOD_COLORS[request.method]
+					// Borderless and transparent: the field around it draws the box.
+					// `w-auto` so the trigger is as wide as its verb, and
+					// `rounded-none` so it does not round against the field's own
+					// corner a pixel away.
+					"h-full w-auto shrink-0 gap-1.5 rounded-none border-0 bg-transparent px-3 py-0 shadow-none",
+					"font-mono text-[11px] font-bold",
+					// The field owns the focus ring; a second one inside it reads as
+					// two controls, which is exactly what this stopped being.
+					"focus:ring-0 focus:ring-offset-0",
+					"[&>svg]:h-3 [&>svg]:w-3"
 				)}
+				// Inline `hsl()` from `getMethodColor`, matching `MethodBadge` - the
+				// one way method colour is applied in this app. This file used to
+				// carry its own `METHOD_COLORS` map of `.method-*` utility classes,
+				// a second source of truth for the same seven colours, and the kind
+				// that quietly stops matching.
+				style={{ color: `hsl(${getMethodColor(request.method)})` }}
 			>
 				<SelectValue />
 			</SelectTrigger>
@@ -48,7 +64,8 @@ export default function MethodSelector() {
 					<SelectItem
 						key={method}
 						value={method}
-						className={cn("font-mono font-semibold", METHOD_COLORS[method])}
+						className="font-mono font-semibold"
+						style={{ color: `hsl(${getMethodColor(method)})` }}
 					>
 						{method}
 					</SelectItem>

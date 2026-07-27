@@ -44,13 +44,8 @@ export interface KeyValueItem extends KeyValueEntry {
 // ============================================================================
 
 export type RequestTab =
-	| "params"
-	| "headers"
-	| "body"
-	| "auth"
-	| "pre-script"
-	| "test-script"
-	| "settings";
+	/** The request's own documentation. First in the row - see InfoPanel. */
+	"info" | "params" | "headers" | "body" | "auth" | "pre-script" | "test-script" | "settings";
 
 export interface TabInfo {
 	id: RequestTab;

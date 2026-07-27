@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Button, Input, Textarea } from "@/components/ui";
+import { Button, Input, MarkdownEditor } from "@/components/ui";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { Field, SaveFailed, Stat, formatRelative } from "./shared";
@@ -68,12 +68,24 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 				/>
 			</Field>
 
-			<Field label="Description" hint="Markdown supported">
-				<Textarea
+			{/*
+			 * This field has advertised "Markdown supported" beside a plain
+			 * textarea for as long as it has existed - stored as markdown, rendered
+			 * as never. It gets the same editor as a request's description: prose
+			 * when you are reading, source when you click in.
+			 *
+			 * The hint is gone because the behaviour now says it. `onCommit` is
+			 * omitted deliberately: this form saves explicitly through its Save
+			 * Changes button, unlike the request builder which persists on blur.
+			 */}
+			<Field label="Description">
+				<MarkdownEditor
 					value={description}
-					onChange={(e) => setDescription(e.target.value)}
+					onChange={setDescription}
+					aria-label="Collection description"
 					placeholder="Document this collection - what it covers, base URL, usage notes…"
-					className="min-h-[100px] text-sm leading-relaxed resize-y"
+					emptyHint="Document this collection… Markdown is rendered when you click away."
+					minHeight="100px"
 				/>
 			</Field>
 

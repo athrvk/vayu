@@ -14,6 +14,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
 import type { RequestTab, TabInfo } from "../../types";
+import InfoPanel from "./panels/InfoPanel";
 import ParamsPanel from "./panels/ParamsPanel";
 import HeadersPanel from "./panels/HeadersPanel";
 import BodyPanel from "./panels/BodyPanel";
@@ -28,6 +29,18 @@ export default function RequestTabs() {
 
 	// Calculate badges for tabs
 	const tabs: TabInfo[] = [
+		{
+			/*
+			 * First, deliberately. A description is the first thing you want to
+			 * read about a request and the last thing you find at the end of a
+			 * tab row. The badge is `1` for "there is something here" rather than
+			 * a count, which is exactly what Body, Auth, Pre-request, Tests and
+			 * Settings already do - so it needs no new primitive.
+			 */
+			id: "info",
+			label: "Info",
+			badge: request.description?.trim() ? 1 : undefined,
+		},
 		{
 			id: "params",
 			label: "Params",
@@ -108,6 +121,8 @@ function TabContent() {
 	const { activeTab } = useRequestBuilderContext();
 
 	switch (activeTab) {
+		case "info":
+			return <InfoPanel />;
 		case "params":
 			return <ParamsPanel />;
 		case "headers":

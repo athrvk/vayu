@@ -25,6 +25,8 @@ import { render, screen } from "@testing-library/react";
 import { RequestBuilderContext } from "../../context";
 import type { RequestBuilderContextValue } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
+import { formatChord } from "@/lib/platform";
+import { SEND_CHORD, LOAD_TEST_CHORD } from "@/constants/shortcuts";
 import UrlBar from "./index";
 
 vi.mock("./MethodSelector", () => ({ default: () => null }));
@@ -76,5 +78,55 @@ describe("UrlBar Load Test button visibility", () => {
 		expect(screen.queryByRole("button", { name: /load test/i })).toBeNull();
 		// Send is still there - only the load-test affordance is gated.
 		expect(screen.getByRole("button", { name: /send/i })).toBeTruthy();
+	});
+});
+
+/**
+ * Send and Load Test are one attached control, and it has three states.
+ *
+ * The pair used to be two separate buttons at two different type sizes (13px
+ * and 12px) - the signature of two controls styled at different times rather
+ * than a pair designed together. Attaching them makes the corner radii
+ * state-dependent, and the state most likely to be missed is the one where the
+ * second member is absent: a detached copy of a past design run has no
+ * load-test handler, so Send is alone and must take back both corners or the
+ * group looks broken rather than deliberate.
+ */
+describe("the Send / Load Test group", () => {
+	const send = () => screen.getByRole("button", { name: /send/i });
+	const loadTest = () => screen.getByRole("button", { name: /load test/i });
+
+	it("squares Send's right edge where Load Test joins it", () => {
+		renderBar(true);
+		expect(send().className).toContain("rounded-l-md");
+		expect(send().className).toContain("rounded-r-none");
+	});
+
+	it("gives Send both corners when it is alone", () => {
+		// `canStartLoadTest` false - the detached-copy case.
+		renderBar(false);
+		expect(send().className).toContain("rounded-md");
+		expect(send().className).not.toContain("rounded-r-none");
+	});
+
+	it("draws the shared edge once, not twice", () => {
+		// Two adjacent 1px borders would render a 2px seam and make the pair a
+		// pixel taller than Send on its own.
+		renderBar(true);
+		expect(loadTest().className).toContain("border-l-transparent");
+	});
+
+	it("sets both members at one type size", () => {
+		renderBar(true);
+		expect(send().className).toContain("text-xs");
+		expect(loadTest().className).toContain("text-xs");
+	});
+
+	it("advertises both shortcuts, which is new for one and news for both", () => {
+		// Send has been Cmd/Ctrl+Enter since forever and said so nowhere; Load
+		// Test had none at all.
+		renderBar(true);
+		expect(send().textContent).toContain(formatChord(SEND_CHORD));
+		expect(loadTest().textContent).toContain(formatChord(LOAD_TEST_CHORD));
 	});
 });

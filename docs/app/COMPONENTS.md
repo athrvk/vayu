@@ -127,10 +127,9 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 |---|---|
 | `context/RequestBuilderProvider.tsx`, `context/RequestBuilderContext.tsx` | Local request-editing state + the execute/save/load-test callbacks |
 | `components/RequestBuilderLayout.tsx` | Resizable vertical layout composing UrlBar / RequestTabs / ResponseViewer |
-| `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` - method dropdown, URL input (variable highlighting), Send + Load Test buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
-| `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel`, `InheritedScriptsNotice`, `SettingsPanel`. `AuthPanel` owns the mode picker (it is the only host that offers `inherit`) and delegates every field group to the shared [`AuthFields`](#shared-auth-fields), injecting a variable-aware `VariableInput`; OAuth 2.0 reaches [`OAuth2Form`](#shared-oauth-20-form) through it. `PreScriptPanel` and `TestScriptPanel` each render `InheritedScriptsNotice` (the script equivalent of `AuthInheritBanner`) to name which ancestor collections contribute a pre-request or test script; it accepts an optional `entries` prop so a stored-run view can supply parts directly instead of reading the live chain. `SettingsPanel` holds the per-request redirect policy (**Follow redirects** + **Maximum redirects**); the tab strip badges it via `isRedirectPolicyNonDefault` (in `utils/request-state`) only when the request departs from the engine defaults |
+| `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput`. The method dropdown lives **inside** the URL field's border (one control, not two - it was a separate `w-[76px]` box sized for OPTIONS). Send + Load Test are one **attached** pair on the same accent: Send is `--primary-fill` with a white label, Load Test is `--primary` at 12% with `--primary-text` and a transparent left border, so the join is a step in weight rather than a seam between materials. Send owns both corners when `canStartLoadTest` is false. Both shortcuts (`⌘↵` / `⌘⇧↵`) come from `constants/shortcuts.ts` and are shown on the buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
+| `components/RequestTabs/` | `index` + `panels/`: `InfoPanel` (**first in the row**), `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel`, `InheritedScriptsNotice`, `SettingsPanel`. `AuthPanel` owns the mode picker (it is the only host that offers `inherit`) and delegates every field group to the shared [`AuthFields`](#shared-auth-fields), injecting a variable-aware `VariableInput`; OAuth 2.0 reaches [`OAuth2Form`](#shared-oauth-20-form) through it. `PreScriptPanel` and `TestScriptPanel` each render `InheritedScriptsNotice` (the script equivalent of `AuthInheritBanner`) to name which ancestor collections contribute a pre-request or test script; it accepts an optional `entries` prop so a stored-run view can supply parts directly instead of reading the live chain. `InfoPanel` holds the request description and is first because a description is the first thing you want to read about a request; it replaced `RequestDescription`, a permanent ~30px band above the tab strip that every request paid for whether or not it had one. Its badge is `1` for "there is something here", matching Body/Auth/Scripts/Settings. `SettingsPanel` holds the per-request redirect policy (**Follow redirects** + **Maximum redirects**); the tab strip badges it via `isRedirectPolicyNonDefault` (in `utils/request-state`) only when the request departs from the engine defaults |
 | `components/ResponseViewer/` | `index`, `ResponseCookies`, `ResponseTimingTab`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` (status bar, actions and the Headers tab now come from `shared/response-viewer/`). The Console tab renders whenever the response carries console logs **or** a `preScriptError`/`postScriptError`, so a script that throws before logging still shows its error rather than a silent 200 |
-| `components/RequestDescription.tsx` | Editable request description |
 | `components/LoadTestConfigDialog.tsx` | Load-test configuration dialog (mode, duration, RPS, concurrency, …). Renders `OAuth2LoadTestGuard` when the request's effective auth is OAuth 2.0 |
 | `components/OAuth2LoadTestGuard.tsx`, `components/oauth2-load-test-coverage.ts` | Warns when a duration-based load test would outlive its access token (the engine acquires a token once per run, no mid-run refresh): offers **Refresh** when a fresh token would cover the run, or **blocks Start** (with a "Start anyway" override) when even a fresh token can't. The pure coverage decision lives in `oauth2-load-test-coverage.ts` |
 | `shared/KeyValueEditor/` | `index`, `KeyValueRow` - reusable key/value table (params, headers, form fields) |
@@ -345,7 +344,45 @@ Config resolution (`{{variables}}`), the token cache key (`services/oauth/cache-
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`.
+`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+
+### Markdown (`markdown-view`, `markdown-editor`)
+
+`MarkdownView` renders a description; `MarkdownEditor` wraps it in the
+click-to-edit field used by the request **Info** tab and by
+`CollectionDetail/InfoTab`. Both fields stored markdown and rendered none of it
+before this existed - the collection one even advertised "Markdown supported"
+beside a plain textarea.
+
+**Two rules are load-bearing, not stylistic:**
+
+1. **`MarkdownView` never emits a navigating anchor.** The main window has no
+   `will-navigate` handler, no `setWindowOpenHandler` and no CSP, and the
+   preload re-runs on the new origin - so a clicked `<a href>` would hand
+   `window.electronAPI` to whatever site it landed on. Descriptions arrive from
+   imported Postman / Insomnia / OpenAPI files, which are third-party documents.
+   Links therefore render as `<button>`, with no `href` in the DOM, and open via
+   the scheme-validated `openExternalUrl` IPC. `remark-gfm` autolinks bare URLs,
+   so that override covers those too. Guarded by `markdown-view.test.tsx`.
+2. **`react-markdown` with the default `urlTransform`.** It builds React
+   elements from an AST, so there is no `dangerouslySetInnerHTML` and no
+   sanitiser to forget. Raw HTML is inert because `rehype-raw` is deliberately
+   not installed. Overriding `urlTransform` disables the built-in URL sanitising
+   (there is a published advisory for exactly that), so it stays on the default.
+
+`MarkdownEditor`'s rule is **focus, not dirtiness**: rendered while unfocused,
+source the moment you click in. The caret goes to the end - mapping a rendered
+offset back to a source offset needs a real WYSIWYG editor. `keepSourceOpen`
+holds the source open for a caller whose save failed, and a source pin (Obsidian's
+"source mode") lets you read your own markdown without editing.
+
+### `suggestion-list`
+
+A plain-text dropdown on the shared `Command` primitive, used by
+`VariableInput` for header-name suggestions. It replaced a hand-rolled copy in
+that file - its own selected-index state, five keyboard branches, a render-phase
+index reset and a 200ms blur timeout - all of which `cmdk` already did, two
+branches away in the same component, for variables.
 
 ## Component Patterns
 

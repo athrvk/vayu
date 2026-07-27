@@ -116,10 +116,16 @@ export { Label } from "./label";
 export { VariableScopeBadge } from "./variable-scope-badge";
 export type { VariableScopeBadgeProps, VariableScope } from "./variable-scope-badge";
 
+export { MarkdownView } from "./markdown-view";
+export type { MarkdownViewProps } from "./markdown-view";
+export { MarkdownEditor } from "./markdown-editor";
+export type { MarkdownEditorProps } from "./markdown-editor";
 export { VariablePopover } from "./variable-popover";
 export type { VariablePopoverProps, VariableInfo as VariablePopoverInfo } from "./variable-popover";
 
 export { VariableAutocomplete } from "./variable-autocomplete";
+export { SuggestionList } from "./suggestion-list";
+export type { SuggestionListProps } from "./suggestion-list";
 export type {
 	VariableAutocompleteProps,
 	VariableInfo as VariableAutocompleteInfo,

@@ -24,7 +24,7 @@ import {
 	type KeyboardEvent,
 	type ChangeEvent,
 } from "react";
-import { VariableAutocomplete } from "@/components/ui";
+import { VariableAutocomplete, SuggestionList } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
 import type { VariableScope } from "../../types";
@@ -95,7 +95,6 @@ export default function VariableInput({
 
 	const [showSuggestions, setShowSuggestions] = useState(false);
 	const [showPlainSuggestions, setShowPlainSuggestions] = useState(false);
-	const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
 	const [cursorPosition, setCursorPosition] = useState(0);
 	const [searchQuery, setSearchQuery] = useState("");
 	const inputRef = useRef<HTMLInputElement>(null);
@@ -138,7 +137,6 @@ export default function VariableInput({
 		// Show plain suggestions if we have them and not showing variable suggestions
 		if (suggestions.length > 0 && !newValue.includes("{{")) {
 			setShowPlainSuggestions(true);
-			setSelectedSuggestionIndex(0);
 		} else if (!showSuggestions) {
 			setShowPlainSuggestions(false);
 		}
@@ -194,16 +192,6 @@ export default function VariableInput({
 		);
 	}, [suggestions, value]);
 
-	// Reset selected index when the filtered suggestion set changes. Done as a
-	// render-phase adjustment (not an effect) so the index is corrected before
-	// paint without a cascading re-render. The index is ephemeral UI state, so
-	// there's no divergence risk from resetting it during render.
-	const [prevSuggestionCount, setPrevSuggestionCount] = useState(filteredSuggestions.length);
-	if (prevSuggestionCount !== filteredSuggestions.length) {
-		setPrevSuggestionCount(filteredSuggestions.length);
-		setSelectedSuggestionIndex(0);
-	}
-
 	// Handle Escape key globally
 	useEffect(() => {
 		const handleEscapeKey = (e: globalThis.KeyboardEvent) => {
@@ -218,36 +206,19 @@ export default function VariableInput({
 
 	// Handle keyboard navigation
 	const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-		// Arrow key navigation for plain suggestions
-		if (showPlainSuggestions && filteredSuggestions.length > 0) {
-			const maxIndex = Math.min(filteredSuggestions.length, 10) - 1;
-
-			if (e.key === "ArrowDown") {
-				e.preventDefault();
-				setSelectedSuggestionIndex((prev) => (prev < maxIndex ? prev + 1 : prev));
-				return;
-			}
-			if (e.key === "ArrowUp") {
-				e.preventDefault();
-				setSelectedSuggestionIndex((prev) => (prev > 0 ? prev - 1 : 0));
-				return;
-			}
-			if (e.key === "Enter") {
-				e.preventDefault();
-				const idx = Math.min(selectedSuggestionIndex, maxIndex);
-				handleSelectSuggestion(filteredSuggestions[idx]);
-				return;
-			}
-			if (e.key === "Tab") {
-				e.preventDefault();
-				const idx = Math.min(selectedSuggestionIndex, maxIndex);
-				handleSelectSuggestion(filteredSuggestions[idx]);
-				return;
-			}
-			if (e.key === "Escape") {
-				setShowPlainSuggestions(false);
-				return;
-			}
+		/*
+		 * Plain suggestions are navigated by `cmdk` itself - see SuggestionList.
+		 * This used to be ~30 lines of ArrowUp / ArrowDown / Enter / Tab / Escape
+		 * handling against a `selectedSuggestionIndex` this component owned, a
+		 * second implementation of what the Command primitive two branches down
+		 * was already doing for variables.
+		 *
+		 * Only Escape stays here, because closing the list is this component's
+		 * state rather than the list's.
+		 */
+		if (showPlainSuggestions && e.key === "Escape") {
+			setShowPlainSuggestions(false);
+			return;
 		}
 
 		// For variable suggestions, let VariableAutocomplete (Command) handle navigation
@@ -296,7 +267,6 @@ export default function VariableInput({
 	const handleFocus = () => {
 		if (suggestions.length > 0 && !showSuggestions) {
 			setShowPlainSuggestions(true);
-			setSelectedSuggestionIndex(0);
 		}
 	};
 
@@ -437,26 +407,10 @@ export default function VariableInput({
 				</div>
 			)}
 
-			{/* Plain Text Suggestions Popover (e.g., for standard headers) */}
+			{/* Plain Text Suggestions (e.g., for standard headers) */}
 			{showPlainSuggestions && !showSuggestions && filteredSuggestions.length > 0 && (
-				<div className="absolute left-0 top-full mt-1 z-50 w-64 max-h-48 overflow-y-auto rounded-lg border bg-popover shadow-md">
-					{filteredSuggestions.slice(0, 10).map((suggestion, index) => (
-						<button
-							key={suggestion}
-							type="button"
-							className={cn(
-								"w-full text-left px-3 py-2 text-sm cursor-pointer",
-								index === selectedSuggestionIndex ? "bg-accent" : "hover:bg-accent"
-							)}
-							onMouseDown={(e) => {
-								e.preventDefault();
-								handleSelectSuggestion(suggestion);
-							}}
-							onMouseEnter={() => setSelectedSuggestionIndex(index)}
-						>
-							{suggestion}
-						</button>
-					))}
+				<div className="absolute left-0 top-full mt-1 z-50">
+					<SuggestionList items={filteredSuggestions} onSelect={handleSelectSuggestion} />
 				</div>
 			)}
 		</div>

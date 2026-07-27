@@ -119,9 +119,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	openAppLink: (key: "docs" | "scripting" | "issues"): Promise<void> =>
 		ipcRenderer.invoke("shell:openAppLink", key),
 
+	// Open an arbitrary http(s) URL in the system browser. The main handler
+	// validates the scheme and refuses everything else, so this does not hand the
+	// web layer a general "launch any protocol handler" capability.
+	//
+	// Used by the OAuth authorize flow and by links inside rendered markdown -
+	// the latter being why it is no longer named after OAuth.
+	openExternalUrl: (url: string): Promise<void> =>
+		ipcRenderer.invoke("shell:openExternalUrl", url),
+
 	// OAuth 2.0 interactive flow
-	oauthOpenExternal: (url: string): Promise<void> =>
-		ipcRenderer.invoke("oauth:openExternal", url),
 	oauthOpenWindow: (params: {
 		authorizeUrl: string;
 		redirectUri: string;

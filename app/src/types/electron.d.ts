@@ -91,7 +91,7 @@ interface ElectronAPI {
 	openAppLink: (key: "docs" | "scripting" | "issues") => Promise<void>;
 
 	// OAuth 2.0 interactive flow
-	oauthOpenExternal: (url: string) => Promise<void>;
+	openExternalUrl: (url: string) => Promise<void>;
 	oauthOpenWindow: (params: {
 		authorizeUrl: string;
 		redirectUri: string;
