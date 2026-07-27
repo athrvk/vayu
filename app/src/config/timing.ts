@@ -12,9 +12,15 @@
  * one place. Values are milliseconds unless the name says otherwise.
  */
 
+/*
+ * The auto-save delay is deliberately *not* here. It is a user setting, not a
+ * fixed timing: `autoSave.delayMs` in `constants/client-settings.ts`, chosen in
+ * Settings → General and read by `useSaveManager`. An `AUTO_SAVE_DELAY_MS: 3000`
+ * did sit here, with no readers and a value two seconds off the real default -
+ * which is worse than absent, since this file is where CLAUDE.md tells you to
+ * look for a millisecond value.
+ */
 export const TIMING = {
-	/** Debounced auto-save after the user stops editing a request. */
-	AUTO_SAVE_DELAY_MS: 3000,
 	/** How long the "Saved" indicator stays visible after a save. */
 	SAVED_STATUS_DURATION_MS: 3000,
 
