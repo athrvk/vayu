@@ -8,9 +8,11 @@
 import { type ReactNode } from "react";
 import { Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { EYEBROW_CLASS } from "@/components/ui";
 
-export const EYEBROW_CLASS =
-	"text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
+// Re-exported, not redefined - the value lives in `ui/eyebrow` so every
+// surface can reach it. Kept here so the dashboard's existing imports resolve.
+export { EYEBROW_CLASS };
 
 /** Tiny "i" affordance with a Radix tooltip. */
 export function InfoChip({ tip }: { tip: ReactNode }) {

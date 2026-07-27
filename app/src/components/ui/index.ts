@@ -61,6 +61,8 @@ export {
 } from "./dropdown-menu";
 
 export { Tabs, TabsList, TabsTrigger, TabsContent, TabLabel, TabCount, TabErrorDot } from "./tabs";
+export { Eyebrow, EYEBROW_CLASS } from "./eyebrow";
+export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "./table";
 
 export {
 	ToastProvider,
@@ -75,6 +77,8 @@ export {
 } from "./toast";
 export type { ToastVariantName } from "./toast";
 
+export { ToggleGroup, ToggleGroupItem } from "./toggle-group";
+export type { ToggleGroupProps } from "./toggle-group";
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./tooltip";
 export { TooltipIconButton } from "./tooltip-icon-button";
 export type { TooltipIconButtonProps } from "./tooltip-icon-button";

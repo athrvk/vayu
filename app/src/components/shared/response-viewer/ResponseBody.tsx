@@ -18,7 +18,7 @@
 
 import { useState, useMemo } from "react";
 import { FileCode, Image as ImageIcon, File, Eye, Code, FileText } from "lucide-react";
-import { Button, CodeEditor } from "@/components/ui";
+import { CodeEditor, ToggleGroup, ToggleGroupItem } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { detectBodyType, getMonacoLanguage, formatBody } from "./utils";
 import type { ResponseBodyProps, ViewMode } from "./types";
@@ -183,65 +183,55 @@ export default function ResponseBody({
 
 	return (
 		<div className={cn("flex-1 flex flex-col h-full", className)}>
-			{/* Mode Toggle Header */}
-			<div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-rule bg-muted/20">
+			{/*
+			 * The toolbar sits on a 32px band.
+			 *
+			 * It was `px-4 py-2` around `h-7` segments - 44px, against a 24px tab
+			 * strip directly above it. `ResponseActions` carries a comment saying
+			 * its icons are `h-6` precisely so they share that 24px row; this
+			 * toolbar never got the same treatment and ran 83% taller than the
+			 * band it hangs under. `h-8` with no vertical padding is the same
+			 * construction the tab row uses, one step up so the hierarchy still
+			 * reads.
+			 *
+			 * `surface-sunken` rather than `bg-muted/20`: an arbitrary alpha
+			 * declares no `--rule`, so the segmented control inside it had nothing
+			 * for its border to resolve against.
+			 */}
+			<div className="flex h-8 items-center justify-between gap-2 px-4 border-b border-rule surface-sunken">
 				<div className="flex items-center gap-2">
-					<FileCode className="w-4 h-4 text-muted-foreground" />
-					<span className="text-xs text-muted-foreground uppercase tracking-wide">
+					{/* 14px, matching the tab row's `w-3.5` icons. It was 16px. */}
+					<FileCode className="w-3.5 h-3.5 text-muted-foreground" />
+					<span className="text-[11px] text-muted-foreground uppercase tracking-[0.06em]">
 						{detectedType}
 					</span>
 				</div>
 
 				{showModeToggle && (
-					<div className="flex items-center gap-1 bg-muted p-0.5">
-						<Button
-							size="sm"
-							variant="ghost"
-							onClick={() => setViewMode("pretty")}
-							className={cn(
-								"h-7 px-2 text-xs gap-1",
-								compact && "h-6 px-1.5 text-[11px]",
-								viewMode === "pretty"
-									? "bg-background text-foreground shadow-sm font-medium"
-									: "text-muted-foreground hover:text-foreground hover:bg-background/50"
-							)}
-						>
-							<Code className={cn("w-3 h-3", compact && "w-2.5 h-2.5")} />
+					<ToggleGroup
+						value={viewMode}
+						// Radix clears the value when the active item is pressed again.
+						// A view mode has no "off" - ignore the empty string rather than
+						// letting the body render nothing.
+						onValueChange={(next) => next && setViewMode(next as ViewMode)}
+						size={compact ? "xs" : "sm"}
+						aria-label="Body view mode"
+					>
+						<ToggleGroupItem value="pretty">
+							<Code className="w-3 h-3" />
 							Pretty
-						</Button>
-						<Button
-							size="sm"
-							variant="ghost"
-							onClick={() => setViewMode("raw")}
-							className={cn(
-								"h-7 px-2 text-xs gap-1",
-								compact && "h-6 px-1.5 text-[11px]",
-								viewMode === "raw"
-									? "bg-background text-foreground shadow-sm font-medium"
-									: "text-muted-foreground hover:text-foreground hover:bg-background/50"
-							)}
-						>
-							<FileText className={cn("w-3 h-3", compact && "w-2.5 h-2.5")} />
+						</ToggleGroupItem>
+						<ToggleGroupItem value="raw">
+							<FileText className="w-3 h-3" />
 							Raw
-						</Button>
+						</ToggleGroupItem>
 						{canPreview && (
-							<Button
-								size="sm"
-								variant="ghost"
-								onClick={() => setViewMode("preview")}
-								className={cn(
-									"h-7 px-2 text-xs gap-1",
-									compact && "h-6 px-1.5 text-[11px]",
-									viewMode === "preview"
-										? "bg-background text-foreground shadow-sm font-medium"
-										: "text-muted-foreground hover:text-foreground hover:bg-background/50"
-								)}
-							>
-								<Eye className={cn("w-3 h-3", compact && "w-2.5 h-2.5")} />
+							<ToggleGroupItem value="preview">
+								<Eye className="w-3 h-3" />
 								Preview
-							</Button>
+							</ToggleGroupItem>
 						)}
-					</div>
+					</ToggleGroup>
 				)}
 			</div>
 
