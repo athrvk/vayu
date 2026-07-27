@@ -31,6 +31,25 @@ export const createEmptyKeyValue = (): KeyValueItem => ({
 });
 
 /**
+ * Ensure the list ends with exactly one blank row, so there is always somewhere
+ * to type without pressing "add".
+ *
+ * The rule was written twice inside `KeyValueEditor` - once in `handleRemove`
+ * and once in `handleUpdate` - with conditions that had already drifted apart:
+ * the remove path appended a blank when the list emptied *or* when the last row
+ * had content, while the update path only appended when the row being edited
+ * was the last one. Delete the second-to-last row while the last is blank and
+ * neither branch tidied up.
+ *
+ * One definition, applied to whatever the caller produces.
+ */
+export const withTrailingBlank = (items: KeyValueItem[]): KeyValueItem[] => {
+	const last = items[items.length - 1];
+	const lastIsBlank = last && !last.key.trim() && !last.value.trim();
+	return lastIsBlank ? items : [...items, createEmptyKeyValue()];
+};
+
+/**
  * Convert domain KeyValueEntry[] to UI KeyValueItem[].
  * Adds ephemeral `id` for React keys.
  * When `withSystemHeaders` is true, injects managed system headers at the top.
