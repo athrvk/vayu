@@ -8,17 +8,18 @@
 /**
  * ParamsPanel Component
  *
- * Query parameters editor with URL sync and bulk edit support
+ * Query parameters, kept in step with the URL in the bar above.
+ *
+ * The bulk-edit machinery that used to be duplicated here and in `HeadersPanel`
+ * is now `BulkEditor`; only the format differs, and that is what this passes.
  */
 
-import { useState, useCallback } from "react";
-import { Edit3, Table2 } from "lucide-react";
+import { useCallback } from "react";
 import { useRequestBuilderContext } from "../../../context";
-import KeyValueEditor from "../../../shared/KeyValueEditor";
+import KeyValueEditor, { BulkEditor } from "../../../shared/KeyValueEditor";
 import type { KeyValueItem } from "../../../types";
 import { formatParamsToText, parseParamsFromText } from "../../../utils/params-format";
-import { Button, Label } from "@/components/ui";
-import { Textarea } from "@/components/ui/textarea";
+import { EmptyTableHint } from "./EmptyTableHint";
 
 // Build URL from base and params
 // Note: We don't URL-encode values containing {{variables}} - they get resolved and encoded at request time
@@ -45,8 +46,6 @@ function buildUrlWithParams(baseUrl: string, params: KeyValueItem[]): string {
 
 export default function ParamsPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();
-	const [isBulkEditMode, setIsBulkEditMode] = useState(false);
-	const [bulkEditText, setBulkEditText] = useState("");
 
 	// Handle params change and sync to URL
 	const handleParamsChange = useCallback(
@@ -63,115 +62,62 @@ export default function ParamsPanel() {
 		[request.url, updateField]
 	);
 
-	// Handle bulk edit text
-	const handleBulkEdit = useCallback(
-		(text: string) => {
-			const parsedParams = parseParamsFromText(text);
-			handleParamsChange(parsedParams);
-		},
-		[handleParamsChange]
-	);
-
-	// Format params for bulk edit display
-	const formatForBulkEdit = useCallback(() => {
-		return formatParamsToText(request.params);
-	}, [request.params]);
-
-	// Toggle between table and bulk edit mode
-	const handleToggleMode = () => {
-		if (isBulkEditMode) {
-			// Switching to table mode - save bulk edit
-			handleBulkEdit(bulkEditText);
-			setIsBulkEditMode(false);
-		} else {
-			// Switching to bulk edit mode - load current params
-			setBulkEditText(formatForBulkEdit());
-			setIsBulkEditMode(true);
-		}
-	};
-
-	// Handle bulk edit text change
-	const handleBulkEditTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-		setBulkEditText(e.target.value);
-	};
-
 	const resolvedUrl = resolveString(request.url);
 	const displayParams = request.params.filter((param) => !param.system);
 
 	return (
-		<div className="space-y-4">
-			<div className="flex items-center justify-between">
-				<p className="text-sm text-muted-foreground">
-					Add query parameters to include with your request. Use{" "}
-					<code className="bg-muted px-1 rounded-md">{"{{variable}}"}</code> for dynamic
-					values.
-				</p>
-				<Button variant="outline" size="sm" onClick={handleToggleMode} className="shrink-0">
-					{isBulkEditMode ? (
-						<>
-							<Table2 className="w-4 h-4 mr-1" />
-							Table View
-						</>
-					) : (
-						<>
-							<Edit3 className="w-4 h-4 mr-1" />
-							Bulk Edit
-						</>
-					)}
-				</Button>
-			</div>
-
-			{isBulkEditMode ? (
-				<div className="space-y-2">
-					<Label htmlFor="bulk-edit">Query Parameters</Label>
-					<Textarea
-						id="bulk-edit"
-						value={bulkEditText}
-						onChange={handleBulkEditTextChange}
-						placeholder="page=1&#10;limit=10&#10;sort=name"
-						className="font-mono text-sm min-h-[400px]"
-					/>
-					{/* Params keep `=` alone - a query string is written `k=v`, and a
-					    value routinely contains a colon (`redirect=https://…`). Only
-					    the Headers editor accepts both separators. The override claim
-					    was wrong here too: repeated keys are all sent, joined with
-					    `&`, which is how an array parameter is expressed. */}
-					<p className="text-xs text-muted-foreground">
-						Format: <code className="bg-muted px-1 rounded-md">key=value</code> (one per
-						line). Repeated keys are kept and all sent.
-					</p>
-				</div>
-			) : (
+		<BulkEditor
+			label="Query Parameters"
+			format={() => formatParamsToText(request.params)}
+			// Parsed here rather than in BulkEditor, because applying params also
+			// means rewriting the URL - a params rule, not a bulk-edit one.
+			onCommit={(text) => handleParamsChange(parseParamsFromText(text))}
+			placeholder={"page=1\nlimit=10\nsort=name"}
+			hint={
+				/* Params keep `=` alone - a query string is written `k=v`, and a
+				   value routinely contains a colon (`redirect=https://…`). Only the
+				   Headers editor accepts both separators. Repeated keys are all
+				   sent, joined with `&`, which is how an array parameter is
+				   expressed. */
 				<>
-					{/* Query Parameters Editor */}
-					<div className="space-y-2">
-						<KeyValueEditor
-							items={displayParams}
-							onChange={handleParamsChange}
-							keyPlaceholder="Parameter"
-							valuePlaceholder="Value"
-							showResolved={true}
-							allowDisable={true}
-						/>
-					</div>
-
-					{/* Full Resolved URL */}
-					<div className="space-y-2">
-						<label className="text-sm font-medium text-muted-foreground">
-							Full Resolved URL
-						</label>
-						{/* `rounded-md` to match the Quick Reference blocks in the
-						    script panels, which are the same `bg-muted` code slab.
-						    Without a radius class this one stayed square at every
-						    Roundedness setting. */}
-						<div className="p-3 rounded-md bg-muted font-mono text-sm break-all">
-							{resolvedUrl || (
-								<span className="text-muted-foreground italic">No URL</span>
-							)}
-						</div>
-					</div>
+					Format: <code className="bg-muted px-1 rounded-md">key=value</code> (one per
+					line). Repeated keys are kept and all sent.
 				</>
-			)}
-		</div>
+			}
+			tableHeader={
+				<EmptyTableHint items={displayParams} noun="parameters">
+					Add query parameters to send with this request.
+				</EmptyTableHint>
+			}
+		>
+			<div className="space-y-3">
+				<KeyValueEditor
+					items={displayParams}
+					onChange={handleParamsChange}
+					keyPlaceholder="Parameter"
+					valuePlaceholder="Value"
+					showResolved={true}
+					allowDisable={true}
+				/>
+
+				{/*
+				 * The resolved URL, on one line.
+				 *
+				 * Not redundant with the bar above, which is the thing worth being
+				 * careful about: the bar shows the URL *with* its `{{variables}}`,
+				 * this shows what will actually be sent. It was a `p-3` slab under a
+				 * 13px label - two rows of chrome for one line of text - in a tab
+				 * whose table is now 36px per row. It is a labelled line now.
+				 */}
+				<div className="flex items-baseline gap-2 text-xs">
+					<span className="shrink-0 uppercase tracking-wide text-subtle-foreground">
+						Sends
+					</span>
+					<span className="min-w-0 flex-1 break-all font-mono text-muted-foreground">
+						{resolvedUrl || <span className="italic">No URL</span>}
+					</span>
+				</div>
+			</div>
+		</BulkEditor>
 	);
 }
