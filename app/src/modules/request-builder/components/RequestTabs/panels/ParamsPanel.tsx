@@ -80,8 +80,10 @@ export default function ParamsPanel() {
 				   sent, joined with `&`, which is how an array parameter is
 				   expressed. */
 				<>
-					Format: <code className="bg-muted px-1 rounded-md">key=value</code> (one per
-					line). Repeated keys are kept and all sent.
+					<code className="bg-muted px-1 rounded-md">key=value</code>, one per line. A
+					line with no <code className="bg-muted px-1 rounded-md">=</code> splits at{" "}
+					<code className="bg-muted px-1 rounded-md">:</code>, and a bare key sends a
+					valueless parameter. Repeated keys are kept and all sent.
 				</>
 			}
 			tableHeader={

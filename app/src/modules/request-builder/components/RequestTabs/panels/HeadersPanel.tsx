@@ -52,8 +52,9 @@ export default function HeadersPanel() {
 			}
 			hint={
 				<>
-					Format: <code className="bg-muted px-1 rounded-md">Header-Name: value</code>{" "}
-					(one per line). Repeated names are kept as separate headers.
+					<code className="bg-muted px-1 rounded-md">Name: value</code>, one per line -{" "}
+					<code className="bg-muted px-1 rounded-md">=</code> works too. Repeated names
+					are kept as separate headers.
 				</>
 			}
 			tableHeader={
