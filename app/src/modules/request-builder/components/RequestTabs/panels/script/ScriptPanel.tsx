@@ -6,51 +6,49 @@
  */
 
 /**
- * TestScriptPanel Component
+ * The script editor, for both ends of a request.
  *
- * Test/post-request script editor.
+ * `PreScriptPanel` and `TestScriptPanel` were two files of ~155 lines that a
+ * normalised `diff` showed differing in three places. Everything that differs
+ * is now data in `script-variants.tsx`; this is the panel both render.
  *
- * This and `PreScriptPanel` are the same panel bound to a different field: only
- * the field name, the opening sentence and the quick-reference block differ. The
- * duplication is known and deliberately left in place - it is small and stable,
- * and `script-panels.test.tsx` runs every assertion against both, so a fix
- * applied to one and not the other fails. Change them together.
+ * **The full variable list is a sunken slab, not `bg-muted/50` with a border
+ * token.** `--muted` is the one surface where no border token works - it sits
+ * *between* `--border` and `--border-strong` in dark, so `border-input` there
+ * was either invisible or wrong depending on the theme. `surface-sunken`
+ * declares a `--rule` that reads on it, and `border-rule` inherits that.
  */
 
 import { useState } from "react";
 import { Button, Badge, CodeEditor, VariableScopeBadge } from "@/components/ui";
-import { useRequestBuilderContext } from "../../../context";
-import InheritedScriptsNotice from "./InheritedScriptsNotice";
-import LegacyScriptNotice from "./LegacyScriptNotice";
+import { useRequestBuilderContext } from "../../../../context";
+import InheritedScriptsNotice from "../InheritedScriptsNotice";
+import LegacyScriptNotice from "../LegacyScriptNotice";
+import { SCRIPT_VARIANTS, type ScriptVariant } from "./script-variants";
+import { referencedVariables } from "./referenced-variables";
 
-export default function TestScriptPanel() {
-	const { request, updateField, getAllVariables, inheritedPostScripts, legacyPostScript } =
-		useRequestBuilderContext();
+/** How many referenced names get a chip before the rest become a count. */
+const CHIP_LIMIT = 5;
+
+export interface ScriptPanelProps {
+	variant: ScriptVariant;
+}
+
+export default function ScriptPanel({ variant }: ScriptPanelProps) {
+	const config = SCRIPT_VARIANTS[variant];
+	const context = useRequestBuilderContext();
+	const { request, updateField, getAllVariables } = context;
 	const [showVariables, setShowVariables] = useState(false);
 
-	// Find variables referenced in script
-	const envGetPattern =
-		/pm\.(?:environment|globals|collectionVariables)\.get\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-	const templatePattern = /\{\{([^{}]+)\}\}/g;
-
-	const envVars = [...request.testScript.matchAll(envGetPattern)].map((m) => m[1]);
-	const templateVars = [...request.testScript.matchAll(templatePattern)].map((m) => m[1].trim());
-	const usedVars = [...new Set([...envVars, ...templateVars])];
-
+	const script = request[config.field];
+	const usedVars = referencedVariables(script);
 	const allVariables = getAllVariables();
 	const hasReferencedVars = usedVars.length > 0;
-
-	const handleChange = (value: string) => {
-		updateField("testScript", value);
-	};
 
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center justify-between">
-				<p className="text-sm text-muted-foreground">
-					Execute JavaScript after receiving the response. Use{" "}
-					<code className="bg-muted px-1 rounded-md">pm.test()</code> for assertions.
-				</p>
+				<p className="text-sm text-muted-foreground">{config.intro}</p>
 				{hasReferencedVars && (
 					<Button
 						size="sm"
@@ -65,12 +63,12 @@ export default function TestScriptPanel() {
 			{/* `entries` wins when the caller supplied them - a copy of a past run
 			    lists what that run recorded, not what the collection reads now. */}
 			<InheritedScriptsNotice
-				variant="post"
+				variant={variant}
 				collectionId={request.collectionId}
-				entries={inheritedPostScripts}
+				entries={context[config.inheritedKey]}
 			/>
 
-			<LegacyScriptNotice variant="post" script={legacyPostScript} />
+			<LegacyScriptNotice variant={variant} script={context[config.legacyKey]} />
 
 			{/*
 			 * The referenced list stays put when the full list opens. "Show
@@ -83,21 +81,18 @@ export default function TestScriptPanel() {
 			{hasReferencedVars && (
 				<div className="flex flex-wrap items-center gap-2">
 					<span className="text-xs text-muted-foreground">Referenced:</span>
-					{usedVars.slice(0, 5).map((varName) => {
-						const varInfo = allVariables[varName];
-						return (
-							<Badge
-								key={varName}
-								variant={varInfo ? "secondary" : "destructive"}
-								className="font-mono text-xs"
-							>
-								{varName}
-							</Badge>
-						);
-					})}
-					{usedVars.length > 5 && (
+					{usedVars.slice(0, CHIP_LIMIT).map((varName) => (
+						<Badge
+							key={varName}
+							variant={allVariables[varName] ? "secondary" : "destructive"}
+							className="font-mono text-xs"
+						>
+							{varName}
+						</Badge>
+					))}
+					{usedVars.length > CHIP_LIMIT && (
 						<span className="text-xs text-muted-foreground">
-							+{usedVars.length - 5} more
+							+{usedVars.length - CHIP_LIMIT} more
 						</span>
 					)}
 				</div>
@@ -111,7 +106,7 @@ export default function TestScriptPanel() {
 			 * tell them apart.
 			 */}
 			{showVariables && (
-				<div className="p-3 bg-muted/50 rounded-md border border-input max-h-40 overflow-y-auto">
+				<div className="p-3 surface-sunken rounded-md border border-rule max-h-40 overflow-y-auto">
 					<div className="grid grid-cols-2 gap-2 text-xs font-mono">
 						{Object.entries(allVariables).map(([name, info]) => (
 							<div key={name} className="flex items-center gap-2">
@@ -124,33 +119,20 @@ export default function TestScriptPanel() {
 				</div>
 			)}
 
-			{/* Script Editor */}
-			<div className="rounded-md border border-input overflow-hidden">
+			<div className="rounded-md border border-rule surface-card bg-card overflow-hidden">
 				<CodeEditor
 					height="350px"
 					language="javascript"
-					value={request.testScript}
-					onChange={handleChange}
+					value={script}
+					onChange={(value) => updateField(config.field, value ?? "")}
 				/>
 			</div>
 
-			{/* Quick Reference */}
 			<div className="text-xs text-muted-foreground space-y-1">
 				<p className="font-medium">Quick Reference:</p>
-				<code className="block bg-muted p-2 rounded-md">
-					pm.test("Test name", () =&gt; {"{"}
-					<br />
-					&nbsp;&nbsp;pm.response.to.have.status(200);
-					<br />
-					{"}"});
-					<br />
-					<br />
-					pm.response.json()
-					<br />
-					pm.response.text()
-					<br />
-					pm.response.headers.get("Content-Type")
-				</code>
+				<pre className="m-0 p-2 surface-sunken rounded-md border border-rule font-mono whitespace-pre-wrap">
+					{config.quickReference.join("\n")}
+				</pre>
 			</div>
 		</div>
 	);

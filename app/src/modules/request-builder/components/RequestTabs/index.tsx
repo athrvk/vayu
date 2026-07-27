@@ -19,8 +19,7 @@ import ParamsPanel from "./panels/ParamsPanel";
 import HeadersPanel from "./panels/HeadersPanel";
 import BodyPanel from "./panels/BodyPanel";
 import AuthPanel from "./panels/AuthPanel";
-import PreScriptPanel from "./panels/PreScriptPanel";
-import TestScriptPanel from "./panels/TestScriptPanel";
+import ScriptPanel from "./panels/script/ScriptPanel";
 import SettingsPanel from "./panels/SettingsPanel";
 import { isRedirectPolicyNonDefault } from "../../utils/request-state";
 
@@ -132,9 +131,9 @@ function TabContent() {
 		case "auth":
 			return <AuthPanel />;
 		case "pre-script":
-			return <PreScriptPanel />;
+			return <ScriptPanel variant="pre" />;
 		case "test-script":
-			return <TestScriptPanel />;
+			return <ScriptPanel variant="post" />;
 		case "settings":
 			return <SettingsPanel />;
 		default:

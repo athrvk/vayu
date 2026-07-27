@@ -28,10 +28,10 @@
  * request's own part) does not duplicate what the editor above already shows.
  */
 
-import { Folder, Info } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Folder } from "lucide-react";
 import { useCollectionAncestors } from "@/queries/collections";
 import type { Collection, ScriptPart } from "@/types";
+import ChainCard from "./ChainCard";
 
 export type InheritedScriptVariant = "pre" | "post";
 
@@ -81,34 +81,26 @@ export default function InheritedScriptsNotice({
 	const label = VARIANT_LABEL[variant];
 
 	return (
-		<div className="rounded-md border border-primary/30 bg-primary/10">
-			<div className="flex items-start gap-2 px-3 py-2.5 border-b border-primary/20">
-				<Info className="w-3.5 h-3.5 text-primary shrink-0 mt-px" />
+		<ChainCard
+			caption="Runs before your own"
+			summary={
 				<p className="m-0 text-xs leading-relaxed text-foreground">
 					{rows.length === 1 ? "A collection" : `${rows.length} collections`} will run a{" "}
 					<span className="font-semibold text-primary">{label}</span> before your own.
 				</p>
-			</div>
-
-			<div className="px-3 py-2">
-				<div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground mb-1.5">
-					Runs before your own
-				</div>
-				{rows.map((entry, i) => (
-					<div
-						key={entry.id ?? entry.name ?? i}
-						className={cn(
-							"flex items-center gap-2 py-1",
-							i !== rows.length - 1 && "border-b border-primary/10"
-						)}
-					>
-						<Folder className="w-3 h-3 shrink-0 text-primary" />
-						<span className="text-[11px] font-mono truncate text-foreground font-semibold">
-							{entry.name}
-						</span>
-					</div>
-				))}
-			</div>
-		</div>
+			}
+		>
+			{rows.map((entry, i) => (
+				<span
+					key={entry.id ?? entry.name ?? i}
+					className="flex items-center gap-2 flex-1 min-w-0"
+				>
+					<Folder className="w-3 h-3 shrink-0 text-primary" />
+					<span className="text-[11px] font-mono truncate text-foreground font-semibold">
+						{entry.name}
+					</span>
+				</span>
+			))}
+		</ChainCard>
 	);
 }
