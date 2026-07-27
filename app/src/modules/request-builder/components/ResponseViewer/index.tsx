@@ -159,7 +159,15 @@ export default function ResponseViewer() {
 
 	return (
 		<div className="flex-1 flex flex-col surface-card overflow-hidden">
-			{/* Response Header */}
+			{/*
+			 * Its own band, above the tabs.
+			 *
+			 * Folding it *into* the tab row was tried and is wrong: the status of a
+			 * response is the first thing you look at, and a row it shares with
+			 * eight tab triggers and the action buttons is not where a headline
+			 * goes. It stays a band and got denser instead - 40px to 32px, see
+			 * ResponseStatusBar.
+			 */}
 			<ResponseStatusBar
 				status={response.status}
 				statusText={response.statusText}
@@ -182,7 +190,15 @@ export default function ResponseViewer() {
 				    strip used to float free of the content). See index.css,
 				    "Surfaces, and the rule colour that reads on each". */}
 				<div className="flex items-center justify-between border-b border-rule px-4 gap-2">
-					<TabsList className="overflow-x-auto overflow-y-hidden flex-nowrap">
+					{/*
+					    `min-w-0`, or the tabs cannot scroll. A flex item defaults to
+					    `min-width: auto` and refuses to shrink below its content, so
+					    `overflow-x-auto` never engages and the row overflows instead -
+					    pushing the status and actions out of the pane. It mattered less
+					    when the right-hand group was just the actions; it matters now
+					    that the response's own facts live there.
+					 */}
+					<TabsList className="min-w-0 overflow-x-auto overflow-y-hidden flex-nowrap">
 						<TabsTrigger value="body">
 							<TabLabel>Body</TabLabel>
 						</TabsTrigger>
