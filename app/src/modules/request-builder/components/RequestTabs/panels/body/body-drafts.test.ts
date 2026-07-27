@@ -113,6 +113,42 @@ describe("modes that have no body", () => {
 		expect(out.body).toBe(JSON_BODY);
 		expect(out.drafts).toEqual({ requestId: REQ_A, raw: JSON_BODY });
 	});
+
+	/*
+	 * A bodyless mode is a *detour*, not a destination, and the detour is where
+	 * `request.body` is at its most confusing: while you sit in None it still
+	 * holds whatever the mode before it left there. Nothing sends or saves it -
+	 * `execute-mapping.ts` builds form bodies from `formData` / `urlEncoded` and
+	 * only reads `body` when the mode is not `none`, and a form-mode request
+	 * reloads with `body: ""` because only json/text/graphql store `content` -
+	 * but the draft has to survive the parking either way.
+	 */
+	it("gets the JSON back after parking behind GraphQL and None", () => {
+		const toGql = inA("json", "graphql", JSON_BODY);
+		const toNone = inA("graphql", "none", GQL_BODY, toGql.drafts);
+		// The GraphQL envelope is what is sitting in `request.body` right now.
+		expect(toNone.body).toBe(GQL_BODY);
+		expect(inA("none", "json", toNone.body, toNone.drafts).body).toBe(JSON_BODY);
+	});
+});
+
+describe("stashing the second time", () => {
+	/*
+	 * The stash must overwrite, not fill a hole. Skipping the write when the
+	 * bucket is already occupied reads like an optimisation - the draft is
+	 * "already saved" - and loses every edit after the first round trip. Nothing
+	 * else in this file walks two round trips, so nothing else catches it.
+	 */
+	it("stashes the edit, not the text from the first visit", () => {
+		const EDITED = '{"merchant":"mrc_9002"}';
+		const first = inA("json", "graphql", JSON_BODY);
+		const back = inA("graphql", "json", GQL_BODY, first.drafts);
+		expect(back.body).toBe(JSON_BODY);
+
+		// The user now edits the JSON and leaves again.
+		const second = inA("json", "graphql", EDITED, back.drafts);
+		expect(inA("graphql", "json", GQL_BODY, second.drafts).body).toBe(EDITED);
+	});
 });
 
 describe("a mode with nothing stashed", () => {
