@@ -35,10 +35,17 @@ interface Phase {
 /**
  * Tiny "i" affordance with a Radix tooltip.
  *
+ * Hand-rolled rather than `TooltipIconButton`: that primitive's icon-size
+ * `Button` would dwarf a 14px dot. Same treatment as the GraphQL schema-refresh
+ * control, for the same reason.
+ *
  * No `TooltipProvider` of its own. It had one *inside* this component, so a
- * five-phase timing tab mounted five of them; and now that the delay is set
- * once at the app root (main.tsx), even one here would only re-declare what it
- * inherits.
+ * five-phase timing tab mounted five of them; the delay is set once at the app
+ * root (main.tsx) now, so even one here would only re-declare what it inherits.
+ *
+ * `border-rule`, not `border-border`. This tab sits inside a pane that declares
+ * `surface-card`, and on a card `--border` is the same colour as `--card` in
+ * dark - so the dot had no outline in one theme.
  */
 function InfoTip({ tip }: { tip: ReactNode }) {
 	return (
@@ -46,7 +53,7 @@ function InfoTip({ tip }: { tip: ReactNode }) {
 			<TooltipTrigger asChild>
 				<button
 					type="button"
-					className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle"
+					className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-rule bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle"
 					aria-label="More information"
 				>
 					<Info className="h-2.5 w-2.5" />
@@ -160,7 +167,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 			</div>
 
 			{/* Summary: wire vs generator-side overhead vs perceived total. */}
-			<div className="mt-3.5 pt-3 border-t border-dashed border-border flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px]">
+			<div className="mt-3.5 pt-3 border-t border-dashed border-rule flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px]">
 				{timing.wireMs !== undefined && (
 					<TimingStat
 						label="Wire"
