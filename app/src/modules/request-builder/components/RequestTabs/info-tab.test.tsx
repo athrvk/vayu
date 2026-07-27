@@ -40,8 +40,7 @@ vi.mock("./panels/ParamsPanel", () => ({ default: () => null }));
 vi.mock("./panels/HeadersPanel", () => ({ default: () => null }));
 vi.mock("./panels/BodyPanel", () => ({ default: () => null }));
 vi.mock("./panels/AuthPanel", () => ({ default: () => null }));
-vi.mock("./panels/PreScriptPanel", () => ({ default: () => null }));
-vi.mock("./panels/TestScriptPanel", () => ({ default: () => null }));
+vi.mock("./panels/script/ScriptPanel", () => ({ default: () => null }));
 vi.mock("./panels/SettingsPanel", () => ({ default: () => null }));
 
 function renderTabs(description?: string) {

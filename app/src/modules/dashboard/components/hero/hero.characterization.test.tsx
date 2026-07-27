@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
+import { TooltipProvider } from "@/components/ui";
 import { RateFidelityCard } from "./RateFidelityCard";
 import { ThroughputTwinCard } from "./ThroughputTwinCard";
 import { ErrorRateCard } from "./ErrorRateCard";
@@ -30,7 +31,9 @@ const notCrossed: Breakpoint = {
 };
 
 const snap = (ui: React.ReactElement) => {
-	const { container } = render(ui);
+	// Components here use `InfoChip`, which no longer brings its own
+	// `TooltipProvider` - the delay is set once at the app root (main.tsx).
+	const { container } = render(<TooltipProvider>{ui}</TooltipProvider>);
 	expect(container.innerHTML).toMatchSnapshot();
 };
 

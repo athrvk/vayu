@@ -21,9 +21,8 @@ import { type ReactNode } from "react";
 import { formatDuration, formatPhaseDuration } from "@/components/shared/response-viewer/utils";
 import { PHASE_TIPS } from "@/components/shared/response-viewer/phase-tips";
 import { Info } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ResponseTiming } from "../../types";
-import { TIMING } from "@/config/timing";
 
 interface Phase {
 	key: string;
@@ -40,31 +39,30 @@ interface Phase {
  * `Button` would dwarf a 14px dot. Same treatment as the GraphQL schema-refresh
  * control, for the same reason.
  *
- * The `TooltipProvider` is *not* here. It used to be, which mounted one per tip
- * - five for five phases - each doing the same job. It is hoisted to the tab
- * root below. It cannot be dropped altogether: the app's root provider (main.tsx)
- * sets no `delayDuration`, so these tips would fall back to Radix's 700ms
- * default, and a row of phase labels is exactly where you sweep the pointer
- * along expecting each to answer quickly.
+ * No `TooltipProvider` of its own. It had one *inside* this component, so a
+ * five-phase timing tab mounted five of them; the delay is set once at the app
+ * root (main.tsx) now, so even one here would only re-declare what it inherits.
+ *
+ * `border-rule`, not `border-border`. This tab sits inside a pane that declares
+ * `surface-card`, and on a card `--border` is the same colour as `--card` in
+ * dark - so the dot had no outline in one theme.
  */
 function InfoTip({ tip }: { tip: ReactNode }) {
 	return (
-		<>
-			<Tooltip>
-				<TooltipTrigger asChild>
-					<button
-						type="button"
-						className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-rule bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle"
-						aria-label="More information"
-					>
-						<Info className="h-2.5 w-2.5" />
-					</button>
-				</TooltipTrigger>
-				<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
-					{tip}
-				</TooltipContent>
-			</Tooltip>
-		</>
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<button
+					type="button"
+					className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-rule bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle"
+					aria-label="More information"
+				>
+					<Info className="h-2.5 w-2.5" />
+				</button>
+			</TooltipTrigger>
+			<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
+				{tip}
+			</TooltipContent>
+		</Tooltip>
 	);
 }
 
@@ -116,90 +114,82 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 	const pct = (v: number) => (phaseSum > 0 ? (Math.max(0, v) / phaseSum) * 100 : 0);
 
 	return (
-		/*
-		 * One provider for the whole tab, not one per `InfoTip`. The delay is set
-		 * here because the app's root provider (main.tsx) sets none, so without
-		 * it these fall back to Radix's 700ms default - too slow for a row of
-		 * phase labels you sweep along.
-		 */
-		<TooltipProvider delayDuration={TIMING.TOOLTIP_DELAY_MS}>
-			<div className="p-4 overflow-auto h-full">
-				<p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-3">
-					Request timing
-				</p>
+		<div className="p-4 overflow-auto h-full">
+			<p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-3">
+				Request timing
+			</p>
 
-				{/* Continuous timeline: each phase is a sequential segment of the request. */}
-				<div className="flex h-2.5 w-full overflow-hidden rounded-sm bg-accent">
-					{phases.map((p) => (
+			{/* Continuous timeline: each phase is a sequential segment of the request. */}
+			<div className="flex h-2.5 w-full overflow-hidden rounded-sm bg-accent">
+				{phases.map((p) => (
+					<span
+						key={p.key}
+						className="block h-full transition-[width] duration-300"
+						style={{
+							width: `${pct(p.value)}%`,
+							background: p.color,
+							boxShadow: "inset -1px 0 0 hsl(var(--card))",
+						}}
+						aria-hidden
+					/>
+				))}
+			</div>
+
+			{/* Legend: color swatch · phase · value · share of network time. */}
+			<div className="mt-3.5 space-y-1.5">
+				{phases.map((p) => (
+					<div
+						key={p.key}
+						className="grid grid-cols-[10px_1fr_auto_46px] items-center gap-2.5"
+					>
 						<span
-							key={p.key}
-							className="block h-full transition-[width] duration-300"
-							style={{
-								width: `${pct(p.value)}%`,
-								background: p.color,
-								boxShadow: "inset -1px 0 0 hsl(var(--card))",
-							}}
+							className="h-2.5 w-2.5 rounded-sm"
+							style={{ background: p.color }}
 							aria-hidden
 						/>
-					))}
-				</div>
-
-				{/* Legend: color swatch · phase · value · share of network time. */}
-				<div className="mt-3.5 space-y-1.5">
-					{phases.map((p) => (
-						<div
-							key={p.key}
-							className="grid grid-cols-[10px_1fr_auto_46px] items-center gap-2.5"
-						>
-							<span
-								className="h-2.5 w-2.5 rounded-sm"
-								style={{ background: p.color }}
-								aria-hidden
-							/>
-							<span className="text-xs text-muted-foreground inline-flex items-center">
-								{p.label}
-								<InfoTip tip={p.tip} />
+						<span className="text-xs text-muted-foreground inline-flex items-center">
+							{p.label}
+							<InfoTip tip={p.tip} />
+						</span>
+						<span className="text-right font-mono tabular-nums text-xs">
+							<span className="text-foreground">
+								{formatPhaseDuration(p.value).value}
 							</span>
-							<span className="text-right font-mono tabular-nums text-xs">
-								<span className="text-foreground">
-									{formatPhaseDuration(p.value).value}
-								</span>
-								<span className="text-subtle-foreground ml-0.5">
-									{formatPhaseDuration(p.value).unit}
-								</span>
+							<span className="text-subtle-foreground ml-0.5">
+								{formatPhaseDuration(p.value).unit}
 							</span>
-							<span className="text-right font-mono tabular-nums text-[11px] text-muted-foreground">
-								{pct(p.value).toFixed(0)}%
-							</span>
-						</div>
-					))}
-				</div>
-
-				{/* Summary: wire vs generator-side overhead vs perceived total. */}
-				<div className="mt-3.5 pt-3 border-t border-dashed border-rule flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px]">
-					{timing.wireMs !== undefined && (
-						<TimingStat
-							label="Wire"
-							value={timing.wireMs}
-							tip="libcurl transfer time - DNS + connect + TLS + send + receive."
-						/>
-					)}
-					{timing.queueWaitMs !== undefined && (
-						<TimingStat
-							label="Queue"
-							value={timing.queueWaitMs}
-							tip="Generator-side overhead (perceived − wire). Near-zero for a single request; grows under load."
-						/>
-					)}
-					<TimingStat
-						label="Total"
-						value={timing.totalMs}
-						tip="Perceived latency: submit → completion. What the response header shows."
-						emphasized
-					/>
-				</div>
+						</span>
+						<span className="text-right font-mono tabular-nums text-[11px] text-muted-foreground">
+							{pct(p.value).toFixed(0)}%
+						</span>
+					</div>
+				))}
 			</div>
-		</TooltipProvider>
+
+			{/* Summary: wire vs generator-side overhead vs perceived total. */}
+			<div className="mt-3.5 pt-3 border-t border-dashed border-rule flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px]">
+				{timing.wireMs !== undefined && (
+					<TimingStat
+						label="Wire"
+						value={timing.wireMs}
+						tip="libcurl transfer time - DNS + connect + TLS + send + receive."
+					/>
+				)}
+				{timing.queueWaitMs !== undefined && (
+					<TimingStat
+						label="Queue"
+						value={timing.queueWaitMs}
+						tip="Generator-side overhead (perceived − wire). Near-zero for a single request; grows under load."
+					/>
+				)}
+				<TimingStat
+					label="Total"
+					value={timing.totalMs}
+					tip="Perceived latency: submit → completion. What the response header shows."
+					emphasized
+				/>
+			</div>
+		</div>
 	);
 }
 

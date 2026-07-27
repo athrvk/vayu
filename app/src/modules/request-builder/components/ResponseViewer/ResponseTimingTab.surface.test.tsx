@@ -24,31 +24,20 @@
  * is declared by the pane, not by this tab, so what this file can prove is that
  * the tab stopped naming a token the pane cannot make visible.
  *
- * **The provider.** `InfoTip` mounted its own `TooltipProvider`, so a five-phase
- * timing tab mounted five of them doing the same job. It is one at the tab root
- * now. It cannot be dropped: the app's root provider in `main.tsx` sets no
- * `delayDuration`, so these would fall back to Radix's 700ms default.
+ * **The provider is no longer this tab's business.** `InfoTip` used to mount its
+ * own `TooltipProvider` - five for a five-phase tab - and this file grew tests
+ * for that. Since the app root now sets the delay once and nothing nests a
+ * provider anywhere, those tests moved to `components/ui/tooltip-delay.test.tsx`,
+ * which guards the rule for the whole app rather than for one tab. What is left
+ * here is the harness supplying a provider, as the app does.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import type { ResponseTiming } from "../../types";
 
-/** One entry per `TooltipProvider` mounted during a render. */
-const providerRenders: number[] = [];
-
-vi.mock("@/components/ui/tooltip", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@/components/ui/tooltip")>();
-	return {
-		...actual,
-		TooltipProvider: (props: React.ComponentProps<typeof actual.TooltipProvider>) => {
-			providerRenders.push(props.delayDuration ?? -1);
-			return <actual.TooltipProvider {...props} />;
-		},
-	};
-});
-
-const { default: ResponseTimingTab } = await import("./ResponseTimingTab");
+import { TooltipProvider } from "@/components/ui";
+import ResponseTimingTab from "./ResponseTimingTab";
 
 const timing: ResponseTiming = {
 	totalMs: 1011,
@@ -62,9 +51,13 @@ const timing: ResponseTiming = {
 };
 
 function rendered() {
-	// No TooltipProvider wrapper on purpose - the tab must bring its own, and
-	// Radix throws if a Tooltip finds no provider above it.
-	return render(<ResponseTimingTab timing={timing} />);
+	// The tab brings no provider of its own, so the harness supplies one - the
+	// same thing `main.tsx` does for the running app.
+	return render(
+		<TooltipProvider>
+			<ResponseTimingTab timing={timing} />
+		</TooltipProvider>
+	);
 }
 
 describe("the rules inside the response card", () => {
@@ -94,37 +87,5 @@ describe("the rules inside the response card", () => {
 		for (const dot of dots) {
 			expect(dot.className).toContain("border-rule");
 		}
-	});
-});
-
-describe("the tooltip provider", () => {
-	it("sets a delay, since the app root sets none", () => {
-		// `main.tsx` mounts a bare `TooltipProvider`, so without this the tips
-		// inherit Radix's 700ms default - too slow for a row of phase labels.
-		providerRenders.length = 0;
-		rendered();
-		expect(providerRenders[0]).toBeGreaterThan(0);
-		expect(providerRenders[0]).toBeLessThan(700);
-	});
-
-	it("renders without one supplied, so the tab carries its own", () => {
-		// Radix throws "Tooltip must be used within TooltipProvider" otherwise,
-		// which is what removing the hoisted provider would do.
-		expect(() => rendered()).not.toThrow();
-	});
-
-	it("mounts one, not one per tip", () => {
-		/*
-		 * Counted, not inferred from the DOM. A Radix provider renders no
-		 * element of its own, so the obvious assertion - "no provider markup
-		 * repeated" - holds whether there is one provider or five, and would
-		 * have passed against the very code this replaced.
-		 */
-		providerRenders.length = 0;
-		const { container } = rendered();
-		const dots = container.querySelectorAll('button[aria-label="More information"]');
-
-		expect(dots.length).toBeGreaterThan(1);
-		expect(providerRenders).toHaveLength(1);
 	});
 });
