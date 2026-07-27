@@ -21,6 +21,7 @@ import type {
 	ResolvedVariable,
 	ResponseTiming,
 	ScriptPart,
+	VariableOrigin,
 	VariableScope,
 } from "@/types";
 
@@ -43,13 +44,8 @@ export interface KeyValueItem extends KeyValueEntry {
 // ============================================================================
 
 export type RequestTab =
-	| "params"
-	| "headers"
-	| "body"
-	| "auth"
-	| "pre-script"
-	| "test-script"
-	| "settings";
+	/** The request's own documentation. First in the row - see InfoPanel. */
+	"info" | "params" | "headers" | "body" | "auth" | "pre-script" | "test-script" | "settings";
 
 export interface TabInfo {
 	id: RequestTab;
@@ -228,7 +224,20 @@ export interface RequestBuilderContextValue {
 	resolveVariables: (input: string) => string;
 	getVariable: (name: string) => ResolvedVariable | null;
 	getAllVariables: () => Record<string, ResolvedVariable>;
+	/** Every definition of a name, winner and losers alike. Display-only. */
+	getVariableOrigins: (name: string) => VariableOrigin[];
 	updateVariable: (name: string, value: string, scope: VariableScope) => void;
+	/**
+	 * The scopes `updateVariable` can actually write to right now.
+	 *
+	 * Each of its branches begins with a guard - `if (!activeEnvironmentId)
+	 * return`, `if (!collectionId) return` - so writing to a scope with no target
+	 * is a silent no-op. Nothing surfaced that, because the only caller edited an
+	 * already-resolved variable, which by definition had a target. Creating one
+	 * does not, so a scope picker offering "Environment" with none active would
+	 * hand the user a Create button that does nothing.
+	 */
+	writableScopes: VariableScope[];
 
 	// Actions
 	executeRequest: () => Promise<void>;
@@ -244,7 +253,7 @@ export interface RequestBuilderContextValue {
 }
 
 // Re-export from centralized types for backward compatibility
-export type { ResolvedVariable as VariableInfo, VariableScope } from "@/types";
+export type { ResolvedVariable as VariableInfo, VariableScope, VariableOrigin } from "@/types";
 
 // ============================================================================
 // Component Props Types

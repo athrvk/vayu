@@ -169,8 +169,15 @@ export function isRequestNotFound(error: unknown): error is RequestNotFoundError
  * cache) are served without a network call, because `staleTime: Infinity` keeps
  * the cached value fresh.
  */
-export function useRequestQuery(requestId: string | null) {
-	return useQuery({
+/**
+ * The options behind `useRequestQuery`, exported so a caller that needs many
+ * requests at once can feed them to `useQueries` without restating the retry
+ * and 404 rules. The tab strip does exactly that: it has to know what every
+ * open tab is called before it can decide how many fit, and a hook per tab
+ * inside a map would be a variable number of hooks.
+ */
+export function requestDetailOptions(requestId: string | null) {
+	return {
 		queryKey: queryKeys.requests.detail(requestId ?? ""),
 		queryFn: async () => {
 			try {
@@ -186,11 +193,15 @@ export function useRequestQuery(requestId: string | null) {
 		enabled: !!requestId,
 		// Never retry a real deletion - a 404 is final. Only a transport failure
 		// is worth a retry, and only a bounded number of times.
-		retry: (count, error) =>
+		retry: (count: number, error: unknown) =>
 			!isRequestNotFound(error) && count < QUERY_CACHE.REQUEST_LOOKUP_RETRY,
 		retryDelay: QUERY_CACHE.REQUEST_LOOKUP_RETRY_DELAY_MS,
 		staleTime: Infinity,
-	});
+	};
+}
+
+export function useRequestQuery(requestId: string | null) {
+	return useQuery(requestDetailOptions(requestId));
 }
 
 /**
