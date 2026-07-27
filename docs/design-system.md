@@ -701,9 +701,9 @@ style={{ color: `hsl(${getMethodColor(request.method)})` }}
 
 ### Charts
 
-A cohesive categorical set - `chart-1` tracks the active accent, then four
-evenly-spaced hues (teal / violet / amber / rose) shared across modes and tuned
-only in lightness for each ground.
+A cohesive categorical set - `chart-1` tracks the active accent, then five
+evenly-spaced hues (teal / violet / amber / rose / moss) shared across modes and
+tuned only in lightness for each ground.
 
 ```css
 /* Light */
@@ -712,6 +712,7 @@ only in lightness for each ground.
 --chart-3: 258 55% 55%;   /* violet */
 --chart-4:  38 88% 48%;   /* amber */
 --chart-5: 340 72% 50%;   /* rose */
+--chart-6: 105 58% 34%;   /* moss */
 
 /* Dark - same hues, lifted for the dark ground */
 --chart-1: <accent>;
@@ -719,7 +720,19 @@ only in lightness for each ground.
 --chart-3: 258 78% 72%;
 --chart-4:  38 90% 60%;
 --chart-5: 340 74% 62%;
+--chart-6: 105 52% 50%;
 ```
+
+`--chart-6` was added for the response timing waterfall, which needs five series
+at once. With four fixed hues available, two phases had been reaching outside the
+set - TTFB to `--primary` and Download to `--success` - and under the green
+accent those two land on the same hue (142) three points of lightness apart, so
+two of five phases rendered as the same swatch. Moss sits in the widest gap in
+the ring (38 -> 172), 67 degrees from its nearest neighbour.
+
+**A series never takes `--primary` or `--chart-1`.** Both move with the user's
+accent, so either can drift onto a neighbouring series in one scheme and not
+another - which is invisible when you are looking at the scheme it works in.
 
 ---
 
