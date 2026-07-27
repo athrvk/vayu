@@ -104,6 +104,7 @@ nav:
       - Importing Collections:
           - How Import Works: app/import-collections/README.md
           - Postman: app/import-collections/postman.md
+          - Postman Environment: app/import-collections/postman-environment.md
           - Insomnia v4: app/import-collections/insomnia-v4.md
           - OpenAPI 3.0: app/import-collections/openapi-v3.md
           - Swagger 2.0: app/import-collections/openapi-v2.md

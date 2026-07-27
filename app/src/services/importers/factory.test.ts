@@ -18,6 +18,24 @@ describe("parseImport", () => {
 			"Postman Collection v2.0"
 		);
 	});
+	it("routes a Postman environment export", () => {
+		const r = parseImport(fx("postman-environment.json"), opts);
+		expect(r.meta.format).toBe("Postman Environment");
+		expect(r.collections).toEqual([]);
+		expect(r.environments).toHaveLength(1);
+	});
+	it("still routes a Postman collection to the collection parser", () => {
+		// The environment detector sits between v2.0 and Insomnia; a collection
+		// export must not fall through to it.
+		expect(parseImport(fx("postman-v21.json"), opts).meta.format).toBe(
+			"Postman Collection v2.1"
+		);
+	});
+	it("leaves a Postman globals export unrecognised", () => {
+		expect(() =>
+			parseImport('{"_postman_variable_scope":"globals","values":[]}', opts)
+		).toThrow(UnrecognisedFormatError);
+	});
 	it("routes Insomnia v4", () => {
 		expect(parseImport(fx("insomnia-v4.json"), opts).meta.format).toBe("Insomnia Export v4");
 	});

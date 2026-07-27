@@ -115,10 +115,12 @@ the tree, variables, auth and scripts.
     parameters including disabled ones and their descriptions, and raw, JSON,
     URL-encoded, form-data and GraphQL bodies.
 
-    Not carried: **environments** - Postman exports those as separate files, which
-    this importer does not read. Binary and file bodies are dropped and reported
-    with a count rather than silently, and Digest / AWS / NTLM auth imports as
-    data but will not execute.
+    **Environments** come across too. Postman exports those as separate files -
+    drop one in and it imports as a Vayu environment, keys, values, enabled state
+    and secret flag intact.
+
+    Binary and file bodies are dropped and reported with a count rather than
+    silently, and Digest / AWS / NTLM auth imports as data but will not execute.
 
 === "Insomnia"
 
@@ -257,8 +259,9 @@ persists.
 ??? question "Can I import my Postman collections?"
 
     Yes - v2.0 and v2.1 exports, including folders, collection variables, auth,
-    and pre/post-request scripts. Postman environments are a separate export and
-    are not read. Insomnia v4, OpenAPI 3.0 and Swagger 2.0 import too; see
+    and pre/post-request scripts. Postman environments are a separate export;
+    import that file too and it becomes a Vayu environment. Insomnia v4,
+    OpenAPI 3.0 and Swagger 2.0 import too; see
     [what carries over](#bring-your-existing-collections).
 
 ??? question "Will my Postman test scripts still run?"
