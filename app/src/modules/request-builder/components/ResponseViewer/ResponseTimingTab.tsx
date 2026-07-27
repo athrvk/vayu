@@ -21,9 +21,8 @@ import { type ReactNode } from "react";
 import { formatDuration, formatPhaseDuration } from "@/components/shared/response-viewer/utils";
 import { PHASE_TIPS } from "@/components/shared/response-viewer/phase-tips";
 import { Info } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ResponseTiming } from "../../types";
-import { TIMING } from "@/config/timing";
 
 interface Phase {
 	key: string;
@@ -33,25 +32,30 @@ interface Phase {
 	tip: ReactNode;
 }
 
-/** Tiny "i" affordance with a Radix tooltip (local to keep this tab self-contained). */
+/**
+ * Tiny "i" affordance with a Radix tooltip.
+ *
+ * No `TooltipProvider` of its own. It had one *inside* this component, so a
+ * five-phase timing tab mounted five of them; and now that the delay is set
+ * once at the app root (main.tsx), even one here would only re-declare what it
+ * inherits.
+ */
 function InfoTip({ tip }: { tip: ReactNode }) {
 	return (
-		<TooltipProvider delayDuration={TIMING.TOOLTIP_DELAY_MS}>
-			<Tooltip>
-				<TooltipTrigger asChild>
-					<button
-						type="button"
-						className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle"
-						aria-label="More information"
-					>
-						<Info className="h-2.5 w-2.5" />
-					</button>
-				</TooltipTrigger>
-				<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
-					{tip}
-				</TooltipContent>
-			</Tooltip>
-		</TooltipProvider>
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<button
+					type="button"
+					className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle"
+					aria-label="More information"
+				>
+					<Info className="h-2.5 w-2.5" />
+				</button>
+			</TooltipTrigger>
+			<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
+				{tip}
+			</TooltipContent>
+		</Tooltip>
 	);
 }
 
