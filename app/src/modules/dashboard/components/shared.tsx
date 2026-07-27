@@ -7,31 +7,30 @@
 
 import { type ReactNode } from "react";
 import { Info } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { TIMING } from "@/config/timing";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const EYEBROW_CLASS =
 	"text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
 
 /** Tiny "i" affordance with a Radix tooltip. */
 export function InfoChip({ tip }: { tip: ReactNode }) {
+	// No TooltipProvider of its own: the delay is set once at the app root
+	// (main.tsx). A nested one here would only re-declare what it inherits.
 	return (
-		<TooltipProvider delayDuration={TIMING.TOOLTIP_DELAY_MS}>
-			<Tooltip>
-				<TooltipTrigger asChild>
-					<button
-						type="button"
-						className="ml-1.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle"
-						aria-label="More information"
-					>
-						<Info className="h-2.5 w-2.5" />
-					</button>
-				</TooltipTrigger>
-				<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
-					{tip}
-				</TooltipContent>
-			</Tooltip>
-		</TooltipProvider>
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<button
+					type="button"
+					className="ml-1.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle"
+					aria-label="More information"
+				>
+					<Info className="h-2.5 w-2.5" />
+				</button>
+			</TooltipTrigger>
+			<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
+				{tip}
+			</TooltipContent>
+		</Tooltip>
 	);
 }
 

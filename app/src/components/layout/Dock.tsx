@@ -9,7 +9,7 @@ import { FolderOpen, Clock, Braces, PanelRight, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
 import { useLayoutStore, useEngineStore, useSaveStore, type DrawerView } from "@/stores";
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 
 interface DrawerButton {
 	view: DrawerView;
@@ -124,8 +124,10 @@ export function Dock() {
 	const { isEngineConnected } = useEngineStore();
 	const saveStatus = useSaveStore((s) => s.status);
 
+	// No TooltipProvider of its own. A bare nested one would reset this strip to
+	// Radix's 700ms default, ignoring the app-wide delay set in main.tsx.
 	return (
-		<TooltipProvider>
+		<>
 			{/*
 			 * Height comes from --dock-height, not a bare `h-8`, because the toast
 			 * viewport is `fixed` and has to offset itself above this strip - see
@@ -216,6 +218,6 @@ export function Dock() {
 					</DockButton>
 				</div>
 			</div>
-		</TooltipProvider>
+		</>
 	);
 }

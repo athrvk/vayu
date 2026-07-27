@@ -27,7 +27,17 @@ export const TIMING = {
 	/** Transient status feedback (copied / saved / error chips) reset delay. */
 	STATUS_RESET_MS: 2000,
 
-	/** Radix tooltip open delay used across the app. */
+	/**
+	 * Radix tooltip open delay, set once on the root `TooltipProvider` in
+	 * `main.tsx` and inherited everywhere.
+	 *
+	 * This comment used to claim "used across the app" while the root provider
+	 * set nothing, so Radix's 700ms default governed almost everything and two
+	 * components opted into 150ms locally. Worse, two more mounted *bare* nested
+	 * providers, which do not inherit - a provider with no `delayDuration` prop
+	 * re-establishes 700ms for its subtree. Those are gone; a nested provider is
+	 * now the exception that has to say why.
+	 */
 	TOOLTIP_DELAY_MS: 150,
 
 	/** Engine health poll interval while the app is open. */

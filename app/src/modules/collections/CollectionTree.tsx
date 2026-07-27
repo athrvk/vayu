@@ -25,7 +25,6 @@ import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
-	TooltipProvider,
 	DeleteConfirmDialog,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
@@ -529,64 +528,64 @@ export default function CollectionTree() {
 			title="Collections"
 			actions={
 				<>
-					<TooltipProvider>
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									variant="ghost"
-									size="icon"
-									onClick={handleOpenNewCollectionForm}
-									disabled={createCollectionMutation.isPending}
-									className="h-8 w-8"
-									aria-label="Add collection"
-								>
-									{createCollectionMutation.isPending ? (
-										<Loader2 className="w-4 h-4 animate-spin" />
-									) : (
-										<FolderPlus className="w-4 h-4" />
-									)}
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>Add collection</TooltipContent>
-						</Tooltip>
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									variant="ghost"
-									size="icon"
-									onClick={handleNewRequestClick}
-									disabled={createRequestMutation.isPending}
-									className="h-8 w-8"
-									aria-label="Add request"
-								>
-									{createRequestMutation.isPending ? (
-										<Loader2 className="w-4 h-4 animate-spin" />
-									) : (
-										<Plus className="w-4 h-4" />
-									)}
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>
-								{selectedCollectionId
-									? `Add request in ${collections.find((c) => c.id === selectedCollectionId)?.name ?? "selected collection"}`
-									: "Add request"}
-							</TooltipContent>
-						</Tooltip>
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									variant="ghost"
-									size="icon"
-									onClick={openImport}
-									className="h-8 w-8"
-									aria-label="Import collection"
-								>
-									<Download className="w-4 h-4" />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>Import collection</TooltipContent>
-						</Tooltip>
-					</TooltipProvider>
+					{/* No TooltipProvider - a bare nested one would reset this
+					    subtree to Radix's 700ms, ignoring main.tsx. */}
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								variant="ghost"
+								size="icon"
+								onClick={handleOpenNewCollectionForm}
+								disabled={createCollectionMutation.isPending}
+								className="h-8 w-8"
+								aria-label="Add collection"
+							>
+								{createCollectionMutation.isPending ? (
+									<Loader2 className="w-4 h-4 animate-spin" />
+								) : (
+									<FolderPlus className="w-4 h-4" />
+								)}
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>Add collection</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								variant="ghost"
+								size="icon"
+								onClick={handleNewRequestClick}
+								disabled={createRequestMutation.isPending}
+								className="h-8 w-8"
+								aria-label="Add request"
+							>
+								{createRequestMutation.isPending ? (
+									<Loader2 className="w-4 h-4 animate-spin" />
+								) : (
+									<Plus className="w-4 h-4" />
+								)}
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>
+							{selectedCollectionId
+								? `Add request in ${collections.find((c) => c.id === selectedCollectionId)?.name ?? "selected collection"}`
+								: "Add request"}
+						</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								variant="ghost"
+								size="icon"
+								onClick={openImport}
+								className="h-8 w-8"
+								aria-label="Import collection"
+							>
+								<Download className="w-4 h-4" />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>Import collection</TooltipContent>
+					</Tooltip>
 				</>
 			}
 		>
