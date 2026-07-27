@@ -27,7 +27,19 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { Badge, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
+import {
+	Badge,
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+	EYEBROW_CLASS,
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { HeadersViewerProps } from "./types";
 
@@ -50,20 +62,35 @@ export default function HeadersViewer({
 	// and being raw palette, they were theme-blind, so the light failure could
 	// not be fixed without breaking dark. The `-text` tokens are per-theme and
 	// measure 5.68/8.80 and 5.98/6.76.
-	const colorClass =
-		variant === "response" ? "text-status-success-text" : "text-status-running-text";
+	/*
+	 * Header keys carry no colour.
+	 *
+	 * They used to: response keys were `text-status-success-text` and request
+	 * keys `text-status-running-text` - the *status* vocabulary, green and blue,
+	 * spent on a name that is neither succeeding nor running. In this pane
+	 * especially that is a real cost, because the status bar and the status-code
+	 * badge sit directly above and are where green and red have to mean
+	 * something. Painting every response header green teaches the eye to ignore
+	 * it there.
+	 *
+	 * The request/response split is already carried by the section each table
+	 * sits under, so the hue was decoration paid for out of the semantic budget.
+	 * Key and value are told apart the way a devtools panel does it - the value
+	 * is the payload and takes `--foreground`, the key is the lookup label and
+	 * sits one tier back.
+	 */
 
 	return (
 		<Collapsible open={isOpen} onOpenChange={setIsOpen} className={className}>
 			<CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
 				<div className="flex items-center justify-center w-5 h-5 rounded-md bg-muted group-hover:bg-muted/80 transition-colors">
 					{isOpen ? (
-						<ChevronDown className="w-4 h-4 text-muted-foreground" />
+						<ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
 					) : (
-						<ChevronRight className="w-4 h-4 text-muted-foreground" />
+						<ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
 					)}
 				</div>
-				<h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+				<h3 className={EYEBROW_CLASS}>
 					{title || (variant === "response" ? "Response Headers" : "Request Headers")}
 				</h3>
 				<Badge variant="outline" className="ml-auto text-xs">
@@ -71,26 +98,26 @@ export default function HeadersViewer({
 				</Badge>
 			</CollapsibleTrigger>
 			<CollapsibleContent className="mt-2">
-				<table className="w-full text-sm">
-					<thead>
-						<tr className="border-b border-rule">
-							<th className="text-left py-2 px-3 font-medium text-muted-foreground">
-								Name
-							</th>
-							<th className="text-left py-2 px-3 font-medium text-muted-foreground">
-								Value
-							</th>
-						</tr>
-					</thead>
-					<tbody>
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHead>Name</TableHead>
+							<TableHead>Value</TableHead>
+						</TableRow>
+					</TableHeader>
+					<TableBody>
 						{entries.map(([name, value]) => (
-							<tr key={name} className="border-b border-rule hover:bg-muted/50">
-								<td className={cn("py-2 px-3 font-mono", colorClass)}>{name}</td>
-								<td className="py-2 px-3 font-mono break-all">{value}</td>
-							</tr>
+							<TableRow key={name}>
+								<TableCell className="font-mono text-muted-foreground">
+									{name}
+								</TableCell>
+								<TableCell className="font-mono break-all text-foreground">
+									{value}
+								</TableCell>
+							</TableRow>
 						))}
-					</tbody>
-				</table>
+					</TableBody>
+				</Table>
 			</CollapsibleContent>
 		</Collapsible>
 	);
@@ -116,11 +143,7 @@ export function CompactHeadersViewer({
 
 	return (
 		<div className={className}>
-			{title && (
-				<h4 className="text-xs font-semibold text-muted-foreground mb-2 uppercase">
-					{title}
-				</h4>
-			)}
+			{title && <h4 className={cn(EYEBROW_CLASS, "mb-2")}>{title}</h4>}
 			<div className="surface-sunken p-3 rounded-md space-y-1">
 				{entries.map(([key, value]) => (
 					// Same `border-rule` as the table above, resolving differently
@@ -131,7 +154,9 @@ export function CompactHeadersViewer({
 					// surface class supplies an alpha of `--foreground` instead, which
 					// flips with the theme - 1.356 light / 1.343 dark.
 					<div key={key} className="flex gap-2 py-1 border-b border-rule last:border-0">
-						<span className="text-xs font-medium text-primary shrink-0">{key}:</span>
+						<span className="text-xs font-medium text-muted-foreground shrink-0">
+							{key}:
+						</span>
 						<span className="text-xs text-foreground break-all">{value}</span>
 					</div>
 				))}

@@ -92,9 +92,29 @@ describe("the response pane declares its surface", () => {
 	});
 
 	it("does not leave a bare bg-card behind, which would declare nothing", () => {
+		/*
+		 * "Bare" means unprefixed. `\bbg-card\b` also matched
+		 * `data-[state=on]:bg-card` - the raised segment in the body toolbar's
+		 * `ToggleGroup` - and that is a different thing: a leaf control with no
+		 * descendant that ever draws a rule, painted card-coloured only while
+		 * active.
+		 *
+		 * It also cannot be fixed the way this guard would want. `surface-card`
+		 * is declared in `@layer components`, not as a Tailwind utility, so
+		 * `data-[state=on]:surface-card` compiles to **nothing at all** - checked
+		 * by building and grepping the emitted CSS, the same way `bg-current/15`
+		 * was found to generate no utility. A guard that demands an impossible
+		 * pairing is a guard that gets suppressed at the call site.
+		 *
+		 * The defect this was written for - `DialogContent`'s plain
+		 * `bg-background`, a surface root that paints but declares nothing - is
+		 * always unprefixed, so precision costs it nothing.
+		 */
 		const root = paneRoot(200);
 		const bare = Array.from(root.querySelectorAll<HTMLElement>("*")).filter(
-			(el) => /\bbg-card\b/.test(el.className) && !/\bsurface-card\b/.test(el.className)
+			(el) =>
+				/(^|\s)bg-card(\s|$)/.test(el.className) &&
+				!/(^|\s)surface-card(\s|$)/.test(el.className)
 		);
 		expect(bare.map((el) => el.className)).toEqual([]);
 	});
