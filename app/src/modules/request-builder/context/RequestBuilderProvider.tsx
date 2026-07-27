@@ -18,6 +18,7 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { RequestBuilderContext } from "./RequestBuilderContext";
+import { emptyDrafts, type BodyDrafts } from "../utils/body-drafts";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import {
 	useGlobalsQuery,
@@ -176,6 +177,24 @@ export default function RequestBuilderProvider({
 	const [activeTab, setActiveTab] = useState<RequestTab>("params");
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+	/*
+	 * What the body modes you are not looking at were holding. It lives here
+	 * rather than in `BodyPanel` because Radix unmounts an inactive
+	 * `TabsContent`: a panel-local ref is discarded the moment you glance at the
+	 * Headers tab, and your stashed JSON with it.
+	 *
+	 * Not reset by the request-change effect below, deliberately. The drafts
+	 * carry their own `requestId` and `switchBody` drops any that belong to
+	 * another request, so a second reset here would be a copy of that rule that
+	 * could fall out of step with it - and would fire on a *save*, when an
+	 * unsaved request is first assigned an id, wiping drafts the user still has.
+	 */
+	const bodyDraftsRef = useRef<BodyDrafts>(emptyDrafts(initialRequest?.id ?? null));
+	const getBodyDrafts = useCallback(() => bodyDraftsRef.current, []);
+	const setBodyDrafts = useCallback((drafts: BodyDrafts) => {
+		bodyDraftsRef.current = drafts;
+	}, []);
 
 	// Variable resolution
 	const {
@@ -441,6 +460,8 @@ export default function RequestBuilderProvider({
 			request,
 			setRequest,
 			updateField,
+			getBodyDrafts,
+			setBodyDrafts,
 			response,
 			setResponse,
 			inheritedPreScripts,
@@ -469,6 +490,8 @@ export default function RequestBuilderProvider({
 			request,
 			setRequest,
 			updateField,
+			getBodyDrafts,
+			setBodyDrafts,
 			response,
 			setResponse,
 			inheritedPreScripts,

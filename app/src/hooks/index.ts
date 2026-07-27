@@ -9,6 +9,7 @@
 export { useEngine } from "./useEngine";
 export { useSaveManager } from "./useSaveManager";
 export { useVariableResolver } from "./useVariableResolver";
+export { useVariableCompletionProvider } from "./useVariableCompletionProvider";
 export { useElectronTheme } from "./useElectronTheme";
 export { useResizable } from "./useResizable";
 export { useOverflowTitle } from "./useOverflowTitle";

@@ -606,6 +606,37 @@ const { resolveString } = useVariableResolver({ collectionId });
 const resolvedUrl = resolveString("https://{{baseUrl}}/api/users");
 ```
 
+### `RequestBuilderContext` - body drafts
+
+```typescript
+bodyDrafts: React.MutableRefObject<BodyDrafts>
+```
+
+What the body modes you are not looking at were holding. A request stores
+**one** body - the shape is a discriminated union, `{"mode":"json","content":
+"..."}` - so JSON, text and GraphQL share `request.body`, and switching mode
+handed the same string to a different reader. Switching from JSON to GraphQL
+therefore read the payload as a raw query string and destroyed it.
+
+Two buckets, not six: `json` and `text` are one raw string differing only in
+highlighting, so text carries between them deliberately; `graphql` is an
+envelope and keeps its own; the two form modes use `formData` / `urlEncoded`
+and never touch `body`. The rule lives in
+`modules/request-builder/utils/body-drafts.ts`.
+
+Two things about it are deliberate and easy to undo by accident:
+
+- **It lives in the provider, not in `BodyPanel`.** Radix unmounts an inactive
+  `TabsContent`, so a panel-local ref is discarded the moment you glance at the
+  Headers tab, taking the stashed body with it.
+- **The provider does *not* reset it** on a request change. The drafts carry
+  their own `requestId` and `switchBody` drops any belonging to another
+  request, so a second reset would duplicate that rule - and would fire on the
+  request-change effect, which re-runs on more than the id.
+
+Deliberately **not** persisted: a request has one body, and storing payloads it
+will never send would put them in exports and in the engine's schema.
+
 ### `useSaveManager()` - Auto-Save Manager
 
 Orchestrates auto-save for a saveable entity (request, environment, etc.) with debouncing, context registration, and centralized save state tracking. Located in `app/src/hooks/useSaveManager.ts`.

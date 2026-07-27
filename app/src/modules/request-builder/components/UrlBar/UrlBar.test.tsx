@@ -25,6 +25,7 @@ import { render, screen } from "@testing-library/react";
 import { RequestBuilderContext } from "../../context";
 import type { RequestBuilderContextValue } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
+import { emptyDrafts } from "../../utils/body-drafts";
 import { TooltipProvider } from "@/components/ui";
 import { formatChord } from "@/lib/platform";
 import { SEND_CHORD, LOAD_TEST_CHORD } from "@/constants/shortcuts";
@@ -38,6 +39,11 @@ function ctx(canStartLoadTest: boolean): RequestBuilderContextValue {
 		request: { ...createDefaultRequestState(), url: "https://example.test/x" },
 		setRequest: vi.fn(),
 		updateField: vi.fn(),
+		// Body drafts belong to the Body panel; the URL bar never reads them. This
+		// is the one context in the suite built without a cast, so it has to be
+		// complete.
+		getBodyDrafts: () => emptyDrafts(null),
+		setBodyDrafts: vi.fn(),
 		response: null,
 		setResponse: vi.fn(),
 		activeTab: "params",
