@@ -14,20 +14,34 @@
   screenshot works as a static preview image and needs nothing. Revisit if
   per-page previews become worth the build dependency.
 #}
+{#
+  One definition of the page title, used by <title> and by the social cards, so
+  the tab and a pasted link can never disagree.
+
+  Material's own rule is "{{ page title }} - {{ site name }}", which is right for
+  a doc page and wrong for the front page: it can only ever put the brand last,
+  and a root URL should lead with the product. `home_title` is therefore written
+  out in full, and every other page keeps Material's shape.
+
+  Kept to ~50 characters: Google truncates a title around 60, and this one has to
+  survive being suffixed in some surfaces.
+#}
+{% set home_title = "Vayu - REST & GraphQL API Client with Load Testing" %}
+
+{% if page.is_homepage %}
+  {% set page_title = home_title %}
+{% elif page.meta and page.meta.title %}
+  {% set page_title = page.meta.title ~ " - " ~ config.site_name %}
+{% else %}
+  {% set page_title = page.title ~ " - " ~ config.site_name %}
+{% endif %}
+
+{% block htmltitle %}
+  <title>{{ page_title }}</title>
+{% endblock %}
+
 {% block extrahead %}
-  {#
-    Mirrors Material's own <title> logic (a front-matter title wins, and the site
-    name is appended to it), so the social card and the tab never disagree. The
-    home page would otherwise share a card titled just "Vayu", which says nothing
-    to someone seeing the link cold.
-  #}
-  {% if page.meta and page.meta.title %}
-    {% set title = page.meta.title ~ " - " ~ config.site_name %}
-  {% elif page.is_homepage %}
-    {% set title = config.site_name %}
-  {% else %}
-    {% set title = page.title ~ " - " ~ config.site_name %}
-  {% endif %}
+  {% set title = page_title %}
   {% set description = page.meta.description if page.meta and page.meta.description else config.site_description %}
   {% set image = config.site_url ~ "images/vayu-loadtest.png" %}
 
@@ -76,6 +90,7 @@
       "featureList": [
         "REST and GraphQL request builder",
         "Native C++ load testing with live metrics over SSE",
+        "Built-in MCP server for Claude Code, Cursor, VS Code, Codex and Zed",
         "Import Postman, Insomnia, OpenAPI 3.0 and Swagger 2.0 collections",
         "Postman-compatible pm.* test scripts",
         "OAuth 2.0, Bearer, Basic and API key auth",

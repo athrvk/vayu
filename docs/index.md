@@ -1,23 +1,22 @@
 ---
-title: Free API Client with Native Load Testing
+title: Vayu
 description: >-
-  Vayu is a free API client for REST and GraphQL with native load testing built in - import Postman collections, keep pm.* scripts, run fully offline.
+  Free, open source API client for REST and GraphQL with a native load tester and an MCP server your coding agent can drive. Runs offline, no account.
 hide:
   - navigation
   - toc
 ---
 
-# The API client that load tests, too
+# Build the request. Load test it. Let your agent drive.
 
 **Vayu** is a free, open source **API client for REST and GraphQL** with a
-**native load tester** built in. Build a request the way you would in Postman,
-then hammer the same endpoint at tens of thousands of requests per second with a
-C++ engine - no second tool, no account, no cloud sync. Your requests and secrets
-never leave the machine.
+**native C++ load tester** built in - and an **MCP server** that hands the whole
+engine to Claude Code, Cursor, VS Code, or Codex. One app instead of three, all
+of it on your machine: no account, no cloud sync, no telemetry.
 
 [Download Vayu](#install){ .md-button .md-button--primary }
+[Use it from your agent](#drive-vayu-from-your-coding-agent){ .md-button }
 [See what it does](#what-you-can-do){ .md-button }
-[Engine HTTP API](engine/api-reference.md){ .md-button }
 
 ![The load-test dashboard: throughput, latency percentiles and error counters streaming live from the C++ engine while the UI stays responsive.](images/vayu-loadtest.png){ .shot }
 
@@ -90,6 +89,12 @@ Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
     Bearer, Basic, API key, and OAuth 2.0 (client credentials, password,
     authorization code + PKCE) - resolved engine-side, inherited down the tree.
 
+- :material-robot-outline: **Hand it to your coding agent**
+
+    A built-in MCP server exposes the engine to Claude Code, Cursor, VS Code,
+    Codex and Zed - behind a host allowlist and load caps you set.
+    [Drive Vayu from your agent](#drive-vayu-from-your-coding-agent).
+
 - :material-shield-lock-outline: **Private by default**
 
     100% offline execution. No telemetry, no account, no cloud sync - your
@@ -106,6 +111,65 @@ engine saturates a target - and why the engine can be driven on its own, from th
 [MCP](engine/mcp.md).
 
 [How it works in full](architecture.md){ .md-button }
+
+## Drive Vayu from your coding agent
+
+Vayu ships an **MCP server**, so an agent can use the same engine the UI does -
+send a request, start a load run, read the report, compare two runs. It runs
+inside the app on `127.0.0.1:9877`, proxying the engine's REST API; there is no
+second process to manage, and nothing leaves the machine.
+
+=== "Claude Code"
+
+    ```bash
+    claude mcp add --transport http vayu http://127.0.0.1:9877/mcp
+    ```
+
+    Or click **Connect** in **Settings → MCP**, which shells out to the CLI for
+    you.
+
+=== "Cursor"
+
+    ```json
+    // .cursor/mcp.json
+    {
+      "mcpServers": {
+        "vayu": { "type": "http", "url": "http://127.0.0.1:9877/mcp" }
+      }
+    }
+    ```
+
+=== "VS Code"
+
+    ```json
+    // .vscode/mcp.json - note the "servers" key, not "mcpServers"
+    {
+      "servers": { "vayu": { "type": "http", "url": "http://127.0.0.1:9877/mcp" } }
+    }
+    ```
+
+=== "Codex"
+
+    ```toml
+    # ~/.codex/config.toml
+    [mcp_servers.vayu]
+    url = "http://127.0.0.1:9877/mcp"
+    ```
+
+**16 tools, 5 resources, 4 prompts.** Inspection (`list_collections`,
+`get_run_report`, `compare_runs`), execution (`run_request`,
+`run_collection_smoke`), load (`start_load_run`, `stop_run`), and writes
+(`create_request`, `update_environment`) - each with a typed schema, so the agent
+gets validation rather than guesswork.
+
+**An agent pointed at your engine is a real capability, so it is gated.** Tools
+that touch the network refuse any host outside an **allowlist that starts empty**
+(deny all). Load runs are additionally capped on RPS, concurrency and duration,
+and require confirmation. The tools that mutate saved data sit behind a **write
+toggle that is off by default**. All of it lives in **Settings → MCP** and
+persists.
+
+[MCP reference](engine/mcp.md){ .md-button }
 
 ## Reference
 
@@ -166,6 +230,14 @@ engine saturates a target - and why the engine can be driven on its own, from th
     `pm.test()`, `pm.expect()`, `pm.environment.get/set()`, `pm.response.*` -
     and [Postman Script Support](app/pm-api-compatibility.md) lists exactly
     what is covered.
+
+??? question "Can my coding agent use it?"
+
+    Yes - Vayu hosts an MCP server on `127.0.0.1:9877` and one command registers
+    it with Claude Code, Cursor, VS Code, Codex or Zed. The agent gets 16 tools
+    across inspection, execution, load runs and writes, behind a host allowlist,
+    load caps, and a write toggle that ships off. See the
+    [MCP reference](engine/mcp.md).
 
 ??? question "Does it work offline, and does it need an account?"
 

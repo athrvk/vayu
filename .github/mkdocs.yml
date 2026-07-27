@@ -3,7 +3,7 @@ site_name: Vayu
 # string is both the fallback <meta name="description"> for every page and the
 # product description in the home page's structured data.
 site_description: >-
-  Free, open source desktop API client for REST and GraphQL with a native load tester built in. Import Postman collections. Runs offline, no account.
+  Free, open source desktop API client for REST and GraphQL with a native load tester and a built-in MCP server for coding agents. Offline, no account.
 site_url: https://athrvk.github.io/vayu/
 site_author: athrvk
 
