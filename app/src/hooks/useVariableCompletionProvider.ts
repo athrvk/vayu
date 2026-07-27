@@ -34,8 +34,15 @@ import { variableCompletionContext } from "@/lib/variable-completion";
 
 const CLOSE_BRACES = "}}";
 
-/** What `CodeEditor` mounts for a request body. Scripts are excluded - see above. */
-const BODY_LANGUAGES = ["json", "plaintext", "graphql"];
+/**
+ * What `CodeEditor` mounts for a request body. Scripts are excluded - see above.
+ *
+ * Exported so `body-editor-completion.test.tsx` can render every body mode and
+ * check this list still covers the `language` each editor asks for. The two are
+ * wired only by matching strings, several files apart, so a new body mode with
+ * a new language would lose completion silently.
+ */
+export const BODY_LANGUAGES = ["json", "plaintext", "graphql"];
 
 /** The resolver's own precedence, so the winning definition sorts first. */
 const SCOPE_ORDER: Record<string, number> = { environment: 0, collection: 1, global: 2 };
