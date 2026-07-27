@@ -82,6 +82,13 @@ export default function InfoTab({ collection, requestCount }: InfoTabProps) {
 				<MarkdownEditor
 					value={description}
 					onChange={setDescription}
+					/*
+					 * A failed save means the stored text is not what is on
+					 * screen, and rendering shows what is stored - so it would
+					 * hide the edit behind a tidy view of the old value, directly
+					 * above the `SaveFailed` notice telling you to try again.
+					 */
+					keepSourceOpen={updateCollection.isError}
 					aria-label="Collection description"
 					placeholder="Document this collection - what it covers, base URL, usage notes…"
 					emptyHint="Document this collection… Markdown is rendered when you click away."

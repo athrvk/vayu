@@ -33,7 +33,7 @@ import { MarkdownEditor } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 
 export default function InfoPanel() {
-	const { request, updateField, saveRequest } = useRequestBuilderContext();
+	const { request, updateField, saveRequest, saveStatus } = useRequestBuilderContext();
 
 	return (
 		<div className="flex flex-col gap-2 max-w-[76ch]">
@@ -44,6 +44,13 @@ export default function InfoPanel() {
 				value={request.description ?? ""}
 				onChange={(v) => updateField("description", v)}
 				onCommit={() => void saveRequest()}
+				/*
+				 * Blurring renders what is *stored*. If the save that blur fired
+				 * failed, the stored text is not what is on screen, so rendering
+				 * would hide the edit that still needs attention behind a tidy
+				 * view of the old value.
+				 */
+				keepSourceOpen={saveStatus === "error"}
 				aria-label="Request description"
 				emptyHint="Add a description… Markdown is rendered when you click away."
 			/>
