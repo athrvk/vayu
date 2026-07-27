@@ -18,10 +18,11 @@
  * files that touch it, so nothing anywhere asserted that the delay a user picks
  * is the delay that runs.
  *
- * That mattered because the neighbouring config had already rotted -
- * `TIMING.AUTO_SAVE_DELAY_MS` is 3000, has no readers, and disagrees with the
- * real default of 5000 in `constants/client-settings.ts`. A hook that quietly
- * used the dead constant would have looked exactly like this one.
+ * That mattered because the neighbouring config had already rotted:
+ * `config/timing.ts` carried an `AUTO_SAVE_DELAY_MS: 3000` with no readers and
+ * a value two seconds off the real default. A hook that quietly used it would
+ * have looked exactly like this one. It has since been deleted, and
+ * `timing-keys-have-readers.test.ts` now fails on the next one.
  *
  * These tests drive the store the way the Settings panel does rather than
  * passing a delay in, so a regression that stops reading the setting fails
@@ -76,9 +77,9 @@ describe("the auto-save delay chosen in Settings", () => {
 
 	it("moves when the user picks a different one", async () => {
 		/*
-		 * The discriminating case. A hook that hardcoded a constant - the dead
-		 * `TIMING.AUTO_SAVE_DELAY_MS`, say - passes the test above whenever the
-		 * constant happens to match the default, and fails only here.
+		 * The discriminating case. A hook that hardcoded a constant passes the
+		 * test above whenever the constant happens to match the default, and
+		 * fails only here.
 		 */
 		chooseInSettings({ delayMs: 1000 });
 		const onSave = vi.fn().mockResolvedValue(undefined);

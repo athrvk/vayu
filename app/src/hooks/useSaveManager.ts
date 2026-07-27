@@ -169,8 +169,8 @@ export function useSaveManager({
 	// performSave (keyed on the old entityId via useCallback) still sees the
 	// old onSaveRef - an edit still inside the auto-save delay when you switch
 	// is saved, not dropped. (The delay is the user's setting, default 5s; this
-	// said "<3s", which was the dead `TIMING.AUTO_SAVE_DELAY_MS`, not the one
-	// the hook reads.)
+	// said "<3s", the value of a dead constant in `config/timing.ts` that the
+	// hook never read. That constant is gone.)
 	useEffect(() => {
 		reset();
 		return () => {
