@@ -153,3 +153,88 @@ describe("the Send / Load Test group", () => {
 		expect(formatChord(LOAD_TEST_CHORD)).not.toBe(formatChord(SEND_CHORD));
 	});
 });
+
+/**
+ * The URL field is a `--rule` surface, and the separator depends on it.
+ *
+ * The hairline between the method and the URL was `bg-border`. That reads 1.30
+ * on the field in light and **1.01 in dark** - `--border` is the same colour as
+ * `--card` there - so the separation existed in one theme and not the other.
+ * It is the defect the surface/rule contract was built to remove, walked into
+ * again by writing a border token instead of `border-rule`.
+ *
+ * Per that contract only one half is checkable here: **the declaration**. A
+ * `border-rule` under no declared surface silently falls back to `--border`,
+ * which is the original bug, so asserting `border-rule` alone proves nothing.
+ * The colour it resolves to is a computed-style question jsdom cannot answer.
+ */
+describe("the method / URL separator", () => {
+	it("declares the surface its rule reads from", () => {
+		const { container } = renderBar(true);
+		const field = container.querySelector(".surface-card");
+		expect(field, "the URL field must declare surface-card").not.toBeNull();
+	});
+
+	it("keeps bg-card beside it, or the surface loses the cascade", () => {
+		// `surface-card` sets a background too, but a `bg-*` utility on the same
+		// element wins - so the pair is written. Dropping either is a silent
+		// revert of half the contract.
+		const { container } = renderBar(true);
+		expect(container.querySelector(".surface-card")?.className).toContain("bg-card");
+	});
+
+	it("draws the separator with border-rule, not a border token", () => {
+		const { container } = renderBar(true);
+		const rule = container.querySelector(".border-rule");
+		expect(rule, "the separator must consume --rule").not.toBeNull();
+		// The token it replaced. `bg-border` here is the invisible-in-dark bug.
+		expect(rule?.className).not.toContain("bg-border");
+	});
+
+	it("puts the separator inside the surface that declares the rule", () => {
+		// Inheritance is the whole mechanism: outside it, `--rule` falls back to
+		// the `:root` default and the dark case goes straight back to 1.01.
+		const { container } = renderBar(true);
+		const surface = container.querySelector(".surface-card");
+		expect(surface?.querySelector(".border-rule")).not.toBeNull();
+	});
+});
+
+/**
+ * Every button in the pair responds to the pointer.
+ *
+ * All three shipped with `transition-opacity` and no `hover:` rule at all - a
+ * transition for a change that never happened. `Button`'s `default` variant is
+ * `hover:bg-primary-fill/90`; these are hand-rolled so the pair can share an
+ * edge, which means they carry that convention rather than inherit it.
+ */
+describe("button hover states", () => {
+	it("darkens the Send fill, matching the Button primitive", () => {
+		renderBar(true);
+		const send = screen.getByRole("button", { name: /send/i });
+		expect(send.className).toContain("hover:bg-primary-fill/90");
+		// The border has to move with the fill or a lighter ring is left behind.
+		expect(send.className).toContain("hover:border-primary-fill/90");
+	});
+
+	it("steps the Load Test tint up rather than down", () => {
+		renderBar(true);
+		expect(screen.getByRole("button", { name: /load test/i }).className).toContain(
+			"hover:bg-primary/20"
+		);
+	});
+
+	it("transitions colour, since colour is what changes", () => {
+		renderBar(true);
+		for (const name of [/send/i, /load test/i]) {
+			expect(screen.getByRole("button", { name }).className).toContain("transition-colors");
+		}
+	});
+
+	it("does not offer a hover on a button that cannot be clicked", () => {
+		renderBar(true);
+		expect(screen.getByRole("button", { name: /load test/i }).className).toContain(
+			"disabled:hover:bg-primary/10"
+		);
+	});
+});

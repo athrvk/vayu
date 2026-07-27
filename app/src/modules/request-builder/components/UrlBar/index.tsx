@@ -113,15 +113,29 @@ export default function UrlBar() {
 			 */}
 			<div
 				className={cn(
-					"flex flex-1 min-w-0 items-center h-[34px] rounded-md bg-card",
+					// `bg-card surface-card`, the pair. `surface-card` sets the
+					// background *and* declares the `--rule` that reads on it, but a
+					// `bg-*` utility beside it wins the cascade - so both are written,
+					// per docs/design-system.md. The separator below inherits `--rule`
+					// from here.
+					"flex flex-1 min-w-0 items-center h-[34px] rounded-md bg-card surface-card",
 					"border border-input transition-colors focus-within:border-primary"
 				)}
 			>
 				<MethodSelector />
-				{/* Hairline between the two halves of the field. `h-5`, not full
-				    height: a full-height rule would read as a wall between two
-				    controls, which is what this stopped being. */}
-				<span aria-hidden="true" className="h-5 w-px shrink-0 bg-border" />
+				{/*
+				    The hairline between the two halves of the field.
+				    `border-rule`, not `bg-border`. This rule sits on `--card`, and
+				    `--border` *is* `--card` in dark - measured 1.01, i.e. absent -
+				    while reading 1.30 in light. That asymmetry is exactly the defect
+				    the surface/rule contract exists to remove: `surface-card` above
+				    resolves `--rule` to `--border` in light and `--border-strong` in
+				    dark, so this lands at 1.30 / 1.27 instead of 1.30 / 1.01.
+
+				    `h-5`, not full height: a full-height rule would read as a wall
+				    between two controls, which is what this stopped being.
+				 */}
+				<span aria-hidden="true" className="h-5 w-0 shrink-0 border-l border-rule" />
 				<UrlInput className="flex-1 min-w-0 h-full border-0 bg-transparent px-3 text-sm font-mono shadow-none rounded-none focus-within:ring-0" />
 			</div>
 
@@ -137,7 +151,16 @@ export default function UrlBar() {
 							"h-[34px] px-4 inline-flex items-center gap-1.5 shrink-0",
 							"bg-primary-fill text-white text-xs font-semibold font-[inherit]",
 							"border border-primary-fill",
-							"disabled:opacity-50 transition-opacity",
+							/*
+							 * There was no hover state at all. `hover:bg-primary-fill/90` is
+							 * the `Button` primitive's own `default` variant - these are
+							 * hand-rolled so the pair can share an edge, which means they
+							 * carry the convention rather than inherit it. The border moves
+							 * with the fill, or a lighter ring appears around a darkening
+							 * button.
+							 */
+							"hover:bg-primary-fill/90 hover:border-primary-fill/90",
+							"disabled:opacity-50 disabled:hover:bg-primary-fill transition-colors",
 							sendAlone ? "rounded-md" : "rounded-l-md rounded-r-none"
 						)}
 					>
@@ -166,8 +189,8 @@ export default function UrlBar() {
 							onClick={viewRunningTest}
 							className={cn(
 								"h-[34px] px-3.5 inline-flex items-center gap-1.5 shrink-0",
-								"text-xs font-semibold font-[inherit] transition-opacity",
-								"text-status-success-text bg-status-success/10",
+								"text-xs font-semibold font-[inherit] transition-colors",
+								"text-status-success-text bg-status-success/10 hover:bg-status-success/20",
 								"border border-status-success/40 border-l-transparent",
 								"rounded-r-md rounded-l-none"
 							)}
@@ -188,13 +211,15 @@ export default function UrlBar() {
 								className={cn(
 									"h-[34px] px-4 inline-flex items-center shrink-0",
 									"text-xs font-semibold font-[inherit]",
-									"text-primary-text bg-primary/10",
+									// A tint steps *up* rather than down: /10 to /20 is the same
+									// "one more step of itself" that /90 gives the solid fill.
+									"text-primary-text bg-primary/10 hover:bg-primary/20",
 									// The join: this member's own border, with the shared
 									// edge transparent. Two adjacent 1px borders would draw
 									// a 2px line and make the pair a pixel taller than Send.
 									"border border-primary/45 border-l-transparent",
 									"rounded-r-md rounded-l-none",
-									"disabled:opacity-50 transition-opacity"
+									"disabled:opacity-50 disabled:hover:bg-primary/10 transition-colors"
 								)}
 							>
 								Load Test
