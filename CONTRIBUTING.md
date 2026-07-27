@@ -252,6 +252,54 @@ Currently, the app does not have automated tests. If you add tests:
 - Use Vitest for unit tests
 - Use Playwright for E2E tests (if needed)
 
+## Documentation
+
+Everything in `docs/` is published to **[athrvk.github.io/vayu](https://athrvk.github.io/vayu/)**
+by `.github/workflows/docs.yml` on every push to `master` that touches the docs.
+The site is built with [MkDocs Material](https://squidfunk.github.io/mkdocs-material/)
+from `.github/mkdocs.yml`.
+
+```bash
+pip install -r requirements-docs.txt
+mkdocs serve -f .github/mkdocs.yml            # live preview
+mkdocs build --strict -f .github/mkdocs.yml   # exactly what CI runs
+```
+
+`-f` is not optional: the config lives in `.github/`, so bare `mkdocs serve`
+exits with "Config file 'mkdocs.yml' does not exist." The preview URL is
+`http://127.0.0.1:8000/vayu/` - the `/vayu/` prefix is there because the site is
+a project page served from a subdirectory, and `/` redirects to it.
+
+Site-only styling lives in `docs/stylesheets/extra.css` (accent, header, headings,
+landing page). It styles the documentation site, **not** the product - the token
+rules in [Design System](docs/design-system.md) do not apply to it, and it must
+never be used as a reference for app CSS.
+
+The site's favicon and header logo are **not** files under `docs/`.
+`.github/hooks/brand_assets.py` pulls `shared/icon_png/vayu_icon_256x256.png` into the
+build, so the docs share one icon with the installers and cannot drift from
+them. Do not add a copy under `docs/images/` - if the brand icon is regenerated,
+the site picks it up on the next build. A missing source file fails the build
+rather than publishing a broken favicon.
+
+Two rules when you add or change a doc:
+
+- **Add the page to the `nav:` in `.github/mkdocs.yml`.** A file that is not in the nav
+  still builds and is still reachable by URL, but it never appears in the
+  sidebar, so in practice nobody finds it.
+- **Keep cross-links relative and anchors real.** `mkdocs build --strict` fails
+  on a relative `.md` link that does not resolve and on a `#heading-anchor` that
+  does not exist, and the pull-request run does the same. Anchors follow GitHub's
+  slug rules (configured in `.github/mkdocs.yml`), so a link that works in GitHub's
+  markdown view works on the site, and vice versa. Note that a heading such as
+  `## Shared Auth Fields (components/shared/AuthFields/)` slugifies to
+  `#shared-auth-fields-componentssharedauthfields` - the parenthetical is part of
+  the anchor.
+
+Links out of `docs/` (to `SECURITY.md`, `LICENSE`, `CONTRIBUTING.md`) must be
+absolute `https://github.com/athrvk/vayu/blob/master/...` URLs: those files are
+outside the published tree, so a relative path 404s on the site.
+
 ## Commit Messages
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
