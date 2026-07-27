@@ -23,7 +23,7 @@
 
 import { useState } from "react";
 import { FileText } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "../EmptyState";
 import ResponseBody from "./ResponseBody";
@@ -59,44 +59,46 @@ export default function UnifiedResponseViewer({
 				className
 			)}
 		>
-			{/* Simple tab buttons */}
-			<div className="flex gap-2 p-3 border-b border-rule bg-muted/30">
-				<Button
-					variant={activeTab === "body" ? "default" : "ghost"}
-					size="sm"
-					onClick={() => setActiveTab("body")}
-					className="text-xs h-7"
-				>
-					<FileText className="w-3 h-3 mr-1" />
-					Response
-				</Button>
-				<Button
-					variant={activeTab === "headers" ? "default" : "ghost"}
-					size="sm"
-					onClick={() => setActiveTab("headers")}
-					className="text-xs h-7"
-				>
-					Headers
-				</Button>
-			</div>
+			{/*
+			 * The app's Tabs primitive, not two hand-rolled Buttons. The old pair
+			 * were their own tab stops with no arrow-key model and no
+			 * aria-controls, and they were a third tab look in an app that now
+			 * has one. A TabsContent per trigger, not a single panel for the
+			 * active value - Radix points each trigger's aria-controls at the
+			 * panel for its own value (tabs-panels.test.tsx).
+			 */}
+			<Tabs
+				value={activeTab}
+				onValueChange={(v) => setActiveTab(v as ResponseTab)}
+				className="flex min-h-0 flex-1 flex-col"
+			>
+				<TabsList className="px-3 py-1.5 border-b border-rule bg-muted/30">
+					<TabsTrigger value="body">
+						<FileText className="w-3 h-3" />
+						<TabLabel>Response</TabLabel>
+					</TabsTrigger>
+					<TabsTrigger value="headers">
+						<TabLabel>Headers</TabLabel>
+					</TabsTrigger>
+				</TabsList>
 
-			{/* Content */}
-			<div className="h-[500px] overflow-auto">
-				{activeTab === "body" && response?.body && (
-					<ResponseBody
-						body={response.body}
-						bodyRaw={response.bodyRaw}
-						headers={response.headers || {}}
-						compact
-						showModeToggle
-					/>
-				)}
-				{activeTab === "body" && !response?.body && (
-					// `h-full` because this scroll container is not a flex column,
-					// so the primitive's `flex-1` has nothing to grow against.
-					<EmptyState icon={FileText} title="No response body" className="h-full" />
-				)}
-				{activeTab === "headers" && (
+				<TabsContent value="body" className="h-[500px] overflow-auto">
+					{response?.body ? (
+						<ResponseBody
+							body={response.body}
+							bodyRaw={response.bodyRaw}
+							headers={response.headers || {}}
+							compact
+							showModeToggle
+						/>
+					) : (
+						// `h-full` because this scroll container is not a flex column,
+						// so the primitive's `flex-1` has nothing to grow against.
+						<EmptyState icon={FileText} title="No response body" className="h-full" />
+					)}
+				</TabsContent>
+
+				<TabsContent value="headers" className="h-[500px] overflow-auto">
 					<div className="p-4 space-y-4 overflow-auto h-full">
 						{request?.headers && Object.keys(request.headers).length > 0 && (
 							<CompactHeadersViewer
@@ -115,8 +117,8 @@ export default function UnifiedResponseViewer({
 								<EmptyState icon={FileText} title="No headers available" />
 							)}
 					</div>
-				)}
-			</div>
+				</TabsContent>
+			</Tabs>
 		</div>
 	);
 }

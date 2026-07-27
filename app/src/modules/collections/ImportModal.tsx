@@ -18,6 +18,7 @@ import {
 	TabsContent,
 	TabsList,
 	TabsTrigger,
+	TabLabel,
 	Textarea,
 } from "@/components/ui";
 import { useImportModalStore } from "@/stores";
@@ -314,14 +315,12 @@ export function ImportModal() {
 					}}
 					className="flex min-h-0 flex-1 flex-col"
 				>
-					<TabsList className="h-auto w-full justify-start rounded-none border-b border-rule bg-transparent p-0 px-5">
+					<TabsList className="w-full px-4">
 						{(["file", "url", "paste"] as Tab[]).map((t) => (
-							<TabsTrigger
-								key={t}
-								value={t}
-								className="shrink-0 rounded-none border-b-2 border-transparent px-4 py-2.5 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-							>
-								{t === "file" ? "File" : t === "url" ? "URL" : "Paste JSON"}
+							<TabsTrigger key={t} value={t}>
+								<TabLabel>
+									{t === "file" ? "File" : t === "url" ? "URL" : "Paste JSON"}
+								</TabLabel>
 							</TabsTrigger>
 						))}
 					</TabsList>

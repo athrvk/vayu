@@ -18,6 +18,8 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+
+import { DEFAULT_NOTIFICATION_PREFS, type NotificationPrefs } from "@/constants/toast";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
 	DEFAULT_MONO_FONT,
@@ -61,6 +63,8 @@ interface ClientSettingsState {
 	liveRefreshMs: number;
 	autoSave: AutoSavePrefs;
 	reducedMotion: boolean;
+	/** Toast position, duration scale, stack cap and severity floor. */
+	notifications: NotificationPrefs;
 
 	setEditor: (patch: Partial<EditorPrefs>) => void;
 	setMonoFont: (font: MonoFontChoice) => void;
@@ -69,6 +73,7 @@ interface ClientSettingsState {
 	setSloThresholdMs: (ms: number) => void;
 	setLiveRefreshMs: (ms: number) => void;
 	setAutoSave: (patch: Partial<AutoSavePrefs>) => void;
+	setNotifications: (patch: Partial<NotificationPrefs>) => void;
 	setReducedMotion: (on: boolean) => void;
 	/** Clear every renderer preference and reload so defaults re-apply cleanly. */
 	resetAll: () => void;
@@ -109,6 +114,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 			liveRefreshMs: DEFAULT_LIVE_REFRESH_MS,
 			autoSave: { ...DEFAULT_AUTO_SAVE_PREFS },
 			reducedMotion: false,
+			notifications: { ...DEFAULT_NOTIFICATION_PREFS },
 
 			setEditor: (patch) => set((s) => ({ editor: { ...s.editor, ...patch } })),
 			setMonoFont: (font) => {
@@ -123,6 +129,8 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 			setSloThresholdMs: (ms) => set({ sloThresholdMs: clampSloThresholdMs(ms) }),
 			setLiveRefreshMs: (ms) => set({ liveRefreshMs: ms }),
 			setAutoSave: (patch) => set((s) => ({ autoSave: { ...s.autoSave, ...patch } })),
+			setNotifications: (patch) =>
+				set((s) => ({ notifications: { ...s.notifications, ...patch } })),
 			setReducedMotion: (on) => {
 				applyReducedMotion(on);
 				set({ reducedMotion: on });
@@ -146,6 +154,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				liveRefreshMs: s.liveRefreshMs,
 				autoSave: s.autoSave,
 				reducedMotion: s.reducedMotion,
+				notifications: s.notifications,
 			}),
 			onRehydrateStorage: () => (state) => {
 				// Re-assert persisted DOM-affecting prefs after rehydrate.

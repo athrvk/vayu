@@ -31,6 +31,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Dock } from "./Dock";
 import { TabStrip } from "./TabStrip";
 import { Launcher } from "@/modules/welcome/Launcher";
@@ -45,8 +46,13 @@ vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ data: [], isLoading: false, isError: false }),
 	useEnvironmentsQuery: () => ({ data: [], isLoading: false, isError: false }),
 	useGlobalsQuery: () => ({ data: undefined, isLoading: false, error: null }),
-	useRequestQuery: () => ({ data: undefined, isLoading: false, isError: false }),
-	useRunQuery: () => ({ data: undefined, isLoading: false, isError: false }),
+	// TabStrip resolves labels through one `useQueries`, so these are options.
+	requestDetailOptions: () => ({
+		queryKey: ["request"],
+		queryFn: async () => undefined,
+		enabled: false,
+	}),
+	runDetailOptions: () => ({ queryKey: ["run"], queryFn: async () => undefined, enabled: false }),
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({
@@ -106,7 +112,12 @@ describe("the variables icon", () => {
 			openTabs: [{ id: "t1", type: "variables", entityId: null }],
 			activeTabId: "t1",
 		});
-		render(<TabStrip />);
+		// TabStrip resolves every tab's label through `useQueries` now.
+		render(
+			<QueryClientProvider client={new QueryClient()}>
+				<TabStrip />
+			</QueryClientProvider>
+		);
 		const tab = screen.getByRole("tab", { name: /Variables/ });
 
 		const names = iconNames(tab);
