@@ -182,6 +182,7 @@ export default function RequestBuilderProvider({
 		resolveString,
 		getVariable: resolverGetVariable,
 		getAllVariables: resolverGetAllVariables,
+		getVariableOrigins,
 	} = useVariableResolver({ collectionId: collectionId || undefined });
 
 	// Variable update mutations
@@ -282,15 +283,18 @@ export default function RequestBuilderProvider({
 		[resolverGetVariable]
 	);
 
-	// Get all variables
-	const getAllVariables = useCallback((): Record<string, VariableInfo> => {
-		const vars = resolverGetAllVariables();
-		const result: Record<string, VariableInfo> = {};
-		for (const [name, source] of Object.entries(vars)) {
-			result[name] = { value: source.value, scope: source.scope, secret: source.secret };
-		}
-		return result;
-	}, [resolverGetAllVariables]);
+	// Get all variables.
+	//
+	// Passed through rather than re-picked field by field. The old version
+	// rebuilt each entry as `{ value, scope, secret }`, which silently dropped
+	// `sourceName` / `sourceId` (so the popover could name a scope but not the
+	// environment) along with `type` / `typedValue`. A hand-copied projection of
+	// a type is a place fields go to die; the resolver already produces exactly
+	// this shape.
+	const getAllVariables = useCallback(
+		(): Record<string, VariableInfo> => resolverGetAllVariables(),
+		[resolverGetAllVariables]
+	);
 
 	// Update variable value
 	const updateVariable = useCallback(
@@ -349,6 +353,26 @@ export default function RequestBuilderProvider({
 			updateEnvironmentMutation,
 		]
 	);
+
+	/*
+	 * Which scopes `updateVariable` would actually write to, derived from the
+	 * same three guards it opens each branch with.
+	 *
+	 * Kept beside it deliberately: this is the config-defined-in-one-branch,
+	 * re-derived-in-another shape that has bitten this codebase before, so if a
+	 * guard changes above, this list is the next thing in the file to change.
+	 * A caller that offers a scope not in here gets a silent no-op.
+	 */
+	const writableScopes = useMemo((): VariableScope[] => {
+		const scopes: VariableScope[] = [];
+		if (globalsData?.variables) scopes.push("global");
+		if (collectionId && collections.some((c) => c.id === collectionId))
+			scopes.push("collection");
+		if (activeEnvironmentId && environments.some((e) => e.id === activeEnvironmentId)) {
+			scopes.push("environment");
+		}
+		return scopes;
+	}, [globalsData, collections, collectionId, environments, activeEnvironmentId]);
 
 	// Execute request
 	const executeRequest = useCallback(async () => {
@@ -417,7 +441,9 @@ export default function RequestBuilderProvider({
 			resolveVariables: resolveString,
 			getVariable,
 			getAllVariables,
+			getVariableOrigins,
 			updateVariable,
+			writableScopes,
 			executeRequest,
 			saveRequest,
 			startLoadTest,
@@ -441,7 +467,9 @@ export default function RequestBuilderProvider({
 			resolveString,
 			getVariable,
 			getAllVariables,
+			getVariableOrigins,
 			updateVariable,
+			writableScopes,
 			executeRequest,
 			saveRequest,
 			startLoadTest,

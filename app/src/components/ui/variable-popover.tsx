@@ -8,23 +8,49 @@
 /**
  * Variable Popover
  *
- * Unified popover component for viewing and editing variable values.
- * Supports two modes:
- * - manual: Save/Cancel buttons (explicit save)
- * - auto: Auto-saves on close (implicit save)
+ * What opens when you click a `{{token}}`. Three states:
+ *
+ *   resolved   the value, editable, with the environment or collection it came
+ *              from and every other definition that lost
+ *   undefined  a value field and a scope to create it in
+ *   read-only  the value, when there is no way to change it from here
+ *
+ * **It used to show the value twice.** A "Current Value" block sat above an
+ * "Edit Value" input holding the same string, each with its own label and its
+ * own secret-reveal button - about 90px and two labels spent restating what the
+ * editable field already said. The editable field *is* the current value, so
+ * that block now renders only where it does real work: a secret, which must be
+ * masked until deliberately revealed, and the not-editable case.
+ *
+ * The space it freed goes to the two things the popover is opened to find out
+ * and previously could not answer - *which* environment this came from, and why
+ * this value won over the others.
+ *
+ * **Undefined variables used to be a dead end.** The popover said "Define it in
+ * Globals, an Environment, or Collection variables" and offered no way to do
+ * any of that, which is unhelpful for what is by far the most common reason to
+ * click a red token. It can now create one - but only into a scope the caller
+ * says is writable, because `updateVariable` silently no-ops when the target
+ * scope has no active target (no environment selected, no collection). Offering
+ * a scope that cannot be written is a Create button that does nothing.
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { Input } from "./input";
 import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
+import { VARIABLE_SCOPE_CONFIG, VARIABLE_SCOPE_DOT } from "@/constants/variables";
+import { cn } from "@/lib/utils";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
-import type { ResolvedVariable } from "@/types";
+import type { ResolvedVariable, VariableOrigin } from "@/types";
 
 // Re-export ResolvedVariable as VariableInfo for backward compatibility
 export type { ResolvedVariable as VariableInfo };
+
+/** Highest precedence first - the scope a new variable most likely belongs in. */
+const SCOPE_PREFERENCE: VariableScope[] = ["environment", "collection", "global"];
 
 export interface VariablePopoverProps {
 	/** Variable name */
@@ -43,8 +69,18 @@ export interface VariablePopoverProps {
 	trigger: React.ReactNode;
 	/** Custom className for trigger */
 	triggerClassName?: string;
-	/** Show current value section (default: true for auto mode, false for manual) */
-	showCurrentValue?: boolean;
+	/**
+	 * Every definition of this name, lowest precedence first, disabled ones
+	 * included. Rendered only when there is more than one, which is when the
+	 * question "why is this the value?" has a non-obvious answer.
+	 */
+	origins?: VariableOrigin[];
+	/**
+	 * Scopes a create can actually be written to. An empty list (or omitted)
+	 * means an undefined variable falls back to explaining where to define it,
+	 * because there is nowhere this popover could put it.
+	 */
+	writableScopes?: VariableScope[];
 }
 
 export function VariablePopover({
@@ -56,7 +92,8 @@ export function VariablePopover({
 	disabled = false,
 	trigger,
 	triggerClassName,
-	showCurrentValue,
+	origins,
+	writableScopes,
 }: VariablePopoverProps) {
 	const [isOpen, setIsOpen] = useState(false);
 	const [editValue, setEditValue] = useState(varInfo?.value || "");
@@ -90,6 +127,21 @@ export function VariablePopover({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [isOpen]);
 
+	const canEdit = !!onValueChange && !!varInfo && resolved && !disabled;
+
+	// Creating is only offered where a write would land somewhere.
+	const creatableScopes = useMemo(
+		() => SCOPE_PREFERENCE.filter((s) => writableScopes?.includes(s)),
+		[writableScopes]
+	);
+	const canCreate = !resolved && !!onValueChange && !disabled && creatableScopes.length > 0;
+	const [createScope, setCreateScope] = useState<VariableScope | null>(null);
+	// Falls back rather than storing a default, so a scope that stops being
+	// writable (the environment was deselected) cannot leave a stale selection
+	// pointing at a no-op.
+	const activeCreateScope =
+		createScope && creatableScopes.includes(createScope) ? createScope : creatableScopes[0];
+
 	const handleOpenChange = (open: boolean) => {
 		if (open) {
 			setIsOpen(true);
@@ -119,6 +171,12 @@ export function VariablePopover({
 		setIsOpen(false);
 	};
 
+	const handleCreate = () => {
+		if (!onValueChange || !activeCreateScope) return;
+		onValueChange(name, editValue, activeCreateScope);
+		setIsOpen(false);
+	};
+
 	const handleKeyDown = (e: React.KeyboardEvent) => {
 		if (saveMode === "manual") {
 			if (e.key === "Enter") {
@@ -138,20 +196,13 @@ export function VariablePopover({
 		}
 	};
 
-	const shouldShowCurrentValue =
-		showCurrentValue !== undefined ? showCurrentValue : saveMode === "auto" && resolved;
-
-	const canEdit = !!onValueChange && !!varInfo && resolved && !disabled;
-
-	// Handle trigger click manually to ensure popover opens
-	const handleTriggerClick = (e: React.MouseEvent) => {
-		if (!disabled) {
-			e.stopPropagation(); // Prevent input blur
-			if (!isOpen) {
-				setIsOpen(true);
-			}
-		}
-	};
+	/*
+	 * A secret keeps the two-stage display the rest of the popover dropped: it
+	 * is masked until revealed, so the editable field cannot simply *be* the
+	 * value on screen. This is the one case the old duplicate block was earning
+	 * its space.
+	 */
+	const isSecret = !!varInfo?.secret;
 
 	/**
 	 * The trigger is a `<span>`, because a `{{variable}}` token sits inline in the
@@ -173,7 +224,11 @@ export function VariablePopover({
 			role="button"
 			tabIndex={disabled ? -1 : 0}
 			className={triggerClassName}
-			onClick={handleTriggerClick}
+			onClick={(e) => {
+				if (disabled) return;
+				e.stopPropagation(); // Prevent input blur
+				if (!isOpen) setIsOpen(true);
+			}}
 			onKeyDown={(e) => {
 				if (disabled) return;
 				if (e.key === "Enter" || e.key === " ") {
@@ -194,7 +249,7 @@ export function VariablePopover({
 		<Popover open={isOpen} onOpenChange={handleOpenChange}>
 			<PopoverTrigger asChild>{triggerElement}</PopoverTrigger>
 			<PopoverContent
-				className="w-72 p-3"
+				className="w-72 p-2.5"
 				align="start"
 				side="bottom"
 				onClick={(e) => e.stopPropagation()}
@@ -205,35 +260,33 @@ export function VariablePopover({
 				}}
 				onOpenAutoFocus={(e) => e.preventDefault()}
 			>
-				<div className="space-y-3">
-					{/* Header: Variable name and scope badge */}
-					<div>
-						<div className="flex flex-row items-baseline justify-between gap-2">
-							<span className="font-mono text-sm font-medium">{name}</span>
-							{varInfo && <VariableScopeBadge scope={varInfo.scope} variant="full" />}
-						</div>
+				<div className="flex flex-col gap-2">
+					{/* Name + where it came from */}
+					<div className="flex flex-row items-baseline justify-between gap-2">
+						<span className="font-mono text-sm font-semibold truncate">{name}</span>
+						{varInfo ? (
+							<VariableScopeBadge scope={varInfo.scope} variant="full" />
+						) : (
+							<span className="shrink-0 rounded-md border border-destructive-text/40 px-1.5 text-[10px] text-destructive-text">
+								undefined
+							</span>
+						)}
 					</div>
 
 					{resolved && varInfo ? (
 						<>
-							{/* Current Value Section (for auto mode) */}
-							{shouldShowCurrentValue && (
-								<div className="space-y-2">
-									<div className="flex items-center justify-between">
-										<label className="text-xs text-muted-foreground">
-											Current Value
-										</label>
-										{varInfo.secret && (
-											<div className="flex items-center gap-1">
-												<KeyRound className="w-3 h-3 text-warning-text" />
-												<span className="text-[10px] text-warning-text">
-													Secret
-												</span>
-											</div>
-										)}
+							{/*
+							 * Masked read-only display, secrets only. Everything else
+							 * edits in place - the field below is the current value.
+							 */}
+							{isSecret && (
+								<div className="flex flex-col gap-1">
+									<div className="flex items-center gap-1 text-[10px] text-warning-text">
+										<KeyRound className="w-3 h-3" />
+										Secret
 									</div>
-									<div className="relative font-mono text-sm bg-muted px-2 py-1.5 rounded-md break-all">
-										{varInfo.secret && !isSecretRevealed ? (
+									<div className="relative rounded-md bg-muted px-2 py-1.5 font-mono text-sm break-all">
+										{!isSecretRevealed ? (
 											<span className="select-none">••••••••</span>
 										) : varInfo.value ? (
 											varInfo.value
@@ -242,7 +295,7 @@ export function VariablePopover({
 												empty
 											</span>
 										)}
-										{varInfo.secret && varInfo.value && (
+										{varInfo.value && (
 											<TooltipIconButton
 												label={
 													isSecretRevealed ? "Hide value" : "Reveal value"
@@ -264,70 +317,121 @@ export function VariablePopover({
 								</div>
 							)}
 
-							{/* Edit Section */}
-							{canEdit && (
-								<div className="space-y-2">
-									<label className="text-xs text-muted-foreground">
-										{saveMode === "auto" ? "Edit Value" : "Value"}
-									</label>
-									<div className="relative">
-										<Input
-											type={
-												varInfo.secret && !isSecretRevealed
-													? "password"
-													: "text"
-											}
-											value={editValue}
-											onChange={(e) => setEditValue(e.target.value)}
-											onKeyDown={handleKeyDown}
-											className={`h-8 font-mono text-sm ${varInfo.secret ? "pr-8" : ""}`}
-											autoFocus
-										/>
-										{varInfo.secret && (
-											<TooltipIconButton
-												label={
-													isSecretRevealed ? "Hide value" : "Reveal value"
-												}
-												icon={
-													isSecretRevealed ? (
-														<EyeOff className="w-3.5 h-3.5" />
-													) : (
-														<Eye className="w-3.5 h-3.5" />
-													)
-												}
-												onClick={() =>
-													setIsSecretRevealed(!isSecretRevealed)
-												}
-												className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
-											/>
+							{canEdit ? (
+								<Input
+									type={isSecret && !isSecretRevealed ? "password" : "text"}
+									value={editValue}
+									onChange={(e) => setEditValue(e.target.value)}
+									onKeyDown={handleKeyDown}
+									className="h-8 font-mono text-sm"
+									aria-label={`Value of ${name}`}
+									autoFocus
+								/>
+							) : (
+								!isSecret && (
+									<div className="rounded-md bg-muted px-2 py-1.5 font-mono text-sm break-all">
+										{varInfo.value || (
+											<span className="italic text-muted-foreground">
+												empty
+											</span>
 										)}
 									</div>
+								)
+							)}
+
+							{/*
+							 * Source and keyboard hints on one line. This replaces
+							 * "Auto-saves when you click away" - a permanent sentence
+							 * for a behaviour that is only surprising once - with the
+							 * two facts that stay useful: where the value lives, and
+							 * the keys that already worked but were never shown.
+							 */}
+							{canEdit && saveMode === "auto" && (
+								<div className="flex items-baseline justify-between gap-2 text-[10px] text-muted-foreground">
+									<span className="truncate">
+										{varInfo.sourceName ? (
+											<>
+												from{" "}
+												<span className="font-medium text-foreground">
+													{varInfo.sourceName}
+												</span>
+											</>
+										) : (
+											"saves when you click away"
+										)}
+									</span>
+									<span className="shrink-0 font-mono opacity-80">
+										⏎ save · esc cancel
+									</span>
 								</div>
 							)}
 
 							{/* Action Buttons (manual mode only) */}
 							{saveMode === "manual" && canEdit && (
-								<>
-									<div className="flex justify-end gap-2">
-										<Button size="sm" variant="ghost" onClick={handleCancel}>
-											Cancel
-										</Button>
-										<Button size="sm" onClick={handleSave}>
-											Save
-										</Button>
-									</div>
-									<p className="text-xs text-muted-foreground">
-										Press Enter to save, Esc to cancel
-									</p>
-								</>
+								<div className="flex justify-end gap-2">
+									<Button size="sm" variant="ghost" onClick={handleCancel}>
+										Cancel
+									</Button>
+									<Button size="sm" onClick={handleSave}>
+										Save
+									</Button>
+								</div>
 							)}
 
-							{/* Auto-save hint (auto mode only) */}
-							{saveMode === "auto" && canEdit && (
-								<p className="text-[10px] text-muted-foreground">
-									Auto-saves when you click away
-								</p>
-							)}
+							<ShadowedBy origins={origins} />
+						</>
+					) : canCreate ? (
+						<>
+							<Input
+								value={editValue}
+								onChange={(e) => setEditValue(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") {
+										e.preventDefault();
+										handleCreate();
+									}
+								}}
+								placeholder="value…"
+								className="h-8 font-mono text-sm"
+								aria-label={`Value for new variable ${name}`}
+								autoFocus
+							/>
+							<div className="flex items-center gap-1.5">
+								<span className="shrink-0 text-[10px] text-muted-foreground">
+									create in
+								</span>
+								{/*
+								 * Only writable scopes appear. A picker offering
+								 * "Environment" with none selected would produce a
+								 * Create button that silently does nothing.
+								 */}
+								{creatableScopes.map((scope) => (
+									<button
+										key={scope}
+										type="button"
+										onClick={() => setCreateScope(scope)}
+										aria-pressed={scope === activeCreateScope}
+										className={cn(
+											"rounded-md border px-1.5 py-0.5 text-[10px] transition-colors",
+											scope === activeCreateScope
+												? cn(
+														VARIABLE_SCOPE_CONFIG[scope].tint,
+														VARIABLE_SCOPE_CONFIG[scope].border
+													)
+												: "border-transparent text-muted-foreground hover:bg-accent"
+										)}
+									>
+										{VARIABLE_SCOPE_CONFIG[scope].full}
+									</button>
+								))}
+								<Button
+									size="sm"
+									className="ml-auto h-6 px-2 text-[11px]"
+									onClick={handleCreate}
+								>
+									Create
+								</Button>
+							</div>
 						</>
 					) : (
 						<div className="text-sm text-destructive-text">
@@ -338,5 +442,57 @@ export function VariablePopover({
 				</div>
 			</PopoverContent>
 		</Popover>
+	);
+}
+
+/**
+ * The definitions that did not win.
+ *
+ * Rendered only when there is more than one, so the ordinary case stays short.
+ * Three row states, not two - a definition can lose by precedence *or* by being
+ * switched off, and the second is the more common surprise: the value you set
+ * is being skipped rather than missing. A list that only showed shadowing would
+ * answer the easy question and stay silent on the hard one.
+ */
+function ShadowedBy({ origins }: { origins?: VariableOrigin[] }) {
+	if (!origins || origins.length < 2) return null;
+
+	// Highest precedence first: reading down the list is reading the order the
+	// resolver rejected them in.
+	const others = [...origins].reverse().filter((o) => !o.winner);
+	if (others.length === 0) return null;
+
+	return (
+		<div className="flex flex-col gap-0.5 border-t border-border pt-1.5">
+			<div className="text-[10px] uppercase tracking-wide text-subtle-foreground">
+				also defined
+			</div>
+			{others.map((o, i) => (
+				<div
+					key={`${o.scope}-${o.sourceId ?? "global"}-${i}`}
+					className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
+				>
+					<span
+						className={cn(
+							"size-[5px] shrink-0 rounded-full",
+							// A disabled definition is not competing at all, so it does
+							// not get the scope's colour.
+							o.enabled ? VARIABLE_SCOPE_DOT[o.scope] : "bg-subtle-foreground"
+						)}
+					/>
+					<span className="shrink-0">
+						{o.sourceName ?? VARIABLE_SCOPE_CONFIG[o.scope].full}
+					</span>
+					<span className="truncate font-mono line-through opacity-60">
+						{o.secret ? "••••••••" : o.value || "empty"}
+					</span>
+					{!o.enabled && (
+						<span className="ml-auto shrink-0 rounded-md border border-rule px-1 not-italic">
+							off
+						</span>
+					)}
+				</div>
+			))}
+		</div>
 	);
 }

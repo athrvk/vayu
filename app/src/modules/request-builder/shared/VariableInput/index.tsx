@@ -352,6 +352,12 @@ export default function VariableInput({
 							value={varInfo?.value || ""}
 							scope={varInfo?.scope || "global"}
 							resolved={!!varInfo}
+							// Both come from the resolver and were being dropped on
+							// the floor here: `secret` is what stops the hover
+							// tooltip printing a credential, and `sourceName` is
+							// which environment the value came from.
+							secret={varInfo?.secret}
+							sourceName={varInfo?.sourceName}
 							onValueChange={handleVariableChange}
 							disabled={disabled}
 						/>
