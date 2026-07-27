@@ -50,6 +50,7 @@ import { cn } from "@/lib/utils";
 import GraphQLBody from "./body/GraphQLBody";
 import { contentTypeToAdd, contentTypeRow, withoutContentType } from "./body/content-type";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
+import { switchBody, type BodyDrafts } from "./body/body-drafts";
 
 const BODY_MODES: { value: BodyMode; label: string; contentType: string | null }[] = [
 	{ value: "none", label: "None", contentType: null },
@@ -186,7 +187,30 @@ export default function BodyPanel() {
 			])
 		);
 
+	/*
+	 * What each kind of body held, so switching mode does not destroy it.
+	 *
+	 * JSON, text and GraphQL all share `request.body` - the stored shape is one
+	 * discriminated union - so switching handed the same string to a different
+	 * reader. From JSON to GraphQL that meant the payload was read as a raw
+	 * query, and one keystroke later the body was
+	 * `{"query":"{\"merchant\":\"mrc_8813\"}"}` with the original gone.
+	 *
+	 * A ref rather than state: nothing renders from it, and it must not cause a
+	 * re-render when stashed mid-switch.
+	 */
+	const draftsRef = useRef<BodyDrafts>({});
+
 	const handleModeChange = (mode: BodyMode) => {
+		const { body, drafts } = switchBody(
+			request.bodyMode,
+			mode,
+			request.body ?? "",
+			draftsRef.current
+		);
+		draftsRef.current = drafts;
+		if (body !== (request.body ?? "")) updateField("body", body);
+
 		updateField("bodyMode", mode);
 		setAddedContentType(null);
 
