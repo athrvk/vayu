@@ -560,9 +560,10 @@ Resolves `{{variableName}}` patterns in strings and objects using environment, c
 const {
   resolveString: (input: string) => string
   resolveObject: <T>(obj: T) => T
-  getVariable: (name: string) => VariableValue | null
-  getAllVariables: () => Record<string, VariableValue>
+  getVariable: (name: string) => ResolvedVariable | null
+  getAllVariables: () => Record<string, ResolvedVariable>
   hasUnresolvedVariables: (input: string) => boolean
+  getVariableOrigins: (name: string) => VariableOrigin[]
 } = useVariableResolver({ collectionId?: string, environmentId?: string });
 ```
 
@@ -570,6 +571,34 @@ const {
 1. Environment variables
 2. Collection variables
 3. Global variables
+
+`ResolvedVariable` carries `sourceId` / `sourceName` - the specific environment
+or collection the winning value came from (absent for `global`).
+
+`getVariableOrigins` returns **every** definition of a name, lowest precedence
+first, including disabled ones that never resolve. Display-only; the variable
+popover renders it as "also defined". See `docs/app/variable-resolution.md` for
+why the losers are kept and why the MCP copy is not given the same accessor.
+
+### `RequestBuilderContext` - variable members
+
+The request builder re-exposes the resolver plus two things only it can derive:
+
+```typescript
+getVariableOrigins: (name: string) => VariableOrigin[]
+updateVariable: (name: string, value: string, scope: VariableScope) => void
+writableScopes: VariableScope[]
+```
+
+`writableScopes` lists the scopes `updateVariable` would actually write to.
+Each of its branches opens with a guard (`if (!activeEnvironmentId) return`), so
+a write to a scope with no active target is a **silent no-op** - the variable
+popover uses this list so its "create in" picker cannot offer one.
+
+A write through `updateVariable` always sets `enabled: true`. Setting a value
+means "make this value apply"; enabling and disabling belongs to the variables
+editor. Without it, creating a value for a name that was disabled everywhere
+preserved `enabled: false` and the token stayed unresolved.
 
 **Usage:**
 ```typescript
