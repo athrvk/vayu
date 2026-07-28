@@ -637,6 +637,41 @@ Two things about it are deliberate and easy to undo by accident:
 Deliberately **not** persisted: a request has one body, and storing payloads it
 will never send would put them in exports and in the engine's schema.
 
+### `RequestBuilderContext` - the added Content-Type row
+
+```typescript
+getAutoContentType: () => AutoContentType | null
+setAutoContentType: (auto: AutoContentType | null) => void
+```
+
+Which `Content-Type` row a body mode added on its way in, so that leaving the
+mode can take it back. GraphQL is sent as a JSON envelope and genuinely needs
+`Content-Type: application/json`, so `BodyPanel` appends one - but nothing
+removed it, so a single visit to GraphQL left the header on the request for
+good, including after switching back to `none`, which sends no body at all.
+
+The record is `{ requestId, rowId, value }` and the rule that reads it is
+`switchContentType` in
+`modules/request-builder/components/RequestTabs/panels/body/content-type.ts`,
+called once per mode change: it removes the remembered row when the new mode
+does not need that same header, then adds whatever the new mode does need.
+
+Three things it is deliberate about:
+
+- **By row id, not by value.** A `Content-Type` the user typed and the row the
+  panel wrote are identical apart from their id, and only ours may be removed.
+- **A row whose value has been edited is no longer ours** - retyping it is a
+  decision, so it stays and the record is dropped. Merely disabling it is not.
+- **A record naming another request is dropped, not applied.** One provider
+  serves every request tab, and row ids are not unique across a duplicated
+  request.
+
+In the provider rather than in `BodyPanel` for the drafts' reason and one of its
+own: Radix unmounts an inactive `TabsContent`, so a panel-local record is gone
+by the next mode change - and then nothing removes the header, which is the bug
+the record exists to fix. Ephemeral, like the drafts: what is persisted is the
+header row itself, in `request.headers`.
+
 ### `useSaveManager()` - Auto-Save Manager
 
 Orchestrates auto-save for a saveable entity (request, environment, etc.) with debouncing, context registration, and centralized save state tracking. Located in `app/src/hooks/useSaveManager.ts`.

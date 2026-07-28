@@ -54,6 +54,9 @@ function renderPanel(overrides: Partial<RequestState> = {}) {
 		// BodyPanel stashes through these on a mode change.
 		getBodyDrafts: () => emptyDrafts(request.id),
 		setBodyDrafts: () => {},
+		// And remembers the Content-Type row it wrote through these.
+		getAutoContentType: () => null,
+		setAutoContentType: () => {},
 		resolveString: (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_m, n) => `resolved-${n}`),
 		// The form-data / urlencoded modes render the key/value table, which
 		// reaches VariableInput for every cell.
