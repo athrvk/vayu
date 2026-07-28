@@ -154,11 +154,13 @@ function parsePostman(parsed: any, opts: ImportOptions, formatName: string): Imp
 	return {
 		collections: [root],
 		environments: [], // collection files don't embed environments
+		globals: {}, // nor globals - both are separate exports, see postman-environment.ts
 		meta: {
 			format: formatName,
 			requestCount: ctx.requestCount,
 			folderCount: ctx.folderCount,
 			environmentCount: 0,
+			globalCount: 0,
 			skipped,
 			nonExecutableAuth: ctx.nonExecutableAuth,
 		},

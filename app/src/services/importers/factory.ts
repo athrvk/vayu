@@ -9,6 +9,7 @@ import yaml from "js-yaml";
 import type { ImportOptions, ImportParser, ImportResult } from "./types";
 import { UnrecognisedFormatError } from "./types";
 import { PostmanV21Parser, PostmanV20Parser } from "./postman";
+import { PostmanEnvironmentParser } from "./postman-environment";
 import { InsomniaV4Parser } from "./insomnia-v4";
 import { OpenApiV3Parser } from "./openapi-v3";
 import { OpenApiV2Parser } from "./openapi-v2";
@@ -17,6 +18,9 @@ import { OpenApiV2Parser } from "./openapi-v2";
 const PARSERS: ImportParser[] = [
 	new PostmanV21Parser(),
 	new PostmanV20Parser(),
+	// An environment export carries neither `info` nor `item[]`, so v2.0's
+	// permissive fallback branch cannot claim it and this position is not load-bearing.
+	new PostmanEnvironmentParser(),
 	new InsomniaV4Parser(),
 	new OpenApiV3Parser(),
 	new OpenApiV2Parser(),

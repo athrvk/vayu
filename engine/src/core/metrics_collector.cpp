@@ -58,18 +58,27 @@ MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorC
     // Pre-allocate vectors to avoid reallocation during test
     size_t expected = config_.expected_requests;
 
+    // Both reserves below are capped. They derive from `expected_requests`,
+    // which is duration x RPS and has no ceiling of its own, so a long run at a
+    // high rate asks for an allocation that simply cannot be served - and it
+    // throws from here, inside RunContext's constructor, which the route calls
+    // *after* it has written the run row. The caller sees an opaque 500 and the
+    // row sits `pending` forever. Capping only costs a reallocation on a run
+    // that big; the vectors still grow to whatever the run actually produces.
+    const size_t max_reserve = constants::metrics_collector::MAX_RESERVE_RECORDS;
+
     // Reserve errors vector (assume ~5% error rate max)
     size_t error_reserve = config_.max_errors > 0 ?
     config_.max_errors :
     std::max (expected / 20U, size_t (10000));
-    errors_.reserve (error_reserve);
+    errors_.reserve (std::min (error_reserve, max_reserve));
 
     // Reserve success results if storing traces
     if (config_.store_success_traces) {
         size_t success_reserve = config_.max_success_results > 0 ?
         config_.max_success_results :
         expected / config_.success_sample_rate;
-        success_results_.reserve (success_reserve);
+        success_results_.reserve (std::min (success_reserve, max_reserve));
     }
 
     // Reserve response samples for script validation

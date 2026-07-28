@@ -21,6 +21,8 @@ import type { ImportApplyRequest } from "@/types";
 const FIXTURES = [
 	"postman-v21.json",
 	"postman-v20.json",
+	"postman-environment.json",
+	"postman-globals.json",
 	"insomnia-v4.json",
 	"openapi-v3.json",
 	"swagger-v2.json",
@@ -116,6 +118,10 @@ async function capturePayload(result: ImportResult): Promise<ImportApplyRequest>
 			}
 			return { idMap };
 		}),
+		// Globals are a singleton, not a payload item - a globals-only fixture must
+		// still reach applyImport with an empty tree rather than skipping the call.
+		getGlobals: vi.fn(async () => ({ id: "globals", variables: {}, updatedAt: "0" })),
+		updateGlobals: vi.fn(async (variables) => ({ id: "globals", variables, updatedAt: "1" })),
 	};
 	await new ImportOrchestrator(api).run(result, opts);
 	return captured!;
@@ -127,10 +133,17 @@ describe("import payload parity with the per-item path", () => {
 			const result = assignTempIds(loadFixture(name));
 			const legacy = legacyCreates(result, opts);
 
-			// A fixture that parsed to nothing would make every assertion below
-			// vacuous.
-			expect(legacy.collections.length).toBeGreaterThan(0);
-			expect(legacy.requests.length).toBeGreaterThan(0);
+			// A fixture that parsed to nothing would make the comparison below
+			// vacuous. Environment- and globals-only exports legitimately carry no
+			// tree, so the guard counts every parsed item rather than requiring
+			// collections - what it must never pass on is a fixture that parsed to
+			// nothing at all.
+			const parsedItems =
+				legacy.collections.length +
+				legacy.requests.length +
+				legacy.environments.length +
+				Object.keys(result.globals).length;
+			expect(parsedItems).toBeGreaterThan(0);
 
 			expect(asLegacyShape(await capturePayload(result))).toEqual(legacy);
 		});

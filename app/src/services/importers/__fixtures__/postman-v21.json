@@ -1,10 +1,10 @@
 {
 	"info": {
-		"name": "Acme API",
+		"name": "Sample API",
 		"description": "Demo",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
-	"variable": [{ "key": "baseUrl", "value": "https://api.acme.com" }],
+	"variable": [{ "key": "baseUrl", "value": "https://api.example.com" }],
 	"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
 	"event": [{ "listen": "prerequest", "script": { "exec": ["console.log('pre')"] } }],
 	"item": [

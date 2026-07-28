@@ -29,6 +29,7 @@ import { ChevronRight } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useTabsStore } from "@/stores";
 import { MethodBadge, TruncatedText } from "@/components/shared";
+import { Eyebrow } from "@/components/ui";
 import type { Run } from "@/types";
 
 const RECENT_RUN_LIMIT = 5;
@@ -59,9 +60,7 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 
 	return (
 		<section>
-			<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-				Recent runs
-			</p>
+			<Eyebrow className="mb-2">Recent runs</Eyebrow>
 			<div className="flex flex-col">
 				{recent.map((run) => {
 					const status = statusLabel(run.status);

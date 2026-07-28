@@ -8,7 +8,7 @@
 			"name": "Get thing",
 			"request": {
 				"method": "GET",
-				"url": "https://api.legacy.com/things?id=5",
+				"url": "https://legacy.example.com/things?id=5",
 				"auth": { "type": "bearer", "bearer": { "token": "LEGACY" } }
 			}
 		}

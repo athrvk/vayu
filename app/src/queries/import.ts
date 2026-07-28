@@ -16,6 +16,8 @@ import type { ImportOptions, ImportResult } from "@/services/importers/types";
 export function createImportApi(): ImportApi {
 	return {
 		applyImport: (payload) => apiService.applyImport(payload),
+		getGlobals: () => apiService.getGlobals(),
+		updateGlobals: (variables) => apiService.updateGlobals(variables),
 	};
 }
 
@@ -30,6 +32,9 @@ export function useImportMutation() {
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 			queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+			// A Postman globals export writes the globals singleton; without this the
+			// imported variables sit on the engine unread until the next reload.
+			queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
 		},
 	});
 }

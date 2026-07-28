@@ -22,9 +22,10 @@
  * Used by both the Pre-request and Post-request tabs in CollectionDetail.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, Button, CodeEditor } from "@/components/ui";
+import { useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed } from "./shared";
@@ -46,32 +47,25 @@ const QUICK_REF: Array<[string, string]> = [
 export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 	const isPre = kind === "pre";
 	const fieldKey = isPre ? "preRequestScript" : "postRequestScript";
-	const initial = collection[fieldKey] ?? "";
 
-	const [script, setScript] = useState(initial);
 	const [showRef, setShowRef] = useState(false);
 	const updateCollection = useUpdateCollectionMutation();
 
-	// Resync the editable script draft when the collection or script kind
-	// (pre/post) changes (component renders inline, not remounted per-collection).
-	// Can't be derived: `script` is a user-editable Monaco draft that
-	// intentionally diverges from props between edits and save. A value-keyed
-	// render-phase reset would miss switches to a different collection whose
-	// script happens to equal the current draft.
-	useEffect(() => {
-		// eslint-disable-next-line react-hooks/set-state-in-effect
-		setScript(collection[fieldKey] ?? "");
-	}, [collection.id, collection, fieldKey]);
-
-	// The other half of that resync - see AuthTab. This component is reused
-	// across collection switches, and a mutation holds `isError` until the next
-	// mutate, so the failure notice has to be cleared with the draft.
-	const resetSave = updateCollection.reset;
-	useEffect(() => {
-		resetSave();
-	}, [collection.id, resetSave]);
-
-	const isDirty = script !== (collection[fieldKey] ?? "");
+	// Draft/resync/isDirty/mutation-reset all live in the shared hook - the
+	// three collection tabs used to hand-roll it one each. See useEntityDraft.
+	//
+	// The kind is part of the entity key: pre and post are two different things
+	// to edit, even though only one of them is mounted at a time (the tab shell
+	// renders just the active panel).
+	const {
+		draft: script,
+		setDraft: setScript,
+		isDirty,
+	} = useEntityDraft<string>({
+		entityKey: `${collection.id}:${fieldKey}`,
+		value: collection[fieldKey] ?? "",
+		mutation: updateCollection,
+	});
 
 	const usedVars = useMemo(() => {
 		const envPattern =

@@ -212,6 +212,51 @@ export interface ResolvedVariable {
 	secret?: boolean;
 	type?: VariableValue["type"];
 	typedValue?: unknown;
+	/**
+	 * Which collection or environment this value came from. Absent for `global`,
+	 * which is a singleton and has no name to give.
+	 *
+	 * These sat on `VariableInfo` for a long time, declared and never written by
+	 * anything in `src/` - so the popover could say a variable came from "an
+	 * environment" but not *which* one, in an app where having several is the
+	 * point. Moved down to `ResolvedVariable` because the resolver is what knows,
+	 * and it produces this type.
+	 */
+	sourceId?: string;
+	sourceName?: string;
+}
+
+/**
+ * One definition of a variable name, at one scope.
+ *
+ * The resolver flattens every scope into a single winner, which is all execution
+ * needs and strictly less than the UI needs: "why is this the value?" cannot be
+ * answered from the winner alone. Two cases in particular are invisible without
+ * the losers - a name defined at several scopes, and a name whose highest-scope
+ * definition is *disabled*, which is the most common reason a value is not the
+ * one you expected.
+ *
+ * Disabled definitions are therefore kept here even though they never resolve.
+ */
+export interface VariableOrigin {
+	scope: VariableScope;
+	/** Absent for `global`, as on ResolvedVariable. */
+	sourceId?: string;
+	sourceName?: string;
+	value: string;
+	secret?: boolean;
+	/** The declared conversion, carried so the winner can rebuild `typedValue`. */
+	type?: VariableValue["type"];
+	/** A disabled definition is listed but never wins. */
+	enabled: boolean;
+	/**
+	 * The definition that actually resolves. Exactly one origin per name carries
+	 * this, unless every definition is disabled, in which case none does.
+	 *
+	 * Explicit rather than "the last one", because precedence order and win order
+	 * are not the same list once disabled definitions are included.
+	 */
+	winner: boolean;
 }
 
 /**
@@ -219,8 +264,6 @@ export interface ResolvedVariable {
  */
 export interface VariableInfo extends ResolvedVariable {
 	name: string;
-	sourceId?: string; // Collection ID or Environment ID
-	sourceName?: string; // Collection name or Environment name
 }
 
 /**
@@ -388,7 +431,13 @@ export interface LoadTestConfig {
 	ramp_duration_seconds?: number;
 	/** Ramp-Up only: connections at t=0, climbing to `concurrency`. */
 	start_concurrency?: number;
-	data_sample_rate?: number;
+	/**
+	 * Sampling **period** for stored success traces - keep 1 in N, engine-side
+	 * `counter % N`. Named for the unit on purpose: the dialog's control is a
+	 * percentage, and the two used to be the same number, so the slider meant
+	 * the inverse of its own label. `successSamplePeriod` does the conversion.
+	 */
+	success_sample_period?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
 	comment?: string;
@@ -594,7 +643,14 @@ export interface ConfigEntry {
 }
 
 /** Client-side settings panels (localStorage-backed prefs, rendered by app panels). */
-export type ClientSettingsCategory = "appearance" | "editor" | "dashboard" | "general" | "mcp";
+export type ClientSettingsCategory =
+	| "appearance"
+	| "editor"
+	| "dashboard"
+	| "load-testing"
+	| "notifications"
+	| "general"
+	| "mcp";
 
 /** Engine settings categories (data-driven from the engine `/config` API). */
 export type EngineSettingsCategory =

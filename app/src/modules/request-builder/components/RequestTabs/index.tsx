@@ -11,15 +11,15 @@
  * Tab navigation and content panels for request configuration
  */
 
-import { Tabs, TabsContent, TabsList, TabsTrigger, Badge } from "@/components/ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
 import type { RequestTab, TabInfo } from "../../types";
+import InfoPanel from "./panels/InfoPanel";
 import ParamsPanel from "./panels/ParamsPanel";
 import HeadersPanel from "./panels/HeadersPanel";
 import BodyPanel from "./panels/BodyPanel";
 import AuthPanel from "./panels/AuthPanel";
-import PreScriptPanel from "./panels/PreScriptPanel";
-import TestScriptPanel from "./panels/TestScriptPanel";
+import ScriptPanel from "./panels/script/ScriptPanel";
 import SettingsPanel from "./panels/SettingsPanel";
 import { isRedirectPolicyNonDefault } from "../../utils/request-state";
 
@@ -28,6 +28,18 @@ export default function RequestTabs() {
 
 	// Calculate badges for tabs
 	const tabs: TabInfo[] = [
+		{
+			/*
+			 * First, deliberately. A description is the first thing you want to
+			 * read about a request and the last thing you find at the end of a
+			 * tab row. The badge is `1` for "there is something here" rather than
+			 * a count, which is exactly what Body, Auth, Pre-request, Tests and
+			 * Settings already do - so it needs no new primitive.
+			 */
+			id: "info",
+			label: "Info",
+			badge: request.description?.trim() ? 1 : undefined,
+		},
 		{
 			id: "params",
 			label: "Params",
@@ -74,22 +86,11 @@ export default function RequestTabs() {
 			className="flex-1 flex flex-col overflow-hidden"
 		>
 			{/* Tab Headers */}
-			<TabsList className="flex w-full justify-start border-b border-border bg-transparent h-auto p-0 overflow-x-auto overflow-y-hidden flex-nowrap">
+			<TabsList className="w-full overflow-x-auto overflow-y-hidden flex-nowrap px-1">
 				{tabs.map((tab) => (
-					<TabsTrigger
-						key={tab.id}
-						value={tab.id}
-						className="relative shrink-0 border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2.5 text-sm font-medium"
-					>
-						{tab.label}
-						{tab.badge !== undefined && (
-							<Badge
-								variant="secondary"
-								className="ml-1.5 h-5 min-w-[20px] px-1.5 text-xs"
-							>
-								{tab.badge}
-							</Badge>
-						)}
+					<TabsTrigger key={tab.id} value={tab.id}>
+						<TabLabel>{tab.label}</TabLabel>
+						{tab.badge !== undefined && <TabCount value={tab.badge} />}
 					</TabsTrigger>
 				))}
 			</TabsList>
@@ -119,6 +120,8 @@ function TabContent() {
 	const { activeTab } = useRequestBuilderContext();
 
 	switch (activeTab) {
+		case "info":
+			return <InfoPanel />;
 		case "params":
 			return <ParamsPanel />;
 		case "headers":
@@ -128,9 +131,9 @@ function TabContent() {
 		case "auth":
 			return <AuthPanel />;
 		case "pre-script":
-			return <PreScriptPanel />;
+			return <ScriptPanel variant="pre" />;
 		case "test-script":
-			return <TestScriptPanel />;
+			return <ScriptPanel variant="post" />;
 		case "settings":
 			return <SettingsPanel />;
 		default:

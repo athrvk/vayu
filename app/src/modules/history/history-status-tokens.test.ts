@@ -20,10 +20,12 @@
  *     `--status-success` icon.
  *
  * The discriminator is *what the colour means*, not whether it is paired.
- * Deliberately excluded below: `TimingBreakdown` (DNS/connect/TLS/TTFB/download
- * phases) and `OverviewTab`'s status-code tiles are the documented decorative
- * categorical palettes - fixed identity, no state - and design-system.md names
- * them as the token exception. Scanning them would be a false positive.
+ *
+ * `TimingBreakdown` (DNS/connect/TLS/TTFB/download phases) used to be excluded
+ * here as a documented decorative categorical palette. It no longer exists:
+ * #76 folded it into the shared `TimingPhaseTiles`, whose tiles are neutral,
+ * and moved the per-phase hues to `--chart-*` in `timing-phases.ts`. The
+ * exception it stood on is gone from design-system.md with it.
  */
 
 import { describe, it, expect } from "vitest";

@@ -2,20 +2,36 @@ import { describe, it, expect, vi } from "vitest";
 import { ImportOrchestrator, type ImportApi } from "./orchestrator";
 import { assignTempIds } from "./assign-ids";
 import type { ImportResult } from "./types";
-import type { ImportApplyRequest } from "@/types";
+import type { ImportApplyRequest, VariableValue } from "@/types";
 
 /**
  * Fake engine. `idMap` echoes every tempId it was sent unless `drop` names one,
  * which is how the "engine skipped an item" path is exercised.
+ *
+ * Globals are not part of the bulk payload - the engine keeps them as a
+ * singleton - so the fake tracks that read/write pair separately, and `order`
+ * records the sequence the two writes actually happened in.
  */
-function fakeApi(options: { drop?: string[]; reject?: Error } = {}): {
+function fakeApi(
+	options: {
+		drop?: string[];
+		reject?: Error;
+		existingGlobals?: Record<string, VariableValue>;
+		rejectGlobals?: Error;
+	} = {}
+): {
 	api: ImportApi;
 	calls: ImportApplyRequest[];
+	globals: { reads: number; writes: Record<string, VariableValue>[] };
+	order: string[];
 } {
 	const calls: ImportApplyRequest[] = [];
+	const globals = { reads: 0, writes: [] as Record<string, VariableValue>[] };
+	const order: string[] = [];
 	const api: ImportApi = {
 		applyImport: vi.fn(async (payload: ImportApplyRequest) => {
 			calls.push(payload);
+			order.push("apply");
 			if (options.reject) throw options.reject;
 			const idMap: Record<string, string> = {};
 			const prefix = { collections: "col_", requests: "req_", environments: "env_" } as const;
@@ -27,8 +43,18 @@ function fakeApi(options: { drop?: string[]; reject?: Error } = {}): {
 			}
 			return { idMap };
 		}),
+		getGlobals: vi.fn(async () => {
+			globals.reads++;
+			return { id: "globals", variables: options.existingGlobals ?? {}, updatedAt: "0" };
+		}),
+		updateGlobals: vi.fn(async (variables: Record<string, VariableValue>) => {
+			order.push("globals");
+			if (options.rejectGlobals) throw options.rejectGlobals;
+			globals.writes.push(variables);
+			return { id: "globals", variables, updatedAt: "1" };
+		}),
 	};
-	return { api, calls };
+	return { api, calls, globals, order };
 }
 
 function fixture(): ImportResult {
@@ -85,11 +111,13 @@ function fixture(): ImportResult {
 		environments: [
 			{ name: "Prod", description: "d", variables: { a: { value: "1", enabled: true } } },
 		],
+		globals: {},
 		meta: {
 			format: "x",
 			requestCount: 2,
 			folderCount: 1,
 			environmentCount: 1,
+			globalCount: 0,
 			skipped: [],
 			nonExecutableAuth: 0,
 		},
@@ -176,11 +204,13 @@ describe("ImportOrchestrator", () => {
 				},
 			],
 			environments: [{ name: "e", description: "", variables: {} }],
+			globals: {},
 			meta: {
 				format: "x",
 				requestCount: 0,
 				folderCount: 1,
 				environmentCount: 1,
+				globalCount: 0,
 				skipped: [],
 				nonExecutableAuth: 0,
 			},
@@ -189,5 +219,106 @@ describe("ImportOrchestrator", () => {
 			/assignTempIds/
 		);
 		expect(calls).toHaveLength(0);
+	});
+
+	describe("globals", () => {
+		/** A globals-only result, the shape a Postman globals export parses to. */
+		function globalsFixture(globals: Record<string, VariableValue>): ImportResult {
+			return assignTempIds({
+				collections: [],
+				environments: [],
+				globals,
+				meta: {
+					format: "Postman Globals",
+					requestCount: 0,
+					folderCount: 0,
+					environmentCount: 0,
+					globalCount: Object.keys(globals).length,
+					skipped: [],
+					nonExecutableAuth: 0,
+				},
+			});
+		}
+
+		it("merges into the existing set rather than replacing it", async () => {
+			// POST /globals replaces everything, so a write that is not a merge would
+			// delete `keep` - the whole reason applyGlobals reads first.
+			const { api, globals } = fakeApi({
+				existingGlobals: { keep: { value: "old", enabled: true } },
+			});
+			await new ImportOrchestrator(api).run(
+				globalsFixture({ fresh: { value: "new", enabled: true } }),
+				opts
+			);
+			expect(globals.writes).toHaveLength(1);
+			expect(globals.writes[0]).toEqual({
+				keep: { value: "old", enabled: true },
+				fresh: { value: "new", enabled: true },
+			});
+		});
+
+		it("lets the imported value win a name collision", async () => {
+			const { api, globals } = fakeApi({
+				existingGlobals: { token: { value: "old", enabled: true } },
+			});
+			await new ImportOrchestrator(api).run(
+				globalsFixture({ token: { value: "imported", enabled: true } }),
+				opts
+			);
+			expect(globals.writes[0].token).toEqual({ value: "imported", enabled: true });
+		});
+
+		it("neither reads nor writes globals when the result has none", async () => {
+			// Every other format lands here; an import must not touch the globals scope.
+			const { api, globals } = fakeApi();
+			await new ImportOrchestrator(api).run(fixture(), opts);
+			expect(globals.reads).toBe(0);
+			expect(globals.writes).toHaveLength(0);
+		});
+
+		it("skips globals when importEnvironments=false", async () => {
+			const { api, globals } = fakeApi();
+			await new ImportOrchestrator(api).run(
+				globalsFixture({ a: { value: "1", enabled: true } }),
+				{ ...opts, importEnvironments: false }
+			);
+			expect(globals.reads).toBe(0);
+			expect(globals.writes).toHaveLength(0);
+		});
+
+		it("does not touch globals when the bulk apply fails", async () => {
+			// The apply is atomic, so a failed import created nothing - and the globals
+			// singleton is the one thing here that would outlive it.
+			const { api, globals } = fakeApi({ reject: new Error("boom") });
+			const result = globalsFixture({ g: { value: "1", enabled: true } });
+			await expect(new ImportOrchestrator(api).run(result, opts)).rejects.toThrow("boom");
+			expect(globals.reads).toBe(0);
+			expect(globals.writes).toHaveLength(0);
+		});
+
+		it("surfaces a failed globals write with the imported tree already committed", async () => {
+			// The engine call is atomic but the globals write is a second, separate
+			// request, so this is the one partial outcome left: the tree landed and the
+			// globals did not. The error must reach the user rather than be swallowed -
+			// there is no rollback to undo an atomic apply that succeeded.
+			const { api, calls } = fakeApi({ rejectGlobals: new Error("globals boom") });
+			const result = fixture();
+			result.globals = { g: { value: "1", enabled: true } };
+			result.meta.globalCount = 1;
+			await expect(new ImportOrchestrator(api).run(result, opts)).rejects.toThrow(
+				"globals boom"
+			);
+			expect(calls).toHaveLength(1);
+		});
+
+		it("writes globals only after the bulk apply has landed", async () => {
+			// Ordering is load-bearing: globals is the one write that can destroy data the
+			// import did not create, so nothing may fail behind it.
+			const { api, order } = fakeApi();
+			const result = fixture();
+			result.globals = { g: { value: "1", enabled: true } };
+			await new ImportOrchestrator(api).run(result, opts);
+			expect(order).toEqual(["apply", "globals"]);
+		});
 	});
 });

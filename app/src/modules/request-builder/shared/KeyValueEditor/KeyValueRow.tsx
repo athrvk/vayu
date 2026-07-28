@@ -6,14 +6,19 @@
  */
 
 /**
- * KeyValueRow Component
+ * One row of the key/value table.
  *
- * Single row in the KeyValueEditor with variable support
+ * `h-8` fields at a 36px pitch, down from `h-9` in a `p-1` row at 48px. This is
+ * the densest table in the app and it was the loosest thing in the panel.
+ *
+ * The resolved value moved out of a column and into `ResolvedPeek` - see the
+ * note there for why, and for how it stays out of the way of the variable
+ * token's own popover.
  */
 
 import { memo } from "react";
-import { Trash2 } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Trash2, Sigma } from "lucide-react";
+import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { KeyValueItem } from "../../types";
 import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
@@ -30,8 +35,47 @@ interface KeyValueRowProps {
 	onUpdate: (id: string, field: keyof KeyValueItem, value: string | boolean) => void;
 	onRemove: (id: string) => void;
 	canRemove?: boolean;
-	canEdit?: boolean;
+	/** Per field - see the note at the call site in KeyValueEditor. */
+	canEditKey?: boolean;
+	canEditValue?: boolean;
 	canDisable?: boolean;
+}
+
+/**
+ * The resolved form of a row that contains `{{variables}}`, on demand.
+ *
+ * It used to be a column holding an equal third of the table, printing
+ * `key=value` - the two cells to its left, joined - on every row whether or not
+ * anything in it resolved. Most rows have no variable, so most of that third
+ * was an echo.
+ *
+ * **A marker rather than bare row-hover.** Hovering the row itself would fire
+ * underneath the variable token's own tooltip, which already answers "what does
+ * *this* variable resolve to" - two hover surfaces in one space, one of them
+ * invisible. This is a separate target with its own column, so the two never
+ * overlap: the token answers for itself, the marker answers for the whole line.
+ *
+ * It renders only where there is something to resolve, so the column is empty
+ * on an ordinary row and the marker is its own affordance - the alternative was
+ * a hover with nothing on screen to say it existed.
+ */
+function ResolvedPeek({ label, resolved }: { label: string; resolved: string }) {
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<button
+					type="button"
+					aria-label={`Resolved value of ${label}`}
+					className="flex h-8 w-5 items-center justify-center rounded-md text-subtle-foreground transition-colors hover:text-primary-text focus-visible:text-primary-text focus-visible:outline-none"
+				>
+					<Sigma className="h-3 w-3" />
+				</button>
+			</TooltipTrigger>
+			<TooltipContent side="left" className="max-w-md">
+				<span className="font-mono break-all">{resolved}</span>
+			</TooltipContent>
+		</Tooltip>
+	);
 }
 
 function KeyValueRow({
@@ -45,37 +89,40 @@ function KeyValueRow({
 	onUpdate,
 	onRemove,
 	canRemove = true,
-	canEdit = true,
+	canEditKey = true,
+	canEditValue = true,
 	canDisable = true,
 }: KeyValueRowProps) {
 	const { resolveString } = useRequestBuilderContext();
 
 	const resolvedKey = resolveString(item.key);
 	const resolvedValue = resolveString(item.value);
-	const hasVariableInKey = item.key !== resolvedKey;
-	const hasVariableInValue = item.value !== resolvedValue;
+	/*
+	 * "Contains a variable" is exactly "resolving changed something". A row whose
+	 * text is already literal has nothing to peek at, which is the condition the
+	 * marker keys off.
+	 */
+	const hasVariables = item.key !== resolvedKey || item.value !== resolvedValue;
 
-	const isProtected = !canEdit || !canRemove || !canDisable;
-	const isReadOnly = readOnly || !canEdit;
+	const keyReadOnly = readOnly || !canEditKey;
+	const valueReadOnly = readOnly || !canEditValue;
+	const isProtected = !canEditKey || !canEditValue || !canRemove || !canDisable;
 
 	return (
 		<div
 			className={cn(
-				"grid gap-2 items-center group p-1",
-				showResolved
-					? "grid-cols-[24px_1fr_1fr_1fr_32px]"
-					: "grid-cols-[24px_1fr_1fr_32px]",
+				"grid gap-2 items-center group px-1 py-0.5 rounded-md",
+				"grid-cols-[24px_1fr_1fr_20px_28px]",
 				!item.enabled && "opacity-50",
 				isProtected && "bg-muted/30"
 			)}
 		>
-			{/* Enable/Disable Checkbox */}
 			{allowDisable ? (
 				<input
 					type="checkbox"
 					checked={item.enabled}
 					onChange={(e) => onUpdate(item.id, "enabled", e.target.checked)}
-					disabled={isReadOnly || !canDisable}
+					disabled={keyReadOnly || !canDisable}
 					// Named after the row it governs. Without this it announced as
 					// a bare "checkbox", giving no clue which row it enables - and
 					// there is one per row.
@@ -94,61 +141,38 @@ function KeyValueRow({
 				<div className="w-4" />
 			)}
 
-			{/* Key Input */}
 			<VariableInput
 				value={item.key}
 				onChange={(v) => onUpdate(item.id, "key", v)}
 				placeholder={keyPlaceholder}
-				disabled={isReadOnly || !item.enabled}
+				disabled={keyReadOnly || !item.enabled}
 				suggestions={keySuggestions}
+				className="h-8"
 			/>
 
-			{/* Value Input */}
 			<VariableInput
 				value={item.value}
 				onChange={(v) => onUpdate(item.id, "value", v)}
 				placeholder={valuePlaceholder}
-				disabled={isReadOnly || !item.enabled}
+				disabled={valueReadOnly || !item.enabled}
+				className="h-8"
 			/>
 
-			{/* Resolved Preview */}
-			{showResolved && (
-				<div className="flex items-center min-w-0">
-					{/*
-					 * `rounded-md`, so the preview follows Settings → Appearance →
-					 * Roundedness like every other box. With no radius class at all it
-					 * was pinned square at every setting - the same escape hatch as a
-					 * bare `rounded`, in the other direction.
-					 *
-					 * `truncate` alone: it sets `overflow: hidden`, which the old
-					 * `overflow-x-auto` beside it contradicted outright. Nothing
-					 * scrolled; the ellipsis just fought a scrollbar that could not
-					 * appear.
-					 */}
-					<div className="truncate rounded-md text-sm font-mono text-muted-foreground bg-muted/50 px-2 py-1.5 w-full h-9 flex items-center">
-						{item.enabled && (resolvedKey || resolvedValue) ? (
-							<>
-								<span className={hasVariableInKey ? "text-primary" : ""}>
-									{resolvedKey}
-								</span>
-								{resolvedKey && resolvedValue && <span>=</span>}
-								<span className={hasVariableInValue ? "text-primary" : ""}>
-									{resolvedValue}
-								</span>
-							</>
-						) : (
-							<span className="italic text-muted-foreground">-</span>
-						)}
-					</div>
-				</div>
-			)}
+			{/* Empty on an ordinary row; the column keeps the grid aligned. */}
+			<div className="flex items-center justify-center">
+				{showResolved && item.enabled && hasVariables && (
+					<ResolvedPeek
+						label={item.key || "this row"}
+						resolved={resolvedValue ? `${resolvedKey}: ${resolvedValue}` : resolvedKey}
+					/>
+				)}
+			</div>
 
-			{/* Remove Button */}
 			<Button
 				size="icon"
 				variant="rowActionDestructive"
 				onClick={() => onRemove(item.id)}
-				disabled={isReadOnly || !canRemove}
+				disabled={keyReadOnly || !canRemove}
 				aria-label="Remove row"
 				className={cn(
 					// `focus-visible:opacity-100` is not decoration. The button was
@@ -156,13 +180,13 @@ function KeyValueRow({
 					// headers table landed on a fully transparent control - including
 					// its focus ring - once per row, and Enter there silently deleted
 					// the row they could not see they were on.
-					"h-8 w-8 transition-opacity focus-visible:opacity-100",
+					"h-7 w-7 transition-opacity focus-visible:opacity-100",
 					!canRemove
 						? "opacity-0 cursor-not-allowed"
 						: "opacity-0 group-hover:opacity-100"
 				)}
 			>
-				<Trash2 className="w-4 h-4" />
+				<Trash2 className="w-3.5 h-3.5" />
 			</Button>
 		</div>
 	);

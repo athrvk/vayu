@@ -32,6 +32,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
+import { TooltipProvider } from "@/components/ui";
 import VariableInput from "./index";
 
 vi.mock("../../context/RequestBuilderContext", () => ({
@@ -39,6 +40,10 @@ vi.mock("../../context/RequestBuilderContext", () => ({
 		getAllVariables: () => ({
 			base_url: { value: "https://api.example.com", scope: "global" },
 		}),
+		// The token now hovers to a tooltip and its popover lists every other
+		// definition, so the stub owes both of these.
+		getVariableOrigins: () => [],
+		writableScopes: [],
 		updateVariable: () => {},
 		resolveString: (s: string) => s,
 	}),
@@ -47,7 +52,9 @@ vi.mock("../../context/RequestBuilderContext", () => ({
 /** The input rendered with a variable in it, which is what builds the overlay. */
 function withVariable() {
 	const { container } = render(
-		<VariableInput value="{{base_url}}/users" onChange={() => {}} placeholder="URL" />
+		<TooltipProvider>
+			<VariableInput value="{{base_url}}/users" onChange={() => {}} placeholder="URL" />
+		</TooltipProvider>
 	);
 	return container;
 }

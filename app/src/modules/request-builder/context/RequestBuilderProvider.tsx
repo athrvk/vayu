@@ -18,6 +18,7 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { RequestBuilderContext } from "./RequestBuilderContext";
+import { emptyDrafts, type BodyDrafts } from "../utils/body-drafts";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import {
 	useGlobalsQuery,
@@ -31,6 +32,7 @@ import {
 import { useSessionStore, useResponseStore } from "@/stores";
 import type { ScriptPart, VariableValue } from "@/types";
 import type {
+	AutoContentType,
 	RequestState,
 	ResponseState,
 	RequestTab,
@@ -177,11 +179,48 @@ export default function RequestBuilderProvider({
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
+	/*
+	 * What the body modes you are not looking at were holding. It lives here
+	 * rather than in `BodyPanel` because Radix unmounts an inactive
+	 * `TabsContent`: a panel-local ref is discarded the moment you glance at the
+	 * Headers tab, and your stashed JSON with it.
+	 *
+	 * Not reset by the request-change effect below, deliberately. The drafts
+	 * carry their own `requestId` and `switchBody` drops any that belong to
+	 * another request, so a second reset here would be a copy of that rule that
+	 * could fall out of step with it - and would fire on a *save*, when an
+	 * unsaved request is first assigned an id, wiping drafts the user still has.
+	 */
+	const bodyDraftsRef = useRef<BodyDrafts>(emptyDrafts(initialRequest?.id ?? null));
+	const getBodyDrafts = useCallback(() => bodyDraftsRef.current, []);
+	const setBodyDrafts = useCallback((drafts: BodyDrafts) => {
+		bodyDraftsRef.current = drafts;
+	}, []);
+
+	/*
+	 * The Content-Type row a body mode added on its way in, so leaving the mode
+	 * can remove it again. Here rather than in `BodyPanel` for the drafts' reason
+	 * and one of its own: the panel is unmounted whenever another tab is on
+	 * screen, so a panel-local record is gone by the next mode change - and then
+	 * the header outlives the mode that needed it, which is the bug the record
+	 * exists to fix.
+	 *
+	 * Not reset by the request-change effect below, for the same reason as the
+	 * drafts: the record names its own request and `switchContentType` drops one
+	 * belonging to another.
+	 */
+	const autoContentTypeRef = useRef<AutoContentType | null>(null);
+	const getAutoContentType = useCallback(() => autoContentTypeRef.current, []);
+	const setAutoContentType = useCallback((auto: AutoContentType | null) => {
+		autoContentTypeRef.current = auto;
+	}, []);
+
 	// Variable resolution
 	const {
 		resolveString,
 		getVariable: resolverGetVariable,
 		getAllVariables: resolverGetAllVariables,
+		getVariableOrigins,
 	} = useVariableResolver({ collectionId: collectionId || undefined });
 
 	// Variable update mutations
@@ -282,15 +321,47 @@ export default function RequestBuilderProvider({
 		[resolverGetVariable]
 	);
 
-	// Get all variables
-	const getAllVariables = useCallback((): Record<string, VariableInfo> => {
-		const vars = resolverGetAllVariables();
-		const result: Record<string, VariableInfo> = {};
-		for (const [name, source] of Object.entries(vars)) {
-			result[name] = { value: source.value, scope: source.scope, secret: source.secret };
-		}
-		return result;
-	}, [resolverGetAllVariables]);
+	// Get all variables.
+	//
+	// Passed through rather than re-picked field by field. The old version
+	// rebuilt each entry as `{ value, scope, secret }`, which silently dropped
+	// `sourceName` / `sourceId` (so the popover could name a scope but not the
+	// environment) along with `type` / `typedValue`. A hand-copied projection of
+	// a type is a place fields go to die; the resolver already produces exactly
+	// this shape.
+	const getAllVariables = useCallback(
+		(): Record<string, VariableInfo> => resolverGetAllVariables(),
+		[resolverGetAllVariables]
+	);
+
+	/*
+	 * Merge one variable into a scope's map.
+	 *
+	 * Written once rather than three times. The three branches below were
+	 * identical apart from where they wrote, and identical code in three places
+	 * is three places for a rule to diverge - which is what happened: each
+	 * spread the existing entry to keep its flags, so writing a value to a
+	 * variable that was **disabled** preserved `enabled: false`.
+	 *
+	 * That produced exactly the dead end the popover's Create button exists to
+	 * remove. A name disabled at every scope does not resolve, so the token is
+	 * red and the popover offers to create it; the write then landed on the
+	 * disabled entry, kept it disabled, and the token stayed red. The button
+	 * appeared to work and changed nothing visible.
+	 *
+	 * So a write through this path always enables. Setting a value here means
+	 * "make this value apply" - there is no caller for whom writing a value and
+	 * leaving it switched off is the intent, and the variables editor is where
+	 * enabling and disabling actually belongs.
+	 */
+	const mergeVariable = (
+		existing: Record<string, VariableValue> | undefined,
+		name: string,
+		newValue: string
+	): Record<string, VariableValue> => ({
+		...existing,
+		[name]: { ...existing?.[name], value: newValue, enabled: true },
+	});
 
 	// Update variable value
 	const updateVariable = useCallback(
@@ -298,41 +369,28 @@ export default function RequestBuilderProvider({
 			switch (scope) {
 				case "global": {
 					if (!globalsData?.variables) return;
-					const updatedVars: Record<string, VariableValue> = { ...globalsData.variables };
-					if (updatedVars[name]) {
-						updatedVars[name] = { ...updatedVars[name], value: newValue };
-					} else {
-						updatedVars[name] = { value: newValue, enabled: true };
-					}
-					updateGlobalsMutation.mutate({ variables: updatedVars });
+					updateGlobalsMutation.mutate({
+						variables: mergeVariable(globalsData.variables, name, newValue),
+					});
 					break;
 				}
 				case "collection": {
 					if (!collectionId) return;
 					const collection = collections.find((c) => c.id === collectionId);
 					if (!collection) return;
-					const updatedVars: Record<string, VariableValue> = { ...collection.variables };
-					if (updatedVars[name]) {
-						updatedVars[name] = { ...updatedVars[name], value: newValue };
-					} else {
-						updatedVars[name] = { value: newValue, enabled: true };
-					}
-					updateCollectionMutation.mutate({ id: collectionId, variables: updatedVars });
+					updateCollectionMutation.mutate({
+						id: collectionId,
+						variables: mergeVariable(collection.variables, name, newValue),
+					});
 					break;
 				}
 				case "environment": {
 					if (!activeEnvironmentId) return;
 					const environment = environments.find((e) => e.id === activeEnvironmentId);
 					if (!environment) return;
-					const updatedVars: Record<string, VariableValue> = { ...environment.variables };
-					if (updatedVars[name]) {
-						updatedVars[name] = { ...updatedVars[name], value: newValue };
-					} else {
-						updatedVars[name] = { value: newValue, enabled: true };
-					}
 					updateEnvironmentMutation.mutate({
 						id: activeEnvironmentId,
-						variables: updatedVars,
+						variables: mergeVariable(environment.variables, name, newValue),
 					});
 					break;
 				}
@@ -349,6 +407,26 @@ export default function RequestBuilderProvider({
 			updateEnvironmentMutation,
 		]
 	);
+
+	/*
+	 * Which scopes `updateVariable` would actually write to, derived from the
+	 * same three guards it opens each branch with.
+	 *
+	 * Kept beside it deliberately: this is the config-defined-in-one-branch,
+	 * re-derived-in-another shape that has bitten this codebase before, so if a
+	 * guard changes above, this list is the next thing in the file to change.
+	 * A caller that offers a scope not in here gets a silent no-op.
+	 */
+	const writableScopes = useMemo((): VariableScope[] => {
+		const scopes: VariableScope[] = [];
+		if (globalsData?.variables) scopes.push("global");
+		if (collectionId && collections.some((c) => c.id === collectionId))
+			scopes.push("collection");
+		if (activeEnvironmentId && environments.some((e) => e.id === activeEnvironmentId)) {
+			scopes.push("environment");
+		}
+		return scopes;
+	}, [globalsData, collections, collectionId, environments, activeEnvironmentId]);
 
 	// Execute request
 	const executeRequest = useCallback(async () => {
@@ -401,6 +479,10 @@ export default function RequestBuilderProvider({
 			request,
 			setRequest,
 			updateField,
+			getBodyDrafts,
+			setBodyDrafts,
+			getAutoContentType,
+			setAutoContentType,
 			response,
 			setResponse,
 			inheritedPreScripts,
@@ -417,7 +499,9 @@ export default function RequestBuilderProvider({
 			resolveVariables: resolveString,
 			getVariable,
 			getAllVariables,
+			getVariableOrigins,
 			updateVariable,
+			writableScopes,
 			executeRequest,
 			saveRequest,
 			startLoadTest,
@@ -427,6 +511,10 @@ export default function RequestBuilderProvider({
 			request,
 			setRequest,
 			updateField,
+			getBodyDrafts,
+			setBodyDrafts,
+			getAutoContentType,
+			setAutoContentType,
 			response,
 			setResponse,
 			inheritedPreScripts,
@@ -441,7 +529,9 @@ export default function RequestBuilderProvider({
 			resolveString,
 			getVariable,
 			getAllVariables,
+			getVariableOrigins,
 			updateVariable,
+			writableScopes,
 			executeRequest,
 			saveRequest,
 			startLoadTest,

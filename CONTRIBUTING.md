@@ -270,6 +270,11 @@ exits with "Config file 'mkdocs.yml' does not exist." The preview URL is
 `http://127.0.0.1:8000/vayu/` - the `/vayu/` prefix is there because the site is
 a project page served from a subdirectory, and `/` redirects to it.
 
+Site-only styling lives in `docs/stylesheets/extra.css` (accent, header, headings,
+landing page). It styles the documentation site, **not** the product - the token
+rules in [Design System](docs/design-system.md) do not apply to it, and it must
+never be used as a reference for app CSS.
+
 The site's favicon and header logo are **not** files under `docs/`.
 `.github/hooks/brand_assets.py` pulls `shared/icon_png/vayu_icon_256x256.png` into the
 build, so the docs share one icon with the installers and cannot drift from

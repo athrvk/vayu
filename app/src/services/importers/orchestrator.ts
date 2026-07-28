@@ -6,6 +6,8 @@
  */
 
 import type {
+	GlobalVariables,
+	VariableValue,
 	ImportApplyCollection,
 	ImportApplyEnvironment,
 	ImportApplyRequest,
@@ -17,6 +19,8 @@ import type { CollectionDraft, ImportOptions, ImportResult } from "./types";
 /** The subset of the API the orchestrator needs. Injected so it is easy to fake in tests. */
 export interface ImportApi {
 	applyImport(payload: ImportApplyRequest): Promise<ImportApplyResponse>;
+	getGlobals(): Promise<GlobalVariables>;
+	updateGlobals(variables: Record<string, VariableValue>): Promise<GlobalVariables>;
 }
 
 /**
@@ -30,6 +34,10 @@ export interface ImportApi {
  * atomic now (issue #96), so both the loop and the rollback are gone: either the
  * whole tree lands or nothing does, and a failure is the engine's 400 naming the
  * item that broke.
+ *
+ * Globals are the one part that `/import/apply` does not carry: they are an
+ * engine singleton behind `POST /globals`, not a tree item with a temp id, so
+ * they stay a separate write - see `applyGlobals`.
  */
 export class ImportOrchestrator {
 	constructor(private readonly api: ImportApi) {}
@@ -71,6 +79,31 @@ export class ImportOrchestrator {
 					.join(", ")})`
 			);
 		}
+
+		// Globals last, and deliberately so: `POST /globals` **replaces** the whole
+		// set, so it is the one write here that can destroy data the import did not
+		// create. Running it after the apply - and after the id-map check above -
+		// means nothing can fail behind it, so a failed import never leaves the
+		// user's globals half-rewritten. Do not reorder.
+		await this.applyGlobals(result, opts);
+	}
+
+	/**
+	 * Merge imported globals into the existing set. The engine has no merge verb -
+	 * a POST replaces everything - so the union is computed here from a fresh read.
+	 * Writing `result.globals` alone would silently delete every global the user
+	 * already had.
+	 *
+	 * On a key collision the imported value wins: the user explicitly asked for this
+	 * file's variables, and skipping them would be the silent no-op the issue calls
+	 * the worst outcome. Documented in `docs/app/import-collections/postman-environment.md`.
+	 */
+	private async applyGlobals(result: ImportResult, opts: ImportOptions): Promise<void> {
+		if (!opts.importEnvironments) return;
+		// No read, no write - every other format lands here and must not touch the scope.
+		if (Object.keys(result.globals).length === 0) return;
+		const existing = await this.api.getGlobals();
+		await this.api.updateGlobals({ ...existing.variables, ...result.globals });
 	}
 }
 

@@ -50,14 +50,26 @@ import {
 	ToastTitle,
 	ToastViewport,
 } from "@/components/ui/toast";
-import { useToastStore } from "@/stores";
+import { useToastStore, useClientSettingsStore } from "@/stores";
+import { toastPositionOption } from "@/constants/toast";
 
 export default function Toaster() {
 	const toasts = useToastStore((s) => s.toasts);
 	const dismissToast = useToastStore((s) => s.dismissToast);
+	/*
+	 * Position is the one preference this component sees; the duration scale,
+	 * the stack cap and the severity floor are all applied when the toast is
+	 * enqueued, so the queue arriving here is already the queue to draw.
+	 *
+	 * Swipe follows the position rather than being fixed: a stack anchored left
+	 * that could only be swiped right would have to be dragged across the whole
+	 * app to dismiss.
+	 */
+	const position = useClientSettingsStore((s) => s.notifications.position);
+	const { swipe, className } = toastPositionOption(position);
 
 	return (
-		<ToastProvider swipeDirection="right" label="Notification">
+		<ToastProvider swipeDirection={swipe} label="Notification">
 			{toasts.map(({ id, title, message, variant, action, duration, open }) => (
 				<Toast
 					key={id}
@@ -95,7 +107,7 @@ export default function Toaster() {
 					<ToastClose aria-label="Dismiss notification" />
 				</Toast>
 			))}
-			<ToastViewport />
+			<ToastViewport className={className} />
 		</ToastProvider>
 	);
 }

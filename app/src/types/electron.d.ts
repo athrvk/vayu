@@ -66,6 +66,8 @@ interface ElectronAPI {
 
 	// Window controls for custom titlebar
 	windowMinimize: () => void;
+	/** Windows only: opens the app-icon system menu at the given viewport point. */
+	windowSystemMenu: (position?: { x: number; y: number }) => void;
 	windowMaximize: () => void;
 	windowClose: () => void;
 	windowIsMaximized: () => Promise<boolean>;
@@ -89,7 +91,7 @@ interface ElectronAPI {
 	openAppLink: (key: "docs" | "scripting" | "issues") => Promise<void>;
 
 	// OAuth 2.0 interactive flow
-	oauthOpenExternal: (url: string) => Promise<void>;
+	openExternalUrl: (url: string) => Promise<void>;
 	oauthOpenWindow: (params: {
 		authorizeUrl: string;
 		redirectUri: string;

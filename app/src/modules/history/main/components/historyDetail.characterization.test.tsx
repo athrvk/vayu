@@ -9,6 +9,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
+import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import LoadTestDetail from "../LoadTestDetail";
@@ -22,7 +23,13 @@ import type { RunReport } from "@/types";
  */
 function renderWithClient(ui: ReactElement) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-	return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+	// Components here use `InfoChip`, which no longer brings its own
+	// `TooltipProvider` - the delay is set once at the app root (main.tsx).
+	return render(
+		<QueryClientProvider client={qc}>
+			<TooltipProvider>{ui}</TooltipProvider>
+		</QueryClientProvider>
+	);
 }
 
 function report(mode: string, cfg: Record<string, unknown>): RunReport {

@@ -24,6 +24,8 @@ export interface ImportMeta {
 	requestCount: number;
 	folderCount: number;
 	environmentCount: number;
+	/** Variables destined for Vayu's globals scope. Only a Postman globals export produces any. */
+	globalCount: number;
 	// TODO: populated by parsers so the Preview can warn the user about lossy imports.
 	// Vayu is HTTP-only and has no OAuth execution path; WebSocket/gRPC are dropped and
 	// oauth2/digest/aws/ntlm auth is stored-but-not-executed. Surface both rather than
@@ -68,6 +70,14 @@ export interface EnvironmentDraft {
 export interface ImportResult {
 	collections: CollectionDraft[]; // roots (parentId = null)
 	environments: EnvironmentDraft[];
+	/**
+	 * Variables for Vayu's globals scope, keyed by name. Not a draft list like the
+	 * two above: globals are a singleton on the engine (`POST /globals` replaces the
+	 * whole set), so there is nothing to name and no id to assign. Required rather
+	 * than optional so every parser states its answer - `{}` for all but the Postman
+	 * globals export.
+	 */
+	globals: Record<string, VariableValue>;
 	meta: ImportMeta;
 }
 
