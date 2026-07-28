@@ -27,6 +27,7 @@ import {
 	loadResolutionContext,
 	composeAuth,
 	composeSavedRequest,
+	HTTP_VERSIONS,
 	type AuthRecord,
 	type Resolver,
 	type ResolutionContext,
@@ -199,7 +200,20 @@ function buildExecutionPayload(
 	// script, not collection-chain composition - there is no chain to collect
 	// parts from, so this deliberately keeps sending the legacy singular key
 	// (still accepted by the engine's `read_script`), not `ScriptPart[]`.
-	for (const key of ["requestId", "environmentId", "preRequestScript", "postRequestScript"]) {
+	//
+	// httpVersion: unlike `composeSavedRequest`'s saved-request path, there is
+	// no stored row to fall back to here, so this forwards the agent-supplied
+	// value only when present rather than defaulting to "auto" - the same
+	// treatment `followRedirects`/`maxRedirects` get on this ad-hoc path (they
+	// are not forwarded at all unless the caller adds them). The `run_request`/
+	// `start_load_run` Zod schemas restrict the value to a known protocol.
+	for (const key of [
+		"requestId",
+		"environmentId",
+		"preRequestScript",
+		"postRequestScript",
+		"httpVersion",
+	]) {
 		const v = str(args, key);
 		if (v !== undefined) payload[key] = v;
 	}
@@ -496,6 +510,12 @@ export const TOOLS: McpTool[] = [
 					"Body type: json, text, form-data, x-www-form-urlencoded (default text)."
 				),
 			auth: authInput,
+			httpVersion: z
+				.enum(HTTP_VERSIONS)
+				.optional()
+				.describe(
+					'Protocol to negotiate: "auto" | "http1.1" | "http2" (default "auto"). Mirrors the request builder\'s Settings tab picker.'
+				),
 			requestId: z.string().optional().describe("Optional saved request ID to link."),
 			environmentId: environmentIdInput,
 			collectionId: collectionIdInput,
@@ -808,6 +828,12 @@ export const TOOLS: McpTool[] = [
 			body: z.string().optional(),
 			bodyType: z.string().optional(),
 			auth: authInput,
+			httpVersion: z
+				.enum(HTTP_VERSIONS)
+				.optional()
+				.describe(
+					'Protocol to negotiate for this ad-hoc run: "auto" | "http1.1" | "http2" (default "auto"). There is no saved request behind this call, so this is how the protocol gets specified at all - not an override of a per-run setting.'
+				),
 			mode: z
 				.string()
 				.optional()

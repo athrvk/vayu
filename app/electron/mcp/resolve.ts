@@ -90,6 +90,13 @@ export interface SavedRequestLike {
 	/** Redirect policy. Absent on rows saved before the columns existed. */
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	/**
+	 * Protocol to negotiate. Loose (`string`, not {@link HttpVersion}) like the
+	 * rest of this interface - a row saved before this column existed, or one
+	 * written by a newer/corrupted engine, is coerced by
+	 * {@link composeExecutionOptions}, not typed away here.
+	 */
+	httpVersion?: string;
 }
 
 /**
@@ -121,6 +128,7 @@ export interface OutgoingRequest {
 	postRequestScripts?: ScriptPart[];
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	httpVersion?: HttpVersion;
 	requestId?: string;
 	environmentId?: string;
 }
@@ -344,13 +352,15 @@ export function resolveBody(
 	return out;
 }
 
-// --- Redirect policy ---------------------------------------------------------
+// --- Execution options (redirect policy + protocol) --------------------------
 
 /**
- * Engine defaults for the redirect policy, restated here because the main
- * process shares no module graph with the renderer (`electron/` has no `@/`
- * alias). Keep in step with `src/constants/request.ts` and with
- * `vayu::Request` in `engine/include/vayu/types.hpp`.
+ * Engine defaults for the redirect policy and protocol negotiation, restated
+ * here because the main process shares no module graph with the renderer
+ * (`electron/` has no `@/` alias). Keep in step with `src/constants/request.ts`
+ * (`DEFAULT_FOLLOW_REDIRECTS`/`DEFAULT_MAX_REDIRECTS`/`HTTP_VERSIONS`/
+ * `DEFAULT_HTTP_VERSION`) and with `vayu::Request` in
+ * `engine/include/vayu/types.hpp`.
  */
 const DEFAULT_FOLLOW_REDIRECTS = true;
 const DEFAULT_MAX_REDIRECTS = 10;
@@ -358,15 +368,37 @@ const MIN_MAX_REDIRECTS = 0;
 const MAX_MAX_REDIRECTS = 100;
 
 /**
- * The redirect policy to forward for a saved request. Both fields are always
- * sent - the engine defaults to following, so eliding a stored
- * `followRedirects: false` would quietly follow the redirect the request opted
- * out of. Missing or out-of-range values fall back the same way the renderer's
- * `RequestTransformer` does, so MCP and the UI execute a row identically.
+ * HTTP protocol a request asks the engine to negotiate. Mirrors
+ * `HTTP_VERSIONS` in `src/constants/request.ts` - restated here rather than
+ * imported (see the module docblock: MCP cannot import from `app/src/`).
+ * Exported so `tools.ts` builds its Zod enum from this one array instead of
+ * declaring a third copy.
  */
-export function composeRedirectPolicy(request: SavedRequestLike): {
+export const HTTP_VERSIONS = ["auto", "http1.1", "http2"] as const;
+export type HttpVersion = (typeof HTTP_VERSIONS)[number];
+const DEFAULT_HTTP_VERSION: HttpVersion = "auto";
+
+/** Narrow an unknown value to a {@link HttpVersion}, mirroring `isHttpVersion` in `src/constants/request.ts`. */
+function isHttpVersion(value: unknown): value is HttpVersion {
+	return typeof value === "string" && (HTTP_VERSIONS as readonly string[]).includes(value);
+}
+
+/**
+ * The redirect policy and protocol to forward for a saved request. All three
+ * fields are always sent - the engine defaults to following redirects and to
+ * "auto" protocol negotiation, so eliding a stored `followRedirects: false` or
+ * a stored `httpVersion: "http2"` would quietly hand the decision back to the
+ * engine. Missing or out-of-range/out-of-domain values fall back the same way
+ * the renderer's `RequestTransformer` does (`clampMaxRedirects` /
+ * `coerceHttpVersion`), so MCP and the UI execute a row identically.
+ *
+ * Named for what it returns, not just the redirect fields - it also decides
+ * protocol, and a name that didn't say so is how that would get missed.
+ */
+export function composeExecutionOptions(request: SavedRequestLike): {
 	followRedirects: boolean;
 	maxRedirects: number;
+	httpVersion: HttpVersion;
 } {
 	const followRedirects =
 		typeof request.followRedirects === "boolean"
@@ -377,7 +409,10 @@ export function composeRedirectPolicy(request: SavedRequestLike): {
 		typeof raw === "number" && Number.isFinite(raw)
 			? Math.min(MAX_MAX_REDIRECTS, Math.max(MIN_MAX_REDIRECTS, Math.trunc(raw)))
 			: DEFAULT_MAX_REDIRECTS;
-	return { followRedirects, maxRedirects };
+	const httpVersion = isHttpVersion(request.httpVersion)
+		? request.httpVersion
+		: DEFAULT_HTTP_VERSION;
+	return { followRedirects, maxRedirects, httpVersion };
 }
 
 // --- High-level composition --------------------------------------------------
@@ -387,8 +422,8 @@ export function composeRedirectPolicy(request: SavedRequestLike): {
  * the MCP equivalent of the app clicking **Send** on that request. Variables are
  * resolved in the URL, headers, and body; `inherit`/chain auth is resolved to a
  * concrete block; the collection-chain + request script parts are collected
- * (the engine joins and runs them); and the request's redirect policy is
- * forwarded.
+ * (the engine joins and runs them); and the request's redirect policy and
+ * protocol are forwarded.
  */
 export function composeSavedRequest(
 	request: SavedRequestLike,
@@ -409,9 +444,10 @@ export function composeSavedRequest(
 	if (auth) out.auth = auth;
 	if (scripts.preRequestScripts) out.preRequestScripts = scripts.preRequestScripts;
 	if (scripts.postRequestScripts) out.postRequestScripts = scripts.postRequestScripts;
-	const redirects = composeRedirectPolicy(request);
-	out.followRedirects = redirects.followRedirects;
-	out.maxRedirects = redirects.maxRedirects;
+	const options = composeExecutionOptions(request);
+	out.followRedirects = options.followRedirects;
+	out.maxRedirects = options.maxRedirects;
+	out.httpVersion = options.httpVersion;
 	if (typeof request.id === "string") out.requestId = request.id;
 	if (environmentId) out.environmentId = environmentId;
 	return out;

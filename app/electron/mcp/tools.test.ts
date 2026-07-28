@@ -470,6 +470,22 @@ describe("dispatchTool", () => {
 		expect(client.executeRequest).not.toHaveBeenCalled();
 	});
 
+	// The ad-hoc path has no saved request behind it, so an agent-supplied
+	// httpVersion is the only way to specify the protocol at all - it is
+	// forwarded when present, same treatment as the other ad-hoc string args
+	// (preRequestScript, environmentId, ...).
+	test("run_request forwards an agent-supplied httpVersion", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/users", httpVersion: "http2" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.httpVersion).toBe("http2");
+	});
+
 	test("start_load_run previews (no run) when confirmed is absent", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
@@ -502,6 +518,25 @@ describe("dispatchTool", () => {
 		);
 		expect(res.isError).toBeFalsy();
 		expect(client.startRun).toHaveBeenCalledTimes(1);
+	});
+
+	test("start_load_run forwards an agent-supplied httpVersion", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				url: "https://api.example.com",
+				targetRps: 100,
+				mode: "constant_rps",
+				duration: "30s",
+				confirmed: true,
+				httpVersion: "http2",
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.httpVersion).toBe("http2");
 	});
 
 	test("start_load_run enforces caps before any engine call", async () => {
