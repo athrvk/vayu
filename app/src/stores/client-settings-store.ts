@@ -38,6 +38,11 @@ import {
 	type AutoSavePrefs,
 	nearestAutoSaveDelay,
 } from "@/constants/client-settings";
+import {
+	DEFAULT_LOAD_TEST_CEILINGS,
+	clampCeilings,
+	type LoadTestCeilings,
+} from "@/constants/load-test";
 
 /** localStorage keys reset by "Reset app settings" - all renderer preferences,
  *  but NOT workspace/session state (open tabs, layout, active collection). */
@@ -65,6 +70,8 @@ interface ClientSettingsState {
 	reducedMotion: boolean;
 	/** Toast position, duration scale, stack cap and severity floor. */
 	notifications: NotificationPrefs;
+	/** Upper bounds the load-test dialog offers. Read via `resolveLoadTestLimits`. */
+	loadTestCeilings: LoadTestCeilings;
 
 	setEditor: (patch: Partial<EditorPrefs>) => void;
 	setMonoFont: (font: MonoFontChoice) => void;
@@ -75,6 +82,8 @@ interface ClientSettingsState {
 	setAutoSave: (patch: Partial<AutoSavePrefs>) => void;
 	setNotifications: (patch: Partial<NotificationPrefs>) => void;
 	setReducedMotion: (on: boolean) => void;
+	/** Patch one or more ceilings; each is clamped to what the engine accepts. */
+	setLoadTestCeilings: (patch: Partial<LoadTestCeilings>) => void;
 	/** Clear every renderer preference and reload so defaults re-apply cleanly. */
 	resetAll: () => void;
 }
@@ -115,6 +124,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 			autoSave: { ...DEFAULT_AUTO_SAVE_PREFS },
 			reducedMotion: false,
 			notifications: { ...DEFAULT_NOTIFICATION_PREFS },
+			loadTestCeilings: { ...DEFAULT_LOAD_TEST_CEILINGS },
 
 			setEditor: (patch) => set((s) => ({ editor: { ...s.editor, ...patch } })),
 			setMonoFont: (font) => {
@@ -135,6 +145,13 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				applyReducedMotion(on);
 				set({ reducedMotion: on });
 			},
+			// Clamped on the way in, not only on the way out: the dialog reads
+			// this to build its own ranges, so an out-of-range ceiling stored
+			// here would present the user a value the engine rejects.
+			setLoadTestCeilings: (patch) =>
+				set((s) => ({
+					loadTestCeilings: clampCeilings({ ...s.loadTestCeilings, ...patch }),
+				})),
 
 			resetAll: () => {
 				for (const key of SETTINGS_STORAGE_KEYS) localStorage.removeItem(key);
@@ -155,6 +172,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				autoSave: s.autoSave,
 				reducedMotion: s.reducedMotion,
 				notifications: s.notifications,
+				loadTestCeilings: s.loadTestCeilings,
 			}),
 			onRehydrateStorage: () => (state) => {
 				// Re-assert persisted DOM-affecting prefs after rehydrate.
@@ -170,6 +188,16 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 					if (snapped !== state.autoSave.delayMs) {
 						state.autoSave = { ...state.autoSave, delayMs: snapped };
 					}
+
+					// Re-clamp on the way out of storage. The bounds are the
+					// engine's crash guards, and a build that tightens one
+					// would otherwise keep offering the stored ceiling above
+					// it. The spread also fills in a key added after the
+					// stored payload was written.
+					state.loadTestCeilings = clampCeilings({
+						...DEFAULT_LOAD_TEST_CEILINGS,
+						...state.loadTestCeilings,
+					});
 				}
 			},
 		}

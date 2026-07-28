@@ -17,11 +17,12 @@
 
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Palette, Code2, LayoutDashboard, Bell, Plug, Info } from "lucide-react";
+import { Palette, Code2, LayoutDashboard, Gauge, Bell, Plug, Info } from "lucide-react";
 import type { ClientSettingsCategory, SettingsCategory } from "@/types";
 import AppearancePanel from "./panels/AppearancePanel";
 import EditorPanel from "./panels/EditorPanel";
 import DashboardPanel from "./panels/DashboardPanel";
+import LoadTestingPanel from "./panels/LoadTestingPanel";
 import McpSettingsPanel from "./panels/McpSettingsPanel";
 import NotificationsPanel from "./panels/NotificationsPanel";
 import GeneralPanel from "./panels/GeneralPanel";
@@ -56,6 +57,13 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 		description: "How live test dashboards and charts behave",
 		icon: LayoutDashboard,
 		Component: DashboardPanel,
+	},
+	{
+		id: "load-testing",
+		label: "Load testing",
+		description: "How far the load-test dialog lets you push a run",
+		icon: Gauge,
+		Component: LoadTestingPanel,
 	},
 	{
 		id: "notifications",

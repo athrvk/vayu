@@ -19,6 +19,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
 import LoadTestConfigDialog from "./index";
 import type { LoadTestConfig } from "@/types";
+import { STORAGE_KEYS } from "@/constants/storage-keys";
+import { useClientSettingsStore } from "@/stores";
+import { DEFAULT_LOAD_TEST_CEILINGS, LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
 
 vi.mock("../OAuth2LoadTestGuard", () => ({
 	default: () => null,
@@ -50,6 +53,9 @@ const started = (onStart: ReturnType<typeof vi.fn>): LoadTestConfig => {
 beforeEach(() => {
 	cleanup();
 	localStorage.clear();
+	// The ceilings store is module-level and persists across tests in this
+	// file; clearing localStorage does not roll it back.
+	useClientSettingsStore.getState().setLoadTestCeilings(DEFAULT_LOAD_TEST_CEILINGS);
 });
 
 describe("load profile → fields", () => {
@@ -113,7 +119,7 @@ describe("payload", () => {
 	it("keeps the recording options even though they are folded away", () => {
 		const { onStart } = open();
 		const config = started(onStart);
-		expect(config.data_sample_rate).toBeTypeOf("number");
+		expect(config.success_sample_period).toBeTypeOf("number");
 		expect(config.slow_threshold_ms).toBeTypeOf("number");
 		expect(config.save_timing_breakdown).toBeTypeOf("boolean");
 	});
@@ -283,5 +289,96 @@ describe("ramp start concurrency", () => {
 		pickProfile("Ramp-Up");
 		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "3" } });
 		expect(screen.getByText(/Climbs from 3 to 10 connections/i)).toBeInTheDocument();
+	});
+});
+
+/**
+ * The slider is a percentage and the engine's field is a sampling period (keep
+ * 1 in N, `counter % N`). Nothing converted between them, so the two ends of
+ * the control meant the opposite of what they said: "100% - everything" sent a
+ * period of 100 and kept 1%, while the left stop kept every single response.
+ * Only the default of 10 was right, 1-in-10 being 10%.
+ *
+ * Asserted through the payload rather than on `successSamplePeriod` alone,
+ * because the unit conversion existing is not the point - it being applied on
+ * the way out of this dialog is.
+ */
+describe("success sample rate reaches the engine in the engine's unit", () => {
+	const rateSlider = () => screen.getByLabelText(/success sample rate/i) as HTMLInputElement;
+	const openRecording = () => fireEvent.click(screen.getByRole("button", { name: /recording/i }));
+
+	it("sends a period of 1 - every response - at the 100% stop", () => {
+		const { onStart } = open();
+		openRecording();
+		fireEvent.change(rateSlider(), { target: { value: "100" } });
+		expect(started(onStart).success_sample_period).toBe(1);
+	});
+
+	it("sends a period of 100 - one in a hundred - at the 1% stop", () => {
+		const { onStart } = open();
+		openRecording();
+		fireEvent.change(rateSlider(), { target: { value: "1" } });
+		expect(started(onStart).success_sample_period).toBe(100);
+	});
+
+	it("leaves the default alone, which is the one value that was already right", () => {
+		const { onStart } = open();
+		expect(started(onStart).success_sample_period).toBe(10);
+	});
+
+	it("never offers, or sends, the divide-by-zero value", () => {
+		// The floor used to be 0, and `saved.sampleRate ?? DEFAULT` keeps a
+		// stored 0 because 0 is present. A 0 on the wire is `% 0` engine-side.
+		localStorage.setItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG, JSON.stringify({ sampleRate: 0 }));
+		const { onStart } = open();
+		openRecording();
+		expect(Number(rateSlider().min)).toBeGreaterThanOrEqual(1);
+		expect(started(onStart).success_sample_period).toBeGreaterThanOrEqual(1);
+	});
+});
+
+/**
+ * The dialog's ceilings are a user setting, not a constant. Nothing else in the
+ * app reads `loadTestCeilings`, so if this dialog stopped resolving them the
+ * setting would be written and never read - which is the defect class this
+ * codebase repeats most.
+ */
+describe("ceilings from Settings", () => {
+	const connections = () => screen.getByLabelText(/^connections/i) as HTMLInputElement;
+
+	it("offers the raised ceiling on the field it governs", () => {
+		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 5000 });
+		open();
+		pickProfile("Constant Concurrency");
+		expect(Number(connections().max)).toBe(5000);
+	});
+
+	it("applies a connection ceiling to the ramp's start too, not just its target", () => {
+		// Same physical quantity. A ramp that may only start below 1000 cannot
+		// climb to a target of 5000 from anywhere sensible.
+		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 5000 });
+		open();
+		pickProfile("Ramp-Up");
+		expect(Number((screen.getByLabelText(/start from/i) as HTMLInputElement).max)).toBe(5000);
+	});
+
+	it("pulls a restored value back under a ceiling lowered since it was saved", () => {
+		localStorage.setItem(
+			STORAGE_KEYS.LAST_LOAD_TEST_CONFIG,
+			JSON.stringify({ mode: "constant_concurrency", concurrency: 800 })
+		);
+		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 100 });
+		const { onStart } = open();
+		expect(connections().value).toBe("100");
+		expect(started(onStart).concurrency).toBe(100);
+	});
+
+	it("cannot be set past what the engine accepts", () => {
+		// The bound is the engine's crash guard, so this clamp is what makes
+		// "no setting on that screen can compose a rejected run" true.
+		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 999_999 });
+		open();
+		pickProfile("Constant Concurrency");
+		expect(Number(connections().max)).toBe(LOAD_TEST_CEILING_BOUNDS.concurrency.MAX);
 	});
 });
