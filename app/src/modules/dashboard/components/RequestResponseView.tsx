@@ -12,25 +12,16 @@
  */
 
 import { useState } from "react";
-import {
-	Card,
-	CardContent,
-	CardHeader,
-	CardTitle,
-	Badge,
-	Button,
-	ScrollArea,
-} from "@/components/ui";
+import { Card, CardContent, CardHeader, CardTitle, Badge, ScrollArea } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Clock, XCircle } from "lucide-react";
+import { Clock, XCircle } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
 import {
-	StatusCodeBadge,
 	CompactHeadersViewer,
 	ResponseBody,
-	TimingPhaseTiles,
+	SampledExchange,
 	phasesFromAverages,
 	phasesFromTrace,
 } from "@/components/shared/response-viewer";
@@ -265,228 +256,126 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<ScrollArea className="h-[400px]">
 							<div className="divide-y">
 								{report.results.map((result, index) => {
-									const isExpanded = expandedResults.has(index);
-									const isError = !!result.error || result.statusCode === 0;
-									const isSlow = result.trace?.isSlow;
+									const trace = result.trace;
 
-									// The phases this sample actually reported, in wire order,
-									// from the shared descriptor. Absent ones are dropped: a
-									// trace with no TLS is plain HTTP, which is not the same
-									// statement as "the handshake took 0ms".
-									const timingPhases = phasesFromTrace(result.trace);
+									// The phases this sample actually reported, in wire order, from the
+									// shared descriptor. Absent ones are dropped: a trace with no TLS is
+									// plain HTTP, which is not the same statement as "the handshake took
+									// 0ms".
+									const phases = phasesFromTrace(trace);
 
 									return (
-										<div key={index} className="border-b last:border-b-0">
-											{/* Result Header - Clickable */}
-											<Button
-												variant="ghost"
-												className="w-full justify-start px-4 py-3 h-auto hover:bg-muted/50"
-												onClick={() => toggleResult(index)}
-											>
-												<div className="flex flex-wrap items-center gap-x-3 gap-y-2 w-full">
-													{isExpanded ? (
-														<ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-													) : (
-														<ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-													)}
-
-													{/* Status Icon */}
-													{isError ? (
-														<AlertCircle className="w-4 h-4 text-destructive-text shrink-0" />
-													) : isSlow ? (
-														<Clock className="w-4 h-4 text-status-stopped-text shrink-0" />
-													) : (
-														<CheckCircle2 className="w-4 h-4 text-status-success-text shrink-0" />
-													)}
-
-													{/* Request Number */}
-													<span className="text-xs text-muted-foreground font-mono min-w-8">
-														#{result.trace?.request_number ?? index}
-													</span>
-
-													{/* Status Code */}
-													<StatusCodeBadge
-														status={result.statusCode}
-														statusText={result.statusText}
-														className="shrink-0"
-													/>
-
-													{/* Latency */}
-													<span
-														className={cn(
-															"text-sm font-mono shrink-0",
-															isSlow && "text-status-stopped-text"
+										<SampledExchange
+											key={index}
+											label={trace?.request_number ?? index}
+											statusCode={result.statusCode}
+											statusText={result.statusText}
+											latencyMs={result.latencyMs}
+											timestamp={formatTime(result.timestamp)}
+											error={result.error}
+											isSlow={trace?.isSlow}
+											phases={phases}
+											isExpanded={expandedResults.has(index)}
+											onToggle={() => toggleResult(index)}
+											className="border-b last:border-b-0"
+											details={
+												trace && (
+													<>
+														{trace.error_type && (
+															<div className="flex gap-4 text-sm">
+																<span className="text-muted-foreground">
+																	Error Type:
+																</span>
+																<span className="font-mono">
+																	{trace.error_type}
+																</span>
+															</div>
 														)}
-													>
-														{result.latencyMs.toFixed(1)}ms
-													</span>
 
-													{/* Timestamp */}
-													<span className="text-xs text-muted-foreground sm:ml-auto">
-														{formatTime(result.timestamp)}
-													</span>
-
-													{/* Error preview */}
-													{isError && result.error && (
-														<span className="text-xs text-destructive-text truncate basis-full sm:basis-auto sm:max-w-[200px]">
-															{result.error.split(":")[0]}
-														</span>
-													)}
-												</div>
-											</Button>
-
-											{/* Expanded Details */}
-											{isExpanded && (
-												<div className="px-4 py-3 bg-muted/30 space-y-3">
-													{/* Error Message */}
-													{result.error && (
-														<div className="space-y-1">
-															<p className="text-xs font-medium text-muted-foreground">
-																Error
-															</p>
-															<p className="text-sm bg-destructive/10 text-destructive-text p-2 rounded-md font-mono text-xs break-all">
-																{result.error}
-															</p>
-														</div>
-													)}
-
-													{/* Trace Info */}
-													{result.trace && (
-														<>
-															{result.trace.error_type && (
-																<div className="flex gap-4 text-sm">
-																	<span className="text-muted-foreground">
-																		Error Type:
-																	</span>
-																	<span className="font-mono">
-																		{result.trace.error_type}
-																	</span>
-																</div>
-															)}
-
-															{/* Per-test validation failures
-															    (`validate_scripts` in
-															    run_manager.cpp). Before #111 the
-															    summary row showed only the opaque
-															    `ERR` chip and a count - never which
-															    assertions failed or why. Modelled on
-															    the request-builder Tests tab. */}
-															{result.trace.failures &&
-																result.trace.failures.length >
-																	0 && (
-																	<div className="space-y-1">
-																		<p className="text-xs font-medium text-muted-foreground">
-																			Failed Tests
-																			{result.trace
-																				.totalFailed !==
-																				undefined && (
-																				<span className="ml-1">
-																					(
-																					{
-																						result.trace
-																							.totalFailed
-																					}
-																					)
-																				</span>
-																			)}
-																		</p>
-																		<div className="space-y-1.5">
-																			{result.trace.failures.map(
-																				(failure, i) => (
-																					<div
-																						key={i}
-																						className="flex items-start gap-2 bg-status-error/10 border border-status-error/20 rounded-md p-2"
-																					>
-																						<XCircle className="w-4 h-4 text-status-error-text mt-0.5 shrink-0" />
-																						<pre className="text-xs text-status-error-text font-mono whitespace-pre-wrap break-words flex-1 min-w-0">
-																							{
-																								failure
-																							}
-																						</pre>
-																					</div>
-																				)
-																			)}
-																		</div>
-																	</div>
-																)}
-
-															{/* Timing Breakdown - the shared tile grid, the same one the
-															    history sample card renders. It was two copies of this
-															    markup until #76; the history copy had lost the tooltips
-															    and painted each tile with a raw Tailwind pastel. */}
-															{timingPhases.length > 0 && (
+														{/* Per-test validation failures (`validate_scripts` in
+														    run_manager.cpp). Before #111 the summary row showed
+														    only the opaque `ERR` chip and a count - never which
+														    assertions failed or why. Modelled on the
+														    request-builder Tests tab. */}
+														{trace.failures &&
+															trace.failures.length > 0 && (
 																<div className="space-y-1">
 																	<p className="text-xs font-medium text-muted-foreground">
-																		Timing Breakdown
-																	</p>
-																	<TimingPhaseTiles
-																		phases={timingPhases}
-																	/>
-																</div>
-															)}
-
-															{/* Slow Request Warning */}
-															{result.trace.isSlow && (
-																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive-text p-2 rounded-md">
-																	<Clock className="w-3 h-3" />
-																	<span>
-																		Slow request:{" "}
-																		{result.trace.totalMs?.toFixed(
-																			1
-																		)}
-																		ms
-																		{result.trace
-																			.thresholdMs && (
-																			<span className="text-muted-foreground ml-1">
-																				(threshold:{" "}
-																				{
-																					result.trace
-																						.thresholdMs
-																				}
-																				ms)
+																		Failed Tests
+																		{trace.totalFailed !==
+																			undefined && (
+																			<span className="ml-1">
+																				({trace.totalFailed}
+																				)
 																			</span>
 																		)}
-																	</span>
-																</div>
-															)}
-
-															{/* Response Headers - the shared compact viewer. It
-															    declares its own `surface-sunken`, so its row rules
-															    resolve correctly on this `bg-muted/30` panel where a
-															    bare `border-rule` would fall back to invisible. */}
-															{result.trace.headers && (
-																<CompactHeadersViewer
-																	headers={result.trace.headers}
-																	title="Response Headers"
-																	className="max-h-40 overflow-auto"
-																/>
-															)}
-
-															{/* Response Body - the shared viewer (pretty/raw/preview
-															    with body-type detection), not a raw `<pre>`. */}
-															{result.trace.body && (
-																<div className="space-y-1">
-																	<p className="text-xs font-medium text-muted-foreground">
-																		Response Body
 																	</p>
-																	<div className="h-48 overflow-hidden rounded-md border border-border">
-																		<ResponseBody
-																			body={result.trace.body}
-																			headers={
-																				result.trace
-																					.headers || {}
-																			}
-																			height="100%"
-																			compact
-																		/>
+																	<div className="space-y-1.5">
+																		{trace.failures.map(
+																			(failure, i) => (
+																				<div
+																					key={i}
+																					className="flex items-start gap-2 bg-status-error/10 border border-status-error/20 rounded-md p-2"
+																				>
+																					<XCircle className="w-4 h-4 text-status-error-text mt-0.5 shrink-0" />
+																					<pre className="text-xs text-status-error-text font-mono whitespace-pre-wrap break-words flex-1 min-w-0">
+																						{failure}
+																					</pre>
+																				</div>
+																			)
+																		)}
 																	</div>
 																</div>
 															)}
-														</>
-													)}
+													</>
+												)
+											}
+										>
+											{/* Slow Request Warning */}
+											{trace?.isSlow && (
+												<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive-text p-2 rounded-md">
+													<Clock className="w-3 h-3" />
+													<span>
+														Slow request: {trace.totalMs?.toFixed(1)}ms
+														{trace.thresholdMs && (
+															<span className="text-muted-foreground ml-1">
+																(threshold: {trace.thresholdMs}ms)
+															</span>
+														)}
+													</span>
 												</div>
 											)}
-										</div>
+
+											{/* Response Headers - the shared compact viewer. It declares its
+											    own `surface-sunken`, so its row rules resolve correctly on the
+											    shell's `bg-muted/30` panel where a bare `border-rule` would
+											    fall back to invisible. */}
+											{trace?.headers && (
+												<CompactHeadersViewer
+													headers={trace.headers}
+													title="Response Headers"
+													className="max-h-40 overflow-auto"
+												/>
+											)}
+
+											{/* Response Body - the shared viewer (pretty/raw/preview with
+											    body-type detection), not a raw `<pre>`. */}
+											{trace?.body && (
+												<div className="space-y-1">
+													<p className="text-xs font-medium text-muted-foreground">
+														Response Body
+													</p>
+													<div className="h-48 overflow-hidden rounded-md border border-rule">
+														<ResponseBody
+															body={trace.body}
+															headers={trace.headers || {}}
+															height="100%"
+															compact
+														/>
+													</div>
+												</div>
+											)}
+										</SampledExchange>
 									);
 								})}
 							</div>

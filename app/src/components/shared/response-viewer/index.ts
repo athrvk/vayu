@@ -45,6 +45,13 @@ export type {
 export { default as TimingPhaseTiles } from "./TimingPhaseTiles";
 export type { TimingPhaseTilesProps } from "./TimingPhaseTiles";
 
+// The sampled-exchange shell - the summary row, the expansion, the error block
+// and the timing tiles - rendered by both the dashboard's live sample list and
+// the history detail's stored one. See the file header for what the two shells
+// had drifted into before they shared this.
+export { SampledExchange } from "./SampledExchange";
+export type { SampledExchangeProps } from "./SampledExchange";
+
 // Utilities
 export {
 	detectBodyType,
