@@ -150,6 +150,20 @@ constexpr bool DEFAULT_STORE_SUCCESS_TRACES = false;
 constexpr size_t DEFAULT_MAX_RESPONSE_SAMPLES = 1000;
 /// Sample rate for response storage (1 = all, 100 = 1%, etc.)
 constexpr size_t DEFAULT_RESPONSE_SAMPLE_RATE = 100;
+/// Upper bound on the collector's *pre-allocation* - not on what a run may go
+/// on to store, since both vectors still grow past it.
+///
+/// Both derived reserves scale with `expected_requests`, which RunContext
+/// computes as duration x RPS x 1.2 with no ceiling of its own. At 1M RPS for
+/// a day that is ~1.04e11, and the errors reserve (expected / 20, taken
+/// whenever `max_errors` is 0 - the default, and nothing overrides it) asks
+/// for ~5.2e9 ResultRecords, on the order of 450 GB. That allocation throws
+/// out of the collector's constructor, which runs inside RunContext's, which
+/// the route calls *after* writing the run row - so the caller gets an opaque
+/// 500 and the row is stranded `pending` forever. A reserve is only an
+/// optimisation, so capping it costs a few reallocations on a run that large
+/// and nothing at all otherwise. 1M records is ~90 MB, still generous.
+constexpr size_t MAX_RESERVE_RECORDS = 1000000;
 /// HdrHistogram significant figures (3 = ~0.1% precision)
 constexpr int HISTOGRAM_SIGNIFICANT_FIGURES = 3;
 /// HdrHistogram max trackable latency in microseconds (1 hour)
