@@ -15,7 +15,14 @@
  */
 
 import { Code2 } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+	Eyebrow,
+} from "@/components/ui";
 import { useClientSettingsStore } from "@/stores";
 import { EDITOR_FONT_SIZES, EDITOR_TAB_SIZES } from "@/constants/client-settings";
 import { MONO_FONTS, customMonoStack, type MonoFontChoice } from "@/constants/appearance";
@@ -59,9 +66,7 @@ export default function EditorPanel() {
 				</CardHeader>
 				<CardContent className="space-y-5">
 					<div>
-						<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-							Code font
-						</p>
+						<Eyebrow className="mb-2">Code font</Eyebrow>
 						<FontPicker
 							options={MONO_FONTS}
 							value={monoFont}
@@ -75,9 +80,7 @@ export default function EditorPanel() {
 					</div>
 
 					<div>
-						<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-							Font size
-						</p>
+						<Eyebrow className="mb-2">Font size</Eyebrow>
 						<OptionButtons
 							options={EDITOR_FONT_SIZES.map((v) => ({ value: v, label: `${v}px` }))}
 							value={editor.fontSize}
@@ -86,9 +89,7 @@ export default function EditorPanel() {
 					</div>
 
 					<div>
-						<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-							Tab width
-						</p>
+						<Eyebrow className="mb-2">Tab width</Eyebrow>
 						<OptionButtons
 							options={EDITOR_TAB_SIZES.map((v) => ({
 								value: v,

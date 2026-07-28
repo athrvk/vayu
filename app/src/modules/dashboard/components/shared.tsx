@@ -5,10 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { type ReactNode } from "react";
-import { EYEBROW_CLASS, InfoChip } from "@/components/ui";
-
-// Re-exported, not redefined - both values live in `components/ui` so every
+// Re-exported, not redefined - all three live in `components/ui` so every
 // surface can reach them, and the dashboard's existing imports still resolve.
 //
 // `InfoChip` was defined here, where only the dashboard could import it without
@@ -16,11 +13,12 @@ import { EYEBROW_CLASS, InfoChip } from "@/components/ui";
 // own copy (`ResponseTimingTab`'s `InfoTip`), and the copy is the one that got
 // the `border-rule` fix - so the original never did. It lives in
 // `ui/info-chip` now; see that file for why the border stayed a prop.
-export { EYEBROW_CLASS, InfoChip };
-
-export function Eyebrow({ children }: { children: ReactNode }) {
-	return <p className={EYEBROW_CLASS}>{children}</p>;
-}
+//
+// `Eyebrow` was the same shape with a quieter symptom: this file imported the
+// shared `EYEBROW_CLASS` and then wrapped it in a second component that dropped
+// the `className` the primitive accepts. Same class string, so nothing looked
+// wrong - but a dashboard caller that needed a margin had to reach past it.
+export { EYEBROW_CLASS, Eyebrow, InfoChip } from "@/components/ui";
 
 /** Format a possibly-undefined number, falling back to a dash. */
 export function fmt(v: number | undefined, digits = 1): string {
