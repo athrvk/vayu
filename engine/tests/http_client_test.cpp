@@ -148,6 +148,65 @@ TEST_F (HttpClientTest, TimingPhasesAreNonNegative) {
     EXPECT_DOUBLE_EQ (t.tls_ms, 0.0); // plain HTTP - no TLS phase
 }
 
+// The mock is plain HTTP/1.1 over loopback (no ALPN, so no HTTP/2 is on
+// offer), which makes "HTTP/1.1" the one negotiated outcome a real transfer
+// against it can produce - a genuine end-to-end check of the
+// CURLINFO_HTTP_VERSION read, not a restatement of the mapping table (that
+// lives in http_version_test.cpp). It also pins the request line: rawRequest
+// must reflect what was actually negotiated, not a literal that never looks
+// at the transfer.
+TEST_F (HttpClientTest, ReportsNegotiatedHttpVersion) {
+    auto result = client_->get (mock_->url ("/get"));
+
+    ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
+    const auto& response = result.value ();
+    EXPECT_EQ (response.http_version, "HTTP/1.1");
+    EXPECT_TRUE (response.raw_request.starts_with ("GET /get HTTP/1.1\r\n"))
+    << response.raw_request;
+}
+
+// A connection that never reaches a server negotiates nothing at all.
+// CURLINFO_HTTP_VERSION reports CURL_HTTP_VERSION_NONE in that case, and the
+// mapping in curl_version_map.hpp turns that into "" rather than a guessed
+// "HTTP/1.1" - this is the property from HttpVersionFromCurl in
+// http_version_test.cpp actually exercised end-to-end through a real failed
+// transfer, not just the lookup table in isolation.
+TEST_F (HttpClientTest, UnnegotiatedConnectionReportsEmptyHttpVersion) {
+    Request request;
+    request.method = HttpMethod::GET;
+    request.url = "http://127.0.0.1:1/"; // port 1: connection refused, fast fail
+    request.timeout_ms = 2000;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    EXPECT_NE (response.error_code, ErrorCode::None);
+    EXPECT_EQ (response.http_version, "");
+}
+
+TEST_F (HttpClientTest, UnreachableHostsRawRequestNamesWhatWasAskedFor) {
+    // The one case that discriminates the request line's version from a
+    // hardcoded literal. Every reachable-host test in this file talks plain
+    // HTTP/1.1 over loopback with no ALPN, so "HTTP/1.1" is the only outcome
+    // they can produce - reverting the fix would leave them all green. Here
+    // nothing is negotiated at all, so the line can only come from what was
+    // requested, and a stale literal would print HTTP/1.1 instead.
+    Request request;
+    request.method       = HttpMethod::GET;
+    request.url          = "http://127.0.0.1:1/"; // port 1: connection refused
+    request.timeout_ms   = 2000;
+    request.http_version = HttpVersion::Http2;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    EXPECT_EQ (response.http_version, ""); // nothing negotiated - still honest
+    EXPECT_TRUE (response.raw_request.rfind ("GET / HTTP/2\r\n", 0) == 0)
+    << "raw_request began: " << response.raw_request.substr (0, 40);
+}
+
 TEST_F (HttpClientTest, SendsPostRequest) {
     Headers headers = { { "Content-Type", "application/json" } };
 

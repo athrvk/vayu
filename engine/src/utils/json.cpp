@@ -445,6 +445,11 @@ Json serialize (const Response& response) {
     json["requestHeaders"] = response.request_headers;
     json["rawRequest"]     = response.raw_request;
     json["bodySize"]       = response.body_size;
+    // The negotiated protocol, distinct from the requested `httpVersion` on
+    // the Request side (see Response::http_version). "" when nothing was
+    // negotiated - not omitted, so a caller reading this field can't confuse
+    // "we don't know" with "this key doesn't exist on responses".
+    json["httpVersion"] = response.http_version;
 
     // Try to parse body as JSON
     if (auto parsed = try_parse_body (response.body)) {

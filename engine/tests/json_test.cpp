@@ -135,6 +135,7 @@ TEST (JsonTest, SerializesResponse) {
     response.body                    = R"({"success": true})";
     response.body_size               = response.body.size ();
     response.timing.total_ms         = 123.45;
+    response.http_version            = "HTTP/2";
 
     auto json = serialize (response);
 
@@ -143,6 +144,21 @@ TEST (JsonTest, SerializesResponse) {
     EXPECT_EQ (json["headers"]["content-type"], "application/json");
     EXPECT_EQ (json["body"]["success"], true); // Parsed as JSON
     EXPECT_DOUBLE_EQ (json["timing"]["totalMs"], 123.45);
+    EXPECT_EQ (json["httpVersion"], "HTTP/2");
+}
+
+// A response that never got far enough to negotiate anything (e.g. a
+// connection-refused error) has http_version == "" - the default. That must
+// serialize as an honest empty string, not be dropped or coerced into a
+// guess like "HTTP/1.1".
+TEST (JsonTest, SerializesUnnegotiatedResponseHttpVersionAsEmptyString) {
+    Response response;
+    response.status_code = 0;
+
+    auto json = serialize (response);
+
+    ASSERT_TRUE (json.contains ("httpVersion"));
+    EXPECT_EQ (json["httpVersion"], "");
 }
 
 TEST (JsonTest, SerializesError) {

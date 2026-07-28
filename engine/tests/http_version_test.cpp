@@ -62,3 +62,35 @@ TEST (HttpVersionDomain, MapsEveryMemberToACurlConstant) {
     // Auto: whichever constant Task 1 Step 6 established.
     EXPECT_EQ (vayu::http::to_curl_http_version (HttpVersion::Auto), CURL_HTTP_VERSION_NONE);
 }
+
+// ----------------------------------------------------------------------------
+// Reverse mapping: what CURLINFO_HTTP_VERSION reports after a transfer,
+// translated to the display string Response::http_version carries. This is
+// the opposite direction from to_curl_http_version above (request -> curl
+// constant); this one is curl constant -> negotiated-outcome display string.
+// ----------------------------------------------------------------------------
+
+TEST (HttpVersionFromCurl, MapsKnownConstantsToDisplayStrings) {
+    // Task 1 measured these two directly against real hosts: 2 is HTTP/1.1,
+    // 3 is HTTP/2.
+    EXPECT_EQ (vayu::http::http_version_from_curl (CURL_HTTP_VERSION_1_1), "HTTP/1.1");
+    EXPECT_EQ (vayu::http::http_version_from_curl (CURL_HTTP_VERSION_2_0), "HTTP/2");
+    EXPECT_EQ (vayu::http::http_version_from_curl (CURL_HTTP_VERSION_1_0), "HTTP/1.0");
+    EXPECT_EQ (vayu::http::http_version_from_curl (CURL_HTTP_VERSION_3), "HTTP/3");
+}
+
+TEST (HttpVersionFromCurl, ReturnsEmptyForNoAnswerRatherThanGuessing) {
+    // CURL_HTTP_VERSION_NONE (0) is curl's own "no answer" - the transfer
+    // never got far enough to negotiate anything. Reporting HTTP/1.1 here
+    // would be a guess dressed up as a fact.
+    EXPECT_EQ (vayu::http::http_version_from_curl (CURL_HTTP_VERSION_NONE), "");
+}
+
+TEST (HttpVersionFromCurl, ReturnsEmptyForUnrecognizedValue) {
+    // A value curl itself never returns from CURLINFO_HTTP_VERSION (this map
+    // does not need to track every CURLOPT_HTTP_VERSION request-side option,
+    // e.g. CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE, which getinfo never echoes
+    // back) must not be silently coerced into a real-looking answer.
+    EXPECT_EQ (vayu::http::http_version_from_curl (999L), "");
+    EXPECT_EQ (vayu::http::http_version_from_curl (-1L), "");
+}

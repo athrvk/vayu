@@ -248,6 +248,27 @@ struct Response {
     size_t body_size = 0;
     Timing timing;
 
+    /**
+     * @brief The protocol actually negotiated for this transfer, e.g.
+     * "HTTP/1.1" or "HTTP/2" - read from CURLINFO_HTTP_VERSION after the
+     * transfer completes.
+     *
+     * This is an *outcome*, not the request. It is deliberately a different
+     * type and a different value space from the two other things also
+     * called "http_version" in this codebase:
+     *   - `Request::http_version` (HttpVersion enum) is what was asked for -
+     *     Auto/Http1_1/Http2 - before the transfer ran.
+     *   - `db::Request::http_version` (string) is that same request-side
+     *     enum, persisted to disk.
+     * Conflating either of those with this field would show a user a
+     * protocol they asked for but were not actually granted.
+     *
+     * Empty when nothing was negotiated (e.g. the connection never reached a
+     * server) - deliberately not defaulted to "HTTP/1.1", since that would be
+     * a guess presented as a fact.
+     */
+    std::string http_version;
+
     // Error information (for client-side failures like invalid URL, connection errors)
     // When set, indicates the request failed before receiving a server response
     ErrorCode error_code = ErrorCode::None;

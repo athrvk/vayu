@@ -41,6 +41,7 @@ namespace vayu::http {
 // ============================================================================
 
 namespace {
+
 int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, void* userptr) {
     (void)handle;
     (void)userptr;
@@ -274,62 +275,9 @@ Result<Response> Client::send (const Request& request) {
         curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers_list);
     }
 
-    // Build raw request string (proper HTTP/1.1 format)
-    std::stringstream raw_req;
-
-    // Parse URL to extract host and path
-    std::string host;
-    std::string path = "/";
-    std::string url  = request.url;
-
-    // Remove protocol prefix
-    size_t proto_end = url.find ("://");
-    if (proto_end != std::string::npos) {
-        url = url.substr (proto_end + 3);
-    }
-
-    // Split host and path
-    size_t path_start = url.find ('/');
-    if (path_start != std::string::npos) {
-        host = url.substr (0, path_start);
-        path = url.substr (path_start);
-    } else {
-        host = url;
-        // Check for query string without path
-        size_t query_start = host.find ('?');
-        if (query_start != std::string::npos) {
-            path = "/" + host.substr (query_start);
-            host = host.substr (0, query_start);
-        }
-    }
-
-    // Request line: METHOD /path HTTP/1.1
-    raw_req << to_string (request.method) << " " << path << " HTTP/1.1\r\n";
-
-    // Host header (required for HTTP/1.1)
-    raw_req << "Host: " << host << "\r\n";
-
-    // Add all request headers
-    for (const auto& [key, value] : response.request_headers) {
-        // Skip if it's a Host header (we already added it)
-        if (key == "Host" || key == "host")
-            continue;
-        raw_req << key << ": " << value << "\r\n";
-    }
-
-    // Add Content-Length for body
-    if (!request.body.content.empty ()) {
-        raw_req << "Content-Length: " << request.body.content.size () << "\r\n";
-    }
-
-    // End of headers
-    raw_req << "\r\n";
-
-    // Body
-    if (!request.body.content.empty ()) {
-        raw_req << request.body.content;
-    }
-    response.raw_request = raw_req.str ();
+    // rawRequest's request line names the negotiated protocol, so it can only
+    // be built after the transfer completes - see below, just before the
+    // error-path early return.
 
     // Set callbacks
     curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, write_callback);
@@ -416,6 +364,86 @@ Result<Response> Client::send (const Request& request) {
     std::max (0.0, (starttransfer_time - appconnect) * 1000.0);
     response.timing.download_ms =
     std::max (0.0, (wire_seconds - starttransfer_time) * 1000.0);
+
+    // Negotiated protocol (try to get even on errors, same as timing above -
+    // a transfer that fails after the connection was established still knows
+    // what it negotiated). Empty when nothing was negotiated at all, e.g. a
+    // connection that never reached a server - see http_version_from_curl.
+    long negotiated_version = 0;
+    curl_easy_getinfo (curl, CURLINFO_HTTP_VERSION, &negotiated_version);
+    response.http_version = vayu::http::http_version_from_curl (negotiated_version);
+
+    // Build raw request string. Only buildable now: the request line names
+    // the negotiated protocol, which isn't known until after curl_easy_perform
+    // returns. Everything else here (host/path/headers/body) was already
+    // fixed before the transfer ran.
+    std::stringstream raw_req;
+
+    // Parse URL to extract host and path
+    std::string host;
+    std::string path = "/";
+    std::string url  = request.url;
+
+    // Remove protocol prefix
+    size_t proto_end = url.find ("://");
+    if (proto_end != std::string::npos) {
+        url = url.substr (proto_end + 3);
+    }
+
+    // Split host and path
+    size_t path_start = url.find ('/');
+    if (path_start != std::string::npos) {
+        host = url.substr (0, path_start);
+        path = url.substr (path_start);
+    } else {
+        host = url;
+        // Check for query string without path
+        size_t query_start = host.find ('?');
+        if (query_start != std::string::npos) {
+            path = "/" + host.substr (query_start);
+            host = host.substr (0, query_start);
+        }
+    }
+
+    // Request line: METHOD /path <version>. Normally the negotiated version.
+    // When nothing was negotiated (connection refused, DNS failure) this line
+    // still has to read as syntactically valid HTTP, so it cannot be blank the
+    // way response.http_version is - but it falls back to what was *requested*
+    // rather than a flat HTTP/1.1. Printing HTTP/1.1 after the user asked for
+    // http2 and never reached a server would contradict both their intent and
+    // the outcome, which is the kind of confident wrong answer this whole task
+    // exists to remove. The fallback never reaches response.http_version.
+    std::string display_version = response.http_version;
+    if (display_version.empty ()) {
+        display_version =
+        request.http_version == HttpVersion::Http2 ? "HTTP/2" : "HTTP/1.1";
+    }
+    raw_req << to_string (request.method) << " " << path << " " << display_version << "\r\n";
+
+    // Host header (required for HTTP/1.1)
+    raw_req << "Host: " << host << "\r\n";
+
+    // Add all request headers
+    for (const auto& [key, value] : response.request_headers) {
+        // Skip if it's a Host header (we already added it)
+        if (key == "Host" || key == "host")
+            continue;
+        raw_req << key << ": " << value << "\r\n";
+    }
+
+    // Add Content-Length for body
+    if (!request.body.content.empty ()) {
+        raw_req << "Content-Length: " << request.body.content.size () << "\r\n";
+    }
+
+    // End of headers
+    raw_req << "\r\n";
+
+    // Body
+    if (!request.body.content.empty ()) {
+        raw_req << request.body.content;
+    }
+    response.raw_request = raw_req.str ();
 
     // Check for errors
     if (res != CURLE_OK) {

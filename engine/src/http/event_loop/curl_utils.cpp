@@ -290,6 +290,14 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
         response.status_text = vayu::http::status_text (response.status_code);
     }
 
+    // Negotiated protocol - what actually got used, not what was requested.
+    // Empty when curl reports CURL_HTTP_VERSION_NONE or anything this driver
+    // doesn't recognize; see http_version_from_curl for why that's not
+    // coerced into a guessed "HTTP/1.1".
+    long negotiated_version = 0;
+    curl_easy_getinfo (curl, CURLINFO_HTTP_VERSION, &negotiated_version);
+    response.http_version = vayu::http::http_version_from_curl (negotiated_version);
+
     // Get curl timing info - these are wire-only (libcurl's view)
     double wire_seconds = 0, namelookup_time = 0, connect_time = 0;
     double appconnect_time = 0, starttransfer_time = 0;
