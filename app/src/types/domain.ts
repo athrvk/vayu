@@ -478,6 +478,13 @@ export interface LoadTestConfig {
 	comment?: string;
 	latency_percentiles?: number[];
 	max_in_flight?: number;
+	/**
+	 * Per-run protocol override - the third of the "three tiers" (global
+	 * default, per-request, per-run). `LoadTestConfigDialog` pre-fills its
+	 * picker from the request's own `httpVersion` and reports it here whether
+	 * or not the user changed it; the request itself is never touched.
+	 */
+	httpVersion?: HttpVersion;
 }
 
 /**

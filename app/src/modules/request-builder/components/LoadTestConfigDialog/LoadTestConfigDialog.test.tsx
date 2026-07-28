@@ -32,11 +32,17 @@ function open(props: Partial<React.ComponentProps<typeof LoadTestConfigDialog>> 
 			onStart={onStart}
 			isStarting={false}
 			hasPreRequestScript={false}
+			httpVersion="auto"
 			{...props}
 		/>
 	);
 	return { onStart };
 }
+
+const pickProtocol = (name: string) => {
+	fireEvent.click(screen.getByRole("combobox", { name: /protocol/i }));
+	fireEvent.click(screen.getByRole("option", { name: new RegExp(name, "i") }));
+};
 
 const pickProfile = (name: string) =>
 	fireEvent.click(screen.getByRole("radio", { name: new RegExp(name, "i") }));
@@ -283,5 +289,49 @@ describe("ramp start concurrency", () => {
 		pickProfile("Ramp-Up");
 		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "3" } });
 		expect(screen.getByText(/Climbs from 3 to 10 connections/i)).toBeInTheDocument();
+	});
+});
+
+describe("protocol override", () => {
+	/*
+	 * The third tier of the "three tiers" design (global default, per-request,
+	 * per-run). A load test is a snapshot, so there is no "inherit" state here -
+	 * the dialog pre-fills the request's own concrete protocol and lets the run
+	 * diverge from it, without touching the saved request at all.
+	 */
+	it("pre-fills the picker with the request's own protocol", () => {
+		open({ httpVersion: "http2" });
+		expect(screen.getByRole("combobox", { name: /protocol/i })).toHaveTextContent("HTTP/2");
+	});
+
+	it("sends the changed value on start", () => {
+		const { onStart } = open({ httpVersion: "auto" });
+		pickProtocol("HTTP/1.x");
+		expect(started(onStart).httpVersion).toBe("http1.1");
+	});
+
+	it("sends the pre-filled value unchanged when the user leaves it alone", () => {
+		const { onStart } = open({ httpVersion: "http2" });
+		expect(started(onStart).httpVersion).toBe("http2");
+	});
+
+	/*
+	 * `saveConfig`/`loadSavedConfig` memo the other fields as "your last run"
+	 * across dialogs - see `comment`'s "Per-run: never restored." above.
+	 * `httpVersion` must not join that memo: it is not a preference, it is a
+	 * snapshot of *this* request, and remembering the override into the next
+	 * request opened would be the write-back bug pointed the other way -
+	 * silently applying request A's override to request B. Starting a run
+	 * with an override, then reopening for a different request, must still
+	 * show that request's own protocol.
+	 */
+	it("does not persist across dialogs - no cross-request memory for the override", () => {
+		const { onStart } = open({ httpVersion: "http2" });
+		pickProtocol("HTTP/1.x");
+		started(onStart);
+		cleanup();
+
+		open({ httpVersion: "auto" });
+		expect(screen.getByRole("combobox", { name: /protocol/i })).toHaveTextContent("Auto");
 	});
 });
