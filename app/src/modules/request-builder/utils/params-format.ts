@@ -13,25 +13,38 @@
 
 import type { KeyValueItem } from "../types";
 import { generateId } from "./id";
+import { splitKeyValueLine, PARAM_SEPARATORS } from "./kv-line";
 
 /**
  * Format params array to text format for bulk edit
  * Format: "key=value" (one per line)
  */
 export const formatParamsToText = (params: KeyValueItem[]): string => {
-	return params
-		.filter((p) => {
-			// Filter out empty params and system params
-			const hasContent = p.key.trim() || p.value.trim();
-			return hasContent && !p.system;
-		})
-		.map((p) => `${p.key}=${p.value}`)
-		.join("\n");
+	return (
+		params
+			.filter((p) => {
+				// Filter out empty params and system params
+				const hasContent = p.key.trim() || p.value.trim();
+				return hasContent && !p.system;
+			})
+			// A valueless param writes as a bare key, matching how it is sent:
+			// `buildUrlWithParams` emits `?page`, not `?page=`. Writing `page=` here
+			// round-tripped, but told the user something the request does not do.
+			.map((p) => (p.value ? `${p.key}=${p.value}` : p.key))
+			.join("\n")
+	);
 };
 
 /**
  * Parse text format to params array
- * Format: "key=value" (one per line)
+ * Format: "key=value" (one per line); "key: value" is accepted when the line
+ * carries no `=`, so a header block pasted here parses instead of vanishing.
+ *
+ * Two kinds of line used to be dropped in silence. `Authorization: Bearer abc`
+ * has no `=`, so pasting a header block returned an empty array - which the
+ * panel then wrote over the user's params. And `page`, a legal valueless
+ * parameter that `buildUrlWithParams` already emits as `?page`, matched nothing
+ * either, so bulk-editing lost it.
  *
  * @param text - Params in text format
  * @returns Array of KeyValueItem
@@ -41,18 +54,15 @@ export const parseParamsFromText = (text: string): KeyValueItem[] => {
 	const params: KeyValueItem[] = [];
 
 	lines.forEach((line) => {
-		const match = line.match(/^([^=]+)=\s*(.*)$/);
-		if (match) {
-			const key = match[1].trim();
-			const value = match[2].trim();
+		const parsed = splitKeyValueLine(line, PARAM_SEPARATORS, { allowBareKey: true });
+		if (!parsed) return;
 
-			params.push({
-				id: generateId(),
-				key,
-				value,
-				enabled: true,
-			});
-		}
+		params.push({
+			id: generateId(),
+			key: parsed.key,
+			value: parsed.value,
+			enabled: true,
+		});
 	});
 
 	return params;

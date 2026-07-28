@@ -45,8 +45,94 @@ export const WINDOW_DEFAULT_WIDTH = 1400;
 export const WINDOW_DEFAULT_HEIGHT = 900;
 export const WINDOW_MIN_WIDTH = 1024;
 export const WINDOW_MIN_HEIGHT = 768;
-/** Custom titlebar overlay height. Must match TitleBar.tsx h-[38px]. */
-export const TITLEBAR_HEIGHT = 38;
+/**
+ * Custom titlebar height, per platform. Must match `--titlebar-height` in
+ * `src/index.css`, which `titlebar-height.test.ts` holds it to - the renderer
+ * and main tsconfigs do not share a module graph, so nothing else can.
+ *
+ * **32px is the Windows standard**, and also the floor: `titleBarOverlay.height`
+ * is what the OS draws its caption buttons at, and those are 46x32. Anything
+ * smaller squeezes controls the platform requires to stay fully visible. The
+ * 48px variant exists for a searchbox or a person-picture, neither of which
+ * this bar has - tabs do not call for extra height.
+ *
+ * **macOS matches it.** 28px is the macOS standard for a title bar holding a
+ * *title*; this one holds tabs, and the traffic lights are a fixed 12px object
+ * that needs air as well. Safari and Chrome both use a taller bar for the same
+ * reason. 32 gives the lights 10px above and below and keeps one number across
+ * the three platforms - the map stays per-platform because the mechanism is
+ * right even when the values agree.
+ *
+ * Linux follows Windows: Vayu draws its own decorations there, so there is no
+ * system metric to match, and one fewer value to reason about is worth more
+ * than a third opinion.
+ */
+export const TITLEBAR_HEIGHT_BY_PLATFORM = {
+	darwin: 32,
+	win32: 32,
+	linux: 32,
+} as const;
+
+/**
+ * macOS traffic-light metrics.
+ *
+ * **14, not 12.** `trafficLightPosition` places the buttons' frame, not the
+ * visible circle - the circle is 12pt, the frame around it is not - so centring
+ * on 12 leaves the cluster a pixel off. 14 is what the Electron ecosystem
+ * centres on (`headerHeight / 2 - MACOS_TRAFFIC_LIGHTS_HEIGHT / 2`); it is a
+ * convention rather than a published Apple figure, so it is named here to be
+ * adjusted in one place if it proves wrong on a real machine.
+ *
+ * The original formula used 16, which was wrong in the other direction.
+ */
+export const TRAFFIC_LIGHT_FRAME_HEIGHT = 14;
+/**
+ * Leading inset of the light cluster.
+ *
+ * 20px, not 12. macOS windows have rounded top corners of roughly 10-12px, and
+ * at x=12 the close button sits *inside* that curve - the visible area is being
+ * cut away diagonally behind it, so the button reads as misaligned no matter
+ * how exactly it is centred vertically. Apple's own inset clears the corner for
+ * this reason. Moving the cluster out of the curve is what makes the arithmetic
+ * centring look centred.
+ */
+export const TRAFFIC_LIGHT_X = 20;
+/**
+ * Width the renderer reserves for the cluster, so the first tab does not land
+ * under it. A 20px lead plus three buttons on a 20px pitch ends at 84px; 104
+ * leaves a 20px gutter. At 80 that gutter was 16px and the lights read as
+ * crammed against the tab strip. Mirrored by `--traffic-light-inset` in
+ * index.css and held to it by `titlebar-height.test.ts`.
+ */
+export const TRAFFIC_LIGHT_INSET = 104;
+
+/** Resolved for the running platform; unknown platforms get the Linux value. */
+export const TITLEBAR_HEIGHT: number =
+	TITLEBAR_HEIGHT_BY_PLATFORM[process.platform as keyof typeof TITLEBAR_HEIGHT_BY_PLATFORM] ??
+	TITLEBAR_HEIGHT_BY_PLATFORM.linux;
+/**
+ * Colours the main process has to name that the renderer owns as tokens.
+ *
+ * These paint the Windows caption-button overlay and the window's pre-paint
+ * background - both set by Electron before any stylesheet exists, so they
+ * cannot read a CSS variable and must be duplicated here.
+ *
+ * They had drifted: the overlay was `#f2f0eb`, a warm cream from the palette
+ * before "paper white", against a `--panel` of `#fafafa`. On Windows that put a
+ * visibly warmer strip across the right of the title bar in light mode. The
+ * hex existed nowhere else in the repo. `titlebar-height.test.ts` now holds
+ * these to `src/index.css` the same way it holds the height.
+ */
+/** `--panel`: the title bar's own surface, so the overlay disappears into it. */
+export const TITLEBAR_BG_LIGHT = "#fafafa";
+export const TITLEBAR_BG_DARK = "#111113";
+/** `--foreground`: the caption glyphs. */
+export const TITLEBAR_FG_LIGHT = "#18181b";
+export const TITLEBAR_FG_DARK = "#f4f4f5";
+/** `--background`: shown for the frame or two before the first paint. */
+export const WINDOW_BG_LIGHT = "#f4f4f5";
+export const WINDOW_BG_DARK = "#09090b";
+
 /** Debounce for persisting window bounds to disk. */
 export const WINDOW_STATE_SAVE_DEBOUNCE_MS = 500;
 

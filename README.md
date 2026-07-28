@@ -74,7 +74,7 @@ A broader comparison against k6, JMeter, and the Postman collection runner is in
 
 ## Coming from Postman, Insomnia, or an OpenAPI spec?
 
-Migrating takes seconds. Drop an existing export onto Vayu and the workspace is rebuilt as a native collection - folders, environments, variables, auth, and pre/post-request scripts all carry across.
+Migrating takes seconds. Drop an existing export onto Vayu and the workspace is rebuilt as a native collection - folders, variables, auth, and pre/post-request scripts all carry across, plus environments from an Insomnia workspace. (Postman keeps environments in a separate export, which is not read.)
 
 - **Postman** - Collection v2.0 and v2.1 JSON exports
 - **Insomnia** - v4 exports
@@ -181,6 +181,8 @@ See [Architecture Documentation](docs/architecture.md) for the full process mode
 
 ## Documentation
 
+**Full docs: [athrvk.github.io/vayu](https://athrvk.github.io/vayu/)** - searchable, and built from `docs/` on every push to `master`.
+
 | Document | Description |
 |---|---|
 | [Architecture](docs/architecture.md) | Sidecar pattern, process model, IPC |
@@ -217,7 +219,7 @@ Yes. All execution happens locally. Vayu never contacts external servers during 
 No. Download, install, and use it immediately with no sign-up.
 
 **Can I import my Postman collections?**
-Yes - Postman Collection v2.0 and v2.1 JSON exports, including folders, environments, variables, auth settings, and pre/post-request scripts.
+Yes - Postman Collection v2.0 and v2.1 JSON exports, including folders, collection variables, auth settings, and pre/post-request scripts. Postman environments live in a separate export file and are not read; Insomnia workspace environments do import.
 
 **Can I import OpenAPI / Swagger specs?**
 Yes. Drop in an OpenAPI 3.0 or Swagger 2.0 file (JSON or YAML) and Vayu generates a ready-to-use collection from the spec.

@@ -174,6 +174,7 @@ The app uses a dual-state management approach:
 - **`useSSE()`**: Connect to metrics stream for active load tests
 - **`useVariableResolver()`**: Resolve `{{variables}}` in strings/objects
 - **`useSaveManager()`**: Auto-save orchestration with debouncing
+- **`useEntityDraft()`**: The manual counterpart - draft, `isDirty`, reset, for editors that save on a button
 
 ## Data Flow
 

@@ -12,6 +12,10 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 
+# MkDocs output (`mkdocs build`). CI builds and uploads this; it is never
+# committed - the Pages deploy reads the artifact, not a branch.
+/site/
+
 # Engine data dir when the daemon is run from the repo root (it defaults to
 # ./data relative to the working directory). Anchored so it only matches here -
 # the in-tree location, engine/data/, is ignored by engine/.gitignore.

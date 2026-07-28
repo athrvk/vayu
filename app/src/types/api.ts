@@ -251,7 +251,12 @@ export interface StartLoadTestRequest {
 	maxInFlight?: number; // Max concurrent in-flight requests before drops/queue. Default per-strategy.
 
 	// Data capture options
-	success_sample_rate?: number; // 1-100; the engine rejects 0 (it is a divisor)
+	// Sampling period, not a percentage: the engine keeps a trace when
+	// `counter % success_sample_rate == 0`, so 1 keeps every response and 100
+	// keeps 1%. A 0 is a division by zero engine-side, and the engine rejects
+	// it with a 400. Build it with `successSamplePeriod`, which converts from
+	// the percentage the UI shows.
+	success_sample_rate?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
 	tests?: ScriptPart[];

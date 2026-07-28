@@ -68,6 +68,40 @@ export default function Shell() {
 		} else if (activeTab?.type === "collection" || activeTab?.type === "request") {
 			setDrawerOpen(true);
 			setDrawerView("collections");
+		} else if (activeTab?.type === "run") {
+			/*
+			 * A run's list is History, so a run tab belongs with it - and with the
+			 * drawer open. It had no branch at all, which was not quite the same as
+			 * "leave it alone": the drawer never *opened*, so picking a run while it
+			 * was closed left the sidebar shut.
+			 *
+			 * The guard this has to respect is the older bug where opening a run
+			 * threw the user out of the History list. Selecting History satisfies
+			 * that rather than violating it - the failure then was landing
+			 * somewhere else.
+			 */
+			setDrawerOpen(true);
+			setDrawerView("history");
+		} else if (activeTab?.type === "dashboard") {
+			/*
+			 * Deliberately nothing. Written out rather than left to fall off the
+			 * end, because "no branch" is what made the `run` case a bug for so
+			 * long - it is indistinguishable from nobody having considered it, and
+			 * the next person adding branches for completeness would add one here.
+			 *
+			 * The dashboard is a detour from a request, not a list item: it is
+			 * opened only by the request builder when a load test starts, carries
+			 * `entityId: null`, and its back button returns to `sourceRequestId`
+			 * rather than closing. So when it opens, the drawer is already on
+			 * Collections with that request revealed - which is both where the user
+			 * came from and where Back sends them. Switching to History would
+			 * discard exactly that context, twice per round trip.
+			 *
+			 * A judgement call, not a forced one: a running test *does* appear in
+			 * History (`listRuns` applies no status filter, and the sidebar offers
+			 * a "Running" filter), so showing History here would not be
+			 * nonsensical - just contrary to the flow.
+			 */
 		}
 	}, [activeTab?.type, activeTab?.entityId, setDrawerOpen, setDrawerView]);
 

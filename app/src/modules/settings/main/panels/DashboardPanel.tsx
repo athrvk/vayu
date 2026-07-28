@@ -16,7 +16,15 @@
  */
 
 import { History, Gauge, LineChart, Rewind } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@/components/ui";
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+	Eyebrow,
+	Input,
+} from "@/components/ui";
 import { useLiveChartWindow } from "@/hooks/useLiveChartWindow";
 import { useClientSettingsStore } from "@/stores";
 import { LIVE_WINDOW_OPTIONS } from "@/constants/live-window";
@@ -51,9 +59,7 @@ export default function DashboardPanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-						Chart window
-					</p>
+					<Eyebrow className="mb-2">Chart window</Eyebrow>
 					<OptionButtons
 						options={LIVE_WINDOW_OPTIONS.map((o) => ({
 							value: o.value,

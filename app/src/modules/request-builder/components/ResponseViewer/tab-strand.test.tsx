@@ -27,7 +27,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import type { ResponseState } from "../../types";
 import ResponseViewer from "./index";
@@ -104,43 +104,71 @@ function activeTabName(): string | null {
 	return active[0]?.textContent?.trim() ?? null;
 }
 
-function bodyIsVisible(): boolean {
-	const panel = screen.queryByTestId("body-content");
-	return !!panel && within(panel).queryByText(BODY) !== null;
-}
+/*
+ * Issue #59 is now unrepresentable rather than handled.
+ *
+ * It happened because four tabs rendered only when the response carried their
+ * data, so the set shrank as you switched responses: a tab clicked on one
+ * response could name a trigger the next one no longer drew, leaving the
+ * controlled Tabs root with nothing to select and a blank pane. The fix was a
+ * clamp back to `body`.
+ *
+ * Every tab renders now, so nothing can vanish underneath the selection and the
+ * clamp is gone. These no longer test the clamp; they test the property that
+ * replaced it - **the tab set does not depend on the response** - which is
+ * strictly stronger, because a clamp only rescues you after the set has changed.
+ */
+describe("the response tab set", () => {
+	const ALL = [/body/i, /headers/i, /cookies/i, /timing/i, /console/i, /tests/i, /raw/i];
 
-describe("ResponseViewer active-tab clamping", () => {
-	it("renders the conditional tab this test relies on (guards the fixture)", () => {
+	it("renders all seven tabs for a response that carries everything", () => {
 		state.response = fullResponse();
-		const { unmount } = renderViewer();
-
-		// If the fixture stopped producing a Tests tab, the strand test below
-		// would pass vacuously - so prove the tab is really there first.
-		expect(screen.getByRole("tab", { name: /tests/i })).toBeTruthy();
-		unmount();
+		renderViewer();
+		for (const name of ALL) {
+			expect(screen.queryByRole("tab", { name })).toBeTruthy();
+		}
 	});
 
-	it("falls back to Body when the selected tab disappears from the next response", () => {
+	it("renders all seven for a response that carries none of the optional data", () => {
+		// The case that used to shrink the strip to three.
+		state.response = {
+			...fullResponse(),
+			timing: undefined,
+			consoleLogs: undefined,
+			testResults: undefined,
+			rawRequest: undefined,
+			preScriptError: undefined,
+			postScriptError: undefined,
+		};
+		renderViewer();
+		for (const name of ALL) {
+			expect(screen.queryByRole("tab", { name })).toBeTruthy();
+		}
+	});
+
+	it("keeps the selected tab when the next response drops that tab's data", () => {
+		/*
+		 * The #59 repro, inverted. Standing on Tests and re-sending without a
+		 * test script used to unmount the trigger under you; now the tab stays
+		 * selected and says it has nothing, which is an answer rather than a
+		 * disappearance.
+		 */
 		state.response = fullResponse();
 		const { rerender } = renderViewer();
 
-		// Stand on Tests, the way the app's repro does.
 		selectTab(/tests/i);
 		expect(activeTabName()).toMatch(/tests/i);
 
-		// A scriptless re-send: same response, no test results. The Tests tab and
-		// its panel unmount together.
 		state.response = { ...fullResponse(), testResults: undefined };
 		rerender();
 
-		expect(screen.queryByRole("tab", { name: /tests/i })).toBeNull();
-		expect(activeTabName()).toMatch(/body/i);
-		expect(bodyIsVisible()).toBe(true);
+		expect(screen.queryByRole("tab", { name: /tests/i })).toBeTruthy();
+		expect(activeTabName()).toMatch(/tests/i);
+		expect(screen.getByText(/no tests ran/i)).toBeTruthy();
 	});
 
-	it("survives switching between restored responses with differing tab sets", () => {
-		// One restored trace has timing, the next has none - the sequence #65
-		// makes routine by routing design-run history through this viewer.
+	it("keeps Timing selected across restored traces with and without timing", () => {
+		// Sequence #65 makes this routine by routing design-run history here.
 		state.response = fullResponse();
 		const { rerender } = renderViewer();
 
@@ -150,8 +178,81 @@ describe("ResponseViewer active-tab clamping", () => {
 		state.response = { ...fullResponse(), timing: undefined };
 		rerender();
 
-		expect(screen.queryByRole("tab", { name: /timing/i })).toBeNull();
-		expect(activeTabName()).toMatch(/body/i);
-		expect(bodyIsVisible()).toBe(true);
+		expect(activeTabName()).toMatch(/timing/i);
+		expect(screen.getByText(/no timing recorded/i)).toBeTruthy();
+	});
+});
+
+/**
+ * No tab trigger carries an icon.
+ *
+ * Console had one - the only icon across the fifteen triggers in the two strips,
+ * this pane's seven and the request builder's eight. One decorated tab out of
+ * fifteen reads as that tab being a different *kind* of thing rather than as an
+ * aid to finding it, and it sat directly beside the error dot that actually
+ * distinguishes Console when it matters.
+ *
+ * Asserted by rendering rather than scanning: an icon arrives as a component, and
+ * a source scan for `lucide` would flag the tab *panels*, which use icons
+ * legitimately.
+ */
+describe("icons in the tab strip", () => {
+	it("has none, so no tab reads as a different kind of thing", () => {
+		state.response = fullResponse();
+		const { container } = renderViewer();
+
+		const triggers = Array.from(
+			container.querySelectorAll<HTMLElement>('[data-slot="tabs-trigger"]')
+		);
+		expect(triggers.length).toBeGreaterThan(5);
+
+		const decorated = triggers
+			.filter((t) => t.querySelector("svg"))
+			.map((t) => t.textContent?.trim());
+		expect(decorated).toEqual([]);
+	});
+});
+
+/**
+ * A tab count of zero renders nothing.
+ *
+ * Removing the conditional gating made the Console tab always render, and its
+ * count came with it - so a response with no console output showed `Console⁰`,
+ * a superscript whose only message is that there is nothing to read, above a
+ * panel that says "No console output" at more length.
+ *
+ * `TabCount` drops a zero itself rather than each call site guarding: they were
+ * already guarding by hand (`RequestTabs` passes `badge: undefined` and tests
+ * `!== undefined`), which is the same remembering problem one level up.
+ */
+describe("a tab count of zero", () => {
+	it("shows no superscript on Console when nothing was logged", () => {
+		state.response = {
+			...fullResponse(),
+			consoleLogs: undefined,
+			preScriptError: undefined,
+			postScriptError: undefined,
+		};
+		renderViewer();
+
+		/*
+		 * The absence of a `sup`, not an equality on the text. `TabLabel` renders
+		 * its label twice - once `invisible font-semibold` to reserve the width
+		 * the active state will need - so `textContent` is "ConsoleConsole" and
+		 * always will be.
+		 */
+		const trigger = screen.getByRole("tab", { name: /console/i });
+		expect(trigger.querySelector("sup")).toBeNull();
+		expect(trigger.textContent).not.toMatch(/\d/);
+	});
+
+	it("still shows a real count when there is one", () => {
+		// The guard has to fail for the right reason - a count that vanished
+		// entirely would pass the assertion above.
+		state.response = { ...fullResponse(), consoleLogs: ["one", "two"] };
+		renderViewer();
+
+		const trigger = screen.getByRole("tab", { name: /console/i });
+		expect(trigger.querySelector("sup")?.textContent).toBe("2");
 	});
 });

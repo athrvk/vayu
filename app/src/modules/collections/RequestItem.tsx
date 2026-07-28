@@ -64,6 +64,20 @@ export default function RequestItem({
 		onStartRename?.(request);
 	};
 
+	/**
+	 * The row's own box - the indent, the flex gap, `pr-3` - belongs to no child,
+	 * so a click there has nowhere to go. `self-stretch` on the label button
+	 * recovered the height; it cannot recover the indent, because the indent is
+	 * padding on the row (deliberately, so the fill reaches the panel edge) and on
+	 * a collection row the chevron sits between it and the button.
+	 *
+	 * So the row delegates. `target === currentTarget` is exactly "the pointer
+	 * landed on the row itself, not on anything inside it", which excludes the
+	 * label button, the ⋯ menu and the chevron without naming any of them - and
+	 * without double-firing when a click on the button bubbles through here.
+	 */
+	const isRowSurface = (e: React.MouseEvent) => e.target === e.currentTarget;
+
 	// Prefer the confirmation flow when the tree supplies one.
 	const handleDelete = () => {
 		if (isDeleting) return;
@@ -77,6 +91,8 @@ export default function RequestItem({
 			role="treeitem"
 			tabIndex={-1}
 			aria-selected={isSelected}
+			onClick={(e) => isRowSurface(e) && handleClick(e)}
+			onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
 			// Indent inside the row (see CollectionItem) so the fill still
 			// reaches both panel edges.
 			style={{ paddingLeft: 8 + depth * INDENT_STEP }}
@@ -98,7 +114,14 @@ export default function RequestItem({
 				onDoubleClick={handleDoubleClick}
 				tabIndex={-1}
 				data-tree-activate
-				className="flex min-w-0 items-center gap-2 flex-1 text-left cursor-pointer"
+				// self-stretch: the row is `items-center`, which makes every child
+				// content-height - so this button, the only thing wired to onSelect,
+				// was ~22px tall inside a 32px row that paints a full-height hover
+				// fill and `cursor-pointer`. The top and bottom ~5px of the row
+				// looked clickable and were not. Stretching to the row's height
+				// costs nothing (the button's own `items-center` still centres the
+				// badge and label) and `focus-row` keeps painting the ring.
+				className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
 				disabled={isDeleting || isRenaming}
 			>
 				<MethodBadge method={request.method} size="md" />

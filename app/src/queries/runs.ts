@@ -94,13 +94,18 @@ export function useAllRunsQuery() {
  * stored exchange. The report is a load-test aggregate and carries no
  * configuration for a design run, so this is the only source for it.
  */
-export function useRunQuery(runId: string | null) {
-	return useQuery({
+/** See `requestDetailOptions` - same reason, for runs. */
+export function runDetailOptions(runId: string | null) {
+	return {
 		queryKey: queryKeys.runs.detail(runId ?? ""),
 		queryFn: () => apiService.getRun(runId!),
 		enabled: !!runId,
 		staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
-	});
+	};
+}
+
+export function useRunQuery(runId: string | null) {
+	return useQuery(runDetailOptions(runId));
 }
 
 /**

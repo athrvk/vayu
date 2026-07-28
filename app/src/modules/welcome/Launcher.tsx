@@ -17,6 +17,7 @@
 // `components/layout/Dock.tsx`. It was `Database` here, which reads as stored
 // records rather than `{{name}}` substitutions.
 import { Download, Plus, Braces, History } from "lucide-react";
+import { Eyebrow } from "@/components/ui";
 import type { Run } from "@/types";
 import { ActionTile } from "./components/ActionTile";
 import { FooterLinks } from "./components/FooterLinks";
@@ -46,9 +47,7 @@ export function Launcher({
 	return (
 		<div className="flex flex-col gap-8">
 			<section>
-				<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-					Start
-				</p>
+				<Eyebrow className="mb-2">Start</Eyebrow>
 				<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
 					<ActionTile icon={Plus} label="New request" onClick={onNewRequest} />
 					<ActionTile icon={Download} label="Import" onClick={onImport} />

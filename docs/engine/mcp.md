@@ -10,7 +10,7 @@ and proxies the engine's REST API on `:9876`. The **C++ engine is not modified**
 the MCP layer is Apache-2.0 like the rest of the app.
 
 Once Vayu is running, any agent opts in with one command; if Vayu is down, the
-agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`](../../SECURITY.md).
+agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md).
 
 ## Overview
 
@@ -397,4 +397,4 @@ builds on the mechanism the spec is deprecating and the payoff is client-depende
   [Codex](https://developers.openai.com/codex/mcp) ·
   [Cursor](https://cursor.com/docs/mcp)
 - Engine API surface: [`api-reference.md`](./api-reference.md) · Threat model:
-  [`SECURITY.md`](../../SECURITY.md)
+  [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md)

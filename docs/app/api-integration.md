@@ -404,12 +404,37 @@ await apiService.startLoadTest({
 
 The engine range-checks this payload before it creates the run row and answers a
 violation with `400 invalid_run_config` (accepted ranges are tabulated under
-[POST /runs](../engine/api-reference.md#post-runs)). The renderer's own floors
+[POST /runs](../engine/api-reference.md#post-runs)). The renderer's own limits
 live in `LOAD_TEST_LIMITS` (`src/constants/load-test.ts`) and must stay at or
-inside the engine's: `SAMPLE_RATE_PCT.MIN` is `1` rather than `0` because the
-value is sent as `success_sample_rate`, which the engine uses as a sampling
-period (`counter % rate`) - a `0` there was a division by zero. "Keep no success
-traces" is the **Save timing breakdown** toggle, not a rate of zero.
+inside the engine's.
+
+#### `success_sample_rate` is a period, not a percentage
+
+The engine keeps a success trace when `counter % success_sample_rate == 0` - one
+in every N. The dialog's control is a percentage, and the renderer converts
+between them with `successSamplePeriod` (`constants/load-test.ts`): 100% becomes
+a period of `1`, 1% becomes `100`, and the default 10% is the fixed point where
+the two units coincide. Sending the percentage straight through, as the renderer
+did before, inverts the slider - "100% - everything" kept 1%.
+
+A `0` is a division by zero engine-side, so the control's floor is 1%. "Keep no
+success traces" is the **Save timing breakdown** toggle, which gates storage
+outright.
+
+#### Dialog ceilings are a user setting
+
+`LOAD_TEST_LIMITS` (`constants/load-test.ts`) holds the ranges the load dialog
+offers, and four of its ceilings are user-adjustable in **Settings → Load
+testing** (`loadTestCeilings` on `client-settings-store`). The dialog reads them
+through `resolveLoadTestLimits`, never off the constant.
+
+These are the app's policy and sit inside the engine's own bounds, which are
+crash guards rather than throttles: a run's `concurrency` becomes an *eager*
+per-worker curl-handle pre-allocation, so the engine caps it at 10x
+`event_loop::MAX_CONCURRENT`. `LOAD_TEST_CEILING_BOUNDS` pins each settable
+ceiling at that guard, so no value on the settings screen can compose a run the
+engine rejects. The floors are not settable at all - below them the values are
+not "small", they are unusable (a `concurrency` of 0, a sample period of 0).
 
 ## Error Handling
 
