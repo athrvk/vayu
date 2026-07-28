@@ -12,7 +12,6 @@
  */
 
 import { CheckCircle, XCircle } from "lucide-react";
-import { Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 export interface TestResultsProps {
@@ -25,15 +24,36 @@ export default function TestResults({ results }: TestResultsProps) {
 
 	return (
 		<div className="p-4 overflow-auto h-full">
-			{/* Summary */}
-			<div className="mb-4 flex items-center gap-4">
-				<Badge variant={failedCount === 0 ? "default" : "destructive"} className="text-sm">
-					{passedCount} passed, {failedCount} failed
-				</Badge>
-			</div>
+			{/*
+			 * The summary reads as text, not a chip.
+			 *
+			 * It was a `text-sm` Badge, which made it the loudest thing in a panel
+			 * whose *content* is the results - and the tab trigger directly above
+			 * already carries a pass/fail chip, so a second one restated it more
+			 * loudly than the thing it summarised. Failures keep a colour, because
+			 * "2 failed" is the one part worth finding without reading.
+			 */}
+			<p className="mb-3 text-xs text-muted-foreground">
+				<span className="text-foreground font-medium tabular-nums">{passedCount}</span>{" "}
+				passed
+				{failedCount > 0 && (
+					<>
+						{", "}
+						<span className="text-status-error-text font-medium tabular-nums">
+							{failedCount}
+						</span>{" "}
+						failed
+					</>
+				)}
+			</p>
 
-			{/* Test List */}
-			<div className="space-y-2">
+			{/*
+			 * `text-xs` and 14px icons, matching the pane. This ran at `text-sm`
+			 * with `w-5 h-5` icons - a ~52px row in the one tab whose job is
+			 * listing every assertion a script made, while the tables beside it
+			 * had just been taken to 12px.
+			 */}
+			<div className="space-y-1.5">
 				{results.map((test, i) => (
 					<div
 						key={i}
@@ -41,7 +61,7 @@ export default function TestResults({ results }: TestResultsProps) {
 							// `rounded-md`: these were the only square-cornered cards
 							// in the response pane, and they ignored the Roundedness
 							// setting entirely.
-							"p-3 rounded-md border",
+							"p-2.5 rounded-md border",
 							test.passed
 								? "bg-status-success/10 border-status-success/20"
 								: "bg-status-error/10 border-status-error/20"
@@ -49,14 +69,14 @@ export default function TestResults({ results }: TestResultsProps) {
 					>
 						<div className="flex items-start gap-2">
 							{test.passed ? (
-								<CheckCircle className="w-5 h-5 text-status-success-text mt-0.5 flex-shrink-0" />
+								<CheckCircle className="w-3.5 h-3.5 text-status-success-text mt-px shrink-0" />
 							) : (
-								<XCircle className="w-5 h-5 text-status-error-text mt-0.5 flex-shrink-0" />
+								<XCircle className="w-3.5 h-3.5 text-status-error-text mt-px shrink-0" />
 							)}
-							<div className="flex-1">
+							<div className="flex-1 min-w-0">
 								<p
 									className={cn(
-										"text-sm font-medium",
+										"text-xs font-medium",
 										test.passed
 											? "text-status-success-text"
 											: "text-status-error-text"
@@ -65,9 +85,9 @@ export default function TestResults({ results }: TestResultsProps) {
 									{test.name}
 								</p>
 								{test.error && (
-									<p className="text-sm text-status-error-text mt-1 font-mono">
+									<pre className="text-[11px] text-status-error-text mt-1 font-mono whitespace-pre-wrap break-words">
 										{test.error}
-									</p>
+									</pre>
 								)}
 							</div>
 						</div>
