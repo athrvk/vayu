@@ -16,6 +16,16 @@
  * result / Request / Response data. None of them concatenates the two halves
  * into one blob with a divider through the middle, which is what this did.
  *
+ * **The tab stays called "Raw", deliberately.** That does collide with the body
+ * toolbar's Raw segment, which means the other thing - the unformatted body -
+ * and the collision was weighed rather than missed. The alternatives were worse:
+ * "Timeline" implies a sequence of calls over time and would sit beside a tab
+ * already called Timing, and "Wire" is taken inside Vayu, where the Timing
+ * summary uses it for the libcurl transfer phase. Renaming to dodge one
+ * collision by creating another is not a trade. The prefixes below also carry
+ * most of the weight the name would have: the content is self-evidently an
+ * exchange the moment you look at it.
+ *
  * The prefixes are the closest thing to a convention a reader already knows,
  * and they beat a separator line in three ways: every line says which half it
  * belongs to instead of only the boundary saying it, an excerpt pasted into an
