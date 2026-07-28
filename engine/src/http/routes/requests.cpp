@@ -124,6 +124,27 @@ apply_key_value_field (const nlohmann::json& json, const char* key, std::string&
 }
 
 /**
+ * The value new/reset requests' httpVersion is seeded with: the live
+ * "defaultHttpVersion" config entry, read fresh on every write (not cached,
+ * not vayu::DEFAULT_HTTP_VERSION) so a user-changed global takes effect
+ * immediately for the next create or explicit reset. Falls back to
+ * vayu::DEFAULT_HTTP_VERSION only if the config entry is missing or somehow
+ * holds a value outside all_http_versions().
+ *
+ * The validity check goes through the domain's own parser: a tampered config
+ * row must not be able to plant an invalid value via the seed path, and the
+ * rule for what counts as valid lives in exactly one place.
+ */
+static std::string http_version_seed (vayu::db::Database& db) {
+    std::string configured = db.get_config_string (
+    "defaultHttpVersion", vayu::to_string (vayu::DEFAULT_HTTP_VERSION));
+    if (vayu::http_version_from_string (configured).has_value ()) {
+        return configured;
+    }
+    return vayu::to_string (vayu::DEFAULT_HTTP_VERSION);
+}
+
+/**
  * Applies the request body onto `r` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
  * verbs cannot drift apart on what a field means.
@@ -131,8 +152,11 @@ apply_key_value_field (const nlohmann::json& json, const char* key, std::string&
  * `collectionId`, `name`, `method` and `url` have no default, so each is
  * required on create and rejects an explicit null on either verb.
  */
-static std::optional<std::pair<int, nlohmann::json>>
-apply_request_fields (vayu::db::Request& r, const nlohmann::json& json, bool is_create) {
+static std::optional<std::pair<int, nlohmann::json>> apply_request_fields (
+vayu::db::Database& db,
+vayu::db::Request& r,
+const nlohmann::json& json,
+bool is_create) {
     if (auto err = apply_required_string_field (
         json, "collectionId", r.collection_id, is_create)) {
         return err;
@@ -179,6 +203,15 @@ apply_request_fields (vayu::db::Request& r, const nlohmann::json& json, bool is_
     // is not a policy we want a stray value to select.
     r.max_redirects = std::clamp (r.max_redirects, 0, 100);
 
+    // Unlike the fields above, an unrecognized httpVersion is rejected rather
+    // than coerced - see apply_http_version_field in routes.hpp. The seed is
+    // read fresh here (not hoisted above the field applications) so it always
+    // reflects the config entry as of this write.
+    if (auto err = apply_http_version_field (json, "httpVersion",
+        r.http_version, http_version_seed (db), is_create)) {
+        return err;
+    }
+
     return std::nullopt;
 }
 
@@ -208,7 +241,7 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
     r.created_at = now_ms ();
     r.updated_at = now_ms ();
 
-    if (auto err = apply_request_fields (r, json, /*is_create=*/true)) {
+    if (auto err = apply_request_fields (db, r, json, /*is_create=*/true)) {
         return *err;
     }
 
@@ -230,7 +263,7 @@ const nlohmann::json& json) {
     }
 
     vayu::db::Request r = *existing;
-    if (auto err = apply_request_fields (r, json, /*is_create=*/false)) {
+    if (auto err = apply_request_fields (db, r, json, /*is_create=*/false)) {
         return *err;
     }
     r.updated_at = now_ms ();
@@ -300,7 +333,9 @@ void register_request_routes (RouteContext& ctx) {
      * Body params: id (optional string - generated when absent), collectionId,
      * name, method, url (all required), description, params/headers (arrays of
      * KeyValueEntry), body, bodyType, auth, preRequestScript,
-     * postRequestScript, order, followRedirects, maxRedirects.
+     * postRequestScript, order, followRedirects, maxRedirects, httpVersion
+     * (absent/null seeds from the "defaultHttpVersion" config entry; an
+     * unrecognized value is a 400, never silently coerced).
      * Returns: The created request object, 409 on an existing id, or 400.
      */
     ctx.server.Post (

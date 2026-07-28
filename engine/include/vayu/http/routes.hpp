@@ -155,6 +155,79 @@ apply_int_field (const nlohmann::json& json, const char* key, int& out, int defa
 }
 
 /**
+ * The domain's wire values as quoted, comma-separated text, for the "Valid
+ * values: ..." tail of a rejection. Built from `all_http_versions()` so the
+ * message can never list a different set than the one actually accepted.
+ */
+inline std::string http_version_valid_list () {
+    std::string list;
+    for (const auto version : vayu::all_http_versions ()) {
+        if (!list.empty ()) {
+            list += ", ";
+        }
+        list += "'" + vayu::to_string (version) + "'";
+    }
+    return list;
+}
+
+/**
+ * Same null-vs-absent rule for a field validated against `all_http_versions()`
+ * (currently only `httpVersion`, but written generically since the pattern -
+ * "a string that must be one of an enumerated set" - is not itself
+ * HTTP-version-specific).
+ *
+ * Unlike `apply_bool_field` / `apply_int_field`, a value that fails validation
+ * is a 400, never a silent ignore: a typo'd protocol name quietly running as
+ * something else is worse than a rejected write. @p seed is the value used for
+ * "absent on create" and "null" on either verb - the caller reads it from the
+ * live `defaultHttpVersion` config entry, not a compiled-in constant, so a
+ * user-configured global takes effect for new/reset requests.
+ *
+ * Acceptance goes through `http_version_from_string`, and the 400's
+ * valid-values text through `http_version_valid_list()`. Both resolve to
+ * `all_http_versions()`, so the set accepted and the set advertised cannot
+ * drift apart - a hand-written accept-list here would be exactly the risk
+ * `all_http_versions()` exists to prevent.
+ */
+inline std::optional<std::pair<int, nlohmann::json>> apply_http_version_field (
+const nlohmann::json& json,
+const char* key,
+std::string& out,
+const std::string& seed,
+bool is_create) {
+    if (!json.contains (key)) {
+        if (is_create) {
+            out = seed;
+        }
+        return std::nullopt;
+    }
+    if (json[key].is_null ()) {
+        out = seed;
+        return std::nullopt;
+    }
+
+    if (json[key].is_string ()) {
+        const std::string candidate = json[key].get<std::string> ();
+        // Acceptance goes through the domain's own parser rather than a
+        // hand-rolled comparison, so this cannot come to disagree with what
+        // deserialize_request and the config seed accept.
+        if (vayu::http_version_from_string (candidate).has_value ()) {
+            out = candidate;
+            return std::nullopt;
+        }
+        return std::make_pair (400,
+        nlohmann::json{ { "error",
+        std::string ("Invalid '") + key + "': '" + candidate +
+        "' is not a valid HTTP version. Valid values: " + http_version_valid_list () } });
+    }
+
+    return std::make_pair (400,
+    nlohmann::json{ { "error",
+    std::string ("Invalid '") + key +
+    "': must be a string. Valid values: " + http_version_valid_list () } });
+}
+
+/**
  * A field with no default: absent on create and `null` on either verb are both
  * 400s, because there is nothing to fall back to. Returns the error response
  * body, or nullopt when the value is acceptable (including "absent on update",
