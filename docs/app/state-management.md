@@ -683,6 +683,39 @@ const { forceSave, status, isSaving } = useSaveManager({
 });
 ```
 
+### `useEntityDraft()` - Manual Draft/Save Model
+
+The other save model, and the counterpart to `useSaveManager()`: an editable draft, a Save button gated on `isDirty`, and a Reset that discards it. Located in `app/src/hooks/useEntityDraft.ts`. Used by all three editing tabs of `CollectionDetail` (`AuthTab`, `InfoTab`, `ScriptTab`), where a save is a deliberate button press rather than a keystroke that persists itself.
+
+**API:**
+```typescript
+const {
+  draft: T                                 // The editable copy
+  setDraft: Dispatch<SetStateAction<T>>    // Standard setState signature
+  isDirty: boolean                         // Draft differs from the persisted value
+  reset: () => void                        // Discard the draft
+} = useEntityDraft<T>({
+  entityKey: string                        // Identity of the thing being edited
+  value: T                                 // The persisted value
+  mutation: { reset: () => void }          // The save mutation this editor reports through
+});
+```
+
+**Behaviour:**
+- **Seeds and resyncs:** the draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`.
+- **Tracks by JSON value, not identity:** `value` may be a fresh object literal every render (`InfoTab` builds `{ name, description }` inline); callers do not have to memoize it.
+- **`entityKey` is a switch, not an edit:** a change reseeds the draft *and* calls `mutation.reset()`. These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. `ScriptTab` passes `${collection.id}:${fieldKey}`, since pre- and post-request scripts are two different things to edit under one collection id.
+- **Requiring the mutation is the point:** the three hand-rolled copies this replaced had drifted, and the one that omitted the reset had exactly that bug.
+
+**Usage:**
+```typescript
+const { draft, setDraft, isDirty, reset } = useEntityDraft({
+  entityKey: collection.id,
+  value: collection.auth,
+  mutation: updateCollection,
+});
+```
+
 ## State Flow Examples
 
 ### Executing a Single Request
@@ -740,7 +773,7 @@ const { forceSave, status, isSaving } = useSaveManager({
 
 3. **TanStack Query for server state:** Use TanStack Query for collections, requests, environments, globals, runs, and reports. It is the single source of truth and ensures consistency across the app.
 
-4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.). It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save.
+4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.) that autosaves. It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save. For an editor that saves on an explicit button instead, use `useEntityDraft()` - do not hand-roll the draft/resync/`isDirty`/mutation-reset parts again.
 
 5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes.
 
