@@ -120,7 +120,10 @@ class EventLoopWorker {
     EventLoopWorker& operator= (const EventLoopWorker&) = delete;
 
     void start ();
-    void stop (bool wait_for_pending);
+    /// See EventLoop::stop. `drain_timeout` bounds the drain when
+    /// `wait_for_pending` is true; zero means unbounded.
+    void stop (bool wait_for_pending,
+    std::chrono::milliseconds drain_timeout = std::chrono::milliseconds::zero ());
     void submit (std::unique_ptr<TransferData> data);
 
     size_t active_count () const;
@@ -135,15 +138,28 @@ class EventLoopWorker {
 
     void run_loop ();
 
+    /// Remove every in-flight easy handle from curl and complete it as
+    /// cancelled. Worker-thread only - `active_transfers` and the handle pool
+    /// are not synchronised.
+    void cancel_active_transfers ();
+
+    /// True once a bounded drain (stop(true, t)) has run out of time. Always
+    /// false when no deadline was set.
+    [[nodiscard]] bool drain_deadline_passed () const;
+
     CURLM* multi_handle = nullptr;
     std::thread thread;
     std::atomic<bool> running{ false };
     std::atomic<bool> stop_requested{ false };
     // Set to true when stop(true) is called so the run_loop continues draining
     // the pending queue before exiting. When false (stop(false)), the worker
-    // abandons the queue after draining active_transfers; the caller drains
+    // cancels its in-flight transfers and abandons the queue; the caller drains
     // the queue as sole consumer after join() to avoid a concurrent SPSC pop.
     std::atomic<bool> drain_on_stop{ true };
+    // steady_clock ticks after which a drain gives up and cancels what is left.
+    // 0 = no deadline. Written by the stopping thread before `stop_requested`,
+    // read by the worker, so a release/acquire pair carries both.
+    std::atomic<int64_t> drain_deadline_ticks{ 0 };
 
     // Lock-free queue for high performance
     vayu::core::SPSCQueue<std::unique_ptr<TransferData>> pending_queue;

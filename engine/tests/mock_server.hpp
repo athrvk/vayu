@@ -11,6 +11,7 @@
 
 #include <httplib.h>
 
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -33,6 +34,17 @@ class SlowMockServer {
         svr.Get ("/fast", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content ("{}", "application/json");
         });
+        // An upstream that never answers on its own - what a stop must not wait
+        // for. The handler only returns once the fixture is torn down (or after
+        // a hard cap, so a leaked handler cannot wedge the test binary).
+        svr.Get ("/hang", [this] (const httplib::Request&, httplib::Response& res) {
+            auto deadline = std::chrono::steady_clock::now () + std::chrono::seconds (30);
+            while (!released.load (std::memory_order_relaxed) &&
+            std::chrono::steady_clock::now () < deadline) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
+            }
+            res.set_content ("{}", "application/json");
+        });
 
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
@@ -46,6 +58,9 @@ class SlowMockServer {
     }
 
     ~SlowMockServer () {
+        // Release /hang first: httplib's stop() does not interrupt a handler
+        // that is already running, so teardown would otherwise wait out the cap.
+        released.store (true, std::memory_order_relaxed);
         svr.stop ();
         if (thread.joinable ())
             thread.join ();
@@ -59,9 +74,14 @@ class SlowMockServer {
         return "http://127.0.0.1:" + std::to_string (port) + "/fast";
     }
 
+    std::string hang_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/hang";
+    }
+
     httplib::Server svr;
     std::thread thread;
     int port = 0;
+    std::atomic<bool> released{ false };
 };
 
 } // namespace vayu::tests

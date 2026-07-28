@@ -465,8 +465,25 @@ RunManager& manager) {
             return;
         }
 
-        // Wait for all requests to complete
-        context->event_loop->stop (true); // Wait for pending
+        // How the run lets go of the event loop depends on why it is ending.
+        //
+        // A user stop must stop *sending*: draining the queued backlog would
+        // keep the target under load after the stop was requested, and waiting
+        // on in-flight transfers hands the stop's latency to the upstream.
+        // stop(false) discards the backlog and cancels what is in flight.
+        //
+        // The natural end of the duration still lets genuine in-flight requests
+        // settle, but not forever: a request that has outlived its own timeout
+        // by the grace period is never going to answer, and waiting on it pins
+        // the run in `running` with no way out.
+        if (context->should_stop) {
+            context->event_loop->stop (false);
+        } else {
+            const int64_t drain_ms =
+            (timeout_ms > 0 ? timeout_ms : vayu::core::constants::server::DEFAULT_TIMEOUT_MS) +
+            vayu::core::constants::event_loop::STOP_DRAIN_GRACE_MS;
+            context->event_loop->stop (true, std::chrono::milliseconds (drain_ms));
+        }
 
         // Record test end time immediately (before cleanup overhead)
         auto test_end = std::chrono::steady_clock::now ();
@@ -793,12 +810,13 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         emit_live_tick (nullptr, now_ms ());
 
         // Loop on is_running alone. should_stop is only the *request* to stop:
-        // the worker acts on it, then blocks in event_loop->stop(true) draining
-        // in-flight requests, and clears is_running afterwards. Exiting on
-        // should_stop emitted the "final settled tick" and set closed while
-        // hundreds of requests were still completing, so the live view froze at
-        // the moment of the stop click while the stored report - written after
-        // the drain - counted everything that landed during it.
+        // the worker acts on it, then blocks in event_loop->stop (cancelling on
+        // a user stop, draining to a deadline at the natural end), and clears
+        // is_running afterwards. Exiting on should_stop emitted the "final
+        // settled tick" and set closed while hundreds of requests were still
+        // settling, so the live view froze at the moment of the stop click
+        // while the stored report - written after the worker returned -
+        // counted everything that landed in between.
         while (context->is_running) {
             std::this_thread::sleep_for (std::chrono::milliseconds (tick_interval_ms));
 

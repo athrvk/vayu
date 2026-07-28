@@ -25,6 +25,31 @@
 
 namespace vayu::http::detail {
 
+namespace {
+
+/**
+ * The single definition of what a cancelled transfer looks like. Both paths
+ * that can cancel one - an in-flight transfer removed from curl, and a request
+ * that never left the pending queue - go through here, so a stopped run's
+ * accounting sees one shape rather than two. The result is an Error rather
+ * than a zero-status Response because no response was ever received;
+ * load_strategy::handle_result records it against the run.
+ */
+void complete_as_cancelled (TransferData& data) {
+    Error error;
+    error.code    = ErrorCode::InternalError;
+    error.message = "Request cancelled";
+
+    if (data.callback) {
+        data.callback (data.request_id, error);
+    }
+    if (data.has_promise) {
+        data.promise.set_value (error);
+    }
+}
+
+} // namespace
+
 // ============================================================================
 // DnsCache Implementation
 // ============================================================================
@@ -207,17 +232,27 @@ void EventLoopWorker::start () {
     thread         = std::thread (&EventLoopWorker::run_loop, this);
 }
 
-void EventLoopWorker::stop (bool wait_for_pending) {
+void EventLoopWorker::stop (bool wait_for_pending, std::chrono::milliseconds drain_timeout) {
     if (!running) {
         return;
     }
 
-    // Tell run_loop whether to drain the pending queue before exiting.
-    // Must be stored before stop_requested so the worker reads a consistent value.
-    drain_on_stop.store (wait_for_pending, std::memory_order_release);
-    stop_requested = true;
+    // Tell run_loop whether to drain the pending queue before exiting, and by
+    // when it must give up if it does. Both must be stored before
+    // stop_requested so the worker reads a consistent view.
+    drain_on_stop.store (wait_for_pending, std::memory_order_relaxed);
+    const bool bounded =
+    wait_for_pending && drain_timeout > std::chrono::milliseconds::zero ();
+    drain_deadline_ticks.store (bounded ?
+    (std::chrono::steady_clock::now () + drain_timeout).time_since_epoch ().count () :
+    0,
+    std::memory_order_relaxed);
+    stop_requested.store (true, std::memory_order_release);
     queue_has_items.store (true, std::memory_order_release);
     queue_has_items.notify_one ();
+    // The worker may be parked in curl_multi_poll driving transfers that will
+    // never answer; without this a cancel waits out the poll timeout per pass.
+    curl_multi_wakeup (multi_handle);
 
     if (thread.joinable ()) {
         thread.join ();
@@ -225,23 +260,35 @@ void EventLoopWorker::stop (bool wait_for_pending) {
 
     running = false;
 
-    if (!wait_for_pending) {
-        // Worker has exited - we are now the sole SPSC consumer. Cancel any
-        // requests that were never started (still sitting in pending_queue).
-        std::unique_ptr<TransferData> data;
-        while (pending_queue.pop (data)) {
-            Error error;
-            error.code    = ErrorCode::InternalError;
-            error.message = "Request cancelled";
-
-            if (data->callback) {
-                data->callback (data->request_id, error);
-            }
-            if (data->has_promise) {
-                data->promise.set_value (error);
-            }
-        }
+    // Worker has exited - we are now the sole SPSC consumer. Cancel whatever it
+    // left behind: on stop(false) that is the whole backlog, on a drain that
+    // hit its deadline it is what was still queued, and on a completed drain it
+    // is nothing. Doing it unconditionally means no path can leak an unanswered
+    // callback or an unsatisfied promise.
+    std::unique_ptr<TransferData> data;
+    while (pending_queue.pop (data)) {
+        complete_as_cancelled (*data);
     }
+}
+
+bool EventLoopWorker::drain_deadline_passed () const {
+    const int64_t ticks = drain_deadline_ticks.load (std::memory_order_relaxed);
+    if (ticks == 0) {
+        return false; // Unbounded drain
+    }
+    return std::chrono::steady_clock::now ().time_since_epoch ().count () >= ticks;
+}
+
+void EventLoopWorker::cancel_active_transfers () {
+    for (auto& [easy, data] : active_transfers) {
+        curl_multi_remove_handle (multi_handle, easy);
+        if (data) {
+            complete_as_cancelled (*data);
+        }
+        handle_pool_.release (easy);
+    }
+    active_transfers.clear ();
+    current_active_count.store (0, std::memory_order_relaxed);
 }
 
 void EventLoopWorker::run_loop () {
@@ -249,14 +296,24 @@ void EventLoopWorker::run_loop () {
     constexpr int SPIN_COUNT = core::constants::queue::SPIN_COUNT;
 
     // Core loop optimized for latency and throughput.
-    // When drain_on_stop=true (stop(true)): keep running until pending queue AND
-    // active transfers are both empty.
-    // When drain_on_stop=false (stop(false)): keep running only until active
-    // transfers are empty; the pending queue is left for the caller to cancel
-    // after join(), avoiding a concurrent SPSC consumer race on Windows.
+    // When drain_on_stop=true (stop(true)): keep running until pending queue
+    // AND active transfers are both empty, or until the drain deadline passes.
+    // When drain_on_stop=false (stop(false)): cancel the in-flight transfers at
+    // once and exit; the pending queue is left for the caller to cancel after
+    // join(), avoiding a concurrent SPSC consumer race on Windows.
     while (!stop_requested ||
     (drain_on_stop.load (std::memory_order_relaxed) && !pending_queue.empty ()) ||
     !active_transfers.empty ()) {
+        // A stop that is not draining - or a drain that has run out of time -
+        // must not sit here waiting on transfers the upstream may never answer.
+        // Cancel them and leave; stop() cancels anything still queued once it
+        // is the sole consumer of the queue.
+        if (stop_requested.load (std::memory_order_acquire) &&
+        (!drain_on_stop.load (std::memory_order_relaxed) || drain_deadline_passed ())) {
+            cancel_active_transfers ();
+            break;
+        }
+
         bool did_work = false;
 
         // 1. Process pending queue (Lock-free Consumer)

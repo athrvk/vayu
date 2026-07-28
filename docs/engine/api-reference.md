@@ -1091,10 +1091,10 @@ reads and writes this entry (`GET`/`POST /config`), so the span the engine
 retains and the span the chart displays cannot disagree. Editing it here and
 editing it there are the same action.
 
-The final `metrics` event is emitted only once the run has actually finished
-draining. On `POST /runs/:runId/stop` the engine keeps ticking while in-flight
-requests complete, so the last live numbers agree with the stored report rather
-than freezing at the moment of the stop request.
+The final `metrics` event is emitted only once the run's worker has actually
+settled. On `POST /runs/:runId/stop` the engine keeps ticking while in-flight
+requests are cancelled and recorded, so the last live numbers agree with the
+stored report rather than freezing at the moment of the stop request.
 
 **Application-level reconnect**: clients that close the EventSource themselves
 (e.g. after observing `readyState === CLOSED`) should NOT open a new connection
@@ -1236,9 +1236,20 @@ to fetch the whole body.
 
 > Alias: `POST /run/:runId/stop` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
-Stop a running load test. The engine signals the run, waits for it to drain
-in-flight requests (bounded at 5s), and answers with a summary of what the run
-actually did - including the requests that completed during the drain.
+Stop a running load test. The engine signals the run, waits up to 5s for its
+worker to settle, and answers with a summary of what the run actually did.
+
+**Stop discards, it does not drain.** The queued backlog is thrown away rather
+than sent, and transfers already in flight are cancelled (removed from curl and
+completed as an `INTERNAL_ERROR` "Request cancelled"), so the target stops
+receiving traffic immediately and the stop's latency does not belong to the
+upstream. A cancelled request was submitted, so it is counted: it lands in the
+run's errors, which is what keeps `requests_sent` and the recorded total equal.
+
+A run that ends **naturally** still lets its in-flight requests finish, but only
+up to its own `timeout` plus a 2s grace; anything still outstanding then is
+cancelled the same way. Without that bound an upstream that never answers would
+hold the run in `running` indefinitely.
 
 **Response** (active run):
 ```json
@@ -1336,11 +1347,32 @@ per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percenti
 
 Delete a run and all associated metrics/results.
 
+**An active run is stopped first.** Deleting a run that is still executing used
+to remove its rows while its worker kept writing new metrics and results against
+the same id - orphan rows that no run owns, and a run that partially reappeared
+as it finished. So a run that is still active is stopped exactly as
+`POST /runs/:runId/stop` stops it, and the rows are removed only once its worker
+has completed its final writes. Expect the call to take as long as the stop does
+(up to ~5s for a large run).
+
+If the worker has not settled within that window nothing is deleted and the call
+returns **409** - a half-deleted run racing a live writer is worse than a delete
+that has to be retried. The stop still stands, so a retry a moment later
+succeeds. A run whose stored status is `running` but which has no worker (the
+daemon restarted under it) has nobody to race and is deleted immediately.
+
 **Response:**
 ```json
 {
   "message": "Run deleted successfully",
   "runId": "run_1234567890"
+}
+```
+
+**409 Conflict** (still stopping - nothing was deleted):
+```json
+{
+  "error": "Run is still stopping; it was not deleted. Retry once it reports a terminal status."
 }
 ```
 

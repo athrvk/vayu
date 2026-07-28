@@ -77,6 +77,11 @@ constexpr long DNS_CACHE_TIMEOUT_SECONDS = 300;
 constexpr long TCP_KEEPALIVE_IDLE_SECONDS = 60;
 /// TCP keep-alive probe interval in seconds
 constexpr long TCP_KEEPALIVE_INTERVAL_SECONDS = 30;
+/// Grace added to the per-request timeout when a run drains its in-flight
+/// transfers at the natural end of its duration. A transfer that outlives its
+/// own timeout by this much is not going to complete, so it is cancelled
+/// rather than allowed to hold the run in `running` indefinitely.
+constexpr int64_t STOP_DRAIN_GRACE_MS = 2000;
 } // namespace event_loop
 
 /**

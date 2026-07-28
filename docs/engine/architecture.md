@@ -86,6 +86,14 @@ Manages the lifecycle of load test runs:
 - **Retained finished runs**: Completed/failed/stopped runs are moved to a separate retained
   map rather than unregistered immediately, so a late SSE client still receives the full metric
   series. A TTL sweep evicts them after `liveRetentionMs` (default 60s).
+- **Stop discards, completion drains (with a deadline)**: a stopped run throws away its queued
+  backlog and cancels in-flight transfers, so a stop is not paced by the upstream; a run that
+  reaches the end of its duration waits for genuine in-flight requests, but no longer than
+  `timeout` + 2s. Cancelled requests are recorded as errors, so a run's submitted and recorded
+  counts still agree.
+- **The move to the retained map is the "worker is finished" signal**: it happens after the
+  final metrics flush and status update, which is what `DELETE /runs/:id` waits on before
+  removing rows (see the API reference).
 - **Graceful shutdown**: Stops active runs on daemon shutdown
 
 ### Metrics Collector
@@ -254,11 +262,12 @@ See [Database Schema](db-schema.md) for the full column list.
 ```
 
 The metrics thread's exit is gated on `is_running`, not on `should_stop`. A stop
-request only asks the worker to stop; the worker then blocks in
-`event_loop->stop(true)` draining in-flight requests and clears `is_running`
-afterwards. Exiting on `should_stop` emitted the final tick and set `closed`
-mid-drain, so the live view froze at the stop click while the stored report -
-written after the drain - counted everything that landed during it.
+request only asks the worker to stop; the worker then blocks in `event_loop->stop`
+- cancelling on a user stop, draining to a deadline at the natural end - and
+clears `is_running` afterwards. Exiting on `should_stop` emitted the final tick
+and set `closed` while requests were still settling, so the live view froze at
+the stop click while the stored report - written after the worker returned -
+counted everything that landed in between.
 
 The tick topic itself is a bounded ring. Run duration is user-controlled with no
 upper bound, so an append-only buffer is a slow OOM on an overnight soak. The
