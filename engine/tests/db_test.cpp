@@ -285,6 +285,35 @@ TEST_F (DatabaseTest, SeedRemovesRetiredRequestBatchSizeEntry) {
     EXPECT_FALSE (db.get_config_entry ("requestBatchSize").has_value ());
 }
 
+// The "options" column is new (Task 4); an existing on-disk database predates
+// it, so sync_schema must add the nullable column without a migration, and
+// re-seeding on an already-upgraded row must both preserve the user's chosen
+// value and backfill the options metadata that older row would be missing.
+// Simulates the upgrade the same way SeedRemovesRetiredRequestBatchSizeEntry
+// does: plant a pre-Task-4-shaped row (no options), then re-run the seed.
+TEST_F (DatabaseTest, SeedBackfillsOptionsOnUpgradeWithoutLosingUserValue) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto seeded = db.get_config_entry ("defaultHttpVersion");
+    ASSERT_TRUE (seeded.has_value ());
+    ASSERT_TRUE (seeded->options.has_value ());
+
+    ConfigEntry upgraded_row = *seeded;
+    upgraded_row.value       = "http2";  // user's choice, must survive re-seed
+    upgraded_row.options = std::nullopt; // pre-Task-4 row never had this column
+    db.save_config_entry (upgraded_row);
+    ASSERT_FALSE (db.get_config_entry ("defaultHttpVersion")->options.has_value ());
+
+    db.seed_default_config ();
+
+    auto after = db.get_config_entry ("defaultHttpVersion");
+    ASSERT_TRUE (after.has_value ());
+    EXPECT_EQ (after->value, "http2");         // user's value preserved
+    ASSERT_TRUE (after->options.has_value ()); // metadata backfilled
+    EXPECT_EQ (*after->options, *seeded->options);
+}
+
 // ==================== Environment Delete Tests ====================
 
 TEST_F (DatabaseTest, DeletesEnvironment) {
