@@ -21,8 +21,9 @@
  */
 
 import { useState } from "react";
-import { AlertCircle, ChevronDown, ChevronRight, Terminal } from "lucide-react";
-import { Badge, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
+import { useGrowingWindow } from "@/hooks/useGrowingWindow";
+import { AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { ParsedLog } from "./parse-logs";
 
@@ -66,6 +67,7 @@ export function ScriptError({ which, message }: { which: ScriptKey; message: str
 export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[] }) {
 	const [open, setOpen] = useState(true);
 	const { label, tone } = SCRIPT_SECTIONS[which];
+	const { visible, sentinelRef, hasMore } = useGrowingWindow(logs.length);
 
 	if (logs.length === 0) return null;
 
@@ -108,6 +110,11 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 						/>
 					)}
 				</div>
+				{/*
+				 * No count badge. It restated what the section below shows, and on a
+				 * short console - two lines, one per script - the row was mostly
+				 * numbers about very little. The slab itself is the count.
+				 */}
 				<h3
 					className={cn(
 						"text-xs font-medium",
@@ -116,35 +123,42 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 				>
 					{label}
 				</h3>
-				<Badge
-					variant="outline"
-					className={cn(
-						"ml-auto text-[10px]",
-						tone === "running"
-							? "border-status-running/30 text-status-running-text"
-							: "border-status-success/30 text-status-success-text"
-					)}
-				>
-					{logs.length} log{logs.length !== 1 ? "s" : ""}
-				</Badge>
 			</CollapsibleTrigger>
 			<CollapsibleContent className="mt-2">
-				<div className="surface-sunken p-3 rounded-md border border-rule font-mono text-xs space-y-1">
-					{logs.map((log, i) => (
-						<div key={i} className="flex items-start gap-2">
-							<Terminal
-								className={cn(
-									"w-3.5 h-3.5 mt-px shrink-0",
-									tone === "running"
-										? "text-status-running-text"
-										: "text-status-success-text"
-								)}
-							/>
-							<pre className="text-foreground whitespace-pre-wrap break-words flex-1 min-w-0">
-								{log.message}
-							</pre>
-						</div>
+				<div className="surface-sunken p-3 rounded-md border border-rule font-mono text-xs">
+					{/*
+					 * No per-line icon. Every line in this slab came from the script
+					 * named in the heading directly above it, so a marker on each one
+					 * repeated what the section already said - the same redundancy that
+					 * took the icon off the Console tab trigger.
+					 *
+					 * It was also the dominant per-row cost: a lucide icon is a
+					 * multi-element SVG, and console output is unbounded, so a script
+					 * that logs in a loop was asking the pane to build one SVG per
+					 * line. Removing it is worth more here than anywhere else in the
+					 * pane.
+					 */}
+					{logs.slice(0, visible).map((log, i) => (
+						<pre
+							key={i}
+							className="skip-offscreen text-foreground whitespace-pre-wrap break-words py-px"
+						>
+							{log.message}
+						</pre>
 					))}
+					{hasMore && (
+						/*
+						 * The sentinel. Reaching it renders the next slice - nothing is
+						 * withheld, it just arrives when you get there. The count is
+						 * stated rather than left to be inferred from a scrollbar.
+						 */
+						<div
+							ref={sentinelRef}
+							className="pt-2 text-[10px] text-muted-foreground tabular-nums"
+						>
+							Showing {visible.toLocaleString()} of {logs.length.toLocaleString()}…
+						</div>
+					)}
 				</div>
 			</CollapsibleContent>
 		</Collapsible>

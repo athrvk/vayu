@@ -38,7 +38,9 @@
  * surface contract arrived after it was written.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Search } from "lucide-react";
+import { Input } from "@/components/ui";
 import { EmptyState } from "@/components/shared";
 import { parseConsoleLogs, splitBySource } from "./console/parse-logs";
 import { ScriptError, ScriptLogs } from "./console/ScriptSection";
@@ -52,7 +54,27 @@ export interface ConsoleOutputProps {
 }
 
 export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
-	const bySource = useMemo(() => splitBySource(parseConsoleLogs(logs)), [logs]);
+	const [filter, setFilter] = useState("");
+
+	/*
+	 * The filter runs over *every* log, not over what is currently rendered.
+	 *
+	 * That distinction is the whole point: the list renders progressively, so a
+	 * filter applied to the rendered slice would search only the part you had
+	 * already scrolled past - which is the same trap as searching a virtualised
+	 * list's DOM. Matching happens on the parsed lines, before the window is
+	 * taken, so a match ten thousand lines down is found without being visited.
+	 */
+	const bySource = useMemo(() => {
+		const parsed = parseConsoleLogs(logs);
+		const needle = filter.trim().toLowerCase();
+		return splitBySource(
+			needle ? parsed.filter((l) => l.message.toLowerCase().includes(needle)) : parsed
+		);
+	}, [logs, filter]);
+
+	const matched = bySource.pre.length + bySource.test.length;
+	const filtering = filter.trim().length > 0;
 
 	return (
 		<div className="p-4 overflow-auto h-full space-y-4">
@@ -67,8 +89,30 @@ export default function ConsoleOutput({ logs, errors }: ConsoleOutputProps) {
 				<EmptyState variant="inline" title="No console output" />
 			) : (
 				<div className="space-y-3">
-					<ScriptLogs which="pre" logs={bySource.pre} />
-					<ScriptLogs which="test" logs={bySource.test} />
+					<div className="relative">
+						<Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+						<Input
+							value={filter}
+							onChange={(e) => setFilter(e.target.value)}
+							placeholder="Filter logs"
+							aria-label="Filter console output"
+							// `md:text-xs` as well as `text-xs`: the Input primitive's base
+							// classes carry `md:text-sm`, and tailwind-merge keeps a
+							// responsive variant in its own group - so an unqualified
+							// `text-xs` loses to it above 768px and the field renders a
+							// step larger than everything around it.
+							className="h-7 pl-7 text-xs md:text-xs"
+						/>
+					</div>
+
+					{filtering && matched === 0 ? (
+						<EmptyState variant="inline" title="No log matches that filter" />
+					) : (
+						<>
+							<ScriptLogs which="pre" logs={bySource.pre} />
+							<ScriptLogs which="test" logs={bySource.test} />
+						</>
+					)}
 				</div>
 			)}
 		</div>

@@ -26,15 +26,58 @@
  * label and their own logs.
  */
 
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import ConsoleOutput from "./ConsoleOutput";
 import TestResults from "./TestResults";
+
+/*
+ * jsdom ships no `IntersectionObserver`, and the hook falls back to rendering
+ * everything without one. That fallback is correct for the app - it can only
+ * happen where windowing is impossible, and showing all rows beats hiding rows
+ * you cannot reach - but it is not what these assert. A stub that never fires
+ * puts the real windowing path under test: the first slice renders, and nothing
+ * grows it.
+ */
+beforeAll(() => {
+	vi.stubGlobal(
+		"IntersectionObserver",
+		class {
+			observe() {}
+			unobserve() {}
+			disconnect() {}
+			takeRecords() {
+				return [];
+			}
+			root = null;
+			rootMargin = "";
+			thresholds = [];
+		}
+	);
+});
+
+afterAll(() => vi.unstubAllGlobals());
 
 const RESULTS = [
 	{ name: "status is 200", passed: true },
 	{ name: "body has id", passed: false, error: "expected undefined to exist" },
 ];
+
+/**
+ * A size a step above the pane's, written *unprefixed*.
+ *
+ * The leading `(^|\s)` matters. A bare `\btext-sm\b` also matches
+ * `file:text-sm`, which the shared `Input` primitive carries for
+ * `::file-selector-button` - a pseudo-element a text input does not have, so it
+ * styles nothing and says nothing about this panel's density. It flagged the
+ * filter field and would have kept flagging every primitive that ships a
+ * variant, until someone made the guard lie instead.
+ *
+ * A variant-prefixed class is also not this panel choosing a size: it is a
+ * shared component's own responsive or state rule. What is being guarded is the
+ * unqualified choice.
+ */
+const OVERSIZED = /(^|\s)(text-sm|w-5|h-5)(\s|$)/;
 
 function consoleOutput() {
 	return render(
@@ -69,11 +112,26 @@ describe("the two console sections", () => {
 		expect(test!.textContent).not.toContain("token minted");
 	});
 
-	it("counts each section's own logs", () => {
-		// "2 logs" and "1 log" - a shared count would show the same number twice.
+	it("carries no count badge, on either section", () => {
+		/*
+		 * They restated what the slab below each heading already shows, and on a
+		 * short console - two lines, one per script - the row was mostly numbers
+		 * about very little.
+		 */
+		/*
+		 * Asserted per element, not against `container.textContent`.
+		 *
+		 * The first attempt matched `/\d+\s*logs?\b/` on the whole text and could
+		 * never fire: `textContent` concatenates without separators, so a badge
+		 * renders as `...2 logstoken minted...` and the trailing `\b` demands a
+		 * boundary between `s` and `t` that is not there. It passed against its
+		 * own mutation, which is the only reason it was caught.
+		 */
 		const { container } = consoleOutput();
-		expect(container.textContent).toContain("2 logs");
-		expect(container.textContent).toContain("1 log");
+		const counts = Array.from(container.querySelectorAll("*")).filter((el) =>
+			/^\d+\s*logs?$/.test(el.textContent?.trim() ?? "")
+		);
+		expect(counts.map((el) => el.textContent)).toEqual([]);
 	});
 
 	it("labels an error by the script that raised it", () => {
@@ -96,7 +154,7 @@ describe("console density", () => {
 	it("sizes its text and icons to the pane, not one step up", () => {
 		const { container } = consoleOutput();
 		const oversized = Array.from(container.querySelectorAll<HTMLElement>("*")).filter((el) =>
-			/\btext-sm\b|\bw-5\b|\bh-5\b/.test(el.className)
+			OVERSIZED.test(el.className)
 		);
 		expect(oversized.map((el) => el.className)).toEqual([]);
 	});
@@ -106,7 +164,7 @@ describe("tests density", () => {
 	it("sizes its rows to the pane", () => {
 		const { container } = render(<TestResults results={RESULTS} />);
 		const oversized = Array.from(container.querySelectorAll<HTMLElement>("*")).filter((el) =>
-			/\btext-sm\b|\bw-5\b|\bh-5\b/.test(el.className)
+			OVERSIZED.test(el.className)
 		);
 		expect(oversized.map((el) => el.className)).toEqual([]);
 	});
@@ -158,5 +216,94 @@ describe("both panels' boxes", () => {
 				expect(box.className).toMatch(/\brounded-(sm|md|lg|full)\b/);
 			}
 		}
+	});
+});
+
+/**
+ * Console output is unbounded and stays that way.
+ *
+ * `script_engine.cpp` pushes every `console.log` line into a vector with no cap,
+ * so a script with a loop can produce a hundred thousand of them - and the user
+ * asked for every one. Capping was considered and rejected: the engine holds
+ * them comfortably, and what falls over is the DOM, so the fix belongs there.
+ *
+ * Nothing is withheld. Rows arrive as you reach them, `content-visibility` keeps
+ * off-screen ones from costing layout, and the filter searches *all* of them
+ * rather than the rendered slice.
+ */
+describe("a very long console", () => {
+	const MANY = Array.from({ length: 5000 }, (_, i) => `line ${i}`);
+
+	it("renders a bounded slice rather than every line", () => {
+		const { container } = render(<ConsoleOutput logs={MANY} errors={{}} />);
+		const rows = container.querySelectorAll("pre");
+		expect(rows.length).toBeGreaterThan(0);
+		expect(rows.length).toBeLessThan(MANY.length);
+	});
+
+	it("says how much of it is showing, rather than leaving it to a scrollbar", () => {
+		const { container } = render(<ConsoleOutput logs={MANY} errors={{}} />);
+		expect(container.textContent).toMatch(/showing[\s\S]*5,000/i);
+	});
+
+	it("marks its rows skippable so the ones off screen cost no layout", () => {
+		const { container } = render(<ConsoleOutput logs={MANY} errors={{}} />);
+		const row = container.querySelector("pre");
+		expect(row?.className).toContain("skip-offscreen");
+	});
+
+	it("draws no icon per line", () => {
+		/*
+		 * Every line in a slab came from the script named directly above it, so a
+		 * marker on each repeated the heading - and a lucide icon is a
+		 * multi-element SVG, which on unbounded output was the dominant per-row
+		 * cost.
+		 */
+		const { container } = render(<ConsoleOutput logs={MANY} errors={{}} />);
+		const slab = container.querySelector(".surface-sunken");
+		expect(slab).not.toBeNull();
+		expect(slab!.querySelectorAll("svg")).toHaveLength(0);
+	});
+});
+
+describe("the console filter", () => {
+	const LOGS = ["[pre] minted token abc", "assertion ran", "[pre] header set"];
+
+	function typeFilter(value: string) {
+		const { container } = render(<ConsoleOutput logs={LOGS} errors={{}} />);
+		const input = screen.getByLabelText(/filter console output/i);
+		fireEvent.change(input, { target: { value } });
+		return container;
+	}
+
+	it("keeps only matching lines, across both scripts", () => {
+		const container = typeFilter("token");
+		expect(container.textContent).toContain("minted token abc");
+		expect(container.textContent).not.toContain("assertion ran");
+		expect(container.textContent).not.toContain("header set");
+	});
+
+	it("matches case-insensitively, because log text is not typed twice", () => {
+		expect(typeFilter("TOKEN").textContent).toContain("minted token abc");
+	});
+
+	it("says so when nothing matches, rather than showing empty sections", () => {
+		expect(typeFilter("zzz").textContent).toMatch(/no log matches/i);
+	});
+
+	it("searches every line, not the rendered slice", () => {
+		/*
+		 * The distinction the filter exists to respect. Rendering is progressive,
+		 * so filtering what is on screen would search only what you had already
+		 * scrolled past - the same trap as searching a virtualised list's DOM.
+		 */
+		const many = Array.from({ length: 5000 }, (_, i) => `line ${i}`);
+		const { container } = render(<ConsoleOutput logs={many} errors={{}} />);
+		expect(container.textContent).not.toContain("line 4999");
+
+		fireEvent.change(screen.getByLabelText(/filter console output/i), {
+			target: { value: "line 4999" },
+		});
+		expect(container.textContent).toContain("line 4999");
 	});
 });

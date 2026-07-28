@@ -1125,6 +1125,28 @@
 }
 
 @layer utilities {
+	/*
+	 * A row in a long list that the browser may skip laying out while it is off
+	 * screen.
+	 *
+	 * Console output is unbounded - `script_engine.cpp` pushes every
+	 * `console.log` line into a vector with no cap - so a script with a loop can
+	 * produce a hundred thousand of them, and the user asked for every one. The
+	 * answer is not to cap what they get; it is to stop paying layout and paint
+	 * for rows nobody is looking at.
+	 *
+	 * `contain-intrinsic-size` is the placeholder height a skipped row reports,
+	 * which is what keeps the scrollbar from jumping as rows come into view. The
+	 * `auto` keyword means "remember the real height once measured", so a wrapped
+	 * line settles after its first appearance instead of re-estimating forever.
+	 *
+	 * Chromium-only, which is fine: this ships in Electron.
+	 */
+	.skip-offscreen {
+		content-visibility: auto;
+		contain-intrinsic-size: auto 1.25rem;
+	}
+
 	.font-code {
 		font-family: "JetBrains Mono", "Consolas", "Monaco", monospace;
 	}
