@@ -28,7 +28,7 @@ import { render, screen, within, fireEvent } from "@testing-library/react";
 import { RequestBuilderContext } from "../../context/RequestBuilderContext";
 import type { RequestBuilderContextValue, RequestState } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
-import { DEFAULT_MAX_REDIRECTS, MAX_MAX_REDIRECTS } from "@/constants/request";
+import { DEFAULT_MAX_REDIRECTS, MAX_MAX_REDIRECTS, HTTP_VERSIONS } from "@/constants/request";
 import RequestTabs from "./index";
 
 function renderTabs(overrides: Partial<RequestState> = {}, updateField = vi.fn()) {
@@ -51,6 +51,7 @@ function renderTabs(overrides: Partial<RequestState> = {}, updateField = vi.fn()
 const settingsTab = () => screen.getByRole("tab", { name: /settings/i });
 const followToggle = () => screen.getByRole("switch", { name: /follow redirects/i });
 const hopLimit = () => screen.getByLabelText(/maximum redirects/i);
+const protocolPicker = () => screen.getByRole("combobox", { name: /protocol/i });
 
 describe("Settings tab", () => {
 	it("is a member of the tab strip, so it joins arrow-key navigation", () => {
@@ -81,6 +82,15 @@ describe("Settings tab", () => {
 
 	it("badges when the hop limit differs from the default", () => {
 		renderTabs({ maxRedirects: DEFAULT_MAX_REDIRECTS + 5 });
+		expect(settingsTab().textContent).toContain("1");
+	});
+
+	it("badges when the protocol differs from the default, even with default redirects", () => {
+		// The badge predicate used to only look at followRedirects/maxRedirects
+		// (isRedirectPolicyNonDefault). Changing only the protocol must still
+		// badge - this is the case the rename to isRequestSettingsNonDefault
+		// exists for.
+		renderTabs({ httpVersion: "http2" });
 		expect(settingsTab().textContent).toContain("1");
 	});
 });
@@ -129,5 +139,33 @@ describe("Settings panel controls", () => {
 		const updateField = renderTabs();
 		fireEvent.change(hopLimit(), { target: { value: "" } });
 		expect(updateField).toHaveBeenCalledWith("maxRedirects", DEFAULT_MAX_REDIRECTS);
+	});
+});
+
+describe("Protocol picker", () => {
+	it("offers one option per entry in HTTP_VERSIONS, labelled from it", () => {
+		renderTabs();
+		fireEvent.click(protocolPicker());
+
+		for (const version of HTTP_VERSIONS) {
+			expect(screen.getByRole("option", { name: version.label })).toBeInTheDocument();
+		}
+	});
+
+	it("shows the request's current protocol as the selected value", () => {
+		renderTabs({ httpVersion: "http2" });
+		expect(protocolPicker()).toHaveTextContent("HTTP/2");
+	});
+
+	it("writes the chosen protocol through to the request", () => {
+		const updateField = renderTabs();
+		fireEvent.click(protocolPicker());
+		fireEvent.click(screen.getByRole("option", { name: "HTTP/2" }));
+		expect(updateField).toHaveBeenCalledWith("httpVersion", "http2");
+	});
+
+	it("keeps the picker in the keyboard tab order", () => {
+		renderTabs();
+		expect(protocolPicker().getAttribute("tabindex")).not.toBe("-1");
 	});
 });

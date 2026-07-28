@@ -17,7 +17,11 @@
 import { describe, it, expect } from "vitest";
 import { seedFromRun } from "./design-run-seed";
 import type { Run, Request } from "@/types";
-import { DEFAULT_FOLLOW_REDIRECTS, DEFAULT_MAX_REDIRECTS } from "@/constants/request";
+import {
+	DEFAULT_FOLLOW_REDIRECTS,
+	DEFAULT_HTTP_VERSION,
+	DEFAULT_MAX_REDIRECTS,
+} from "@/constants/request";
 
 function run(overrides: Partial<Run> = {}): Run {
 	return {
@@ -45,6 +49,7 @@ function run(overrides: Partial<Run> = {}): Run {
 			],
 			followRedirects: false,
 			maxRedirects: 3,
+			httpVersion: "http2",
 			requestId: "req_1",
 		},
 		result: {
@@ -121,6 +126,25 @@ describe("seedFromRun", () => {
 
 		expect(request.followRedirects).toBe(DEFAULT_FOLLOW_REDIRECTS);
 		expect(request.maxRedirects).toBe(DEFAULT_MAX_REDIRECTS);
+	});
+
+	it("keeps the protocol the run used", () => {
+		const { request } = seedFromRun(run(), liveRequest);
+
+		expect(request.httpVersion).toBe("http2");
+	});
+
+	it("falls back to auto when the run predates the httpVersion field", () => {
+		const legacy = run({
+			configSnapshot: {
+				method: "GET",
+				url: "https://x.test/",
+			},
+		} as Partial<Run>);
+
+		const { request } = seedFromRun(legacy, liveRequest);
+
+		expect(request.httpVersion).toBe(DEFAULT_HTTP_VERSION);
 	});
 
 	describe("when the request still exists", () => {

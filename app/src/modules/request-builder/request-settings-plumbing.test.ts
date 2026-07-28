@@ -6,24 +6,33 @@
  */
 
 /**
- * The redirect policy has four hops in the renderer, and each one fails
- * silently on its own.
+ * The redirect policy and the protocol (`httpVersion`) each have four hops in
+ * the renderer, and each hop fails silently on its own.
  *
- * Drop it from `initialRequest` and a saved `followRedirects: false` never
+ * Drop a field from `initialRequest` and a saved non-default value never
  * loads - the editor merges over `createDefaultRequestState()`, so the default
- * wins and the setting appears to work until the tab is reopened. Drop it from
- * `handleSave` and it is never persisted. Drop it from the execute payload and
- * the engine applies its own default (follow), so the 3xx the user asked to see
- * is followed anyway. Drop it from the load-test payload and the load test
- * measures a different request than Send does. None of the four produces an
- * error, a type failure, or a visibly broken screen - which is exactly the
- * "written but never read" shape this codebase keeps hitting.
+ * wins and the setting appears to work until the tab is reopened. This is the
+ * exact bug `httpVersion` had: a stored `http2` request loaded into the
+ * builder as `auto`, and the very next auto-save silently downgraded it,
+ * because `initialRequest` copied `followRedirects` / `maxRedirects` but not
+ * `httpVersion`. Drop a field from `handleSave` and it is never persisted.
+ * Drop it from the execute payload and the engine applies its own default, so
+ * the user gets a protocol (or a followed 3xx) they did not ask for. Drop it
+ * from the load-test payload and the load test measures a different request
+ * than Send does. None of these produces an error, a type failure, or a
+ * visibly broken screen - which is exactly the "written but never read" shape
+ * this codebase keeps hitting.
  *
- * A scan, not a render: the four hops live inside `useCallback`s in a component
+ * A scan, not a render: the hops live inside `useCallback`s in a component
  * wired to TanStack Query, several zustand stores and the engine service.
  * Standing that up would test the mocks. Each hop is matched by the distinctive
  * source expression it reads from, so deleting any one of them trips exactly
  * one assertion.
+ *
+ * Formerly `redirect-policy-plumbing.test.ts` - renamed when `httpVersion`
+ * joined the fields this file guards, for the same reason
+ * `isRedirectPolicyNonDefault` was renamed to `isRequestSettingsNonDefault`: a
+ * name that only mentions redirects is how the next field misses this file.
  */
 
 import { describe, it, expect } from "vitest";
@@ -42,7 +51,7 @@ function hops(src: string, holder: string, field: string): number {
 	return (src.match(re) ?? []).length;
 }
 
-describe("redirect policy reaches every payload the renderer builds", () => {
+describe("redirect policy and protocol reach every payload the renderer builds", () => {
 	it("found the request builder source (guards the scan itself)", () => {
 		// vitest stubs some imports to "", and a moved file would make every
 		// assertion below pass vacuously.
@@ -51,7 +60,7 @@ describe("redirect policy reaches every payload the renderer builds", () => {
 		expect(source).toContain("engineExecuteRequest");
 	});
 
-	for (const field of ["followRedirects", "maxRedirects"] as const) {
+	for (const field of ["followRedirects", "maxRedirects", "httpVersion"] as const) {
 		it(`loads ${field} from the saved request into the editor state`, () => {
 			expect(hops(source ?? "", "fetchedRequest", field)).toBe(1);
 		});

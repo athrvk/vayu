@@ -214,6 +214,10 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						// redirect the run was recorded not following.
 						followRedirects: request.followRedirects,
 						maxRedirects: request.maxRedirects,
+						// Same rule - a resend must use the protocol the run
+						// actually used (seeded by design-run-seed.ts), not
+						// whatever the engine would default to.
+						httpVersion: request.httpVersion,
 						// Files the new run under the same request, so a resend
 						// lands beside the run it came from.
 						...(run.requestId ? { requestId: run.requestId } : {}),

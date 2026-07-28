@@ -8,27 +8,50 @@
 /**
  * SettingsPanel Component
  *
- * Per-request execution settings. Today that is the redirect policy: the engine
- * has always accepted `followRedirects` / `maxRedirects` and defaulted to
- * following, but nothing in the app sent them, so a 3xx was followed silently
- * and never reached the response pane. Both fields are stored on the request and
- * sent on every Send and every load test.
+ * Per-request execution settings: the protocol to negotiate, and the redirect
+ * policy. The engine has always accepted `followRedirects` / `maxRedirects` and
+ * defaulted to following, but nothing in the app sent them, so a 3xx was
+ * followed silently and never reached the response pane. All three fields are
+ * stored on the request and sent on every Send and every load test, never
+ * elided even when they equal the default - see the comment on the payload
+ * fields in `index.tsx` and `types/api.ts`.
  *
  * `verifySSL` is deliberately not exposed here - it weakens transport security
  * and was deferred.
  */
 
-import { Input, Label, Switch } from "@/components/ui";
-import { DEFAULT_MAX_REDIRECTS, MAX_MAX_REDIRECTS, MIN_MAX_REDIRECTS } from "@/constants/request";
+import {
+	Input,
+	Label,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+	Switch,
+} from "@/components/ui";
+import {
+	DEFAULT_MAX_REDIRECTS,
+	HTTP_VERSIONS,
+	MAX_MAX_REDIRECTS,
+	MIN_MAX_REDIRECTS,
+	isHttpVersion,
+} from "@/constants/request";
 import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../../context";
 
 const FOLLOW_LABEL = "Follow redirects";
 const MAX_LABEL = "Maximum redirects";
+const PROTOCOL_LABEL = "Protocol";
 
 export default function SettingsPanel() {
 	const { request, updateField } = useRequestBuilderContext();
 	const followRedirects = request.followRedirects;
+
+	const handleProtocolChange = (value: string) => {
+		if (!isHttpVersion(value)) return;
+		updateField("httpVersion", value);
+	};
 
 	/**
 	 * Keep the stored value inside the range the engine clamps to. An empty
@@ -50,6 +73,35 @@ export default function SettingsPanel() {
 
 	return (
 		<div className="space-y-6 max-w-xl">
+			<div className="space-y-1">
+				<h3 className="text-sm font-medium">Protocol</h3>
+				<p className="text-xs text-muted-foreground">
+					The HTTP protocol to negotiate. Applies to Send and to load tests.
+				</p>
+			</div>
+
+			<div className="space-y-1.5">
+				<Label htmlFor="setting-protocol" className="text-sm font-medium">
+					{PROTOCOL_LABEL}
+				</Label>
+				<Select value={request.httpVersion} onValueChange={handleProtocolChange}>
+					<SelectTrigger
+						id="setting-protocol"
+						className="h-9 w-48 text-sm"
+						aria-label={PROTOCOL_LABEL}
+					>
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent>
+						{HTTP_VERSIONS.map((version) => (
+							<SelectItem key={version.value} value={version.value}>
+								{version.label}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+			</div>
+
 			<div className="space-y-1">
 				<h3 className="text-sm font-medium">Redirects</h3>
 				<p className="text-xs text-muted-foreground">

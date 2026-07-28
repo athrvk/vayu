@@ -16,14 +16,24 @@ import {
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
+	type HttpVersion,
 } from "@/constants/request";
 import { createEmptyKeyValue } from "./key-value";
 import { createDefaultSystemHeaders } from "./system-headers";
 
 /**
- * Create a default RequestState with empty values
+ * Create a default RequestState with empty values.
+ *
+ * `httpVersion` defaults to {@link DEFAULT_HTTP_VERSION} ("auto"), but a
+ * caller that already knows the engine's configured `defaultHttpVersion` (the
+ * global set on the Settings > Config page) can pass it as an override so a
+ * genuinely new draft starts on the operator's chosen protocol rather than
+ * the hardcoded fallback. This function stays synchronous and pure - it does
+ * not fetch config itself - so the override is the caller's job.
  */
-export const createDefaultRequestState = (): RequestState => {
+export const createDefaultRequestState = (
+	httpVersion: HttpVersion = DEFAULT_HTTP_VERSION
+): RequestState => {
 	const systemHeaders = createDefaultSystemHeaders();
 	return {
 		id: null,
@@ -42,24 +52,30 @@ export const createDefaultRequestState = (): RequestState => {
 		testScript: "",
 		followRedirects: DEFAULT_FOLLOW_REDIRECTS,
 		maxRedirects: DEFAULT_MAX_REDIRECTS,
-		httpVersion: DEFAULT_HTTP_VERSION,
+		httpVersion,
 	};
 };
 
 /**
- * True when the request's redirect policy departs from the engine defaults -
- * the rule the Settings tab badges on. It deliberately compares against the
+ * True when the request's settings depart from the engine defaults - the
+ * rule the Settings tab badges on. It deliberately compares against the
  * defaults rather than tracking "the user opened the tab", so a request that is
  * toggled off and back on stops badging again.
+ *
+ * Covers the redirect policy *and* the protocol: a request that only changes
+ * `httpVersion` (redirects left at their defaults) must still badge, which is
+ * why this checks all three fields rather than being named (and scoped) after
+ * redirects alone.
  *
  * Lives here rather than in `SettingsPanel` so that file only exports its
  * component (`react-refresh/only-export-components`).
  */
-export function isRedirectPolicyNonDefault(
-	state: Pick<RequestState, "followRedirects" | "maxRedirects">
+export function isRequestSettingsNonDefault(
+	state: Pick<RequestState, "followRedirects" | "maxRedirects" | "httpVersion">
 ): boolean {
 	return (
 		state.followRedirects !== DEFAULT_FOLLOW_REDIRECTS ||
-		state.maxRedirects !== DEFAULT_MAX_REDIRECTS
+		state.maxRedirects !== DEFAULT_MAX_REDIRECTS ||
+		state.httpVersion !== DEFAULT_HTTP_VERSION
 	);
 }

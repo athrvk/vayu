@@ -21,7 +21,7 @@ import BodyPanel from "./panels/BodyPanel";
 import AuthPanel from "./panels/AuthPanel";
 import ScriptPanel from "./panels/script/ScriptPanel";
 import SettingsPanel from "./panels/SettingsPanel";
-import { isRedirectPolicyNonDefault } from "../../utils/request-state";
+import { isRequestSettingsNonDefault } from "../../utils/request-state";
 
 export default function RequestTabs() {
 	const { request, activeTab, setActiveTab } = useRequestBuilderContext();
@@ -75,7 +75,7 @@ export default function RequestTabs() {
 			label: "Settings",
 			// Badges only when the request departs from the engine defaults, so
 			// the tab stays quiet for the requests that never touch it.
-			badge: isRedirectPolicyNonDefault(request) ? 1 : undefined,
+			badge: isRequestSettingsNonDefault(request) ? 1 : undefined,
 		},
 	];
 
