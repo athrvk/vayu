@@ -123,32 +123,35 @@ function ToggleGroupItem({
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 				"disabled:pointer-events-none disabled:opacity-50",
 				/*
-				 * The raised chip, and the split of work between fill and text.
-				 * Measured in the running app against the `surface-sunken` toolbar
-				 * this sits on, alpha composited:
+				 * The active chip is the *tinted* one, and the row around it stays
+				 * the surface it belongs to.
 				 *
-				 *                       light    dark
-				 *     bg-card           1.18     1.15
-				 *     bg-primary/10     1.25     1.05
-				 *     bg-primary/15     1.41     1.07
+				 * This was `bg-card` first, which assumed a `--muted` toolbar to lift
+				 * off. That toolbar turned out to be the wrong idea - a full muted
+				 * fill made the row a grey band between a card-coloured tab strip and
+				 * a card-coloured editor - so the row is card now and the chip is
+				 * muted. The measured separation is the same either way, because it
+				 * is the same pair of colours:
+				 *
+				 *                          light    dark
+				 *     card vs muted        1.18     1.15
+				 *     primary/10 on muted  1.25     1.05
+				 *     primary/15 on muted  1.41     1.07
 				 *
 				 * An accent tint looks like the obvious "active" fill and is the
-				 * *worse* of the two in dark - at 10-15% over `--muted` it barely
-				 * moves luminance. `--card` is the only one that separates by
-				 * roughly the same amount in both themes, so it is the fill.
+				 * *worse* option in dark - at 10-15% alpha it barely moves luminance.
 				 *
-				 * No fill carries this on its own at ~1.16, and none needs to. The
-				 * text does the work: `--foreground` on the bar measures 13.69 dark
-				 * against `--muted-foreground`'s 5.87. That is a large,
-				 * *non-chromatic* difference, which matters because the graphite
-				 * scheme's accent is a neutral - a hue-based active state vanishes
-				 * there, the same trap `tabs.tsx` documents.
+				 * No fill carries this alone at ~1.16, and none needs to. The text
+				 * does the work: `--foreground` against `--muted-foreground` measures
+				 * 13.69 dark. That difference is *non-chromatic*, which matters
+				 * because the graphite scheme's accent is a neutral - a hue-based
+				 * active state vanishes there, the trap `tabs.tsx` documents.
 				 *
-				 * Deliberately not accent-coloured. The tab strip directly above
-				 * uses accent text plus an underline; repeating that here would make
-				 * the toolbar read as a second tab row.
+				 * Deliberately not accent-coloured. The tab strip directly above uses
+				 * accent text plus an underline; repeating that here would make the
+				 * toolbar read as a second tab row.
 				 */
-				"data-[state=on]:bg-card data-[state=on]:text-foreground",
+				"data-[state=on]:bg-accent data-[state=on]:text-foreground",
 				"data-[state=on]:font-semibold data-[state=on]:shadow-sm",
 				ITEM[size ?? inherited],
 				className

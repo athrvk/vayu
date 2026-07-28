@@ -194,11 +194,20 @@ export default function ResponseBody({
 			 * construction the tab row uses, one step up so the hierarchy still
 			 * reads.
 			 *
-			 * `surface-sunken` rather than `bg-muted/20`: an arbitrary alpha
-			 * declares no `--rule`, so the segmented control inside it had nothing
-			 * for its border to resolve against.
+			 * **No background of its own**, which is the second thing that was
+			 * wrong here and the harder one to see. It was `bg-muted/20`; the fix
+			 * for that was `surface-sunken`, and that over-corrected - a full
+			 * `--muted` fill turns this row into a heavy grey band between a
+			 * card-coloured tab strip and a card-coloured editor, reading as a
+			 * separate block wedged between them rather than part of the pane.
+			 *
+			 * The rule problem `surface-sunken` was solving does not need a fill to
+			 * solve. This row sits inside the pane, which declares `surface-card`,
+			 * so `border-b border-rule` already resolves against a card - exactly
+			 * how the tab strip above gets its edge, with no background either.
+			 * The band is defined by its rule and its height, not by a colour.
 			 */}
-			<div className="flex h-8 items-center justify-between gap-2 px-4 border-b border-rule surface-sunken">
+			<div className="flex h-8 items-center justify-between gap-2 px-4 border-b border-rule">
 				<div className="flex items-center gap-2">
 					{/* 14px, matching the tab row's `w-3.5` icons. It was 16px. */}
 					<FileCode className="w-3.5 h-3.5 text-muted-foreground" />
