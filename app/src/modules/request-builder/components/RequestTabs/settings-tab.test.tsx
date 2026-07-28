@@ -166,6 +166,13 @@ describe("Protocol picker", () => {
 
 	it("keeps the picker in the keyboard tab order", () => {
 		renderTabs();
-		expect(protocolPicker().getAttribute("tabindex")).not.toBe("-1");
+		// Focus it, don't just read the attribute: Radix's SelectTrigger sets no
+		// tabIndex at all, so `getAttribute("tabindex")` is null and an
+		// attribute-only assertion passes no matter what the component does.
+		// This mirrors the redirect controls' test above.
+		const control = protocolPicker();
+		expect(control.getAttribute("tabindex")).not.toBe("-1");
+		control.focus();
+		expect(document.activeElement).toBe(control);
 	});
 });

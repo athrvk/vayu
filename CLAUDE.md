@@ -122,6 +122,17 @@ file with:
 
 Forgetting it fails loudly (`document is not defined`), never silently.
 
+**Scale the verification to what the change could actually break.** Comment-only
+and `.md`-only edits need no test run at all - a format check, or nothing. A
+rename or signature change needs a *build*, to prove it still compiles. Only a
+behaviour change needs the covering tests, and the full suite belongs once
+before committing a substantial piece of work, not after every edit.
+
+The engine suite takes ~110s and a rebuild ~2.5min; the app suite ~90s. Running
+both after retouching a doc comment reads as diligence and is just latency. Ask
+what a failure would even look like before running anything: if no test could
+possibly go from green to red, do not run tests.
+
 ### Type checking
 
 ```bash

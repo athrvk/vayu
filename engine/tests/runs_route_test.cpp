@@ -172,9 +172,9 @@ TEST_F (RunsRouteTest, SummaryHasExactlyNineKeysAndOmitsAbsent) {
 }
 
 // A raw POST /runs body of `"httpVersion": null` (the client asked for no
-// override) lands in config_snapshot verbatim - config_snapshot is built from
-// the raw request body, before resolve_run_http_version_override erases the
-// key from the *executed* request (see execution.cpp). A run predating this
+// explicit protocol) lands in config_snapshot verbatim - the snapshot is built
+// from the raw request body, before normalize_run_http_version erases the key
+// from the *executed* request (see execution.cpp). A run predating this
 // field has no httpVersion key at all. Both cases mean the same thing - the
 // run executed at the engine's default - so both normalize to the literal
 // string "auto" rather than being silently omitted, which would misrepresent

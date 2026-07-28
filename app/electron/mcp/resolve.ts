@@ -373,6 +373,12 @@ const MAX_MAX_REDIRECTS = 100;
  * imported (see the module docblock: MCP cannot import from `app/src/`).
  * Exported so `tools.ts` builds its Zod enum from this one array instead of
  * declaring a third copy.
+ *
+ * The two arrays hold the same *values* but deliberately differ in *shape*:
+ * the renderer's is `{value, label}[]` because it populates a picker, this one
+ * is a flat tuple because `z.enum` takes bare strings. Do not "fix" the
+ * difference by diffing them literally - it is the value list that must stay
+ * in step, not the structure.
  */
 export const HTTP_VERSIONS = ["auto", "http1.1", "http2"] as const;
 export type HttpVersion = (typeof HTTP_VERSIONS)[number];

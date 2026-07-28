@@ -42,12 +42,16 @@ int resolve_request_timeout_ms (const nlohmann::json& json, int configured_defau
     return configured_default;
 }
 
-// Validate and normalize the optional per-run "httpVersion" override on
-// POST /runs. Absent leaves `json` untouched: the request's own httpVersion
-// field, read like any other field by build_request/deserialize_request
-// further down the pipeline, decides - so this is a true override, not a
-// second source of truth. It never touches the stored request - `json` here
-// is the handler's local copy of the request body, not anything persisted.
+// Validate and normalize the optional "httpVersion" on a POST /runs body.
+// Absent leaves `json` untouched: the request's own httpVersion field, read
+// like any other field by build_request/deserialize_request further down the
+// pipeline, decides. This is NOT a per-run override - the request builder's
+// Settings tab holds the single protocol control and it governs Send and load
+// test alike. The field exists on this payload because that is how a run
+// states its protocol at all, the same way it states its redirect policy, and
+// because MCP's ad-hoc runs have no saved request to read one from. It never
+// touches the stored request - `json` here is the handler's local copy of the
+// request body, not anything persisted.
 //
 // Present is validated through apply_http_version_field/http_version_valid_list
 // (the same helpers Task 5's CRUD routes use - see routes.hpp), so a typo'd
@@ -82,8 +86,8 @@ int resolve_request_timeout_ms (const nlohmann::json& json, int configured_defau
 // The validated value is written back onto `json["httpVersion"]` so it reaches
 // deserialize_request as a concrete string; `null` would otherwise hit
 // `.get<std::string>()` there and throw.
-std::optional<std::pair<int, nlohmann::json>>
-resolve_run_http_version_override (nlohmann::json& json) {
+std::optional<std::pair<int, nlohmann::json>> normalize_run_http_version (
+nlohmann::json& json) {
     if (!json.contains ("httpVersion")) {
         return std::nullopt;
     }
@@ -580,12 +584,12 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
-        // Optional per-run httpVersion override - see
-        // resolve_run_http_version_override's doc comment above. Validated
+        // Validate/normalize the body's httpVersion - see
+        // normalize_run_http_version's doc comment above. Validated
         // before run.config_snapshot is built below so config_snapshot always
         // reflects the raw, client-submitted body (sanitize_config_snapshot
         // reads req.body directly, not this normalized `json`).
-        if (auto err = resolve_run_http_version_override (json)) {
+        if (auto err = normalize_run_http_version (json)) {
             vayu::utils::log_warning (
             "POST /runs - Invalid httpVersion: " + err->second.dump ());
             res.status = err->first;

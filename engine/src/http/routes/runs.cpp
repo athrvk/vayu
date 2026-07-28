@@ -32,8 +32,8 @@ void add_if_present (nlohmann::json& dst, const nlohmann::json& src, const char*
 
 // httpVersion is handled separately from add_if_present, and always ends up
 // present: a raw POST /runs body of `"httpVersion": null` (a request for no
-// override) lands in config_snapshot verbatim, because config_snapshot is
-// built from the raw request body *before* resolve_run_http_version_override
+// explicit protocol) lands in config_snapshot verbatim, because config_snapshot is
+// built from the raw request body *before* normalize_run_http_version
 // erases the key from the executed request (see execution.cpp) - and a run
 // predating this field has no key at all. Both cases mean the run executed at
 // the engine's default, so both normalize to the literal string "auto"

@@ -207,6 +207,14 @@ function buildExecutionPayload(
 	// treatment `followRedirects`/`maxRedirects` get on this ad-hoc path (they
 	// are not forwarded at all unless the caller adds them). The `run_request`/
 	// `start_load_run` Zod schemas restrict the value to a known protocol.
+	//
+	// What makes omitting it *safe* rather than merely consistent: an absent
+	// httpVersion leaves `Request::http_version` at its default member
+	// initializer, which is Auto (`engine/src/utils/json.cpp`'s
+	// deserialize_request only assigns inside `if (json.contains(...))`). Note
+	// `engine/src/http/routes/execution.cpp` calls that equivalence
+	// "incidental" - if a config-backed default is ever resolved at that layer,
+	// omitting the field here stops meaning "auto" and this needs revisiting.
 	for (const key of [
 		"requestId",
 		"environmentId",
