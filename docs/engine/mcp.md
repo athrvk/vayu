@@ -10,7 +10,7 @@ and proxies the engine's REST API on `:9876`. The **C++ engine is not modified**
 the MCP layer is Apache-2.0 like the rest of the app.
 
 Once Vayu is running, any agent opts in with one command; if Vayu is down, the
-agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`](../../SECURITY.md).
+agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md).
 
 ## Overview
 
@@ -254,6 +254,11 @@ never modified. All configurable in **Settings → MCP** and persisted.
   bypasses the list (still rejects unresolved `{{variables}}`); off by default.
 - **Hard caps** - max RPS / concurrency / duration on `start_load_run`; over-cap
   requests are rejected. With the allowlist, these are the real limits on load.
+  The caps bound values from above; `concurrency` is additionally constrained to
+  a positive integer by the tool's own schema, because "unlimited" is an obvious
+  guess to spell `-1` or `0` and the engine reads it as an eager per-worker
+  pre-allocation count (see the accepted ranges under
+  [POST /runs](api-reference.md#post-runs)).
 - **Load-run confirmation** - anti-accident, not anti-adversary: it stops a stray
   tool call from starting load, but on HTTP it is agent-side (the caps/allowlist
   are the enforcement). Elicitation upgrades it to a human prompt where supported.
@@ -392,4 +397,4 @@ builds on the mechanism the spec is deprecating and the payoff is client-depende
   [Codex](https://developers.openai.com/codex/mcp) ·
   [Cursor](https://cursor.com/docs/mcp)
 - Engine API surface: [`api-reference.md`](./api-reference.md) · Threat model:
-  [`SECURITY.md`](../../SECURITY.md)
+  [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md)

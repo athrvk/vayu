@@ -1,0 +1,171 @@
+/* Accent for the docs site.
+ *
+ * These are the app's default accent, "ocean" (hsl(217 80% 48%) - see
+ * DEFAULT_COLOR_SCHEME in app/src/constants/color-schemes.ts and the
+ * [data-color-scheme="ocean"] block in app/src/index.css), so the site reads as
+ * the same product as the UI in the screenshots. Material's stock teal clashed
+ * with the blue app icon now used as the header logo.
+ *
+ * Only the accent is overridden; everything else is Material's default. This
+ * file is NOT part of the app's design system, and the token rules in
+ * docs/design-system.md do not apply to it - it styles the documentation site,
+ * not the product.
+ */
+
+:root {
+	--md-primary-fg-color: hsl(217 80% 48%);
+	--md-primary-fg-color--light: hsl(217 80% 58%);
+	--md-primary-fg-color--dark: hsl(217 80% 38%);
+	--md-accent-fg-color: hsl(217 80% 44%);
+	--md-typeset-a-color: hsl(217 80% 44%);
+}
+
+/* The app brightens its accent in dark mode rather than reusing the light value
+ * (ocean goes 48% -> 66% lightness); links here follow that, while the header
+ * keeps the deeper fill so white text on it stays legible. */
+[data-md-color-scheme="slate"] {
+	--md-primary-fg-color: hsl(217 80% 42%);
+	--md-accent-fg-color: hsl(217 90% 66%);
+	--md-typeset-a-color: hsl(217 90% 66%);
+}
+
+/* The app icon is a blue figure on a cloud, and the header is blue - on its own
+ * it washed out to a faint smudge. The white tile is what makes the real brand
+ * icon usable here; the alternative was a monochrome glyph
+ * (`theme.icon.logo: material/weather-windy`), which reads cleanly but is not
+ * the product's icon. Keep the padding: the cloud runs to the edge of the PNG
+ * and touches the tile without it.
+ */
+.md-header__button.md-logo {
+	background: #fff;
+	border-radius: 0.3rem;
+	padding: 0.15rem;
+}
+
+.md-header__button.md-logo :is(img, svg) {
+	height: 1.4rem;
+	width: 1.4rem;
+}
+
+/* ---------------------------------------------------------------------------
+ * Dark mode: a calm header.
+ *
+ * Material paints the header and the tab bar with --md-primary-fg-color, so the
+ * brand blue that reads well on a white canvas became a heavy saturated slab
+ * against near-black. The chrome goes quiet; the accent stays on links, active
+ * nav items and buttons.
+ *
+ * The background is set on the elements, NOT by redefining
+ * --md-primary-fg-color, because that variable does double duty: `.md-button`
+ * takes both its border and its text colour from it, and `--md-button--primary`
+ * its fill. Darkening the token drained every button on the page to dark-on-dark
+ * - the landing page's two outline buttons were effectively invisible. Two
+ * consumers, one token: style the surface, not the token.
+ *
+ * The hairline is needed once the header is no longer a colour break from the
+ * canvas: without it the bar and the page merge into one dark field.
+ * ------------------------------------------------------------------------- */
+[data-md-color-scheme="slate"] .md-header,
+[data-md-color-scheme="slate"] .md-tabs {
+	background-color: hsl(225 14% 15%);
+}
+
+[data-md-color-scheme="slate"] .md-header {
+	border-bottom: 1px solid hsl(225 10% 24%);
+}
+
+/* The tab bar sits directly under the header, so it needs the divider only when
+ * the header's own border is hidden behind it (Material hides .md-tabs on scroll
+ * for a page with no tabs). Keeping both edges quiet avoids a double rule. */
+[data-md-color-scheme="slate"] .md-tabs {
+	border-bottom: 1px solid hsl(225 10% 24%);
+}
+
+/* Material sets h1/h2 in --md-default-fg-color--light at weight 300. Inter at 300
+ * reads as disabled text rather than a heading, and it was the weakest part of
+ * the page in dark mode. Full-strength foreground, and enough weight to hold the
+ * hierarchy against body copy. The negative tracking is Inter-specific: it is
+ * drawn a little wide for display sizes. */
+.md-typeset h1 {
+	color: var(--md-default-fg-color);
+	font-weight: 600;
+	letter-spacing: -0.02em;
+}
+
+.md-typeset h2 {
+	color: var(--md-default-fg-color);
+	font-weight: 600;
+	letter-spacing: -0.01em;
+}
+
+.md-typeset h3,
+.md-typeset h4 {
+	color: var(--md-default-fg-color);
+	font-weight: 500;
+}
+
+/* Landing page: the button row needs its own rhythm, since consecutive
+ * .md-button elements are inline and would otherwise sit flush. */
+.md-typeset .md-button {
+	margin: 0 0.4rem 0.6rem 0;
+}
+
+/* Product screenshots. Not decoration: the border keeps a light-UI screenshot
+ * from bleeding into the page background in light mode, where both are near
+ * white and the frame edge would otherwise disappear. */
+.md-typeset img.shot {
+	border: 1px solid var(--md-default-fg-color--lightest);
+	border-radius: 0.3rem;
+	display: block;
+	width: 100%;
+}
+
+/* Buttons in dark mode take the brightened accent, for the same reason links do:
+ * the light-mode blue (hsl(217 80% 48%)) sits at ~2:1 against the slate canvas,
+ * which is unreadable. Measured, not guessed - see the contrast check in the
+ * commit message. The primary button keeps the deeper fill, since its label is
+ * white and it needs the weight. */
+[data-md-color-scheme="slate"] .md-typeset .md-button {
+	color: hsl(217 90% 66%);
+	border-color: hsl(217 90% 66%);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .md-button--primary {
+	background-color: hsl(217 80% 48%);
+	border-color: hsl(217 80% 48%);
+	color: hsl(0 0% 100%);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .md-button:is(:hover, :focus) {
+	background-color: hsl(217 90% 66%);
+	border-color: hsl(217 90% 66%);
+	color: hsl(225 14% 12%);
+}
+
+/* FAQ accordions. Material's `question` admonition is teal-green, which put seven
+ * bright green bars down a product page that is otherwise blue and neutral. Only
+ * the colour is changed: the chevron, the collapse behaviour and the icon are
+ * Material's. The icon keeps the accent so the rows still read as interactive
+ * rather than as inert boxes. */
+.md-typeset details.question {
+	border-color: var(--md-default-fg-color--lighter);
+}
+
+.md-typeset details.question > summary {
+	background-color: var(--md-default-fg-color--lightest);
+}
+
+.md-typeset details.question > summary::before {
+	background-color: var(--md-primary-fg-color);
+}
+
+/* The chevron is tinted from the same admonition colour as the icon, so it stayed
+ * green after the row went neutral. Muted foreground: it is an affordance, not a
+ * second accent competing with the icon. */
+.md-typeset details.question > summary::after {
+	background-color: var(--md-default-fg-color--light);
+}
+
+[data-md-color-scheme="slate"] .md-typeset details.question > summary::before {
+	background-color: hsl(217 90% 66%);
+}

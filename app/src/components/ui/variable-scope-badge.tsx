@@ -15,6 +15,7 @@
  */
 
 import { Badge } from "./badge";
+import { VARIABLE_SCOPE_CONFIG } from "@/constants/variables";
 import { cn } from "@/lib/utils";
 import type { VariableScope } from "@/types";
 
@@ -27,47 +28,12 @@ export interface VariableScopeBadgeProps {
 	className?: string;
 }
 
-/**
- * One colour per scope, read by both variants.
- *
- * The compact branch used to re-derive these inline and special-cased global to
- * `bg-muted`, so the same scope rendered green in a popover and grey in the
- * autocomplete list. `--scope-global` is a real token (green in both themes),
- * `docs/design-system.md` gives it the same "icon/text solid, `/10` tint"
- * convention as the other two, and `VariableTableEditor` and
- * `VariablesCategoryTree` already paint it green - the autocomplete was the
- * only place that disagreed.
- */
-const SCOPE_CONFIG: Record<
-	VariableScope,
-	{ compact: string; full: string; tint: string; border: string }
-> = {
-	global: {
-		compact: "G",
-		full: "Global",
-		tint: "bg-scope-global/10 text-scope-global",
-		border: "border-scope-global/30",
-	},
-	collection: {
-		compact: "C",
-		full: "Collection",
-		tint: "bg-scope-collection/10 text-scope-collection",
-		border: "border-scope-collection/30",
-	},
-	environment: {
-		compact: "E",
-		full: "Environment",
-		tint: "bg-scope-environment/10 text-scope-environment",
-		border: "border-scope-environment/30",
-	},
-};
-
 export function VariableScopeBadge({
 	scope,
 	variant = "compact",
 	className,
 }: VariableScopeBadgeProps) {
-	const config = SCOPE_CONFIG[scope];
+	const config = VARIABLE_SCOPE_CONFIG[scope];
 	const label = variant === "compact" ? config.compact : config.full;
 
 	/*

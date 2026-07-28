@@ -50,7 +50,7 @@ describe("ImportModal", () => {
 		await waitFor(() =>
 			expect(screen.getByText(/Postman Collection v2.1/i)).toBeInTheDocument()
 		);
-		expect(screen.getByText(/Acme API/)).toBeInTheDocument();
+		expect(screen.getByText(/Sample API/)).toBeInTheDocument();
 		expect(screen.getByText(/2 requests/)).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: /^Import/i })).toBeInTheDocument();
 	});

@@ -7,9 +7,17 @@
 
 /**
  * Live dashboard chart window - how much recent live history the dashboard
- * charts retain, as a **time** window (not a point count). A renderer-only
- * preference, persisted to localStorage. This array is the single source of
- * truth: the type, the settings picker, and the runtime guard all derive from it.
+ * charts retain, as a **time** window (not a point count). This array is the
+ * single source of truth for the type, the settings picker, and the runtime
+ * guard.
+ *
+ * The window is **not** a renderer-only preference. It is stored engine-side as
+ * the `liveReplayWindowMs` config entry, because the engine needs the same
+ * number: it sizes the in-memory SSE tick ring that `/runs/:id/live` replays
+ * from offset 0, which is what rebuilds these charts when the dashboard
+ * attaches or re-attaches mid-run. Two settings would let the retained span and
+ * the displayed span disagree - the engine replaying less than the chart is set
+ * to show - so there is one value and both sides read it.
  *
  * The dashboard store trims retained ticks to this window on each batch; because
  * uPlot renders on Canvas there's no per-point-DOM cost, so the window is a UX +
@@ -45,8 +53,66 @@ export function liveWindowSeconds(value: LiveWindow): number | null {
 }
 
 /**
- * Hard safety cap on retained live ticks regardless of the chosen window - a
- * backstop so a very long "full run" (or a misbehaving high tick rate) can't
- * grow memory without bound. ~33 min at the default 10 Hz tick.
+ * The engine's `liveReplayWindowMs` config key. The engine stores milliseconds
+ * and uses `0` for "full run" (no time limit) - matching this module's `null`,
+ * which cannot round-trip through an integer config value.
  */
-export const MAX_RETAINED_TICKS = 20000;
+export const LIVE_WINDOW_CONFIG_KEY = "liveReplayWindowMs";
+
+/** Window value → the milliseconds the engine stores. `full` → 0. */
+export function liveWindowToMs(value: LiveWindow): number {
+	const seconds = liveWindowSeconds(value);
+	return seconds === null ? 0 : seconds * 1000;
+}
+
+/**
+ * Engine milliseconds → the picker option to show. A value that matches no
+ * option - the key is a free integer field in the engine's settings list, so a
+ * user can save 90000 there - resolves to the nearest option that does not
+ * exceed it, so the chart never claims more history than is retained. Anything
+ * below the shortest option, and any unparseable value, falls back to the
+ * default rather than showing a window nothing is set to.
+ */
+export function liveWindowFromMs(ms: number | null | undefined): LiveWindow {
+	if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) {
+		return DEFAULT_LIVE_WINDOW;
+	}
+	if (ms === 0) return "full";
+
+	let best: LiveWindow | null = null;
+	let bestSeconds = -1;
+	for (const option of LIVE_WINDOW_OPTIONS) {
+		if (option.seconds === null) continue;
+		const optionMs = option.seconds * 1000;
+		if (optionMs <= ms && option.seconds > bestSeconds) {
+			best = option.value;
+			bestSeconds = option.seconds;
+		}
+	}
+	return best ?? DEFAULT_LIVE_WINDOW;
+}
+
+/**
+ * Default ceiling on retained live ticks regardless of the chosen window - a
+ * backstop so a very long "full run" (or a misbehaving high tick rate) can't
+ * grow memory without bound. ~83 min at the default 10 Hz tick.
+ *
+ * It is a **memory** bound, not a rendering one. `bucketColumns` collapses ticks
+ * into `chartBucketSeconds` buckets (0.5s by default) before uPlot sees them, so
+ * a full window reaches the canvas as a few thousand points however many ticks
+ * back it - and uPlot draws to canvas, so there is no per-point DOM cost either
+ * way. What this bounds is the array of tick objects in the dashboard store.
+ *
+ * Raising it is close to free at stock settings, because the *window* is what
+ * sizes the retained history: 5 minutes at a 10 Hz tick is 3000 ticks whatever
+ * this is. It only binds when window / tick-interval exceeds it.
+ *
+ * Like the window, the live value is the engine's - `liveMaxRetainedTicks`,
+ * synced in by useLiveChartSettings - because the engine's replay ring must not
+ * retain ticks this side would discard. This constant is the value used until
+ * the config query resolves, and must match the engine's DEFAULT_MAX_LIVE_TICKS.
+ */
+export const DEFAULT_MAX_RETAINED_TICKS = 50000;
+
+/** The engine's `liveMaxRetainedTicks` config key. */
+export const LIVE_MAX_TICKS_CONFIG_KEY = "liveMaxRetainedTicks";

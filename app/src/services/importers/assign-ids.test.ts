@@ -41,11 +41,13 @@ function fixture(): ImportResult {
 			},
 		],
 		environments: [{ name: "e", description: "", variables: {} }],
+		globals: {},
 		meta: {
 			format: "x",
 			requestCount: 1,
 			folderCount: 1,
 			environmentCount: 1,
+			globalCount: 0,
 			skipped: [],
 			nonExecutableAuth: 0,
 		},

@@ -165,10 +165,11 @@ void validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& 
 }
 } // namespace
 
-RunContext::RunContext (const std::string& id, nlohmann::json cfg)
+RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_errors)
 : run_id (id), config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()), start_time_ms (0) {
     // Initialize MetricsCollector with configuration from test config
     MetricsCollectorConfig mc_config;
+    mc_config.max_errors = max_errors;
 
     // Calculate expected requests from duration and RPS
     std::string duration_str = config.value ("duration", "60s");
@@ -349,7 +350,9 @@ void RunManager::start_run (const std::string& run_id,
 const nlohmann::json& config,
 vayu::db::Database& db,
 bool verbose) {
-    auto context = std::make_shared<RunContext> (run_id, config);
+    auto context = std::make_shared<RunContext> (run_id, config,
+    static_cast<size_t> (db.get_config_int ("maxStoredErrors",
+    static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS))));
     register_run (run_id, context);
 
     // Sweep stale retained runs on each new registration so that headless /
@@ -506,7 +509,7 @@ RunManager& manager) {
 
         size_t completed   = context->total_requests ();
         size_t errors      = context->total_errors ();
-        double avg_latency = context->metrics_collector->average_latency ();
+        double avg_latency = context->average_latency_ms ();
         double actual_rps =
         total_duration_s > 0 ? static_cast<double> (completed) / total_duration_s : 0.0;
         double error_rate = context->metrics_collector->error_rate ();
@@ -791,10 +794,30 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         tick_interval_ms = db_ptr->get_config_int (
         "liveTickIntervalMs", vayu::core::constants::server::STATS_INTERVAL_MS);
 
+        // Size the replay ring from the configured window and this run's tick
+        // cadence, so what is retained is the *duration* the user asked for
+        // rather than a tick count that means a different span per cadence.
+        // Read once here: changing the window mid-run would make the ids the
+        // dashboard already holds refer to a differently-sized window.
+        context->set_max_live_ticks (live_ring_size (
+        db_ptr->get_config_int ("liveReplayWindowMs",
+        vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
+        tick_interval_ms,
+        static_cast<size_t> (db_ptr->get_config_int ("liveMaxRetainedTicks",
+        static_cast<int> (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS)))));
+
         // Tick 0: emit immediately so consumers see data before the first sleep.
         emit_live_tick (nullptr, now_ms ());
 
-        while (context->is_running && !context->should_stop) {
+        // Loop on is_running alone. should_stop is only the *request* to stop:
+        // the worker acts on it, then blocks in event_loop->stop (cancelling on
+        // a user stop, draining to a deadline at the natural end), and clears
+        // is_running afterwards. Exiting on should_stop emitted the "final
+        // settled tick" and set closed while hundreds of requests were still
+        // settling, so the live view froze at the moment of the stop click
+        // while the stored report - written after the worker returned -
+        // counted everything that landed in between.
+        while (context->is_running) {
             std::this_thread::sleep_for (std::chrono::milliseconds (tick_interval_ms));
 
             // Single wall-clock sample per tick - shared by the SSE payload
@@ -890,8 +913,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
                     // Avg latency and queue-wait enrichment for the DB batch.
                     metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::LatencyAvg,
-                    context->metrics_collector->average_latency (), "" });
+                    vayu::MetricName::LatencyAvg, context->average_latency_ms (), "" });
                     metrics.push_back ({ 0, context->run_id, timestamp,
                     vayu::MetricName::QueueWaitAvg,
                     context->metrics_collector->average_queue_wait (), "" });

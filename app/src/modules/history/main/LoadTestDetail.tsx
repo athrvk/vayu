@@ -13,7 +13,15 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { CheckCircle, Activity, TrendingUp, BarChart3, Settings2 } from "lucide-react";
-import { Badge, Tabs, TabsContent, TabsList, TabsTrigger, ScrollArea } from "@/components/ui";
+import {
+	Badge,
+	Tabs,
+	TabsContent,
+	TabsList,
+	TabsTrigger,
+	TabLabel,
+	ScrollArea,
+} from "@/components/ui";
 import { formatNumber, loadTestTypeToLabel } from "@/utils";
 import { TruncatedText } from "@/components/shared";
 import type { LoadTestConfig } from "@/types";
@@ -187,18 +195,18 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				onValueChange={setActiveTab}
 				className="flex-1 flex flex-col min-h-0"
 			>
-				<TabsList className="mx-6 mt-4">
-					<TabsTrigger value="overview" className="text-xs">
-						<BarChart3 className="w-3.5 h-3.5 mr-1.5" />
-						Overview
+				<TabsList className="mx-5 mt-3">
+					<TabsTrigger value="overview">
+						<BarChart3 className="w-3.5 h-3.5" />
+						<TabLabel>Overview</TabLabel>
 					</TabsTrigger>
-					<TabsTrigger value="performance" className="text-xs">
-						<TrendingUp className="w-3.5 h-3.5 mr-1.5" />
-						Performance
+					<TabsTrigger value="performance">
+						<TrendingUp className="w-3.5 h-3.5" />
+						<TabLabel>Performance</TabLabel>
 					</TabsTrigger>
-					<TabsTrigger value="samples" className="text-xs">
-						<Activity className="w-3.5 h-3.5 mr-1.5" />
-						Sampled Requests
+					<TabsTrigger value="samples">
+						<Activity className="w-3.5 h-3.5" />
+						<TabLabel>Sampled Requests</TabLabel>
 					</TabsTrigger>
 				</TabsList>
 

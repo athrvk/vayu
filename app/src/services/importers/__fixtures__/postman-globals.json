@@ -1,0 +1,33 @@
+{
+	"id": "3c9d7e21-5a48-4f16-b8c2-6e0f9a4d2b73",
+	"name": "Sample Workspace Globals",
+	"values": [
+		{
+			"key": "apiHost",
+			"value": "https://api.example.com",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "sharedToken",
+			"value": "test-shared-token-1",
+			"type": "secret",
+			"enabled": true
+		},
+		{
+			"key": "retiredFlag",
+			"value": "off",
+			"type": "default",
+			"enabled": false
+		},
+		{
+			"key": "banner",
+			"value": "welcome {{ tenant }}",
+			"type": "default",
+			"enabled": true
+		}
+	],
+	"_postman_variable_scope": "globals",
+	"_postman_exported_at": "2026-07-28T09:00:00.000Z",
+	"_postman_exported_using": "Postman/11.62.3"
+}

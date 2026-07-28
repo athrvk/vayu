@@ -878,6 +878,30 @@ assertions are now actually checked under load - previously only the
 request's own `tests` string was ever sent, so a collection-level assertion
 passed in design mode and was silently never validated by a load run.
 
+**Accepted ranges.** The numeric config is range-checked **before the run row is
+created**, so a rejected request leaves no `pending` row behind. A violation is
+a `400` carrying the nested error shape (`{"error": {"code":
+"invalid_run_config", "message": "..."}}`), whose message names the offending
+field and why the bound exists:
+
+| Field | Accepted | Rejected because |
+|-------|----------|------------------|
+| `success_sample_rate` | `1`-`100000` | It is a sampling *period* (keep 1 in N), used as `counter % rate`. A `0` was a division by zero that killed the daemon mid-run. |
+| `response_sample_rate` | `1`-`100000` | Same modulo, same crash. |
+| `max_response_samples` | `0`-`1000000` | Each retained sample holds a full response body, and the vector is reserved up front; a negative value casts to ~1.8e19. |
+| `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
+| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
+| `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
+
+An **absent** field, or an explicit `null`, is always accepted - every one of
+them has a default. The ceilings are crash guards, not policy: each client caps
+itself far lower (the load dialog offers `concurrency` &le; 1000; the MCP
+`start_load_run` tool has a user-settable cap in Settings).
+
+The sample rates are additionally clamped to &ge; 1 inside the metrics
+collector, so the modulo cannot divide by zero even for a caller that bypasses
+this route.
+
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
 token **before** creating the run and warms the cache for the workers. An
 unauthorizable config is rejected up front with `409` (interactive sign-in
@@ -943,6 +967,14 @@ capacity-breakpoint / saturation stats from stored data.
   "pagination": { "total": 1, "limit": 5000, "offset": 0, "hasMore": false, "returned": 1 }
 }
 ```
+
+`requests_failed` is derived per tick as `error_rate% × requests_completed`,
+rounded to the nearest request, after every row belonging to that timestamp has
+been folded into the bucket. It is therefore independent of the order the rows
+come back in - deriving it while reading the `error_rate` row made it depend on
+the `requests_sent` row having already been seen for the same timestamp, and the
+producer writes `error_rate` first, so it read a completed count of 0 and every
+bucket of every run reported 0 failed requests.
 
 A missing run returns `404` with `{"error":"Run not found"}`.
 
@@ -1033,6 +1065,37 @@ browser's built-in `EventSource` retry automatically replays this id as
 `Last-Event-ID` on its **own** intra-connection retries (no application code
 needed), and the stream resumes from `Last-Event-ID + 1`.
 
+**Replay window.** The in-memory tick topic is a bounded ring, so a long run's
+memory does not grow with its duration. Its span is `liveReplayWindowMs`
+(default 300000, i.e. 5 minutes) and the tick count is derived from that window
+and the configured cadence - `liveReplayWindowMs / liveTickIntervalMs`, 3000
+ticks at both defaults. The bound is a duration rather than a fixed count
+because the cadence is itself configurable: one tick count would mean a
+30-second window at `liveTickIntervalMs=10` and a 50-minute one at `1000`.
+`liveReplayWindowMs = 0` means the full run (no time limit). Whatever the pair,
+the ring is capped at `liveMaxRetainedTicks` (default **50,000**, ~50 MB), so a
+fast cadence reaches that ceiling before a long window does. Raising it is
+cheap at stock settings - the window, not the ceiling, is what sizes the ring.
+
+Ids keep counting past an eviction, so they stay monotonic; a `Last-Event-ID`
+older than the retained window resumes from the oldest retained tick rather than
+replaying from 0, which means a client that was disconnected for longer than the
+window sees a gap, not a duplicate flood.
+
+The window also bounds the **replay-from-0** path below, which is the one the
+bundled app actually exercises: a dashboard attaching (or re-attaching) mid-run
+rebuilds its chart from the retained ring. That is why `liveReplayWindowMs` is
+the *same* setting as the app's live-chart window rather than a second one to
+keep aligned - the app's **Settings → Live Dashboard → Chart window** picker
+reads and writes this entry (`GET`/`POST /config`), so the span the engine
+retains and the span the chart displays cannot disagree. Editing it here and
+editing it there are the same action.
+
+The final `metrics` event is emitted only once the run's worker has actually
+settled. On `POST /runs/:runId/stop` the engine keeps ticking while in-flight
+requests are cancelled and recorded, so the last live numbers agree with the
+stored report rather than freezing at the moment of the stop request.
+
 **Application-level reconnect**: clients that close the EventSource themselves
 (e.g. after observing `readyState === CLOSED`) should NOT open a new connection
 and rely on `Last-Event-ID` - `EventSource` does not expose a header-setting
@@ -1047,9 +1110,12 @@ run end). This is the pattern the bundled app uses.
   `Use /runs/:runId/report for the stored report`. Clients should fall back to
   the stored report in this case.
 
-Tuning: `liveTickIntervalMs` (live tick cadence, 10–1000ms) and
-`liveRetentionMs` (post-completion retention, 0–600000ms; 0 disables retention)
-are configurable via `POST /config`.
+Tuning: `liveTickIntervalMs` (live tick cadence, 10–1000ms),
+`liveReplayWindowMs` (retained replay span *and* the dashboard's chart window,
+0–3600000ms; 0 = full run), `liveMaxRetainedTicks` (the tick ceiling for that
+window on both sides, 1000–500000) and `liveRetentionMs`
+(post-completion retention, 0–600000ms; 0 disables retention) are configurable
+via `POST /config`.
 
 ## Runs
 
@@ -1170,7 +1236,8 @@ to fetch the whole body.
 
 > Alias: `POST /run/:runId/stop` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
-Stop a running load test.
+Stop a running load test. The engine signals the run, waits up to 5s for its
+worker to settle, and answers with a summary of what the run actually did.
 
 **Stop discards, it does not drain.** The queued backlog is thrown away rather
 than sent, and transfers already in flight are cancelled (removed from curl and
@@ -1184,13 +1251,28 @@ up to its own `timeout` plus a 2s grace; anything still outstanding then is
 cancelled the same way. Without that bound an upstream that never answers would
 hold the run in `running` indefinitely.
 
-**Response:**
+**Response** (active run):
 ```json
 {
-  "message": "Run stopped",
-  "runId": "run_1234567890"
+  "status": "stopped",
+  "runId": "run_1234567890",
+  "summary": {
+    "totalRequests": 1500,
+    "errors": 5,
+    "errorRate": 0.33,
+    "avgLatencyMs": 38.9
+  }
 }
 ```
+
+`avgLatencyMs` is the same average the final report and the live ticks show:
+the latency sum over the requests that contributed to it (successes). It is not
+divided by `totalRequests`, which would report a lower figure here than
+everywhere else for the same run.
+
+A run that is already finished answers `{"status": "<status>", "runId": ...,
+"message": "Run already <status>"}`; one that is not in memory answers
+`{"status": "stopped", "runId": ..., "message": "Run was not active"}`.
 
 ### GET /runs/:runId/report
 

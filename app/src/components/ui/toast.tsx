@@ -65,19 +65,23 @@ function ToastViewport({
 				 * `elementFromPoint` at the toast's centre, with an overlay and
 				 * panel mounted at z-50, returns the toast's own content.
 				 *
-				 * The bottom offset clears the Dock rather than being a round
+				 * The edge offset clears app chrome rather than being a round
 				 * number. `fixed` anchors to the window, not to the layout, so a
 				 * plain `bottom-4` put the stack 16px off the window floor - inside
 				 * the Dock's 32px band, covering its lower half including
 				 * "Connected" and the version string. Measured: viewport bottom at
-				 * 704px against a Dock top of 688px.
-				 *
-				 * `--dock-height` is why this is not a magic number: the offset is
-				 * the strip's own height plus the same 1rem of air the stack keeps
-				 * on its right edge, so changing the Dock's height moves the toasts
-				 * with it.
+				 * 704px against a Dock top of 688px. The same trap waits at the top
+				 * edge, where the tab strip lives.
 				 */
-				"fixed bottom-[calc(var(--dock-height)+1rem)] right-4 z-[100] flex max-h-screen w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none",
+				"fixed z-[100] flex max-h-screen w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none",
+				/*
+				 * The edge offsets are no longer here: the stack is user-positioned
+				 * (Settings -> Notifications), so which corner it anchors to and
+				 * which chrome it has to clear both come from
+				 * `TOAST_POSITIONS[].className` in constants/toast.ts. Every entry
+				 * there still goes through --dock-height or --titlebar-height for
+				 * the same reason the single hardcoded corner did.
+				 */
 				className
 			)}
 			{...props}
