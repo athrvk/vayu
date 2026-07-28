@@ -44,9 +44,9 @@ import { TooltipProvider } from "@/components/ui";
 import type { ResponseTiming } from "../../types";
 
 /** Captures what language the Raw tab actually asks its editor for. */
-const editorProps: { language?: string; value?: string }[] = [];
+const editorProps: { language?: string; value?: string; options?: Record<string, unknown> }[] = [];
 vi.mock("@/components/ui/code-editor", () => ({
-	CodeEditor: (p: { language?: string; value?: string }) => {
+	CodeEditor: (p: { language?: string; value?: string; options?: Record<string, unknown> }) => {
 		editorProps.push(p);
 		return <div data-testid="code-editor" />;
 	},
@@ -55,7 +55,7 @@ vi.mock("@/components/ui/code-editor", () => ({
 const ResponseTimingTab = (await import("./ResponseTimingTab")).default;
 const RawRequestResponse = (await import("./RawRequestResponse")).default;
 
-const { registerHttpLanguage, HTTP_LANGUAGE_ID, RAW_SEPARATOR } =
+const { registerHttpLanguage, HTTP_LANGUAGE_ID, SENT_MARKER, RECEIVED_MARKER } =
 	await import("@/lib/http-language");
 
 /** `Array.at` is outside this tsconfig's lib target. */
@@ -150,15 +150,39 @@ describe("the http language the Raw tab asks for", () => {
 describe("the Raw tab", () => {
 	const response = { status: 200, statusText: "OK", headers: { server: "nginx" }, body: "{}" };
 
-	it("shows the exchange, with a separator that is not a fixed-width rule", () => {
+	it("marks every line with its direction, curl-style", () => {
+		/*
+		 * Postman and Bruno both mean "the unformatted response body" by Raw, and
+		 * put the whole exchange somewhere else - Bruno's Timeline, Postman's
+		 * Console. JMeter splits it across tabs. None of them glues the halves
+		 * together with a rule through the middle, which is what this did.
+		 *
+		 * `>` and `<` are what `curl -v` and HTTPie print, so every line says
+		 * which half it belongs to and an excerpt stays unambiguous without its
+		 * boundary.
+		 */
 		editorProps.length = 0;
 		render(<RawRequestResponse rawRequest="GET /orders HTTP/1.1" response={response} />);
 
+		const lines = (last()?.value ?? "").split("\n");
+		expect(lines).toContain(`${SENT_MARKER} GET /orders HTTP/1.1`);
+		expect(lines.some((l) => l.startsWith(`${RECEIVED_MARKER} HTTP/1.1 200`))).toBe(true);
+
+		// Every non-empty line carries a marker - no bare payload lines.
+		for (const line of lines.filter(Boolean)) {
+			expect(line[0]).toMatch(/[<>]/);
+		}
+	});
+
+	it("keeps no separator line, because the markers replaced it", () => {
+		// The 60 box characters were a fixed width in a resizable pane, and they
+		// landed in the clipboard as content that is not part of any HTTP message.
+		editorProps.length = 0;
+		render(<RawRequestResponse rawRequest="GET / HTTP/1.1" response={response} />);
+
 		const value = last()?.value ?? "";
-		expect(value).toContain("GET /orders HTTP/1.1");
-		expect(value).toContain(RAW_SEPARATOR);
-		// 60 box characters in a resizable pane, and in the clipboard.
-		expect(value).not.toMatch(/─{20,}/);
+		expect(value).not.toMatch(/─{3,}/);
+		expect(value).not.toContain("#");
 	});
 
 	it("asks for the language that now exists", () => {
@@ -174,7 +198,8 @@ describe("the Raw tab", () => {
 
 		const value = last()?.value ?? "";
 		expect(value).toContain("200");
-		expect(value).not.toContain(RAW_SEPARATOR);
+		// Nothing was sent, so nothing carries the sent marker.
+		expect(value).not.toMatch(/^>/m);
 	});
 
 	it("has no empty state, because nothing it renders can be empty", () => {
@@ -194,5 +219,25 @@ describe("the Raw tab", () => {
 		);
 		expect(screen.queryByText(/no raw data available/i)).toBeNull();
 		expect(last()?.value).toContain("HTTP/1.1");
+	});
+});
+
+describe("what the Raw editor is configured to show", () => {
+	const response = { status: 200, statusText: "OK", headers: {}, body: "{}" };
+
+	it("hides the line numbers and the gutter they sat in", () => {
+		/*
+		 * Every line opens with `>` or `<`, so a number column is a second
+		 * left-hand rail competing with the one that carries meaning. Turning the
+		 * numbers off alone is not enough - Monaco keeps reserving the gutter
+		 * unless the two width options go to zero as well.
+		 */
+		editorProps.length = 0;
+		render(<RawRequestResponse rawRequest="GET / HTTP/1.1" response={response} />);
+
+		const opts = last()?.options ?? {};
+		expect(opts.lineNumbers).toBe("off");
+		expect(opts.lineNumbersMinChars).toBe(0);
+		expect(opts.lineDecorationsWidth).toBe(0);
 	});
 });
