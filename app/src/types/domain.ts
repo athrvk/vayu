@@ -605,6 +605,10 @@ export interface RunReport {
 			 * using it as a value.
 			 */
 			httpVersion?: string;
+		/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
+		followRedirects?: boolean;
+		/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
+		maxRedirects?: number;
 		};
 	};
 	summary: {

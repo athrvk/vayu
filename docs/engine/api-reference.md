@@ -1171,10 +1171,12 @@ snapshot (a malformed snapshot yields an empty `summary`, never a `500`);
 `httpVersion` alone is always present. A raw `POST /runs` body of
 `"httpVersion": null` (erased before execution, so it behaves exactly like an
 absent key - see [POST /runs](#post-runs)) lands in the stored snapshot
-verbatim, and a run predating this field has no key at all; both cases mean
-the run executed at the engine's default, so both normalize to the literal
-string `"auto"` rather than being omitted, which would misrepresent "we know
-it defaulted" as "we don't know". The full snapshot stays available on
+verbatim, and a run predating this field has no key at all; neither case
+recorded a protocol, so both normalize to the literal string `"auto"` rather
+than being omitted, which would misrepresent "nothing was recorded" as "we
+lost it". Do not read `"auto"` on an old run as the protocol it used: a load
+run stored before 0.11.0 hardcoded `CURL_HTTP_VERSION_2TLS`, and every run
+before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The full snapshot stays available on
 `GET /runs/:runId`.
 
 **Response (envelope):**

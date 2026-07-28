@@ -24,12 +24,14 @@ import { createDefaultSystemHeaders } from "./system-headers";
 /**
  * Create a default RequestState with empty values.
  *
- * `httpVersion` defaults to {@link DEFAULT_HTTP_VERSION} ("auto"), but a
- * caller that already knows the engine's configured `defaultHttpVersion` (the
- * global set on the Settings > Config page) can pass it as an override so a
- * genuinely new draft starts on the operator's chosen protocol rather than
- * the hardcoded fallback. This function stays synchronous and pure - it does
- * not fetch config itself - so the override is the caller's job.
+ * `httpVersion` defaults to {@link DEFAULT_HTTP_VERSION} ("auto"). The
+ * parameter exists as a seam and **no production caller passes it** - do not
+ * take it as an invitation to wire one up. A new request is created
+ * server-side immediately (`CollectionTree`) with no `httpVersion` in the
+ * payload, so the *engine* applies its configured `defaultHttpVersion` seed
+ * and the app loads the result straight back. There is no unsaved-draft phase
+ * to pre-fill, and reading the global here would duplicate the engine for
+ * nothing.
  */
 export const createDefaultRequestState = (
 	httpVersion: HttpVersion = DEFAULT_HTTP_VERSION

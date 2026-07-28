@@ -35,10 +35,14 @@ void add_if_present (nlohmann::json& dst, const nlohmann::json& src, const char*
 // explicit protocol) lands in config_snapshot verbatim, because config_snapshot is
 // built from the raw request body *before* normalize_run_http_version
 // erases the key from the executed request (see execution.cpp) - and a run
-// predating this field has no key at all. Both cases mean the run executed at
-// the engine's default, so both normalize to the literal string "auto"
-// instead of being omitted, which would misrepresent "we know it defaulted"
-// as "we don't know". Never call src["httpVersion"].get<std::string>() here -
+// predating this field has no key at all. Neither case recorded a protocol, so
+// both normalize to the literal string "auto" instead of being omitted, which
+// would misrepresent "nothing was recorded" as "we lost it".
+//
+// Do not read that as "the run executed at auto". A load run stored before this
+// branch hardcoded CURL_HTTP_VERSION_2TLS, and every run before it went out as
+// HTTP/1.1 regardless because nghttp2 was not linked. "auto" here means the
+// snapshot names no protocol, not that one was chosen. Never call src["httpVersion"].get<std::string>() here -
 // an explicit null throws.
 void add_http_version (nlohmann::json& dst, const nlohmann::json& src) {
     if (src.contains ("httpVersion") && !src["httpVersion"].is_null ()) {

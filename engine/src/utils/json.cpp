@@ -407,6 +407,14 @@ Result<Request> deserialize_request (const Json& json) {
             // rather than being rejected (rejecting user input is the route
             // layer's job - see routes.hpp).
             //
+            // Note POST /execute is the one write path that relies on this
+            // coercion instead of validating: POST /runs
+            // (normalize_run_http_version) and the requests CRUD
+            // (apply_http_version_field) both reject an unrecognized value
+            // with a 400. Neither shipped client can send one - the renderer
+            // sends a typed union, MCP validates with z.enum - so this is a
+            // gap in consistency, not a live hole.
+            //
             // A non-string value throws here and fails the whole parse, which
             // is deliberate and matches every sibling field in this block. It
             // is unreachable from storage - db::Request::http_version is a
