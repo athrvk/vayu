@@ -22,6 +22,7 @@ import type {
 	OAuth2Config,
 	LoadTestMode,
 	ScriptPart,
+	HttpVersion,
 } from "./domain";
 
 // API Response wrapper
@@ -132,6 +133,7 @@ export interface CreateRequestRequest {
 	postRequestScript?: string;
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	httpVersion?: HttpVersion;
 	order?: number;
 }
 
@@ -150,6 +152,7 @@ export interface UpdateRequestRequest {
 	postRequestScript?: string;
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	httpVersion?: HttpVersion;
 	order?: number;
 }
 
@@ -201,6 +204,15 @@ export interface ExecuteRequestRequest {
 	 */
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	/**
+	 * Protocol to negotiate. Sent on *every* execute, never elided when it
+	 * equals the default - exactly like the redirect policy above, and for the
+	 * same reason: an omitted field lets an engine-side default win silently,
+	 * which is not a decision the client should hand over. Both engine clients
+	 * (renderer and MCP) must agree on this; see CLAUDE.md's request-composition
+	 * section.
+	 */
+	httpVersion?: HttpVersion;
 	requestId?: string;
 	environmentId?: string;
 }
@@ -226,6 +238,9 @@ export interface StartLoadTestRequest {
 	// test exercises the request under the policy the user configured for it.
 	followRedirects?: boolean;
 	maxRedirects?: number;
+
+	/** Protocol to negotiate - same rationale as `followRedirects` above. */
+	httpVersion?: HttpVersion;
 
 	// Load test strategy
 	mode: LoadTestMode;

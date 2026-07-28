@@ -12,7 +12,11 @@
  */
 
 import type { RequestState } from "../types";
-import { DEFAULT_FOLLOW_REDIRECTS, DEFAULT_MAX_REDIRECTS } from "@/constants/request";
+import {
+	DEFAULT_FOLLOW_REDIRECTS,
+	DEFAULT_HTTP_VERSION,
+	DEFAULT_MAX_REDIRECTS,
+} from "@/constants/request";
 import { createEmptyKeyValue } from "./key-value";
 import { createDefaultSystemHeaders } from "./system-headers";
 
@@ -38,6 +42,7 @@ export const createDefaultRequestState = (): RequestState => {
 		testScript: "",
 		followRedirects: DEFAULT_FOLLOW_REDIRECTS,
 		maxRedirects: DEFAULT_MAX_REDIRECTS,
+		httpVersion: DEFAULT_HTTP_VERSION,
 	};
 };
 

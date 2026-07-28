@@ -7,6 +7,15 @@
 
 // Core Domain Types
 
+/**
+ * HTTP protocol to negotiate. Declared in `@/constants/request` (derived from
+ * the `HTTP_VERSIONS` list, the single source of truth also consumed by the
+ * Settings tab picker) and re-exported here, same pattern as `ColorScheme` in
+ * `types/ui.ts`, so `Request.httpVersion` below can reference it.
+ */
+import type { HttpVersion } from "@/constants/request";
+export type { HttpVersion };
+
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export type BodyMode = "none" | "json" | "text" | "graphql" | "form-data" | "x-www-form-urlencoded";
@@ -161,6 +170,14 @@ export interface Request {
 	followRedirects: boolean;
 	/** Redirect hops allowed when {@link followRedirects} is on. Engine default is 10. */
 	maxRedirects: number;
+	/**
+	 * HTTP protocol to negotiate for this request. `"auto"` lets curl pick
+	 * (ALPN over TLS, HTTP/1.1 otherwise) - see {@link HTTP_VERSIONS}. This is
+	 * the *requested* protocol; the protocol actually negotiated for a given
+	 * response is `ResponseState.httpVersion`, a different, display-string
+	 * value space - do not unify them.
+	 */
+	httpVersion: HttpVersion;
 	order: number;
 	createdAt: string;
 	updatedAt: string;
@@ -282,6 +299,14 @@ export interface RunConfigSnapshot {
 	rampUpDuration?: string;
 	startConcurrency?: number;
 	comment?: string;
+	/**
+	 * Requested protocol the run executed with - `build_run_report_config` in
+	 * `engine/src/http/routes/runs.cpp` normalizes an absent or explicit-`null`
+	 * key to `"auto"` before this ever reaches the client, so it is always
+	 * present in practice despite the optional `?`. Distinct from the
+	 * *negotiated* protocol on a single exchange (`ResponseState.httpVersion`).
+	 */
+	httpVersion?: HttpVersion;
 	[key: string]: unknown;
 }
 
@@ -345,6 +370,14 @@ export interface RunResultTrace {
 		bodyTruncated?: boolean;
 		/** The response body's original byte length, present only when truncated. */
 		bodyBytes?: number;
+		/**
+		 * The protocol negotiated for this exchange, as stored by
+		 * `build_result_trace` (`engine/src/http/routes/execution.cpp`) - same
+		 * display-string value space as `ResponseState.httpVersion`
+		 * (`app/src/modules/request-builder/types.ts`), not the request-side
+		 * `HttpVersion` union. Not yet read by `restore-response.ts`.
+		 */
+		httpVersion?: string;
 	};
 }
 
@@ -365,9 +398,15 @@ export interface RunResult {
 
 /**
  * The compact per-row summary the paginated `GET /runs` list carries in place
- * of the full {@link RunConfigSnapshot}. Exactly the six keys the history and
- * dashboard list UIs read; each is omitted by the engine when absent from the
- * stored snapshot. The full snapshot is still available on `GET /runs/:id`.
+ * of the full {@link RunConfigSnapshot}. Models the seven keys the history and
+ * dashboard list UIs read out of `build_run_summary`
+ * (`engine/src/http/routes/runs.cpp`); each is omitted by the engine when
+ * absent from the stored snapshot, except `httpVersion` which the engine
+ * always normalizes to a value (see `add_http_version`, same file). As of
+ * the httpVersion change (#507a90be) the engine's summary is actually nine
+ * keys wide - it also sends `followRedirects` / `maxRedirects` - which this
+ * type does not yet declare; add them when a consumer needs to read them.
+ * The full snapshot is still available on `GET /runs/:id`.
  */
 export interface RunSummary {
 	url?: string;
@@ -376,6 +415,8 @@ export interface RunSummary {
 	duration?: string;
 	concurrency?: number;
 	comment?: string;
+	/** Requested protocol - see {@link RunConfigSnapshot.httpVersion}. */
+	httpVersion?: HttpVersion;
 }
 
 export interface Run {
