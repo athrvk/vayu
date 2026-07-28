@@ -165,10 +165,11 @@ void validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& 
 }
 } // namespace
 
-RunContext::RunContext (const std::string& id, nlohmann::json cfg)
+RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_errors)
 : run_id (id), config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()), start_time_ms (0) {
     // Initialize MetricsCollector with configuration from test config
     MetricsCollectorConfig mc_config;
+    mc_config.max_errors = max_errors;
 
     // Calculate expected requests from duration and RPS
     std::string duration_str = config.value ("duration", "60s");
@@ -349,7 +350,9 @@ void RunManager::start_run (const std::string& run_id,
 const nlohmann::json& config,
 vayu::db::Database& db,
 bool verbose) {
-    auto context = std::make_shared<RunContext> (run_id, config);
+    auto context = std::make_shared<RunContext> (run_id, config,
+    static_cast<size_t> (db.get_config_int ("maxStoredErrors",
+    static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS))));
     register_run (run_id, context);
 
     // Sweep stale retained runs on each new registration so that headless /
@@ -782,7 +785,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         context->set_max_live_ticks (live_ring_size (
         db_ptr->get_config_int ("liveReplayWindowMs",
         vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
-        tick_interval_ms));
+        tick_interval_ms,
+        static_cast<size_t> (db_ptr->get_config_int ("liveMaxRetainedTicks",
+        static_cast<int> (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS)))));
 
         // Tick 0: emit immediately so consumers see data before the first sleep.
         emit_live_tick (nullptr, now_ms ());

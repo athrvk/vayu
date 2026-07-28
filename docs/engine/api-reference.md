@@ -1049,8 +1049,9 @@ ticks at both defaults. The bound is a duration rather than a fixed count
 because the cadence is itself configurable: one tick count would mean a
 30-second window at `liveTickIntervalMs=10` and a 50-minute one at `1000`.
 `liveReplayWindowMs = 0` means the full run (no time limit). Whatever the pair,
-the ring is capped at **20,000 ticks** per run (~20 MB), so a fast cadence
-reaches that ceiling before a long window does.
+the ring is capped at `liveMaxRetainedTicks` (default **50,000**, ~50 MB), so a
+fast cadence reaches that ceiling before a long window does. Raising it is
+cheap at stock settings - the window, not the ceiling, is what sizes the ring.
 
 Ids keep counting past an eviction, so they stay monotonic; a `Last-Event-ID`
 older than the retained window resumes from the oldest retained tick rather than
@@ -1087,7 +1088,8 @@ run end). This is the pattern the bundled app uses.
 
 Tuning: `liveTickIntervalMs` (live tick cadence, 10–1000ms),
 `liveReplayWindowMs` (retained replay span *and* the dashboard's chart window,
-0–3600000ms; 0 = full run, capped at 20,000 ticks) and `liveRetentionMs`
+0–3600000ms; 0 = full run), `liveMaxRetainedTicks` (the tick ceiling for that
+window on both sides, 1000–500000) and `liveRetentionMs`
 (post-completion retention, 0–600000ms; 0 disables retention) are configurable
 via `POST /config`.
 

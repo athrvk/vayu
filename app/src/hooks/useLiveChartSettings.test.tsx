@@ -21,12 +21,12 @@ vi.mock("@/queries", () => ({
 	useUpdateConfigMutation: () => ({ mutate }),
 }));
 
-import { useLiveChartWindow } from "./useLiveChartWindow";
+import { useLiveChartSettings } from "./useLiveChartSettings";
 import { useDashboardStore } from "@/stores";
 
-function entry(value: string): ConfigEntry {
+function entry(value: string, key = "liveReplayWindowMs"): ConfigEntry {
 	return {
-		key: "liveReplayWindowMs",
+		key,
 		value,
 		type: "integer",
 		label: "Live Chart Window (ms)",
@@ -41,14 +41,15 @@ beforeEach(() => {
 	mutate.mockClear();
 	configEntries = undefined;
 	useDashboardStore.getState().setLiveWindowSeconds(300);
+	useDashboardStore.getState().setMaxRetainedTicks(50000);
 });
 
-describe("useLiveChartWindow", () => {
+describe("useLiveChartSettings", () => {
 	it("reads the window from engine config, not localStorage", () => {
 		localStorage.setItem("vayu-live-chart-window", "1m");
 		configEntries = [entry("1800000")];
 
-		const { result } = renderHook(() => useLiveChartWindow());
+		const { result } = renderHook(() => useLiveChartSettings());
 
 		// The stale localStorage value from before this setting moved engine-side
 		// must not win - it is not read at all any more.
@@ -58,7 +59,7 @@ describe("useLiveChartWindow", () => {
 
 	it("holds the default until the config query resolves", () => {
 		configEntries = undefined;
-		const { result } = renderHook(() => useLiveChartWindow());
+		const { result } = renderHook(() => useLiveChartSettings());
 
 		expect(result.current.window).toBe("5m");
 		// Bounded, not null - an unbounded store during the load gap would let a
@@ -68,7 +69,7 @@ describe("useLiveChartWindow", () => {
 
 	it("maps the engine's 0 to full run", () => {
 		configEntries = [entry("0")];
-		const { result } = renderHook(() => useLiveChartWindow());
+		const { result } = renderHook(() => useLiveChartSettings());
 
 		expect(result.current.window).toBe("full");
 		expect(useDashboardStore.getState().liveWindowSeconds).toBeNull();
@@ -76,7 +77,7 @@ describe("useLiveChartWindow", () => {
 
 	it("writes the picked window back to engine config as milliseconds", () => {
 		configEntries = [entry("300000")];
-		const { result } = renderHook(() => useLiveChartWindow());
+		const { result } = renderHook(() => useLiveChartSettings());
 
 		act(() => result.current.setWindow("15m"));
 
@@ -85,7 +86,7 @@ describe("useLiveChartWindow", () => {
 
 	it("writes 0 for full run rather than dropping the key", () => {
 		configEntries = [entry("300000")];
-		const { result } = renderHook(() => useLiveChartWindow());
+		const { result } = renderHook(() => useLiveChartSettings());
 
 		act(() => result.current.setWindow("full"));
 
@@ -96,10 +97,31 @@ describe("useLiveChartWindow", () => {
 	// the charts should re-trim on the click, not a request later.
 	it("applies the new window to the store before the mutation resolves", () => {
 		configEntries = [entry("300000")];
-		const { result } = renderHook(() => useLiveChartWindow());
+		const { result } = renderHook(() => useLiveChartSettings());
 
 		act(() => result.current.setWindow("1m"));
 
 		expect(useDashboardStore.getState().liveWindowSeconds).toBe(60);
+	});
+
+	// The ceiling is the engine's `liveMaxRetainedTicks`. If this side kept its
+	// own number, the engine could retain ticks the store would then discard -
+	// the drift the shared setting exists to prevent.
+	it("syncs the tick ceiling from engine config", () => {
+		configEntries = [entry("300000"), entry("120000", "liveMaxRetainedTicks")];
+		const { result } = renderHook(() => useLiveChartSettings());
+
+		expect(result.current.maxRetainedTicks).toBe(120000);
+		expect(useDashboardStore.getState().maxRetainedTicks).toBe(120000);
+	});
+
+	it("falls back to the default ceiling when the key is absent or nonsense", () => {
+		configEntries = [entry("300000")];
+		const { result, rerender } = renderHook(() => useLiveChartSettings());
+		expect(result.current.maxRetainedTicks).toBe(50000);
+
+		configEntries = [entry("300000"), entry("0", "liveMaxRetainedTicks")];
+		rerender();
+		expect(useDashboardStore.getState().maxRetainedTicks).toBe(50000);
 	});
 });

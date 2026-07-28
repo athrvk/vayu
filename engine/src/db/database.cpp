@@ -1397,6 +1397,36 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
     "0", "3600000", now });
 
+    upsert_config (ConfigEntry{ "liveMaxRetainedTicks",
+    std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS),
+    "integer", "Live Metrics Tick Ceiling",
+    "Hard ceiling on live-metrics data points held in memory per run, on both "
+    "sides - the engine's replay ring and the dashboard's chart history. It is a "
+    "memory bound, not a rendering one: the charts bucket points before plotting, "
+    "so a full window reaches the screen as a few thousand points however many "
+    "are retained. It costs nothing at stock settings, because the chart window "
+    "is what sizes the buffer; it only binds when the window divided by the tick "
+    "interval exceeds it - a long window at a fast tick interval. Raise it if a "
+    "long window is being cut short; each point is roughly 1 KB.",
+    "observability",
+    std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS),
+    "1000", "500000", now });
+
+    upsert_config (ConfigEntry{ "maxStoredErrors",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
+    "integer", "Stored Error Records Per Run",
+    "How many individual error records a run keeps for its report. The error "
+    "total, the failed-request count, the error rate and the status-code "
+    "breakdown are always exact - this bounds only the per-error detail, which "
+    "is what the report's 'By Error Type' breakdown is built from. On a run with "
+    "more errors than this, that breakdown covers the first N and so will not sum "
+    "to the total shown beside it; raise this to keep it complete, at the cost of "
+    "memory on a heavily failing run. 0 means unlimited, which against a fully "
+    "refusing target grows for the life of the run - not recommended.",
+    "observability",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
+    "0", "10000000", now });
+
     upsert_config (ConfigEntry{ "liveRetentionMs",
     "60000",
     "integer", "Live Metrics Retention (ms)",

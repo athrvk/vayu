@@ -93,8 +93,26 @@ export function liveWindowFromMs(ms: number | null | undefined): LiveWindow {
 }
 
 /**
- * Hard safety cap on retained live ticks regardless of the chosen window - a
+ * Default ceiling on retained live ticks regardless of the chosen window - a
  * backstop so a very long "full run" (or a misbehaving high tick rate) can't
- * grow memory without bound. ~33 min at the default 10 Hz tick.
+ * grow memory without bound. ~83 min at the default 10 Hz tick.
+ *
+ * It is a **memory** bound, not a rendering one. `bucketColumns` collapses ticks
+ * into `chartBucketSeconds` buckets (0.5s by default) before uPlot sees them, so
+ * a full window reaches the canvas as a few thousand points however many ticks
+ * back it - and uPlot draws to canvas, so there is no per-point DOM cost either
+ * way. What this bounds is the array of tick objects in the dashboard store.
+ *
+ * Raising it is close to free at stock settings, because the *window* is what
+ * sizes the retained history: 5 minutes at a 10 Hz tick is 3000 ticks whatever
+ * this is. It only binds when window / tick-interval exceeds it.
+ *
+ * Like the window, the live value is the engine's - `liveMaxRetainedTicks`,
+ * synced in by useLiveChartSettings - because the engine's replay ring must not
+ * retain ticks this side would discard. This constant is the value used until
+ * the config query resolves, and must match the engine's DEFAULT_MAX_LIVE_TICKS.
  */
-export const MAX_RETAINED_TICKS = 20000;
+export const DEFAULT_MAX_RETAINED_TICKS = 50000;
+
+/** The engine's `liveMaxRetainedTicks` config key. */
+export const LIVE_MAX_TICKS_CONFIG_KEY = "liveMaxRetainedTicks";

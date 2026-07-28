@@ -109,10 +109,13 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
 - **Batch DB writes**: Per-request results written after test completion; per-tick time-series
   metrics persisted by the metrics thread during the run
 - **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only
-  the first `max_errors` (default 10,000) individual records are kept; the rest are counted by
+  the first `maxStoredErrors` (default 10,000) individual records are kept; the rest are counted by
   `errors_dropped()` and logged once. A fully-failing target produces errors at close to the
   completion rate, each carrying a message and a trace blob, so an unlimited store grows for the
   whole run and then flushes as one enormous transaction. Success results are sampled.
+  Because the final report's per-type error breakdown is built by walking those stored
+  records, a run with more errors than the cap gets a breakdown that does not sum to its
+  (exact) total - raise `maxStoredErrors` to keep it complete, or set `0` for unlimited.
 - **Response sampling**: Stores samples for deferred script validation
 
 ### Script Engine (`QuickJS`)
@@ -261,8 +264,8 @@ The tick topic itself is a bounded ring. Run duration is user-controlled with no
 upper bound, so an append-only buffer is a slow OOM on an overnight soak. The
 bound is expressed as a **duration** - `liveReplayWindowMs` (default 5 min, `0`
 = full run) - and `live_ring_size()` converts it to a tick count against the
-run's cadence, `liveTickIntervalMs`, clamping to `MAX_LIVE_TICKS_CAP` (20,000,
-matching the renderer's own `MAX_RETAINED_TICKS`). That same entry *is* the
+run's cadence, `liveTickIntervalMs`, clamping to `liveMaxRetainedTicks`
+(default 50,000, matching the renderer's own ceiling - it reads the same key). That same entry *is* the
 app's live-chart window - the dashboard's picker reads and writes it through
 `/config` - so the retained span and the displayed span are one number, not two
 that have to be kept aligned. A fixed count would be the wrong unit:

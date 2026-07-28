@@ -29,7 +29,7 @@ namespace vayu::core {
 /**
  * @brief Ring capacity for a run's live tick topic: how many ticks fit in
  * `window_ms` at a cadence of `tick_interval_ms`, floored at one tick and
- * clamped to MAX_LIVE_TICKS_CAP.
+ * clamped to `max_ticks` (the `liveMaxRetainedTicks` setting).
  *
  * Sizing from a duration rather than a fixed count is the point: both inputs
  * are user-configurable, and `liveTickIntervalMs` spans 10-1000ms, so one tick
@@ -43,12 +43,17 @@ namespace vayu::core {
  * here from a hand-edited config row, so it falls back to the default rather
  * than being trusted.
  */
-[[nodiscard]] constexpr size_t live_ring_size (int64_t window_ms, int64_t tick_interval_ms) {
+[[nodiscard]] constexpr size_t live_ring_size (int64_t window_ms,
+int64_t tick_interval_ms,
+size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
     if (tick_interval_ms <= 0) {
         tick_interval_ms = constants::server::STATS_INTERVAL_MS;
     }
+    if (max_ticks < 1) {
+        max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS;
+    }
     if (window_ms == 0) {
-        return constants::server::MAX_LIVE_TICKS_CAP;
+        return max_ticks;
     }
     if (window_ms < 0) {
         window_ms = constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS;
@@ -57,9 +62,7 @@ namespace vayu::core {
     if (ticks < 1) {
         ticks = 1;
     }
-    return ticks > constants::server::MAX_LIVE_TICKS_CAP ?
-    constants::server::MAX_LIVE_TICKS_CAP :
-    ticks;
+    return ticks > max_ticks ? max_ticks : ticks;
 }
 
 struct RunContext {
@@ -200,7 +203,14 @@ struct RunContext {
         return metrics_collector ? metrics_collector->average_latency () : 0.0;
     }
 
-    RunContext (const std::string& id, nlohmann::json cfg);
+    // `max_errors` is the `maxStoredErrors` setting (0 = unlimited). It is a
+    // constructor argument rather than something set afterwards because the
+    // collector sizes its error store from it up front; RunManager::start_run
+    // reads the key, and the default keeps direct constructions (tests, and any
+    // caller without a database to hand) on the stock cap.
+    RunContext (const std::string& id,
+    nlohmann::json cfg,
+    size_t max_errors = constants::metrics_collector::DEFAULT_MAX_ERRORS);
     ~RunContext ();
 };
 

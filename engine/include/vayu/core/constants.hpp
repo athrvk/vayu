@@ -101,12 +101,23 @@ constexpr int STATS_INTERVAL_MS = 100;
 /// at the other. 5 minutes matches the app's default live-chart window, so a
 /// dashboard attaching mid-run replays what it is going to show.
 constexpr int DEFAULT_LIVE_REPLAY_WINDOW_MS = 300000;
-/// Absolute ceiling on retained live ticks per run, whatever window and cadence
-/// are configured - the backstop that keeps a fast cadence from turning a long
-/// window into unbounded memory. Deliberately equal to the renderer's own
-/// MAX_RETAINED_TICKS (app/src/constants/live-window.ts), so neither side
+/// Default ceiling on retained live ticks per run (config key
+/// `liveMaxRetainedTicks`) - the backstop that keeps a fast cadence from
+/// turning a long window into unbounded memory. It is a *memory* bound, not a
+/// rendering one: the dashboard's charts bucket ticks before plotting (0.5s by
+/// default) and uPlot draws to canvas, so a full window reaches the screen as a
+/// few thousand points however many ticks back it.
+///
+/// Raising it is close to free at stock settings, because the window - not this
+/// ceiling - is what sizes the ring: a 5-minute window at a 100ms cadence holds
+/// 3000 ticks whatever this is set to. It only binds when window / cadence
+/// exceeds it. 50000 is chosen so the longest configurable window (1 hour) is
+/// honoured in full at the default cadence, with headroom.
+///
+/// The renderer keeps the same value (its DEFAULT_MAX_RETAINED_TICKS in
+/// app/src/constants/live-window.ts) and reads this key too, so neither side
 /// promises a window the other cannot hold.
-constexpr size_t MAX_LIVE_TICKS_CAP = 20000;
+constexpr size_t DEFAULT_MAX_LIVE_TICKS = 50000;
 /// Size of the context pool for request handling
 constexpr size_t CONTEXT_POOL_SIZE = 64;
 } // namespace server
@@ -156,12 +167,15 @@ constexpr size_t MAX_TRACE_BODY_BYTES = 5 * 1024 * 1024;
 namespace metrics_collector {
 /// Default expected requests for pre-allocation
 constexpr size_t DEFAULT_EXPECTED_REQUESTS = 100000;
-/// Maximum error records to store (0 = unlimited) (prevents OOM at high error
-/// rates). A fully-failing target produces errors at close to the completion
-/// rate, each carrying a message and a trace blob, so an unlimited store is a
-/// straight path to an OOM kill mid-run. Errors past the cap are still counted
-/// (see MetricsCollector::errors_dropped) and still reach the status-code
-/// distribution - only their individual records are dropped.
+/// Default maximum error records to store (config key `maxStoredErrors`;
+/// 0 = unlimited) (prevents OOM at high error rates). A fully-failing target
+/// produces errors at close to the completion rate, each carrying a message and
+/// a trace blob, so an unlimited store is a straight path to an OOM kill
+/// mid-run. Errors past the cap are still counted (see
+/// MetricsCollector::errors_dropped) and still reach the status-code
+/// distribution - only their individual records are dropped, which truncates
+/// the final report's per-type error breakdown. Raise the key to keep that
+/// breakdown complete on a run with more errors than this.
 constexpr size_t DEFAULT_MAX_ERRORS = 10000;
 /// Maximum success results to store (0 = unlimited)
 constexpr size_t DEFAULT_MAX_SUCCESS_RESULTS = 1000;

@@ -14,13 +14,13 @@ import { useClientSettingsStore } from "./client-settings-store";
 import {
 	DEFAULT_LIVE_WINDOW,
 	liveWindowSeconds as windowSecondsFor,
-	MAX_RETAINED_TICKS,
+	DEFAULT_MAX_RETAINED_TICKS,
 } from "@/constants/live-window";
 import type { DashboardMode, DashboardView } from "@/modules/dashboard/types";
 
 /**
  * Retention seeded before the window is known. The real value is the engine's
- * `liveReplayWindowMs`, which `useLiveChartWindow` pushes in once the config
+ * `liveReplayWindowMs`, which `useLiveChartSettings` pushes in once the config
  * query resolves - it cannot be read synchronously here the way the old
  * localStorage preference could. Seeding the module default rather than `null`
  * keeps retention bounded during that gap; a run started in the first moments
@@ -81,10 +81,17 @@ interface DashboardState {
 	breakpoint: Breakpoint;
 	/**
 	 * Live retention window in seconds (null = full run, bounded by
-	 * MAX_RETAINED_TICKS). Seeded from the persisted preference; drives the
-	 * time-based trim in {@link addMetricsBatch}. Kept in sync by useLiveChartWindow.
+	 * {@link maxRetainedTicks}). Drives the time-based trim in
+	 * {@link addMetricsBatch}. Kept in sync by useLiveChartSettings.
 	 */
 	liveWindowSeconds: number | null;
+	/**
+	 * Ceiling on retained ticks whatever the window - the memory backstop, and
+	 * the same `liveMaxRetainedTicks` value the engine bounds its replay ring
+	 * with, so this side never discards what the engine went to the trouble of
+	 * retaining. Also synced by useLiveChartSettings.
+	 */
+	maxRetainedTicks: number;
 
 	// Actions
 	startRun: (
@@ -96,6 +103,7 @@ interface DashboardState {
 	stopRun: () => void;
 	setStreaming: (streaming: boolean) => void;
 	setLiveWindowSeconds: (seconds: number | null) => void;
+	setMaxRetainedTicks: (ticks: number) => void;
 	addMetricsBatch: (batch: LoadTestMetrics[]) => void;
 	setFinalReport: (report: RunReport) => void;
 	setError: (error: string | null) => void;
@@ -124,6 +132,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 	peakConcurrency: 0,
 	breakpoint: INITIAL_BREAKPOINT,
 	liveWindowSeconds: initialLiveWindowSeconds(),
+	maxRetainedTicks: DEFAULT_MAX_RETAINED_TICKS,
 
 	startRun: (runId, config, requestInfo, sourceRequestId) =>
 		set({
@@ -153,6 +162,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
 	setLiveWindowSeconds: (seconds) => set({ liveWindowSeconds: seconds }),
 
+	setMaxRetainedTicks: (ticks) =>
+		set({ maxRetainedTicks: ticks > 0 ? ticks : DEFAULT_MAX_RETAINED_TICKS }),
+
 	addMetricsBatch: (batch) =>
 		set((state) => {
 			if (batch.length === 0) return state;
@@ -173,8 +185,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 			}
 			// Hard safety cap regardless of window (bounds memory on a very long
 			// "full run" or an unexpectedly high tick rate).
-			if (newHistory.length > MAX_RETAINED_TICKS) {
-				newHistory = newHistory.slice(-MAX_RETAINED_TICKS);
+			const cap = state.maxRetainedTicks;
+			if (newHistory.length > cap) {
+				newHistory = newHistory.slice(-cap);
 			}
 
 			// Fold the new ticks into the running aggregates. Both are monotone:

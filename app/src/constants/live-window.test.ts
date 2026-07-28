@@ -12,7 +12,7 @@ import {
 	liveWindowFromMs,
 	liveWindowSeconds,
 	liveWindowToMs,
-	MAX_RETAINED_TICKS,
+	DEFAULT_MAX_RETAINED_TICKS,
 	type LiveWindow,
 } from "./live-window";
 
@@ -66,11 +66,22 @@ describe("live window <-> engine milliseconds", () => {
 		expect(liveWindowFromMs(Infinity)).toBe(DEFAULT_LIVE_WINDOW);
 	});
 
-	// The renderer's backstop and the engine's MAX_LIVE_TICKS_CAP are a matched
-	// pair: the engine must not retain ticks this side will discard, and must
-	// not retain fewer than a "full run" here can show.
-	it("keeps the tick backstop equal to the engine's ceiling", () => {
-		expect(MAX_RETAINED_TICKS).toBe(20000);
+	// The renderer's default backstop and the engine's DEFAULT_MAX_LIVE_TICKS are
+	// a matched pair: the engine must not retain ticks this side will discard,
+	// and must not retain fewer than a "full run" here can show. The live value
+	// is the shared `liveMaxRetainedTicks` setting; this is the pre-config
+	// default, and if the two constants drift the two sides drift with them.
+	it("keeps the default tick backstop equal to the engine's", () => {
+		expect(DEFAULT_MAX_RETAINED_TICKS).toBe(50000);
+	});
+
+	// The ceiling is chosen so the longest window the picker offers is honoured
+	// in full at the default tick interval - otherwise "Full run" would quietly
+	// mean "however much fits", which is the failure this whole setting fixes.
+	it("holds the longest configurable window at the default tick interval", () => {
+		const longestMs = 3600000; // liveReplayWindowMs max
+		const defaultTickMs = 100;
+		expect(longestMs / defaultTickMs).toBeLessThan(DEFAULT_MAX_RETAINED_TICKS);
 	});
 
 	it("every option is a valid LiveWindow with a distinct span", () => {

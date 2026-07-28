@@ -89,26 +89,42 @@ TEST (LiveRingSize, DerivesTheSameWindowAtEveryTickCadence) {
 // The ceiling is what makes the duration safe to expose: at the minimum 10ms
 // cadence a 5-minute window is 30000 ticks, and an hour is 360000.
 TEST (LiveRingSize, ClampsToTheMemoryCeiling) {
-    const size_t ceiling = vayu::core::constants::server::MAX_LIVE_TICKS_CAP;
+    const size_t ceiling = vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS;
 
-    EXPECT_EQ (live_ring_size (300000, 10), ceiling);
     EXPECT_EQ (live_ring_size (3600000, 10), ceiling);
-    // The largest window the config accepts, at the default cadence, is also
-    // over the ceiling - so no setting can exceed it.
-    EXPECT_EQ (live_ring_size (3600000, 100), ceiling);
+    EXPECT_EQ (live_ring_size (3600000, 50), ceiling);
     // Just under it still passes through unclamped.
     EXPECT_EQ (live_ring_size (static_cast<int64_t> (ceiling - 1) * 100, 100), ceiling - 1);
+    // The default ceiling is chosen so the longest configurable window is
+    // honoured in full at the default cadence - it must NOT clamp there.
+    EXPECT_EQ (live_ring_size (3600000, 100), 36000u);
+    EXPECT_LT (36000u, ceiling);
+}
+
+// The ceiling is the `liveMaxRetainedTicks` setting, so it has to be honoured
+// as an argument rather than read from the constant.
+TEST (LiveRingSize, HonoursAConfiguredCeiling) {
+    EXPECT_EQ (live_ring_size (3600000, 100, 5000), 5000u);
+    EXPECT_EQ (live_ring_size (3600000, 100, 200000), 36000u);
+    // Raising the ceiling does not enlarge a ring the window already bounds -
+    // the window is what sizes it, which is why a bigger ceiling is ~free.
+    EXPECT_EQ (live_ring_size (300000, 100, 500000), 3000u);
+    // A nonsense ceiling from a hand-edited row falls back rather than
+    // collapsing the ring to nothing.
+    EXPECT_EQ (live_ring_size (0, 100, 0),
+    vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS);
 }
 
 // 0 is the "Full run" option in the dashboard's window picker - no time limit,
 // so the tick ceiling becomes the whole bound. It must NOT be treated as a
 // degenerate value and rounded back up to the default window.
 TEST (LiveRingSize, ZeroWindowMeansFullRunAndYieldsTheCeiling) {
-    const size_t ceiling = vayu::core::constants::server::MAX_LIVE_TICKS_CAP;
+    const size_t ceiling = vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS;
 
     EXPECT_EQ (live_ring_size (0, 100), ceiling);
     EXPECT_EQ (live_ring_size (0, 10), ceiling);
     EXPECT_EQ (live_ring_size (0, 1000), ceiling);
+    EXPECT_EQ (live_ring_size (0, 100, 12345), 12345u);
 }
 
 // POST /config validates its bounds, but a hand-edited row reaches this
@@ -133,7 +149,30 @@ TEST (RunContextTopic, RingIsBoundedBeforeConfigIsRead) {
     nlohmann::json cfg;
     RunContext ctx ("r", cfg);
     EXPECT_EQ (ctx.max_live_ticks.load (), 3000u);
-    EXPECT_LE (ctx.max_live_ticks.load (), vayu::core::constants::server::MAX_LIVE_TICKS_CAP);
+    EXPECT_LE (ctx.max_live_ticks.load (), vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS);
+}
+
+// maxStoredErrors has to reach the collector at construction - the store is
+// sized from it - so RunManager::start_run passes it and the default covers
+// every other caller.
+TEST (RunContextTopic, MaxStoredErrorsReachesTheCollector) {
+    nlohmann::json cfg;
+    RunContext stock ("stock", cfg);
+    RunContext raised ("raised", cfg, 42);
+
+    for (size_t i = 0; i < 50; ++i) {
+        stock.metrics_collector->record_error (vayu::ErrorCode::ConnectionFailed, "boom", "");
+        raised.metrics_collector->record_error (vayu::ErrorCode::ConnectionFailed, "boom", "");
+    }
+
+    EXPECT_EQ (raised.metrics_collector->errors ().size (), 42u);
+    EXPECT_EQ (raised.metrics_collector->errors_dropped (), 8u);
+    // The stock cap is far above 50, so nothing is dropped there.
+    EXPECT_EQ (stock.metrics_collector->errors ().size (), 50u);
+    EXPECT_EQ (stock.metrics_collector->errors_dropped (), 0u);
+    // The counts stay exact on both regardless of what was stored.
+    EXPECT_EQ (raised.metrics_collector->total_errors (), 50u);
+    EXPECT_EQ (stock.metrics_collector->total_errors (), 50u);
 }
 
 TEST (RunContextTopic, SetMaxLiveTicksResizesTheRetainedWindow) {
