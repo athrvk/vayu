@@ -44,6 +44,9 @@ function ctx(canStartLoadTest: boolean): RequestBuilderContextValue {
 		// complete.
 		getBodyDrafts: () => emptyDrafts(null),
 		setBodyDrafts: vi.fn(),
+		// Likewise the Content-Type row a body mode added: the Body panel's record.
+		getAutoContentType: () => null,
+		setAutoContentType: vi.fn(),
 		response: null,
 		setResponse: vi.fn(),
 		activeTab: "params",

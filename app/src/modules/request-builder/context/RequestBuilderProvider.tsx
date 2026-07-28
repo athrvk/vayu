@@ -32,6 +32,7 @@ import {
 import { useSessionStore, useResponseStore } from "@/stores";
 import type { ScriptPart, VariableValue } from "@/types";
 import type {
+	AutoContentType,
 	RequestState,
 	ResponseState,
 	RequestTab,
@@ -194,6 +195,24 @@ export default function RequestBuilderProvider({
 	const getBodyDrafts = useCallback(() => bodyDraftsRef.current, []);
 	const setBodyDrafts = useCallback((drafts: BodyDrafts) => {
 		bodyDraftsRef.current = drafts;
+	}, []);
+
+	/*
+	 * The Content-Type row a body mode added on its way in, so leaving the mode
+	 * can remove it again. Here rather than in `BodyPanel` for the drafts' reason
+	 * and one of its own: the panel is unmounted whenever another tab is on
+	 * screen, so a panel-local record is gone by the next mode change - and then
+	 * the header outlives the mode that needed it, which is the bug the record
+	 * exists to fix.
+	 *
+	 * Not reset by the request-change effect below, for the same reason as the
+	 * drafts: the record names its own request and `switchContentType` drops one
+	 * belonging to another.
+	 */
+	const autoContentTypeRef = useRef<AutoContentType | null>(null);
+	const getAutoContentType = useCallback(() => autoContentTypeRef.current, []);
+	const setAutoContentType = useCallback((auto: AutoContentType | null) => {
+		autoContentTypeRef.current = auto;
 	}, []);
 
 	// Variable resolution
@@ -462,6 +481,8 @@ export default function RequestBuilderProvider({
 			updateField,
 			getBodyDrafts,
 			setBodyDrafts,
+			getAutoContentType,
+			setAutoContentType,
 			response,
 			setResponse,
 			inheritedPreScripts,
@@ -492,6 +513,8 @@ export default function RequestBuilderProvider({
 			updateField,
 			getBodyDrafts,
 			setBodyDrafts,
+			getAutoContentType,
+			setAutoContentType,
 			response,
 			setResponse,
 			inheritedPreScripts,

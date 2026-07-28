@@ -34,7 +34,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import ResponseBody from "./ResponseBody";
 import HeadersViewer from "./HeadersViewer";
 
@@ -66,11 +66,24 @@ describe("the body toolbar's band", () => {
 		expect(bar.className).toMatch(/\bpx-4\b/);
 	});
 
-	it("declares a surface, so what sits on it has a rule to resolve", () => {
-		// It was `bg-muted/20` - an arbitrary alpha declares no `--rule`.
+	it("paints no background of its own, so it stays part of the pane", () => {
+		/*
+		 * Two wrong answers before this one. `bg-muted/20` was an arbitrary alpha
+		 * that declared no `--rule` for the control sitting on it; replacing it
+		 * with `surface-sunken` fixed that and over-corrected, because a full
+		 * `--muted` fill turns this row into a heavy grey band between a
+		 * card-coloured tab strip and a card-coloured editor - a separate block
+		 * wedged between them rather than part of the pane.
+		 *
+		 * The rule never needed a fill. This row is inside the pane, which
+		 * declares `surface-card`, so `border-rule` already resolves against a
+		 * card - the same way the tab strip above gets its edge, also with no
+		 * background. The band is its rule and its height, not a colour.
+		 */
 		const bar = toolbar();
-		expect(bar.className).toMatch(/\bsurface-sunken\b/);
-		expect(bar.className).not.toMatch(/bg-muted\/\d/);
+		expect(bar.className).toMatch(/\bborder-rule\b/);
+		expect(bar.className).not.toMatch(/\bsurface-/);
+		expect(bar.className).not.toMatch(/\bbg-/);
 	});
 });
 
@@ -94,8 +107,7 @@ describe("the view-mode segmented control", () => {
 	});
 
 	it("draws no track - no fill and no outline around the segments", () => {
-		// A filled track would have to be `--muted`, which is what the toolbar it
-		// sits on already is. The raised active segment is the whole affordance.
+		// The tinted active segment is the whole affordance.
 		const cls = group().className;
 		expect(cls).not.toMatch(/\bborder\b/);
 		expect(cls).not.toMatch(/\bbg-/);
@@ -179,5 +191,39 @@ describe("what colour a header key is", () => {
 
 	it("gives both variants the same treatment, since the section already says which", () => {
 		expect(keyCell("request").className).toBe(keyCell("response").className);
+	});
+});
+
+/**
+ * Copy and download act on the *body*, so they live with the body.
+ *
+ * They sat on the tab row, where they read as applying to whatever tab you were
+ * standing on - but `content` was always `response.body`, so on Headers, Timing
+ * or Raw they copied something other than what was on screen. Moving them into
+ * the body toolbar also gave the tab strip back the ~64px they occupied, which
+ * is what let all seven tabs render without the strip scrolling.
+ */
+describe("where the copy and download actions live", () => {
+	it("renders whatever the host puts in the toolbar's actions slot", () => {
+		const { container } = render(
+			<ResponseBody
+				body={JSON_BODY}
+				headers={{ "content-type": "application/json" }}
+				actions={<button type="button">Copy</button>}
+			/>
+		);
+		const bar = container.querySelector<HTMLElement>(".border-b");
+		expect(bar, "the body toolbar").not.toBeNull();
+		expect(within(bar!).getByRole("button", { name: "Copy" })).toBeInTheDocument();
+	});
+
+	it("renders none when the host supplies none, so the history viewer is unchanged", () => {
+		// `UnifiedResponseViewer` mounts this same component with nothing to put
+		// there - a hardcoded `ResponseActions` would have appeared for it too.
+		const { container } = render(
+			<ResponseBody body={JSON_BODY} headers={{ "content-type": "application/json" }} />
+		);
+		const bar = container.querySelector<HTMLElement>(".border-b");
+		expect(within(bar!).queryByRole("button", { name: /copy|download/i })).toBeNull();
 	});
 });

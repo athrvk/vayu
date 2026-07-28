@@ -29,6 +29,10 @@
  *
  * The rule the drafts follow - two buckets, and ownership by request id - is
  * tested as logic in `utils/body-drafts.test.ts`.
+ *
+ * The second half of the file guards the same lifetime for the second thing
+ * kept up here for the same reason: which Content-Type row a body mode added,
+ * so that leaving the mode can remove it (`panels/body/content-type.ts`).
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -37,7 +41,7 @@ import { render, act } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
 import { switchBody } from "../utils/body-drafts";
-import type { RequestState } from "../types";
+import type { AutoContentType, RequestState } from "../types";
 
 // The provider is wired to variable resolution, the save manager and several
 // TanStack Query hooks. None of them matter to a ref's lifetime.
@@ -145,5 +149,68 @@ describe("drafts across a tab switch", () => {
 		);
 		await act(async () => {});
 		expect(seen.restored).toBe("");
+	});
+});
+
+/**
+ * The record of the Content-Type row a body mode added lives here for the same
+ * reason and one of its own: the panel is unmounted while any other tab is on
+ * screen, so a panel-local record is gone by the next mode change - and then
+ * nothing removes the header, which is the bug the record exists to fix.
+ */
+const ADDED: AutoContentType = { requestId: "req_a", rowId: "row_1", value: "application/json" };
+
+const contentType: { read: AutoContentType | null } = { read: null };
+
+function ContentTypeStandIn({ write }: { write?: boolean }) {
+	const { getAutoContentType, setAutoContentType } = useRequestBuilderContext();
+	useEffect(() => {
+		if (write) {
+			setAutoContentType(ADDED);
+			contentType.read = null;
+			return;
+		}
+		contentType.read = getAutoContentType();
+	}, [getAutoContentType, setAutoContentType, write]);
+	return null;
+}
+
+function ContentTypeHarness() {
+	const [step, setStep] = useState<"write" | "away" | "back">("write");
+	useEffect(() => {
+		contentTypeStep = setStep;
+	}, []);
+	if (step === "write") return <ContentTypeStandIn write />;
+	if (step === "away") return null; // the Headers tab: BodyPanel is unmounted
+	return <ContentTypeStandIn />;
+}
+
+let contentTypeStep: (s: "write" | "away" | "back") => void = () => {};
+
+describe("the added Content-Type row across a tab switch", () => {
+	it("is still known after BodyPanel unmounts and comes back", async () => {
+		contentType.read = null;
+		render(
+			<RequestBuilderProvider initialRequest={{ id: "req_a" } as Partial<RequestState>}>
+				<ContentTypeHarness />
+			</RequestBuilderProvider>
+		);
+
+		await act(async () => contentTypeStep("away"));
+		await act(async () => contentTypeStep("back"));
+
+		expect(contentType.read).toEqual(ADDED);
+	});
+
+	it("is null for a provider that has added nothing", async () => {
+		// Guards the assertion above from passing on a stale module-level value.
+		contentType.read = ADDED;
+		render(
+			<RequestBuilderProvider initialRequest={{ id: "req_z" } as Partial<RequestState>}>
+				<ContentTypeStandIn />
+			</RequestBuilderProvider>
+		);
+		await act(async () => {});
+		expect(contentType.read).toBeNull();
 	});
 });

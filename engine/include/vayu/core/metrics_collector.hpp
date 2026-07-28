@@ -92,7 +92,8 @@ struct MetricsCollectorConfig {
     /// Expected number of requests (for pre-allocation)
     size_t expected_requests = constants::metrics_collector::DEFAULT_EXPECTED_REQUESTS;
 
-    /// Maximum errors to store (prevents OOM at high error rates)
+    /// Maximum error records to store, 0 = unlimited (prevents OOM at high
+    /// error rates). Errors past the cap are counted by errors_dropped().
     size_t max_errors = constants::metrics_collector::DEFAULT_MAX_ERRORS;
 
     /// Maximum success results to store (for detailed trace data)
@@ -146,11 +147,22 @@ class MetricsCollector {
 
     /**
      * @brief Record a failed request
-     * Thread-safe, all errors are preserved
+     * Thread-safe. The error counters and the status-code distribution always
+     * see every error; the individual record is stored only while the store is
+     * below config_.max_errors (see errors_dropped).
      */
     void record_error (ErrorCode code,
     const std::string& message,
     const std::string& trace_data = "");
+
+    /**
+     * @brief Number of error records discarded because the store was full.
+     * Non-zero means errors() (and the flushed results) are a prefix, not the
+     * whole set - total_errors() remains exact.
+     */
+    [[nodiscard]] size_t errors_dropped () const {
+        return errors_dropped_.load (std::memory_order_relaxed);
+    }
 
     /**
      * @brief Record N requests dropped due to generator backpressure
@@ -177,12 +189,6 @@ class MetricsCollector {
         return total_bytes_recv_.load (std::memory_order_relaxed);
     }
 
-    /**
-     * @brief Record a latency value (for percentile calculation)
-     * Thread-safe
-     */
-    void record_latency (double latency_ms);
-
     // ========================================================================
     // Real-time stats (lock-free reads)
     // ========================================================================
@@ -195,8 +201,19 @@ class MetricsCollector {
         return total_errors_.load (std::memory_order_relaxed);
     }
 
+    /**
+     * @brief Requests that completed without an error.
+     *
+     * total_requests_ and total_errors_ are separate relaxed atomics that
+     * record_error bumps one after the other, so a reader can observe the error
+     * increment before its paired request increment. The subtraction is
+     * therefore guarded: unguarded it wraps to a huge size_t, which passes the
+     * `> 0` denominator checks below and drives every average toward zero.
+     */
     [[nodiscard]] size_t success_count () const {
-        return total_requests () - total_errors ();
+        size_t total  = total_requests ();
+        size_t errors = total_errors ();
+        return total > errors ? total - errors : 0;
     }
 
     [[nodiscard]] double total_latency_sum () const {
@@ -247,8 +264,8 @@ class MetricsCollector {
      * @brief Sample the rolling (windowed) latency percentiles for the interval
      *        that has elapsed since the previous call, then reset the window.
      *
-     * Backed by a phaser-based hdr_interval_recorder: record_success/record_latency
-     * feed the recorder concurrently from worker threads while this single-reader
+     * Backed by a phaser-based hdr_interval_recorder: record_success feeds the
+     * recorder concurrently from worker threads while this single-reader
      * sample-and-recycle runs safely alongside them (this is what properly resolves
      * the cumulative-histogram concurrent read/write concern, D8). Unlike
      * calculate_percentiles() - which reads the cumulative-from-start histogram and
@@ -267,7 +284,8 @@ class MetricsCollector {
     [[nodiscard]] std::map<int, size_t> status_code_distribution () const;
 
     /**
-     * @brief Get all stored errors
+     * @brief Get the stored errors (a prefix of all errors when
+     *        errors_dropped() is non-zero)
      */
     [[nodiscard]] const std::vector<ResultRecord>& errors () const {
         return errors_;
@@ -360,19 +378,25 @@ class MetricsCollector {
     static constexpr int STATUS_CODE_SLOTS = 600;
     std::array<std::atomic<size_t>, STATUS_CODE_SLOTS> status_code_counts_{};
 
-    // Lock-free HdrHistogram for latency recording (thread-safe). Cumulative from
-    // start of run - feeds calculate_percentiles() for the final report.
+    // HdrHistogram for latency recording. Cumulative from start of run - feeds
+    // calculate_percentiles() for the final report. Every worker thread records
+    // into it concurrently, so writes MUST go through hdr_record_value_atomic;
+    // the plain hdr_record_value is a non-atomic read-modify-write on counts[]
+    // and total_count and loses increments under concurrency.
     struct hdr_histogram* latency_histogram_{ nullptr };
 
     // Phaser-based interval recorder for the windowed (rolling) percentiles that
-    // the live/history per-tick series consume. Writers (record_success/
-    // record_latency) record here in parallel with the cumulative histogram; the
-    // producer thread sample-and-recycles it once per tick (sample_window_percentiles).
+    // the live/history per-tick series consume. record_success records here in
+    // parallel with the cumulative histogram; the producer thread
+    // sample-and-recycles it once per tick (sample_window_percentiles). The
+    // phaser orders the reader's swap against writers - it is not mutual
+    // exclusion between writers, so the write itself must be the atomic variant.
     struct hdr_interval_recorder interval_recorder_{};
     bool interval_recorder_ready_{ false };
 
     mutable std::mutex errors_mutex_;
     std::vector<ResultRecord> errors_;
+    std::atomic<size_t> errors_dropped_{ 0 };
 
     mutable std::mutex success_mutex_;
     std::vector<ResultRecord> success_results_;

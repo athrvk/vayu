@@ -30,8 +30,14 @@ import { Loader2 } from "lucide-react";
 import type { LoadTestConfig, OAuth2Config } from "@/types";
 import OAuth2LoadTestGuard from "../OAuth2LoadTestGuard";
 import { validateRampDuration, validateStartConcurrency } from "../../utils/loadTestValidation";
-import { LOAD_TEST_DEFAULTS, LOAD_TEST_LIMITS } from "@/constants/load-test";
+import {
+	LOAD_TEST_DEFAULTS,
+	clampToRange,
+	resolveLoadTestLimits,
+	successSamplePeriod,
+} from "@/constants/load-test";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
+import { useClientSettingsStore } from "@/stores";
 import {
 	Button,
 	Input,
@@ -174,24 +180,43 @@ export default function LoadTestConfigDialog({
 }: LoadTestConfigDialogProps) {
 	const saved = loadSavedConfig();
 
+	/**
+	 * The ceilings are a user setting (Settings -> Load testing), so every
+	 * range below is resolved rather than read off the constant. Restored
+	 * values are clamped into it: the memo is written by a past run, and a
+	 * ceiling lowered since then would otherwise seed a field above its own
+	 * `max` - which a number input shows without complaint.
+	 */
+	const ceilings = useClientSettingsStore((s) => s.loadTestCeilings);
+	const limits = useMemo(() => resolveLoadTestLimits(ceilings), [ceilings]);
+	const restore = (value: number | undefined, fallback: number, key: keyof typeof limits) =>
+		clampToRange(value ?? fallback, limits[key]);
+
 	const [mode, setMode] = useState<LoadTestConfig["mode"]>(saved.mode ?? LOAD_TEST_DEFAULTS.MODE);
-	const [duration, setDuration] = useState(saved.duration ?? LOAD_TEST_DEFAULTS.DURATION_S);
-	const [rps, setRps] = useState(saved.rps ?? LOAD_TEST_DEFAULTS.RPS);
-	const [concurrency, setConcurrency] = useState(
-		saved.concurrency ?? LOAD_TEST_DEFAULTS.CONCURRENCY
+	const [duration, setDuration] = useState(() =>
+		restore(saved.duration, LOAD_TEST_DEFAULTS.DURATION_S, "DURATION_S")
 	);
-	const [iterations, setIterations] = useState(saved.iterations ?? LOAD_TEST_DEFAULTS.ITERATIONS);
-	const [rampDuration, setRampDuration] = useState(
-		saved.rampDuration ?? LOAD_TEST_DEFAULTS.RAMP_DURATION_S
+	const [rps, setRps] = useState(() => restore(saved.rps, LOAD_TEST_DEFAULTS.RPS, "RPS"));
+	const [concurrency, setConcurrency] = useState(() =>
+		restore(saved.concurrency, LOAD_TEST_DEFAULTS.CONCURRENCY, "CONCURRENCY")
 	);
-	const [startConcurrency, setStartConcurrency] = useState(
-		saved.startConcurrency ?? LOAD_TEST_DEFAULTS.START_CONCURRENCY
+	const [iterations, setIterations] = useState(() =>
+		restore(saved.iterations, LOAD_TEST_DEFAULTS.ITERATIONS, "ITERATIONS")
+	);
+	const [rampDuration, setRampDuration] = useState(() =>
+		restore(saved.rampDuration, LOAD_TEST_DEFAULTS.RAMP_DURATION_S, "RAMP_DURATION_S")
+	);
+	const [startConcurrency, setStartConcurrency] = useState(() =>
+		restore(saved.startConcurrency, LOAD_TEST_DEFAULTS.START_CONCURRENCY, "START_CONCURRENCY")
 	);
 	const [maxInFlight, setMaxInFlight] = useState<string>(
 		saved.maxInFlight != null ? String(saved.maxInFlight) : ""
 	);
-	const [sampleRate, setSampleRate] = useState(
-		saved.sampleRate ?? LOAD_TEST_DEFAULTS.SAMPLE_RATE_PCT
+	// Clamped like the rest, and load-bearing for a second reason: a config
+	// saved when the slider's floor was 0 restores that 0, because
+	// `saved.sampleRate ?? DEFAULT` keeps a present 0.
+	const [sampleRate, setSampleRate] = useState(() =>
+		restore(saved.sampleRate, LOAD_TEST_DEFAULTS.SAMPLE_RATE_PCT, "SAMPLE_RATE_PCT")
 	);
 	const [slowThreshold, setSlowThreshold] = useState(
 		saved.slowThreshold ?? LOAD_TEST_DEFAULTS.SLOW_THRESHOLD_MS
@@ -284,7 +309,10 @@ export default function LoadTestConfigDialog({
 
 		const config: LoadTestConfig = {
 			mode,
-			data_sample_rate: sampleRate,
+			// The slider is a percentage; the engine's field is a period. The
+			// memo above keeps the percentage, so the control restores to what
+			// the user set rather than to a converted number.
+			success_sample_period: successSamplePeriod(sampleRate),
 			slow_threshold_ms: slowThreshold,
 			save_timing_breakdown: saveTimingBreakdown,
 			comment: comment || undefined,
@@ -344,8 +372,8 @@ export default function LoadTestConfigDialog({
 								unit="req/s"
 								value={rps}
 								onChange={num(setRps)}
-								min={LOAD_TEST_LIMITS.RPS.MIN}
-								max={LOAD_TEST_LIMITS.RPS.MAX}
+								min={limits.RPS.MIN}
+								max={limits.RPS.MAX}
 							/>
 						)}
 
@@ -355,8 +383,8 @@ export default function LoadTestConfigDialog({
 								label={mode === "ramp_up" ? "Target connections" : "Connections"}
 								value={concurrency}
 								onChange={num(setConcurrency)}
-								min={LOAD_TEST_LIMITS.CONCURRENCY.MIN}
-								max={LOAD_TEST_LIMITS.CONCURRENCY.MAX}
+								min={limits.CONCURRENCY.MIN}
+								max={limits.CONCURRENCY.MAX}
 							/>
 						)}
 
@@ -366,8 +394,8 @@ export default function LoadTestConfigDialog({
 								label="Requests"
 								value={iterations}
 								onChange={num(setIterations)}
-								min={LOAD_TEST_LIMITS.ITERATIONS.MIN}
-								max={LOAD_TEST_LIMITS.ITERATIONS.MAX}
+								min={limits.ITERATIONS.MIN}
+								max={limits.ITERATIONS.MAX}
 							/>
 						)}
 
@@ -378,8 +406,8 @@ export default function LoadTestConfigDialog({
 								unit="sec"
 								value={duration}
 								onChange={num(setDuration)}
-								min={LOAD_TEST_LIMITS.DURATION_S.MIN}
-								max={LOAD_TEST_LIMITS.DURATION_S.MAX}
+								min={limits.DURATION_S.MIN}
+								max={limits.DURATION_S.MAX}
 							/>
 						)}
 
@@ -389,8 +417,8 @@ export default function LoadTestConfigDialog({
 								label="Start from"
 								value={startConcurrency}
 								onChange={num(setStartConcurrency)}
-								min={LOAD_TEST_LIMITS.START_CONCURRENCY.MIN}
-								max={LOAD_TEST_LIMITS.START_CONCURRENCY.MAX}
+								min={limits.START_CONCURRENCY.MIN}
+								max={limits.START_CONCURRENCY.MAX}
 								hint="Connections at the start of the ramp. The engine climbs from here to the target."
 							/>
 						)}
@@ -402,8 +430,8 @@ export default function LoadTestConfigDialog({
 								unit="sec"
 								value={rampDuration}
 								onChange={num(setRampDuration)}
-								min={LOAD_TEST_LIMITS.RAMP_DURATION_S.MIN}
-								max={LOAD_TEST_LIMITS.RAMP_DURATION_S.MAX}
+								min={limits.RAMP_DURATION_S.MIN}
+								max={limits.RAMP_DURATION_S.MAX}
 							/>
 						)}
 					</div>
@@ -470,12 +498,20 @@ export default function LoadTestConfigDialog({
 									type="range"
 									value={sampleRate}
 									onChange={(e) => setSampleRate(Number(e.target.value))}
-									min={LOAD_TEST_LIMITS.SAMPLE_RATE_PCT.MIN}
-									max={LOAD_TEST_LIMITS.SAMPLE_RATE_PCT.MAX}
+									min={limits.SAMPLE_RATE_PCT.MIN}
+									max={limits.SAMPLE_RATE_PCT.MAX}
 									className="w-full accent-primary"
 								/>
+								{/*
+								    The left stop is 1%, not 0%. The value is
+								    converted to the engine's sampling period, and
+								    no period expresses "none" - that is the Save
+								    timing breakdown toggle below, which gates
+								    storage outright. Errors are never sampled
+								    either way; they are always kept.
+								 */}
 								<div className="flex justify-between text-[11px] text-muted-foreground">
-									<span>0% - errors only</span>
+									<span>1% - a trickle</span>
 									<span>100% - everything</span>
 								</div>
 							</div>
@@ -486,8 +522,8 @@ export default function LoadTestConfigDialog({
 								unit="ms"
 								value={slowThreshold}
 								onChange={num(setSlowThreshold)}
-								min={LOAD_TEST_LIMITS.SLOW_THRESHOLD_MS.MIN}
-								max={LOAD_TEST_LIMITS.SLOW_THRESHOLD_MS.MAX}
+								min={limits.SLOW_THRESHOLD_MS.MIN}
+								max={limits.SLOW_THRESHOLD_MS.MAX}
 								hint="Requests slower than this are flagged and always saved, whatever the sample rate."
 							/>
 
@@ -498,8 +534,8 @@ export default function LoadTestConfigDialog({
 									optional
 									value={maxInFlight}
 									onChange={setMaxInFlight}
-									min={LOAD_TEST_LIMITS.MAX_IN_FLIGHT.MIN}
-									max={LOAD_TEST_LIMITS.MAX_IN_FLIGHT.MAX}
+									min={limits.MAX_IN_FLIGHT.MIN}
+									max={limits.MAX_IN_FLIGHT.MAX}
 									placeholder="Auto"
 									hint="Hard cap on concurrent in-flight requests. Blank derives it from the target rate. Lowering it drops requests sooner under backpressure; raising it queues instead."
 								/>

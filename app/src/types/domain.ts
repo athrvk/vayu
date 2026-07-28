@@ -482,7 +482,13 @@ export interface LoadTestConfig {
 	ramp_duration_seconds?: number;
 	/** Ramp-Up only: connections at t=0, climbing to `concurrency`. */
 	start_concurrency?: number;
-	data_sample_rate?: number;
+	/**
+	 * Sampling **period** for stored success traces - keep 1 in N, engine-side
+	 * `counter % N`. Named for the unit on purpose: the dialog's control is a
+	 * percentage, and the two used to be the same number, so the slider meant
+	 * the inverse of its own label. `successSamplePeriod` does the conversion.
+	 */
+	success_sample_period?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
 	comment?: string;
@@ -722,6 +728,7 @@ export type ClientSettingsCategory =
 	| "appearance"
 	| "editor"
 	| "dashboard"
+	| "load-testing"
 	| "notifications"
 	| "general"
 	| "mcp";

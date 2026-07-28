@@ -1,0 +1,45 @@
+{
+	"id": "8f1c2a44-9c3e-4b0d-9f2a-1d7e5b6c0a11",
+	"name": "Sample Staging",
+	"values": [
+		{
+			"key": "baseUrl",
+			"value": "https://staging.api.example.com",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "apiKey",
+			"value": "test-api-key-1",
+			"type": "secret",
+			"enabled": true
+		},
+		{
+			"key": "emptySecret",
+			"value": "",
+			"type": "secret",
+			"enabled": true
+		},
+		{
+			"key": "legacyHost",
+			"value": "old.example.com",
+			"type": "default",
+			"enabled": false
+		},
+		{
+			"key": "greeting",
+			"value": "hello {{ user.name }}",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "",
+			"value": "dropped - no key",
+			"type": "default",
+			"enabled": true
+		}
+	],
+	"_postman_variable_scope": "environment",
+	"_postman_exported_at": "2026-07-27T06:00:00.000Z",
+	"_postman_exported_using": "Postman/11.62.3"
+}

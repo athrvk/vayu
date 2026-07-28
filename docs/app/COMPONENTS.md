@@ -140,6 +140,8 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 
 > **Body tabs** support `none` / `json` / `text` / `graphql` / `form-data` / `x-www-form-urlencoded`. The `graphql` mode renders a split resizable editor: a **Query** pane (Monaco `graphql` language with diagnostics, autocomplete, hover, and formatting) and a **Variables** pane (Monaco `json` with schema-derived validation). **Scripts** are two separate panels - pre-request and test - not a single tab.
 
+> **Choosing GraphQL writes a header, and leaving GraphQL removes it.** GraphQL is sent as a JSON envelope, so picking it appends `Content-Type: application/json` to the Headers tab (unless an enabled `Content-Type` is already there) and says so in a notice with an Undo. The next mode change that no longer needs that header takes the row back out. The row is tracked **by id** - a `Content-Type` the user typed is indistinguishable by value and always survives, as does one whose value has since been edited. The rule is `panels/body/content-type.ts`; the record lives in `RequestBuilderProvider` (see [state-management](state-management.md#requestbuildercontext---the-added-content-type-row)) because the panel is unmounted whenever another tab is on screen.
+
 ## GraphQL Library (`lib/graphql/`)
 
 Shared, Monaco-independent modules that power the GraphQL body mode.
@@ -177,6 +179,8 @@ Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows n
 | Variables | `VariablesTab.tsx` | Collection-scoped variables (count badge) |
 
 `InheritanceChain.tsx` and `shared.tsx` are helpers used by these tabs (e.g. visualizing the auth/variable inheritance chain).
+
+Info, Auth and both Script tabs share one save model: an editable draft with a Save button gated on `isDirty` and a Reset, held by [`useEntityDraft()`](./state-management.md#useentitydraft---manual-draftsave-model). It is the manual counterpart to the request builder's `useSaveManager()` autosave, and it owns the mutation reset on a collection switch - that part had been hand-rolled per tab and one tab had omitted it.
 
 ## Load Test Dashboard (`modules/dashboard/`)
 
@@ -240,7 +244,11 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 Same nav/content split as Variables: the category tree renders in the **Drawer** (`settings` view), not inside the settings tab. Selecting a category sets `useSettingsStore.selectedCategory` **and** opens the settings tab, so `SettingsMain` shows that panel. There is no `SettingsLayout` two-pane wrapper anymore - the Drawer is the left pane.
 
 - **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** - settings category navigation; rendered by the Drawer.
-- **Main (`main/`)** - `SettingsMain.tsx` (screen `"settings"`) hosts the app-settings category panels under `main/panels/`: `AppearancePanel.tsx`, `DashboardPanel.tsx`, `GeneralPanel.tsx`, and `EditorPanel.tsx`, plus the shared `ClientSettingsPanel.tsx` wrapper, `FontPicker.tsx`, and `SettingControls.tsx` primitives. `app-panels.ts` is the panel registry/metadata. (The former monolithic `UISettingsPanel.tsx` was split into these panels in PR #55.)
+- **Main (`main/`)** - `SettingsMain.tsx` (screen `"settings"`) hosts the app-settings category panels under `main/panels/`: `AppearancePanel.tsx`, `DashboardPanel.tsx`, `LoadTestingPanel.tsx`, `GeneralPanel.tsx`, and `EditorPanel.tsx`, plus the shared `ClientSettingsPanel.tsx` wrapper, `FontPicker.tsx`, and `SettingControls.tsx` primitives. `app-panels.ts` is the panel registry/metadata. (The former monolithic `UISettingsPanel.tsx` was split into these panels in PR #55.)
+
+Adding an app panel is three edits and no branching: a member on `ClientSettingsCategory` (`types/domain.ts`), one entry in `APP_SETTINGS_PANELS`, and the panel file. The sidebar tree and `SettingsMain` both read the registry.
+
+`LoadTestingPanel.tsx` is the ceilings the load-test dialog offers - the app's own policy, clamped to the engine's crash guards on the way into `client-settings-store`. The engine's bounds themselves are deliberately **not** settings; see `docs/app/api-integration.md` (Dialog ceilings are a user setting).
 
 ## Welcome (`modules/welcome/`)
 
@@ -276,13 +284,54 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 
 - `UnifiedResponseViewer.tsx` - top-level response view for stored runs
 - `ResponseBody.tsx` - body rendering (JSON/text/HTML/XML)
-- `HeadersViewer.tsx` - response headers (plus `CompactHeadersViewer`)
+- `HeadersViewer.tsx` - the headers family, three variants in one file: the collapsible table, `CompactHeadersViewer` (same content on a sunken slab, for panes with no room for a table), and `ResponseHeadersPanel` (the Headers *tab* - request collapsed above response open, with the empty state `HeadersViewer` alone cannot give)
 - `StatusCodeBadge.tsx` - the status chip
 - `ResponseStatusBar.tsx` - status chip + elapsed time + payload size
 - `ResponseActions.tsx` - the copy/download pair
-- `ResponseHeadersPanel.tsx` - the Headers tab body
 - `tab-trigger.ts` - `RESPONSE_TAB_TRIGGER`, the underline-on-active class
 - `phase-tips.ts` - `PHASE_TIPS`, the five per-phase timing tooltips (DNS -> Connect -> TLS -> TTFB -> Download), shared so every renderer of those numbers reads one string
+- `timing-phases.ts` - `TIMING_PHASES`, the same five phases as one descriptor list (label, hue, tooltip, and the trace/average field each reads), plus the `phasesFromTrace` / `phasesFromAverages` selectors
+- `TimingPhaseTiles.tsx` - the dense tile grid (one labelled box per phase), rendered by both sampled-exchange views
+- `SampledExchange.tsx` - the sampled-exchange shell: summary row, expansion, error block and timing tiles
+
+> **One shell, two sample lists.** The dashboard's live sample list and the
+> history detail's stored one show the same thing - a sampled HTTP exchange you
+> can expand - and were two components. #60 gave them the same per-concern
+> primitives, which moved the drift up into the shells rather than removing it:
+> each still owned its summary row, its expansion chrome and its section order,
+> so a spacing or empty-state fix to one did not reach the other. By the time
+> they were merged the rows differed in almost everything that is not data - one
+> chevron and one hand-drawn CSS triangle, two different icon sets, and a
+> slow-request state on only one side.
+>
+> `SampledExchange` is **presentational over already-shaped data**: a status
+> code, a latency, a pre-resolved phase list. Expansion stays the parent's
+> state, as it already was on the history side - the dashboard holds a `Set` of
+> open indices, the history detail a single one. Sections that genuinely differ
+> arrive as slots (`details` before the timing tiles, `children` after), not as
+> boolean flags; the callers keep their own chrome (the history card's
+> outcome-tinted border) and their own timestamp formatting, because a live row
+> placing a sample inside a seconds-old run wants milliseconds where a stored
+> row dating a run wants the day.
+>
+> Guarded by `sampled-exchange-adoption.test.tsx` (the shell is replaced with a
+> sentinel, so a view that hand-rolls a row again fails) and
+> `SampledExchange.test.tsx` (the shell's own behaviour).
+
+> **One list, five renderers.** The five network phases are drawn by the
+> request-builder's `ResponseTimingTab` (timeline + legend), the dashboard's
+> run-level averages card and per-sample tiles, the dashboard's
+> `charts/TimingWaterfall`, and the history `SampleRequestCard`. Each used to
+> declare its own copy of the list, so adding a phase meant finding all five and
+> nothing pointed you at the other four. Two had already drifted: the waterfall
+> painted TTFB with `--primary` - an accent-tracking token the design system
+> forbids for a chart series, and the very bug `ResponseTimingTab`'s header
+> comment describes fixing in its own copy - and carried private tooltip strings
+> that `phase-tips.ts` existed to replace.
+>
+> Add a phase to `TIMING_PHASES` and all five pick it up.
+> `timing-phases.test.tsx` guards that by mocking in a sixth phase and asking
+> each renderer to show it, so a call site that goes back to a local array fails.
 
 > **Two shells, shared parts.** The request builder has its own richer
 > `components/ResponseViewer/` (console output, test results, cookies, timing,
@@ -344,7 +393,19 @@ Config resolution (`{{variables}}`), the token cache key (`services/oauth/cache-
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+
+### `info-chip`
+
+The 14px "i" dot with a tooltip, beside a label that needs a sentence -
+timing phases, chart axes, the wire/queue/total summary. It lived in
+`modules/dashboard/components/shared.tsx`, where nothing outside the dashboard
+could import it without a module reaching into another module, so the request
+builder grew its own copy - and the copy is the one that got the `border-rule`
+fix, leaving the original outline-less in dark. The border stays a prop
+(default `border-border`, pass `border-rule` on a declared surface) because
+`border-rule` falls back to the invisible default where no surface declares one.
+`dashboard/components/shared.tsx` re-exports it so existing imports resolve.
 
 ### Markdown (`markdown-view`, `markdown-editor`)
 

@@ -462,7 +462,7 @@ export default function RequestBuilder() {
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,
 					comment: config.comment,
-					success_sample_rate: config.data_sample_rate,
+					success_sample_rate: config.success_sample_period,
 					slow_threshold_ms: config.slow_threshold_ms,
 					save_timing_breakdown: config.save_timing_breakdown,
 					// The collection chain's test scripts too. Load runs only ever

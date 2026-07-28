@@ -20,6 +20,7 @@
  */
 
 import { Folder } from "lucide-react";
+import { Eyebrow } from "@/components/ui";
 import { useCollectionAncestors } from "@/queries/collections";
 import { cn } from "@/lib/utils";
 import type { Collection } from "@/types";
@@ -76,9 +77,11 @@ export default function InheritanceChain({ collectionId }: InheritanceChainProps
 
 	return (
 		<div className="mt-7 p-3.5 px-4 bg-card border border-border rounded-md">
-			<div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground mb-2.5">
-				Inheritance chain
-			</div>
+			{/* Was a hand-typed copy of the eyebrow that had drifted to
+			    `tracking-[0.07em]`. At 11px that is 0.11px per character - not a
+			    deliberate variant, just a copy nobody could diff against the
+			    original. */}
+			<Eyebrow className="mb-2.5">Inheritance chain</Eyebrow>
 
 			{ancestors.map((c, i) => {
 				const isThis = c.id === collectionId;

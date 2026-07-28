@@ -16,11 +16,19 @@
 #include "vayu/utils/metrics_helper.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 #include <utility>
 
 namespace vayu::http::routes {
 
 namespace {
+
+// How long DELETE /runs/:id waits for an active run's worker to settle before
+// refusing the delete. Matches the 5s POST /runs/:id/stop already waits for a
+// graceful stop, so a client that stops and then deletes sees one budget, not
+// two different ones.
+constexpr int64_t DELETE_STOP_WAIT_MS = 5000;
 
 // Copy src[key] to dst[key] when present and not null. Shared by the list-row
 // `summary` builder and the report route's `config_obj` (which adds a few
@@ -147,6 +155,66 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
     }
     add_http_version (config_obj, config);
     return config_obj;
+}
+
+/**
+ * Testable core of DELETE /runs/:id, returning {http_status, json_body}.
+ *
+ * Deleting a run that is still executing used to remove its rows while its
+ * detached worker kept writing new metrics and results against the same id -
+ * permanently orphaned rows, and a run that partially "un-deleted" itself as it
+ * finished. So an active run is stopped first: the stop is signalled the same
+ * way POST /runs/:id/stop signals it, and the delete waits for the worker to
+ * hand the run over to the retained map, which it only does after its last
+ * database write.
+ *
+ * If the worker has not settled within `stop_wait_ms` the run is *not* deleted
+ * and the caller gets a 409 - a partial delete racing a live writer is the one
+ * outcome worth refusing outright. The stop still stands, so a retry a moment
+ * later succeeds.
+ *
+ * A run whose stored status is `running` but which has no context (the daemon
+ * restarted under it) has no writer to race and is deleted directly.
+ */
+std::pair<int, nlohmann::json> delete_run_response (vayu::db::Database& db,
+vayu::core::RunManager& run_manager,
+const std::string& run_id,
+int64_t stop_wait_ms) {
+    auto run = db.get_run (run_id);
+    if (!run) {
+        return { 404, nlohmann::json{ { "error", "Run not found" } } };
+    }
+
+    if (auto context = run_manager.get_run (run_id)) {
+        vayu::utils::log_info (
+        "DELETE /runs/:id - Run is active, stopping it first: " + run_id);
+        context->should_stop = true;
+        // Wake the closed-loop controller so it observes should_stop without
+        // waiting out its 50ms safety-net timeout.
+        context->notify_refill ();
+
+        // retain_run() is the worker's last act, after the final metrics flush
+        // and status update, so "no longer active" is the only signal that says
+        // every writer is done with this id.
+        const auto deadline = std::chrono::steady_clock::now () +
+        std::chrono::milliseconds (stop_wait_ms);
+        while (run_manager.get_run (run_id) != nullptr) {
+            if (std::chrono::steady_clock::now () >= deadline) {
+                vayu::utils::log_warning (
+                "DELETE /runs/:id - Run did not settle within " +
+                std::to_string (stop_wait_ms) + "ms, refusing to delete: " + run_id);
+                return { 409,
+                    nlohmann::json{ { "error",
+                    "Run is still stopping; it was not deleted. Retry once it "
+                    "reports a terminal status." } } };
+            }
+            std::this_thread::sleep_for (std::chrono::milliseconds (20));
+        }
+    }
+
+    db.delete_run (run_id);
+    return { 200,
+        nlohmann::json{ { "message", "Run deleted successfully" }, { "runId", run_id } } };
 }
 
 void register_run_routes (RouteContext& ctx) {
@@ -278,28 +346,25 @@ void register_run_routes (RouteContext& ctx) {
 
     /**
      * DELETE /runs/:runId  (alias: DELETE /run/:runId, deprecated)
-     * Deletes a specific test run and all associated metrics/results.
+     * Deletes a specific test run and all associated metrics/results. An active
+     * run is stopped first and only deleted once its worker has settled; see
+     * delete_run_response.
      */
     httplib::Server::Handler delete_run =
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string run_id = req.matches[1];
         vayu::utils::log_info ("DELETE /runs/:id - Deleting run: " + run_id);
         try {
-            auto run = ctx.db.get_run (run_id);
-            if (!run) {
+            auto [status, body] =
+            delete_run_response (ctx.db, ctx.run_manager, run_id, DELETE_STOP_WAIT_MS);
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+            if (status == 200) {
+                vayu::utils::log_info (
+                "DELETE /runs/:id - Successfully deleted run: " + run_id);
+            } else if (status == 404) {
                 vayu::utils::log_warning ("DELETE /runs/:id - Run not found: " + run_id);
-                send_error (res, 404, "Run not found");
-                return;
             }
-
-            ctx.db.delete_run (run_id);
-            vayu::utils::log_info (
-            "DELETE /runs/:id - Successfully deleted run: " + run_id);
-
-            nlohmann::json response;
-            response["message"] = "Run deleted successfully";
-            response["runId"]   = run_id;
-            res.set_content (response.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "DELETE /runs/:id - Error deleting run " + run_id + ": " + e.what ());

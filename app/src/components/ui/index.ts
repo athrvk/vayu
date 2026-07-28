@@ -82,6 +82,8 @@ export type { ToggleGroupProps } from "./toggle-group";
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./tooltip";
 export { TooltipIconButton } from "./tooltip-icon-button";
 export type { TooltipIconButtonProps } from "./tooltip-icon-button";
+export { InfoChip } from "./info-chip";
+export type { InfoChipProps } from "./info-chip";
 
 export {
 	Select,

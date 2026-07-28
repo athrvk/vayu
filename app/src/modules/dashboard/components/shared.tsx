@@ -5,40 +5,20 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { type ReactNode } from "react";
-import { Info } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { EYEBROW_CLASS } from "@/components/ui";
-
-// Re-exported, not redefined - the value lives in `ui/eyebrow` so every
-// surface can reach it. Kept here so the dashboard's existing imports resolve.
-export { EYEBROW_CLASS };
-
-/** Tiny "i" affordance with a Radix tooltip. */
-export function InfoChip({ tip }: { tip: ReactNode }) {
-	// No TooltipProvider of its own: the delay is set once at the app root
-	// (main.tsx). A nested one here would only re-declare what it inherits.
-	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<button
-					type="button"
-					className="ml-1.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle"
-					aria-label="More information"
-				>
-					<Info className="h-2.5 w-2.5" />
-				</button>
-			</TooltipTrigger>
-			<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
-				{tip}
-			</TooltipContent>
-		</Tooltip>
-	);
-}
-
-export function Eyebrow({ children }: { children: ReactNode }) {
-	return <p className={EYEBROW_CLASS}>{children}</p>;
-}
+// Re-exported, not redefined - all three live in `components/ui` so every
+// surface can reach them, and the dashboard's existing imports still resolve.
+//
+// `InfoChip` was defined here, where only the dashboard could import it without
+// a module reaching into another module. The request-builder therefore grew its
+// own copy (`ResponseTimingTab`'s `InfoTip`), and the copy is the one that got
+// the `border-rule` fix - so the original never did. It lives in
+// `ui/info-chip` now; see that file for why the border stayed a prop.
+//
+// `Eyebrow` was the same shape with a quieter symptom: this file imported the
+// shared `EYEBROW_CLASS` and then wrapped it in a second component that dropped
+// the `className` the primitive accepts. Same class string, so nothing looked
+// wrong - but a dashboard caller that needed a margin had to reach past it.
+export { EYEBROW_CLASS, Eyebrow, InfoChip } from "@/components/ui";
 
 /** Format a possibly-undefined number, falling back to a dash. */
 export function fmt(v: number | undefined, digits = 1): string {

@@ -102,10 +102,22 @@ function bodyTypeFromContentType(headers: Record<string, string> | undefined) {
  * parsed form and falls back to it.
  */
 export function responseFromExecuteResult(result: SanityResult): ResponseState {
+	/*
+	 * The fallback must not indent. `bodyRaw` is the field whose entire job is
+	 * to be what the server actually sent - the Raw view reads it and nothing
+	 * else - so a fallback that pretty-prints turns Raw into a second Pretty
+	 * whenever it fires.
+	 *
+	 * The engine always sends `bodyRaw` (`json["bodyRaw"] = response.body` in
+	 * `utils/json.cpp`), so this is a guard against a producer that does not,
+	 * and the original bytes are already gone by the time we are stringifying a
+	 * parsed object. Compact is the closest honest reconstruction; indenting
+	 * would be inventing formatting the server never sent.
+	 */
 	const bodyRaw =
 		result.bodyRaw ||
 		(typeof result.body === "object" && result.body !== null
-			? JSON.stringify(result.body, null, 2)
+			? JSON.stringify(result.body)
 			: String(result.body || ""));
 
 	const body =
@@ -125,6 +137,10 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		body,
 		bodyRaw,
 		bodyType: bodyTypeFromContentType(result.headers),
+		// When it arrived, as opposed to how long it took. The status bar shows
+		// it as an age, which is the only thing distinguishing a fresh response
+		// from one sent before the request beside it was edited.
+		receivedAt: new Date().toISOString(),
 		time: result.timing?.totalMs || 0,
 		timing: result.timing,
 		size: result.bodySize || 0,

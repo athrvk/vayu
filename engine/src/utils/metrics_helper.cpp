@@ -22,9 +22,7 @@ const vayu::core::RunContext& context) {
     RunSummary summary;
     summary.total_requests = context.total_requests ();
     summary.errors         = context.total_errors ();
-    summary.avg_latency_ms = summary.total_requests > 0 ?
-    context.total_latency_ms () / static_cast<double> (summary.total_requests) :
-    0.0;
+    summary.avg_latency_ms = context.average_latency_ms ();
     summary.error_rate     = summary.total_requests > 0 ?
         (static_cast<double> (summary.errors) * vayu::core::metrics::PERCENTAGE_MULTIPLIER /
     static_cast<double> (summary.total_requests)) :

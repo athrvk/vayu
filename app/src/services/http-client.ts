@@ -85,9 +85,31 @@ class HttpClient {
 
 			if (!response.ok) {
 				const errorData = await response.json().catch(() => ({}));
-				const errorCode = errorData.error?.code || "UNKNOWN_ERROR";
+				// The engine emits two error shapes and always has. Most routes
+				// use `send_error` in routes.hpp, which writes a flat
+				// `{"error": "some message"}`; a handful (POST /config, the
+				// POST /runs config check, the auth pre-flight) write a nested
+				// `{"error": {"code", "message"}}`. Reading only the nested one
+				// meant every flat error - which is the large majority, and
+				// includes every validation message the requests, collections
+				// and environments routes produce - surfaced as a bare
+				// "HTTP 400" with the reason silently dropped.
+				//
+				// Accept both here rather than converting 38 call sites across
+				// nine route files: the fix belongs wherever the payload is
+				// read, it makes every existing flat error legible at once, and
+				// a route that later moves to the nested shape keeps working.
+				const rawError: unknown = errorData?.error;
+				const nested = typeof rawError === "object" && rawError !== null;
+				const errorCode = nested
+					? ((rawError as { code?: string }).code ?? "UNKNOWN_ERROR")
+					: "UNKNOWN_ERROR";
 				const errorMessage =
-					errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+					(nested
+						? (rawError as { message?: string }).message
+						: typeof rawError === "string"
+							? rawError
+							: undefined) ?? `HTTP ${response.status}: ${response.statusText}`;
 
 				throw new ApiError(response.status, errorCode, errorMessage, errorData);
 			}
