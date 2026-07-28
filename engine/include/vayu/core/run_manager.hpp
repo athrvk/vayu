@@ -19,11 +19,44 @@
 #include <thread>
 #include <vector>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
 
 namespace vayu::core {
+
+/**
+ * @brief Ring capacity for a run's live tick topic: how many ticks fit in
+ * `window_ms` at a cadence of `tick_interval_ms`, floored at one tick and
+ * clamped to MAX_LIVE_TICKS_CAP.
+ *
+ * Sizing from a duration rather than a fixed count is the point: both inputs
+ * are user-configurable, and `liveTickIntervalMs` spans 10-1000ms, so one tick
+ * count means a 30-second window at one end of that range and a 50-minute one
+ * at the other. Deriving the count preserves the *time* the user asked for -
+ * the same unit the dashboard's live-chart window setting uses.
+ *
+ * Non-positive inputs come from a hand-edited config row, not from the
+ * validated POST /config path; a zero interval would divide by zero and a zero
+ * window would leave nothing to replay, so both fall back rather than trusting
+ * the row.
+ */
+[[nodiscard]] constexpr size_t live_ring_size (int64_t window_ms, int64_t tick_interval_ms) {
+    if (tick_interval_ms <= 0) {
+        tick_interval_ms = constants::server::STATS_INTERVAL_MS;
+    }
+    if (window_ms <= 0) {
+        window_ms = constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS;
+    }
+    auto ticks = static_cast<size_t> (window_ms / tick_interval_ms);
+    if (ticks < 1) {
+        ticks = 1;
+    }
+    return ticks > constants::server::MAX_LIVE_TICKS_CAP ?
+    constants::server::MAX_LIVE_TICKS_CAP :
+    ticks;
+}
 
 struct RunContext {
     std::string run_id;
@@ -57,6 +90,14 @@ struct RunContext {
     std::atomic<size_t> peak_in_flight{ 0 }; // high-water mark of in_flight()
 
     // ---- Live metrics "topic" (N1) ---------------------------------------
+    // Ring capacity in ticks, derived from `liveReplayWindowMs` and this run's
+    // tick cadence once the metrics thread reads config (see collect_metrics).
+    // The initializer covers the stock window at the stock cadence, so a direct
+    // append_tick caller - a test, or a run whose thread has not read config
+    // yet - is bounded too rather than falling back to unlimited.
+    std::atomic<size_t> max_live_ticks{ live_ring_size (
+    constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS, constants::server::STATS_INTERVAL_MS) };
+
     // Bounded ring of wire-ready SSE payload strings (each is a full
     // "event: metrics\nid: <n>\ndata: {...}\n\n"). Produced by the metrics
     // thread, replayed+tailed by /runs/:id/live. MUST be mutex-guarded - a
@@ -64,12 +105,12 @@ struct RunContext {
     // even for already-published indices, so the atomic offset alone is not
     // enough. Readers copy out under the lock.
     //
-    // The ring holds the newest MAX_LIVE_TICKS payloads; `published_count` keeps
-    // counting every tick ever published, so SSE event ids stay monotonic across
-    // an eviction and the /live termination check still compares like with like.
-    // Duration is user-controlled with no upper bound, so an append-only buffer
-    // grows without limit for the life of a run (~0.5 GB over an overnight soak
-    // at the default 10 ticks/sec).
+    // The ring holds the newest `max_live_ticks` payloads; `published_count`
+    // keeps counting every tick ever published, so SSE event ids stay monotonic
+    // across an eviction and the /live termination check still compares like
+    // with like. Duration is user-controlled with no upper bound, so an
+    // append-only buffer grows without limit for the life of a run (~0.5 GB
+    // over an overnight soak at the default 10 ticks/sec).
     mutable std::mutex tick_mtx;
     std::deque<std::string> tick_buffer;
     size_t tick_base_offset{ 0 };  // absolute index of tick_buffer.front(); tick_mtx
@@ -87,10 +128,20 @@ struct RunContext {
         size_t next_offset = 0;
     };
 
+    // Resize the retained window. Called once per run by the metrics thread
+    // before the first tick; the ring trims on the next append rather than
+    // here, so a shrink costs nothing on the caller's path.
+    void set_max_live_ticks (size_t cap) {
+        max_live_ticks.store (cap > 0 ? cap : 1, std::memory_order_relaxed);
+    }
+
     void append_tick (std::string payload) {
         std::lock_guard<std::mutex> lock (tick_mtx);
         tick_buffer.push_back (std::move (payload));
-        if (tick_buffer.size () > constants::server::MAX_LIVE_TICKS) {
+        // A loop, not an `if`: the cap can drop between appends, and one
+        // eviction per append would take the whole run to converge on it.
+        size_t cap = max_live_ticks.load (std::memory_order_relaxed);
+        while (tick_buffer.size () > cap) {
             tick_buffer.pop_front ();
             ++tick_base_offset;
         }

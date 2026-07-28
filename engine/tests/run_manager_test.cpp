@@ -45,7 +45,7 @@ TEST (RunContextTopic, RingEvictsOldestAndKeepsIdsMonotonic) {
     nlohmann::json cfg;
     RunContext ctx ("r", cfg);
 
-    const size_t cap   = vayu::core::constants::server::MAX_LIVE_TICKS;
+    const size_t cap   = ctx.max_live_ticks.load ();
     const size_t extra = 5;
     for (size_t i = 0; i < cap + extra; ++i) {
         ctx.append_tick ("tick-" + std::to_string (i));
@@ -68,6 +68,93 @@ TEST (RunContextTopic, RingEvictsOldestAndKeepsIdsMonotonic) {
     ASSERT_EQ (stale.payloads.size (), cap);
     EXPECT_EQ (stale.payloads[0], "tick-" + std::to_string (extra));
     EXPECT_EQ (stale.next_offset, cap + extra);
+}
+
+// The retained window is a duration (`liveReplayWindowMs`), so the tick count
+// must follow the cadence. A fixed count would silently mean a different span
+// per `liveTickIntervalMs` setting - the whole reason this is derived.
+TEST (LiveRingSize, DerivesTheSameWindowAtEveryTickCadence) {
+    const int64_t five_min = 300000;
+
+    // 5 minutes' worth of ticks, whatever the cadence buys per tick.
+    EXPECT_EQ (live_ring_size (five_min, 1000), 300u);
+    EXPECT_EQ (live_ring_size (five_min, 500), 600u);
+    EXPECT_EQ (live_ring_size (five_min, 100), 3000u);
+
+    // Same cadence, longer window -> proportionally more ticks.
+    EXPECT_EQ (live_ring_size (60000, 100), 600u);
+    EXPECT_EQ (live_ring_size (1800000, 100), 18000u);
+}
+
+// The ceiling is what makes the duration safe to expose: at the minimum 10ms
+// cadence a 5-minute window is 30000 ticks, and an hour is 360000.
+TEST (LiveRingSize, ClampsToTheMemoryCeiling) {
+    const size_t ceiling = vayu::core::constants::server::MAX_LIVE_TICKS_CAP;
+
+    EXPECT_EQ (live_ring_size (300000, 10), ceiling);
+    EXPECT_EQ (live_ring_size (3600000, 10), ceiling);
+    // The largest window the config accepts, at the default cadence, is also
+    // over the ceiling - so no setting can exceed it.
+    EXPECT_EQ (live_ring_size (3600000, 100), ceiling);
+    // Just under it still passes through unclamped.
+    EXPECT_EQ (live_ring_size (static_cast<int64_t> (ceiling - 1) * 100, 100), ceiling - 1);
+}
+
+// POST /config validates its bounds, but a hand-edited row reaches this
+// unvalidated. Dividing by a zero interval is UB, and a zero window would
+// leave the dashboard nothing to replay.
+TEST (LiveRingSize, FallsBackOnNonPositiveInputsInsteadOfDividingByZero) {
+    const size_t stock = live_ring_size (
+    vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS,
+    vayu::core::constants::server::STATS_INTERVAL_MS);
+
+    EXPECT_EQ (live_ring_size (300000, 0), 3000u);
+    EXPECT_EQ (live_ring_size (300000, -100), 3000u);
+    EXPECT_EQ (live_ring_size (0, 100), stock);
+    EXPECT_EQ (live_ring_size (-1, 100), stock);
+    // A window shorter than one tick still retains a tick - a zero-size ring
+    // would make /live replay nothing at all.
+    EXPECT_EQ (live_ring_size (50, 100), 1u);
+}
+
+// A RunContext that never reaches collect_metrics (a test, or a run whose
+// metrics thread has not read config yet) must still be bounded.
+TEST (RunContextTopic, RingIsBoundedBeforeConfigIsRead) {
+    nlohmann::json cfg;
+    RunContext ctx ("r", cfg);
+    EXPECT_EQ (ctx.max_live_ticks.load (), 3000u);
+    EXPECT_LE (ctx.max_live_ticks.load (), vayu::core::constants::server::MAX_LIVE_TICKS_CAP);
+}
+
+TEST (RunContextTopic, SetMaxLiveTicksResizesTheRetainedWindow) {
+    nlohmann::json cfg;
+    RunContext ctx ("r", cfg);
+    ctx.set_max_live_ticks (4);
+
+    for (size_t i = 0; i < 10; ++i) {
+        ctx.append_tick ("tick-" + std::to_string (i));
+    }
+    EXPECT_EQ (ctx.tick_count (), 4u);
+    EXPECT_EQ (ctx.published_count.load (), 10u);
+
+    auto stale = ctx.ticks_since (0);
+    ASSERT_EQ (stale.payloads.size (), 4u);
+    EXPECT_EQ (stale.payloads[0], "tick-6");
+    EXPECT_EQ (stale.next_offset, 10u);
+
+    // Shrinking mid-run converges on the next append, not one eviction per
+    // append - an `if` here would take six more ticks to reach the new cap.
+    ctx.set_max_live_ticks (2);
+    ctx.append_tick ("tick-10");
+    EXPECT_EQ (ctx.tick_count (), 2u);
+    EXPECT_EQ (ctx.published_count.load (), 11u);
+    EXPECT_EQ (ctx.ticks_since (0).payloads[0], "tick-9");
+
+    // A zero cap would divide the ring out of existence; it floors at one.
+    ctx.set_max_live_ticks (0);
+    ctx.append_tick ("tick-11");
+    EXPECT_EQ (ctx.tick_count (), 1u);
+    EXPECT_EQ (ctx.ticks_since (0).payloads[0], "tick-11");
 }
 
 TEST (RunContextTopic, ClosedAndCompletedDefaults) {
@@ -155,6 +242,49 @@ TEST (CollectMetrics, StaysOpenUntilTheStopDrainCompletes) {
     metrics.join ();
 
     EXPECT_TRUE (ctx->closed.load ());
+    ctx->event_loop.reset ();
+    for (const char* s : { "", "-wal", "-shm", ".bak" })
+        std::filesystem::remove (db_path + s);
+}
+
+// The window is only useful if the run actually reads it. collect_metrics must
+// apply liveReplayWindowMs against this run's tick cadence before tick 0, or
+// every run keeps the built-in default however the user configured it.
+TEST (CollectMetrics, SizesTheReplayRingFromTheConfiguredWindow) {
+    const std::string db_path = "test_collect_metrics_window.db";
+    for (const char* s : { "", "-wal", "-shm", ".bak" })
+        std::filesystem::remove (db_path + s);
+
+    vayu::db::Database db (db_path);
+    db.init ();
+
+    // 20s of history at a 20ms cadence = 1000 ticks - deliberately neither the
+    // default window nor the default cadence, so a hardcoded 3000 fails here.
+    auto entry  = db.get_config_entry ("liveReplayWindowMs");
+    ASSERT_TRUE (entry.has_value ()) << "seed_default_config did not seed the key";
+    entry->value = "20000";
+    db.save_config_entry (*entry);
+
+    auto tick  = db.get_config_entry ("liveTickIntervalMs");
+    ASSERT_TRUE (tick.has_value ());
+    tick->value = "20";
+    db.save_config_entry (*tick);
+
+    nlohmann::json cfg;
+    auto ctx = std::make_shared<RunContext> ("window_run", cfg);
+    vayu::http::EventLoopConfig loop_config;
+    ctx->event_loop    = std::make_unique<vayu::http::EventLoop> (loop_config);
+    ctx->start_time_ms = 1;
+    ctx->is_running    = true;
+
+    std::thread metrics ([&] () { collect_metrics (ctx, &db); });
+    std::this_thread::sleep_for (std::chrono::milliseconds (150));
+
+    EXPECT_EQ (ctx->max_live_ticks.load (), 1000u)
+    << "the ring kept its default instead of the configured window / cadence";
+
+    ctx->is_running = false;
+    metrics.join ();
     ctx->event_loop.reset ();
     for (const char* s : { "", "-wal", "-shm", ".bak" })
         std::filesystem::remove (db_path + s);

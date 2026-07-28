@@ -257,11 +257,19 @@ afterwards. Exiting on `should_stop` emitted the final tick and set `closed`
 mid-drain, so the live view froze at the stop click while the stored report -
 written after the drain - counted everything that landed during it.
 
-The tick topic itself is a bounded ring (`MAX_LIVE_TICKS`, 3000). Run duration is
-user-controlled with no upper bound, so an append-only buffer is a slow OOM on an
-overnight soak. `published_count` keeps counting past an eviction, so SSE event
-ids stay monotonic and a `Last-Event-ID` resume from before the window is
-fast-forwarded to the oldest retained tick rather than replaying from 0.
+The tick topic itself is a bounded ring. Run duration is user-controlled with no
+upper bound, so an append-only buffer is a slow OOM on an overnight soak. The
+bound is expressed as a **duration** - `liveReplayWindowMs` (default 5 min) -
+and `live_ring_size()` converts it to a tick count against the run's cadence,
+`liveTickIntervalMs`, clamping to `MAX_LIVE_TICKS_CAP` (20,000, matching the
+renderer's own `MAX_RETAINED_TICKS`). A fixed count would be the wrong unit:
+the cadence spans 10–1000ms, so 3000 ticks is 30 seconds at one end and 50
+minutes at the other, and the dashboard's live-window setting the ring has to
+serve is itself a duration. `collect_metrics` reads the pair once, before tick
+0; a mid-run change would leave ids the dashboard already holds pointing into a
+differently-sized window. `published_count` keeps counting past an eviction, so
+SSE event ids stay monotonic and a `Last-Event-ID` resume from before the window
+is fast-forwarded to the oldest retained tick rather than replaying from 0.
 
 ## Load Test Strategies
 

@@ -774,6 +774,16 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         tick_interval_ms = db_ptr->get_config_int (
         "liveTickIntervalMs", vayu::core::constants::server::STATS_INTERVAL_MS);
 
+        // Size the replay ring from the configured window and this run's tick
+        // cadence, so what is retained is the *duration* the user asked for
+        // rather than a tick count that means a different span per cadence.
+        // Read once here: changing the window mid-run would make the ids the
+        // dashboard already holds refer to a differently-sized window.
+        context->set_max_live_ticks (live_ring_size (
+        db_ptr->get_config_int ("liveReplayWindowMs",
+        vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
+        tick_interval_ms));
+
         // Tick 0: emit immediately so consumers see data before the first sleep.
         emit_live_tick (nullptr, now_ms ());
 

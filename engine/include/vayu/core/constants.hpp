@@ -89,12 +89,24 @@ constexpr size_t MAX_CONNECTIONS = 10000;
 constexpr int DEFAULT_TIMEOUT_MS = 30000;
 /// Interval for collecting statistics in milliseconds
 constexpr int STATS_INTERVAL_MS = 100;
-/// Live SSE ticks retained in memory per run for Last-Event-ID replay. The
-/// buffer is a ring: older ticks are evicted, so a run's memory does not grow
-/// with its duration. At the default 100ms cadence this is a ~5 minute
-/// reconnect window; a consumer that resumes from further back is served from
-/// the oldest retained tick (SSE clients tolerate a gap on resume).
-constexpr size_t MAX_LIVE_TICKS = 3000;
+/// Default span of live SSE history retained in memory per run, in
+/// milliseconds (config key `liveReplayWindowMs`). The buffer is a ring: older
+/// ticks are evicted, so a run's memory does not grow with its duration. A
+/// consumer that resumes from further back is served from the oldest retained
+/// tick (SSE clients tolerate a gap on resume).
+///
+/// The bound is a *duration*, not a tick count, because the tick cadence is
+/// itself user-configurable (`liveTickIntervalMs`, 10-1000ms): a fixed count
+/// would mean a 30-second window at one end of that range and a 50-minute one
+/// at the other. 5 minutes matches the app's default live-chart window, so a
+/// dashboard attaching mid-run replays what it is going to show.
+constexpr int DEFAULT_LIVE_REPLAY_WINDOW_MS = 300000;
+/// Absolute ceiling on retained live ticks per run, whatever window and cadence
+/// are configured - the backstop that keeps a fast cadence from turning a long
+/// window into unbounded memory. Deliberately equal to the renderer's own
+/// MAX_RETAINED_TICKS (app/src/constants/live-window.ts), so neither side
+/// promises a window the other cannot hold.
+constexpr size_t MAX_LIVE_TICKS_CAP = 20000;
 /// Size of the context pool for request handling
 constexpr size_t CONTEXT_POOL_SIZE = 64;
 } // namespace server
