@@ -103,6 +103,7 @@ Json serialize (const Request& request) {
     json["followRedirects"] = request.follow_redirects;
     json["maxRedirects"]    = request.max_redirects;
     json["verifySSL"]       = request.verify_ssl;
+    json["httpVersion"]     = to_string (request.http_version);
 
     return json;
 }
@@ -279,6 +280,7 @@ Json serialize (const vayu::db::Request& r) {
     json["postRequestScript"] = r.post_request_script;
     json["followRedirects"]   = r.follow_redirects;
     json["maxRedirects"]      = r.max_redirects;
+    json["httpVersion"]       = r.http_version;
     json["updatedAt"]         = r.updated_at;
     json["createdAt"]         = r.created_at;
     return json;
@@ -398,6 +400,22 @@ Result<Request> deserialize_request (const Json& json) {
         }
         if (json.contains ("verifySSL")) {
             request.verify_ssl = json["verifySSL"].get<bool> ();
+        }
+        if (json.contains ("httpVersion")) {
+            // A corrupted or downgraded stored row must not execute as
+            // something arbitrary, so an unrecognized *string* coerces to Auto
+            // rather than being rejected (rejecting user input is the route
+            // layer's job - see routes.hpp).
+            //
+            // A non-string value throws here and fails the whole parse, which
+            // is deliberate and matches every sibling field in this block. It
+            // is unreachable from storage - db::Request::http_version is a
+            // std::string and both serializers emit it as one - so it can only
+            // come from a hand-crafted payload, where failing closed with a 400
+            // is the right answer.
+            auto parsed_version =
+            http_version_from_string (json["httpVersion"].get<std::string> ());
+            request.http_version = parsed_version.value_or (HttpVersion::Auto);
         }
 
         return request;
@@ -670,6 +688,7 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"postRequestScript\":" << Json (r.post_request_script).dump () << ",";
     out << "\"followRedirects\":" << (r.follow_redirects ? "true" : "false") << ",";
     out << "\"maxRedirects\":" << r.max_redirects << ",";
+    out << "\"httpVersion\":" << Json (r.http_version).dump () << ",";
     out << "\"updatedAt\":" << r.updated_at << ",";
     out << "\"createdAt\":" << r.created_at;
     out << "}";

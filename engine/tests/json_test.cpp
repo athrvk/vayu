@@ -206,6 +206,38 @@ TEST (JsonTest, HandlesAllHttpMethods) {
     }
 }
 
+TEST (JsonRequest, ParsesHttpVersion) {
+    auto json = nlohmann::json::parse (
+    R"({"method":"GET","url":"https://x/y","httpVersion":"http2"})");
+    auto result = vayu::json::deserialize_request (json);
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().http_version, vayu::HttpVersion::Http2);
+}
+
+TEST (JsonRequest, DefaultsHttpVersionWhenAbsent) {
+    auto json = nlohmann::json::parse (R"({"method":"GET","url":"https://x/y"})");
+    auto result = vayu::json::deserialize_request (json);
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().http_version, vayu::DEFAULT_HTTP_VERSION);
+}
+
+TEST (JsonRequest, CoercesAGarbageStoredValueToAuto) {
+    // A corrupted or downgraded row must not execute as something arbitrary.
+    auto json = nlohmann::json::parse (
+    R"({"method":"GET","url":"https://x/y","httpVersion":"quic"})");
+    auto result = vayu::json::deserialize_request (json);
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().http_version, vayu::HttpVersion::Auto);
+}
+
+TEST (JsonRequest, SerializesHttpVersion) {
+    vayu::Request req;
+    req.method       = vayu::HttpMethod::GET;
+    req.url          = "https://x/y";
+    req.http_version = vayu::HttpVersion::Http1_1;
+    EXPECT_EQ (vayu::json::serialize (req)["httpVersion"], "http1.1");
+}
+
 TEST (JsonTest, SerializesRun) {
     vayu::db::Run run;
     run.id              = "run_123";

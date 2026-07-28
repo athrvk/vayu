@@ -120,6 +120,51 @@ struct Body {
 };
 
 /**
+ * @brief Transport HTTP version for a request, stored as TEXT in the DB.
+ *
+ * `all_http_versions()` is the single enumeration of this domain - request
+ * validation and the seeded config `options` list both derive their allowed
+ * values from it rather than writing a literal list, so the two cannot drift.
+ */
+enum class HttpVersion { Auto, Http1_1, Http2 };
+
+inline std::string to_string (HttpVersion version) {
+    switch (version) {
+    case HttpVersion::Auto: return "auto";
+    case HttpVersion::Http1_1: return "http1.1";
+    case HttpVersion::Http2: return "http2";
+    }
+    return "unknown";
+}
+
+inline std::string http_version_label (HttpVersion version) {
+    switch (version) {
+    case HttpVersion::Auto: return "Auto";
+    case HttpVersion::Http1_1: return "HTTP/1.x";
+    case HttpVersion::Http2: return "HTTP/2";
+    }
+    return "Unknown";
+}
+
+inline std::optional<HttpVersion> http_version_from_string (const std::string& str) {
+    if (str == "auto")
+        return HttpVersion::Auto;
+    if (str == "http1.1")
+        return HttpVersion::Http1_1;
+    if (str == "http2")
+        return HttpVersion::Http2;
+    return std::nullopt;
+}
+
+inline const std::vector<HttpVersion>& all_http_versions () {
+    static const std::vector<HttpVersion> versions = { HttpVersion::Auto,
+        HttpVersion::Http1_1, HttpVersion::Http2 };
+    return versions;
+}
+
+constexpr HttpVersion DEFAULT_HTTP_VERSION = HttpVersion::Auto;
+
+/**
  * @brief HTTP Request definition
  */
 struct Request {
@@ -129,10 +174,11 @@ struct Request {
     Body body;
 
     // Options
-    int timeout_ms        = 30000;
-    bool follow_redirects = true;
-    int max_redirects     = 10;
-    bool verify_ssl       = true;
+    int timeout_ms           = 30000;
+    bool follow_redirects    = true;
+    int max_redirects        = 10;
+    bool verify_ssl          = true;
+    HttpVersion http_version = DEFAULT_HTTP_VERSION;
 };
 
 /**
@@ -545,51 +591,6 @@ inline std::optional<RunStatus> parse_run_status (const std::string& str) {
     return std::nullopt;
 }
 
-/**
- * @brief Transport HTTP version for a request, stored as TEXT in the DB.
- *
- * `all_http_versions()` is the single enumeration of this domain - request
- * validation and the seeded config `options` list both derive their allowed
- * values from it rather than writing a literal list, so the two cannot drift.
- */
-enum class HttpVersion { Auto, Http1_1, Http2 };
-
-inline std::string to_string (HttpVersion version) {
-    switch (version) {
-    case HttpVersion::Auto: return "auto";
-    case HttpVersion::Http1_1: return "http1.1";
-    case HttpVersion::Http2: return "http2";
-    }
-    return "unknown";
-}
-
-inline std::string http_version_label (HttpVersion version) {
-    switch (version) {
-    case HttpVersion::Auto: return "Auto";
-    case HttpVersion::Http1_1: return "HTTP/1.x";
-    case HttpVersion::Http2: return "HTTP/2";
-    }
-    return "Unknown";
-}
-
-inline std::optional<HttpVersion> http_version_from_string (const std::string& str) {
-    if (str == "auto")
-        return HttpVersion::Auto;
-    if (str == "http1.1")
-        return HttpVersion::Http1_1;
-    if (str == "http2")
-        return HttpVersion::Http2;
-    return std::nullopt;
-}
-
-inline const std::vector<HttpVersion>& all_http_versions () {
-    static const std::vector<HttpVersion> versions = { HttpVersion::Auto,
-        HttpVersion::Http1_1, HttpVersion::Http2 };
-    return versions;
-}
-
-constexpr HttpVersion DEFAULT_HTTP_VERSION = HttpVersion::Auto;
-
 enum class MetricName {
     Rps,
     LatencyAvg,
@@ -769,8 +770,9 @@ struct Request {
     // saved request keeps the redirect policy the user chose. The in-struct
     // defaults match the column defaults, so a default-constructed row and a row
     // written before these columns existed agree.
-    bool follow_redirects = true; // INTEGER NOT NULL DEFAULT 1
-    int max_redirects     = 10;   // INTEGER NOT NULL DEFAULT 10
+    bool follow_redirects    = true;   // INTEGER NOT NULL DEFAULT 1
+    int max_redirects        = 10;     // INTEGER NOT NULL DEFAULT 10
+    std::string http_version = "auto"; // TEXT NOT NULL DEFAULT 'auto'
     int64_t created_at;
     int64_t updated_at;
 };

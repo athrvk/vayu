@@ -237,6 +237,10 @@ inline auto make_storage (const std::string& path) {
     // pre-existing rows backfill to the engine defaults (follow, cap at 10).
     make_column ("follow_redirects", &Request::follow_redirects, default_value (true)),
     make_column ("max_redirects", &Request::max_redirects, default_value (10)),
+    // Protocol selection. TEXT (not an ordinal) so a stored value survives a
+    // reorder of the HttpVersion enum. NOT NULL with a default_value so
+    // sync_schema can ALTER TABLE ADD COLUMN onto an existing requests table.
+    make_column ("http_version", &Request::http_version, default_value ("auto")),
     make_column ("created_at", &Request::created_at),
     make_column ("updated_at", &Request::updated_at)),
 
