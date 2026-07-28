@@ -17,6 +17,7 @@
 #include <system_error>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/event_loop/curl_callbacks.hpp"
 #include "vayu/http/event_loop/event_loop_worker.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
@@ -230,9 +231,11 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
         curl_easy_setopt (curl, CURLOPT_TCP_KEEPALIVE, 0L);
     }
 
-    // HTTP/2: Enable multiplexing (many requests over single connection)
-    // This dramatically reduces connection establishment overhead
-    curl_easy_setopt (curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+    // Protocol selection. Until nghttp2 was linked this was a hardcoded
+    // CURL_HTTP_VERSION_2TLS that libcurl silently ignored, so every request
+    // went out as HTTP/1.1 regardless. It now follows the request's field.
+    curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
+    vayu::http::to_curl_http_version (request.http_version));
 
     // Connection reuse: Don't close connection after request
     curl_easy_setopt (curl, CURLOPT_FORBID_REUSE, 0L);

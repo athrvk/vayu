@@ -20,6 +20,7 @@
 #endif
 
 #include "vayu/http/client.hpp"
+#include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/http/status.hpp"
 
@@ -348,6 +349,15 @@ Result<Response> Client::send (const Request& request) {
     // SSL verification
     curl_easy_setopt (curl, CURLOPT_SSL_VERIFYPEER, request.verify_ssl ? 1L : 0L);
     curl_easy_setopt (curl, CURLOPT_SSL_VERIFYHOST, request.verify_ssl ? 2L : 0L);
+
+    // Protocol selection. This path (POST /execute, "Send") previously set no
+    // CURLOPT_HTTP_VERSION at all and ran at libcurl's implicit default -
+    // the same NONE value Auto maps to, but not by anything that named the
+    // request's field, so a Send and a load test of the same request had no
+    // structural guarantee of agreeing. Both drivers now go through the one
+    // shared mapping.
+    curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
+    vayu::http::to_curl_http_version (request.http_version));
 
     // Verbose output for debugging
     if (impl_->config.verbose) {
