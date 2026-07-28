@@ -333,6 +333,7 @@ await apiService.executeRequest({
   ],
   followRedirects: true,
   maxRedirects: 10,
+  httpVersion: "auto",
   requestId: "req_123",
   environmentId: "env_456"
 });
@@ -345,14 +346,19 @@ built client-side by `scriptParts()` (`request-builder/utils/script-parts.ts`
 for the renderer, `resolve.ts` for MCP). The **engine** joins the parts and runs
 the result - see `docs/engine/architecture.md` → *Request composition boundary*.
 
-**Redirect policy is always sent, never elided.** `followRedirects` and
-`maxRedirects` come from the request's **Settings** tab and are included on
-every execute even when they equal the defaults. The engine defaults
-`follow_redirects` to `true`, so omitting a `false` would follow the 3xx the
-user asked to inspect - a bug the app shipped with for a long time, when nothing
-in the renderer sent these fields at all. The same pair goes out with
-`startLoadTest()`, so a load test exercises the policy the request was
-configured with.
+**Redirect policy and protocol are always sent, never elided.**
+`followRedirects`, `maxRedirects` and `httpVersion` all come from the request's
+**Settings** tab and are included on every execute even when they equal the
+defaults. The engine defaults `follow_redirects` to `true`, so omitting a
+`false` would follow the 3xx the user asked to inspect - a bug the app shipped
+with for a long time, when nothing in the renderer sent these fields at all.
+The same three fields go out with `startLoadTest()`, so a load test exercises
+the same policy and protocol the request was configured with - there is no
+separate, load-test-only protocol control; the Settings tab's picker is the
+only one, and it governs Send and load test alike. `httpVersion` is
+`"auto" | "http1.1" | "http2"`: `"auto"` lets ALPN negotiate, `"http1.1"`
+forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
+1.1 over plain `http://` (curl's `CURL_HTTP_VERSION_2TLS` semantics).
 
 **Example Response:**
 ```typescript
@@ -362,6 +368,7 @@ configured with.
   headers: { "content-type": "application/json" },
   body: { users: [...] },
   bodyRaw: '{"users":[...]}',
+  httpVersion: "HTTP/1.1",
   timing: { total: 150, dns: 10, connect: 20, ... },
   testResults: [
     { name: "Status 200", passed: true }
@@ -369,6 +376,11 @@ configured with.
   consoleLogs: ["Pre-request"]
 }
 ```
+
+`httpVersion` here is the **negotiated** protocol (`"HTTP/1.1"` / `"HTTP/2"` /
+`""` when nothing was negotiated) - an outcome, not an echo of the request's
+own `httpVersion`. The Raw tab in the response viewer prints it on the
+request/status line instead of a hardcoded `HTTP/1.1`.
 
 ### Load Test Execution
 
@@ -392,6 +404,7 @@ await apiService.startLoadTest({
   },
   followRedirects: true,
   maxRedirects: 10,
+  httpVersion: "auto",
   mode: "constant_rps",
   duration: "30s",
   targetRps: 100,

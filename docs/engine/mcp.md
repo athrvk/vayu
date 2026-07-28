@@ -202,6 +202,15 @@ clicking Send:
 - **Scripts** - `run_collection_smoke` collects the collection-chain pre/post
   script parts (root→leaf) and the request's own, and sends the list for the
   engine to join and run, so a request's tests and setup actually execute.
+- **Protocol** - `run_request` and `start_load_run` both take an optional
+  `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
+  mirroring the request builder's Settings-tab picker. `run_collection_smoke`
+  has no such arg: it replays each saved request exactly as-is, so its stored
+  `httpVersion` goes through `composeSavedRequest` unconditionally, the same
+  path the renderer uses. On the two ad-hoc tools there is no saved row behind
+  the call, so `httpVersion` forwards only when the caller actually supplies
+  it - unlike the saved-request path, there is nothing concrete to protect from
+  an engine-side default by always sending it.
 
 Resolution only fetches the variable sources when a call needs them (a field
 carries a `{{template}}`, or auth is `inherit`); a fully-literal call skips the

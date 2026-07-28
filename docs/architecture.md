@@ -89,7 +89,7 @@ The Engine is the "muscle"-a headless daemon optimized for maximum I/O throughpu
 **Technology Stack:**
 - **C++20**: Core language
 - **cpp-httplib**: HTTP server
-- **libcurl**: HTTP client (HTTP/1.1, HTTP/2, HTTP/3)
+- **libcurl**: HTTP client (HTTP/1.1, HTTP/2 via nghttp2 - HTTP/3 is not supported)
 - **QuickJS**: JavaScript engine for scripts
 - **SQLite**: Embedded database
 - **sqlite_orm**: C++ ORM

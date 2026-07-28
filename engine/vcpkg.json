@@ -1,11 +1,16 @@
 {
   "name": "vayu-engine",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "High-performance API execution engine",
   "homepage": "https://github.com/vayu/vayu",
   "license": "MIT",
   "dependencies": [
-    { "name": "curl", "features": ["http2"] },
+    {
+      "name": "curl",
+      "features": [
+        "http2"
+      ]
+    },
     "nlohmann-json",
     "cpp-httplib",
     "gtest",
