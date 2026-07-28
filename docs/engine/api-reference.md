@@ -944,6 +944,14 @@ capacity-breakpoint / saturation stats from stored data.
 }
 ```
 
+`requests_failed` is derived per tick as `error_rate% × requests_completed`,
+rounded to the nearest request, after every row belonging to that timestamp has
+been folded into the bucket. It is therefore independent of the order the rows
+come back in - deriving it while reading the `error_rate` row made it depend on
+the `requests_sent` row having already been seen for the same timestamp, and the
+producer writes `error_rate` first, so it read a completed count of 0 and every
+bucket of every run reported 0 failed requests.
+
 A missing run returns `404` with `{"error":"Run not found"}`.
 
 ### GET /stats/:runId (deprecated)
@@ -1032,6 +1040,18 @@ Each `metrics` event carries an `id:` equal to its zero-based offset. The
 browser's built-in `EventSource` retry automatically replays this id as
 `Last-Event-ID` on its **own** intra-connection retries (no application code
 needed), and the stream resumes from `Last-Event-ID + 1`.
+
+**Replay window.** The in-memory tick topic is a bounded ring holding the newest
+3000 ticks (~5 minutes at the default 100ms cadence), so a long run's memory
+does not grow with its duration. Ids keep counting past an eviction, so they
+stay monotonic; a `Last-Event-ID` older than the retained window resumes from the
+oldest retained tick rather than replaying from 0, which means a client that was
+disconnected for longer than the window sees a gap, not a duplicate flood.
+
+The final `metrics` event is emitted only once the run has actually finished
+draining. On `POST /runs/:runId/stop` the engine keeps ticking while in-flight
+requests complete, so the last live numbers agree with the stored report rather
+than freezing at the moment of the stop request.
 
 **Application-level reconnect**: clients that close the EventSource themselves
 (e.g. after observing `readyState === CLOSED`) should NOT open a new connection
@@ -1170,15 +1190,32 @@ to fetch the whole body.
 
 > Alias: `POST /run/:runId/stop` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
-Stop a running load test.
+Stop a running load test. The engine signals the run, waits for it to drain
+in-flight requests (bounded at 5s), and answers with a summary of what the run
+actually did - including the requests that completed during the drain.
 
-**Response:**
+**Response** (active run):
 ```json
 {
-  "message": "Run stopped",
-  "runId": "run_1234567890"
+  "status": "stopped",
+  "runId": "run_1234567890",
+  "summary": {
+    "totalRequests": 1500,
+    "errors": 5,
+    "errorRate": 0.33,
+    "avgLatencyMs": 38.9
+  }
 }
 ```
+
+`avgLatencyMs` is the same average the final report and the live ticks show:
+the latency sum over the requests that contributed to it (successes). It is not
+divided by `totalRequests`, which would report a lower figure here than
+everywhere else for the same run.
+
+A run that is already finished answers `{"status": "<status>", "runId": ...,
+"message": "Run already <status>"}`; one that is not in memory answers
+`{"status": "stopped", "runId": ..., "message": "Run was not active"}`.
 
 ### GET /runs/:runId/report
 

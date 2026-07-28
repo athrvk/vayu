@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -56,28 +57,54 @@ struct RunContext {
     std::atomic<size_t> peak_in_flight{ 0 }; // high-water mark of in_flight()
 
     // ---- Live metrics "topic" (N1) ---------------------------------------
-    // Append-only buffer of wire-ready SSE payload strings (each is a full
+    // Bounded ring of wire-ready SSE payload strings (each is a full
     // "event: metrics\nid: <n>\ndata: {...}\n\n"). Produced by the metrics
-    // thread, replayed+tailed by /metrics/live. MUST be mutex-guarded - a
-    // vector realloc would move/free the backing array under a concurrent
-    // reader (UAF) even for already-published indices, so the atomic offset
-    // alone is not enough. Readers copy out under the lock.
+    // thread, replayed+tailed by /runs/:id/live. MUST be mutex-guarded - a
+    // realloc would move/free the backing array under a concurrent reader (UAF)
+    // even for already-published indices, so the atomic offset alone is not
+    // enough. Readers copy out under the lock.
+    //
+    // The ring holds the newest MAX_LIVE_TICKS payloads; `published_count` keeps
+    // counting every tick ever published, so SSE event ids stay monotonic across
+    // an eviction and the /live termination check still compares like with like.
+    // Duration is user-controlled with no upper bound, so an append-only buffer
+    // grows without limit for the life of a run (~0.5 GB over an overnight soak
+    // at the default 10 ticks/sec).
     mutable std::mutex tick_mtx;
-    std::vector<std::string> tick_buffer;
-    std::atomic<size_t> published_count{ 0 }; // == tick_buffer.size() (hint)
+    std::deque<std::string> tick_buffer;
+    size_t tick_base_offset{ 0 };  // absolute index of tick_buffer.front(); tick_mtx
+    std::atomic<size_t> published_count{ 0 }; // total ticks ever published
     std::atomic<bool> closed{ false };         // set true AFTER final tick appended
     std::atomic<int64_t> completed_at_ms{ 0 }; // 0 while running; stamped at completion
+
+    // A batch of replayed ticks plus the absolute offset the consumer should ask
+    // for next. `next_offset` is not always `from + payloads.size()`: a consumer
+    // resuming from before the retained window is fast-forwarded to the oldest
+    // retained tick, and must adopt this offset or it would re-request evicted
+    // ids forever.
+    struct TickBatch {
+        std::vector<std::string> payloads;
+        size_t next_offset = 0;
+    };
 
     void append_tick (std::string payload) {
         std::lock_guard<std::mutex> lock (tick_mtx);
         tick_buffer.push_back (std::move (payload));
-        published_count.store (tick_buffer.size (), std::memory_order_release);
+        if (tick_buffer.size () > constants::server::MAX_LIVE_TICKS) {
+            tick_buffer.pop_front ();
+            ++tick_base_offset;
+        }
+        published_count.store (tick_base_offset + tick_buffer.size (),
+        std::memory_order_release);
     }
-    [[nodiscard]] std::vector<std::string> ticks_since (size_t from) const {
+    [[nodiscard]] TickBatch ticks_since (size_t from) const {
         std::lock_guard<std::mutex> lock (tick_mtx);
-        if (from >= tick_buffer.size ()) return {};
-        return { tick_buffer.begin () + static_cast<std::ptrdiff_t> (from),
-        tick_buffer.end () };
+        size_t end = tick_base_offset + tick_buffer.size ();
+        if (from >= end) return { {}, from };
+        size_t start = from < tick_base_offset ? tick_base_offset : from;
+        auto begin_it =
+        tick_buffer.begin () + static_cast<std::ptrdiff_t> (start - tick_base_offset);
+        return { { begin_it, tick_buffer.end () }, end };
     }
     [[nodiscard]] size_t tick_count () const {
         std::lock_guard<std::mutex> lock (tick_mtx);
@@ -109,8 +136,13 @@ struct RunContext {
     [[nodiscard]] size_t total_errors () const {
         return metrics_collector ? metrics_collector->total_errors () : 0;
     }
-    [[nodiscard]] double total_latency_ms () const {
-        return metrics_collector ? metrics_collector->total_latency_sum () : 0.0;
+    // The one average-latency definition for this run: the latency sum over the
+    // requests that contributed to it (successes). Every caller - the stop
+    // response, the per-tick rows, the final report - goes through here so they
+    // cannot disagree; dividing the same sum by total_requests() instead
+    // silently reports a lower figure on any run with errors.
+    [[nodiscard]] double average_latency_ms () const {
+        return metrics_collector ? metrics_collector->average_latency () : 0.0;
     }
 
     RunContext (const std::string& id, nlohmann::json cfg);

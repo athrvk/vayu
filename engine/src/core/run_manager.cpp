@@ -489,7 +489,7 @@ RunManager& manager) {
 
         size_t completed   = context->total_requests ();
         size_t errors      = context->total_errors ();
-        double avg_latency = context->metrics_collector->average_latency ();
+        double avg_latency = context->average_latency_ms ();
         double actual_rps =
         total_duration_s > 0 ? static_cast<double> (completed) / total_duration_s : 0.0;
         double error_rate = context->metrics_collector->error_rate ();
@@ -777,7 +777,14 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         // Tick 0: emit immediately so consumers see data before the first sleep.
         emit_live_tick (nullptr, now_ms ());
 
-        while (context->is_running && !context->should_stop) {
+        // Loop on is_running alone. should_stop is only the *request* to stop:
+        // the worker acts on it, then blocks in event_loop->stop(true) draining
+        // in-flight requests, and clears is_running afterwards. Exiting on
+        // should_stop emitted the "final settled tick" and set closed while
+        // hundreds of requests were still completing, so the live view froze at
+        // the moment of the stop click while the stored report - written after
+        // the drain - counted everything that landed during it.
+        while (context->is_running) {
             std::this_thread::sleep_for (std::chrono::milliseconds (tick_interval_ms));
 
             // Single wall-clock sample per tick - shared by the SSE payload
@@ -873,8 +880,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
                     // Avg latency and queue-wait enrichment for the DB batch.
                     metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::LatencyAvg,
-                    context->metrics_collector->average_latency (), "" });
+                    vayu::MetricName::LatencyAvg, context->average_latency_ms (), "" });
                     metrics.push_back ({ 0, context->run_id, timestamp,
                     vayu::MetricName::QueueWaitAvg,
                     context->metrics_collector->average_queue_wait (), "" });

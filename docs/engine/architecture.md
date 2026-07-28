@@ -93,8 +93,14 @@ Manages the lifecycle of load test runs:
 High-performance in-memory metrics collection optimized for 60k+ RPS:
 
 - **Pre-allocated storage**: Avoids reallocation during tests
-- **Lock-free atomics + HdrHistogram**: Zero-contention counter updates; latency recorded in a
-  lock-free HdrHistogram (µs resolution)
+- **Lock-free atomics + HdrHistogram**: Zero-contention counter updates; latency recorded in an
+  HdrHistogram (µs resolution). Every event-loop worker records on its own thread, so both the
+  cumulative histogram and the rolling interval recorder are written through the library's
+  **atomic** entry points (`hdr_record_value_atomic` / `hdr_interval_recorder_record_value_atomic`).
+  The plain variants are a non-atomic `counts[i] += 1; total_count += 1` and lose samples under
+  concurrency - silently, since the run still reports percentiles, just computed from fewer
+  samples than it served. The interval recorder's phaser orders the once-per-tick reader against
+  writers; it is not mutual exclusion *between* writers, so it does not make the plain write safe.
 - **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a
   request spent inside the engine), not just libcurl's wire time. Wire time and the
   generator-internal `queue_wait` are tracked separately.
@@ -102,7 +108,11 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   peak in-flight, and a full per-status-code distribution
 - **Batch DB writes**: Per-request results written after test completion; per-tick time-series
   metrics persisted by the metrics thread during the run
-- **Error preservation**: All errors stored, success results sampled
+- **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only
+  the first `max_errors` (default 10,000) individual records are kept; the rest are counted by
+  `errors_dropped()` and logged once. A fully-failing target produces errors at close to the
+  completion rate, each carrying a message and a trace blob, so an unlimited store grows for the
+  whole run and then flushes as one enormous transaction. Success results are sampled.
 - **Response sampling**: Stores samples for deferred script validation
 
 ### Script Engine (`QuickJS`)
@@ -234,11 +244,24 @@ See [Database Schema](db-schema.md) for the full column list.
    writes per-tick snapshots into the retained tick topic + DB
    ↓
 9. Client streams ticks via SSE (/runs/:runId/live), replayed
-   from offset 0 then tailed to the `complete` event
+   from the oldest retained tick then tailed to the `complete` event
    ↓
 10. On completion: batch-write results to DB; run retained (TTL) so
     late clients still get the full series
 ```
+
+The metrics thread's exit is gated on `is_running`, not on `should_stop`. A stop
+request only asks the worker to stop; the worker then blocks in
+`event_loop->stop(true)` draining in-flight requests and clears `is_running`
+afterwards. Exiting on `should_stop` emitted the final tick and set `closed`
+mid-drain, so the live view froze at the stop click while the stored report -
+written after the drain - counted everything that landed during it.
+
+The tick topic itself is a bounded ring (`MAX_LIVE_TICKS`, 3000). Run duration is
+user-controlled with no upper bound, so an append-only buffer is a slow OOM on an
+overnight soak. `published_count` keeps counting past an eviction, so SSE event
+ids stay monotonic and a `Last-Event-ID` resume from before the window is
+fast-forwarded to the oldest retained tick rather than replaying from 0.
 
 ## Load Test Strategies
 

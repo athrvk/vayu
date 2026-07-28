@@ -1,6 +1,13 @@
 #include "vayu/core/run_manager.hpp"
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <filesystem>
+#include <thread>
+
+#include "vayu/db/database.hpp"
+#include "vayu/http/event_loop.hpp"
+
 using namespace vayu::core;
 
 TEST (RunContextTopic, AppendsAndSnapshotsInOrder) {
@@ -16,16 +23,51 @@ TEST (RunContextTopic, AppendsAndSnapshotsInOrder) {
     EXPECT_EQ (ctx.published_count.load (), 3u);
 
     auto from0 = ctx.ticks_since (0);
-    ASSERT_EQ (from0.size (), 3u);
-    EXPECT_EQ (from0[0], "a");
-    EXPECT_EQ (from0[2], "c");
+    ASSERT_EQ (from0.payloads.size (), 3u);
+    EXPECT_EQ (from0.payloads[0], "a");
+    EXPECT_EQ (from0.payloads[2], "c");
+    EXPECT_EQ (from0.next_offset, 3u);
 
     auto from2 = ctx.ticks_since (2);
-    ASSERT_EQ (from2.size (), 1u);
-    EXPECT_EQ (from2[0], "c");
+    ASSERT_EQ (from2.payloads.size (), 1u);
+    EXPECT_EQ (from2.payloads[0], "c");
+    EXPECT_EQ (from2.next_offset, 3u);
 
-    EXPECT_TRUE (ctx.ticks_since (3).empty ());
-    EXPECT_TRUE (ctx.ticks_since (99).empty ());
+    EXPECT_TRUE (ctx.ticks_since (3).payloads.empty ());
+    EXPECT_TRUE (ctx.ticks_since (99).payloads.empty ());
+    // A consumer that is ahead of the producer must not be dragged backwards.
+    EXPECT_EQ (ctx.ticks_since (99).next_offset, 99u);
+}
+
+// The tick topic is a ring, not an append-only log: a run's duration is
+// user-controlled, so an unbounded buffer is a slow OOM on a soak test.
+TEST (RunContextTopic, RingEvictsOldestAndKeepsIdsMonotonic) {
+    nlohmann::json cfg;
+    RunContext ctx ("r", cfg);
+
+    const size_t cap   = vayu::core::constants::server::MAX_LIVE_TICKS;
+    const size_t extra = 5;
+    for (size_t i = 0; i < cap + extra; ++i) {
+        ctx.append_tick ("tick-" + std::to_string (i));
+    }
+
+    // Retained window is bounded ...
+    EXPECT_EQ (ctx.tick_count (), cap);
+    // ... but the published id sequence keeps counting, so SSE event ids (and
+    // the /live termination check that compares against them) stay monotonic.
+    EXPECT_EQ (ctx.published_count.load (), cap + extra);
+
+    auto newest = ctx.ticks_since (cap + extra - 1);
+    ASSERT_EQ (newest.payloads.size (), 1u);
+    EXPECT_EQ (newest.payloads[0], "tick-" + std::to_string (cap + extra - 1));
+
+    // A resume from before the retained window is served the oldest retained
+    // tick and fast-forwarded - advancing by batch size instead would leave the
+    // consumer permanently re-requesting evicted ids.
+    auto stale = ctx.ticks_since (0);
+    ASSERT_EQ (stale.payloads.size (), cap);
+    EXPECT_EQ (stale.payloads[0], "tick-" + std::to_string (extra));
+    EXPECT_EQ (stale.next_offset, cap + extra);
 }
 
 TEST (RunContextTopic, ClosedAndCompletedDefaults) {
@@ -66,6 +108,56 @@ TEST (BuildTickPayload, WrapsStatsAsSseEventWithOffsetId) {
     EXPECT_NE (p.find ("id: 7\n"), std::string::npos);
     EXPECT_NE (p.find ("\"totalRequests\":42"), std::string::npos);
     EXPECT_EQ (p.substr (p.size () - 2), "\n\n");
+}
+
+// A stop request is not the end of the run: the worker acts on should_stop,
+// then blocks in event_loop->stop(true) draining in-flight requests, and only
+// then clears is_running. The metrics thread used to exit on should_stop, so it
+// emitted its "final settled tick" and set closed while requests were still
+// completing - the live view froze at the stop click while the stored report,
+// written after the drain, counted everything that landed during it.
+//
+// This drives collect_metrics directly: raise should_stop and assert the stream
+// keeps ticking and stays open until is_running goes false.
+TEST (CollectMetrics, StaysOpenUntilTheStopDrainCompletes) {
+    const std::string db_path = "test_collect_metrics_drain.db";
+    for (const char* s : { "", "-wal", "-shm", ".bak" })
+        std::filesystem::remove (db_path + s);
+
+    vayu::db::Database db (db_path);
+    db.init ();
+
+    nlohmann::json cfg;
+    auto ctx = std::make_shared<RunContext> ("drain_run", cfg);
+    // collect_metrics reads active_count() from the loop on the 1 Hz DB path.
+    vayu::http::EventLoopConfig loop_config;
+    ctx->event_loop   = std::make_unique<vayu::http::EventLoop> (loop_config);
+    ctx->start_time_ms = 1;
+    ctx->is_running    = true;
+
+    std::thread metrics ([&] () { collect_metrics (ctx, &db); });
+
+    // Let a few ticks land, then request a stop - as POST /runs/:id/stop does.
+    std::this_thread::sleep_for (std::chrono::milliseconds (300));
+    size_t ticks_at_stop = ctx->published_count.load ();
+    ctx->should_stop     = true;
+
+    // The worker is still draining: the stream must stay open and keep ticking.
+    std::this_thread::sleep_for (std::chrono::milliseconds (400));
+    EXPECT_FALSE (ctx->closed.load ())
+    << "closed was signalled on should_stop, before the drain finished";
+    EXPECT_GT (ctx->published_count.load (), ticks_at_stop)
+    << "ticks stopped at the stop request instead of covering the drain";
+
+    // Drain complete - this is what execute_load_test does after
+    // event_loop->stop(true) returns.
+    ctx->is_running = false;
+    metrics.join ();
+
+    EXPECT_TRUE (ctx->closed.load ());
+    ctx->event_loop.reset ();
+    for (const char* s : { "", "-wal", "-shm", ".bak" })
+        std::filesystem::remove (db_path + s);
 }
 
 TEST (RunManagerRetention, BackgroundSweeperEvictsWithoutExternalTriggers) {

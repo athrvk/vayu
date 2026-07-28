@@ -89,6 +89,12 @@ constexpr size_t MAX_CONNECTIONS = 10000;
 constexpr int DEFAULT_TIMEOUT_MS = 30000;
 /// Interval for collecting statistics in milliseconds
 constexpr int STATS_INTERVAL_MS = 100;
+/// Live SSE ticks retained in memory per run for Last-Event-ID replay. The
+/// buffer is a ring: older ticks are evicted, so a run's memory does not grow
+/// with its duration. At the default 100ms cadence this is a ~5 minute
+/// reconnect window; a consumer that resumes from further back is served from
+/// the oldest retained tick (SSE clients tolerate a gap on resume).
+constexpr size_t MAX_LIVE_TICKS = 3000;
 /// Size of the context pool for request handling
 constexpr size_t CONTEXT_POOL_SIZE = 64;
 } // namespace server
@@ -138,8 +144,13 @@ constexpr size_t MAX_TRACE_BODY_BYTES = 5 * 1024 * 1024;
 namespace metrics_collector {
 /// Default expected requests for pre-allocation
 constexpr size_t DEFAULT_EXPECTED_REQUESTS = 100000;
-/// Maximum errors to store (0 = unlimited) (prevents OOM at high error rates)
-constexpr size_t DEFAULT_MAX_ERRORS = 0;
+/// Maximum error records to store (0 = unlimited) (prevents OOM at high error
+/// rates). A fully-failing target produces errors at close to the completion
+/// rate, each carrying a message and a trace blob, so an unlimited store is a
+/// straight path to an OOM kill mid-run. Errors past the cap are still counted
+/// (see MetricsCollector::errors_dropped) and still reach the status-code
+/// distribution - only their individual records are dropped.
+constexpr size_t DEFAULT_MAX_ERRORS = 10000;
 /// Maximum success results to store (0 = unlimited)
 constexpr size_t DEFAULT_MAX_SUCCESS_RESULTS = 1000;
 /// Default sample rate for success traces (1 in N)

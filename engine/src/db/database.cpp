@@ -931,9 +931,14 @@ std::vector<Metric> Database::get_metrics_since (const std::string& run_id, int6
 // Get metrics with pagination for historical data retrieval
 std::vector<Metric> Database::get_metrics_paginated (const std::string& run_id, int64_t limit, int64_t offset) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    // Many rows share one timestamp (a tick inserts ~18 of them), and there is
+    // no index on timestamp - so ordering by timestamp alone leaves ties in
+    // whatever order the scan produced, which makes a page boundary able to
+    // repeat or skip a row. id is the insertion order, so it is the stable
+    // tiebreaker.
     return impl_->storage.get_all<Metric> (
     where (c (&Metric::run_id) == run_id),
-    order_by (&Metric::timestamp),
+    multi_order_by (order_by (&Metric::timestamp), order_by (&Metric::id)),
     sqlite_orm::limit (offset, limit));
 }
 
