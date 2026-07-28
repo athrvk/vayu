@@ -123,6 +123,15 @@ export default function CollectionItem({
 	};
 
 	/**
+	 * The row's own box delegates to the label button - see RequestItem for the
+	 * rule and why the check is what it is. This is the row where the indent
+	 * *cannot* move onto that button even in principle: the chevron sits between
+	 * them, so padding on the button would push the label away from the chevron
+	 * rather than indent the row.
+	 */
+	const isRowSurface = (e: React.MouseEvent) => e.target === e.currentTarget;
+
+	/**
 	 * Indentation is padding *inside* the row, never margin around it. A margin
 	 * would push the row's background in too, so a nested row's hover and
 	 * selection fill would stop short of the panel edge while a top-level row's
@@ -145,6 +154,8 @@ export default function CollectionItem({
 				data-collection-id={collection.id}
 				aria-expanded={isExpanded}
 				aria-selected={isSelected}
+				onClick={(e) => isRowSurface(e) && handleClick(e)}
+				onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
 				className={cn(
 					// focus-row: this row is the perceived target, not the narrower
 					// label button inside it - it paints the keyboard focus ring.
@@ -194,7 +205,12 @@ export default function CollectionItem({
 					onDoubleClick={handleDoubleClick}
 					tabIndex={-1}
 					data-tree-activate
-					className="flex min-w-0 items-center gap-2 flex-1 text-left cursor-pointer"
+					// self-stretch: see RequestItem. The row is `items-center`, so
+					// this button - the only thing wired to onCollectionClick - was
+					// as tall as its 18px label inside a 32px row, leaving ~7px of
+					// dead space above and below that still showed the hover fill
+					// and the pointer cursor.
+					className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
 					disabled={isDeleting || isRenaming}
 				>
 					<FolderIcon
