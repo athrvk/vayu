@@ -188,6 +188,21 @@ line naming a model, delete it before committing.
   full-bleed editors) - only the component knows which it is, so render it and
   read `element.className`. Seven boxes in the request builder were stuck square
   this way. → `boxed-surfaces.test.tsx`, `KeyValueRow.test.tsx`
+- **A drawer row's hit area needs two things, not one.** A row that carries a `⋯`
+  menu cannot be one button, so it is an `h-8 items-center` container that paints
+  the hover fill plus a narrower activator button holding the handler. That leaks
+  clicks twice over: `items-center` leaves the button *content*-height (18px in a
+  collection or environment row, so 7px above and below are dead), and the row's
+  own box - the `paddingLeft` indent, the flex gaps, the right padding - belongs
+  to no child at all. Measured in the running app, a collection row responded
+  over **41%** of the area that looked clickable, a request row 51%, an
+  environment row 36%. The fix is `self-stretch` on the activator **plus** the row
+  delegating clicks that land on itself (`e.target === e.currentTarget`, which
+  keeps the chevron and `⋯` out and stops a double-fire on bubble). The indent
+  cannot simply move onto the activator - on a collection row the chevron sits
+  between them. → `drawer-row-hit-area.test.tsx`. Assert the height as a
+  `className`, not `offsetHeight`: jsdom has no layout and reports 0 for
+  everything, so an `offsetHeight` guard passes while measuring nothing.
 - **Adding an accent scheme:** `constants/color-schemes.ts` + `index.css`, both
   themes, nothing else. → `color-schemes.test.ts`
 - **A `Badge` that paints its own `bg-` must be `variant="chip"`.** Every other

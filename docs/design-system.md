@@ -1152,7 +1152,57 @@ Section *headers* (e.g. "Environments") stay shorter on purpose - they are group
 labels, not list items, and the difference carries hierarchy.
 
 The disclosure chevron is `w-6 h-6` (24px) so it fits a 32px row. That is still
-an adequate pointer target, and the whole row remains clickable for opening.
+an adequate pointer target, and the row around it opens the collection.
+
+**`h-8 items-center` on the row means the activator needs `self-stretch`.** The
+two rules above interact, and the interaction is a bug the eye cannot see. A
+composite row (see `.focus-row`) paints the height, the hover fill, the selection
+tint and `cursor-pointer`, while the click handler sits on a narrower activator
+button inside it - the row carries a `⋯` menu, so it cannot itself be one button,
+and a plain `<div onClick>` is not keyboard operable. `items-center` then makes
+that button *content*-height: ~22px in a request row, where the `MethodBadge`
+props it open, and ~18px in a collection or environment row. The remaining 5-7px
+above and below took the fill and the pointer and did nothing on click. Measured
+in the running app at the 260px default drawer width, the share of the row that
+actually responded was **41%** for a collection, **51%** for a request and
+**36%** for an environment - and hit-testing 3px inside the top or bottom edge
+landed on the container, which has no handler.
+
+`self-stretch` on the activator overrides the row's centring; the activator's own
+`items-center` still centres its contents, and `.focus-row` is unaffected because
+the row paints the ring either way.
+
+**`self-stretch` fixes the height; the row's own box needs delegation.** The
+indent is `paddingLeft` *on the row* - deliberately, so the fill reaches the panel
+edge - and the flex gaps and right padding belong to no child either. No amount of
+stretching reaches any of it, and on a collection row the indent cannot move onto
+the activator even in principle, because the chevron sits between them. So the row
+takes the click itself and forwards it:
+
+```tsx
+const isRowSurface = (e: React.MouseEvent) => e.target === e.currentTarget;
+// on the row:
+onClick={(e) => isRowSurface(e) && handleClick(e)}
+```
+
+`target === currentTarget` is exactly "the pointer landed on the row's own box".
+It excludes the chevron and the `⋯` menu without naming them - they are children,
+and they own their own actions - and it stops a click on the activator from firing
+twice as it bubbles through. Drop the check and every label click activates twice.
+
+This is *not* the `<div onClick>` the environment row's comment warns against: the
+activator button stays and remains the keyboard path (`useRovingTreeFocus` clicks
+`[data-tree-activate]` on Enter). The row is a second, pointer-only entrance to
+the same handler.
+
+Together the two changes take all three rows to **100% of their own pixels** -
+measured by sweeping `elementFromPoint` across the row box in the running app. The
+only pixels a row does not own are the chevron, the `⋯` menu and the drawer's 8px
+`cursor-col-resize` handle at the panel edge. Both halves are guarded by
+`drawer-row-hit-area.test.tsx`: the height as a `className` assertion (jsdom has
+no layout, so an `offsetHeight` assertion would pass while measuring nothing), the
+delegation behaviourally, because `fireEvent.click(row)` targets the row itself -
+exactly the pointer that used to land on dead padding.
 
 ---
 
