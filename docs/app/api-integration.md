@@ -402,6 +402,12 @@ await apiService.startLoadTest({
 });
 ```
 
+The engine range-checks this payload before it creates the run row and answers a
+violation with `400 invalid_run_config` (accepted ranges are tabulated under
+[POST /runs](../engine/api-reference.md#post-runs)). The renderer's own limits
+live in `LOAD_TEST_LIMITS` (`src/constants/load-test.ts`) and must stay at or
+inside the engine's.
+
 #### `success_sample_rate` is a period, not a percentage
 
 The engine keeps a success trace when `counter % success_sample_rate == 0` - one

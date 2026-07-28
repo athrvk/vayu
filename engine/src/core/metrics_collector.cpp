@@ -29,6 +29,15 @@ inline int64_t now_ms () {
 
 MetricsCollector::MetricsCollector (const std::string& run_id, MetricsCollectorConfig config)
 : run_id_ (run_id), config_ (config) {
+    // Both sample rates are sampling *periods* - "keep 1 in N" - used as the
+    // right-hand side of a `%` in the hot record path and as a divisor in the
+    // reserve below. A 0 there is integer division by zero: a SIGFPE that takes
+    // the whole daemon down, from a field a caller can simply set to 0.
+    // POST /runs now rejects that (validate_run_config), and this clamp makes
+    // the collector safe for any caller, not just that one route.
+    config_.success_sample_rate = std::max (config_.success_sample_rate, size_t (1));
+    config_.response_sample_rate = std::max (config_.response_sample_rate, size_t (1));
+
     // Initialize HdrHistogram for lock-free latency recording
     // 3 significant figures = ~0.1% precision, max 1 hour in microseconds
     int result = hdr_init (

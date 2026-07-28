@@ -878,6 +878,30 @@ assertions are now actually checked under load - previously only the
 request's own `tests` string was ever sent, so a collection-level assertion
 passed in design mode and was silently never validated by a load run.
 
+**Accepted ranges.** The numeric config is range-checked **before the run row is
+created**, so a rejected request leaves no `pending` row behind. A violation is
+a `400` carrying the nested error shape (`{"error": {"code":
+"invalid_run_config", "message": "..."}}`), whose message names the offending
+field and why the bound exists:
+
+| Field | Accepted | Rejected because |
+|-------|----------|------------------|
+| `success_sample_rate` | `1`-`100000` | It is a sampling *period* (keep 1 in N), used as `counter % rate`. A `0` was a division by zero that killed the daemon mid-run. |
+| `response_sample_rate` | `1`-`100000` | Same modulo, same crash. |
+| `max_response_samples` | `0`-`1000000` | Each retained sample holds a full response body, and the vector is reserved up front; a negative value casts to ~1.8e19. |
+| `concurrency` | `1`-`10000` | Connections are eagerly pre-allocated per worker before any traffic flows, so `-1` (a natural "unlimited" guess) allocated until malloc failed. |
+| `timeout` | `1`-`86400000` ms | A transfer that never times out never completes, leaving the run stuck `running` and unstoppable. |
+| `duration` | string, positive, optional unit (`ms`\|`s`\|`m`\|`h`) | A JSON *number* threw out of the run-context constructor *after* the row was written, stranding it `pending` forever behind an opaque `500`. |
+
+An **absent** field, or an explicit `null`, is always accepted - every one of
+them has a default. The ceilings are crash guards, not policy: each client caps
+itself far lower (the load dialog offers `concurrency` &le; 1000; the MCP
+`start_load_run` tool has a user-settable cap in Settings).
+
+The sample rates are additionally clamped to &ge; 1 inside the metrics
+collector, so the modulo cannot divide by zero even for a caller that bypasses
+this route.
+
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
 token **before** creating the run and warms the cache for the workers. An
 unauthorizable config is rejected up front with `409` (interactive sign-in
