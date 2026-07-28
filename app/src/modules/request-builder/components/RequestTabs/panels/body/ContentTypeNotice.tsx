@@ -6,7 +6,12 @@
  */
 
 /**
- * "Choosing this mode edited your Headers tab."
+ * "Choosing this mode edited your Headers tab, and will put it back."
+ *
+ * Undo is the impatient version of what a mode change does anyway - the row is
+ * removed when the body type next changes to one that does not need it. The
+ * notice says so, because an edit to a tab you are not looking at reads as
+ * permanent unless something tells you otherwise.
  *
  * Its own component so it can be rendered and tested directly. Inside the panel
  * it only appears after a Radix Select commits a value, and a Select does not
@@ -33,7 +38,7 @@ export function ContentTypeNotice({ value, onUndo, onDismiss }: ContentTypeNotic
 				<code className="font-mono">
 					{CONTENT_TYPE}: {value}
 				</code>{" "}
-				to Headers.
+				to Headers - removed again when you change body type.
 			</span>
 			<div className="flex shrink-0 items-center gap-1">
 				<Button size="sm" variant="ghost" onClick={onUndo} className="h-6 px-2 text-xs">

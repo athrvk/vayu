@@ -16,12 +16,15 @@
  * mode with an editor pair, an introspection lifecycle and a header side effect
  * of its own. It is its own component now.
  *
- * **Choosing GraphQL still adds a Content-Type header, but says so.** It used
- * to write `Content-Type: application/json` into `request.headers` in silence,
- * on a tab you are not looking at, and never take it back - so picking GraphQL
- * once and returning to None left the header behind for good. The header is
- * genuinely required, so it is still added; what changed is that the panel
- * announces it and offers the way back.
+ * **Choosing GraphQL still adds a Content-Type header, but says so - and
+ * leaving GraphQL removes it again.** It used to write `Content-Type:
+ * application/json` into `request.headers` in silence, on a tab you are not
+ * looking at, and never take it back - so picking GraphQL once and returning to
+ * None left the header behind for good, on a request that sends no body at all.
+ * The header is genuinely required, so it is still added; what changed is that
+ * the panel announces it, and that the next mode change takes back the row it
+ * wrote (`body/content-type.ts`, by row id - a Content-Type the user typed is
+ * indistinguishable by value and must survive).
  *
  * **The resolved preview swaps rather than splits.** It used to put the editor
  * and a read-only echo side by side at `grid-cols-2`, so the code you are
@@ -48,7 +51,7 @@ import { createEmptyKeyValue, toFlatHeaders } from "../../../utils/key-value";
 import { useResizable } from "@/hooks/useResizable";
 import { cn } from "@/lib/utils";
 import GraphQLBody from "./body/GraphQLBody";
-import { contentTypeToAdd, contentTypeRow, withoutContentType } from "./body/content-type";
+import { switchContentType, withoutContentType } from "./body/content-type";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
 import { switchBody } from "../../../utils/body-drafts";
 
@@ -144,8 +147,15 @@ function ResizeHandle({
 }
 
 export default function BodyPanel() {
-	const { request, updateField, resolveString, getBodyDrafts, setBodyDrafts } =
-		useRequestBuilderContext();
+	const {
+		request,
+		updateField,
+		resolveString,
+		getBodyDrafts,
+		setBodyDrafts,
+		getAutoContentType,
+		setAutoContentType,
+	} = useRequestBuilderContext();
 	const [showResolved, setShowResolved] = useState(false);
 
 	// Drag-to-resize editor height, shared across body modes that host an editor.
@@ -172,10 +182,13 @@ export default function BodyPanel() {
 	}, [editorHeight]);
 
 	/*
-	 * The Content-Type this mode change added, so it can be taken back.
+	 * The Content-Type this mode change added, for the notice.
 	 *
 	 * Null once dismissed, undone, or the mode changes again - the notice is
-	 * about the edit that just happened, not a standing state.
+	 * about the edit that just happened, not a standing state. *Which row* was
+	 * added is remembered separately and durably (`getAutoContentType`), because
+	 * removing it again must survive dismissing the notice and unmounting the
+	 * panel.
 	 */
 	const [addedContentType, setAddedContentType] = useState<string | null>(null);
 
@@ -213,7 +226,6 @@ export default function BodyPanel() {
 		if (body !== (request.body ?? "")) updateField("body", body);
 
 		updateField("bodyMode", mode);
-		setAddedContentType(null);
 
 		// Initialize appropriate data for mode
 		if (mode === "form-data" && request.formData.length === 0) {
@@ -224,21 +236,30 @@ export default function BodyPanel() {
 		}
 
 		/*
-		 * The mode may require a Content-Type. Adding it automatically is right -
-		 * GraphQL genuinely needs one - but doing so *silently*, to a tab the user
-		 * is not looking at, was not, and nothing ever removed it, so one visit to
-		 * this mode left the header on the request permanently.
+		 * The mode may require a Content-Type, and the mode being left may have
+		 * required one this panel added. Adding it automatically is right - GraphQL
+		 * genuinely needs one - but doing so *silently*, to a tab the user is not
+		 * looking at, was not, and nothing ever removed it: one visit to GraphQL
+		 * left the header on the request permanently, including after switching
+		 * back to None, which sends no body at all. Both halves happen in one call
+		 * because they read and write the same array.
 		 */
-		const required = contentTypeToAdd(mode, request.headers);
-		if (required) {
-			updateField("headers", [...request.headers, contentTypeRow(required)]);
-			setAddedContentType(required);
-		}
+		const contentType = switchContentType(
+			mode,
+			request.headers,
+			request.id,
+			getAutoContentType()
+		);
+		if (contentType.headers !== request.headers) updateField("headers", contentType.headers);
+		setAutoContentType(contentType.auto);
+		setAddedContentType(contentType.added);
 	};
 
 	const undoContentType = () => {
-		if (!addedContentType) return;
-		updateField("headers", withoutContentType(request.headers, addedContentType));
+		const auto = getAutoContentType();
+		if (!auto) return;
+		updateField("headers", withoutContentType(request.headers, auto));
+		setAutoContentType(null);
 		setAddedContentType(null);
 	};
 

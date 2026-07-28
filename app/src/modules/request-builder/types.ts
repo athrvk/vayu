@@ -91,6 +91,25 @@ export interface BodyConfig {
 	urlEncoded?: KeyValueItem[];
 }
 
+/**
+ * The Content-Type row a body mode added on its way in, so leaving that mode can
+ * take it back. Written by `BodyPanel` through the context accessors; the rule
+ * that reads it is in `components/RequestTabs/panels/body/content-type.ts`.
+ *
+ * By **row id**, not by value: `Content-Type: application/json` typed by the
+ * user and the identical row this panel wrote look the same and must not be
+ * treated the same. `value` is kept beside it so a row the user has since
+ * retyped is recognised as no longer ours.
+ *
+ * Ephemeral, like the body drafts - `requestId` says whose row it is, and a
+ * record belonging to another request is dropped rather than applied.
+ */
+export interface AutoContentType {
+	requestId: string | null;
+	rowId: string;
+	value: string;
+}
+
 // ============================================================================
 // Request State
 // ============================================================================
@@ -221,6 +240,16 @@ export interface RequestBuilderContextValue {
 	 */
 	getBodyDrafts: () => BodyDrafts;
 	setBodyDrafts: (drafts: BodyDrafts) => void;
+
+	/**
+	 * The Content-Type row `BodyPanel` wrote when a mode required one, so that
+	 * leaving the mode can take it back. Behind accessors and living in the
+	 * provider for the same reasons as the drafts above - and for one more: the
+	 * record has to outlive the panel, or the header outlives the mode that
+	 * needed it, which is the bug it exists to fix.
+	 */
+	getAutoContentType: () => AutoContentType | null;
+	setAutoContentType: (auto: AutoContentType | null) => void;
 
 	// Response State
 	response: ResponseState | null;

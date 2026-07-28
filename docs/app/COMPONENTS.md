@@ -140,6 +140,8 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 
 > **Body tabs** support `none` / `json` / `text` / `graphql` / `form-data` / `x-www-form-urlencoded`. The `graphql` mode renders a split resizable editor: a **Query** pane (Monaco `graphql` language with diagnostics, autocomplete, hover, and formatting) and a **Variables** pane (Monaco `json` with schema-derived validation). **Scripts** are two separate panels - pre-request and test - not a single tab.
 
+> **Choosing GraphQL writes a header, and leaving GraphQL removes it.** GraphQL is sent as a JSON envelope, so picking it appends `Content-Type: application/json` to the Headers tab (unless an enabled `Content-Type` is already there) and says so in a notice with an Undo. The next mode change that no longer needs that header takes the row back out. The row is tracked **by id** - a `Content-Type` the user typed is indistinguishable by value and always survives, as does one whose value has since been edited. The rule is `panels/body/content-type.ts`; the record lives in `RequestBuilderProvider` (see [state-management](state-management.md#requestbuildercontext---the-added-content-type-row)) because the panel is unmounted whenever another tab is on screen.
+
 ## GraphQL Library (`lib/graphql/`)
 
 Shared, Monaco-independent modules that power the GraphQL body mode.
