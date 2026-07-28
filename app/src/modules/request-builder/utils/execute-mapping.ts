@@ -136,6 +136,10 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		body,
 		bodyRaw,
 		bodyType: bodyTypeFromContentType(result.headers),
+		// When it arrived, as opposed to how long it took. The status bar shows
+		// it as an age, which is the only thing distinguishing a fresh response
+		// from one sent before the request beside it was edited.
+		receivedAt: new Date().toISOString(),
 		time: result.timing?.totalMs || 0,
 		timing: result.timing,
 		size: result.bodySize || 0,

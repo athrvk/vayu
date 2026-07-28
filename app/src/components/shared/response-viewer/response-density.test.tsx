@@ -34,7 +34,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import ResponseBody from "./ResponseBody";
 import HeadersViewer from "./HeadersViewer";
 
@@ -191,5 +191,39 @@ describe("what colour a header key is", () => {
 
 	it("gives both variants the same treatment, since the section already says which", () => {
 		expect(keyCell("request").className).toBe(keyCell("response").className);
+	});
+});
+
+/**
+ * Copy and download act on the *body*, so they live with the body.
+ *
+ * They sat on the tab row, where they read as applying to whatever tab you were
+ * standing on - but `content` was always `response.body`, so on Headers, Timing
+ * or Raw they copied something other than what was on screen. Moving them into
+ * the body toolbar also gave the tab strip back the ~64px they occupied, which
+ * is what let all seven tabs render without the strip scrolling.
+ */
+describe("where the copy and download actions live", () => {
+	it("renders whatever the host puts in the toolbar's actions slot", () => {
+		const { container } = render(
+			<ResponseBody
+				body={JSON_BODY}
+				headers={{ "content-type": "application/json" }}
+				actions={<button type="button">Copy</button>}
+			/>
+		);
+		const bar = container.querySelector<HTMLElement>(".border-b");
+		expect(bar, "the body toolbar").not.toBeNull();
+		expect(within(bar!).getByRole("button", { name: "Copy" })).toBeInTheDocument();
+	});
+
+	it("renders none when the host supplies none, so the history viewer is unchanged", () => {
+		// `UnifiedResponseViewer` mounts this same component with nothing to put
+		// there - a hardcoded `ResponseActions` would have appeared for it too.
+		const { container } = render(
+			<ResponseBody body={JSON_BODY} headers={{ "content-type": "application/json" }} />
+		);
+		const bar = container.querySelector<HTMLElement>(".border-b");
+		expect(within(bar!).queryByRole("button", { name: /copy|download/i })).toBeNull();
 	});
 });

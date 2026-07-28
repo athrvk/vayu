@@ -67,3 +67,52 @@ describe("the response age chip", () => {
 		expect((container.querySelector("[title]") as HTMLElement).className).not.toMatch(/\bbg-/);
 	});
 });
+
+/**
+ * A *live* response has to look live, for the same reason a restored one has to
+ * look restored.
+ *
+ * The pane sits open while you keep editing the request beside it, so a response
+ * you sent twenty minutes and several edits ago reads exactly like one that just
+ * came back. `time` beside it cannot answer this - that is how long the exchange
+ * took, not when it happened.
+ *
+ * `ResponseState` carried a bare `timestamp` for this once and it was removed
+ * for having one writer and no reader. This is the reader.
+ */
+describe("a live response's age", () => {
+	it("shows how long ago it arrived", () => {
+		const at = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+		render(<ResponseStatusBar status={200} statusText="OK" time={12} receivedAt={at} />);
+		expect(screen.getByText(/4m ago/i)).toBeInTheDocument();
+	});
+
+	it("does not label it as coming from a run", () => {
+		// "from run" belongs to the restored case and carries the run's identity.
+		const at = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+		render(<ResponseStatusBar status={200} statusText="OK" time={12} receivedAt={at} />);
+		expect(screen.queryByText(/from run/i)).toBeNull();
+	});
+
+	it("lets the restored label win when a response is both", () => {
+		// A restored response has no `receivedAt`, but if one ever carried both,
+		// where it came from is the more specific fact.
+		const at = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+		render(
+			<ResponseStatusBar
+				status={200}
+				statusText="OK"
+				time={12}
+				receivedAt={at}
+				restoredFrom={{ at, runId: "run_1" }}
+			/>
+		);
+		expect(screen.getByText(/from run/i)).toBeInTheDocument();
+	});
+
+	it("shows nothing when neither is set", () => {
+		// A caller with no timestamp at all - the history viewer's stored rows.
+		const { container } = render(<ResponseStatusBar status={200} statusText="OK" />);
+		expect(container.textContent).not.toMatch(/ago/i);
+	});
+});

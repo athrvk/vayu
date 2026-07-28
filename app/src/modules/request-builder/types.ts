@@ -167,12 +167,23 @@ export interface ResponseState {
 	time: number;
 	timing?: ResponseTiming;
 	/**
-	 * Set only when this response was rebuilt from a stored run rather than sent
-	 * just now - a cold start, or a run opened from History. Drives the pane's
-	 * age chip, which is the only thing that tells the two apart: the request
-	 * beside it may have been edited since. Gone after the next send.
+	 * When this response arrived, ISO. Set on a live send only.
 	 *
-	 * This replaced a bare `timestamp` that had one writer and no reader.
+	 * The pane's status bar reads it as an age - "just now", "4m ago" - which
+	 * answers the question a duration cannot: whether what you are looking at is
+	 * the response to the request beside it *as it is now*, or to a version of
+	 * it from twenty minutes and several edits ago.
+	 *
+	 * A bare `timestamp` used to live here and was removed for having one writer
+	 * and no reader. This one has a reader; that is the whole difference, and
+	 * `response-age.test.tsx` is what keeps it true.
+	 */
+	receivedAt?: string;
+	/**
+	 * Set only when this response was rebuilt from a stored run rather than sent
+	 * just now - a cold start, or a run opened from History. Drives the same age
+	 * chip, labelled "from run" so the two cases stay distinguishable: the
+	 * request beside it may have been edited since. Gone after the next send.
 	 */
 	restoredFrom?: RestoredFrom;
 	errorCode?: string;

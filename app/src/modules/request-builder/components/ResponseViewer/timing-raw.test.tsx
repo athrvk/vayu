@@ -55,7 +55,7 @@ vi.mock("@/components/ui/code-editor", () => ({
 const ResponseTimingTab = (await import("./ResponseTimingTab")).default;
 const RawRequestResponse = (await import("./RawRequestResponse")).default;
 
-const { registerHttpLanguage, HTTP_LANGUAGE_ID, SENT_MARKER, RECEIVED_MARKER } =
+const { registerHttpLanguage, HTTP_LANGUAGE_ID, SENT_MARKER, RECEIVED_MARKER, markLines } =
 	await import("@/lib/http-language");
 
 /** `Array.at` is outside this tsconfig's lib target. */
@@ -239,5 +239,49 @@ describe("what the Raw editor is configured to show", () => {
 		expect(opts.lineNumbers).toBe("off");
 		expect(opts.lineNumbersMinChars).toBe(0);
 		expect(opts.lineDecorationsWidth).toBe(0);
+	});
+});
+
+describe("where a bare marker appears", () => {
+	/*
+	 * Validating the rendered Raw tab turned up a comment that lied: `markLines`
+	 * claimed trailing blank lines were "dropped and re-added as a bare marker".
+	 * They are only dropped. The behaviour is right and the comment was wrong, so
+	 * the behaviour is pinned here rather than left as an accident of a regex.
+	 *
+	 * The rule that falls out of dropping only *trailing* whitespace: a bare
+	 * marker appears wherever a blank line separates a head from a body, and
+	 * nowhere else. curl prints that line at the end of a bodyless head too; this
+	 * does not, because there it separates nothing.
+	 */
+	it("shows one between a request's head and its body", () => {
+		const post = 'POST /o HTTP/1.1\r\nHost: x\r\n\r\n{"q":2}\r\n';
+		expect(markLines(post, SENT_MARKER).split("\n")).toEqual([
+			`${SENT_MARKER} POST /o HTTP/1.1`,
+			`${SENT_MARKER} Host: x`,
+			SENT_MARKER,
+			`${SENT_MARKER} {"q":2}`,
+		]);
+	});
+
+	it("shows none after a bodyless request, where it would separate nothing", () => {
+		// The GET case, which is what surfaced the wrong comment.
+		const get = "GET /json HTTP/1.1\r\nHost: httpbin.org\r\n\r\n";
+		const lines = markLines(get, SENT_MARKER).split("\n");
+		expect(lines).toEqual([
+			`${SENT_MARKER} GET /json HTTP/1.1`,
+			`${SENT_MARKER} Host: httpbin.org`,
+		]);
+		expect(lines[lines.length - 1]).not.toBe(SENT_MARKER);
+	});
+
+	it("shows one between a response's head and its body", () => {
+		const res = 'HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{"a":1}\n';
+		expect(markLines(res, RECEIVED_MARKER).split("\n")).toEqual([
+			`${RECEIVED_MARKER} HTTP/1.1 200 OK`,
+			`${RECEIVED_MARKER} content-type: application/json`,
+			RECEIVED_MARKER,
+			`${RECEIVED_MARKER} {"a":1}`,
+		]);
 	});
 });

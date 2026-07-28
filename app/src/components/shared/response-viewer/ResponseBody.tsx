@@ -16,7 +16,7 @@
  * Similar to Postman's response body viewer.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { FileCode, Image as ImageIcon, File, Eye, Code, FileText } from "lucide-react";
 import { CodeEditor, ToggleGroup, ToggleGroupItem } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -30,6 +30,12 @@ interface ExtendedResponseBodyProps extends ResponseBodyProps {
 	height?: string;
 	/** Show view mode toggle buttons */
 	showModeToggle?: boolean;
+	/**
+	 * Rendered at the end of the toolbar - copy and download, in the request
+	 * builder. A slot rather than a hardcoded `ResponseActions` because the
+	 * history viewer mounts this same component with nothing to put there.
+	 */
+	actions?: ReactNode;
 	/** Compact mode for smaller displays */
 	compact?: boolean;
 }
@@ -42,6 +48,7 @@ export default function ResponseBody({
 	defaultMode = "pretty",
 	height = "100%",
 	showModeToggle = true,
+	actions,
 	compact = false,
 }: ExtendedResponseBodyProps) {
 	const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
@@ -216,32 +223,35 @@ export default function ResponseBody({
 					</span>
 				</div>
 
-				{showModeToggle && (
-					<ToggleGroup
-						value={viewMode}
-						// Radix clears the value when the active item is pressed again.
-						// A view mode has no "off" - ignore the empty string rather than
-						// letting the body render nothing.
-						onValueChange={(next) => next && setViewMode(next as ViewMode)}
-						size={compact ? "xs" : "sm"}
-						aria-label="Body view mode"
-					>
-						<ToggleGroupItem value="pretty">
-							<Code className="w-3 h-3" />
-							Pretty
-						</ToggleGroupItem>
-						<ToggleGroupItem value="raw">
-							<FileText className="w-3 h-3" />
-							Raw
-						</ToggleGroupItem>
-						{canPreview && (
-							<ToggleGroupItem value="preview">
-								<Eye className="w-3 h-3" />
-								Preview
+				<div className="flex items-center gap-2">
+					{showModeToggle && (
+						<ToggleGroup
+							value={viewMode}
+							// Radix clears the value when the active item is pressed again.
+							// A view mode has no "off" - ignore the empty string rather than
+							// letting the body render nothing.
+							onValueChange={(next) => next && setViewMode(next as ViewMode)}
+							size={compact ? "xs" : "sm"}
+							aria-label="Body view mode"
+						>
+							<ToggleGroupItem value="pretty">
+								<Code className="w-3 h-3" />
+								Pretty
 							</ToggleGroupItem>
-						)}
-					</ToggleGroup>
-				)}
+							<ToggleGroupItem value="raw">
+								<FileText className="w-3 h-3" />
+								Raw
+							</ToggleGroupItem>
+							{canPreview && (
+								<ToggleGroupItem value="preview">
+									<Eye className="w-3 h-3" />
+									Preview
+								</ToggleGroupItem>
+							)}
+						</ToggleGroup>
+					)}
+					{actions}
+				</div>
 			</div>
 
 			{/* Content */}

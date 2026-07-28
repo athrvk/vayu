@@ -52,9 +52,18 @@ const METHODS = "GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|CONNECT";
 /**
  * Prefixes every line of one half of the exchange.
  *
- * Trailing blank lines are dropped and re-added as a bare marker, which is what
- * curl prints for the blank line that ends a head - it reads as "the head ended
- * here" rather than as an accidental gap.
+ * **A bare marker appears wherever a blank line separates a head from a body,
+ * and nowhere else.** That falls out of dropping only *trailing* whitespace: the
+ * `\r\n\r\n` between a head and its body is mid-string and survives, while the
+ * one terminating a bodyless request is at the end and does not.
+ *
+ * So a POST shows `>` between its headers and its payload, and a GET shows no
+ * bare `>` at all - it has no body for one to separate. curl prints that line
+ * either way; this does not, and the difference is deliberate. An earlier
+ * version of this comment claimed the trailing blank was "dropped and re-added
+ * as a bare marker", which the code has never done - checked by running it
+ * against a real GET, where the request head runs straight into the response's
+ * status line with nothing between.
  */
 export function markLines(text: string, marker: string): string {
 	return text
