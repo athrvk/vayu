@@ -125,8 +125,11 @@ const vayu::Response& response) {
     }
 
     if (!response.has_error ()) {
+        // "" when nothing was negotiated, not omitted - same convention as
+        // serialize(Response) in json.cpp, so restore-response.ts can't
+        // confuse "empty" with "this key doesn't exist on a stored trace".
         trace["response"] = { { "headers", response.headers },
-            { "body", response.body } };
+            { "body", response.body }, { "httpVersion", response.http_version } };
     } else {
         trace["error_type"]    = to_string (response.error_code);
         trace["error_message"] = response.error_message;

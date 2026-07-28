@@ -30,19 +30,39 @@ void add_if_present (nlohmann::json& dst, const nlohmann::json& src, const char*
         dst[key] = src[key];
 }
 
-// The compact list-row summary: exactly the six keys the history/dashboard
-// list UIs read, each omitted when absent from the snapshot. A malformed
-// config_snapshot yields an empty object, never an error - the full snapshot
-// stays available on GET /runs/:id.
+// httpVersion is handled separately from add_if_present, and always ends up
+// present: a raw POST /runs body of `"httpVersion": null` (a request for no
+// override) lands in config_snapshot verbatim, because config_snapshot is
+// built from the raw request body *before* resolve_run_http_version_override
+// erases the key from the executed request (see execution.cpp) - and a run
+// predating this field has no key at all. Both cases mean the run executed at
+// the engine's default, so both normalize to the literal string "auto"
+// instead of being omitted, which would misrepresent "we know it defaulted"
+// as "we don't know". Never call src["httpVersion"].get<std::string>() here -
+// an explicit null throws.
+void add_http_version (nlohmann::json& dst, const nlohmann::json& src) {
+    if (src.contains ("httpVersion") && !src["httpVersion"].is_null ()) {
+        dst["httpVersion"] = src["httpVersion"];
+    } else {
+        dst["httpVersion"] = "auto";
+    }
+}
+
+// The compact list-row summary: exactly the nine keys the history/dashboard
+// list UIs read, each omitted when absent from the snapshot (httpVersion
+// excepted - see add_http_version). A malformed config_snapshot yields an
+// empty object, never an error - the full snapshot stays available on
+// GET /runs/:id.
 nlohmann::json build_run_summary (const std::string& config_snapshot) {
     nlohmann::json summary = nlohmann::json::object ();
     try {
         auto config = nlohmann::json::parse (config_snapshot);
         if (config.is_object ()) {
-            for (const char* key :
-            { "url", "method", "mode", "duration", "concurrency", "comment" }) {
+            for (const char* key : { "url", "method", "mode", "duration",
+                 "concurrency", "comment", "followRedirects", "maxRedirects" }) {
                 add_if_present (summary, config, key);
             }
+            add_http_version (summary, config);
         }
     } catch (...) {
         // Malformed snapshot -> empty summary (never a 500).
@@ -78,7 +98,7 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run) {
  * `limit`/`offset` arrive already parsed and clamped by the caller (limit
  * default 50, capped at 500; offset floored at 0); `filter` holds the already
  * validated type/status/requestId/q constraints. Rows carry the compact
- * `summary` (six keys) instead of the full `config_snapshot`, wrapped in the
+ * `summary` (nine keys) instead of the full `config_snapshot`, wrapped in the
  * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86).
  *
  * Extracted so the envelope shape, clamping and filtering are covered without
@@ -105,13 +125,35 @@ const vayu::db::RunFilter& filter, int64_t limit, int64_t offset) {
     return { 200, response };
 }
 
+/**
+ * The GET /runs/:runId/report `configuration` object: the load-test tuning
+ * knobs plus httpVersion/followRedirects/maxRedirects (ten keys total), built
+ * from an already-parsed config_snapshot. `rps`/`targetRps` is the one
+ * rename, so it stays as an inline branch in the caller rather than living in
+ * this key list.
+ *
+ * Extracted (like get_runs_response above) so this is covered directly - see
+ * runs_route_test.cpp - without the full report handler's DB/metrics reads.
+ */
+nlohmann::json build_run_report_config (const nlohmann::json& config) {
+    nlohmann::json config_obj = nlohmann::json::object ();
+    for (const char* key : { "mode", "duration", "concurrency", "startConcurrency",
+         "rampUpDuration", "timeout", "comment", "followRedirects", "maxRedirects" }) {
+        add_if_present (config_obj, config, key);
+    }
+    add_http_version (config_obj, config);
+    return config_obj;
+}
+
 void register_run_routes (RouteContext& ctx) {
     /**
      * GET /runs?limit=&offset=&type=&status=&requestId=&q=
      * Lists test runs (both "design" single requests and "load" tests), newest
      * first. Rows carry a compact `summary` (url/method/mode/duration/
-     * concurrency/comment) instead of the full config_snapshot, wrapped in the
-     * `{data, pagination}` envelope.
+     * concurrency/comment/httpVersion/followRedirects/maxRedirects) instead of
+     * the full config_snapshot, wrapped in the `{data, pagination}` envelope.
+     * See build_run_summary for the authoritative key list - keep this in step
+     * with it.
      *
      * Query params:
      * - limit: page size, default 50, capped at 500
@@ -504,13 +546,9 @@ void register_run_routes (RouteContext& ctx) {
                     metadata["requestMethod"] = config["method"];
                 }
 
-                nlohmann::json config_obj;
-                // Straight copies share the list-row summary's helper; `rps`
-                // is the one rename (-> targetRps), so it stays inline.
-                for (const char* key : { "mode", "duration", "concurrency",
-                     "startConcurrency", "rampUpDuration", "timeout", "comment" }) {
-                    add_if_present (config_obj, config, key);
-                }
+                nlohmann::json config_obj = build_run_report_config (config);
+                // `rps` is the one rename (-> targetRps), so it stays inline
+                // rather than living in build_run_report_config's key list.
                 if (config.contains ("rps"))
                     config_obj["targetRps"] = config["rps"];
                 if (config.contains ("targetRps"))

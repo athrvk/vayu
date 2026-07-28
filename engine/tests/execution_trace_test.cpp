@@ -98,6 +98,44 @@ TEST (ExecutionTrace, SuccessNestsTheExchange) {
     EXPECT_FALSE (trace.contains ("error_type"));
 }
 
+// The negotiated protocol is part of the stored contract too:
+// restore-response.ts has nothing to show for a historical run's Protocol field
+// without it. Stored under trace["response"], the same nesting as headers/body.
+TEST (ExecutionTrace, ResponseCarriesNegotiatedHttpVersion) {
+    auto response         = make_response ();
+    response.http_version = "HTTP/2";
+
+    auto trace = build_result_trace (make_request (), response);
+
+    ASSERT_TRUE (trace.contains ("response"));
+    EXPECT_EQ (trace["response"]["httpVersion"], "HTTP/2");
+}
+
+// Matches serialize(Response)'s convention (json.cpp): stored, not omitted,
+// even when nothing was negotiated - so a reader can't confuse "empty" with
+// "this key doesn't exist on a stored trace".
+TEST (ExecutionTrace, EmptyHttpVersionStoredNotOmitted) {
+    auto response = make_response (); // http_version defaults to ""
+
+    auto trace = build_result_trace (make_request (), response);
+
+    ASSERT_TRUE (trace["response"].contains ("httpVersion"));
+    EXPECT_EQ (trace["response"]["httpVersion"], "");
+}
+
+// Same invariant style as the timing test above: whatever key
+// serialize(Response) puts on the live /execute wire for httpVersion is also
+// what the stored trace carries.
+TEST (ExecutionTrace, StoredHttpVersionMatchesTheLiveWireKey) {
+    auto response         = make_response ();
+    response.http_version = "HTTP/1.1";
+
+    auto trace = build_result_trace (make_request (), response);
+    auto live  = vayu::json::serialize (response);
+
+    EXPECT_EQ (trace["response"]["httpVersion"], live["httpVersion"]);
+}
+
 TEST (ExecutionTrace, FailureStoresErrorInsteadOfResponse) {
     auto response          = make_response ();
     response.status_code   = 0;
