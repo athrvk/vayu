@@ -21,6 +21,15 @@
  * look for a millisecond value.
  */
 export const TIMING = {
+	/**
+	 * How often a rendered relative time recomputes itself.
+	 *
+	 * The response pane shows a response's age, and it sits open while you keep
+	 * editing the request beside it - so a "just now" that never updates is a
+	 * claim that goes stale while being looked at. Coarser than the finest
+	 * granularity the formatter has (a minute), which is all it needs to be.
+	 */
+	RELATIVE_TIME_TICK_MS: 30_000,
 	/** How long the "Saved" indicator stays visible after a save. */
 	SAVED_STATUS_DURATION_MS: 3000,
 

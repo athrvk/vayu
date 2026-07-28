@@ -132,9 +132,22 @@ export function responseFromRunResult(
 		};
 	}
 
+	/*
+	 * The stored trace keeps the body as an opaque string - the engine caps it
+	 * on a raw byte boundary, so what comes back is what the server sent. That
+	 * string is the raw body, and it is carried through as `bodyRaw` rather than
+	 * left undefined.
+	 *
+	 * It used to be omitted, and the Raw view was correct only by accident:
+	 * `ResponseBody` falls back to `body`, which happened to be the same string.
+	 * The moment a trace arrives holding a parsed object instead - the branch
+	 * below exists because that can happen - `body` becomes pretty-printed and
+	 * Raw would have silently shown formatting the server never sent.
+	 */
 	const raw = trace.response.body;
 	const body =
 		typeof raw === "string" ? raw : raw === undefined ? "" : JSON.stringify(raw, null, 2);
+	const bodyRaw = typeof raw === "string" ? raw : raw === undefined ? "" : JSON.stringify(raw);
 
 	return {
 		status: result.statusCode || 0,
@@ -142,6 +155,7 @@ export function responseFromRunResult(
 		headers: trace.response.headers || {},
 		...sentSide(trace),
 		body,
+		bodyRaw,
 		bodyType: detectBodyType(body),
 		// `size` is what the pane's byte count shows. When the body was truncated
 		// for storage the stored slice is not the real size, so prefer the

@@ -223,14 +223,23 @@
 		--destructive-foreground: 0 0% 98%;
 		--destructive-text: 0 60% 48%; /* muted rose - accessible text on light bg, ~4.8:1 */
 
-		/* Charts - cohesive categorical set: accent + 4 evenly-spaced hues,
+		/* Charts - cohesive categorical set: accent + 5 evenly-spaced hues,
 		 * consistent with dark mode (tuned only in lightness). chart-1 tracks
-		 * the active accent. */
+		 * the active accent.
+		 *
+		 * `--chart-6` exists because the response timing waterfall needs five
+		 * series at once and the set offered four fixed hues, so two phases had
+		 * been reaching outside it - one to `--primary` and one to `--success`.
+		 * Under the green accent those two land on the same hue (142) three
+		 * points of lightness apart, which is two of five phases rendered the
+		 * same colour. Moss sits in the widest gap in the ring (38 -> 172), 67
+		 * degrees from its nearest neighbour. */
 		--chart-1: 24 90% 46%;
 		--chart-2: 172 66% 38%; /* teal */
 		--chart-3: 258 55% 55%; /* violet */
 		--chart-4: 38 88% 48%; /* amber */
 		--chart-5: 340 72% 50%; /* rose */
+		--chart-6: 105 58% 34%; /* moss - the fifth fixed hue, see below */
 
 		/* HTTP method colors (light).
 		 *
@@ -587,6 +596,7 @@
 		--chart-3: 258 78% 72%; /* violet */
 		--chart-4: 38 90% 60%; /* amber */
 		--chart-5: 340 74% 62%; /* rose */
+		--chart-6: 105 52% 50%; /* moss */
 
 		/* Variable highlight */
 		--variable: 24 95% 58%;
@@ -1115,6 +1125,28 @@
 }
 
 @layer utilities {
+	/*
+	 * A row in a long list that the browser may skip laying out while it is off
+	 * screen.
+	 *
+	 * Console output is unbounded - `script_engine.cpp` pushes every
+	 * `console.log` line into a vector with no cap - so a script with a loop can
+	 * produce a hundred thousand of them, and the user asked for every one. The
+	 * answer is not to cap what they get; it is to stop paying layout and paint
+	 * for rows nobody is looking at.
+	 *
+	 * `contain-intrinsic-size` is the placeholder height a skipped row reports,
+	 * which is what keeps the scrollbar from jumping as rows come into view. The
+	 * `auto` keyword means "remember the real height once measured", so a wrapped
+	 * line settles after its first appearance instead of re-estimating forever.
+	 *
+	 * Chromium-only, which is fine: this ships in Electron.
+	 */
+	.skip-offscreen {
+		content-visibility: auto;
+		contain-intrinsic-size: auto 1.25rem;
+	}
+
 	.font-code {
 		font-family: "JetBrains Mono", "Consolas", "Monaco", monospace;
 	}

@@ -20,7 +20,6 @@
  */
 
 import { useState } from "react";
-import { Terminal } from "lucide-react";
 import {
 	Tabs,
 	TabsContent,
@@ -41,7 +40,7 @@ import {
 	ResponseHeadersPanel,
 	formatSize,
 } from "@/components/shared/response-viewer";
-import { Callout } from "@/components/shared";
+import { Callout, EmptyState } from "@/components/shared";
 import ResponseCookies from "./ResponseCookies";
 import ResponseTimingTab from "./ResponseTimingTab";
 import ConsoleOutput from "./ConsoleOutput";
@@ -99,41 +98,31 @@ export default function ResponseViewer() {
 		);
 	}
 
-	// Which of the four conditional tabs are present on *this* response. The
-	// engine emits `timing`/`rawRequest` on every live execute but omits them
-	// from some restored traces, and `consoleLogs`/`testResults` only when a
-	// script produced them - so the tab set shrinks as you switch responses.
-	const hasTiming = !!response.timing;
-	const hasConsoleLogs = !!response.consoleLogs && response.consoleLogs.length > 0;
-	// A failing pre/post-request script must surface even when it threw before
-	// logging anything - a typo or ReferenceError produces `preScriptError` with
-	// empty `consoleLogs`, so gating the Console tab on logs alone hid the error
-	// behind a normal-looking 200 (issue #111). Show the tab when either exists;
-	// `ConsoleOutput` already renders the error cards above the (empty) log area.
+	/*
+	 * Every tab always renders.
+	 *
+	 * Four of them used to appear only when the response carried the data -
+	 * `timing`, `console`, `tests`, `raw-request` - so the tab set shrank as you
+	 * switched responses. That produced issue #59: `activeTab` is local state that
+	 * survives a response change, so a tab clicked on one response could name a
+	 * trigger the next response no longer drew, leaving the controlled Tabs root
+	 * with nothing to select and a blank pane. It was handled by clamping the
+	 * selection back to `body`.
+	 *
+	 * A constant tab set makes that unrepresentable rather than handled, and the
+	 * clamp is gone with it. It also stops the strip twitching - tabs no longer
+	 * appear and vanish under the pointer between sends - and it gives "did this
+	 * run any tests?" an answer you can go and read, rather than an absence you
+	 * have to notice.
+	 *
+	 * The cost is that four tabs can now be empty, so each says so. Console and
+	 * Cookies already did; Timing, Tests and Raw did not. `RawRequestResponse`'s
+	 * empty state in particular was deleted earlier in this same branch for being
+	 * unreachable - this is what makes it reachable.
+	 */
+	const consoleLogCount = response.consoleLogs?.length ?? 0;
 	const hasScriptError = !!response.preScriptError || !!response.postScriptError;
-	const hasConsole = hasConsoleLogs || hasScriptError;
-	const hasTests = !!response.testResults && response.testResults.length > 0;
-	const hasRaw = !!response.rawRequest;
-
-	// The tabs actually rendered below, in trigger order. Both the triggers and
-	// their panels key off the same `has*` flags, so this list is exactly the
-	// set Radix has to select from.
-	const availableTabs: ResponseTab[] = [
-		"body",
-		"headers",
-		"cookies",
-		...(hasTiming ? (["timing"] as const) : []),
-		...(hasConsole ? (["console"] as const) : []),
-		...(hasTests ? (["tests"] as const) : []),
-		...(hasRaw ? (["raw-request"] as const) : []),
-	];
-
-	// Clamp the selection to a tab that still renders. `activeTab` is local state
-	// that survives a response change, so a tab clicked on one response can name
-	// a trigger the next response no longer draws - leaving the controlled Tabs
-	// root with nothing to select and a blank pane (issue #59). Falling back to
-	// `body`, which is always present, keeps a tab selected and the body shown.
-	const effectiveTab = availableTabs.includes(activeTab) ? activeTab : "body";
+	const testResults = response.testResults ?? [];
 
 	// Client-side error state (status === 0 means no server response)
 	const isClientError = response.status === 0;
@@ -147,6 +136,7 @@ export default function ResponseViewer() {
 					statusText={response.statusText}
 					time={response.time}
 					size={response.size}
+					receivedAt={response.receivedAt}
 					restoredFrom={response.restoredFrom}
 				/>
 				<ClientErrorView
@@ -173,12 +163,13 @@ export default function ResponseViewer() {
 				statusText={response.statusText}
 				time={response.time}
 				size={response.size}
+				receivedAt={response.receivedAt}
 				restoredFrom={response.restoredFrom}
 			/>
 
 			{/* Response Tabs */}
 			<Tabs
-				value={effectiveTab}
+				value={activeTab}
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
@@ -209,53 +200,55 @@ export default function ResponseViewer() {
 						<TabsTrigger value="cookies">
 							<TabLabel>Cookies</TabLabel>
 						</TabsTrigger>
-						{hasTiming && (
-							<TabsTrigger value="timing">
-								<TabLabel>Timing</TabLabel>
-							</TabsTrigger>
-						)}
-						{hasConsole && (
-							<TabsTrigger value="console">
-								<Terminal className="w-3.5 h-3.5" />
-								<TabLabel>Console</TabLabel>
-								{hasConsoleLogs ? (
-									<TabCount value={response.consoleLogs!.length} />
-								) : (
-									// Script error with no logs: flag the failure instead
-									// of a misleading "0" log count (issue #111). A dot
-									// rather than a count, so a future `count="none"`
-									// cannot silently delete the only failure signal.
-									<TabErrorDot />
-								)}
-							</TabsTrigger>
-						)}
-						{hasTests && (
-							<TabsTrigger value="tests">
-								<TabLabel>Tests</TabLabel>
-								{/* A result, not a count - it keeps its chip. */}
+						<TabsTrigger value="timing">
+							<TabLabel>Timing</TabLabel>
+						</TabsTrigger>
+						{/*
+						 * No icon. This was the only one across the fifteen triggers in
+						 * the two strips - the response pane's seven and the request
+						 * builder's eight - so it read as Console being a different
+						 * *kind* of thing rather than as an aid to finding it. What
+						 * actually distinguishes this tab when it matters is the error
+						 * dot below, which the icon sat next to and competed with.
+						 *
+						 * It was also 20px on a strip that had just gained four
+						 * permanent tabs, though that is the smaller reason.
+						 */}
+						<TabsTrigger value="console">
+							<TabLabel>Console</TabLabel>
+							{hasScriptError ? (
+								// A script error that logged nothing must still be flagged
+								// (issue #111). A dot rather than a count, so a future
+								// `count="none"` cannot silently delete the only failure
+								// signal - and it outranks the count, because the failure is
+								// the thing you need to see.
+								<TabErrorDot />
+							) : (
+								<TabCount value={consoleLogCount} />
+							)}
+						</TabsTrigger>
+						<TabsTrigger value="tests">
+							<TabLabel>Tests</TabLabel>
+							{/* A result, not a count - it keeps its chip. No chip at all when
+							    nothing ran, rather than a "0/0" that reads like a result. */}
+							{testResults.length > 0 && (
 								<Badge
 									variant={
-										response.testResults!.every((t) => t.passed)
+										testResults.every((t) => t.passed)
 											? "default"
 											: "destructive"
 									}
 									className="ml-0.5 h-4 px-1 text-[10px]"
 								>
-									{response.testResults!.filter((t) => t.passed).length}/
-									{response.testResults!.length}
+									{testResults.filter((t) => t.passed).length}/
+									{testResults.length}
 								</Badge>
-							</TabsTrigger>
-						)}
-						{hasRaw && (
-							<TabsTrigger value="raw-request">
-								<TabLabel>Raw</TabLabel>
-							</TabsTrigger>
-						)}
+							)}
+						</TabsTrigger>
+						<TabsTrigger value="raw-request">
+							<TabLabel>Raw</TabLabel>
+						</TabsTrigger>
 					</TabsList>
-
-					{/* `response.bodyType` names the download; the history viewer has no
-					    such field and keeps `.txt`. Passed rather than inferred. */}
-					<ResponseActions content={response.body} fileExtension={response.bodyType} />
 				</div>
 
 				{/*
@@ -289,6 +282,27 @@ export default function ResponseViewer() {
 								bodyRaw={response.bodyRaw}
 								headers={response.headers}
 								showModeToggle
+								/*
+								 * Copy and download live *here*, not on the tab row.
+								 *
+								 * They act on the body - `content={response.body}` - and
+								 * always did, so on the tab row they sat above Headers,
+								 * Timing and Raw claiming to act on whatever you were
+								 * looking at while copying something else. Moving them
+								 * beside the Pretty/Raw switch puts them with the thing
+								 * they operate on, and gives the tab strip back the ~64px
+								 * they were taking, which is what let all seven tabs
+								 * render without the strip scrolling.
+								 *
+								 * `response.bodyType` names the download; the history
+								 * viewer has no such field and keeps `.txt`.
+								 */
+								actions={
+									<ResponseActions
+										content={response.body}
+										fileExtension={response.bodyType}
+									/>
+								}
 							/>
 						</div>
 					</div>
@@ -302,35 +316,39 @@ export default function ResponseViewer() {
 				<TabsContent value="cookies" className="mt-0 flex-1 overflow-hidden">
 					<ResponseCookies headers={response.headers} />
 				</TabsContent>
-				{hasTiming && (
-					<TabsContent value="timing" className="mt-0 flex-1 overflow-hidden">
-						<ResponseTimingTab timing={response.timing!} />
-					</TabsContent>
-				)}
-				{hasConsole && (
-					<TabsContent value="console" className="mt-0 flex-1 overflow-hidden">
-						<ConsoleOutput
-							logs={response.consoleLogs || []}
-							errors={{
-								pre: response.preScriptError,
-								post: response.postScriptError,
-							}}
+				<TabsContent value="timing" className="mt-0 flex-1 overflow-hidden">
+					{response.timing ? (
+						<ResponseTimingTab timing={response.timing} />
+					) : (
+						<EmptyState variant="inline" title="No timing recorded" />
+					)}
+				</TabsContent>
+				<TabsContent value="console" className="mt-0 flex-1 overflow-hidden">
+					<ConsoleOutput
+						logs={response.consoleLogs || []}
+						errors={{
+							pre: response.preScriptError,
+							post: response.postScriptError,
+						}}
+					/>
+				</TabsContent>
+				<TabsContent value="tests" className="mt-0 flex-1 overflow-hidden">
+					{testResults.length > 0 ? (
+						<TestResults results={testResults} />
+					) : (
+						<EmptyState
+							variant="inline"
+							title="No tests ran"
+							description="Assertions written in the request's Tests script show up here."
 						/>
-					</TabsContent>
-				)}
-				{hasTests && (
-					<TabsContent value="tests" className="mt-0 flex-1 overflow-hidden">
-						<TestResults results={response.testResults || []} />
-					</TabsContent>
-				)}
-				{hasRaw && (
-					<TabsContent value="raw-request" className="mt-0 flex-1 overflow-hidden">
-						<RawRequestResponse
-							rawRequest={response.rawRequest || ""}
-							response={response}
-						/>
-					</TabsContent>
-				)}
+					)}
+				</TabsContent>
+				<TabsContent value="raw-request" className="mt-0 flex-1 overflow-hidden">
+					<RawRequestResponse
+						rawRequest={response.rawRequest || ""}
+						response={response}
+					/>
+				</TabsContent>
 			</Tabs>
 		</div>
 	);

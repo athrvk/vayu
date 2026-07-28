@@ -13,6 +13,18 @@
  * they render as one continuous timeline track with proportional segments,
  * followed by a precise legend and a Wire · Queue · Total summary.
  *
+ * **Every phase is a fixed categorical hue.** Two were not: TTFB took
+ * `--primary` and Download took `--success`. `--primary` tracks the user's
+ * accent, which the design system forbids for a chart series precisely because
+ * of what happened here - under the green scheme `--primary` is hue 142 and
+ * `--success` is hue 142, three points of lightness apart, so two of the five
+ * phases rendered as the same swatch. Under the default orange, TTFB sat 14
+ * degrees from Connect's amber. `--success` was the second problem on its own
+ * terms: a status token spent on a series that has no status.
+ *
+ * They are `--chart-3` (violet) and `--chart-6` (moss) now. `--chart-6` was
+ * added for this - the set had four fixed hues and this chart needs five.
+ *
  * Mirrors the dashboard TimingWaterfall's visual idiom (same --chart-* tokens),
  * but is driven by a single response's timing object rather than run averages.
  */
@@ -22,6 +34,7 @@ import { formatDuration, formatPhaseDuration } from "@/components/shared/respons
 import { PHASE_TIPS } from "@/components/shared/response-viewer/phase-tips";
 import { Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Eyebrow } from "@/components/ui";
 import type { ResponseTiming } from "../../types";
 
 interface Phase {
@@ -97,14 +110,14 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 			key: "ttfb",
 			label: "TTFB",
 			value: timing.firstByteMs,
-			color: "hsl(var(--primary))",
+			color: "hsl(var(--chart-3))",
 			tip: PHASE_TIPS.ttfb,
 		},
 		{
 			key: "download",
 			label: "Download",
 			value: timing.downloadMs,
-			color: "hsl(var(--success))",
+			color: "hsl(var(--chart-6))",
 			tip: PHASE_TIPS.download,
 		},
 	];
@@ -115,9 +128,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 
 	return (
 		<div className="p-4 overflow-auto h-full">
-			<p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-3">
-				Request timing
-			</p>
+			<Eyebrow className="mb-3">Request timing</Eyebrow>
 
 			{/* Continuous timeline: each phase is a sequential segment of the request. */}
 			<div className="flex h-2.5 w-full overflow-hidden rounded-sm bg-accent">

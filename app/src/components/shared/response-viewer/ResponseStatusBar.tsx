@@ -19,8 +19,10 @@
  * the reason the invisible-divider fix had to be applied to this bar twice.
  */
 
+import { useEffect, useState } from "react";
 import { Clock, FileText, History } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TIMING } from "@/config/timing";
 import { formatRelativeTime } from "@/utils";
 import { formatResponseTime, formatSize } from "./utils";
 import { StatusCodeBadge } from "./StatusCodeBadge";
@@ -32,6 +34,8 @@ export interface ResponseStatusBarProps {
 	time?: number;
 	/** Omitted by callers that have no size. */
 	size?: number;
+	/** ISO time this response arrived. Live sends only. */
+	receivedAt?: string;
 	/**
 	 * Set when this response was rebuilt from a stored run rather than sent just
 	 * now. See the age chip below for why the difference is shown.
@@ -45,9 +49,36 @@ export function ResponseStatusBar({
 	statusText,
 	time,
 	size,
+	receivedAt,
 	restoredFrom,
 	className,
 }: ResponseStatusBarProps) {
+	/*
+	 * A relative time has to be recomputed to stay true. Nothing else in the app
+	 * does this - every other `formatRelativeTime` caller renders once and then
+	 * says "just now" for as long as it stays mounted - and the restored-response
+	 * chip here had the same rot. The response pane is where it matters most,
+	 * because the pane sits open while you keep editing the request beside it.
+	 */
+	const [, tick] = useState(0);
+	const at = receivedAt ?? restoredFrom?.at;
+	useEffect(() => {
+		if (!at) return;
+		const id = setInterval(() => tick((n) => n + 1), TIMING.RELATIVE_TIME_TICK_MS);
+		return () => clearInterval(id);
+	}, [at]);
+
+	const age = at
+		? {
+				at,
+				fromRun: !!restoredFrom,
+				title: restoredFrom
+					? `Restored from a stored run - ${new Date(restoredFrom.at).toLocaleString()}` +
+						(restoredFrom.runId ? `\nRun ${restoredFrom.runId}` : "")
+					: `Received ${new Date(at).toLocaleString()}`,
+			}
+		: null;
+
 	return (
 		/*
 		 * `border-rule`: this bar sits inside the response pane's `surface-card`,
@@ -96,29 +127,33 @@ export function ResponseStatusBar({
 			)}
 
 			{/*
-			 * Response age.
+			 * Response age - for a restored response *and* a live one.
 			 *
-			 * Without it, a response restored from a stored run reads exactly
-			 * like one that just came back, while the request editor beside it
-			 * shows the request as it is now, possibly edited since. The
-			 * relative form is what the History sidebar says about the same run;
-			 * the exact time and the run id go in the tooltip.
+			 * `time` beside it is a duration: how long the exchange took. This is
+			 * a different question, and the one a duration cannot answer - whether
+			 * what you are looking at is the response to the request beside it *as
+			 * it is now*, or to a version of it from twenty minutes and several
+			 * edits ago. A restored response used to be the only case that got an
+			 * answer, which left the more common one - a response you sent, then
+			 * kept editing around - reading as if it were current forever.
+			 *
+			 * The two are labelled apart: "from run" carries the run's identity
+			 * and its id in the tooltip; a live one is just its age.
 			 *
 			 * No `bg-`, so no Badge - see the variant="chip" rule in
-			 * badge-hover.test.tsx. It is text, and it sits at the far end
-			 * rather than among status/time/size, which describe the exchange
-			 * itself.
+			 * badge-hover.test.tsx. It is text, and it sits at the far end rather
+			 * than among status/time/size, which describe the exchange itself.
 			 */}
-			{restoredFrom && (
+			{age && (
 				<div
 					className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground"
-					title={
-						`Restored from a stored run - ${new Date(restoredFrom.at).toLocaleString()}` +
-						(restoredFrom.runId ? `\nRun ${restoredFrom.runId}` : "")
-					}
+					title={age.title}
 				>
-					<History className="h-3 w-3" />
-					<span>from run - {formatRelativeTime(restoredFrom.at)}</span>
+					{age.fromRun ? <History className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+					<span>
+						{age.fromRun ? "from run - " : ""}
+						{formatRelativeTime(age.at)}
+					</span>
 				</div>
 			)}
 		</div>
