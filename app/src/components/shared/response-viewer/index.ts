@@ -14,7 +14,14 @@
 // Main exports
 export { default as UnifiedResponseViewer } from "./UnifiedResponseViewer";
 export { default as ResponseBody } from "./ResponseBody";
-export { default as HeadersViewer, CompactHeadersViewer } from "./HeadersViewer";
+// One file, three variants: the collapsible table, the compact slab, and the
+// Headers *tab* that stacks two tables with an empty state.
+export {
+	default as HeadersViewer,
+	CompactHeadersViewer,
+	ResponseHeadersPanel,
+} from "./HeadersViewer";
+export type { ResponseHeadersPanelProps } from "./HeadersViewer";
 export { StatusCodeBadge } from "./StatusCodeBadge";
 export type { StatusCodeBadgeProps } from "./StatusCodeBadge";
 
@@ -23,10 +30,8 @@ export type { StatusCodeBadgeProps } from "./StatusCodeBadge";
 // parts that were genuinely identical, not an attempt to merge the shells.
 export { ResponseStatusBar } from "./ResponseStatusBar";
 export { ResponseActions } from "./ResponseActions";
-export { ResponseHeadersPanel } from "./ResponseHeadersPanel";
 export type { ResponseStatusBarProps } from "./ResponseStatusBar";
 export type { ResponseActionsProps } from "./ResponseActions";
-export type { ResponseHeadersPanelProps } from "./ResponseHeadersPanel";
 
 // The five network phases, as one descriptor list. Five components render the
 // same DNS -> Connect -> TLS -> TTFB -> Download breakdown; adding a phase used

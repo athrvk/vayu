@@ -280,11 +280,10 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 
 - `UnifiedResponseViewer.tsx` - top-level response view for stored runs
 - `ResponseBody.tsx` - body rendering (JSON/text/HTML/XML)
-- `HeadersViewer.tsx` - response headers (plus `CompactHeadersViewer`)
+- `HeadersViewer.tsx` - the headers family, three variants in one file: the collapsible table, `CompactHeadersViewer` (same content on a sunken slab, for panes with no room for a table), and `ResponseHeadersPanel` (the Headers *tab* - request collapsed above response open, with the empty state `HeadersViewer` alone cannot give)
 - `StatusCodeBadge.tsx` - the status chip
 - `ResponseStatusBar.tsx` - status chip + elapsed time + payload size
 - `ResponseActions.tsx` - the copy/download pair
-- `ResponseHeadersPanel.tsx` - the Headers tab body
 - `tab-trigger.ts` - `RESPONSE_TAB_TRIGGER`, the underline-on-active class
 - `phase-tips.ts` - `PHASE_TIPS`, the five per-phase timing tooltips (DNS -> Connect -> TLS -> TTFB -> Download), shared so every renderer of those numbers reads one string
 - `timing-phases.ts` - `TIMING_PHASES`, the same five phases as one descriptor list (label, hue, tooltip, and the trace/average field each reads), plus the `phasesFromTrace` / `phasesFromAverages` selectors
