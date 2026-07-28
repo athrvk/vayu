@@ -32,17 +32,11 @@ import OAuth2LoadTestGuard from "../OAuth2LoadTestGuard";
 import { validateRampDuration, validateStartConcurrency } from "../../utils/loadTestValidation";
 import { LOAD_TEST_DEFAULTS, LOAD_TEST_LIMITS } from "@/constants/load-test";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
-import { HTTP_VERSIONS, isHttpVersion, type HttpVersion } from "@/constants/request";
 import {
 	Button,
 	Input,
 	Label,
 	Switch,
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
@@ -169,15 +163,6 @@ export interface LoadTestConfigDialogProps {
 	hasPreRequestScript: boolean;
 	/** Variable-resolved OAuth 2.0 config, when the effective auth is oauth2. */
 	oauth2Config?: OAuth2Config;
-	/**
-	 * The request's own protocol, snapshotted when the dialog opens - pre-fills
-	 * the picker below. There is no "inherit" state: a load test run is a
-	 * snapshot itself, so the concrete value is all there is to show. Changing
-	 * the picker overrides the protocol for this run only; the confirmed value
-	 * always rides out through `onStart`, and the saved request is never
-	 * touched (see `LoadTestConfig.httpVersion`).
-	 */
-	httpVersion: HttpVersion;
 }
 
 export default function LoadTestConfigDialog({
@@ -186,7 +171,6 @@ export default function LoadTestConfigDialog({
 	isStarting,
 	hasPreRequestScript,
 	oauth2Config,
-	httpVersion,
 }: LoadTestConfigDialogProps) {
 	const saved = loadSavedConfig();
 
@@ -216,18 +200,8 @@ export default function LoadTestConfigDialog({
 		saved.saveTimingBreakdown ?? LOAD_TEST_DEFAULTS.SAVE_TIMING_BREAKDOWN
 	);
 	const [comment, setComment] = useState(""); // Per-run: never restored.
-	// Pre-filled from the request's own protocol, not from `loadSavedConfig` -
-	// unlike the fields above, this is not a "your last run" memo. Restoring it
-	// across requests would silently override a request that never asked for
-	// one, which is exactly the write-back this control must not do in reverse.
-	const [protocol, setProtocol] = useState<HttpVersion>(httpVersion);
 	const [oauthGated, setOauthGated] = useState(false);
 	const [recordingOpen, setRecordingOpen] = useState(false);
-
-	const handleProtocolChange = (value: string) => {
-		if (!isHttpVersion(value)) return;
-		setProtocol(value);
-	};
 
 	/**
 	 * Duration is meaningless in `iterations`: the engine stops on
@@ -310,11 +284,6 @@ export default function LoadTestConfigDialog({
 
 		const config: LoadTestConfig = {
 			mode,
-			// Always sent, even when it equals the request's own value - same
-			// rule as `followRedirects`/`httpVersion` on the execute payload
-			// (see `index.tsx`): an omitted override lets the engine-side
-			// default win silently, which is not this dialog's call to make.
-			httpVersion: protocol,
 			data_sample_rate: sampleRate,
 			slow_threshold_ms: slowThreshold,
 			save_timing_breakdown: saveTimingBreakdown,
@@ -364,43 +333,6 @@ export default function LoadTestConfigDialog({
 					<div className="space-y-1.5">
 						<Label className="text-xs">Load profile</Label>
 						<ProfilePicker value={mode} onChange={setMode} disabled={isStarting} />
-					</div>
-
-					{/*
-					 * Per-run protocol override - the third of the "three tiers"
-					 * (global default in Settings, per-request in the request's own
-					 * Settings tab, per-run here). Pre-filled from the request, not
-					 * an "inherit" state - see the `httpVersion` prop doc above.
-					 */}
-					<div className="flex items-center justify-between gap-3">
-						<div className="space-y-0.5">
-							<Label htmlFor="lt-protocol" className="text-xs">
-								Protocol override
-							</Label>
-							<p className="text-[11px] text-muted-foreground">
-								Overrides this request&apos;s protocol for this run only.
-							</p>
-						</div>
-						<Select
-							value={protocol}
-							onValueChange={handleProtocolChange}
-							disabled={isStarting}
-						>
-							<SelectTrigger
-								id="lt-protocol"
-								className="h-9 w-36 text-sm"
-								aria-label="Protocol override"
-							>
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								{HTTP_VERSIONS.map((version) => (
-									<SelectItem key={version.value} value={version.value}>
-										{version.label}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
 					</div>
 
 					{/* Only the fields this profile actually uses. */}

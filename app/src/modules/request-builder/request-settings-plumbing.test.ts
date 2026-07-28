@@ -34,14 +34,13 @@
  * `isRedirectPolicyNonDefault` was renamed to `isRequestSettingsNonDefault`: a
  * name that only mentions redirects is how the next field misses this file.
  *
- * `httpVersion` diverges from the other two at the load-test hop only (Task
- * 12): `LoadTestConfigDialog` pre-fills its picker from the request's own
- * protocol but lets the user override it for that run alone, so the
- * load-test payload must read the confirmed `LoadTestConfig`, not
- * `pendingLoadTestRequest` directly - reading the request there would
- * silently discard the override and is exactly the bug this file exists to
- * catch. `followRedirects`/`maxRedirects` have no such override yet, so they
- * keep the original shape.
+ * All three fields have the same shape at every hop, deliberately. A revision
+ * of this branch gave `httpVersion` a per-run picker in the load test dialog,
+ * so the load-test hop read the confirmed `LoadTestConfig` instead of the
+ * request. That was reversed: one control in the request builder's Settings
+ * tab governs Send and load test alike, which is what `followRedirects` and
+ * `maxRedirects` already did. A second control for one of the three would have
+ * made that tab mean something different for that field alone.
  */
 
 import { describe, it, expect } from "vitest";
@@ -80,27 +79,30 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		});
 	}
 
-	for (const field of ["followRedirects", "maxRedirects"] as const) {
+	for (const field of ["followRedirects", "maxRedirects", "httpVersion"] as const) {
 		it(`sends ${field} with the load test`, () => {
 			expect(hops(source ?? "", "pendingLoadTestRequest", field)).toBe(1);
 		});
 	}
 
-	it("sends the load test's per-run httpVersion override, not the saved request's protocol directly", () => {
-		expect(hops(source ?? "", "config", "httpVersion")).toBe(1);
-		expect(hops(source ?? "", "pendingLoadTestRequest", "httpVersion")).toBe(0);
+	it("takes the load test's protocol from the request, never from the dialog's config", () => {
+		// The load dialog decides load shape (rps, duration, concurrency), not
+		// request semantics. A `config.httpVersion` here would mean a second
+		// control had crept back in and the Settings tab no longer governs both
+		// modes.
+		expect(hops(source ?? "", "config", "httpVersion")).toBe(0);
 	});
 
 	/**
-	 * The data-loss case Task 12 calls out explicitly: confirming a load test
-	 * with an overridden protocol must never persist that override onto the
-	 * saved request - a user trying one run at HTTP/1.1 must not permanently
-	 * downgrade their request. `updateRequestMutation` is the only path that
-	 * writes a request (see `handleSave` above, which is the sole caller this
-	 * scan permits), so its absence from `handleConfirmLoadTest`'s body is what
-	 * proves the override stays run-scoped.
+	 * Starting a load test must never write to the saved request. There is no
+	 * per-run protocol override any more, so this is no longer about protecting
+	 * one from leaking - but `handleConfirmLoadTest` still reads request state
+	 * to build its payload, and the cheapest way for a future edit to go wrong
+	 * is to persist something while it is in there. `updateRequestMutation` is
+	 * the only path that writes a request (`handleSave` is its sole caller this
+	 * scan permits), so its absence from this body is the guard.
 	 */
-	it("confirming a load test never writes the per-run override back to the request", () => {
+	it("confirming a load test never writes anything back to the request", () => {
 		const src = source ?? "";
 		const start = src.indexOf("const handleConfirmLoadTest");
 		const end = src.indexOf("const handleCloseLoadTestDialog");
@@ -112,7 +114,7 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		const body = src.slice(start, end);
 		expect(body.length).toBeGreaterThan(500);
 
-		expect(body).toContain("httpVersion: config.httpVersion");
+		expect(body).toContain("httpVersion: pendingLoadTestRequest.httpVersion");
 		expect(body).not.toContain("updateRequestMutation");
 	});
 });

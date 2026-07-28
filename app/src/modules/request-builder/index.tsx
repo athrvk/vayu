@@ -36,7 +36,6 @@ import { EmptyState, ErrorState } from "@/components/shared";
 import { Button } from "@/components/ui";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
-import { DEFAULT_HTTP_VERSION } from "@/constants/request";
 import { apiService, loadTestService } from "@/services";
 import type { RequestState, ResponseState } from "./types";
 import { resolveAuthForSend } from "./utils/auth-resolution";
@@ -441,13 +440,11 @@ export default function RequestBuilder() {
 					// load test measures the same hops the user sees.
 					followRedirects: pendingLoadTestRequest.followRedirects,
 					maxRedirects: pendingLoadTestRequest.maxRedirects,
-					// Per-run override (Task 12, the third of the "three tiers"):
-					// `LoadTestConfigDialog` pre-fills its picker from the
-					// request's own protocol but the user may change it for this
-					// run only, so the source of truth here is the confirmed
-					// config, not `pendingLoadTestRequest` - reading the request
-					// directly would silently discard the override.
-					httpVersion: config.httpVersion,
+					// Same protocol the single-request Send uses, and always
+					// sent for the same reason - see the execute payload above.
+					// One control in the Settings tab governs both modes; the
+					// load dialog decides load shape, not request semantics.
+					httpVersion: pendingLoadTestRequest.httpVersion,
 					// Load test config
 					mode: config.mode,
 					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,
@@ -605,7 +602,6 @@ export default function RequestBuilder() {
 					isStarting={isStartingLoadTest}
 					hasPreRequestScript={!!pendingLoadTestRequest?.preRequestScript?.trim()}
 					oauth2Config={pendingOAuth2Config ?? undefined}
-					httpVersion={pendingLoadTestRequest?.httpVersion ?? DEFAULT_HTTP_VERSION}
 				/>
 			)}
 		</>
