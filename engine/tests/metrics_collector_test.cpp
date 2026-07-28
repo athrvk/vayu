@@ -606,3 +606,57 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsDerivesStatusClasses) {
     EXPECT_EQ (stats["status4xx"].get<size_t> (), 2u);
     EXPECT_EQ (stats["status5xx"].get<size_t> (), 1u);
 }
+
+// ============================================================================
+// Pre-allocation guard
+// ============================================================================
+
+// `expected_requests` is duration x RPS x 1.2 and has no ceiling of its own,
+// while the errors reserve is `expected / 20` whenever `max_errors` is 0 - the
+// default, and nothing overrides it. A day at a high rate therefore asked for
+// billions of ResultRecords, which throws from this constructor - inside
+// RunContext's, which the run route calls *after* writing the run row, so the
+// caller got an opaque 500 and the row was stranded `pending`. Constructing at
+// all is most of the assertion here.
+TEST (MetricsCollectorReserveGuard, HugeExpectedRequestsDoesNotThrow) {
+    MetricsCollectorConfig config;
+    // 24h at 1M RPS with the 20% buffer - the top of what the load dialog's
+    // ceilings can now be raised to.
+    config.expected_requests    = 103'680'000'000ULL;
+    config.store_success_traces = true;
+    config.max_success_results  = 0; // take the derived branch, not the default cap
+    config.success_sample_rate  = 1; // 100% sampling: the largest derived reserve
+
+    std::unique_ptr<MetricsCollector> collector;
+    ASSERT_NO_THROW (
+    collector = std::make_unique<MetricsCollector> ("run_huge_expected", config));
+
+    EXPECT_LE (collector->errors ().capacity (),
+    vayu::core::constants::metrics_collector::MAX_RESERVE_RECORDS);
+}
+
+// The cap must not become a floor: an ordinary run still gets the exact
+// pre-allocation it asked for, which is the point of reserving at all.
+TEST (MetricsCollectorReserveGuard, OrdinaryRunKeepsItsFullReserve) {
+    MetricsCollectorConfig config;
+    config.expected_requests = 200000; // 60s at ~2.8k RPS
+    MetricsCollector collector ("run_ordinary", config);
+
+    // expected / 20, uncapped because it is far below the ceiling.
+    EXPECT_GE (collector.errors ().capacity (), 10000u);
+    EXPECT_LT (collector.errors ().capacity (),
+    vayu::core::constants::metrics_collector::MAX_RESERVE_RECORDS);
+}
+
+// Capping the *reserve* must not cap what a run records - the vector grows.
+TEST (MetricsCollectorReserveGuard, RecordingIsUnaffectedByTheCap) {
+    MetricsCollectorConfig config;
+    config.expected_requests = 103'680'000'000ULL;
+    MetricsCollector collector ("run_capped_recording", config);
+
+    for (int i = 0; i < 50; ++i) {
+        collector.record_error (vayu::ErrorCode::Timeout, "t");
+    }
+    EXPECT_EQ (collector.total_errors (), 50u);
+    EXPECT_EQ (collector.errors ().size (), 50u);
+}
