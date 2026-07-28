@@ -20,7 +20,6 @@
  */
 
 import { useState } from "react";
-import { Terminal } from "lucide-react";
 import {
 	Tabs,
 	TabsContent,
@@ -204,8 +203,18 @@ export default function ResponseViewer() {
 						<TabsTrigger value="timing">
 							<TabLabel>Timing</TabLabel>
 						</TabsTrigger>
+						{/*
+						 * No icon. This was the only one across the fifteen triggers in
+						 * the two strips - the response pane's seven and the request
+						 * builder's eight - so it read as Console being a different
+						 * *kind* of thing rather than as an aid to finding it. What
+						 * actually distinguishes this tab when it matters is the error
+						 * dot below, which the icon sat next to and competed with.
+						 *
+						 * It was also 20px on a strip that had just gained four
+						 * permanent tabs, though that is the smaller reason.
+						 */}
 						<TabsTrigger value="console">
-							<Terminal className="w-3.5 h-3.5" />
 							<TabLabel>Console</TabLabel>
 							{hasScriptError ? (
 								// A script error that logged nothing must still be flagged

@@ -182,3 +182,33 @@ describe("the response tab set", () => {
 		expect(screen.getByText(/no timing recorded/i)).toBeTruthy();
 	});
 });
+
+/**
+ * No tab trigger carries an icon.
+ *
+ * Console had one - the only icon across the fifteen triggers in the two strips,
+ * this pane's seven and the request builder's eight. One decorated tab out of
+ * fifteen reads as that tab being a different *kind* of thing rather than as an
+ * aid to finding it, and it sat directly beside the error dot that actually
+ * distinguishes Console when it matters.
+ *
+ * Asserted by rendering rather than scanning: an icon arrives as a component, and
+ * a source scan for `lucide` would flag the tab *panels*, which use icons
+ * legitimately.
+ */
+describe("icons in the tab strip", () => {
+	it("has none, so no tab reads as a different kind of thing", () => {
+		state.response = fullResponse();
+		const { container } = renderViewer();
+
+		const triggers = Array.from(
+			container.querySelectorAll<HTMLElement>('[data-slot="tabs-trigger"]')
+		);
+		expect(triggers.length).toBeGreaterThan(5);
+
+		const decorated = triggers
+			.filter((t) => t.querySelector("svg"))
+			.map((t) => t.textContent?.trim());
+		expect(decorated).toEqual([]);
+	});
+});
