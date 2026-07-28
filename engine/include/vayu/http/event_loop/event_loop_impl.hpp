@@ -8,6 +8,7 @@
  */
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <vector>
 
@@ -48,7 +49,8 @@ class EventLoopImpl {
     ~EventLoopImpl ();
 
     void start ();
-    void stop (bool wait_for_pending);
+    void stop (bool wait_for_pending,
+    std::chrono::milliseconds drain_timeout = std::chrono::milliseconds::zero ());
 
     size_t submit (const Request& request, RequestCallback callback, ProgressCallback progress);
     RequestHandle submit_async (const Request& request);

@@ -118,4 +118,23 @@ TEST_F (GlobalsRouteTest, SaveReplacesTheWholeSet) {
     EXPECT_EQ (stored["b"], "2");
 }
 
+// Issue #133: the null guard removed one bad *value*; this removes the bad
+// *shape*. `{"variables": 42}` used to store `42` - JSON that parses but is not
+// an object, so `GET /globals` fell back to `{}` and the globals vanished
+// exactly as they did for the `null` case.
+TEST_F (GlobalsRouteTest, WrongShapeVariablesIsRejected) {
+    save_globals_response (*db_, json{ { "variables", { { "token", "abc" } } } });
+    const std::string before = stored_variables ();
+
+    for (const json& bad :
+    { json (42), json ("token"), json::array ({ 1, 2 }), json (true) }) {
+        auto [status, body] = save_globals_response (*db_, json{ { "variables", bad } });
+        EXPECT_EQ (status, 400) << "variables = " << bad.dump ();
+        EXPECT_NE (body["error"].get<std::string> ().find ("variables"), std::string::npos);
+    }
+
+    EXPECT_EQ (stored_variables (), before)
+    << "a rejected write must not reach the column";
+}
+
 } // namespace

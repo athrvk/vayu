@@ -80,16 +80,42 @@ describe("console output", () => {
 		expect(square.map((el) => el.className)).toEqual([]);
 	});
 
-	it("does not outline the log slabs with a border that cannot be seen", () => {
+	/*
+	 * This used to assert the log slabs carried *no* border, and that was right
+	 * at the time: the measurement in `ConsoleOutput`'s docblock shows every
+	 * border token failing on `--muted` in one theme or the other, so the slabs
+	 * went bare rather than wrong.
+	 *
+	 * `surface-sunken` is the answer that did not exist then. It is not a token
+	 * but an alpha of `--foreground`, which flips with the theme and lands on
+	 * 1.356 light / 1.343 dark. So the outline is back, and what is pinned now is
+	 * the pair - the surface *and* the rule that reads on it.
+	 */
+	it("outlines the log slabs through the surface contract, not a border token", () => {
 		const { container } = rendered();
 		const slabs = Array.from(container.querySelectorAll<HTMLElement>("*")).filter((el) =>
-			/\bbg-muted\b/.test(el.className)
+			/\bsurface-sunken\b/.test(el.className)
 		);
 
 		expect(slabs.length).toBe(2); // one per script source
 		for (const slab of slabs) {
+			expect(slab.className).toMatch(/\bborder-rule\b/);
+			// The tokens the measurement ruled out. `border-rule` under no
+			// declared surface would silently fall back to the first of them.
 			expect(slab.className).not.toMatch(/\bborder-border(-strong)?\b/);
+			expect(slab.className).not.toMatch(/\bborder-input\b/);
 		}
+	});
+
+	it("leaves no bare bg-muted slab, which would have no rule to inherit", () => {
+		// The mirror: a slab that keeps `bg-muted` instead of declaring the
+		// surface gets the background but not the `--rule`, so a `border-rule`
+		// on it resolves to the invisible default.
+		const { container } = rendered();
+		const bare = Array.from(container.querySelectorAll<HTMLElement>("*")).filter(
+			(el) => /\bbg-muted\b/.test(el.className) && !/\bsurface-sunken\b/.test(el.className)
+		);
+		expect(bare.map((el) => el.className)).toEqual([]);
 	});
 
 	it("keeps the error cards' border, which has hue and does read", () => {

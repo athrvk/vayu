@@ -82,6 +82,17 @@ restart needed despite the "Requires Restart" label on some):
   causes congestion collapse (in-flight balloons to tens of thousands, multi-second
   queue latency, throughput *halves*). Bound it to **~256–500** for clean,
   low-latency saturation. Closed-loop constant-concurrency avoids the issue entirely.
+  Bounding it does not hide the demand: requests that come due while the cap is
+  reached are counted as **dropped**, so a run that could not keep up says so
+  instead of running past its `duration` to catch up.
+
+**How `constant_rps` paces.** Open-loop, and time-bound rather than quota-bound:
+each tick accrues `targetRps × elapsed` and dispatches the whole requests owed,
+carrying the fraction to the next tick. Rate fidelity therefore does not depend
+on the tick length (1ms above 1000 RPS, the request interval below it) - timer
+jitter is corrected on the following tick, and a rate like 1500 RPS is delivered
+as asked rather than floored to the nearest 1000. Comparing against wrk/vegeta
+at a fixed rate, `sent + dropped` should equal `targetRps × duration`.
 - `eventLoopMaxConcurrent` / `eventLoopMaxPerHost` -
   secondary; effects are within run-to-run noise once the above are set.
 

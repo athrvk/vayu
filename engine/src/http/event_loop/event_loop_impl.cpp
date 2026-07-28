@@ -67,14 +67,16 @@ void EventLoopImpl::start () {
     }
 }
 
-void EventLoopImpl::stop (bool wait_for_pending) {
+void EventLoopImpl::stop (bool wait_for_pending, std::chrono::milliseconds drain_timeout) {
     if (!running) {
         return;
     }
 
-    // Stop all workers
+    // Stop all workers. The deadline is computed per worker rather than shared:
+    // workers stop sequentially, so a shared deadline would give the last
+    // worker in the vector almost none of the budget the caller asked for.
     for (auto& worker : workers) {
-        worker->stop (wait_for_pending);
+        worker->stop (wait_for_pending, drain_timeout);
     }
 
     running = false;

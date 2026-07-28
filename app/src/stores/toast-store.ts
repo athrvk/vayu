@@ -32,16 +32,18 @@
  * ruled out was a library that ships its own stylesheet, which is still the
  * reason `sonner` was not adopted.
  *
- * What is left is the two policies the primitive has no opinion about: dedup
- * and a cap. The values themselves are not here - the delays live in
- * `config/timing.ts` and the cap in `constants/toast.ts`, so this file holds
- * behaviour rather than configuration.
+ * What is left is the policies the primitive has no opinion about: dedup, a
+ * cap, a severity floor and a duration scale. The values themselves are not
+ * here - the delays live in `config/timing.ts` and everything user-configurable
+ * in `constants/toast.ts`, read off the client-settings store at enqueue - so
+ * this file still holds behaviour rather than configuration.
  */
 
 import { create } from "zustand";
 
 import { TIMING } from "@/config/timing";
-import { MAX_TOASTS } from "@/constants/toast";
+import { passesSeverityFloor, scaledDuration } from "@/constants/toast";
+import { useClientSettingsStore } from "./client-settings-store";
 
 export type ToastVariant = "info" | "success" | "warning" | "error";
 
@@ -89,13 +91,41 @@ export const useToastStore = create<ToastState>((set, get) => ({
 		const opts: ToastOptions =
 			typeof input === "string" ? { message: input, variant: variant ?? "info" } : input;
 
+		// Named apart from the `variant` parameter above, which is only the
+		// shorthand overload's second argument and is already folded into `opts`.
+		const resolvedVariant = opts.variant ?? "info";
+
+		/*
+		 * Read, not subscribed. `showToast` is called from services, query
+		 * callbacks and event handlers as often as from components, so there is no
+		 * hook to hang a subscription on - and the preference only has to be right
+		 * at the moment the toast is created.
+		 */
+		const prefs = useClientSettingsStore.getState().notifications;
+
+		/*
+		 * Below the floor: never queued, but still handed back an id. Callers keep
+		 * the id to dismiss a toast early, and that has to stay a safe no-op
+		 * rather than something every call site must guard - muting a
+		 * notification should not become a crash where it was raised.
+		 */
+		if (!passesSeverityFloor(resolvedVariant, prefs.minSeverity)) return crypto.randomUUID();
+
 		const resolved: Toast = {
 			id: crypto.randomUUID(),
 			...(opts.title ? { title: opts.title } : {}),
 			message: opts.message,
-			variant: opts.variant ?? "info",
+			variant: resolvedVariant,
 			...(opts.action ? { action: opts.action } : {}),
-			duration: opts.duration ?? TIMING.TOAST_DURATION_MS[opts.variant ?? "info"],
+			/*
+			 * An explicit duration wins: a caller that names one means it. The
+			 * scale otherwise multiplies the variant's tuned value rather than
+			 * replacing it, so an error still outlasts a confirmation at every
+			 * setting.
+			 */
+			duration:
+				opts.duration ??
+				scaledDuration(TIMING.TOAST_DURATION_MS[resolvedVariant], prefs.durationScale),
 			open: true,
 		};
 
@@ -111,7 +141,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
 			(t) => !(t.message === resolved.message && t.variant === resolved.variant)
 		);
 
-		set({ toasts: [...withoutDuplicate, resolved].slice(-MAX_TOASTS) });
+		set({ toasts: [...withoutDuplicate, resolved].slice(-prefs.maxVisible) });
 		return resolved.id;
 	},
 

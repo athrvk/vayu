@@ -65,7 +65,7 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 	}
 
 	// Loopback: open the system browser and poll the engine's listener result.
-	await api.oauthOpenExternal(started.authorizeUrl);
+	await api.openExternalUrl(started.authorizeUrl);
 
 	const deadline = Date.now() + POLL_TIMEOUT_MS;
 	for (;;) {
