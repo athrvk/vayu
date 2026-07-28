@@ -11,21 +11,26 @@
  * Internal layout component that uses ResizablePanelGroup for the vertical split between
  * request editor (left) and response viewer (right).
  *
- * Also handles keyboard shortcuts (Ctrl+Enter / Cmd+Enter) for sending requests.
+ * Also handles the send shortcuts (Cmd/Ctrl+Enter, and Cmd/Ctrl+Shift+Enter for
+ * a load test).
+ *
+ * The description no longer has a band of its own between the URL bar and the
+ * tabs - it is the first request tab now. See `RequestTabs/panels/InfoPanel`.
  */
 
 import { useCallback, useEffect, useRef } from "react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui";
 import { useLayoutStore } from "@/stores";
 import { useRequestBuilderContext } from "../context";
+import { SEND_CHORD, LOAD_TEST_CHORD, matchesChord } from "@/constants/shortcuts";
 import UrlBar from "./UrlBar";
-import RequestDescription from "./RequestDescription";
 import RequestTabs from "./RequestTabs";
 import ResponseAnnouncer from "./ResponseAnnouncer";
 import ResponseViewer from "./ResponseViewer";
 
 export default function RequestBuilderLayout() {
-	const { request, isExecuting, executeRequest } = useRequestBuilderContext();
+	const { request, isExecuting, executeRequest, startLoadTest, canStartLoadTest } =
+		useRequestBuilderContext();
 
 	const { requestSplitRatio, setRequestSplitRatio } = useLayoutStore();
 
@@ -38,34 +43,53 @@ export default function RequestBuilderLayout() {
 		[setRequestSplitRatio]
 	);
 
-	// Keyboard shortcut handler: Ctrl+Enter (Windows/Linux) or Cmd+Enter (Mac)
+	/*
+	 * Send and Load Test from the keyboard.
+	 *
+	 * Both chords live in `constants/shortcuts.ts` so the buttons that advertise
+	 * them and the handler that fires them read the same definition. `mod+Enter`
+	 * sends; `mod+shift+Enter` starts a load test.
+	 *
+	 * `matchesChord` compares `shift` strictly rather than ignoring it. Without
+	 * that, `mod+shift+Enter` also satisfies Send's `mod+Enter` and both fire -
+	 * the one failure a modifier-distinguished pair must not have.
+	 *
+	 * The editor exclusions are Send's original ones, and they apply to both:
+	 * a plain input (the URL) should still send, but a textarea, a Monaco editor
+	 * or a contenteditable owns Enter for its own purposes.
+	 */
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
-			// Check for Ctrl+Enter (Windows/Linux) or Cmd+Enter (Mac)
-			const isModifierPressed = event.ctrlKey || event.metaKey;
-			const isEnterPressed = event.key === "Enter";
+			const isSend = matchesChord(event, SEND_CHORD);
+			const isLoadTest = matchesChord(event, LOAD_TEST_CHORD);
+			if (!isSend && !isLoadTest) return;
 
-			if (isModifierPressed && isEnterPressed) {
-				const target = event.target as HTMLElement;
+			const target = event.target as HTMLElement;
+			const isTextarea = target.tagName === "TEXTAREA";
+			const isContentEditable =
+				target.isContentEditable || target.closest('[contenteditable="true"]') !== null;
+			// Monaco editor creates elements with class 'monaco-editor'
+			const isMonacoEditor = target.closest(".monaco-editor") !== null;
+			if (isTextarea || isContentEditable || isMonacoEditor) return;
 
-				// Allow shortcut in regular input fields (like URL input)
-				// But prevent it in textareas, Monaco editors, and contenteditable elements
-				const isTextarea = target.tagName === "TEXTAREA";
-				const isContentEditable =
-					target.isContentEditable || target.closest('[contenteditable="true"]') !== null;
-				// Monaco editor creates elements with class 'monaco-editor'
-				const isMonacoEditor = target.closest(".monaco-editor") !== null;
+			// Don't trigger if the request is already executing or URL is empty
+			if (isExecuting || request.url.trim().length === 0) return;
 
-				// Don't trigger if the request is already executing or URL is empty
-				const canExecute = !isExecuting && request.url.trim().length > 0;
-
-				// Only prevent if we're in a textarea, Monaco editor, or contenteditable
-				// Regular inputs (like URL) should allow the shortcut
-				if (canExecute && !isTextarea && !isContentEditable && !isMonacoEditor) {
-					event.preventDefault();
-					executeRequest();
-				}
+			if (isSend) {
+				event.preventDefault();
+				executeRequest();
+				return;
 			}
+			/*
+			 * The same gate the Load Test button honours. A detached copy of a
+			 * past design run is mounted without an `onStartLoadTest` handler, so
+			 * the button is hidden entirely - and a shortcut that still fired
+			 * would be an action with no visible affordance, on the one screen
+			 * where it is deliberately unavailable.
+			 */
+			if (!canStartLoadTest) return;
+			event.preventDefault();
+			startLoadTest();
 		};
 
 		window.addEventListener("keydown", handleKeyDown);
@@ -73,7 +97,7 @@ export default function RequestBuilderLayout() {
 		return () => {
 			window.removeEventListener("keydown", handleKeyDown);
 		};
-	}, [request.url, isExecuting, executeRequest]);
+	}, [request.url, isExecuting, executeRequest, startLoadTest, canStartLoadTest]);
 
 	return (
 		<div className="h-full flex flex-col">
@@ -84,11 +108,9 @@ export default function RequestBuilderLayout() {
 			 */}
 			<ResponseAnnouncer />
 
-			{/* URL Bar - Always visible at top */}
+			{/* URL Bar - the whole header now. The description used to draw a
+			    second band here, permanently, whether or not one existed. */}
 			<UrlBar />
-
-			{/* Description - collapsible row between URL bar and tabs */}
-			<RequestDescription />
 
 			{/* Main content area with resizable panels */}
 			<ResizablePanelGroup

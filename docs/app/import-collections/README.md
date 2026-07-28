@@ -13,6 +13,7 @@ are detected, parsed into Vayu's internal draft model, and persisted.
 | Format | Module | Detection (summary) | Doc |
 |---|---|---|---|
 | Postman Collection v2.1 / v2.0 | `postman.ts` | `info.schema` contains `v2.1.0` / `v2.0.0` (or `info`+`item` with no schema) | [postman.md](./postman.md) |
+| Postman Environment / Globals | `postman-environment.ts` | `_postman_variable_scope` is `"environment"` or `"globals"` && `values` is an array | [postman-environment.md](./postman-environment.md) |
 | Insomnia Export v4 | `insomnia-v4.ts` | `_type === "export"` && `__export_format === 4` | [insomnia-v4.md](./insomnia-v4.md) |
 | OpenAPI 3.0 | `openapi-v3.ts` | `openapi` starts with `3.` | [openapi-v3.md](./openapi-v3.md) |
 | OpenAPI 2.0 (Swagger) | `openapi-v2.ts` | `swagger === "2.0"` | [openapi-v2.md](./openapi-v2.md) |
@@ -38,7 +39,7 @@ raw string ──▶ parseImport() ──▶ assignIds() ──▶ ImportOrchest
 1. **`parseRaw`** - `JSON.parse(raw)`, falling back to `yaml.load(raw)` on JSON failure.
    Malformed YAML throws and propagates as a parse error.
 2. Runs each parser's `detect()` in a fixed **most-specific-first** order:
-   `PostmanV21 → PostmanV20 → InsomniaV4 → OpenApiV3 → OpenApiV2`.
+   `PostmanV21 → PostmanV20 → PostmanEnvironment → InsomniaV4 → OpenApiV3 → OpenApiV2`.
    The first parser whose `detect()` returns `true` gets to `parse()`.
 3. No match → throws `UnrecognisedFormatError`.
 

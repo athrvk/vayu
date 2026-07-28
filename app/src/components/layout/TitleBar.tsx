@@ -8,7 +8,10 @@
 /**
  * Custom TitleBar Component
  *
- * h-[38px] - must match TITLEBAR_HEIGHT in electron/constants.ts
+ * Height comes from --titlebar-height, not a bare h-[38px], because the toast
+ * viewport subtracts it when the stack is anchored to the top of the window.
+ * The value must still match TITLEBAR_HEIGHT in electron/constants.ts, which
+ * sizes the real window frame and cannot read a CSS variable.
  * macOS: traffic lights inset (~80px), no HTML controls
  * Windows: native overlay handles controls - no HTML buttons
  * Linux: custom HTML min/max/close buttons
@@ -16,7 +19,7 @@
 
 import { useEffect, useState } from "react";
 import { Minus, X, Maximize2, Square, Check, ChevronDown, Cloud } from "lucide-react";
-import { useSessionStore } from "@/stores";
+import { useSessionStore, useToastStore } from "@/stores";
 import { useEnvironmentsQuery } from "@/queries";
 import {
 	DropdownMenu,
@@ -49,14 +52,14 @@ function WindowControls() {
 		>
 			<button
 				onClick={() => window.electronAPI?.windowMinimize()}
-				className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
+				className="h-full px-3 hover:bg-muted/50 transition-colors flex items-center justify-center"
 				aria-label="Minimize"
 			>
 				<Minus className="w-4 h-4 text-foreground/70" />
 			</button>
 			<button
 				onClick={() => window.electronAPI?.windowMaximize()}
-				className="h-full px-4 hover:bg-muted/50 transition-colors flex items-center justify-center"
+				className="h-full px-3 hover:bg-muted/50 transition-colors flex items-center justify-center"
 				aria-label={isMaximized ? "Restore" : "Maximize"}
 			>
 				{isMaximized ? (
@@ -67,7 +70,7 @@ function WindowControls() {
 			</button>
 			<button
 				onClick={() => window.electronAPI?.windowClose()}
-				className="h-full px-4 hover:bg-destructive hover:text-destructive-foreground transition-colors flex items-center justify-center group"
+				className="h-full px-3 hover:bg-destructive hover:text-destructive-foreground transition-colors flex items-center justify-center group"
 				aria-label="Close"
 			>
 				<X className="w-4 h-4 text-foreground/70 group-hover:text-destructive-foreground" />
@@ -76,10 +79,100 @@ function WindowControls() {
 	);
 }
 
+/**
+ * The app icon, which on Windows is the system-menu control.
+ *
+ * Windows convention is that the title-bar icon opens the system menu on left
+ * click, on right click, and on Alt+Space. Vayu had the right-click half for
+ * free: a `-webkit-app-region: drag` area is treated as a non-client frame, and
+ * Windows pops the real menu on it. Left click could not be added on top,
+ * because a draggable area ignores every pointer event.
+ *
+ * So on Windows the icon leaves the drag region and both buttons are handled
+ * here, against a menu built in the main process. Elsewhere it stays a plain
+ * drag region - macOS and Linux have no such convention, and giving up the drag
+ * area there would cost something and buy nothing.
+ *
+ * Losing 44px of drag surface on Windows is not a regression: a real Win32
+ * title-bar icon is HTSYSMENU, which does not drag the window either.
+ */
+function AppIcon() {
+	const openSystemMenu = (e: React.MouseEvent) => {
+		e.preventDefault();
+		// Anchored to the icon's bottom-left, so the menu drops from the control
+		// rather than from the pointer - which is what the OS menu does.
+		const r = e.currentTarget.getBoundingClientRect();
+		window.electronAPI?.windowSystemMenu({ x: r.left, y: r.bottom });
+	};
+
+	/*
+	 * Windows only.
+	 *
+	 * macOS states app identity twice already - the Dock icon and the menu bar -
+	 * and its traffic lights own this corner, so a logo beside them is the second
+	 * app mark in the same 124px. GNOME's header-bar contents are buttons, a
+	 * heading and menus, with no app icon, and Vayu draws client-side decorations
+	 * there; KDE shows one, but that is painted by the window manager, not the
+	 * app, so it is not Vayu's to place.
+	 *
+	 * On Windows it stays because it is a control, not branding - see the system
+	 * menu handler in electron/main.ts.
+	 */
+	if (!isWindows) return null;
+
+	return (
+		<div
+			// 16px at a 16px inset, per the Windows title-bar spec: "the size of the
+			// window icon is 16px by 16px", placed "16px from the left-most border"
+			// and vertically centred. It was 20px at 12px.
+			className="flex items-center pl-4 pr-3 shrink-0"
+			style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+			// Both buttons, because taking the icon out of the drag region is what
+			// removed the platform's own right-click menu.
+			onClick={openSystemMenu}
+			onContextMenu={openSystemMenu}
+			// Windows closes the window on a double-click of the icon. That is the
+			// icon's convention specifically - double-clicking the rest of the bar
+			// toggles maximise, which the drag region already gives us.
+			onDoubleClick={(e) => {
+				e.preventDefault();
+				window.electronAPI?.windowClose();
+			}}
+			role="button"
+			aria-label="System menu"
+			aria-haspopup="menu"
+		>
+			<img src={iconUrl} alt="" className="w-4 h-4" />
+		</div>
+	);
+}
+
 function EnvSwitcher() {
 	const { activeEnvironmentId, setActiveEnvironmentId } = useSessionStore();
 	const { data: environments = [] } = useEnvironmentsQuery();
+	const showToast = useToastStore((s) => s.showToast);
 	const activeEnv = environments.find((e) => e.id === activeEnvironmentId);
+
+	/*
+	 * Switching environment is a silent change with loud consequences: every
+	 * {{variable}} in every open request resolves against the new one, so the
+	 * same Send can hit a different host. The only feedback was this button's
+	 * own label, which the user is not looking at once the menu closes over it.
+	 *
+	 * Confirms the destination rather than the act ("Environment: Staging", not
+	 * "Environment switched"), so the toast still answers the question a glance
+	 * is actually asking. Selecting the environment already active changes
+	 * nothing and says nothing.
+	 */
+	const selectEnvironment = (id: string | null) => {
+		if (id === activeEnvironmentId) return;
+		setActiveEnvironmentId(id);
+		const name = id ? environments.find((e) => e.id === id)?.name : null;
+		showToast({
+			message: name ? `Environment: ${name}` : "Environment cleared",
+			variant: "info",
+		});
+	};
 
 	return (
 		<DropdownMenu>
@@ -90,29 +183,48 @@ function EnvSwitcher() {
 						// so its corners follow the Appearance → Roundedness setting.
 						// rounded-full is reserved for non-interactive indicators.
 						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-md shrink-0 transition-colors",
+						// Border on both states, transparent when idle, so selecting an
+						// environment does not resize the control by 2px.
+						"border",
 						activeEnv
-							? "bg-accent text-accent-foreground hover:bg-accent/80"
-							: "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+							? /*
+								 * Tracks the accent. Every other "this is selected" surface
+								 * in the app does - the Appearance cards, the active tab's
+								 * rule - so a pill that stayed blue while the accent was
+								 * Coral was the one thing not following the scheme.
+								 *
+								 * `--primary-text` for the label rather than `--primary`,
+								 * because here the accent *is* the text: on the graphite
+								 * scheme `--primary` is a neutral and would read as grey on
+								 * a grey tint.
+								 *
+								 * What it replaces is `bg-accent`, the **hover** background
+								 * token (`--accent-active` is the selected one), used as a
+								 * resting fill and hovered to an alpha of itself - so the
+								 * control got lighter under the pointer, not stronger.
+								 */
+								"bg-primary/10 text-primary-text border-primary/30 hover:bg-primary/20"
+							: "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
 					)}
 					aria-label="Switch environment"
 				>
 					<Cloud className="w-3 h-3 shrink-0" />
 					<span className="truncate">{activeEnv?.name ?? "No Environment"}</span>
-					<ChevronDown className="w-3 h-3 shrink-0 opacity-60" />
+					{/* Inherits the control's colour: the old `opacity-60` was a magic
+					    number that fought the tinted state, dimming an already-tinted
+					    foreground a second time. */}
+					<ChevronDown className="w-3 h-3 shrink-0" />
 				</button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="min-w-44">
-				<DropdownMenuItem
-					onClick={() => setActiveEnvironmentId(null)}
-					className="text-xs gap-2"
-				>
+				<DropdownMenuItem onClick={() => selectEnvironment(null)} className="text-xs gap-2">
 					<span className="flex-1">No Environment</span>
 					{!activeEnv && <Check className="w-3.5 h-3.5" />}
 				</DropdownMenuItem>
 				{environments.map((env) => (
 					<DropdownMenuItem
 						key={env.id}
-						onClick={() => setActiveEnvironmentId(env.id)}
+						onClick={() => selectEnvironment(env.id)}
 						className="text-xs gap-2"
 					>
 						<span className="flex-1 truncate">{env.name}</span>
@@ -131,21 +243,18 @@ export default function TitleBar() {
 		// <header>: the app's banner region, so it is reachable as a landmark
 		// rather than being an unnamed div in the accessibility tree.
 		<header
-			className="titlebar h-[38px] flex items-center bg-panel border-b border-border shrink-0 select-none"
+			className="titlebar h-[var(--titlebar-height)] flex items-center bg-panel border-b border-border shrink-0 select-none"
 			style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 		>
 			{/* macOS: space for native traffic lights */}
-			{isMac && <div className="w-20 shrink-0" />}
+			{/* Reserved for the traffic lights; the width is a token so it cannot
+			    drift from the position Electron gives them. */}
+			{isMac && <div className="shrink-0 w-[var(--traffic-light-inset)]" />}
 
 			{/* Logo - all platforms. The icon is imported as a module, not referenced
 			    as "/icon.png": `base: "./"` means a root-absolute path does not
 			    resolve under the packaged file:// build. */}
-			<div
-				className="flex items-center px-3 shrink-0"
-				style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
-			>
-				<img src={iconUrl} alt="Vayu" className="w-5 h-5" />
-			</div>
+			<AppIcon />
 
 			{/* TabStrip - fills available width. This wrapper stays a drag region so
 			    the empty space to the right of the last tab moves the window on every

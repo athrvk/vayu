@@ -80,6 +80,11 @@ export function checkAllowlist(url: string, config: McpSafetyConfig): GuardResul
 /**
  * Parse an engine duration string ("60s", "5m", "1h", or a bare number of
  * seconds) into seconds. Returns null for unparseable input.
+ *
+ * The accepted grammar mirrors the engine's `parse_duration_ms`
+ * (`engine/include/vayu/core/load_pacing.hpp`): the same units, the same
+ * bare-number-is-seconds rule. They must agree, or a duration this cap reads as
+ * 5 minutes runs for some other length.
  */
 export function parseDurationSeconds(value: string | number | undefined): number | null {
 	if (value === undefined || value === null) return null;
@@ -129,6 +134,17 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 			ok: false,
 			error: `concurrency ${params.concurrency} exceeds the MCP cap of ${config.maxConcurrency}. Lower it or raise the cap in Settings.`,
 		};
+	}
+	// A duration the engine cannot read now fails the run rather than quietly
+	// becoming 60s, so say so here instead of starting a run that dies.
+	for (const field of ["duration", "rampUpDuration"] as const) {
+		const value = params[field];
+		if (value !== undefined && parseDurationSeconds(value) === null) {
+			return {
+				ok: false,
+				error: `${field} ${JSON.stringify(value)} is not a duration. Use a non-negative number with an optional ms/s/m/h unit, e.g. "500ms", "30s", "5m", "2h".`,
+			};
+		}
 	}
 	const durationSeconds = parseDurationSeconds(params.duration);
 	if (durationSeconds !== null && durationSeconds > config.maxDurationSeconds) {

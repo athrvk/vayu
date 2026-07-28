@@ -412,3 +412,242 @@ TEST_F (LoadStrategyTest, TickEnrichmentMetricsCarryBytesDroppedStatus) {
     EXPECT_TRUE (brecv);
     EXPECT_TRUE (status);
 }
+
+// ============================================================================
+// Open-loop pacing: rate fidelity, the wall-clock deadline, and ramp-down
+// ============================================================================
+
+// Above 1000 RPS the old batch loop submitted size_t(target_rps / 1000.0)
+// requests per 1ms tick, so 1500 RPS delivered 1000 and no client was told.
+// The fractional accumulator delivers the requested rate.
+TEST_F (LoadStrategyTest, ConstantRpsDeliversRatesAbove1000) {
+    const double RPS      = 1500.0;
+    const double DUR_S    = 2.0;
+    nlohmann::json config = {
+        { "mode", "constant_rps" },
+        { "duration", "2s" },
+        { "targetRps", RPS },
+    };
+
+    auto context = std::make_shared<vayu::core::RunContext> ("test-rps-1500", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    const double owed = RPS * DUR_S;
+    const size_t sent = context->requests_sent.load ();
+    EXPECT_GT (static_cast<double> (sent), owed * 0.9)
+    << "delivered " << sent << " of " << owed
+    << "; a rate floored to a 1000-multiple would deliver ~2000";
+    EXPECT_LT (static_cast<double> (sent), owed * 1.1)
+    << "delivered " << sent << " of " << owed << "; the generator overshot its rate";
+}
+
+// The run is time-bound: it ends at its wall-clock deadline, and the requests
+// it owed but could not issue are recorded as drops instead of being pushed
+// past the deadline (or vanishing). sent + dropped is what the rate owed.
+TEST_F (LoadStrategyTest, SaturatedRunEndsAtDeadlineAndRecordsTheShortfall) {
+    const double RPS      = 500.0;
+    const double DUR_S    = 1.0;
+    nlohmann::json config = {
+        { "mode", "constant_rps" }, { "duration", "1s" }, { "targetRps", RPS },
+        { "maxInFlight", 5 }, // far below what a 500ms endpoint can retire
+    };
+
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-rps-saturated", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->slow_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+
+    const auto started = std::chrono::steady_clock::now ();
+    strategy->execute (context, db, request);
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - started)
+                            .count ();
+    context->event_loop->stop (false);
+
+    const size_t sent    = context->requests_sent.load ();
+    const size_t dropped = context->metrics_collector->dropped_requests ();
+
+    EXPECT_LT (elapsed_ms, 1500) << "run overshot its 1s wall-clock deadline";
+    EXPECT_GT (dropped, 0u) << "a saturated run recorded no drops";
+    EXPECT_NEAR (static_cast<double> (sent + dropped), RPS * DUR_S, 5.0)
+    << "sent(" << sent << ") + dropped(" << dropped << ") does not account for the "
+    << (RPS * DUR_S) << " requests the rate owed";
+}
+
+// Ramp down (start > target) is a legitimate profile. The size_t delta
+// underflowed to ~1.8e19, so the controller held an astronomical target and
+// flooded at max capacity for the whole ramp instead of descending.
+TEST_F (LoadStrategyTest, RampDownDescendsInsteadOfFlooding) {
+    const size_t START    = 40;
+    const size_t TARGET   = 5;
+    nlohmann::json config = {
+        { "mode", "ramp_up" },
+        { "duration", "1500ms" },
+        { "rampUpDuration", "1s" },
+        { "startConcurrency", START },
+        { "concurrency", TARGET },
+    };
+
+    auto context = std::make_shared<vayu::core::RunContext> ("test-ramp-down", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000; // ample, so only the ramp bounds in-flight
+    loop_config.max_per_host = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->slow_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    EXPECT_LE (context->peak_in_flight.load (), START + 10)
+    << "in-flight ran past the ramp start; the descending ramp is unbounded";
+    EXPECT_GT (context->requests_sent.load (), 0u)
+    << "ramp-down submitted nothing";
+}
+
+// Durations below a second are honored, so this run lasts 500ms rather than
+// the 500 seconds the old parser read out of "500ms".
+TEST_F (LoadStrategyTest, SubSecondDurationEndsOnTime) {
+    nlohmann::json config = {
+        { "mode", "constant_concurrency" },
+        { "duration", "500ms" },
+        { "concurrency", 5 },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-ms-duration", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 200;
+    loop_config.max_per_host   = 200;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+
+    const auto started = std::chrono::steady_clock::now ();
+    strategy->execute (context, db, request);
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - started)
+                            .count ();
+    context->event_loop->stop (false);
+
+    EXPECT_GE (elapsed_ms, 400) << "ran shorter than the requested 500ms";
+    EXPECT_LT (elapsed_ms, 5000)
+    << "ran for " << elapsed_ms << "ms; \"500ms\" was not read as milliseconds";
+}
+
+// A duration the engine cannot read fails the run loudly. execute_load_test
+// catches this and marks the run Failed; the old parser silently ran for 60s,
+// so a mistyped duration looked like a run that merely took longer.
+TEST_F (LoadStrategyTest, UnreadableDurationThrows) {
+    nlohmann::json config = {
+        { "mode", "constant_concurrency" },
+        { "duration", "5 fortnights" },
+        { "concurrency", 5 },
+    };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-bad-duration", config);
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = mock_server->fast_url ();
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    EXPECT_THROW (strategy->execute (context, db, request), std::invalid_argument);
+}
+
+// A zero-length closed-loop run submits nothing. The controller seeded
+// target(0) before evaluating its own stop predicate, so a 0s duration still
+// fired a full concurrency's worth of requests.
+TEST_F (LoadStrategyTest, ZeroDurationSubmitsNothing) {
+    nlohmann::json config = {
+        { "mode", "constant_concurrency" },
+        { "duration", "0s" },
+        { "concurrency", 50 },
+    };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-zero-duration", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 200;
+    loop_config.max_per_host   = 200;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    EXPECT_EQ (context->requests_sent.load (), 0u)
+    << "a 0s run submitted a seed before checking its own duration";
+}
+
+// The quota modes reach the same place by their budget rather than by the new
+// predicate check - 0 iterations is 0 requests. Locked so a later change to
+// either guard cannot make a no-op run submit a seed.
+TEST_F (LoadStrategyTest, ZeroIterationsSubmitsNothing) {
+    nlohmann::json config = {
+        { "mode", "iterations" },
+        { "iterations", 0 },
+        { "concurrency", 10 },
+    };
+    auto context = std::make_shared<vayu::core::RunContext> ("test-zero-iter", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 200;
+    loop_config.max_per_host   = 200;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url ();
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    EXPECT_EQ (context->requests_sent.load (), 0u)
+    << "a 0-iteration run submitted a seed before checking its own budget";
+}

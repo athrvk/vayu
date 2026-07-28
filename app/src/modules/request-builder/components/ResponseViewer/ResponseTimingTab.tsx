@@ -13,90 +13,48 @@
  * they render as one continuous timeline track with proportional segments,
  * followed by a precise legend and a Wire · Queue · Total summary.
  *
+ * **Every phase is a fixed categorical hue**, and the list of them - label,
+ * hue, tooltip, the field each one reads - now comes from `TIMING_PHASES` in
+ * `shared/response-viewer/timing-phases.ts` rather than being declared here.
+ * Two hues were once wrong in this file: TTFB took `--primary` and Download
+ * took `--success`. `--primary` tracks the user's accent, which the design
+ * system forbids for a chart series precisely because of what happened here -
+ * under the green scheme `--primary` is hue 142 and `--success` is hue 142,
+ * three points of lightness apart, so two of the five phases rendered as the
+ * same swatch. Under the default orange, TTFB sat 14 degrees from Connect's
+ * amber. `--success` was the second problem on its own terms: a status token
+ * spent on a series that has no status.
+ *
+ * They are `--chart-3` (violet) and `--chart-6` (moss). `--chart-6` was added
+ * for this - the set had four fixed hues and this chart needs five. Fixing it
+ * here left the dashboard's `TimingWaterfall` painting the same two phases the
+ * same wrong way for as long as the two lists were separate, which is the
+ * argument for the shared descriptor.
+ *
  * Mirrors the dashboard TimingWaterfall's visual idiom (same --chart-* tokens),
  * but is driven by a single response's timing object rather than run averages.
  */
 
 import { type ReactNode } from "react";
 import { formatDuration, formatPhaseDuration } from "@/components/shared/response-viewer/utils";
-import { PHASE_TIPS } from "@/components/shared/response-viewer/phase-tips";
-import { Info } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { phaseColor, phasesFromTrace } from "@/components/shared/response-viewer/timing-phases";
+import { Eyebrow, InfoChip } from "@/components/ui";
 import type { ResponseTiming } from "../../types";
-import { TIMING } from "@/config/timing";
 
-interface Phase {
-	key: string;
-	label: string;
-	value: number;
-	color: string;
-	tip: ReactNode;
-}
-
-/** Tiny "i" affordance with a Radix tooltip (local to keep this tab self-contained). */
-function InfoTip({ tip }: { tip: ReactNode }) {
-	return (
-		<TooltipProvider delayDuration={TIMING.TOOLTIP_DELAY_MS}>
-			<Tooltip>
-				<TooltipTrigger asChild>
-					<button
-						type="button"
-						className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle"
-						aria-label="More information"
-					>
-						<Info className="h-2.5 w-2.5" />
-					</button>
-				</TooltipTrigger>
-				<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
-					{tip}
-				</TooltipContent>
-			</Tooltip>
-		</TooltipProvider>
-	);
-}
+/**
+ * `border-rule`, not the chip's default `border-border`. This tab sits inside a
+ * pane that declares `surface-card`, and on a card `--border` is the same
+ * colour as `--card` in dark - so the dot had no outline in one theme. `ml-1`
+ * rather than the default `ml-1.5` keeps the legend rows tight.
+ */
+const TIP_CLASS = "ml-1 border-rule";
 
 export interface ResponseTimingTabProps {
 	timing: ResponseTiming;
 }
 
 export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
-	const phases: Phase[] = [
-		{
-			key: "dns",
-			label: "DNS",
-			value: timing.dnsMs,
-			color: "hsl(var(--chart-2))",
-			tip: PHASE_TIPS.dns,
-		},
-		{
-			key: "connect",
-			label: "Connect",
-			value: timing.connectMs,
-			color: "hsl(var(--chart-4))",
-			tip: PHASE_TIPS.connect,
-		},
-		{
-			key: "tls",
-			label: "TLS",
-			value: timing.tlsMs,
-			color: "hsl(var(--chart-5))",
-			tip: PHASE_TIPS.tls,
-		},
-		{
-			key: "ttfb",
-			label: "TTFB",
-			value: timing.firstByteMs,
-			color: "hsl(var(--primary))",
-			tip: PHASE_TIPS.ttfb,
-		},
-		{
-			key: "download",
-			label: "Download",
-			value: timing.downloadMs,
-			color: "hsl(var(--success))",
-			tip: PHASE_TIPS.download,
-		},
-	];
+	const phases = phasesFromTrace(timing);
 
 	// Bar segments are proportional to the network phases (which sum to ≈ wire).
 	const phaseSum = phases.reduce((s, p) => s + Math.max(0, p.value), 0);
@@ -104,9 +62,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 
 	return (
 		<div className="p-4 overflow-auto h-full">
-			<p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-3">
-				Request timing
-			</p>
+			<Eyebrow className="mb-3">Request timing</Eyebrow>
 
 			{/* Continuous timeline: each phase is a sequential segment of the request. */}
 			<div className="flex h-2.5 w-full overflow-hidden rounded-sm bg-accent">
@@ -116,7 +72,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 						className="block h-full transition-[width] duration-300"
 						style={{
 							width: `${pct(p.value)}%`,
-							background: p.color,
+							background: phaseColor(p),
 							boxShadow: "inset -1px 0 0 hsl(var(--card))",
 						}}
 						aria-hidden
@@ -133,12 +89,12 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 					>
 						<span
 							className="h-2.5 w-2.5 rounded-sm"
-							style={{ background: p.color }}
+							style={{ background: phaseColor(p) }}
 							aria-hidden
 						/>
 						<span className="text-xs text-muted-foreground inline-flex items-center">
 							{p.label}
-							<InfoTip tip={p.tip} />
+							<InfoChip tip={p.tip} className={TIP_CLASS} />
 						</span>
 						<span className="text-right font-mono tabular-nums text-xs">
 							<span className="text-foreground">
@@ -156,7 +112,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 			</div>
 
 			{/* Summary: wire vs generator-side overhead vs perceived total. */}
-			<div className="mt-3.5 pt-3 border-t border-dashed border-border flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px]">
+			<div className="mt-3.5 pt-3 border-t border-dashed border-rule flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px]">
 				{timing.wireMs !== undefined && (
 					<TimingStat
 						label="Wire"
@@ -197,7 +153,7 @@ function TimingStat({
 		<span className="inline-flex items-center gap-1.5">
 			<span className="text-muted-foreground inline-flex items-center">
 				{label}
-				<InfoTip tip={tip} />
+				<InfoChip tip={tip} className={TIP_CLASS} />
 			</span>
 			<span
 				className={

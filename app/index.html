@@ -16,6 +16,19 @@
 			(function () {
 				try {
 					var el = document.documentElement;
+
+					/*
+					 * Platform, for the per-platform title-bar height in index.css
+					 * (macOS runs 28px, Windows and Linux 32px). Stamped here rather
+					 * than from React so the bar is never briefly the wrong height and
+					 * everything below it never shifts. `electronAPI` is exposed at
+					 * preload top level, which runs before this script.
+					 */
+					var plat = window.electronAPI && window.electronAPI.platform;
+					if (plat === "darwin") el.setAttribute("data-platform", "mac");
+					else if (plat === "win32") el.setAttribute("data-platform", "windows");
+					else if (plat) el.setAttribute("data-platform", "linux");
+
 					var scheme = localStorage.getItem("vayu-color-scheme");
 					if (scheme) el.setAttribute("data-color-scheme", scheme);
 					var source = localStorage.getItem("vayu-theme-source");

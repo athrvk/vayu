@@ -46,27 +46,66 @@ per-environment values like base URLs and API keys.
 
 ## Implementation
 
-`useVariableResolver` (`app/src/hooks/useVariableResolver.ts`) builds a flat
-`Record<string, ResolvedVariable>` on every render via `useMemo`, keyed by
-`(collectionId, environmentId)`:
+`useVariableResolver` (`app/src/hooks/useVariableResolver.ts`) collects **every**
+definition of every name on every render via `useMemo`, keyed by
+`(collectionId, environmentId)`, in precedence order (lowest first):
 
 ```typescript
-// 1. Globals
-for ([key, val] of globalsData.variables) result[key] = { value, scope: "global" };
+// 1. Globals - a singleton, so no source name
+for ([key, val] of globalsData.variables) push(key, val, "global");
 
-// 2. Collection chain - root first so leaf overrides parent
+// 2. Collection chain - root first so leaf overrides parent. Each collection is
+//    its own origin: two in one chain both have scope "collection".
 const chain = buildCollectionChain(activeCollectionId, collections); // root-first array
 for (const col of chain)
   for ([key, val] of col.variables)
-    result[key] = { value, scope: "collection" };
+    push(key, val, "collection", { id: col.id, name: col.name });
 
 // 3. Environment - highest priority
 for ([key, val] of env.variables)
-  result[key] = { value, scope: "environment" };
+  push(key, val, "environment", { id: env.id, name: env.name });
+
+// The winner is the last *enabled* definition.
 ```
 
 `buildCollectionChain(startId, collections)` walks `parentId` links upward and
 returns the chain with the root at index 0.
+
+The resolved `Record<string, ResolvedVariable>` is **derived** from that list
+(the origin carrying `winner: true`) rather than built beside it, so the two
+cannot disagree about which definition won. A name whose every definition is
+disabled is absent from the map, not present-and-empty - `hasUnresolvedVariables`
+and the red token both key off absence.
+
+### `getVariableOrigins(name)`
+
+Returns every definition of a name, lowest precedence first, **including the
+disabled ones that never resolve**. Empty array for a name nothing defines.
+
+Display-only; nothing about execution reads it. It exists because the winner
+alone cannot answer "why is this the value?" - and the two cases that need
+answering are exactly the ones a flat map destroys:
+
+- the same name defined at several scopes, where the losers were overwritten;
+- a name whose highest-scope definition is **disabled**, which is the more
+  common surprise. The old loop skipped those with `if (v.enabled)`, so nothing
+  could report that the value you set is being *skipped* rather than missing.
+
+The variable popover renders this as its "also defined" list. `VariableOrigin`
+carries `enabled` and an explicit `winner` flag - once disabled definitions are
+in the list, "last" and "wins" are different things.
+
+`ResolvedVariable.sourceId` / `sourceName` name the specific environment or
+collection the winning value came from (absent for `global`), so the popover can
+say *which* environment rather than just "Environment".
+
+### The MCP copy
+
+`app/electron/mcp/resolve.ts` duplicates resolution for the MCP client and is
+**deliberately not** given `getVariableOrigins`. The rule in `CLAUDE.md` is that
+the two copies move together when *semantics* change; these have not - the
+winner is still the last enabled definition in the same precedence order. The
+origins list is display metadata, and MCP renders nothing.
 
 The resolved map is then used by `resolveString(input)` which replaces all
 `{{name}}` occurrences. Unresolved variables are left as-is (e.g. `{{unknown}}`

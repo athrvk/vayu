@@ -1,0 +1,129 @@
+name: Docs site
+
+# Publishes `docs/` to GitHub Pages (https://athrvk.github.io/vayu/) with
+# MkDocs Material. Source of truth stays on master - the built site is uploaded
+# as a Pages artifact, so there is no `gh-pages` branch to keep in sync.
+#
+# Requires one manual repository setting: Settings -> Pages -> Build and
+# deployment -> Source = "GitHub Actions". With the default "Deploy from a
+# branch" the deploy step fails with "Get Pages site failed".
+#
+# Jekyll is deliberately not used. GitHub Pages' default Jekyll build runs
+# Liquid over every page, and these docs are full of `{{variable}}` and
+# `{% ... %}` examples: the former would render as empty strings, the latter
+# fails the build as an unknown Liquid tag. MkDocs never templates page content.
+#
+# This workflow only triggers on docs paths, so it must NOT be added as a
+# required status check - it never starts on a code-only pull request, and a
+# check that never starts blocks the merge forever (see the note at the top of
+# pr-tests.yml for the same trap).
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'docs/**'
+      - '.github/mkdocs.yml'
+      - '.github/hooks/**'
+      - 'shared/icon_png/**'
+      - 'requirements-docs.txt'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'docs/**'
+      - '.github/mkdocs.yml'
+      - '.github/hooks/**'
+      - 'shared/icon_png/**'
+      - 'requirements-docs.txt'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Silences the "Warning from the Material for MkDocs team" banner about MkDocs
+  # 2.0 (https://squidfunk.github.io/mkdocs-material/blog/2026/02/18/mkdocs-2.0/).
+  # It is an unconditional advisory from the theme, not a finding about this
+  # config: the build still succeeds, and it printed 14 red lines above every
+  # run. Our exposure is small anyway - the only plugin here is MkDocs' built-in
+  # `search` and there are no theme overrides - and the version is pinned in
+  # requirements-docs.txt, so nothing upstream can change this site without a
+  # commit. Unset this to see the banner again.
+  NO_MKDOCS_2_WARNING: '1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Superseded pull-request builds are throwaway; a superseded deploy is not -
+  # cancelling one mid-upload can leave Pages serving a half-published site.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Cache pip wheels
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-docs-${{ runner.os }}-${{ hashFiles('requirements-docs.txt') }}
+          restore-keys: |
+            pip-docs-${{ runner.os }}-
+
+      - name: Install MkDocs Material
+        run: python3 -m pip install --disable-pip-version-check -r requirements-docs.txt
+
+      # `--strict` promotes MkDocs warnings to failures, which is what makes the
+      # pull-request run worth having: these docs cross-link heavily by relative
+      # `.md` path and by heading anchor, and both are validated here (see the
+      # `validation:` block in .github/mkdocs.yml).
+      #
+      # `-f` is required: the config lives in .github/, not the repo root, so
+      # bare `mkdocs build` cannot find it. site_dir is ../site, so the output
+      # still lands at the repo root and the upload path below is unchanged.
+      - name: Build site
+        run: mkdocs build --strict -f .github/mkdocs.yml
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # This trio is version-coupled through the Pages artifact format, so the
+      # pairing is taken verbatim from GitHub's own starter workflow
+      # (actions/starter-workflows, pages/static.yml) rather than each action
+      # being bumped to its newest major independently. `upload-pages-artifact`
+      # has a v5 and `configure-pages` a v6, but GitHub still ships v3 and v5
+      # alongside `deploy-pages@v5`. Nothing on a pull request exercises this
+      # job (it is skipped), so a bad pin here would only surface as a failed
+      # deploy on master.
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

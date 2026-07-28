@@ -17,15 +17,34 @@ export function asString(v: unknown): string {
 	return String(v);
 }
 
-/** Postman/Insomnia variable arrays → Vayu VariableValue record. */
+/**
+ * Postman/Insomnia variable arrays → Vayu VariableValue record.
+ *
+ * `type` is Postman's per-variable kind. Only `"secret"` is meaningful to Vayu
+ * (it maps to `VariableValue.secret`); the rest describe a value type Vayu does
+ * not store, since every value is a string. The flag is omitted rather than set
+ * to `false` so a non-secret variable serialises the same as before.
+ */
 export function toVarRecord(
-	vars: Array<{ key: string; value?: unknown; enabled?: boolean; disabled?: boolean }> | undefined
+	vars:
+		| Array<{
+				key: string;
+				value?: unknown;
+				enabled?: boolean;
+				disabled?: boolean;
+				type?: unknown;
+		  }>
+		| undefined
 ): Record<string, VariableValue> {
 	const out: Record<string, VariableValue> = {};
 	for (const v of vars ?? []) {
 		if (!v || !v.key) continue;
 		const enabled = v.disabled != null ? !v.disabled : v.enabled != null ? v.enabled : true;
-		out[v.key] = { value: normalizeVars(asString(v.value)), enabled };
+		out[v.key] = {
+			value: normalizeVars(asString(v.value)),
+			enabled,
+			...(v.type === "secret" ? { secret: true } : {}),
+		};
 	}
 	return out;
 }

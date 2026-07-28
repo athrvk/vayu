@@ -18,6 +18,7 @@
  */
 
 import { EmptyState } from "@/components/shared";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui";
 import { parseSetCookie } from "./parse-set-cookie";
 
 export interface ResponseCookiesProps {
@@ -47,51 +48,43 @@ export default function ResponseCookies({ headers }: ResponseCookiesProps) {
 		 * hover.
 		 */
 		<div className="p-4 overflow-auto h-full">
-			<table className="w-full text-sm">
-				<thead>
-					<tr className="border-b border-rule">
-						<th className="text-left py-2 px-3 font-medium text-muted-foreground">
-							Name
-						</th>
-						<th className="text-left py-2 px-3 font-medium text-muted-foreground">
-							Value
-						</th>
-						<th className="text-left py-2 px-3 font-medium text-muted-foreground">
-							Attributes
-						</th>
-					</tr>
-				</thead>
-				<tbody>
+			<Table>
+				<TableHeader>
+					<TableRow>
+						<TableHead>Name</TableHead>
+						<TableHead>Value</TableHead>
+						<TableHead>Attributes</TableHead>
+					</TableRow>
+				</TableHeader>
+				<TableBody>
 					{cookies.map((cookie, i) => (
-						<tr key={i} className="border-b border-rule hover:bg-muted/50">
-							<td className="py-2 px-3 font-mono text-primary align-top">
+						<TableRow key={i}>
+							<TableCell className="font-mono text-muted-foreground">
 								{cookie.name}
-							</td>
-							<td className="py-2 px-3 font-mono break-all align-top">
+							</TableCell>
+							<TableCell className="font-mono break-all text-foreground">
 								{cookie.value}
-							</td>
-							<td className="py-2 px-3 align-top">
+							</TableCell>
+							<TableCell>
 								{cookie.attrs.length > 0 ? (
 									<div className="flex flex-wrap gap-1">
 										{cookie.attrs.map((attr, j) => (
 											<span
 												key={j}
-												className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+												className="rounded-sm surface-sunken border border-rule px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
 											>
 												{attr}
 											</span>
 										))}
 									</div>
 								) : (
-									<span className="text-muted-foreground italic text-xs">
-										none
-									</span>
+									<span className="text-muted-foreground italic">none</span>
 								)}
-							</td>
-						</tr>
+							</TableCell>
+						</TableRow>
 					))}
-				</tbody>
-			</table>
+				</TableBody>
+			</Table>
 		</div>
 	);
 }

@@ -8,7 +8,9 @@
 import type {
 	Collection,
 	Environment,
+	GlobalVariables,
 	Request,
+	VariableValue,
 	CreateCollectionRequest,
 	CreateRequestRequest,
 	CreateEnvironmentRequest,
@@ -22,6 +24,8 @@ export interface ImportApi {
 	createEnvironment(data: CreateEnvironmentRequest & { id: string }): Promise<Environment>;
 	deleteCollection(id: string): Promise<void>;
 	deleteEnvironment(id: string): Promise<void>;
+	getGlobals(): Promise<GlobalVariables>;
+	updateGlobals(variables: Record<string, VariableValue>): Promise<GlobalVariables>;
 }
 
 export class ImportOrchestrator {
@@ -54,10 +58,34 @@ export class ImportOrchestrator {
 					this.createdEnvIds.push(env.id!);
 				}
 			}
+			// Globals last, and deliberately so: `POST /globals` **replaces** the whole
+			// set, so it is the one write here that can destroy data the import did not
+			// create. Running it after everything else means nothing can fail behind it,
+			// so a failed import never leaves the user's globals half-rewritten and
+			// rollback has no globals case to restore. Do not reorder without adding one.
+			await this.applyGlobals(result, opts);
 		} catch (err) {
 			await this.rollback();
 			throw err;
 		}
+	}
+
+	/**
+	 * Merge imported globals into the existing set. The engine has no merge verb -
+	 * a POST replaces everything - so the union is computed here from a fresh read.
+	 * Writing `result.globals` alone would silently delete every global the user
+	 * already had.
+	 *
+	 * On a key collision the imported value wins: the user explicitly asked for this
+	 * file's variables, and skipping them would be the silent no-op the issue calls
+	 * the worst outcome. Documented in `docs/app/import-collections/postman-environment.md`.
+	 */
+	private async applyGlobals(result: ImportResult, opts: ImportOptions): Promise<void> {
+		if (!opts.importEnvironments) return;
+		// No read, no write - every other format lands here and must not touch the scope.
+		if (Object.keys(result.globals).length === 0) return;
+		const existing = await this.api.getGlobals();
+		await this.api.updateGlobals({ ...existing.variables, ...result.globals });
 	}
 
 	/** Create this collection, then its requests, then recurse into children. */

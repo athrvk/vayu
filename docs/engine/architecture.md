@@ -108,6 +108,14 @@ Manages the lifecycle of load test runs:
 - **Retained finished runs**: Completed/failed/stopped runs are moved to a separate retained
   map rather than unregistered immediately, so a late SSE client still receives the full metric
   series. A TTL sweep evicts them after `liveRetentionMs` (default 60s).
+- **Stop discards, completion drains (with a deadline)**: a stopped run throws away its queued
+  backlog and cancels in-flight transfers, so a stop is not paced by the upstream; a run that
+  reaches the end of its duration waits for genuine in-flight requests, but no longer than
+  `timeout` + 2s. Cancelled requests are recorded as errors, so a run's submitted and recorded
+  counts still agree.
+- **The move to the retained map is the "worker is finished" signal**: it happens after the
+  final metrics flush and status update, which is what `DELETE /runs/:id` waits on before
+  removing rows (see the API reference).
 - **Graceful shutdown**: Stops active runs on daemon shutdown
 
 ### Metrics Collector
@@ -115,8 +123,14 @@ Manages the lifecycle of load test runs:
 High-performance in-memory metrics collection optimized for 60k+ RPS:
 
 - **Pre-allocated storage**: Avoids reallocation during tests
-- **Lock-free atomics + HdrHistogram**: Zero-contention counter updates; latency recorded in a
-  lock-free HdrHistogram (µs resolution)
+- **Lock-free atomics + HdrHistogram**: Zero-contention counter updates; latency recorded in an
+  HdrHistogram (µs resolution). Every event-loop worker records on its own thread, so both the
+  cumulative histogram and the rolling interval recorder are written through the library's
+  **atomic** entry points (`hdr_record_value_atomic` / `hdr_interval_recorder_record_value_atomic`).
+  The plain variants are a non-atomic `counts[i] += 1; total_count += 1` and lose samples under
+  concurrency - silently, since the run still reports percentiles, just computed from fewer
+  samples than it served. The interval recorder's phaser orders the once-per-tick reader against
+  writers; it is not mutual exclusion *between* writers, so it does not make the plain write safe.
 - **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a
   request spent inside the engine), not just libcurl's wire time. Wire time and the
   generator-internal `queue_wait` are tracked separately.
@@ -124,7 +138,14 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   peak in-flight, and a full per-status-code distribution
 - **Batch DB writes**: Per-request results written after test completion; per-tick time-series
   metrics persisted by the metrics thread during the run
-- **Error preservation**: All errors stored, success results sampled
+- **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only
+  the first `maxStoredErrors` (default 10,000) individual records are kept; the rest are counted by
+  `errors_dropped()` and logged once. A fully-failing target produces errors at close to the
+  completion rate, each carrying a message and a trace blob, so an unlimited store grows for the
+  whole run and then flushes as one enormous transaction. Success results are sampled.
+  Because the final report's per-type error breakdown is built by walking those stored
+  records, a run with more errors than the cap gets a breakdown that does not sum to its
+  (exact) total - raise `maxStoredErrors` to keep it complete, or set `0` for unlimited.
 - **Response sampling**: Stores samples for deferred script validation
 
 ### Script Engine (`QuickJS`)
@@ -256,11 +277,36 @@ See [Database Schema](db-schema.md) for the full column list.
    writes per-tick snapshots into the retained tick topic + DB
    ↓
 9. Client streams ticks via SSE (/runs/:runId/live), replayed
-   from offset 0 then tailed to the `complete` event
+   from the oldest retained tick then tailed to the `complete` event
    ↓
 10. On completion: batch-write results to DB; run retained (TTL) so
     late clients still get the full series
 ```
+
+The metrics thread's exit is gated on `is_running`, not on `should_stop`. A stop
+request only asks the worker to stop; the worker then blocks in `event_loop->stop`
+- cancelling on a user stop, draining to a deadline at the natural end - and
+clears `is_running` afterwards. Exiting on `should_stop` emitted the final tick
+and set `closed` while requests were still settling, so the live view froze at
+the stop click while the stored report - written after the worker returned -
+counted everything that landed in between.
+
+The tick topic itself is a bounded ring. Run duration is user-controlled with no
+upper bound, so an append-only buffer is a slow OOM on an overnight soak. The
+bound is expressed as a **duration** - `liveReplayWindowMs` (default 5 min, `0`
+= full run) - and `live_ring_size()` converts it to a tick count against the
+run's cadence, `liveTickIntervalMs`, clamping to `liveMaxRetainedTicks`
+(default 50,000, matching the renderer's own ceiling - it reads the same key). That same entry *is* the
+app's live-chart window - the dashboard's picker reads and writes it through
+`/config` - so the retained span and the displayed span are one number, not two
+that have to be kept aligned. A fixed count would be the wrong unit:
+the cadence spans 10–1000ms, so 3000 ticks is 30 seconds at one end and 50
+minutes at the other, and the dashboard's live-window setting the ring has to
+serve is itself a duration. `collect_metrics` reads the pair once, before tick
+0; a mid-run change would leave ids the dashboard already holds pointing into a
+differently-sized window. `published_count` keeps counting past an eviction, so
+SSE event ids stay monotonic and a `Last-Event-ID` resume from before the window
+is fast-forwarded to the oldest retained tick rather than replaying from 0.
 
 ## Load Test Strategies
 
