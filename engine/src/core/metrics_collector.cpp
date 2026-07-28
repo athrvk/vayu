@@ -12,6 +12,7 @@
 
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/utils/logger.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -116,13 +117,17 @@ const std::string& trace_data) {
     // Track the per-code count (lock-free for in-range codes).
     record_status_code (status_code);
 
-    // Record latency in histogram (lock-free, thread-safe)
+    // Record latency in both histograms. Every event-loop worker thread calls
+    // this on its own thread, so the atomic recorder API is required - the
+    // plain hdr_record_value / hdr_interval_recorder_record_value pair is a
+    // non-atomic `counts[i] += 1; total_count += 1`, which loses increments and
+    // tears min/max under concurrent writers.
     // Convert milliseconds to microseconds for histogram precision
     int64_t latency_us = static_cast<int64_t> (latency_ms * 1000.0);
     if (latency_us < 1) latency_us = 1;  // Minimum 1 microsecond
-    hdr_record_value (latency_histogram_, latency_us);
+    hdr_record_value_atomic (latency_histogram_, latency_us);
     // Also feed the rolling-window recorder for the live per-tick percentiles.
-    hdr_interval_recorder_record_value (&interval_recorder_, latency_us);
+    hdr_interval_recorder_record_value_atomic (&interval_recorder_, latency_us);
 
     // Store success result if configured (sampled)
     if (config_.store_success_traces && !trace_data.empty ()) {
@@ -166,30 +171,36 @@ const std::string& trace_data) {
     // distribution) account for them instead of silently dropping to zero.
     record_status_code (0);
 
-    // Store error record (always store all errors)
+    // Store the error record while the store has room. Past the cap the record
+    // is dropped but counted - total_errors_ and the status-code distribution
+    // above stay exact, so only the per-error detail is lost. Without the cap a
+    // fully-failing target grows this vector for the life of the run and then
+    // flushes it as one enormous transaction.
+    bool first_drop = false;
     {
         std::lock_guard<std::mutex> lock (errors_mutex_);
         if (config_.max_errors == 0 || errors_.size () < config_.max_errors) {
             ResultRecord record (now_ms (), code, message);
             record.trace_data = trace_data;
             errors_.push_back (std::move (record));
+        } else {
+            first_drop =
+            errors_dropped_.fetch_add (1, std::memory_order_relaxed) == 0;
         }
+    }
+
+    // Log once, outside the lock, so a capped run leaves a trace instead of
+    // silently truncating its error list.
+    if (first_drop) {
+        vayu::utils::log_warning (
+        "Run " + run_id_ + ": error store full at " +
+        std::to_string (config_.max_errors) +
+        " records; further errors are counted but not stored");
     }
 }
 
 void MetricsCollector::record_drop_batch (size_t count) {
     dropped_requests_.fetch_add (count, std::memory_order_relaxed);
-}
-
-void MetricsCollector::record_latency (double latency_ms) {
-    atomic_add_double (total_latency_sum_, latency_ms);
-
-    // Record latency in histogram (lock-free, thread-safe)
-    // Convert milliseconds to microseconds for histogram precision
-    int64_t latency_us = static_cast<int64_t> (latency_ms * 1000.0);
-    if (latency_us < 1) latency_us = 1;  // Minimum 1 microsecond
-    hdr_record_value (latency_histogram_, latency_us);
-    hdr_interval_recorder_record_value (&interval_recorder_, latency_us);
 }
 
 MetricsCollector::Percentiles MetricsCollector::calculate_percentiles () {

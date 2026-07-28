@@ -395,6 +395,65 @@ TEST_F (MetricsCollectorTest, ThreadSafeRecording) {
     num_threads * requests_per_thread - num_threads * (requests_per_thread / 10));
 }
 
+// The std::atomic counters above are not the interesting part - the histogram
+// is. Every event-loop worker calls record_success on its own thread, and the
+// plain hdr_record_value is a non-atomic `counts[i] += 1; total_count += 1`, so
+// increments are simply lost. Nothing failed when that happened: the run just
+// reported percentiles computed from fewer samples than it served. Assert the
+// histogram's own count, which the counter assertions above cannot see.
+TEST_F (MetricsCollectorTest, HistogramLosesNoSamplesUnderConcurrentWriters) {
+    constexpr int kThreads   = 8;
+    constexpr int kPerThread = 20000;
+
+    std::vector<std::thread> writers;
+    writers.reserve (kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        // Spread values across buckets so writers contend on different
+        // counts[] slots as well as on total_count.
+        writers.emplace_back ([this, t] () {
+            for (int i = 0; i < kPerThread; ++i) {
+                collector->record_success (200, 1.0 + static_cast<double> ((i + t) % 50), 0.0);
+            }
+        });
+    }
+    for (auto& w : writers) w.join ();
+
+    EXPECT_EQ (collector->latency_count (),
+    static_cast<int64_t> (kThreads) * kPerThread);
+}
+
+// total_requests_ and total_errors_ are independent relaxed atomics that
+// record_error bumps one after the other, so a reader can observe the error
+// increment before its paired request increment. Unguarded, the subtraction
+// wraps to a huge size_t which passes every `> 0` denominator check and drives
+// average_latency()/average_queue_wait() toward zero - the 1 Hz metrics tick
+// then stores that near-zero point permanently in an otherwise normal series.
+//
+// Note on what this test can and cannot prove: the inverted window is only
+// *observable* on a weak memory model (ARM64, which Vayu ships on macOS). On
+// x86 the two `lock xadd`s are not reordered, so this asserts the invariant
+// everywhere but can only witness the defect on the platform where it bites.
+TEST_F (MetricsCollectorTest, SuccessCountNeverExceedsTotalRequests) {
+    EXPECT_EQ (collector->success_count (), 0u);
+
+    constexpr int kIterations = 100000;
+    std::atomic<bool> writer_done{ false };
+    std::thread writer ([this, &writer_done] () {
+        for (int i = 0; i < kIterations; ++i) {
+            collector->record_error (vayu::ErrorCode::Timeout, "e");
+        }
+        writer_done.store (true);
+    });
+
+    while (!writer_done.load ()) {
+        ASSERT_LE (collector->success_count (), collector->total_requests ());
+    }
+    writer.join ();
+
+    EXPECT_EQ (collector->success_count (), 0u);
+    EXPECT_EQ (collector->total_errors (), static_cast<size_t> (kIterations));
+}
+
 // ============================================================================
 // Error Storage Tests
 // ============================================================================
@@ -471,6 +530,43 @@ TEST (MetricsCollectorConfigTest, RespectsMaxErrorsLimit) {
     // Should only have max_errors stored
     EXPECT_EQ (collector.errors ().size (), 5);
     EXPECT_EQ (collector.total_errors (), 20); // But all errors counted
+    // The 15 dropped records are counted, not silently discarded.
+    EXPECT_EQ (collector.errors_dropped (), 15u);
+}
+
+// The default must be a real cap. It used to be 0 ("unlimited") and nothing in
+// production ever overrode it, so a fully-failing target grew errors_ for the
+// whole run and then flushed it as one enormous transaction.
+TEST (MetricsCollectorConfigTest, DefaultErrorStoreIsBounded) {
+    MetricsCollectorConfig config;
+    ASSERT_GT (config.max_errors, 0u);
+
+    config.max_errors = 3; // Same rule, small enough to exercise here.
+    MetricsCollector collector ("test", config);
+
+    for (int i = 0; i < 10; ++i) {
+        collector.record_error (vayu::ErrorCode::ConnectionFailed, "boom");
+    }
+
+    EXPECT_EQ (collector.errors ().size (), 3u);
+    EXPECT_EQ (collector.errors_dropped (), 7u);
+    // Neither the counters nor the status-code distribution lose anything.
+    EXPECT_EQ (collector.total_errors (), 10u);
+    EXPECT_EQ (collector.status_code_distribution ().at (0), 10u);
+}
+
+// max_errors == 0 remains an explicit opt-in to unlimited storage.
+TEST (MetricsCollectorConfigTest, ZeroMaxErrorsStillMeansUnlimited) {
+    MetricsCollectorConfig config;
+    config.max_errors = 0;
+    MetricsCollector collector ("test", config);
+
+    for (int i = 0; i < 50; ++i) {
+        collector.record_error (vayu::ErrorCode::Timeout, "boom");
+    }
+
+    EXPECT_EQ (collector.errors ().size (), 50u);
+    EXPECT_EQ (collector.errors_dropped (), 0u);
 }
 
 // ============================================================================

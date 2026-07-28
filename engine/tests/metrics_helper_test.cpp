@@ -38,10 +38,23 @@ TEST_F (MetricsHelperTest, CalculatesSummaryCorrectly) {
 
     EXPECT_EQ (summary.total_requests, 100);
     EXPECT_EQ (summary.errors, 5);
-    // avg_latency = total_latency / success_count = (95*150) / 95 = 150
-    // But MetricsHelper divides by total_requests, so: (95*150) / 100 = 142.5
-    EXPECT_DOUBLE_EQ (summary.avg_latency_ms, 142.5);
+    // Only successes contribute to the latency sum, so the denominator is the
+    // success count: (95*150) / 95 = 150. This is the figure the final report
+    // and every live tick show. Dividing by total_requests instead gave
+    // (95*150) / 100 = 142.5 - a stop response that quietly disagreed with the
+    // report for the same run, worse the higher the error rate.
+    EXPECT_DOUBLE_EQ (summary.avg_latency_ms, 150.0);
     EXPECT_DOUBLE_EQ (summary.error_rate, 5.0); // 5 * 100 / 100
+}
+
+// The disagreement above, asserted directly against the source the report and
+// the per-tick rows read.
+TEST_F (MetricsHelperTest, StopSummaryAvgLatencyMatchesTheCollector) {
+    auto summary = MetricsHelper::calculate_summary (*test_context);
+
+    EXPECT_DOUBLE_EQ (
+    summary.avg_latency_ms, test_context->metrics_collector->average_latency ());
+    EXPECT_DOUBLE_EQ (summary.avg_latency_ms, test_context->average_latency_ms ());
 }
 
 TEST_F (MetricsHelperTest, HandlesZeroRequestsSummary) {
