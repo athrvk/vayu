@@ -1384,17 +1384,18 @@ void Database::seed_default_config () {
 
     upsert_config (ConfigEntry{ "liveReplayWindowMs",
     std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
-    "integer", "Live Metrics Replay Window (ms)",
-    "How much recent live-metrics history the engine holds in memory per run so "
-    "the dashboard can rebuild its chart when it attaches - or re-attaches - "
-    "mid-run. Raise it to match a longer dashboard live-chart window; a window "
-    "shorter than that setting means a re-attach redraws less history than the "
-    "chart is configured to show. Expressed as time, so it survives a change to "
-    "the tick interval, but memory is capped at 20,000 ticks per run regardless: "
-    "a fast tick interval reaches that ceiling before the full window.",
+    "integer", "Live Chart Window (ms)",
+    "How much recent live-metrics history to keep: the span the dashboard's live "
+    "charts show, and the span the engine holds in memory per run so the "
+    "dashboard can rebuild those charts when it attaches - or re-attaches - "
+    "mid-run. One setting drives both, so they cannot disagree; the dashboard's "
+    "Live Dashboard panel edits this same value. Expressed as time, so it "
+    "survives a change to the tick interval. 0 means the full run (no time "
+    "limit). Memory is bounded at 20,000 ticks per run either way, so a fast "
+    "tick interval reaches that ceiling before a long window does.",
     "observability",
     std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
-    "1000", "3600000", now });
+    "0", "3600000", now });
 
     upsert_config (ConfigEntry{ "liveRetentionMs",
     "60000",

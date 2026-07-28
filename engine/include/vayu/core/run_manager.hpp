@@ -37,16 +37,20 @@ namespace vayu::core {
  * at the other. Deriving the count preserves the *time* the user asked for -
  * the same unit the dashboard's live-chart window setting uses.
  *
- * Non-positive inputs come from a hand-edited config row, not from the
- * validated POST /config path; a zero interval would divide by zero and a zero
- * window would leave nothing to replay, so both fall back rather than trusting
- * the row.
+ * `window_ms == 0` is the "Full run" setting - no time limit - and yields the
+ * ceiling, which is then the whole bound. A *negative* window is not a setting
+ * (POST /config rejects it); like a non-positive interval it can only reach
+ * here from a hand-edited config row, so it falls back to the default rather
+ * than being trusted.
  */
 [[nodiscard]] constexpr size_t live_ring_size (int64_t window_ms, int64_t tick_interval_ms) {
     if (tick_interval_ms <= 0) {
         tick_interval_ms = constants::server::STATS_INTERVAL_MS;
     }
-    if (window_ms <= 0) {
+    if (window_ms == 0) {
+        return constants::server::MAX_LIVE_TICKS_CAP;
+    }
+    if (window_ms < 0) {
         window_ms = constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS;
     }
     auto ticks = static_cast<size_t> (window_ms / tick_interval_ms);

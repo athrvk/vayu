@@ -1048,8 +1048,9 @@ and the configured cadence - `liveReplayWindowMs / liveTickIntervalMs`, 3000
 ticks at both defaults. The bound is a duration rather than a fixed count
 because the cadence is itself configurable: one tick count would mean a
 30-second window at `liveTickIntervalMs=10` and a 50-minute one at `1000`.
-Whatever the pair, the ring is capped at **20,000 ticks** per run (~20 MB), so a
-fast cadence reaches that ceiling before the full window.
+`liveReplayWindowMs = 0` means the full run (no time limit). Whatever the pair,
+the ring is capped at **20,000 ticks** per run (~20 MB), so a fast cadence
+reaches that ceiling before a long window does.
 
 Ids keep counting past an eviction, so they stay monotonic; a `Last-Event-ID`
 older than the retained window resumes from the oldest retained tick rather than
@@ -1057,11 +1058,13 @@ replaying from 0, which means a client that was disconnected for longer than the
 window sees a gap, not a duplicate flood.
 
 The window also bounds the **replay-from-0** path below, which is the one the
-bundled app actually exercises: a dashboard attaching (or re-attaching)
-mid-run rebuilds its chart from the retained ring, so a window shorter than the
-dashboard's own live-chart setting means a re-attach redraws less history than
-the chart is configured to show. The 5-minute default matches the app's default
-live-chart window; raise `liveReplayWindowMs` alongside a longer one.
+bundled app actually exercises: a dashboard attaching (or re-attaching) mid-run
+rebuilds its chart from the retained ring. That is why `liveReplayWindowMs` is
+the *same* setting as the app's live-chart window rather than a second one to
+keep aligned - the app's **Settings → Live Dashboard → Chart window** picker
+reads and writes this entry (`GET`/`POST /config`), so the span the engine
+retains and the span the chart displays cannot disagree. Editing it here and
+editing it there are the same action.
 
 The final `metrics` event is emitted only once the run has actually finished
 draining. On `POST /runs/:runId/stop` the engine keeps ticking while in-flight
@@ -1083,9 +1086,10 @@ run end). This is the pattern the bundled app uses.
   the stored report in this case.
 
 Tuning: `liveTickIntervalMs` (live tick cadence, 10–1000ms),
-`liveReplayWindowMs` (retained replay span, 1000–3600000ms, capped at 20,000
-ticks) and `liveRetentionMs` (post-completion retention, 0–600000ms; 0 disables
-retention) are configurable via `POST /config`.
+`liveReplayWindowMs` (retained replay span *and* the dashboard's chart window,
+0–3600000ms; 0 = full run, capped at 20,000 ticks) and `liveRetentionMs`
+(post-completion retention, 0–600000ms; 0 disables retention) are configurable
+via `POST /config`.
 
 ## Runs
 

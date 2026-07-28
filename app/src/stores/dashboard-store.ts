@@ -11,23 +11,23 @@ import { create } from "zustand";
 import type { LoadTestMetrics, RunReport } from "@/types";
 import { type Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { useClientSettingsStore } from "./client-settings-store";
-import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
 	DEFAULT_LIVE_WINDOW,
-	isLiveWindow,
 	liveWindowSeconds as windowSecondsFor,
 	MAX_RETAINED_TICKS,
 } from "@/constants/live-window";
 import type { DashboardMode, DashboardView } from "@/modules/dashboard/types";
 
-/** Read the persisted live-window preference → seconds (null = full run). */
+/**
+ * Retention seeded before the window is known. The real value is the engine's
+ * `liveReplayWindowMs`, which `useLiveChartWindow` pushes in once the config
+ * query resolves - it cannot be read synchronously here the way the old
+ * localStorage preference could. Seeding the module default rather than `null`
+ * keeps retention bounded during that gap; a run started in the first moments
+ * after launch trims to 5 minutes until the hook corrects it.
+ */
 function initialLiveWindowSeconds(): number | null {
-	try {
-		const saved = localStorage.getItem(STORAGE_KEYS.LIVE_CHART_WINDOW);
-		return windowSecondsFor(isLiveWindow(saved) ? saved : DEFAULT_LIVE_WINDOW);
-	} catch {
-		return windowSecondsFor(DEFAULT_LIVE_WINDOW);
-	}
+	return windowSecondsFor(DEFAULT_LIVE_WINDOW);
 }
 
 // Config passed when starting a load test (for display during streaming)

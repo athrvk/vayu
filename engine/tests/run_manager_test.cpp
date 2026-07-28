@@ -100,17 +100,27 @@ TEST (LiveRingSize, ClampsToTheMemoryCeiling) {
     EXPECT_EQ (live_ring_size (static_cast<int64_t> (ceiling - 1) * 100, 100), ceiling - 1);
 }
 
+// 0 is the "Full run" option in the dashboard's window picker - no time limit,
+// so the tick ceiling becomes the whole bound. It must NOT be treated as a
+// degenerate value and rounded back up to the default window.
+TEST (LiveRingSize, ZeroWindowMeansFullRunAndYieldsTheCeiling) {
+    const size_t ceiling = vayu::core::constants::server::MAX_LIVE_TICKS_CAP;
+
+    EXPECT_EQ (live_ring_size (0, 100), ceiling);
+    EXPECT_EQ (live_ring_size (0, 10), ceiling);
+    EXPECT_EQ (live_ring_size (0, 1000), ceiling);
+}
+
 // POST /config validates its bounds, but a hand-edited row reaches this
-// unvalidated. Dividing by a zero interval is UB, and a zero window would
-// leave the dashboard nothing to replay.
-TEST (LiveRingSize, FallsBackOnNonPositiveInputsInsteadOfDividingByZero) {
+// unvalidated. Dividing by a zero interval is UB, and a negative window is not
+// a setting at all - unlike 0, which means "full run".
+TEST (LiveRingSize, FallsBackOnInvalidInputsInsteadOfDividingByZero) {
     const size_t stock = live_ring_size (
     vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS,
     vayu::core::constants::server::STATS_INTERVAL_MS);
 
     EXPECT_EQ (live_ring_size (300000, 0), 3000u);
     EXPECT_EQ (live_ring_size (300000, -100), 3000u);
-    EXPECT_EQ (live_ring_size (0, 100), stock);
     EXPECT_EQ (live_ring_size (-1, 100), stock);
     // A window shorter than one tick still retains a tick - a zero-size ring
     // would make /live replay nothing at all.
