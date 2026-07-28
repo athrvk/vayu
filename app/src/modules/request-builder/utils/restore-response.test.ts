@@ -159,6 +159,31 @@ describe("responseFromRunResult", () => {
 		// Falls back to the stored body's own length.
 		expect(restored?.size).toBe('{"ok":true}'.length);
 	});
+
+	/**
+	 * The negotiated protocol lands on both lines the Raw tab prints - the
+	 * request line (via `buildRawRequest`, baked into `rawRequest` here) and
+	 * the status line (via `ResponseState.httpVersion`, which `RawRequestResponse`
+	 * reads at render time). Missing either one shows a restored HTTP/2 run as
+	 * HTTP/2 on one line and the HTTP/1.1 default on the other.
+	 */
+	it("carries the negotiated protocol onto the request line and the response state", () => {
+		const restored = responseFromRunResult(
+			sample({
+				trace: {
+					request: {
+						method: "GET",
+						url: "https://api.example.test/users",
+						headers: {},
+					},
+					response: { headers: {}, body: "{}", httpVersion: "HTTP/2" },
+				},
+			})
+		);
+
+		expect(restored?.rawRequest).toContain("HTTP/2");
+		expect(restored?.httpVersion).toBe("HTTP/2");
+	});
 });
 
 /**

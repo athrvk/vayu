@@ -72,6 +72,12 @@ function detectBodyType(body: string): ResponseState["bodyType"] {
 /**
  * The parts of a restored response that are the same whether the run succeeded
  * or failed: what was sent.
+ *
+ * `trace.response?.httpVersion` is only present when a response was actually
+ * received (`build_result_trace` omits the whole `response` node on an error
+ * path, see execution.cpp) - so a run that never reached a server has nothing
+ * here, and `buildRawRequest` falls back to its own HTTP/1.1 default, the same
+ * as a pre-migration stored row.
  */
 function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
 	const request = trace.request;
@@ -82,7 +88,8 @@ function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
 					request.method || "GET",
 					request.url || "",
 					request.headers || {},
-					request.body
+					request.body,
+					trace.response?.httpVersion
 				)
 			: undefined,
 	};
@@ -141,6 +148,7 @@ export function responseFromRunResult(
 		statusText: result.statusText || "",
 		headers: trace.response.headers || {},
 		...sentSide(trace),
+		httpVersion: trace.response.httpVersion,
 		body,
 		bodyType: detectBodyType(body),
 		// `size` is what the pane's byte count shows. When the body was truncated

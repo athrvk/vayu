@@ -375,7 +375,9 @@ export interface RunResultTrace {
 		 * `build_result_trace` (`engine/src/http/routes/execution.cpp`) - same
 		 * display-string value space as `ResponseState.httpVersion`
 		 * (`app/src/modules/request-builder/types.ts`), not the request-side
-		 * `HttpVersion` union. Not yet read by `restore-response.ts`.
+		 * `HttpVersion` union. Read by `restore-response.ts`'s `sentSide` (onto
+		 * the rebuilt raw request line) and `responseFromRunResult` (onto
+		 * `ResponseState.httpVersion`, for the Raw tab's status line).
 		 */
 		httpVersion?: string;
 	};
@@ -516,6 +518,14 @@ export interface HttpResponse {
 	timing: ResponseTiming;
 	errorCode?: string;
 	errorMessage?: string;
+	/**
+	 * The protocol negotiated for this exchange, as `serialize(Response)`
+	 * (`engine/src/utils/json.cpp`) emits it on `POST /execute` - `""` when
+	 * nothing was negotiated, not omitted. Same display-string value space as
+	 * `ResponseState.httpVersion` (`app/src/modules/request-builder/types.ts`),
+	 * not the request-side `HttpVersion` union - do not unify the two.
+	 */
+	httpVersion?: string;
 }
 
 export interface TestResult {

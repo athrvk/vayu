@@ -67,4 +67,39 @@ describe("buildRawRequest", () => {
 		expect(raw).toBe("GET {{base}}/users HTTP/1.1\r\n\r\n");
 		expect(raw).not.toContain("Host:");
 	});
+
+	/**
+	 * The request line must name what was actually negotiated, not a hardcoded
+	 * guess - see engine/src/http/client.cpp:408-420 for the wire-side version
+	 * of this same rule.
+	 */
+	it("prints the negotiated protocol in the request line when given one", () => {
+		expect(buildRawRequest("GET", "https://example.test/", {}, undefined, "HTTP/2")).toMatch(
+			/^GET \/ HTTP\/2\r\n/
+		);
+	});
+
+	/**
+	 * Pre-migration stored runs, and any other caller that predates this field,
+	 * omit the argument entirely - the existing tests above assert the default
+	 * unedited, which is the proof this stays backward compatible.
+	 */
+	it("defaults to HTTP/1.1 when no version is supplied", () => {
+		expect(buildRawRequest("GET", "https://example.test/")).toMatch(/^GET \/ HTTP\/1\.1\r\n/);
+	});
+
+	/**
+	 * "" is the engine's convention for "nothing was negotiated" (a connection
+	 * that never reached a server). Unlike the engine's own rawRequest builder,
+	 * this generic formatter is never given the *requested* protocol - only a
+	 * display string - so it cannot replicate that fallback without merging the
+	 * two value spaces the rest of this codebase deliberately keeps apart. It
+	 * falls back to the same HTTP/1.1 default as an omitted argument instead of
+	 * printing a blank or nonsensical version token.
+	 */
+	it("falls back to HTTP/1.1 when the empty string says nothing was negotiated", () => {
+		expect(buildRawRequest("GET", "https://example.test/", {}, undefined, "")).toMatch(
+			/^GET \/ HTTP\/1\.1\r\n/
+		);
+	});
 });
