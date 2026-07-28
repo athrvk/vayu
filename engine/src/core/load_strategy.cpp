@@ -14,8 +14,10 @@
 #include <limits>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 #include <thread>
 
+#include "vayu/core/load_pacing.hpp"
 #include "vayu/core/refill_deficit.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/utils/logger.hpp"
@@ -144,6 +146,38 @@ vayu::Result<vayu::Response> result) {
     }
 }
 
+/**
+ * @brief Read a duration field ("30s", "500ms", "5m", "2h") as milliseconds.
+ *
+ * An absent or null field takes @p default_ms. A JSON number is read as
+ * seconds, matching how the MCP duration cap reads the same field. Anything
+ * else - an unknown unit, a non-numeric string, a negative - throws: the run
+ * thread's caller (execute_load_test) catches it and marks the run Failed with
+ * the message, which is the loud path. The old parser silently ran for 60s
+ * instead, so a mistyped duration looked like a run that simply took longer.
+ */
+int64_t duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t default_ms) {
+    auto it = config.find (key);
+    if (it == config.end () || it->is_null ())
+        return default_ms;
+
+    std::optional<int64_t> parsed;
+    if (it->is_string ()) {
+        parsed = parse_duration_ms (it->get<std::string> ());
+    } else if (it->is_number ()) {
+        const double seconds = it->get<double> ();
+        if (std::isfinite (seconds) && seconds >= 0.0)
+            parsed = static_cast<int64_t> (seconds * 1000.0);
+    }
+
+    if (!parsed) {
+        throw std::invalid_argument ("Invalid " + key + " " + it->dump () +
+        ": expected a non-negative number with an optional ms/s/m/h unit "
+        "(e.g. \"500ms\", \"30s\", \"5m\", \"2h\")");
+    }
+    return *parsed;
+}
+
 // Update the in-flight high-water mark (single writer: the strategy thread).
 inline void update_peak (const std::shared_ptr<RunContext>& context) {
     size_t f    = context->in_flight ();
@@ -179,6 +213,14 @@ const std::function<bool (int64_t)>& should_continue) {
     // closed_loop must be true BEFORE seeding so no early completion's notify
     // is dropped.
     context->closed_loop.store (true, std::memory_order_relaxed);
+
+    // The run's own predicate decides whether anything is owed at all. Seeding
+    // target(0) first meant a 0s duration - or a 0-iteration run - still fired
+    // a full target's worth of requests before the loop's time/quota check was
+    // ever evaluated.
+    if (context->should_stop || !should_continue (0)) {
+        return;
+    }
 
     size_t seed = compute_refill_deficit (target_fn (0), 0, budget_fn ());
     for (size_t i = 0; i < seed && !context->should_stop; ++i) {
@@ -219,15 +261,8 @@ class ConstantLoadStrategy : public LoadStrategy {
     void execute (std::shared_ptr<RunContext> context,
     vayu::db::Database& db,
     const vayu::Request& request) override {
-        const auto& config       = context->config;
-        std::string duration_str = config.value ("duration", "60s");
-        int64_t duration_ms      = 0;
-        try {
-            duration_ms =
-            std::stoll (duration_str.substr (0, duration_str.length () - 1)) * 1000;
-        } catch (...) {
-            duration_ms = 60000;
-        }
+        const auto& config  = context->config;
+        int64_t duration_ms = duration_field_ms (config, "duration", 60000);
 
         // Check for targetRps - if specified, use rate-limited mode
         double target_rps = config.value ("rps", 0.0);
@@ -246,132 +281,89 @@ class ConstantLoadStrategy : public LoadStrategy {
             (static_cast<double> (duration_ms) / 1000.0) * target_rps);
             context->requests_expected = expected;
 
-            // Calculate correct interval between requests based on target RPS
-            // For 10 RPS: interval = 1,000,000 / 10 = 100,000 us = 100ms
-            // For 1000 RPS: interval = 1,000,000 / 1000 = 1,000 us = 1ms
-            // For high RPS (>1000), we batch multiple requests per interval
-            int64_t base_interval_us = static_cast<int64_t> (1000000.0 / target_rps);
+            // Tick length: the request interval up to 1000 RPS, 1ms above it
+            // (below 1ms we would busy-spin). How many requests a tick owes is
+            // not the tick's business - take_due_requests accrues the exact
+            // fractional amount, so 1500 RPS owes 1 or 2 per 1ms tick rather
+            // than the floored 1 the old batch_size gave.
+            const int64_t base_interval_us = static_cast<int64_t> (1000000.0 / target_rps);
+            const int64_t tick_us = std::max<int64_t> (base_interval_us, 1000);
 
-            // Minimum interval of 1ms (1000us) to avoid busy-spinning
-            // If target_rps > 1000, we need to submit multiple requests per interval
-            size_t batch_size         = 1;
-            int64_t batch_interval_us = base_interval_us;
+            // Read once: the config cannot change mid-run.
+            const size_t max_pending = config.value ("maxInFlight",
+            std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
 
-            if (base_interval_us < 1000) {
-                // High RPS mode: batch requests every 1ms
-                batch_interval_us = 1000;
-                batch_size =
-                std::max (static_cast<size_t> (target_rps / 1000.0), size_t (1));
-            }
-
-            vayu::utils::log_debug (
-            "Submission config: batch_size=" + std::to_string (batch_size) +
-            ", batch_interval_us=" + std::to_string (batch_interval_us) +
+            vayu::utils::log_debug ("Submission config: tick_us=" + std::to_string (tick_us) +
+            ", max_in_flight=" + std::to_string (max_pending) +
             ", expected_requests=" + std::to_string (expected));
 
-            auto test_start      = std::chrono::steady_clock::now ();
-            auto next_batch_time = test_start;
+            const auto test_start = std::chrono::steady_clock::now ();
+            const auto duration_end = test_start + std::chrono::milliseconds (duration_ms);
+            auto accrued_through = test_start;
+            double debt          = 0.0;
             size_t submitted     = 0;
 
-            auto duration_end = test_start + std::chrono::milliseconds (duration_ms);
-
             while (!context->should_stop) {
-                auto now = std::chrono::steady_clock::now ();
-                auto elapsed =
-                std::chrono::duration_cast<std::chrono::milliseconds> (now - test_start)
-                .count ();
+                const auto now = std::chrono::steady_clock::now ();
 
-                if (elapsed >= duration_ms) {
-                    // Before breaking: submit all batches that were due within duration.
-                    // Use strict < so we don't submit the first batch after the window
-                    // (e.g. 5s @ 1000 RPS = batches at 0..4999ms only, not 5000ms).
-                    size_t max_pending = config.value ("maxInFlight",
-                    std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
-                    while (next_batch_time < duration_end && now >= next_batch_time &&
-                    context->in_flight () < max_pending && !context->should_stop) {
-                        for (size_t i = 0; i < batch_size && !context->should_stop; ++i) {
-                            context->event_loop->submit (request,
-                            [context, &db] (size_t, vayu::Result<vayu::Response> result) {
-                                handle_result (context, db, std::move (result));
-                            });
-                            submitted++;
-                            context->requests_sent++;
-                        }
-                        next_batch_time += std::chrono::microseconds (batch_interval_us);
+                // The run is time-bound, not quota-bound: never accrue past the
+                // deadline, so the final tick pays out only the slice of the
+                // window it covers and the loop cannot push a backlog beyond it.
+                const auto accrue_to = std::min (now, duration_end);
+                const int64_t elapsed_us =
+                std::chrono::duration_cast<std::chrono::microseconds> (accrue_to - accrued_through)
+                .count ();
+                accrued_through = accrue_to;
+
+                const size_t due = take_due_requests (debt, target_rps, elapsed_us);
+                if (due > 0) {
+                    const size_t in_flight = context->in_flight ();
+                    const size_t headroom =
+                    max_pending > in_flight ? max_pending - in_flight : 0;
+                    const size_t to_submit = std::min (due, headroom);
+
+                    // Requests the in-flight cap refuses are dropped at the
+                    // instant they came due, not deferred. Deferring is what
+                    // let a saturated run submit its backlog past the deadline
+                    // and still report itself on rate.
+                    if (due > to_submit) {
+                        context->metrics_collector->record_drop_batch (due - to_submit);
                     }
+
+                    for (size_t i = 0; i < to_submit && !context->should_stop; ++i) {
+                        context->event_loop->submit (request,
+                        [context, &db] (size_t, vayu::Result<vayu::Response> result) {
+                            handle_result (context, db, std::move (result));
+                        });
+                        submitted++;
+                        context->requests_sent++;
+                    }
+                }
+
+                if (now >= duration_end) {
                     break;
                 }
 
-                // Check if it's time to submit (possibly multiple batches if we fell behind)
-                size_t max_pending = config.value ("maxInFlight",
-                std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
-
-                if (now >= next_batch_time) {
-                    // How many batches are we due? (catch up after preemption/slow iterations)
-                    int64_t overdue_us =
-                    std::chrono::duration_cast<std::chrono::microseconds> (now - next_batch_time)
-                    .count ();
-                    size_t batches_due = 1U;
-                    if (overdue_us > 0 && batch_interval_us > 0) {
-                        batches_due += static_cast<size_t> (overdue_us / batch_interval_us);
-                    }
-                    // Cap by batches left in the test window
-                    if (next_batch_time < duration_end) {
-                        int64_t remaining_us =
-                        std::chrono::duration_cast<std::chrono::microseconds> (
-                        duration_end - next_batch_time)
-                        .count ();
-                        size_t max_batches_in_window =
-                        (remaining_us > 0 && batch_interval_us > 0) ?
-                        static_cast<size_t> (remaining_us / batch_interval_us) :
-                        0U;
-                        if (max_batches_in_window < batches_due)
-                            batches_due = max_batches_in_window;
-                    } else {
-                        batches_due = 0U;
-                    }
-
-                    size_t batches_submitted = 0U;
-                    while (batches_submitted < batches_due && !context->should_stop) {
-                        if (context->in_flight () >= max_pending) {
-                            size_t abandoned_batches = batches_due - batches_submitted;
-                            context->metrics_collector->record_drop_batch (
-                            abandoned_batches * batch_size);
-                            next_batch_time =
-                            now + std::chrono::microseconds (batch_interval_us);
-                            break;
-                        }
-                        for (size_t i = 0; i < batch_size && !context->should_stop; ++i) {
-                            context->event_loop->submit (request,
-                            [context, &db] (size_t, vayu::Result<vayu::Response> result) {
-                                handle_result (context, db, std::move (result));
-                            });
-                            submitted++;
-                            context->requests_sent++;
-                        }
-                        batches_submitted++;
-                        next_batch_time += std::chrono::microseconds (batch_interval_us);
-                    }
-                }
-
-                // Wait until next batch: on Windows use busy-wait for short
-                // intervals so we don't depend on timer resolution (10k+ RPS).
-                auto sleep_time =
-                std::chrono::duration_cast<std::chrono::microseconds> (next_batch_time - now)
-                .count ();
-                if (sleep_time > 100) {
+                // Wait for the next tick. Oversleeping is self-correcting - the
+                // next tick accrues the extra elapsed time - so the sleep can be
+                // the full remainder; on Windows short waits still spin, since
+                // 15.6ms timer rounding would make sub-tick sleeps bursty.
+                const auto next_tick =
+                accrued_through + std::chrono::microseconds (tick_us);
+                const auto sleep_us = std::chrono::duration_cast<std::chrono::microseconds> (
+                next_tick - std::chrono::steady_clock::now ())
+                                      .count ();
+                if (sleep_us > 100) {
 #ifdef _WIN32
-                    // Busy-wait for <= 2ms to avoid 15.6ms timer rounding
-                    if (sleep_time <= 2000) {
-                        while (std::chrono::steady_clock::now () < next_batch_time &&
+                    if (sleep_us <= 2000) {
+                        while (std::chrono::steady_clock::now () < next_tick &&
                         !context->should_stop) {
                             /* spin */
                         }
                     } else
 #endif
                     {
-                        std::this_thread::sleep_for (
-                        std::chrono::microseconds (sleep_time / 2));
+                        std::this_thread::sleep_for (std::chrono::microseconds (sleep_us));
                     }
                 }
             }
@@ -462,25 +454,8 @@ class RampUpLoadStrategy : public LoadStrategy {
     const vayu::Request& request) override {
         const auto& config = context->config;
 
-        // Parse duration
-        std::string duration_str = config.value ("duration", "60s");
-        int64_t duration_ms      = 0;
-        try {
-            duration_ms =
-            std::stoll (duration_str.substr (0, duration_str.length () - 1)) * 1000;
-        } catch (...) {
-            duration_ms = 60000;
-        }
-
-        // Parse ramp up parameters
-        std::string ramp_duration_str = config.value ("rampUpDuration", "10s");
-        int64_t ramp_duration_ms      = 0;
-        try {
-            ramp_duration_ms =
-            std::stoll (ramp_duration_str.substr (0, ramp_duration_str.length () - 1)) * 1000;
-        } catch (...) {
-            ramp_duration_ms = 10000;
-        }
+        int64_t duration_ms = duration_field_ms (config, "duration", 60000);
+        int64_t ramp_duration_ms = duration_field_ms (config, "rampUpDuration", 10000);
 
         size_t start_concurrency =
         static_cast<size_t> (config.value ("startConcurrency", 1));
@@ -503,15 +478,12 @@ class RampUpLoadStrategy : public LoadStrategy {
         };
 
         // target(t): linear from start_concurrency to target_concurrency over
-        // ramp_duration_ms, then flat at target_concurrency.
-        auto target_fn = [start_concurrency, target_concurrency, ramp_duration_ms] (
-                         int64_t el) -> size_t {
-            if (ramp_duration_ms <= 0 || el >= ramp_duration_ms) {
-                return target_concurrency;
-            }
-            double progress = static_cast<double> (el) / static_cast<double> (ramp_duration_ms);
-            return static_cast<size_t> (static_cast<double> (start_concurrency) +
-            static_cast<double> (target_concurrency - start_concurrency) * progress);
+        // ramp_duration_ms, then flat at target_concurrency. Descends correctly
+        // when the start is above the target - see ramp_target_concurrency.
+        auto target_fn = [start_concurrency, target_concurrency,
+                         ramp_duration_ms] (int64_t el) -> size_t {
+            return ramp_target_concurrency (
+            start_concurrency, target_concurrency, ramp_duration_ms, el);
         };
 
         maintain_concurrency (

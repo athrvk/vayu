@@ -259,6 +259,10 @@ never modified. All configurable in **Settings → MCP** and persisted.
   guess to spell `-1` or `0` and the engine reads it as an eager per-worker
   pre-allocation count (see the accepted ranges under
   [POST /runs](api-reference.md#post-runs)).
+  `duration` / `rampUpDuration` are also rejected when they are not durations at
+  all (`ms`/`s`/`m`/`h`, or a bare number of seconds - the same grammar the
+  engine parses), since the engine now fails such a run rather than quietly
+  substituting 60s.
 - **Load-run confirmation** - anti-accident, not anti-adversary: it stops a stray
   tool call from starting load, but on HTTP it is agent-side (the caps/allowlist
   are the enforcement). Elicitation upgrades it to a human prompt where supported.

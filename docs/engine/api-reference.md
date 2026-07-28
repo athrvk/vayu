@@ -848,8 +848,8 @@ Start a load test run (Vayu Mode).
   "mode": "constant_rps",    // "constant_rps", "constant_concurrency", "ramp_up", or "iterations"
   "concurrency": 100,        // Target in-flight requests (constant_concurrency / ramp_up target / iterations)
   "startConcurrency": 1,     // Ramp start concurrency (ramp_up mode)
-  "duration": "60s",         // Duration (constant_rps / constant_concurrency / ramp_up)
-  "rampUpDuration": "10s",   // Ramp-up time (ramp_up mode)
+  "duration": "60s",         // Duration, ms/s/m/h (constant_rps / constant_concurrency / ramp_up)
+  "rampUpDuration": "10s",   // Ramp time, ms/s/m/h (ramp_up mode; start may be above target)
   "iterations": 0,           // Number of iterations (iterations mode)
   "targetRps": 1000,         // Target requests per second (constant_rps mode)
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
@@ -917,9 +917,33 @@ regardless of how fast responses return.
 
 **`maxInFlight`.** A hard cap on concurrent in-flight requests. It applies
 **only to `constant_rps`** (the open-loop rate mode), where it bounds how many
-requests may be outstanding before the engine drops or queues new ones; default
+requests may be outstanding before the engine drops new ones; default
 ≈ `max(targetRps × 10, 1000)`. For the closed-loop modes the `concurrency`
 target *is* the in-flight bound, so `maxInFlight` is ignored there.
+
+**Durations.** `duration` and `rampUpDuration` take a number with an optional
+unit: **`ms`, `s`, `m`, `h`**, matched as a whole suffix (`"500ms"` is half a
+second, not 500 minutes). A bare number is seconds - `"60"` == `"60s"` - which
+is also how the MCP duration cap reads the field. Fractions are allowed
+(`"1.5s"`), case and spacing are ignored (`"30 S"`). A value the engine cannot
+read - an unknown unit, a non-number, a negative - **fails the run** (status
+`failed`, with the offending field named in the daemon log) rather than being
+silently replaced by the 60s default.
+
+**`constant_rps` is time-bound, and its shortfall is recorded.** The generator
+accrues `targetRps × elapsed` and submits the whole requests owed each tick,
+carrying the fraction - so a rate above 1000 is delivered as asked rather than
+floored to a multiple of 1000. Requests that come due while in-flight is at
+`maxInFlight` are **dropped at that instant**, not deferred: the run ends at its
+wall-clock `duration`, and `droppedRequests` (in the run summary and per-tick
+metrics) carries what the rate owed but could not issue. `sent + dropped` is
+therefore what `targetRps × duration` asked for.
+
+**Ramp semantics.** `ramp_up` interpolates linearly from `startConcurrency` to
+`concurrency` over `rampUpDuration`, then holds `concurrency` for the rest of
+`duration`. A `startConcurrency` **above** `concurrency` is a valid descending
+ramp. If `duration` is shorter than `rampUpDuration`, the run stops partway up
+(or down) the curve.
 
 ## Metrics & Statistics
 

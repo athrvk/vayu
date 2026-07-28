@@ -822,12 +822,20 @@ export const TOOLS: McpTool[] = [
 				.positive()
 				.optional()
 				.describe("Target in-flight requests."),
-			startConcurrency: z.number().optional().describe("Ramp start concurrency (ramp_up)."),
+			startConcurrency: z
+				.number()
+				.optional()
+				.describe("Ramp start concurrency (ramp_up). Above `concurrency` ramps down."),
 			duration: z
 				.string()
 				.optional()
-				.describe('Duration, e.g. "60s" (non-iterations modes).'),
-			rampUpDuration: z.string().optional().describe("Ramp time (ramp_up)."),
+				.describe(
+					'Duration with an optional ms/s/m/h unit, e.g. "500ms", "30s", "5m", "2h"; a bare number is seconds (non-iterations modes).'
+				),
+			rampUpDuration: z
+				.string()
+				.optional()
+				.describe("Ramp time (ramp_up), same units as `duration`."),
 			iterations: z.number().optional().describe("Iteration count (iterations mode)."),
 			targetRps: z.number().optional().describe("Target RPS (constant_rps)."),
 			maxInFlight: z.number().optional().describe("In-flight cap (constant_rps only)."),
@@ -853,6 +861,7 @@ export const TOOLS: McpTool[] = [
 				targetRps: typeof args.targetRps === "number" ? args.targetRps : undefined,
 				concurrency: typeof args.concurrency === "number" ? args.concurrency : undefined,
 				duration: (args.duration as string | number | undefined) ?? undefined,
+				rampUpDuration: (args.rampUpDuration as string | number | undefined) ?? undefined,
 			};
 			const caps = checkLoadCaps(loadParams, ctx.config);
 			if (!caps.ok) return errorResult(caps.error!);
