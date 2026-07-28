@@ -15,7 +15,6 @@
  * resolve to.
  */
 
-import { useEffect, useMemo, useState } from "react";
 import {
 	Button,
 	Select,
@@ -32,6 +31,7 @@ import {
 	uneditableAuthLabel,
 	type EditableAuthMode,
 } from "@/constants/auth-modes";
+import { useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
@@ -94,39 +94,23 @@ interface AuthTabProps {
 export default function AuthTab({ collection }: AuthTabProps) {
 	const updateCollection = useUpdateCollectionMutation();
 
-	const [auth, setAuth] = useState<CollectionAuth>(collection.auth);
-
-	// Resync the editable draft when the underlying collection changes (the
-	// component is not remounted per-collection - the parent renders it inline,
-	// so a different collection can arrive via props). Can't be derived: `auth`
-	// is a user-editable draft that intentionally diverges from props between
-	// edits and save. Render-phase reset keyed on value would miss switches to a
-	// different collection whose auth happens to equal the current draft.
-	useEffect(() => {
-		// eslint-disable-next-line react-hooks/set-state-in-effect
-		setAuth(collection.auth);
-	}, [collection.id, collection.auth]);
-
-	// The other half of that resync. Shell renders <CollectionDetail /> with no
-	// key, so switching collection tabs while staying on this inner tab reuses
-	// this component *and its mutation* - and TanStack holds `isError` until the
-	// next mutate. Without this, a save that failed on one collection would keep
-	// claiming to have failed on the next one, which the user never tried to
-	// save. `reset` is bound once in the observer, so it is a stable dep.
-	const resetSave = updateCollection.reset;
-	useEffect(() => {
-		resetSave();
-	}, [collection.id, resetSave]);
+	// Draft/resync/isDirty/mutation-reset all live in the shared hook - the
+	// three collection tabs used to hand-roll it one each. See useEntityDraft.
+	const {
+		draft: auth,
+		setDraft: setAuth,
+		isDirty,
+		reset: resetDraft,
+	} = useEntityDraft<CollectionAuth>({
+		entityKey: collection.id,
+		value: collection.auth,
+		mutation: updateCollection,
+	});
 
 	const mode = asEditable(auth);
 	// `mode === null` is exactly the digest/aws/ntlm set.
 	const uneditableLabel = uneditableAuthLabel(auth.mode);
 	const hint = mode ? AUTH_MODE_HINTS[mode] : undefined;
-
-	const isDirty = useMemo(
-		() => JSON.stringify(auth) !== JSON.stringify(collection.auth),
-		[auth, collection.auth]
-	);
 
 	const handleSave = () => {
 		if (!isDirty) return;
@@ -221,7 +205,7 @@ export default function AuthTab({ collection }: AuthTabProps) {
 					</Button>
 					<Button
 						variant="outline"
-						onClick={() => setAuth(collection.auth)}
+						onClick={resetDraft}
 						disabled={!isDirty || updateCollection.isPending}
 					>
 						Reset

@@ -812,7 +812,16 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe("constant_rps | constant_concurrency | ramp_up | iterations."),
-			concurrency: z.number().optional().describe("Target in-flight requests."),
+			// Positive, because an agent's natural guess for "unlimited" is -1 or
+			// 0, and the engine reads concurrency as an eager per-worker
+			// pre-allocation count. It rejects those with a 400; failing here
+			// names the field instead of surfacing an HTTP error.
+			concurrency: z
+				.number()
+				.int()
+				.positive()
+				.optional()
+				.describe("Target in-flight requests."),
 			startConcurrency: z
 				.number()
 				.optional()

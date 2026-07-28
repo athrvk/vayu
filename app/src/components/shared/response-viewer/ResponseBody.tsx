@@ -16,9 +16,9 @@
  * Similar to Postman's response body viewer.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { FileCode, Image as ImageIcon, File, Eye, Code, FileText } from "lucide-react";
-import { Button, CodeEditor } from "@/components/ui";
+import { CodeEditor, ToggleGroup, ToggleGroupItem } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { detectBodyType, getMonacoLanguage, formatBody } from "./utils";
 import type { ResponseBodyProps, ViewMode } from "./types";
@@ -30,6 +30,12 @@ interface ExtendedResponseBodyProps extends ResponseBodyProps {
 	height?: string;
 	/** Show view mode toggle buttons */
 	showModeToggle?: boolean;
+	/**
+	 * Rendered at the end of the toolbar - copy and download, in the request
+	 * builder. A slot rather than a hardcoded `ResponseActions` because the
+	 * history viewer mounts this same component with nothing to put there.
+	 */
+	actions?: ReactNode;
 	/** Compact mode for smaller displays */
 	compact?: boolean;
 }
@@ -42,6 +48,7 @@ export default function ResponseBody({
 	defaultMode = "pretty",
 	height = "100%",
 	showModeToggle = true,
+	actions,
 	compact = false,
 }: ExtendedResponseBodyProps) {
 	const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
@@ -112,9 +119,14 @@ export default function ResponseBody({
 		const contentType = headers["content-type"] || headers["Content-Type"] || "image/png";
 		const imageData = bodyRaw || body;
 		return (
-			<div className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}>
+			<div
+				className={cn(
+					"flex-1 flex items-center justify-center p-4 surface-sunken",
+					className
+				)}
+			>
 				<div className="text-center space-y-4">
-					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
+					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
 						<ImageIcon className="w-4 h-4" />
 						<span>
 							Image Response ({contentType.split("/")[1]?.toUpperCase() || "IMAGE"})
@@ -135,9 +147,14 @@ export default function ResponseBody({
 	// Handle PDF
 	if (detectedType === "pdf") {
 		return (
-			<div className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}>
+			<div
+				className={cn(
+					"flex-1 flex items-center justify-center p-4 surface-sunken",
+					className
+				)}
+			>
 				<div className="text-center space-y-4">
-					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
+					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
 						<File className="w-4 h-4" />
 						<span>PDF Document</span>
 					</div>
@@ -152,9 +169,14 @@ export default function ResponseBody({
 	// Handle binary
 	if (detectedType === "binary") {
 		return (
-			<div className={cn("flex-1 flex items-center justify-center p-4 bg-muted", className)}>
+			<div
+				className={cn(
+					"flex-1 flex items-center justify-center p-4 surface-sunken",
+					className
+				)}
+			>
 				<div className="text-center space-y-4">
-					<div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted text-sm text-muted-foreground">
+					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
 						<FileCode className="w-4 h-4" />
 						<span>Binary Data</span>
 					</div>
@@ -168,66 +190,68 @@ export default function ResponseBody({
 
 	return (
 		<div className={cn("flex-1 flex flex-col h-full", className)}>
-			{/* Mode Toggle Header */}
-			<div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-rule bg-muted/20">
+			{/*
+			 * The toolbar sits on a 32px band.
+			 *
+			 * It was `px-4 py-2` around `h-7` segments - 44px, against a 24px tab
+			 * strip directly above it. `ResponseActions` carries a comment saying
+			 * its icons are `h-6` precisely so they share that 24px row; this
+			 * toolbar never got the same treatment and ran 83% taller than the
+			 * band it hangs under. `h-8` with no vertical padding is the same
+			 * construction the tab row uses, one step up so the hierarchy still
+			 * reads.
+			 *
+			 * **No background of its own**, which is the second thing that was
+			 * wrong here and the harder one to see. It was `bg-muted/20`; the fix
+			 * for that was `surface-sunken`, and that over-corrected - a full
+			 * `--muted` fill turns this row into a heavy grey band between a
+			 * card-coloured tab strip and a card-coloured editor, reading as a
+			 * separate block wedged between them rather than part of the pane.
+			 *
+			 * The rule problem `surface-sunken` was solving does not need a fill to
+			 * solve. This row sits inside the pane, which declares `surface-card`,
+			 * so `border-b border-rule` already resolves against a card - exactly
+			 * how the tab strip above gets its edge, with no background either.
+			 * The band is defined by its rule and its height, not by a colour.
+			 */}
+			<div className="flex h-8 items-center justify-between gap-2 px-4 border-b border-rule">
 				<div className="flex items-center gap-2">
-					<FileCode className="w-4 h-4 text-muted-foreground" />
-					<span className="text-xs text-muted-foreground uppercase tracking-wide">
+					{/* 14px, matching the tab row's `w-3.5` icons. It was 16px. */}
+					<FileCode className="w-3.5 h-3.5 text-muted-foreground" />
+					<span className="text-[11px] text-muted-foreground uppercase tracking-[0.06em]">
 						{detectedType}
 					</span>
 				</div>
 
-				{showModeToggle && (
-					<div className="flex items-center gap-1 bg-muted p-0.5">
-						<Button
-							size="sm"
-							variant="ghost"
-							onClick={() => setViewMode("pretty")}
-							className={cn(
-								"h-7 px-2 text-xs gap-1",
-								compact && "h-6 px-1.5 text-[11px]",
-								viewMode === "pretty"
-									? "bg-background text-foreground shadow-sm font-medium"
-									: "text-muted-foreground hover:text-foreground hover:bg-background/50"
-							)}
+				<div className="flex items-center gap-2">
+					{showModeToggle && (
+						<ToggleGroup
+							value={viewMode}
+							// Radix clears the value when the active item is pressed again.
+							// A view mode has no "off" - ignore the empty string rather than
+							// letting the body render nothing.
+							onValueChange={(next) => next && setViewMode(next as ViewMode)}
+							size={compact ? "xs" : "sm"}
+							aria-label="Body view mode"
 						>
-							<Code className={cn("w-3 h-3", compact && "w-2.5 h-2.5")} />
-							Pretty
-						</Button>
-						<Button
-							size="sm"
-							variant="ghost"
-							onClick={() => setViewMode("raw")}
-							className={cn(
-								"h-7 px-2 text-xs gap-1",
-								compact && "h-6 px-1.5 text-[11px]",
-								viewMode === "raw"
-									? "bg-background text-foreground shadow-sm font-medium"
-									: "text-muted-foreground hover:text-foreground hover:bg-background/50"
+							<ToggleGroupItem value="pretty">
+								<Code className="w-3 h-3" />
+								Pretty
+							</ToggleGroupItem>
+							<ToggleGroupItem value="raw">
+								<FileText className="w-3 h-3" />
+								Raw
+							</ToggleGroupItem>
+							{canPreview && (
+								<ToggleGroupItem value="preview">
+									<Eye className="w-3 h-3" />
+									Preview
+								</ToggleGroupItem>
 							)}
-						>
-							<FileText className={cn("w-3 h-3", compact && "w-2.5 h-2.5")} />
-							Raw
-						</Button>
-						{canPreview && (
-							<Button
-								size="sm"
-								variant="ghost"
-								onClick={() => setViewMode("preview")}
-								className={cn(
-									"h-7 px-2 text-xs gap-1",
-									compact && "h-6 px-1.5 text-[11px]",
-									viewMode === "preview"
-										? "bg-background text-foreground shadow-sm font-medium"
-										: "text-muted-foreground hover:text-foreground hover:bg-background/50"
-								)}
-							>
-								<Eye className={cn("w-3 h-3", compact && "w-2.5 h-2.5")} />
-								Preview
-							</Button>
-						)}
-					</div>
-				)}
+						</ToggleGroup>
+					)}
+					{actions}
+				</div>
 			</div>
 
 			{/* Content */}

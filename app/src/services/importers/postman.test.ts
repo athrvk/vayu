@@ -19,8 +19,8 @@ describe("PostmanV21Parser", () => {
 		const r = p.parse(parsed, raw, opts);
 		expect(r.collections).toHaveLength(1);
 		const root = r.collections[0];
-		expect(root.name).toBe("Acme API");
-		expect(root.variables.baseUrl.value).toBe("https://api.acme.com");
+		expect(root.name).toBe("Sample API");
+		expect(root.variables.baseUrl.value).toBe("https://api.example.com");
 		expect(root.auth).toEqual({ mode: "bearer", token: "{{token}}" });
 		expect(root.preRequestScript).toBe("console.log('pre')");
 	});
@@ -67,7 +67,7 @@ describe("PostmanV21Parser", () => {
 					name: "Callback",
 					request: {
 						method: "GET",
-						url: "https://api.acme.com/cb?code=dGVzdA==&state=1",
+						url: "https://api.example.com/cb?code=dGVzdA==&state=1",
 					},
 				},
 			],
@@ -101,7 +101,7 @@ describe("PostmanV20Parser", () => {
 
 	it("parses string URL with query and v2.0 object-shape bearer auth", () => {
 		const req = p.parse(parsed20, raw20, opts).collections[0].requests[0];
-		expect(req.url).toBe("https://api.legacy.com/things");
+		expect(req.url).toBe("https://legacy.example.com/things");
 		expect(req.params).toEqual([{ key: "id", value: "5", enabled: true }]);
 		expect(req.auth).toEqual({ mode: "bearer", token: "LEGACY" });
 	});

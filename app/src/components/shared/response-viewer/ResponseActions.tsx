@@ -63,6 +63,11 @@ export function ResponseActions({ content, fileExtension, className }: ResponseA
 		URL.revokeObjectURL(url);
 	};
 
+	/*
+	 * h-6, not the `size="icon"` default of h-9. These buttons share a row with
+	 * the response tabs, and at 36px they - not the tabs - were what set that
+	 * row's height: a 24px tab band inside a 37px bar.
+	 */
 	return (
 		<div className={cn("flex items-center gap-1 shrink-0", className)}>
 			<Tooltip>
@@ -72,12 +77,13 @@ export function ResponseActions({ content, fileExtension, className }: ResponseA
 						variant="ghost"
 						onClick={handleCopy}
 						aria-label="Copy response"
+						className="h-6 w-6"
 					>
 						{copied ? (
 							// The only feedback that the copy happened.
-							<Check className="w-4 h-4 text-status-success-text" />
+							<Check className="w-3.5 h-3.5 text-status-success-text" />
 						) : (
-							<Copy className="w-4 h-4" />
+							<Copy className="w-3.5 h-3.5" />
 						)}
 					</Button>
 				</TooltipTrigger>
@@ -90,8 +96,9 @@ export function ResponseActions({ content, fileExtension, className }: ResponseA
 						variant="ghost"
 						onClick={handleDownload}
 						aria-label="Download response"
+						className="h-6 w-6"
 					>
-						<Download className="w-4 h-4" />
+						<Download className="w-3.5 h-3.5" />
 					</Button>
 				</TooltipTrigger>
 				<TooltipContent>Download response</TooltipContent>

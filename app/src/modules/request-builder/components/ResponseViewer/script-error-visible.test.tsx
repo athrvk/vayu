@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import type { ResponseState } from "../../types";
 import ResponseViewer from "./index";
@@ -91,10 +91,34 @@ describe("ResponseViewer surfaces script errors without console logs (#111)", ()
 		expect(screen.getByText(/ReferenceError: foo is not defined/)).toBeTruthy();
 	});
 
-	it("does not render a Console tab when there is neither a log nor a script error", () => {
-		state.response = { ...errorNoLogsResponse(), preScriptError: undefined };
-		renderViewer();
+	it("flags the trigger with an error dot rather than a log count", () => {
+		/*
+		 * This used to assert the Console tab was *absent* without logs or an
+		 * error. The tab is always present now, so absence says nothing - what
+		 * carries the signal is the dot, which outranks the count precisely so a
+		 * script that threw before logging cannot read as "0 logs, nothing to
+		 * see" (issue #111).
+		 */
+		state.response = errorNoLogsResponse();
+		const { unmount } = renderViewer();
 
-		expect(screen.queryByRole("tab", { name: /console/i })).toBeNull();
+		const trigger = screen.getByRole("tab", { name: /console/i });
+		expect(within(trigger).getByRole("img", { name: /script error/i })).toBeTruthy();
+		unmount();
+	});
+
+	it("shows a plain log count when nothing errored", () => {
+		state.response = {
+			...errorNoLogsResponse(),
+			preScriptError: undefined,
+			postScriptError: undefined,
+			consoleLogs: ["one", "two"],
+		};
+		const { unmount } = renderViewer();
+
+		const trigger = screen.getByRole("tab", { name: /console/i });
+		expect(trigger.textContent).toMatch(/2/);
+		expect(within(trigger).queryByRole("img", { name: /script error/i })).toBeNull();
+		unmount();
 	});
 });

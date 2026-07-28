@@ -13,6 +13,19 @@ describe("toVarRecord", () => {
 			b: { value: "x", enabled: false },
 		});
 	});
+
+	it("marks a Postman secret-typed variable, and omits the flag otherwise", () => {
+		const out = toVarRecord([
+			{ key: "token", value: "s3cr3t", type: "secret" },
+			{ key: "host", value: "example.com", type: "default" },
+		]);
+		expect(out).toEqual({
+			token: { value: "s3cr3t", enabled: true, secret: true },
+			host: { value: "example.com", enabled: true },
+		});
+		// Not `secret: false` - a non-secret variable must serialise as it did before.
+		expect("secret" in out.host).toBe(false);
+	});
 });
 
 describe("mapPostmanAuth", () => {

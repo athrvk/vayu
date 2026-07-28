@@ -53,6 +53,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	windowMaximize: () => ipcRenderer.send("window:maximize"),
 	windowClose: () => ipcRenderer.send("window:close"),
 	windowIsMaximized: (): Promise<boolean> => ipcRenderer.invoke("window:isMaximized"),
+	// Windows only: pops the app-icon system menu. See the handler in main.ts for
+	// why this is reimplemented rather than left to the platform.
+	windowSystemMenu: (position?: { x: number; y: number }): void =>
+		ipcRenderer.send("window:systemMenu", position),
 	onWindowMaximized: (callback: (isMaximized: boolean) => void) => {
 		const handler = (_event: unknown, isMaximized: boolean) => callback(isMaximized);
 		ipcRenderer.on("window:maximized", handler);
@@ -115,9 +119,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	openAppLink: (key: "docs" | "scripting" | "issues"): Promise<void> =>
 		ipcRenderer.invoke("shell:openAppLink", key),
 
+	// Open an arbitrary http(s) URL in the system browser. The main handler
+	// validates the scheme and refuses everything else, so this does not hand the
+	// web layer a general "launch any protocol handler" capability.
+	//
+	// Used by the OAuth authorize flow and by links inside rendered markdown -
+	// the latter being why it is no longer named after OAuth.
+	openExternalUrl: (url: string): Promise<void> =>
+		ipcRenderer.invoke("shell:openExternalUrl", url),
+
 	// OAuth 2.0 interactive flow
-	oauthOpenExternal: (url: string): Promise<void> =>
-		ipcRenderer.invoke("oauth:openExternal", url),
 	oauthOpenWindow: (params: {
 		authorizeUrl: string;
 		redirectUri: string;
