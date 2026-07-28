@@ -666,7 +666,7 @@ export interface EngineConfig {
 export interface ConfigEntry {
 	key: string;
 	value: string;
-	type: "integer" | "string" | "boolean" | "number";
+	type: "integer" | "string" | "boolean" | "number" | "enum";
 	label: string;
 	description: string;
 	category: string;
@@ -675,6 +675,14 @@ export interface ConfigEntry {
 	max?: string;
 	updatedAt: number;
 	requiresRestart?: boolean;
+	/**
+	 * Present only on `type: "enum"` entries (e.g. `defaultHttpVersion`); the
+	 * engine omits the key entirely rather than sending `null` or `[]` when a
+	 * stored row's options fail to parse (`engine/src/http/routes/config.cpp`),
+	 * so a renderer must treat a missing `options` as "nothing to offer", not
+	 * as a bug.
+	 */
+	options?: { value: string; label: string }[];
 }
 
 /** Client-side settings panels (localStorage-backed prefs, rendered by app panels). */
