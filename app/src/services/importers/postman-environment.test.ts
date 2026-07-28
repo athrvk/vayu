@@ -15,8 +15,12 @@ describe("PostmanEnvironmentParser", () => {
 			expect(p.detect(parsed, raw)).toBe(true);
 		});
 
-		it("ignores a globals export - Vayu's globals scope is a separate decision", () => {
-			expect(p.detect({ _postman_variable_scope: "globals", values: [] }, "")).toBe(false);
+		it("claims a globals export - same shape, different destination", () => {
+			expect(p.detect({ _postman_variable_scope: "globals", values: [] }, "")).toBe(true);
+		});
+
+		it("claims neither scope without a values array", () => {
+			expect(p.detect({ _postman_variable_scope: "globals" }, "")).toBe(false);
 		});
 
 		it("needs a values array, not just the scope marker", () => {
@@ -82,6 +86,7 @@ describe("PostmanEnvironmentParser", () => {
 				requestCount: 0,
 				folderCount: 0,
 				environmentCount: 1,
+				globalCount: 0,
 				skipped: [],
 				nonExecutableAuth: 0,
 			});
@@ -91,6 +96,7 @@ describe("PostmanEnvironmentParser", () => {
 			const r = p.parse(parsed, raw, { importEnvironments: false, importScripts: true });
 			expect(r.environments).toEqual([]);
 			expect(r.collections).toEqual([]);
+			expect(r.globals).toEqual({});
 			expect(r.meta.environmentCount).toBe(0);
 		});
 
@@ -98,6 +104,59 @@ describe("PostmanEnvironmentParser", () => {
 			const r = p.parse({ _postman_variable_scope: "environment", values: [] }, "", opts);
 			expect(r.environments[0].name).toBe("Imported Environment");
 			expect(r.environments[0].variables).toEqual({});
+		});
+
+		it("leaves globals empty for an environment export", () => {
+			expect(p.parse(parsed, raw, opts).globals).toEqual({});
+		});
+	});
+
+	describe("parse - globals scope", () => {
+		const gRaw = readFileSync(join(__dirname, "__fixtures__/postman-globals.json"), "utf8");
+		const gParsed = JSON.parse(gRaw);
+
+		it("routes the variables to globals, creating no environment", () => {
+			const r = p.parse(gParsed, gRaw, opts);
+			expect(r.environments).toEqual([]);
+			expect(r.collections).toEqual([]);
+			expect(r.globals.apiHost).toEqual({ value: "https://api.example.com", enabled: true });
+		});
+
+		it("applies the same mapping rules as an environment export", () => {
+			const { globals } = p.parse(gParsed, gRaw, opts);
+			// secret flag from `type`, disabled entries kept as enabled:false,
+			// and {{ spaced }} normalised - all inherited from toVarRecord.
+			expect(globals.sharedToken).toEqual({
+				value: "test-shared-token-1",
+				enabled: true,
+				secret: true,
+			});
+			expect(globals.retiredFlag.enabled).toBe(false);
+			expect(globals.banner.value).toBe("welcome {{tenant}}");
+		});
+
+		it("reports the globals count and its own format name", () => {
+			expect(p.parse(gParsed, gRaw, opts).meta).toEqual({
+				format: "Postman Globals",
+				requestCount: 0,
+				folderCount: 0,
+				environmentCount: 0,
+				globalCount: 4,
+				skipped: [],
+				nonExecutableAuth: 0,
+			});
+		});
+
+		it("drops the workspace name - the globals scope is a singleton with nowhere to put it", () => {
+			const r = p.parse(gParsed, gRaw, opts);
+			expect(r.environments).toHaveLength(0);
+			expect(JSON.stringify(r)).not.toContain("Sample Workspace Globals");
+		});
+
+		it("emits no globals when importEnvironments is off", () => {
+			const r = p.parse(gParsed, gRaw, { importEnvironments: false, importScripts: true });
+			expect(r.globals).toEqual({});
+			expect(r.meta.globalCount).toBe(0);
 		});
 	});
 });

@@ -35,6 +35,11 @@ const environmentFile = readFileSync(
 	"utf8"
 );
 
+const globalsFile = readFileSync(
+	join(__dirname, "../../services/importers/__fixtures__/postman-globals.json"),
+	"utf8"
+);
+
 function renderModal() {
 	const qc = new QueryClient();
 	return render(
@@ -102,5 +107,53 @@ describe("ImportModal with a Postman environment export", () => {
 		expect(screen.getByRole("button", { name: /^Import/i })).toBeEnabled();
 		expect(screen.getByText("Sample Staging")).toBeVisible();
 		expect(screen.queryByText(/No collections in this file/i)).toBeNull();
+	});
+});
+
+/**
+ * A globals export produces neither collections nor environments - only the
+ * `globals` record - so every count-driven surface has to read that field too or
+ * the preview reports an empty import for a file that will write four variables.
+ */
+describe("ImportModal with a Postman globals export", () => {
+	it("previews the globals destination and its variable count", async () => {
+		renderModal();
+		await pasteAndPreview(globalsFile);
+
+		expect(screen.getByText("Postman Globals")).toBeVisible();
+		// Named for the destination scope, not the workspace the file came from.
+		expect(screen.getByText("Globals")).toBeVisible();
+		expect(screen.queryByText("Sample Workspace Globals")).toBeNull();
+		expect(screen.getByText("4 variables")).toBeVisible();
+		expect(screen.getByText(/0 environments · 4 globals/)).toBeVisible();
+	});
+
+	it("keeps Import enabled - a globals-only import is a real import", async () => {
+		renderModal();
+		await pasteAndPreview(globalsFile);
+
+		expect(screen.getByRole("button", { name: /^Import/i })).toBeEnabled();
+		expect(screen.queryByText(/Nothing to import/i)).toBeNull();
+	});
+
+	it("states that existing globals survive the merge", async () => {
+		renderModal();
+		await pasteAndPreview(globalsFile);
+
+		expect(screen.getByText(/Existing globals are kept/i)).toBeVisible();
+	});
+
+	it("blocks Import once variables are excluded, and recovers", async () => {
+		renderModal();
+		await pasteAndPreview(globalsFile);
+
+		const envs = screen.getByLabelText(/Import environments/i);
+		fireEvent.click(envs);
+		expect(screen.getByRole("button", { name: /^Import/i })).toBeDisabled();
+		expect(screen.queryByText("4 variables")).toBeNull();
+
+		fireEvent.click(envs);
+		expect(screen.getByRole("button", { name: /^Import/i })).toBeEnabled();
+		expect(screen.getByText("4 variables")).toBeVisible();
 	});
 });

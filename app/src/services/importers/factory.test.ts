@@ -31,10 +31,13 @@ describe("parseImport", () => {
 			"Postman Collection v2.1"
 		);
 	});
-	it("leaves a Postman globals export unrecognised", () => {
-		expect(() =>
-			parseImport('{"_postman_variable_scope":"globals","values":[]}', opts)
-		).toThrow(UnrecognisedFormatError);
+	it("routes a Postman globals export, reporting it as its own format", () => {
+		const r = parseImport(fx("postman-globals.json"), opts);
+		expect(r.meta.format).toBe("Postman Globals");
+		// Same parser as the environment export, but the variables land in the
+		// globals scope rather than becoming a named environment.
+		expect(r.environments).toHaveLength(0);
+		expect(Object.keys(r.globals)).toContain("apiHost");
 	});
 	it("routes Insomnia v4", () => {
 		expect(parseImport(fx("insomnia-v4.json"), opts).meta.format).toBe("Insomnia Export v4");
