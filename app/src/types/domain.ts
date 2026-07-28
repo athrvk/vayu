@@ -403,9 +403,8 @@ export interface RunResult {
  * (`engine/src/http/routes/runs.cpp`); each is omitted by the engine when
  * absent from the stored snapshot, except `httpVersion` which the engine
  * always normalizes to a value (see `add_http_version`, same file). As of
- * the httpVersion change (#507a90be) the engine's summary is actually nine
- * keys wide - it also sends `followRedirects` / `maxRedirects` - which this
- * type does not yet declare; add them when a consumer needs to read them.
+ * the httpVersion change (#507a90be) the engine's summary is nine keys wide -
+ * it also sends `followRedirects` / `maxRedirects`, both declared below.
  * The full snapshot is still available on `GET /runs/:id`.
  */
 export interface RunSummary {
@@ -417,6 +416,8 @@ export interface RunSummary {
 	comment?: string;
 	/** Requested protocol - see {@link RunConfigSnapshot.httpVersion}. */
 	httpVersion?: HttpVersion;
+	followRedirects?: boolean;
+	maxRedirects?: number;
 }
 
 export interface Run {
@@ -584,6 +585,16 @@ export interface RunReport {
 			rampUpDuration?: string;
 			timeout?: number;
 			comment?: string;
+			/**
+			 * Requested protocol - see {@link RunConfigSnapshot.httpVersion}. Built by
+			 * `build_run_report_config` (`engine/src/http/routes/runs.cpp`), which
+			 * always normalizes it to a value via `add_http_version`, so this is
+			 * effectively always present despite the optional `?` - kept loosely
+			 * typed as `string` (not `HttpVersion`) like its siblings above, since
+			 * nothing here is runtime-validated; narrow with `isHttpVersion` before
+			 * using it as a value.
+			 */
+			httpVersion?: string;
 		};
 	};
 	summary: {

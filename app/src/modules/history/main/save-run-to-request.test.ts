@@ -53,6 +53,7 @@ function run(overrides: Partial<Run> = {}): Run {
 			],
 			followRedirects: false,
 			maxRedirects: 3,
+			httpVersion: "http2",
 			requestId: "req_1",
 		},
 		...overrides,
@@ -100,6 +101,7 @@ function liveRequest(overrides: Partial<Request> = {}): Request {
 		postRequestScript: "oldTest();",
 		followRedirects: true,
 		maxRedirects: 10,
+		httpVersion: "auto",
 		order: 0,
 		createdAt: "",
 		updatedAt: "",
@@ -121,6 +123,13 @@ describe("applyRunToRequest", () => {
 		expect(patch.bodyType).toBe("json");
 		expect(patch.followRedirects).toBe(false);
 		expect(patch.maxRedirects).toBe(3);
+	});
+
+	it("writes httpVersion, following the same `?? live.x` idiom as the redirect settings", () => {
+		const live = liveRequest(); // httpVersion: "auto"
+		const patch = applyRunToRequest(seedFromRun(run(), live), live); // run recorded "http2"
+
+		expect(patch.httpVersion).toBe("http2");
 	});
 
 	it("writes the request's own script part, not the collection's", () => {
@@ -231,6 +240,29 @@ describe("buildChangeset", () => {
 		expect(f).toContain("Body");
 		expect(f).toContain("Follow redirects");
 		expect(f).toContain("Max redirects");
+		expect(f).toContain("Protocol");
+	});
+
+	it("shows a Protocol diff row when the run's requested protocol differs from the request's", () => {
+		// live: "auto" (fixture default); run recorded "http2".
+		const live = liveRequest();
+		const protocol = buildChangeset(seedFromRun(run(), live), live).find(
+			(i) => i.field === "Protocol"
+		);
+
+		expect(protocol).toBeDefined();
+		expect(protocol!.state).toBe("changed");
+		expect(protocol!.segments).toEqual([
+			{ text: "auto", kind: "del" },
+			{ text: "http2", kind: "add" },
+		]);
+	});
+
+	it("omits the Protocol row when the request already uses the run's protocol", () => {
+		const live = liveRequest({ httpVersion: "http2" } as Partial<Request>);
+		const f = fields(seedFromRun(run(), live), live);
+
+		expect(f).not.toContain("Protocol");
 	});
 
 	it("always includes Auth as a kept row - no separate unchanged section", () => {
@@ -356,6 +388,7 @@ describe("buildChangeset", () => {
 			postRequestScript: "pm.test('ok', () => {});",
 			followRedirects: false,
 			maxRedirects: 3,
+			httpVersion: "http2",
 			auth: { mode: "bearer", token: "x" },
 		} as Partial<Request>);
 
