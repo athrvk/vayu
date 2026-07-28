@@ -6,58 +6,63 @@
  */
 
 /**
- * A Monaco language for a raw HTTP exchange.
+ * A Monaco language for a raw HTTP exchange, in `curl -v` notation.
  *
  * The Raw tab has always passed `language="http"` to its editor, and there has
  * never been an `http` language to receive it. Monaco ships ~90 basic languages
  * and that is not one of them - checked against
  * `monaco-editor/esm/vs/basic-languages/`, which has `html`, `hcl` and
- * `handlebars` but nothing HTTP. Monaco silently falls back to plain text for an
- * unknown id, so the one tab whose entire job is reading a protocol exchange has
- * been rendering as undifferentiated grey since it was written. The prop looked
- * right and did nothing.
+ * `handlebars` but nothing HTTP. Monaco falls back to plain text for an unknown
+ * id, so the one tab whose entire job is reading a protocol exchange rendered as
+ * undifferentiated grey. The prop looked right and did nothing.
  *
- * The grammar is deliberately small. A raw exchange has four things worth
- * telling apart - the request line, the status line, header names, and the body
- * after the blank line - and Monarch's `root` state plus one `body` state covers
- * exactly that. Anything more (guessing at JSON inside the body, say) would be a
- * second highlighter fighting whatever the body actually is.
+ * **Direction is a prefix, not a separator.** `>` for what was sent, `<` for
+ * what came back, which is what `curl -v` and HTTPie print and therefore the
+ * closest thing to a convention a reader already knows. It replaced a
+ * `# ─── response ───` line, and it is better in three ways: every line says
+ * which half it belongs to rather than only the boundary saying it, a pasted
+ * excerpt stays unambiguous even when the boundary is not included, and the
+ * grammar no longer has to keep a separator string in step with the component
+ * that writes it - which it had already failed to do once.
+ *
+ * **Where this departs from curl:** curl prefixes the head and prints the body
+ * bare, because its body goes to stdout for piping. Nothing here is piped, and
+ * the payload you want to copy has its own tab with its own copy button, so
+ * every line carries its marker - which means an exchange pasted into an issue
+ * survives being quoted, reflowed, and read out of order.
  */
 
 import type * as Monaco from "monaco-editor";
 
 export const HTTP_LANGUAGE_ID = "http";
 
-/**
- * Marks where a raw request ends and its response begins.
- *
- * It lives *here*, beside the grammar that has to recognise it, and the Raw tab
- * imports it. The two were separate for one commit and immediately drifted: the
- * separator changed and the grammar kept matching the old one, so the tokenizer
- * never left its `body` state and the whole response half - status line,
- * headers, everything - rendered unhighlighted. Caught by tokenizing a sample
- * exchange in a browser, not by any test.
- *
- * A `#` prefix because a raw exchange has no comment syntax of its own, so
- * anything pasted out of here is obviously annotation rather than protocol.
- */
-export const RAW_SEPARATOR = "# ─── response ───";
+/** What was sent. */
+export const SENT_MARKER = ">";
+/** What came back. */
+export const RECEIVED_MARKER = "<";
 
 /**
  * The methods a request line may open with.
  *
- * Anchored so a body line that happens to begin with the word "GET" is not
- * mistaken for a request line - the pattern requires a space and a target after
- * it, and the state machine has already left `root` by then anyway.
+ * Anchored behind a marker and followed by a target, so a body line that begins
+ * with the word "GET" is not mistaken for a request line.
  */
 const METHODS = "GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|CONNECT";
 
 /**
- * The separator holds no regex metacharacters today. This keeps that from
- * mattering if it ever changes.
+ * Prefixes every line of one half of the exchange.
+ *
+ * Trailing blank lines are dropped and re-added as a bare marker, which is what
+ * curl prints for the blank line that ends a head - it reads as "the head ended
+ * here" rather than as an accidental gap.
  */
-function escapeRegExp(literal: string): string {
-	return literal.replace(/[\\^$.*+?()[\]{}|]/g, (ch) => "\\" + ch);
+export function markLines(text: string, marker: string): string {
+	return text
+		.replace(/\r\n/g, "\n")
+		.replace(/\s+$/, "")
+		.split("\n")
+		.map((line) => `${marker} ${line}`.trimEnd())
+		.join("\n");
 }
 
 export function registerHttpLanguage(monaco: typeof Monaco): void {
@@ -71,29 +76,55 @@ export function registerHttpLanguage(monaco: typeof Monaco): void {
 	monaco.languages.setMonarchTokensProvider(HTTP_LANGUAGE_ID, {
 		defaultToken: "",
 		tokenizer: {
+			/*
+			 * `root` reads a head - request line, status line, headers. A bare
+			 * marker is the blank line that ends one, and moves to `body`.
+			 *
+			 * The state exists for one reason: a JSON body line like
+			 * `< {"a":1}` matches the header rule, because `{"a"` is a plausible
+			 * field name followed by a colon. Without a body state the payload
+			 * highlights as headers.
+			 */
 			root: [
-				// Status line: HTTP/1.1 200 OK
-				[/^(HTTP\/[\d.]+)(\s+)(\d{3})(.*)$/, ["keyword", "", "number", "string"]],
-				// Request line: GET /orders HTTP/1.1
+				// < HTTP/1.1 200 OK
 				[
-					new RegExp(`^(${METHODS})(\\s+)(\\S+)(.*)$`),
-					["keyword", "", "string", "comment"],
+					/^(<)(\s+)(HTTP\/[\d.]+)(\s+)(\d{3})(.*)$/,
+					["comment", "", "keyword", "", "number", "string"],
 				],
-				// A blank line ends the head and starts the body, exactly as the
-				// protocol says. Without this the body's colons would keep matching
-				// the header rule.
-				[/^\s*$/, "", "@body"],
-				// Header: Name: value
-				[/^([^:\s]+)(:)(\s*)(.*)$/, ["type", "delimiter", "", "string"]],
+				// > GET /orders HTTP/1.1
+				[
+					new RegExp(`^(>)(\\s+)(${METHODS})(\\s+)(\\S+)(.*)$`),
+					["comment", "", "keyword", "", "string", "comment"],
+				],
+				// > Host: api.example.com   /   < Content-Type: application/json
+				[
+					/^([<>])(\s+)([^:\s]+)(:)(\s*)(.*)$/,
+					["comment", "", "type", "delimiter", "", "string"],
+				],
+				// A bare marker: the blank line between head and body.
+				[/^[<>]\s*$/, "comment", "@body"],
 			],
 			body: [
 				/*
-				 * The separator returns us to reading protocol rather than payload.
-				 * Matched from `RAW_SEPARATOR` rather than a copy of its shape, so
-				 * changing the marker cannot leave the grammar behind - which is
-				 * exactly what happened when these were two literals.
+				 * A status line ends the request's body and starts the response's
+				 * head. This is what the separator used to do, and doing it from
+				 * the protocol's own shape means there is no marker string for the
+				 * component and the grammar to disagree about.
 				 */
-				[new RegExp(`^${escapeRegExp(RAW_SEPARATOR)}$`), "comment", "@pop"],
+				/*
+				 * `next` rides on the last group's action, not as a third element of
+				 * the rule. Monarch accepts `[regex, action, next]` only when the
+				 * action is a single token; with a per-group array the third element
+				 * is ignored, so the state never popped and every response header
+				 * after the status line fell through to the catch-all below as a
+				 * bare comment. Verified by tokenizing, not by reading the docs.
+				 */
+				[
+					/^(<)(\s+)(HTTP\/[\d.]+)(\s+)(\d{3})(.*)$/,
+					["comment", "", "keyword", "", "number", { token: "string", next: "@pop" }],
+				],
+				// Payload lines still show which half they belong to.
+				[/^[<>]/, "comment"],
 			],
 		},
 	});
