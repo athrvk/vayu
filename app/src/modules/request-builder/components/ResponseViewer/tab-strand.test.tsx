@@ -212,3 +212,47 @@ describe("icons in the tab strip", () => {
 		expect(decorated).toEqual([]);
 	});
 });
+
+/**
+ * A tab count of zero renders nothing.
+ *
+ * Removing the conditional gating made the Console tab always render, and its
+ * count came with it - so a response with no console output showed `Console⁰`,
+ * a superscript whose only message is that there is nothing to read, above a
+ * panel that says "No console output" at more length.
+ *
+ * `TabCount` drops a zero itself rather than each call site guarding: they were
+ * already guarding by hand (`RequestTabs` passes `badge: undefined` and tests
+ * `!== undefined`), which is the same remembering problem one level up.
+ */
+describe("a tab count of zero", () => {
+	it("shows no superscript on Console when nothing was logged", () => {
+		state.response = {
+			...fullResponse(),
+			consoleLogs: undefined,
+			preScriptError: undefined,
+			postScriptError: undefined,
+		};
+		renderViewer();
+
+		/*
+		 * The absence of a `sup`, not an equality on the text. `TabLabel` renders
+		 * its label twice - once `invisible font-semibold` to reserve the width
+		 * the active state will need - so `textContent` is "ConsoleConsole" and
+		 * always will be.
+		 */
+		const trigger = screen.getByRole("tab", { name: /console/i });
+		expect(trigger.querySelector("sup")).toBeNull();
+		expect(trigger.textContent).not.toMatch(/\d/);
+	});
+
+	it("still shows a real count when there is one", () => {
+		// The guard has to fail for the right reason - a count that vanished
+		// entirely would pass the assertion above.
+		state.response = { ...fullResponse(), consoleLogs: ["one", "two"] };
+		renderViewer();
+
+		const trigger = screen.getByRole("tab", { name: /console/i });
+		expect(trigger.querySelector("sup")?.textContent).toBe("2");
+	});
+});

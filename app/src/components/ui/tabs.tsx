@@ -167,7 +167,25 @@ function TabLabel({ children }: { children: string }) {
  * 10px is the documented micro step - see type-scale.test.ts, which rejects the
  * half-pixel sizes that come from nudging a number until it looks right.
  */
+/**
+ * The small superscript count on a tab.
+ *
+ * **Zero renders nothing.** A count is there to say "there are this many"; a
+ * `0` says "there are none", which the tab's own empty state already says at
+ * more length and without asking you to read a superscript to find out there is
+ * nothing to read. The Console tab showed one the moment its gating was removed
+ * and it always rendered - a `0` beside a tab whose panel says "No console
+ * output".
+ *
+ * Handled here rather than at each call site because the call sites were
+ * already working around it by hand: `RequestTabs` passes `badge: undefined`
+ * and guards with `tab.badge !== undefined`, which is the same remembering
+ * problem one level up. A caller that genuinely wants to show a zero can pass
+ * the string `"0"`.
+ */
 function TabCount({ value, className }: { value: React.ReactNode; className?: string }) {
+	if (value === 0) return null;
+
 	return (
 		<sup
 			className={cn(
