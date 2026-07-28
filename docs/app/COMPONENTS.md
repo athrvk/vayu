@@ -287,6 +287,23 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 - `ResponseHeadersPanel.tsx` - the Headers tab body
 - `tab-trigger.ts` - `RESPONSE_TAB_TRIGGER`, the underline-on-active class
 - `phase-tips.ts` - `PHASE_TIPS`, the five per-phase timing tooltips (DNS -> Connect -> TLS -> TTFB -> Download), shared so every renderer of those numbers reads one string
+- `timing-phases.ts` - `TIMING_PHASES`, the same five phases as one descriptor list (label, hue, tooltip, and the trace/average field each reads), plus the `phasesFromTrace` / `phasesFromAverages` selectors
+- `TimingPhaseTiles.tsx` - the dense tile grid (one labelled box per phase), rendered by both sampled-exchange views
+
+> **One list, five renderers.** The five network phases are drawn by the
+> request-builder's `ResponseTimingTab` (timeline + legend), the dashboard's
+> run-level averages card and per-sample tiles, the dashboard's
+> `charts/TimingWaterfall`, and the history `SampleRequestCard`. Each used to
+> declare its own copy of the list, so adding a phase meant finding all five and
+> nothing pointed you at the other four. Two had already drifted: the waterfall
+> painted TTFB with `--primary` - an accent-tracking token the design system
+> forbids for a chart series, and the very bug `ResponseTimingTab`'s header
+> comment describes fixing in its own copy - and carried private tooltip strings
+> that `phase-tips.ts` existed to replace.
+>
+> Add a phase to `TIMING_PHASES` and all five pick it up.
+> `timing-phases.test.tsx` guards that by mocking in a sixth phase and asking
+> each renderer to show it, so a call site that goes back to a local array fails.
 
 > **Two shells, shared parts.** The request builder has its own richer
 > `components/ResponseViewer/` (console output, test results, cookies, timing,
@@ -348,7 +365,19 @@ Config resolution (`{{variables}}`), the token cache key (`services/oauth/cache-
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+
+### `info-chip`
+
+The 14px "i" dot with a tooltip, beside a label that needs a sentence -
+timing phases, chart axes, the wire/queue/total summary. It lived in
+`modules/dashboard/components/shared.tsx`, where nothing outside the dashboard
+could import it without a module reaching into another module, so the request
+builder grew its own copy - and the copy is the one that got the `border-rule`
+fix, leaving the original outline-less in dark. The border stays a prop
+(default `border-border`, pass `border-rule` on a declared surface) because
+`border-rule` falls back to the invisible default where no surface declares one.
+`dashboard/components/shared.tsx` re-exports it so existing imports resolve.
 
 ### Markdown (`markdown-view`, `markdown-editor`)
 

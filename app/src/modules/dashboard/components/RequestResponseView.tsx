@@ -30,7 +30,9 @@ import {
 	StatusCodeBadge,
 	CompactHeadersViewer,
 	ResponseBody,
-	PHASE_TIPS,
+	TimingPhaseTiles,
+	phasesFromAverages,
+	phasesFromTrace,
 } from "@/components/shared/response-viewer";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
@@ -147,61 +149,34 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<CardTitle className="text-lg">Timing Breakdown</CardTitle>
 					</CardHeader>
 					<CardContent>
+						{/* Run-level averages: five label/value pairs, driven by the
+						    shared phase descriptor. This card is the one renderer with
+						    room for the spelled-out label, so it reads `longLabel`
+						    ("First Byte") where the dense ones read "TTFB". */}
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
-							<div>
-								<p className="text-sm text-muted-foreground">
-									DNS <InfoChip tip={PHASE_TIPS.dns} />
-								</p>
-								<p className="font-bold">
-									{formatPhaseDuration(report.timingBreakdown.avgDnsMs).value}
-									{formatPhaseDuration(report.timingBreakdown.avgDnsMs).unit}
-								</p>
-							</div>
-							<div>
-								<p className="text-sm text-muted-foreground">
-									Connect <InfoChip tip={PHASE_TIPS.connect} />
-								</p>
-								<p className="font-bold">
-									{formatPhaseDuration(report.timingBreakdown.avgConnectMs).value}
-									{formatPhaseDuration(report.timingBreakdown.avgConnectMs).unit}
-								</p>
-							</div>
-							<div>
-								<p className="text-sm text-muted-foreground">
-									TLS <InfoChip tip={PHASE_TIPS.tls} />
-								</p>
-								<p className="font-bold">
-									{formatPhaseDuration(report.timingBreakdown.avgTlsMs).value}
-									{formatPhaseDuration(report.timingBreakdown.avgTlsMs).unit}
-								</p>
-							</div>
-							<div>
-								<p className="text-sm text-muted-foreground">
-									First Byte <InfoChip tip={PHASE_TIPS.ttfb} />
-								</p>
-								<p className="font-bold">
-									{
-										formatPhaseDuration(report.timingBreakdown.avgFirstByteMs)
-											.value
-									}
-									{
-										formatPhaseDuration(report.timingBreakdown.avgFirstByteMs)
-											.unit
-									}
-								</p>
-							</div>
-							<div>
-								<p className="text-sm text-muted-foreground">
-									Download <InfoChip tip={PHASE_TIPS.download} />
-								</p>
-								<p className="font-bold">
-									{
-										formatPhaseDuration(report.timingBreakdown.avgDownloadMs)
-											.value
-									}
-									{formatPhaseDuration(report.timingBreakdown.avgDownloadMs).unit}
-								</p>
-							</div>
+							{phasesFromAverages(report.timingBreakdown).map((phase) => {
+								const duration =
+									phase.value !== undefined
+										? formatPhaseDuration(phase.value)
+										: undefined;
+								return (
+									<div key={phase.key}>
+										<p className="text-sm text-muted-foreground">
+											{phase.longLabel} <InfoChip tip={phase.tip} />
+										</p>
+										<p className="font-bold">
+											{duration ? (
+												<>
+													{duration.value}
+													{duration.unit}
+												</>
+											) : (
+												<span className="text-subtle-foreground">-</span>
+											)}
+										</p>
+									</div>
+								);
+							})}
 						</div>
 					</CardContent>
 				</Card>
@@ -294,51 +269,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 									const isError = !!result.error || result.statusCode === 0;
 									const isSlow = result.trace?.isSlow;
 
-									// One data-driven list, not five hand-rolled cards each
-									// with its own `.toFixed(1)`. `formatPhaseDuration` (imported
-									// above and already used for the run-level averages) keeps
-									// the significant-digit ladder a raw fixed precision drops -
-									// a 0.04ms cached DNS lookup no longer rounds to `0.0ms`.
-									const timingPhases: {
-										label: string;
-										value: number;
-										tip: string;
-									}[] = (
-										[
-											{
-												label: "DNS",
-												value: result.trace?.dnsMs,
-												tip: PHASE_TIPS.dns,
-											},
-											{
-												label: "Connect",
-												value: result.trace?.connectMs,
-												tip: PHASE_TIPS.connect,
-											},
-											{
-												label: "TLS",
-												value: result.trace?.tlsMs,
-												tip: PHASE_TIPS.tls,
-											},
-											{
-												label: "TTFB",
-												value: result.trace?.firstByteMs,
-												tip: PHASE_TIPS.ttfb,
-											},
-											{
-												label: "Download",
-												value: result.trace?.downloadMs,
-												tip: PHASE_TIPS.download,
-											},
-										] as {
-											label: string;
-											value: number | undefined;
-											tip: string;
-										}[]
-									).filter(
-										(p): p is { label: string; value: number; tip: string } =>
-											p.value !== undefined
-									);
+									// The phases this sample actually reported, in wire order,
+									// from the shared descriptor. Absent ones are dropped: a
+									// trace with no TLS is plain HTTP, which is not the same
+									// statement as "the handshake took 0ms".
+									const timingPhases = phasesFromTrace(result.trace);
 
 									return (
 										<div key={index} className="border-b last:border-b-0">
@@ -475,49 +410,18 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 																	</div>
 																)}
 
-															{/* Timing Breakdown - camelCase phase fields from the
-															    load-test trace, formatted through the shared
-															    `formatPhaseDuration`. */}
+															{/* Timing Breakdown - the shared tile grid, the same one the
+															    history sample card renders. It was two copies of this
+															    markup until #76; the history copy had lost the tooltips
+															    and painted each tile with a raw Tailwind pastel. */}
 															{timingPhases.length > 0 && (
 																<div className="space-y-1">
 																	<p className="text-xs font-medium text-muted-foreground">
 																		Timing Breakdown
 																	</p>
-																	<div className="grid grid-cols-[repeat(auto-fit,minmax(90px,1fr))] gap-2 text-xs">
-																		{timingPhases.map(
-																			(phase) => {
-																				const d =
-																					formatPhaseDuration(
-																						phase.value
-																					);
-																				return (
-																					<div
-																						key={
-																							phase.label
-																						}
-																						className="bg-card border border-border rounded-md p-2 text-center"
-																					>
-																						<p className="text-muted-foreground">
-																							{
-																								phase.label
-																							}{" "}
-																							<InfoChip
-																								tip={
-																									phase.tip
-																								}
-																							/>
-																						</p>
-																						<p className="font-mono font-medium">
-																							{
-																								d.value
-																							}
-																							{d.unit}
-																						</p>
-																					</div>
-																				);
-																			}
-																		)}
-																	</div>
+																	<TimingPhaseTiles
+																		phases={timingPhases}
+																	/>
 																</div>
 															)}
 

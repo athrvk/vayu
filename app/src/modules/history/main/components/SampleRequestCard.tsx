@@ -13,12 +13,14 @@
 
 import { CheckCircle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import TimingBreakdown from "./TimingBreakdown";
 import {
 	UnifiedResponseViewer,
 	HeadersViewer,
 	StatusCodeBadge,
+	TimingPhaseTiles,
+	phasesFromTrace,
 } from "@/components/shared/response-viewer";
+import { Eyebrow } from "@/components/ui";
 import type { SampleResult } from "../../types";
 
 interface SampleRequestCardProps {
@@ -41,6 +43,13 @@ export default function SampleRequestCard({
 
 	const isError = !!sample.error || sample.statusCode === 0;
 	const isSuccess = sample.statusCode >= 200 && sample.statusCode < 300;
+
+	// Gating the heading on the phases themselves, not on `sample.trace`. The
+	// old component decided separately - the wrapper rendered whenever a trace
+	// existed, while the breakdown inside it returned null unless DNS, connect
+	// or TLS was present - so a trace carrying only TTFB and download printed a
+	// "Timing Breakdown" heading with nothing under it.
+	const timingPhases = phasesFromTrace(sample.trace);
 
 	return (
 		<div
@@ -92,20 +101,15 @@ export default function SampleRequestCard({
 						</div>
 					)}
 
-					{/* Timing Breakdown */}
-					{sample.trace && (
+					{/* Timing Breakdown - the shared tile grid, the same one the
+					    dashboard's live sample rows render. The local
+					    `TimingBreakdown` this replaced was the second copy of that
+					    markup: it had no per-phase tooltips and tinted each tile
+					    from the raw Tailwind palette. */}
+					{timingPhases.length > 0 && (
 						<div>
-							<h4 className="text-xs font-semibold text-muted-foreground mb-2 uppercase">
-								Timing Breakdown
-							</h4>
-							<TimingBreakdown
-								dnsMs={sample.trace.dnsMs}
-								connectMs={sample.trace.connectMs}
-								tlsMs={sample.trace.tlsMs}
-								firstByteMs={sample.trace.firstByteMs}
-								downloadMs={sample.trace.downloadMs}
-								compact
-							/>
+							<Eyebrow className="mb-2">Timing Breakdown</Eyebrow>
+							<TimingPhaseTiles phases={timingPhases} />
 						</div>
 					)}
 

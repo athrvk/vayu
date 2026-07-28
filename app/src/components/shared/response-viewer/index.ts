@@ -28,8 +28,22 @@ export type { ResponseStatusBarProps } from "./ResponseStatusBar";
 export type { ResponseActionsProps } from "./ResponseActions";
 export type { ResponseHeadersPanelProps } from "./ResponseHeadersPanel";
 
-// Per-phase timing tooltips, shared by every renderer of the five network phases.
+// The five network phases, as one descriptor list. Five components render the
+// same DNS -> Connect -> TLS -> TTFB -> Download breakdown; adding a phase used
+// to mean finding all five, and two of them had already drifted. See
+// `timing-phases.ts` for what drifted and why colour lives there.
 export { PHASE_TIPS } from "./phase-tips";
+export { TIMING_PHASES, phaseColor, phasesFromTrace, phasesFromAverages } from "./timing-phases";
+export type {
+	TimingPhase,
+	TimingPhaseKey,
+	TimingPhaseSource,
+	TimingAverageSource,
+	ResolvedTimingPhase,
+	MaybeResolvedTimingPhase,
+} from "./timing-phases";
+export { default as TimingPhaseTiles } from "./TimingPhaseTiles";
+export type { TimingPhaseTilesProps } from "./TimingPhaseTiles";
 
 // Utilities
 export {

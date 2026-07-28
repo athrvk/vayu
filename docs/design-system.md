@@ -582,28 +582,50 @@ slow → danger (`LatencyMetric.tsx`).
 
 ### Decorative categorical palettes (the one token exception)
 
-A few surfaces use a **fixed decorative palette** to give items a stable
-identity by color rather than to signal state - the same idea as `--chart-*`.
-These intentionally keep Tailwind hue utilities (with `dark:` variants) instead
-of tokens, because they never respond to theme and don't carry semantics:
+A surface may use a **fixed decorative palette** to give items a stable identity
+by color rather than to signal state - the same idea as `--chart-*`. Such a
+palette may keep Tailwind hue utilities (with `dark:` variants) instead of
+tokens, because it never responds to theme and carries no semantics.
 
-- **Timing phases** - DNS / connect / TLS / TTFB / download in the breakdown.
-  These are written as explicit `bg-blue-50 dark:bg-blue-950/30` pairs, so they
-  *are* theme-aware; they are categorical identity, not state.
+**The list is currently empty.** Everything - state, status, scope, semantics,
+and categorical identity alike - uses tokens.
 
-  The history overview tiles used to be listed here too, and should not have
-  been: they encode HTTP severity, which is state. They now use
-  `STATUS_CLASS_STYLE`.
+**Three entries were removed because they no longer describe the code.** The
+per-section Settings accent palette is gone; there are zero `pink/purple/cyan`
+utilities left under `modules/settings/`. The console's Pre-request and Test
+script groups now use `status-running-*` and `status-success-*` tokens rather
+than raw `blue-500` / `green-500`, because the raw values were theme-blind and
+measured 3.76 and 2.22 in light mode; the console body is `bg-muted`, not a
+fixed `zinc-900` terminal. And the timing phases - DNS / connect / TLS / TTFB /
+download - are covered below.
 
-Everything else - state, status, scope, semantics - must use tokens.
+The history overview tiles were on this list too, and should not have been: they
+encode HTTP severity, which is state. They use `STATUS_CLASS_STYLE`.
 
-**Two entries were removed from this list because they no longer describe the
-code.** The per-section Settings accent palette is gone; there are zero
-`pink/purple/cyan` utilities left under `modules/settings/`. And the console's
-Pre-request and Test script groups now use `status-running-*` and
-`status-success-*` tokens rather than raw `blue-500` / `green-500`, because the
-raw values were theme-blind and measured 3.76 and 2.22 in light mode. The
-console body is `bg-muted`, not a fixed `zinc-900` terminal.
+#### Timing phases
+
+The five network phases are a categorical set, and they were the last entry
+here: the history breakdown tinted each tile with an explicit
+`bg-blue-50 dark:bg-blue-950/30` pair. They are `--chart-*` now, declared once
+in `components/shared/response-viewer/timing-phases.ts`:
+
+| Phase | Token |
+|-------|-------|
+| DNS | `--chart-2` (teal) |
+| Connect | `--chart-4` (amber) |
+| TLS | `--chart-5` (rose) |
+| TTFB | `--chart-3` (violet) |
+| Download | `--chart-6` (moss) |
+
+Two rules come with that table. **Never `--primary` or `--chart-1`** - both
+follow the user's accent, so either can land on a neighbouring phase's hue;
+under the green scheme `--primary` and `--success` sat three lightness points
+apart and two of the five phases rendered as one swatch. And **colour is only
+carried where it is the encoding** - the timeline segments in the builder's
+timing tab and the bars in the dashboard's waterfall, where hue is how you tell
+the phases apart. The tile grid (`TimingPhaseTiles`) is deliberately neutral:
+each tile already has the label written in it, so a hue there was decoration
+paying for an exception.
 
 The lesson worth keeping: an entry on this list is a claim about the code, and
 it decays. A raw palette class here is only defensible if it comes with a
