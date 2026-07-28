@@ -545,6 +545,51 @@ inline std::optional<RunStatus> parse_run_status (const std::string& str) {
     return std::nullopt;
 }
 
+/**
+ * @brief Transport HTTP version for a request, stored as TEXT in the DB.
+ *
+ * `all_http_versions()` is the single enumeration of this domain - request
+ * validation and the seeded config `options` list both derive their allowed
+ * values from it rather than writing a literal list, so the two cannot drift.
+ */
+enum class HttpVersion { Auto, Http1_1, Http2 };
+
+inline std::string to_string (HttpVersion version) {
+    switch (version) {
+    case HttpVersion::Auto: return "auto";
+    case HttpVersion::Http1_1: return "http1.1";
+    case HttpVersion::Http2: return "http2";
+    }
+    return "unknown";
+}
+
+inline std::string http_version_label (HttpVersion version) {
+    switch (version) {
+    case HttpVersion::Auto: return "Auto";
+    case HttpVersion::Http1_1: return "HTTP/1.x";
+    case HttpVersion::Http2: return "HTTP/2";
+    }
+    return "Unknown";
+}
+
+inline std::optional<HttpVersion> http_version_from_string (const std::string& str) {
+    if (str == "auto")
+        return HttpVersion::Auto;
+    if (str == "http1.1")
+        return HttpVersion::Http1_1;
+    if (str == "http2")
+        return HttpVersion::Http2;
+    return std::nullopt;
+}
+
+inline const std::vector<HttpVersion>& all_http_versions () {
+    static const std::vector<HttpVersion> versions = { HttpVersion::Auto,
+        HttpVersion::Http1_1, HttpVersion::Http2 };
+    return versions;
+}
+
+constexpr HttpVersion DEFAULT_HTTP_VERSION = HttpVersion::Auto;
+
 enum class MetricName {
     Rps,
     LatencyAvg,
