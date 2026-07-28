@@ -8,22 +8,35 @@
 /**
  * KeyValueEditor Component
  *
- * Reusable editor for key-value pairs with variable support.
- * Used for: Query Params, Headers, Form Data, URL Encoded
+ * The table behind four surfaces: Query Params, Headers, form-data and
+ * urlencoded. It is the densest data surface in the app, which is what most of
+ * the decisions below are about.
  *
- * Features:
- * - Add/remove rows
- * - Enable/disable individual rows
- * - Variable syntax highlighting and autocomplete
- * - Optional resolved value preview
- * - Optional description field
+ * **Rows were 48px.** `VariableInput` is `h-9` (36px), the row added `p-1` and
+ * the stack added `space-y-1` - so eight headers cost 384px, in a panel whose
+ * tab band is 24px and whose URL bar is 40px. They are `h-8` now, the height 43
+ * other places in the app already use, at a 36px pitch. Same eight headers,
+ * 288px.
+ *
+ * **The Resolved column is gone.** It held an equal third of the table -
+ * `grid-cols-[24px_1fr_1fr_1fr_32px]` - and on a row with no variable in it,
+ * which is most rows, it printed the two cells to its left joined by `=`. Key
+ * and Value now have the whole width, and a row that *does* contain a variable
+ * carries a marker that reveals the resolved line on hover or focus. See
+ * `ResolvedPeek`.
+ *
+ * **The trailing blank row** comes from one `withTrailingBlank` rather than two
+ * copies that had drifted.
  */
 
 import { useCallback } from "react";
-import { cn } from "@/lib/utils";
 import type { KeyValueItem, KeyValueEditorProps } from "../../types";
-import { createEmptyKeyValue } from "../../utils/key-value";
+import { withTrailingBlank } from "../../utils/key-value";
 import KeyValueRow from "./KeyValueRow";
+
+// Re-exported here so a panel takes the table and its text form from one place.
+export { BulkEditor } from "./BulkEditor";
+export type { BulkEditorProps } from "./BulkEditor";
 
 export default function KeyValueEditor({
 	items,
@@ -38,89 +51,48 @@ export default function KeyValueEditor({
 	canRemove = () => true, // Default: allow removing all items
 	canDisable = () => true, // Default: allow disabling all items
 }: KeyValueEditorProps) {
-	// Remove row
 	const handleRemove = useCallback(
 		(id: string) => {
 			const itemToRemove = items.find((item) => item.id === id);
-
-			// Check if parent allows removal
-			if (itemToRemove && !canRemove(itemToRemove)) {
-				return;
-			}
-
-			const newItems = items.filter((item) => item.id !== id);
-			// Always ensure there's at least one empty row at the end
-			if (newItems.length === 0) {
-				newItems.push(createEmptyKeyValue());
-			} else {
-				const lastItem = newItems[newItems.length - 1];
-				// If the last item has a value, add an empty row
-				if (lastItem.key.trim() || lastItem.value.trim()) {
-					newItems.push(createEmptyKeyValue());
-				}
-			}
-			onChange(newItems);
+			if (itemToRemove && !canRemove(itemToRemove)) return;
+			onChange(withTrailingBlank(items.filter((item) => item.id !== id)));
 		},
 		[items, onChange, canRemove]
 	);
 
-	// Update row
 	const handleUpdate = useCallback(
 		(id: string, field: keyof KeyValueItem, value: string | boolean) => {
 			const itemToUpdate = items.find((item) => item.id === id);
 			if (!itemToUpdate) return;
-
-			// Check if parent allows editing this field
-			if (!canEdit(itemToUpdate, field)) {
-				return;
-			}
-
-			// Check if parent allows disabling
-			if (field === "enabled" && value === false && !canDisable(itemToUpdate)) {
-				return;
-			}
+			if (!canEdit(itemToUpdate, field)) return;
+			if (field === "enabled" && value === false && !canDisable(itemToUpdate)) return;
 
 			const newItems = items.map((item) =>
 				item.id === id ? { ...item, [field]: value } : item
 			);
-
-			// Check if we're updating the last row
-			const lastItem = newItems[newItems.length - 1];
-			const isLastRow = lastItem && lastItem.id === id;
-
-			// If editing the last row and it now has a value, add a new empty row
-			if (isLastRow) {
-				const hasValue = lastItem.key.trim() || lastItem.value.trim();
-				if (hasValue) {
-					newItems.push(createEmptyKeyValue());
-				}
-			}
-
-			onChange(newItems);
+			onChange(withTrailingBlank(newItems));
 		},
 		[items, onChange, canEdit, canDisable]
 	);
 
 	return (
-		<div className="space-y-2">
-			{/* Column Headers */}
-			<div
-				className={cn(
-					"grid gap-2 text-xs font-medium text-muted-foreground px-1",
-					showResolved
-						? "grid-cols-[24px_1fr_1fr_1fr_32px]"
-						: "grid-cols-[24px_1fr_1fr_32px]"
-				)}
-			>
-				<div></div>
-				<div>{keyPlaceholder}</div>
-				<div>{valuePlaceholder}</div>
-				{showResolved && <div>Resolved</div>}
-				<div></div>
+		<div className="space-y-1.5">
+			{/*
+			 * The column headers no longer repeat the placeholders. They used to
+			 * render `keyPlaceholder` verbatim, so an empty Headers table said
+			 * "Header" as a column title and "Header" again inside every field
+			 * below it. The placeholder is the one that has to name the thing,
+			 * because it is the one still visible once you start typing.
+			 */}
+			<div className="grid gap-2 grid-cols-[24px_1fr_1fr_20px_28px] px-1 text-[11px] font-medium uppercase tracking-wide text-subtle-foreground">
+				<div />
+				<div>Key</div>
+				<div>Value</div>
+				<div />
+				<div />
 			</div>
 
-			{/* Rows */}
-			<div className="space-y-1">
+			<div className="space-y-0.5">
 				{items.map((item) => (
 					<KeyValueRow
 						key={item.id}
@@ -129,12 +101,23 @@ export default function KeyValueEditor({
 						valuePlaceholder={valuePlaceholder}
 						showResolved={showResolved}
 						allowDisable={allowDisable}
-						readOnly={readOnly || !canEdit(item, "key")}
+						readOnly={readOnly}
 						keySuggestions={keySuggestions}
 						onUpdate={handleUpdate}
 						onRemove={handleRemove}
 						canRemove={canRemove(item)}
-						canEdit={canEdit(item, "key") || canEdit(item, "value")}
+						/*
+						 * Per field, not one boolean for both. `canEdit(item, field)`
+						 * has always taken a field, and `handleUpdate` above honours
+						 * it - but the row derived its disabled state from the *key*
+						 * alone and applied it to both inputs. Nothing exercised the
+						 * difference today (every rule that says no says no to both),
+						 * so this was a promise the UI could not keep rather than a
+						 * live bug: a value-editable, key-locked row would have given
+						 * you a field you could type into that discarded the write.
+						 */
+						canEditKey={canEdit(item, "key")}
+						canEditValue={canEdit(item, "value")}
 						canDisable={canDisable(item)}
 					/>
 				))}

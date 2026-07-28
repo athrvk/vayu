@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, test, vi } from "vitest";
+import { z } from "zod";
 import { dispatchTool, toolCatalog, TOOLS, type ToolContext } from "./tools.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import type { EngineClient } from "./engine-client.js";
@@ -526,5 +527,32 @@ describe("dispatchTool", () => {
 		expect(res.isError).toBeFalsy();
 		expect(client.getRunReport).toHaveBeenCalledTimes(2);
 		expect(firstText(res)).toContain("run_a");
+	});
+});
+
+/**
+ * The engine reads `concurrency` as an eager per-worker curl-handle
+ * pre-allocation, so a negative one becomes ~1.8e19 and allocates until malloc
+ * fails. It now returns a 400 instead, but "-1 means unlimited" is exactly the
+ * guess an agent makes, and the schema is where that gets a name rather than an
+ * HTTP error. Asserted on the schema itself, since `dispatchTool` calls the
+ * handler directly - the MCP SDK is what validates args in production.
+ */
+describe("start_load_run rejects an unusable concurrency at the schema", () => {
+	const concurrencySchema = () => {
+		const tool = TOOLS.find((t) => t.name === "start_load_run");
+		expect(tool).toBeDefined();
+		const shape = tool!.inputSchema as Record<string, z.ZodTypeAny>;
+		expect(shape.concurrency).toBeDefined();
+		return shape.concurrency;
+	};
+
+	test.each([-1, 0, 1.5])("rejects concurrency %s", (value) => {
+		expect(concurrencySchema().safeParse(value).success).toBe(false);
+	});
+
+	test("accepts an ordinary concurrency, and its absence", () => {
+		expect(concurrencySchema().safeParse(50).success).toBe(true);
+		expect(concurrencySchema().safeParse(undefined).success).toBe(true);
 	});
 });

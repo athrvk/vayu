@@ -36,6 +36,14 @@ import {
 	WINDOW_MIN_WIDTH,
 	WINDOW_MIN_HEIGHT,
 	TITLEBAR_HEIGHT,
+	TRAFFIC_LIGHT_X,
+	TRAFFIC_LIGHT_FRAME_HEIGHT,
+	TITLEBAR_BG_LIGHT,
+	TITLEBAR_BG_DARK,
+	TITLEBAR_FG_LIGHT,
+	TITLEBAR_FG_DARK,
+	WINDOW_BG_LIGHT,
+	WINDOW_BG_DARK,
 	ENGINE_HOST,
 	ENGINE_PORT,
 	MCP_HOST,
@@ -89,17 +97,26 @@ function createWindow() {
 		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
-		// Center the macOS traffic lights inside the titlebar (lights are ~16px)
+		// Centre the macOS traffic lights in the bar. The frame height is a named
+		// constant because it has been wrong twice: 16 originally, then 12 (the
+		// visible circle) - Electron positions the button frame, which is 14.
 		trafficLightPosition:
 			process.platform === "darwin"
-				? { x: 12, y: Math.round((TITLEBAR_HEIGHT - 16) / 2) }
+				? {
+						x: TRAFFIC_LIGHT_X,
+						y: Math.round((TITLEBAR_HEIGHT - TRAFFIC_LIGHT_FRAME_HEIGHT) / 2),
+					}
 				: undefined,
 		// Windows-only native overlay - Linux uses custom HTML buttons
 		titleBarOverlay:
 			process.platform === "win32"
 				? {
-						color: nativeTheme.shouldUseDarkColors ? "#111113" : "#f2f0eb",
-						symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f0eb" : "#111113",
+						color: nativeTheme.shouldUseDarkColors
+							? TITLEBAR_BG_DARK
+							: TITLEBAR_BG_LIGHT,
+						symbolColor: nativeTheme.shouldUseDarkColors
+							? TITLEBAR_FG_DARK
+							: TITLEBAR_FG_LIGHT,
 						height: TITLEBAR_HEIGHT,
 					}
 				: false,
@@ -109,7 +126,7 @@ function createWindow() {
 			preload: path.join(__dirname, "preload.js"),
 		},
 		title: "Vayu",
-		backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
+		backgroundColor: nativeTheme.shouldUseDarkColors ? WINDOW_BG_DARK : WINDOW_BG_LIGHT,
 		show: false, // Don't show until ready
 	});
 
@@ -147,8 +164,8 @@ function createWindow() {
 		// Update titlebar overlay color - Windows only
 		if (process.platform === "win32" && mainWindow) {
 			mainWindow.setTitleBarOverlay({
-				color: nativeTheme.shouldUseDarkColors ? "#111113" : "#f2f0eb",
-				symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f0eb" : "#111113",
+				color: nativeTheme.shouldUseDarkColors ? TITLEBAR_BG_DARK : TITLEBAR_BG_LIGHT,
+				symbolColor: nativeTheme.shouldUseDarkColors ? TITLEBAR_FG_DARK : TITLEBAR_FG_LIGHT,
 				height: TITLEBAR_HEIGHT,
 			});
 		}
@@ -531,6 +548,64 @@ function setupIpcHandlers() {
 
 	ipcMain.handle("window:isMaximized", () => {
 		return mainWindow?.isMaximized() ?? false;
+	});
+
+	/**
+	 * The Windows system menu, popped from the title-bar app icon.
+	 *
+	 * Windows convention is that the icon *is* the system-menu control: left
+	 * click opens it, right click opens it, Alt+Space opens it. Vayu got the
+	 * right-click half for free, because a `-webkit-app-region: drag` area is
+	 * treated as a non-client frame and Windows pops the real menu on it. Left
+	 * click was missing, and it cannot be added to a drag region at all -
+	 * draggable areas ignore every pointer event.
+	 *
+	 * So the icon is marked `no-drag` on Windows and both buttons are handled
+	 * here. That trades the OS's own menu for this one, which is why the
+	 * right-click path had to be reimplemented in the same change rather than
+	 * left to the platform.
+	 *
+	 * The native alternative would be returning HTSYSMENU from WM_NCHITTEST for
+	 * the icon's rect, which is how Win32 does it and would have kept the real
+	 * menu. Electron does not handle WM_NCHITTEST in PreHandleMSG, and
+	 * hookWindowMessage callbacks cannot return a value to the OS
+	 * (electron/electron#8762), so it is unreachable without a native module.
+	 *
+	 * Move and Size are deliberately absent: both are Win32 modal drag loops
+	 * with no Electron equivalent, and a disabled item that never becomes
+	 * enabled is worse than one that was never offered.
+	 */
+	ipcMain.on("window:systemMenu", (_event, position?: { x: number; y: number }) => {
+		if (!mainWindow || process.platform !== "win32") return;
+		const maximized = mainWindow.isMaximized();
+		const menu = Menu.buildFromTemplate([
+			{
+				label: "Restore",
+				enabled: maximized,
+				click: () => mainWindow?.unmaximize(),
+			},
+			{
+				label: "Minimize",
+				click: () => mainWindow?.minimize(),
+			},
+			{
+				label: "Maximize",
+				enabled: !maximized,
+				click: () => mainWindow?.maximize(),
+			},
+			{ type: "separator" },
+			{
+				label: "Close",
+				accelerator: "Alt+F4",
+				click: () => mainWindow?.close(),
+			},
+		]);
+		// Rounded because Electron rejects fractional coordinates, and the
+		// renderer's getBoundingClientRect returns them on a scaled display.
+		menu.popup({
+			window: mainWindow,
+			...(position ? { x: Math.round(position.x), y: Math.round(position.y) } : {}),
+		});
 	});
 
 	// Listen for maximize/unmaximize to notify renderer

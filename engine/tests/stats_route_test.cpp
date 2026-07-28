@@ -316,9 +316,14 @@ TEST_F (StatsRouteTest, TickPaginationNeverSplitsATick) {
     EXPECT_DOUBLE_EQ (body2["data"][0]["elapsed_seconds"].get<double> (), 2.0);
 }
 
-// requests_failed is now written by the producer, which knows the error count;
-// the legacy reader derived it from row order and could only ever report 0.
-TEST_F (StatsRouteTest, StoredTickCarriesTheFailedCountTheLegacyReaderLost) {
+// requests_failed is written by the producer, which knows the error count. The
+// legacy reader instead derives it from error_rate and requests_completed, and
+// used to read requests_completed as 0 because the producer emits ErrorRate
+// first - so it reported 0 failures for every bucket until #169 made the
+// derivation order-independent. Both sides are asserted rather than just the
+// new one: they are two independent producers of the same field, and this is
+// what catches either drifting from the other.
+TEST_F (StatsRouteTest, StoredTickAndLegacyRowsAgreeOnTheFailedCount) {
     seed_run ("run_new");
     seed_run ("run_legacy");
 
@@ -334,7 +339,7 @@ TEST_F (StatsRouteTest, StoredTickCarriesTheFailedCountTheLegacyReaderLost) {
     vayu::http::routes::run_time_series_response (*db_, "run_legacy", 5000, 0);
 
     EXPECT_EQ (new_body["data"][0]["requests_failed"].get<int> (), 3);
-    EXPECT_EQ (legacy_body["data"][0]["requests_failed"].get<int> (), 0);
+    EXPECT_EQ (legacy_body["data"][0]["requests_failed"].get<int> (), 3);
 }
 
 // A run that has ticks is served from them even if legacy rows exist too -
@@ -373,6 +378,63 @@ TEST_F (StatsRouteTest, UnreadableTickPayloadIsSkippedNotFatal) {
     // The row still counts for pagination - the page really did consume it.
     EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 2);
     EXPECT_EQ (body["pagination"]["returned"].get<int64_t> (), 2);
+}
+
+// requests_failed is derived from error_rate and requests_completed, both of
+// which arrive as separate rows of the same tick. The producer
+// (run_manager.cpp) always inserts ErrorRate *before* RequestsSent, so a
+// derivation done while folding in the ErrorRate row read requests_completed as
+// its initial 0 and stored 0 failed requests for every bucket of every run -
+// which is what the history error-rate chart and the failed-requests stat show.
+// Insert in exactly that production order.
+TEST_F (StatsRouteTest, RequestsFailedIsDerivedRegardlessOfRowOrderWithinATick) {
+    const std::string id = seed_run ();
+    const int64_t ts     = 2000;
+
+    add (id, ts, vayu::MetricName::Rps, 50.0);
+    add (id, ts, vayu::MetricName::ErrorRate, 25.0);
+    add (id, ts, vayu::MetricName::ConnectionsActive, 4.0);
+    add (id, ts, vayu::MetricName::RequestsSent, 200.0);
+
+    auto [status, body] =
+    vayu::http::routes::run_time_series_response (*db_, id, 5000, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+
+    const auto& bucket = body["data"][0];
+    EXPECT_DOUBLE_EQ (bucket["error_rate"].get<double> (), 25.0);
+    EXPECT_EQ (bucket["requests_completed"].get<int> (), 200);
+    EXPECT_EQ (bucket["requests_failed"].get<int> (), 50);
+}
+
+// A tick with errors but a sub-1% rate must not round down to "no failures".
+TEST_F (StatsRouteTest, RequestsFailedIsNonZeroForASmallButRealErrorRate) {
+    const std::string id = seed_run ();
+    const int64_t ts     = 2000;
+
+    add (id, ts, vayu::MetricName::ErrorRate, 0.1);
+    add (id, ts, vayu::MetricName::RequestsSent, 1000.0);
+
+    auto [status, body] =
+    vayu::http::routes::run_time_series_response (*db_, id, 5000, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["requests_failed"].get<int> (), 1);
+}
+
+// A clean tick stays clean - the second pass must not invent failures.
+TEST_F (StatsRouteTest, RequestsFailedIsZeroWhenTheErrorRateIsZero) {
+    const std::string id = seed_run ();
+    const int64_t ts     = 2000;
+
+    add (id, ts, vayu::MetricName::ErrorRate, 0.0);
+    add (id, ts, vayu::MetricName::RequestsSent, 500.0);
+
+    auto [status, body] =
+    vayu::http::routes::run_time_series_response (*db_, id, 5000, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["requests_failed"].get<int> (), 0);
 }
 
 } // namespace

@@ -25,33 +25,45 @@
  *   - The resolved-value preview had no radius class at all, pinning it square
  *     at every Roundedness setting, and paired `truncate` with `overflow-x-auto`,
  *     which contradict: `truncate` sets `overflow: hidden`.
+ *
+ * That preview has since been replaced - it was a column taking an equal third
+ * of the table to echo the two cells beside it - so those two guards are gone
+ * with the element. What replaced them is below: *when* the resolved marker
+ * appears, and the row's height.
  */
 
 import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
+import { TooltipProvider } from "@/components/ui";
 import KeyValueRow from "./KeyValueRow";
 
 vi.mock("../../context/RequestBuilderContext", () => ({
 	useRequestBuilderContext: () => ({
 		resolveString: (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_m, n) => `resolved-${n}`),
 		getAllVariables: () => ({}),
+		getVariableOrigins: () => [],
+		writableScopes: [],
 		updateVariable: () => {},
 	}),
 }));
 
 function row(overrides: Partial<Parameters<typeof KeyValueRow>[0]> = {}) {
 	const { container } = render(
-		<KeyValueRow
-			item={{ id: "r1", key: "Accept", value: "{{format}}", enabled: true }}
-			keyPlaceholder="Header"
-			valuePlaceholder="Value"
-			showResolved={true}
-			allowDisable={true}
-			readOnly={false}
-			onUpdate={() => {}}
-			onRemove={() => {}}
-			{...overrides}
-		/>
+		// The `{{format}}` token renders a variable chip, which hovers to a
+		// tooltip - Radix requires the provider the app mounts at its root.
+		<TooltipProvider>
+			<KeyValueRow
+				item={{ id: "r1", key: "Accept", value: "{{format}}", enabled: true }}
+				keyPlaceholder="Header"
+				valuePlaceholder="Value"
+				showResolved={true}
+				allowDisable={true}
+				readOnly={false}
+				onUpdate={() => {}}
+				onRemove={() => {}}
+				{...overrides}
+			/>
+		</TooltipProvider>
 	);
 	return container;
 }
@@ -76,31 +88,76 @@ describe("the enable checkbox", () => {
 	});
 });
 
-describe("the resolved-value preview", () => {
-	/** The preview box: the only `bg-muted/50` element in the row. */
-	const preview = (container: HTMLElement) =>
-		Array.from(container.querySelectorAll<HTMLElement>("*")).find((el) =>
-			/\bbg-muted\/50\b/.test(el.className)
-		)!;
+describe("the resolved value", () => {
+	/*
+	 * It used to be a column holding an equal third of the table, printing
+	 * `key=value` on every row whether or not anything resolved. Most rows have
+	 * no variable, so most of that third echoed the two cells beside it.
+	 *
+	 * It is a marker now, on the rows that have something to show. The two
+	 * guards that block replaced - a missing radius class and `truncate` paired
+	 * with a contradicting `overflow-x-auto` - died with the element they were
+	 * about; what matters here is *when* the marker appears, because a marker
+	 * that shows on every row is the old column with extra steps, and one that
+	 * never shows is the feature silently gone.
+	 */
+	const peek = (container: HTMLElement) =>
+		container.querySelector<HTMLElement>('[aria-label^="Resolved value of"]');
 
-	it("follows the roundedness setting", () => {
-		expect(preview(row()).className).toMatch(/\brounded-md\b/);
+	it("appears on a row that contains a variable", () => {
+		expect(peek(row())).not.toBeNull();
 	});
 
-	it("does not pair truncate with an overflow rule that contradicts it", () => {
-		const cls = preview(row()).className;
-		expect(cls).toMatch(/\btruncate\b/);
-		expect(cls).not.toMatch(/\boverflow-x-auto\b/);
+	it("stays away from a row with nothing to resolve", () => {
+		const container = row({
+			item: { id: "r1", key: "Accept", value: "application/json", enabled: true },
+		});
+		expect(peek(container)).toBeNull();
 	});
 
-	it("still shows the resolved value", () => {
-		expect(preview(row()).textContent).toContain("resolved-format");
+	it("is a real control, so the resolved value is reachable without a mouse", () => {
+		// Row-hover was the alternative and would have had nothing on screen to
+		// say it existed - and would have fired underneath the variable token's
+		// own tooltip.
+		expect(peek(row())!.tagName).toBe("BUTTON");
 	});
 
-	it("shows a dash rather than a stale value once the row is disabled", () => {
+	it("names the row it belongs to", () => {
+		expect(peek(row())!.getAttribute("aria-label")).toBe("Resolved value of Accept");
+	});
+
+	it("says nothing once the row is disabled", () => {
+		// A disabled row is not sent, so there is no resolved value to report.
 		const container = row({
 			item: { id: "r1", key: "Accept", value: "{{format}}", enabled: false },
 		});
-		expect(preview(container).textContent).toBe("-");
+		expect(peek(container)).toBeNull();
+	});
+
+	it("is withheld entirely when the caller turns resolution off", () => {
+		const container = row({ showResolved: false });
+		expect(peek(container)).toBeNull();
+	});
+});
+
+describe("row density", () => {
+	/*
+	 * 48px per row in the densest table in the app: `h-9` fields, `p-1` on the
+	 * row, `space-y-1` between. Eight headers cost 384px beside a 24px tab band.
+	 */
+	it("sizes both fields on the app's own step", () => {
+		const fields = row().querySelectorAll<HTMLElement>('[class*="h-8"]');
+		expect(fields.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("does not put the old h-9 back", () => {
+		/*
+		 * `String.raw`, deliberately - the same trap `no-dead-handlers.test.ts`
+		 * records. Written as a plain regex literal through a generating
+		 * script, the word-boundary escape collapsed to a backspace character
+		 * and the pattern matched nothing - so the guard passed against its own
+		 * mutation, which is the one failure a guard cannot have.
+		 */
+		expect(row().innerHTML).not.toMatch(new RegExp(String.raw`\bh-9\b`));
 	});
 });

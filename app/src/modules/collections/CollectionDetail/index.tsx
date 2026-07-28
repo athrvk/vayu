@@ -14,7 +14,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
-import { Badge, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
 import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
 import { useCollectionsQuery, useRequestsQuery } from "@/queries/collections";
 import { useTabsStore, useSessionStore } from "@/stores";
@@ -110,24 +110,16 @@ export default function CollectionDetail() {
 				onValueChange={(v) => setTab(v as CollectionTab)}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				<TabsList className="flex justify-start h-auto p-0 bg-panel border-b border-border rounded-none px-5 shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap">
+				{/* The active trigger's weight change used to shift its neighbours
+				    on every switch; TabLabel reserves the bold width, so it no
+				    longer can. */}
+				<TabsList className="bg-panel px-4 shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap">
 					{TABS.map((t) => {
 						const showBadge = t.id === "variables" && variableCount > 0;
 						return (
-							<TabsTrigger
-								key={t.id}
-								value={t.id}
-								className="shrink-0 relative px-3 py-2.5 text-xs font-medium border-b-2 border-transparent rounded-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:font-semibold"
-							>
-								{t.label}
-								{showBadge && (
-									<Badge
-										variant="secondary"
-										className="ml-1.5 h-[18px] min-w-[20px] px-1.5 text-[10px]"
-									>
-										{variableCount}
-									</Badge>
-								)}
+							<TabsTrigger key={t.id} value={t.id}>
+								<TabLabel>{t.label}</TabLabel>
+								{showBadge && <TabCount value={variableCount} />}
 							</TabsTrigger>
 						);
 					})}

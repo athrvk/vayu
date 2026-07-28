@@ -18,6 +18,27 @@ describe("parseImport", () => {
 			"Postman Collection v2.0"
 		);
 	});
+	it("routes a Postman environment export", () => {
+		const r = parseImport(fx("postman-environment.json"), opts);
+		expect(r.meta.format).toBe("Postman Environment");
+		expect(r.collections).toEqual([]);
+		expect(r.environments).toHaveLength(1);
+	});
+	it("still routes a Postman collection to the collection parser", () => {
+		// The environment detector sits between v2.0 and Insomnia; a collection
+		// export must not fall through to it.
+		expect(parseImport(fx("postman-v21.json"), opts).meta.format).toBe(
+			"Postman Collection v2.1"
+		);
+	});
+	it("routes a Postman globals export, reporting it as its own format", () => {
+		const r = parseImport(fx("postman-globals.json"), opts);
+		expect(r.meta.format).toBe("Postman Globals");
+		// Same parser as the environment export, but the variables land in the
+		// globals scope rather than becoming a named environment.
+		expect(r.environments).toHaveLength(0);
+		expect(Object.keys(r.globals)).toContain("apiHost");
+	});
 	it("routes Insomnia v4", () => {
 		expect(parseImport(fx("insomnia-v4.json"), opts).meta.format).toBe("Insomnia Export v4");
 	});

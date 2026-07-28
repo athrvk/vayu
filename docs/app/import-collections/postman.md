@@ -149,7 +149,7 @@ Collection- and folder-level `variable[]` arrays map to `CollectionDraft.variabl
 - enabled state is `!disabled` if `disabled` is set, else `enabled` if set, else `true`;
 - the value is coerced to a string (`asString`) and run through `normalizeVars`.
 
-Postman **collection** files do not embed environments, so this parser always returns `environments: []` and `meta.environmentCount: 0`. (Postman environments are exported as separate files and are not handled here.)
+Postman **collection** files do not embed environments, so this parser always returns `environments: []` and `meta.environmentCount: 0`. Postman exports environments as separate files, which [`postman-environment.ts`](./postman-environment.md) reads.
 
 ## Options & lossy behavior
 

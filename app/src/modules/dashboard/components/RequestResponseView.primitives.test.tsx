@@ -22,6 +22,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { TooltipProvider } from "@/components/ui";
 import RequestResponseView from "./RequestResponseView";
 import type { RunReport } from "@/types";
 
@@ -62,16 +63,25 @@ function makeReport(): RunReport {
 	};
 }
 
+// Components here use `InfoChip`, which no longer brings its own
+// `TooltipProvider` - the delay is set once at the app root (main.tsx).
+const renderView = () =>
+	render(
+		<TooltipProvider>
+			<RequestResponseView report={makeReport()} />
+		</TooltipProvider>
+	);
+
 describe("RequestResponseView shared-primitive adoption (#60)", () => {
 	it("renders the sample status through StatusCodeBadge", () => {
-		render(<RequestResponseView report={makeReport()} />);
+		renderView();
 		const chip = screen.getByText("200 OK");
 		// The chip variant, not the old semantic-variant Badge.
 		expect(chip.className).toContain("text-primary-foreground");
 	});
 
 	it("formats per-sample phase durations with formatPhaseDuration, not raw toFixed(1)", () => {
-		render(<RequestResponseView report={makeReport()} />);
+		renderView();
 		fireEvent.click(screen.getByRole("button", { name: /200 OK/ }));
 
 		// 0.04ms keeps its significant digits through formatPhaseDuration; the
@@ -81,7 +91,7 @@ describe("RequestResponseView shared-primitive adoption (#60)", () => {
 	});
 
 	it("renders response headers through the shared CompactHeadersViewer", () => {
-		render(<RequestResponseView report={makeReport()} />);
+		renderView();
 		fireEvent.click(screen.getByRole("button", { name: /200 OK/ }));
 
 		// CompactHeadersViewer renders each name as `key:`; the reverted

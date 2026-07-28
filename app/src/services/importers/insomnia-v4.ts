@@ -243,11 +243,13 @@ export class InsomniaV4Parser implements ImportParser {
 		return {
 			collections,
 			environments,
+			globals: {}, // Insomnia has no globals scope; workspace envs map to environments
 			meta: {
 				format: this.formatName,
 				requestCount,
 				folderCount,
 				environmentCount: environments.length,
+				globalCount: 0,
 				skipped,
 				nonExecutableAuth: authCtx.nonExec,
 			},

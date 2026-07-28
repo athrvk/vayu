@@ -136,12 +136,50 @@ Rule: white-labelled solid fills use `bg-primary-fill`; everything else accent
 uses `--primary`. `--primary-foreground` (white) sits on the fill.
 
 ```css
-/* Sunset (default) */
+/* Sunset (the values below; the default scheme is Ocean) */
 --primary:       24 90% 46%;   /* light - deep accent */    /* dark: 24 95% 58% (brighter) */
 --primary-fill:  24 90% 46%;   /* both modes - white-safe button fill */
+--primary-text:  var(--primary);   /* accent as a label - see below */
 --primary-foreground: 0 0% 100%;
 --ring / --variable: track --primary
 ```
+
+**`--primary-text` - the accent when the accent *is* the label.** Used by the
+section tabs for the active trigger (`text-primary-text`), where the accent has
+to separate not from the surface but from the `--muted-foreground` label beside
+it.
+
+It is not sufficient on its own, and the tabs pair it with a 2px underline on
+`--primary`. Colour plus weight leaves the active tab hard to find in graphite,
+where the accent is a neutral: the label then differs from an inactive one in
+lightness alone, and 12px at 600 against 500 is a difference you have to hunt
+for. A rule is a *shape*, which no accent can wash out. Note the split - the
+label takes `--primary-text` and the indicator takes `--primary`, because one is
+text and the other is an indicator.
+
+That separation is carried almost entirely by **saturation**, not lightness.
+Measured on `--card`, accent text and muted text sit within a **1.01-1.56**
+contrast ratio of each other in every scheme - effectively the same brightness -
+so what the eye reads is "coloured vs grey". At 55-95% saturation against an
+inactive 4-5% that is plenty, which is why `--primary-text` defaults to
+`--primary` and seven of the eight schemes never override it.
+
+`graphite` overrides it, because it is the only desaturated scheme (S=12% light,
+15% dark) and so has no hue to spend: `220 12% 26%` light and `220 15% 86%`
+dark, which take its active-vs-inactive separation from 1.14 to 1.86 and 1.23 to
+1.81. Retuning graphite's `--primary` instead is not an option - that also
+paints its buttons, ring and `--chart-1`, and would give it near-black buttons.
+This is the same bind `--primary-fill` exists to solve, answered the same way.
+
+**Adding a scheme:** override `--primary-text` only if the accent's saturation
+is under about 25%. `color-schemes.test.ts` derives that rule from the
+stylesheet rather than naming graphite, so a new desaturated scheme fails until
+it declares one. It is deliberately *not* in that test's `REQUIRED` list -
+inheriting it is correct for a saturated scheme, not a forgotten block.
+
+Note the ratios above are between two *foreground* colours; neither WCAG nor
+APCA is defined for that, so treat them as a discriminability proxy rather than
+a conformance figure.
 
 ### Semantic Status Colors
 
@@ -544,28 +582,50 @@ slow → danger (`LatencyMetric.tsx`).
 
 ### Decorative categorical palettes (the one token exception)
 
-A few surfaces use a **fixed decorative palette** to give items a stable
-identity by color rather than to signal state - the same idea as `--chart-*`.
-These intentionally keep Tailwind hue utilities (with `dark:` variants) instead
-of tokens, because they never respond to theme and don't carry semantics:
+A surface may use a **fixed decorative palette** to give items a stable identity
+by color rather than to signal state - the same idea as `--chart-*`. Such a
+palette may keep Tailwind hue utilities (with `dark:` variants) instead of
+tokens, because it never responds to theme and carries no semantics.
 
-- **Timing phases** - DNS / connect / TLS / TTFB / download in the breakdown.
-  These are written as explicit `bg-blue-50 dark:bg-blue-950/30` pairs, so they
-  *are* theme-aware; they are categorical identity, not state.
+**The list is currently empty.** Everything - state, status, scope, semantics,
+and categorical identity alike - uses tokens.
 
-  The history overview tiles used to be listed here too, and should not have
-  been: they encode HTTP severity, which is state. They now use
-  `STATUS_CLASS_STYLE`.
+**Three entries were removed because they no longer describe the code.** The
+per-section Settings accent palette is gone; there are zero `pink/purple/cyan`
+utilities left under `modules/settings/`. The console's Pre-request and Test
+script groups now use `status-running-*` and `status-success-*` tokens rather
+than raw `blue-500` / `green-500`, because the raw values were theme-blind and
+measured 3.76 and 2.22 in light mode; the console body is `bg-muted`, not a
+fixed `zinc-900` terminal. And the timing phases - DNS / connect / TLS / TTFB /
+download - are covered below.
 
-Everything else - state, status, scope, semantics - must use tokens.
+The history overview tiles were on this list too, and should not have been: they
+encode HTTP severity, which is state. They use `STATUS_CLASS_STYLE`.
 
-**Two entries were removed from this list because they no longer describe the
-code.** The per-section Settings accent palette is gone; there are zero
-`pink/purple/cyan` utilities left under `modules/settings/`. And the console's
-Pre-request and Test script groups now use `status-running-*` and
-`status-success-*` tokens rather than raw `blue-500` / `green-500`, because the
-raw values were theme-blind and measured 3.76 and 2.22 in light mode. The
-console body is `bg-muted`, not a fixed `zinc-900` terminal.
+#### Timing phases
+
+The five network phases are a categorical set, and they were the last entry
+here: the history breakdown tinted each tile with an explicit
+`bg-blue-50 dark:bg-blue-950/30` pair. They are `--chart-*` now, declared once
+in `components/shared/response-viewer/timing-phases.ts`:
+
+| Phase | Token |
+|-------|-------|
+| DNS | `--chart-2` (teal) |
+| Connect | `--chart-4` (amber) |
+| TLS | `--chart-5` (rose) |
+| TTFB | `--chart-3` (violet) |
+| Download | `--chart-6` (moss) |
+
+Two rules come with that table. **Never `--primary` or `--chart-1`** - both
+follow the user's accent, so either can land on a neighbouring phase's hue;
+under the green scheme `--primary` and `--success` sat three lightness points
+apart and two of the five phases rendered as one swatch. And **colour is only
+carried where it is the encoding** - the timeline segments in the builder's
+timing tab and the bars in the dashboard's waterfall, where hue is how you tell
+the phases apart. The tile grid (`TimingPhaseTiles`) is deliberately neutral:
+each tile already has the label written in it, so a hue there was decoration
+paying for an exception.
 
 The lesson worth keeping: an entry on this list is a claim about the code, and
 it decays. A raw palette class here is only defensible if it comes with a
@@ -616,6 +676,11 @@ against its own tint over the worst surface of its theme, and clears 4.6:1.
 - Text color: `.method-get`, `.method-post`, `.method-put`, `.method-patch`, `.method-delete`, `.method-head`, `.method-options`
 - Background: `.bg-method-get`, `.bg-method-post`, etc.
 
+These exist but **nothing in `src/` currently uses them** - prefer
+`getMethodColor` below, which is the one path `MethodBadge`, the tab strip and
+the method selector all take. A second way to spell the same colour is a second
+place for it to drift.
+
 **`getMethodColor(method)`** in `app/src/utils/helpers.ts` returns `var(--method-xxx)` - the raw CSS variable reference. Callers construct full color values:
 
 ```tsx
@@ -647,21 +712,20 @@ const c = `var(--method-${method.toLowerCase()})`;
 </span>
 ```
 
-**MethodSelector** uses the `.method-get` etc. utility classes as Tailwind classNames:
+**MethodSelector** used to carry its own `METHOD_COLORS` map of those utility
+classes - a second source of truth for the same seven colours, and the kind that
+quietly stops matching. It now takes the `getMethodColor` path above, like
+`MethodBadge` and the tab strip:
 
 ```tsx
-const METHOD_COLORS: Record<HttpMethod, string> = {
-  GET: "method-get", POST: "method-post", PUT: "method-put",
-  PATCH: "method-patch", DELETE: "method-delete", HEAD: "method-head", OPTIONS: "method-options",
-};
-// Usage: className={cn("font-mono font-semibold", METHOD_COLORS[method])}
+style={{ color: `hsl(${getMethodColor(request.method)})` }}
 ```
 
 ### Charts
 
-A cohesive categorical set - `chart-1` tracks the active accent, then four
-evenly-spaced hues (teal / violet / amber / rose) shared across modes and tuned
-only in lightness for each ground.
+A cohesive categorical set - `chart-1` tracks the active accent, then five
+evenly-spaced hues (teal / violet / amber / rose / moss) shared across modes and
+tuned only in lightness for each ground.
 
 ```css
 /* Light */
@@ -670,6 +734,7 @@ only in lightness for each ground.
 --chart-3: 258 55% 55%;   /* violet */
 --chart-4:  38 88% 48%;   /* amber */
 --chart-5: 340 72% 50%;   /* rose */
+--chart-6: 105 58% 34%;   /* moss */
 
 /* Dark - same hues, lifted for the dark ground */
 --chart-1: <accent>;
@@ -677,7 +742,19 @@ only in lightness for each ground.
 --chart-3: 258 78% 72%;
 --chart-4:  38 90% 60%;
 --chart-5: 340 74% 62%;
+--chart-6: 105 52% 50%;
 ```
+
+`--chart-6` was added for the response timing waterfall, which needs five series
+at once. With four fixed hues available, two phases had been reaching outside the
+set - TTFB to `--primary` and Download to `--success` - and under the green
+accent those two land on the same hue (142) three points of lightness apart, so
+two of five phases rendered as the same swatch. Moss sits in the widest gap in
+the ring (38 -> 172), 67 degrees from its nearest neighbour.
+
+**A series never takes `--primary` or `--chart-1`.** Both move with the user's
+accent, so either can drift onto a neighbouring series in one scheme and not
+another - which is invisible when you are looking at the scheme it works in.
 
 ---
 
@@ -711,6 +788,10 @@ to Lc 22–37.
 | `coral` | `0 68% 54%` | `0 80% 68%` | `0 68% 54%` |
 | `magenta` | `305 72% 45%` | `305 85% 70%` | `305 72% 45%` |
 | `graphite` | `220 12% 46%` | `220 15% 72%` | `220 12% 46%` |
+
+Every scheme also resolves `--primary-text` (the accent as a label). It tracks
+`--primary` for all of these except `graphite`, which sets `220 12% 26%` light
+and `220 15% 86%` dark - see **Primary (Accent Color)** above for why.
 
 **Adding a scheme.** Edit `constants/color-schemes.ts` and `index.css` - nothing
 else. `color-schemes.test.ts` asserts the two agree, in both themes, because a
@@ -1093,7 +1174,57 @@ Section *headers* (e.g. "Environments") stay shorter on purpose - they are group
 labels, not list items, and the difference carries hierarchy.
 
 The disclosure chevron is `w-6 h-6` (24px) so it fits a 32px row. That is still
-an adequate pointer target, and the whole row remains clickable for opening.
+an adequate pointer target, and the row around it opens the collection.
+
+**`h-8 items-center` on the row means the activator needs `self-stretch`.** The
+two rules above interact, and the interaction is a bug the eye cannot see. A
+composite row (see `.focus-row`) paints the height, the hover fill, the selection
+tint and `cursor-pointer`, while the click handler sits on a narrower activator
+button inside it - the row carries a `⋯` menu, so it cannot itself be one button,
+and a plain `<div onClick>` is not keyboard operable. `items-center` then makes
+that button *content*-height: ~22px in a request row, where the `MethodBadge`
+props it open, and ~18px in a collection or environment row. The remaining 5-7px
+above and below took the fill and the pointer and did nothing on click. Measured
+in the running app at the 260px default drawer width, the share of the row that
+actually responded was **41%** for a collection, **51%** for a request and
+**36%** for an environment - and hit-testing 3px inside the top or bottom edge
+landed on the container, which has no handler.
+
+`self-stretch` on the activator overrides the row's centring; the activator's own
+`items-center` still centres its contents, and `.focus-row` is unaffected because
+the row paints the ring either way.
+
+**`self-stretch` fixes the height; the row's own box needs delegation.** The
+indent is `paddingLeft` *on the row* - deliberately, so the fill reaches the panel
+edge - and the flex gaps and right padding belong to no child either. No amount of
+stretching reaches any of it, and on a collection row the indent cannot move onto
+the activator even in principle, because the chevron sits between them. So the row
+takes the click itself and forwards it:
+
+```tsx
+const isRowSurface = (e: React.MouseEvent) => e.target === e.currentTarget;
+// on the row:
+onClick={(e) => isRowSurface(e) && handleClick(e)}
+```
+
+`target === currentTarget` is exactly "the pointer landed on the row's own box".
+It excludes the chevron and the `⋯` menu without naming them - they are children,
+and they own their own actions - and it stops a click on the activator from firing
+twice as it bubbles through. Drop the check and every label click activates twice.
+
+This is *not* the `<div onClick>` the environment row's comment warns against: the
+activator button stays and remains the keyboard path (`useRovingTreeFocus` clicks
+`[data-tree-activate]` on Enter). The row is a second, pointer-only entrance to
+the same handler.
+
+Together the two changes take all three rows to **100% of their own pixels** -
+measured by sweeping `elementFromPoint` across the row box in the running app. The
+only pixels a row does not own are the chevron, the `⋯` menu and the drawer's 8px
+`cursor-col-resize` handle at the panel edge. Both halves are guarded by
+`drawer-row-hit-area.test.tsx`: the height as a `className` assertion (jsdom has
+no layout, so an `offsetHeight` assertion would pass while measuring nothing), the
+delegation behaviourally, because `fireEvent.click(row)` targets the row itself -
+exactly the pointer that used to land on dead padding.
 
 ---
 
@@ -1338,6 +1469,33 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
 Transient report of an action the user just took. The queue is
 `stores/toast-store.ts`; the surface is the shadcn/Radix primitive in
 `components/ui/toast.tsx`, rendered once by `components/shared/Toaster.tsx`.
+
+**Four things about toasts are user-configurable** (Settings -> Notifications,
+persisted in `client-settings-store` as `notifications`, options and defaults in
+`constants/toast.ts`):
+
+| Setting | Values | Default | Applied |
+|---------|--------|---------|---------|
+| `position` | 6: each corner plus top/bottom centre | `bottom-right` | `Toaster` (viewport class + swipe side) |
+| `durationScale` | `short` 0.5x, `default` 1x, `long` 2x, `never` | `default` | at enqueue |
+| `maxVisible` | 1-8 | 4 | at enqueue |
+| `minSeverity` | `all`, `warning`, `error`, `none` | `all` | at enqueue |
+
+Three of the four are resolved **when a toast is enqueued**, not when it is
+drawn, so changing them does not restyle what is already on screen. That is why
+the panel has a Preview button.
+
+The duration setting is a **multiplier over the per-variant durations in the
+table below**, never a replacement for them: those are tuned so a failure
+outlasts a confirmation, and a flat "5 seconds for everything" would throw that
+away. `never` resolves to a 24h sentinel rather than `Infinity`, because the
+primitive arms a real `setTimeout` and a non-finite delay there is coerced to 1.
+
+**Every position clears the chrome on its own edge**, via `--dock-height` at the
+bottom and `--titlebar-height` at the top - never a round number. The stack is
+`position: fixed`, so it anchors to the window rather than the layout, and a
+plain `bottom-4` once put it on top of the Dock. `toast-position.test.tsx`
+checks all six.
 
 **The icon carries the variant; the rail reinforces it.** Never colour alone.
 The version this replaced signalled variant with a 40%-alpha border and nothing

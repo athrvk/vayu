@@ -74,7 +74,11 @@ describe("client-settings store", () => {
 	it("reset key list covers every renderer preference but not workspace state", () => {
 		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.CLIENT_SETTINGS);
 		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.THEME_SOURCE);
-		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.LIVE_CHART_WINDOW);
+		expect(SETTINGS_STORAGE_KEYS).toContain(STORAGE_KEYS.UI_RADIUS);
+		// The live chart window is engine config (`liveReplayWindowMs`), not a
+		// renderer preference, so it has no localStorage key to reset here - the
+		// engine owns it because it also sizes the SSE replay ring from it.
+		expect(SETTINGS_STORAGE_KEYS).not.toContain("vayu-live-chart-window");
 		// Session/workspace state must NOT be wiped by a settings reset.
 		expect(SETTINGS_STORAGE_KEYS).not.toContain(STORAGE_KEYS.TABS_STORE);
 		expect(SETTINGS_STORAGE_KEYS).not.toContain(STORAGE_KEYS.SESSION_STORE);

@@ -98,4 +98,21 @@ describe("checkLoadCaps", () => {
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/exceeds the MCP cap of 300s/);
 	});
+
+	// The engine fails a run whose duration it cannot read, so the tool says so
+	// up front rather than starting a run that dies. An absent field is still
+	// fine - it means "use the engine default".
+	test("rejects a duration the engine cannot read", () => {
+		const res = checkLoadCaps({ duration: "soon" }, config);
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/is not a duration/);
+		expect(res.error).toMatch(/ms\/s\/m\/h/);
+	});
+	test("rejects an unreadable rampUpDuration", () => {
+		expect(checkLoadCaps({ rampUpDuration: "a while" }, config).ok).toBe(false);
+	});
+	test("accepts a readable rampUpDuration and an absent duration", () => {
+		expect(checkLoadCaps({ rampUpDuration: "500ms" }, config).ok).toBe(true);
+		expect(checkLoadCaps({ concurrency: 10 }, config).ok).toBe(true);
+	});
 });
