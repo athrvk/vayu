@@ -151,7 +151,7 @@ describe("the import dialog declares its surfaces", () => {
 		await openPreview();
 		// The detected-collections slab is the same surface as the drop zone and
 		// gets the same declaration.
-		const slab = screen.getByText(/Acme API/).closest(".surface-sunken");
+		const slab = screen.getByText(/Sample API/).closest(".surface-sunken");
 		expect(slab, "the preview tree should sit on a declared sunken surface").toBeTruthy();
 		// The footer divider only mounts in the preview phase - re-run the
 		// invisible-token scan with it on screen.

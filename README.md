@@ -74,9 +74,9 @@ A broader comparison against k6, JMeter, and the Postman collection runner is in
 
 ## Coming from Postman, Insomnia, or an OpenAPI spec?
 
-Migrating takes seconds. Drop an existing export onto Vayu and the workspace is rebuilt as a native collection - folders, variables, auth, and pre/post-request scripts all carry across, plus environments from an Insomnia workspace. (Postman keeps environments in a separate export, which is not read.)
+Migrating takes seconds. Drop an existing export onto Vayu and the workspace is rebuilt as a native collection - folders, variables, auth, and pre/post-request scripts all carry across, plus environments - from an Insomnia workspace, or from the separate file Postman exports them as.
 
-- **Postman** - Collection v2.0 and v2.1 JSON exports
+- **Postman** - Collection v2.0 and v2.1 JSON exports, plus environment and globals exports
 - **Insomnia** - v4 exports
 - **OpenAPI / Swagger** - 3.0 and 2.0 specs (JSON or YAML); generates a ready-to-use collection from the spec
 
@@ -87,7 +87,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **Native load testing** - multi-worker C++ event loop sustains tens of thousands of req/s with metrics streamed over SSE in real time; no second tool needed
 - **REST + GraphQL request builder** - GET, POST, PUT, PATCH, DELETE and more; JSON, form-data, URL-encoded, raw text, and GraphQL bodies
 - **Collections & folder hierarchy** - nested collections with per-collection variables, auth, and pre/post scripts
-- **One-drop import** - Postman v2.0/v2.1, Insomnia v4, OpenAPI 3.0, Swagger 2.0
+- **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4, OpenAPI 3.0, Swagger 2.0
 - **Layered environments** - variable resolution flows from globals → collection chain → active environment, with overrides at any level
 - **Auth, the way you expect it** - Bearer token, Basic auth, API key (header or query), and OAuth 2.0 (client credentials, password, and interactive authorization code with PKCE); resolved engine-side and inherits down the collection tree
 - **Postman-compatible test scripts** - QuickJS engine implementing `pm.test()`, `pm.expect()`, `pm.environment.set()`, `pm.response.*` - most Postman scripts run unmodified
@@ -219,7 +219,7 @@ Yes. All execution happens locally. Vayu never contacts external servers during 
 No. Download, install, and use it immediately with no sign-up.
 
 **Can I import my Postman collections?**
-Yes - Postman Collection v2.0 and v2.1 JSON exports, including folders, collection variables, auth settings, and pre/post-request scripts. Postman environments live in a separate export file and are not read; Insomnia workspace environments do import.
+Yes - Postman Collection v2.0 and v2.1 JSON exports, including folders, collection variables, auth settings, and pre/post-request scripts. Postman environments live in a separate export file; drop that in too and it imports as a Vayu environment. A Postman globals export imports the same way, merging into Vayu's globals scope. Insomnia workspace environments import as well.
 
 **Can I import OpenAPI / Swagger specs?**
 Yes. Drop in an OpenAPI 3.0 or Swagger 2.0 file (JSON or YAML) and Vayu generates a ready-to-use collection from the spec.
