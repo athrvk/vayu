@@ -211,13 +211,15 @@ const { setResponse, getResponse, clearResponse, clearAll } = useResponseStore()
 
 #### `client-settings-store.ts` - Renderer Preferences
 
-Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the capacity SLO threshold, the live refresh rate, and auto-save preferences. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.
+Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the capacity SLO threshold, the live refresh rate, auto-save preferences, and the load-test dialog's ceilings. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.
 
 **Key exports:**
 ```typescript
-const store = useClientSettingsStore();   // editorPrefs, autoSavePrefs, monoFont, chartBucketSeconds, sloThresholdMs, liveRefreshMs, ...
+const store = useClientSettingsStore();   // editorPrefs, autoSavePrefs, monoFont, chartBucketSeconds, sloThresholdMs, liveRefreshMs, loadTestCeilings, ...
 import { SETTINGS_STORAGE_KEYS } from "@/stores";  // localStorage keys reset by "Reset app settings"
 ```
+
+`loadTestCeilings` is the one slice with a bound outside the app: each value is clamped to `LOAD_TEST_CEILING_BOUNDS` (`constants/load-test.ts`) on write **and** on rehydrate, because the bounds are the engine's crash guards and a build that tightens one must not keep offering a stored ceiling above it. The load dialog turns them into its field ranges via `resolveLoadTestLimits`; nothing else reads them.
 
 **Persisted** to localStorage (via `zustand/persist`); workspace/session state (open tabs, layout, active collection) is deliberately excluded from the reset.
 
