@@ -20,6 +20,7 @@ import { CheckCircle2, AlertCircle, Loader2, RefreshCw } from "lucide-react";
 import type { OnMount } from "@monaco-editor/react";
 import {
 	CodeEditor,
+	EYEBROW_CLASS,
 	ResizablePanelGroup,
 	ResizablePanel,
 	ResizableHandle,
@@ -84,11 +85,10 @@ function PaneHeader({ children }: { children: React.ReactNode }) {
 }
 
 function PaneTitle({ children }: { children: string }) {
-	return (
-		<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-			{children}
-		</span>
-	);
+	// `EYEBROW_CLASS` rather than the `Eyebrow` component: this sits in a
+	// `flex items-center justify-between` bar beside a control, where the
+	// primitive's `<p>` would be the wrong element for an inline label.
+	return <span className={EYEBROW_CLASS}>{children}</span>;
 }
 
 export function GraphQLBody({

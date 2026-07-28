@@ -6,7 +6,13 @@
  */
 
 /**
- * HeadersViewer Component
+ * The headers family - three variants, one file.
+ *
+ * `HeadersViewer` is the collapsible table, used for request and response
+ * headers alike. `CompactHeadersViewer` is the same content on a sunken slab,
+ * for panes with no room for a table. `ResponseHeadersPanel` is the Headers
+ * *tab* - request collapsed above response open - and lived in its own file
+ * until #76 folded it in here, which is where the other two already were.
  *
  * Displays HTTP headers in a collapsible table format.
  * Used for both request and response headers.
@@ -41,6 +47,7 @@ import {
 	TableRow,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "../EmptyState";
 import type { HeadersViewerProps } from "./types";
 
 export default function HeadersViewer({
@@ -161,6 +168,56 @@ export function CompactHeadersViewer({
 					</div>
 				))}
 			</div>
+		</div>
+	);
+}
+
+export interface ResponseHeadersPanelProps {
+	/** Headers that were sent. Collapsed by default - usually not the question. */
+	requestHeaders?: Record<string, string>;
+	/** Headers that came back. Open by default. */
+	responseHeaders?: Record<string, string>;
+}
+
+/**
+ * The Headers tab: request headers collapsed, response headers open.
+ *
+ * `ResponseHeadersTab` in the request builder and an inline block in
+ * `UnifiedResponseViewer` were the same panel, reached through differently
+ * shaped data - one read `response.requestHeaders`, the other a separate
+ * `effectiveRequest`. The prop shape is the normalised one: two header maps,
+ * neither of which the caller has to nest inside a response object.
+ *
+ * **Only the request builder's tab renders this today.** The stored viewer's
+ * Headers tab went back to a pair of `CompactHeadersViewer`s when it became
+ * compact-only (#75), so the "two callers" this was extracted for is now one -
+ * which is why #76 called folding it in here hygiene rather than deduplication.
+ * The two treatments are a deliberate difference, not drift: a table needs
+ * width the compact pane does not have.
+ *
+ * The empty-state fallback is the one piece of behaviour that is this panel's
+ * own. `HeadersViewer` renders `null` with no entries, so without it a response
+ * carrying no headers showed a blank pane with nothing explaining why - which is
+ * exactly what the history copy did before the extraction.
+ */
+export function ResponseHeadersPanel({
+	requestHeaders,
+	responseHeaders,
+}: ResponseHeadersPanelProps) {
+	const response = responseHeaders ?? {};
+	const hasRequestHeaders = requestHeaders && Object.keys(requestHeaders).length > 0;
+
+	return (
+		<div className="p-4 overflow-auto h-full space-y-4">
+			{hasRequestHeaders && (
+				<HeadersViewer headers={requestHeaders} variant="request" defaultOpen={false} />
+			)}
+
+			<HeadersViewer headers={response} variant="response" defaultOpen={true} />
+
+			{Object.keys(response).length === 0 && (
+				<EmptyState variant="inline" title="No headers in response" />
+			)}
 		</div>
 	);
 }

@@ -23,6 +23,7 @@ import {
 	CardHeader,
 	CardTitle,
 	Button,
+	Eyebrow,
 	Kbd,
 	DeleteConfirmDialog,
 } from "@/components/ui";
@@ -137,9 +138,7 @@ export default function GeneralPanel() {
 					/>
 					{autoSave.enabled && (
 						<div>
-							<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-								Save delay
-							</p>
+							<Eyebrow className="mb-2">Save delay</Eyebrow>
 							<OptionButtons
 								options={AUTO_SAVE_DELAY_OPTIONS}
 								value={autoSave.delayMs}
