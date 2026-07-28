@@ -10,7 +10,9 @@
 #include <curl/curl.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -29,30 +31,73 @@ namespace vayu::http::detail {
 struct TransferData;
 
 /**
+ * @brief Whether a DNS cache entry stored `age` ago may still be used.
+ *
+ * @param negative   The entry remembers a failed lookup rather than an address.
+ * @param ttl_seconds >0 entry lifetime, 0 caching disabled, <0 never expires.
+ *
+ * A remembered failure lives for the shorter of the configured TTL and
+ * DNS_NEGATIVE_CACHE_SECONDS - and expires even when addresses are configured
+ * never to, because "this host does not resolve" is the claim most likely to
+ * stop being true while the daemon runs.
+ */
+[[nodiscard]] bool
+dns_entry_is_fresh (bool negative, std::chrono::steady_clock::duration age, long ttl_seconds);
+
+/**
  * @brief Thread-safe DNS cache for pre-resolved hostnames
  *
- * Resolves hostnames once and caches the IP addresses to avoid
- * overwhelming the system DNS resolver under high load.
+ * Resolves hostnames once and caches the IP addresses to avoid overwhelming
+ * the system DNS resolver under high load.
+ *
+ * Entries expire. The cached address is pinned onto every transfer with
+ * `CURLOPT_RESOLVE`, which curl treats as authoritative - so an entry that
+ * never expired would outlive a DNS change for the whole process lifetime
+ * (this cache is shared by every worker and every run), and every request to
+ * that host would fail until the daemon restarted. The TTL is the caller's
+ * `dnsCacheTimeout`, the same setting curl's own cache uses.
+ *
+ * Failed lookups are cached too, briefly: `resolve` runs a blocking
+ * getaddrinfo on the event loop worker thread, so an unresolvable host that
+ * was never remembered re-blocked that thread - stalling every in-flight
+ * transfer it owns - once per request, forever.
  */
 class DnsCache {
     public:
-    /// Pre-resolve a hostname and cache the result
-    /// Returns the resolved IP or empty string on failure
-    std::string resolve (const std::string& hostname);
+    /// Hostname -> address, or empty string when the lookup failed.
+    using Resolver = std::function<std::string (const std::string&)>;
 
-    /// Get cached IP for hostname (empty if not cached)
-    std::string get (const std::string& hostname) const;
+    /// Uses the system resolver. Tests inject a stub to make TTL and
+    /// negative-cache behaviour deterministic and to count lookups.
+    DnsCache ();
+    explicit DnsCache (Resolver resolver);
+
+    /// Pre-resolve a hostname, honouring and refreshing the cache.
+    /// @param ttl_seconds >0 entry lifetime, 0 disables caching, <0 never expires
+    /// @return the resolved IP, or an empty string on failure
+    std::string resolve (const std::string& hostname, long ttl_seconds);
 
     /// Get curl-compatible resolve entry: "hostname:port:ip"
-    /// Returns nullptr if not cached
-    struct curl_slist* get_resolve_list (const std::string& hostname, int port);
+    /// Returns nullptr if the hostname could not be resolved
+    struct curl_slist* get_resolve_list (const std::string& hostname, int port, long ttl_seconds);
 
     /// Clear the cache
     void clear ();
 
+    /// Number of entries currently held (including negative ones)
+    size_t size () const;
+
     private:
+    struct Entry {
+        std::string ip; // Empty for a remembered failure
+        std::chrono::steady_clock::time_point stored_at;
+    };
+
+    static bool is_fresh (const Entry& entry, long ttl_seconds);
+
     mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string, std::string> cache_;
+    std::unordered_map<std::string, Entry> cache_;
+    Resolver resolver_;
 };
 
 /**

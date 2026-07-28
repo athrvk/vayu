@@ -1463,6 +1463,20 @@ void Database::seed_default_config () {
     "104857600",  // 100MB
     now });
 
+    upsert_config (ConfigEntry{ "maxResponseBodyBytes",
+    std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),
+    "integer", "Maximum Load-Test Response Body",
+    "Largest response body a single load-test request will read into memory. "
+    "A response over this size fails that request with an error instead of "
+    "being buffered, so load testing a large download or a streaming endpoint "
+    "cannot exhaust memory (every in-flight request holds its own body). "
+    "Design "
+    "mode sends are not affected. Default 32MB.",
+    "observability", std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),
+    "1024",       // 1KB
+    "1073741824", // 1GB
+    now });
+
     upsert_config (ConfigEntry{ "maxRunsRetained",
     std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED), "integer",
     "Maximum Runs Retained",

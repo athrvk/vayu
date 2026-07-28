@@ -416,6 +416,9 @@ RunManager& manager) {
         loop_config.burst_size     = target_rps > 0 ? target_rps * 2.0 : 0.0;
         loop_config.dns_cache_timeout = db.get_config_int ("dnsCacheTimeout",
         vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
+        loop_config.max_response_body_bytes = static_cast<size_t> (std::max (0,
+        db.get_config_int ("maxResponseBodyBytes",
+        static_cast<int> (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES))));
         // Only enable curl verbose if explicitly requested in config,
         // independent of server verbose mode
         loop_config.verbose = config.value ("verbose", false);

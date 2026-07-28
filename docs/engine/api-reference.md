@@ -180,11 +180,13 @@ min/max):
 or `string`.
 
 The Settings panel renders entries dynamically, so new keys appear without app
-changes. Three `observability` keys govern how much run history the engine keeps:
+changes. These `observability` keys govern how much a run keeps - three of them
+on disk, one in memory:
 
 | Key                 | Default   | Range        | Effect |
 |---------------------|-----------|--------------|--------|
 | `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
+| `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results) are pruned at startup and after each run finishes. `0` = unlimited. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
 
@@ -944,6 +946,31 @@ therefore what `targetRps × duration` asked for.
 `duration`. A `startConcurrency` **above** `concurrency` is a valid descending
 ramp. If `duration` is shorter than `rampUpDuration`, the run stops partway up
 (or down) the curve.
+
+**Response bodies are capped.** A load-run request reads at most
+`maxResponseBodyBytes` (Settings → Observability, default 32MB) into memory.
+Every in-flight request holds its own body, so an uncapped one multiplies by
+concurrency; a response past the cap **fails that request** rather than being
+buffered. It is reported like any other transport failure - `statusCode: 0`
+with an `errorCode` of `INTERNAL_ERROR` and a message naming
+`maxResponseBodyBytes` - and the truncated prefix is kept as the body. Design
+mode (`POST /execute`) is **not** capped: it sends one request at a time, and
+truncating a response the user asked to see would be the wrong trade.
+
+**Wire method and body.** A body is sent with whatever method the request
+names: a `GET` carrying one stays a `GET` on the wire (Elasticsearch-style
+search bodies work), where it previously went out as a `POST`. The one
+combination that cannot be sent is **`HEAD` with a body** - curl's `HEAD`
+support drops the body - so it is refused rather than silently changed:
+`statusCode: 0`, `errorCode: INVALID_METHOD`, and a message saying so. This
+holds identically for `POST /execute` and `POST /runs`.
+
+**Failed requests still report timing.** A transfer that fails (timeout,
+connection refused, capped body) carries whatever curl measured before it
+failed - `wireMs`, the phase breakdown, and `bytes`/throughput counts - instead
+of reporting zeros. No phase (`dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`,
+`downloadMs`) is ever negative: `tlsMs` is `0` for plain HTTP and for a reused
+keep-alive connection rather than the negative value it used to store.
 
 ## Metrics & Statistics
 

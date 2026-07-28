@@ -71,8 +71,18 @@ constexpr size_t MAX_CONCURRENT = 1000;
 constexpr size_t MAX_PER_HOST = 200;
 /// Timeout for event loop polling in milliseconds
 constexpr int POLL_TIMEOUT_MS = 10;
-/// DNS cache timeout in seconds (avoids DNS resolver saturation)
+/// DNS cache timeout in seconds (avoids DNS resolver saturation).
+/// Governs both curl's own cache and the pre-resolution pin cache.
+/// 0 disables caching; a negative value never expires.
 constexpr long DNS_CACHE_TIMEOUT_SECONDS = 300;
+/// How long a failed lookup is remembered, so an unresolvable host does not
+/// re-block the worker thread on getaddrinfo for every request. Deliberately
+/// short: a host that has just come up should be picked up quickly.
+constexpr long DNS_NEGATIVE_CACHE_SECONDS = 5;
+/// Largest response body a single load-run transfer may buffer in memory.
+/// A transfer past this fails with CURLE_WRITE_ERROR rather than growing as
+/// concurrency x body-size until the daemon is OOM-killed. 0 = unbounded.
+constexpr size_t MAX_RESPONSE_BODY_BYTES = 32UL * 1024 * 1024;
 /// TCP keep-alive idle time in seconds
 constexpr long TCP_KEEPALIVE_IDLE_SECONDS = 60;
 /// TCP keep-alive probe interval in seconds

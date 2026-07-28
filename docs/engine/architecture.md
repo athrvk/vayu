@@ -70,11 +70,33 @@ The event loop manages concurrent HTTP request execution using libcurl's multi i
 - **Connection pooling**: Reuses connections with keep-alive
 - **DNS caching**: 5-minute cache to avoid resolver saturation
 
+**DNS pre-resolution.** Hostnames are resolved once and pinned onto each
+transfer with `CURLOPT_RESOLVE`, which keeps a high-RPS run from saturating the
+system resolver. Three rules make that safe:
+
+- **Entries expire** after `dnsCacheTimeout` (default 300s). curl treats a
+  pinned address as authoritative, so an entry that never expired would survive
+  a DNS change - a blue/green deploy of the target - and fail every request for
+  the rest of the daemon's life. The cache is a process-wide static shared by
+  every worker and every run, which is what made that permanent.
+- **Failed lookups are remembered** for 5s. Resolution is a blocking
+  `getaddrinfo` on the worker thread, so it stalls every in-flight transfer
+  that worker owns; without a negative entry an unresolvable host paid that
+  cost on every single request. Moving resolution off the IO thread entirely is
+  the deeper fix and is not done.
+- **IP-literal URLs are never pinned** - `http://127.0.0.1/`,
+  `http://[::1]:8080/` - since there is nothing to resolve. Parsing an
+  authority also handles userinfo (`http://user:pass@host/`), whose colon is
+  not a port separator.
+
 **Configuration:**
 - Max concurrent requests per worker: 1000 (configurable)
 - Max connections per host: 100
 - Poll timeout: 10ms
 - TCP keep-alive: 60s idle, 30s probe interval
+- Max response body per transfer: 32MB (`maxResponseBodyBytes`); a larger
+  response fails that request rather than being buffered, since every in-flight
+  request holds its own body
 
 ### Run Manager
 
@@ -360,7 +382,8 @@ Default configuration values (from `constants.hpp`):
 | Max Concurrent | 1000 | Per worker event loop |
 | Max Per Host | 100 | Connections per hostname |
 | Poll Timeout | 10ms | Event loop poll interval |
-| DNS Cache | 300s | DNS cache timeout |
+| DNS Cache | 300s | DNS cache timeout (curl's cache and the pre-resolution pin cache) |
+| Max Response Body | 32MB | Per load-test transfer; larger fails the request |
 | Script Memory | 64MB | QuickJS memory limit |
 | Script Timeout | 5s | Script execution timeout |
 | Stats Interval | 100ms | Metrics collection interval |

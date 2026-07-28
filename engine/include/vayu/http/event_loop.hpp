@@ -74,8 +74,13 @@ struct EventLoopConfig {
     /// Event loop poll timeout in milliseconds
     int poll_timeout_ms = vayu::core::constants::event_loop::POLL_TIMEOUT_MS;
 
-    /// DNS cache timeout in seconds (0 = no caching)
+    /// DNS cache timeout in seconds (0 = no caching, negative = never expires).
+    /// Governs curl's own resolver cache and the pre-resolution pin cache.
     long dns_cache_timeout = vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS;
+
+    /// Largest response body one transfer may buffer (0 = unbounded).
+    /// Exceeding it fails that transfer instead of allocating without bound.
+    size_t max_response_body_bytes = vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES;
 
     /// Target requests per second (0 = unlimited, no rate limiting)
     double target_rps = 0.0;
