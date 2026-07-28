@@ -5,7 +5,7 @@
   "homepage": "https://github.com/vayu/vayu",
   "license": "MIT",
   "dependencies": [
-    "curl",
+    { "name": "curl", "features": ["http2"] },
     "nlohmann-json",
     "cpp-httplib",
     "gtest",
