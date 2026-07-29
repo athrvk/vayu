@@ -801,6 +801,16 @@ joined with a blank line and run as a single script in one shared scope (see
 earlier part is visible to a later one; parts that are empty or only
 whitespace are dropped.
 
+**The pre-request script can change what is sent.** Its `pm.request` edits -
+method, url, headers, body - are applied to the request before it goes out, and
+because auth is resolved *before* the script runs, a script-set `Authorization`
+overrides the one the engine applied. `requestHeaders` and `rawRequest` in the
+response below, and the stored trace behind `GET /runs/:id`, all report the
+post-script request. A value the engine cannot send (a non-string url, an
+unknown method) rejects the whole write-back, leaves the request unchanged, and
+is reported as `preScriptError`. See
+[scripting.md](scripting.md#mutating-the-request-pre-request-scripts).
+
 **Redirect policy.** `followRedirects` defaults to **true**, so omitting it
 follows every 3xx and only the final response is returned - send
 `followRedirects: false` to see the 3xx status and its `Location` header. Both

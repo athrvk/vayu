@@ -67,6 +67,7 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			'pm.environment.set("key", "value")',
 			'pm.globals.get("variable")',
 			'pm.collectionVariables.get("variable")',
+			'pm.request.headers["X-Signature"] = sign(pm.request.body)',
 		],
 	},
 	post: {

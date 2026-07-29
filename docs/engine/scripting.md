@@ -93,6 +93,41 @@ pm.request.headers           // Request headers (object)
 pm.request.body              // Request body (string, if any)
 ```
 
+### Mutating the request (pre-request scripts)
+
+In a **pre-request** script these four fields are writable, and what they hold
+when the script returns is what goes on the wire. In a **test** script they are
+a read-only record of what was already sent - writes there are discarded.
+
+```javascript
+pm.request.headers['X-Signature'] = 'abc123';   // add or replace a header
+delete pm.request.headers['Authorization'];     // remove one
+pm.request.url = 'https://api.example.com/v2';  // retarget
+pm.request.method = 'POST';                     // case-insensitive
+pm.request.body = JSON.stringify({ n: 2 });     // replace the body
+delete pm.request.body;                         // send no body
+```
+
+Rules worth knowing before you rely on them:
+
+- **The object is authoritative, not a diff.** The header set left in
+  `pm.request.headers` is the header set that is sent, which is what makes
+  `delete` work.
+- **A script beats engine-applied auth.** Auth (bearer / basic / apikey /
+  oauth2) is resolved into the request *before* the script runs, so the script
+  sees the real `Authorization` header and can replace or remove it.
+- **A bad value is refused, not coerced.** `url` and `method` must be strings
+  (`method` one of the seven HTTP verbs), header values must be strings,
+  numbers or booleans, and `body` must be a string. Anything else fails the
+  whole write-back - the request is sent unchanged and the reason is reported
+  as the pre-request script error, visible in the response pane's Console tab.
+- **Setting a variable does not re-render the URL.** `{{placeholders}}` are
+  resolved app-side before the payload reaches the engine, so
+  `pm.environment.set('host', …)` affects later runs only. To change this
+  request's URL, assign `pm.request.url` directly.
+- **Load tests do not run pre-request scripts** - only the `tests` (post-request)
+  script runs there, so this applies to Send / Design Mode.
+
 ## Environment Variables (`pm.environment`)
 
 Access and modify environment variables:
@@ -177,6 +212,9 @@ const data = pm.request.body + secret;
 pm.request.headers['X-Signature'] = computeHash(data);
 ```
 
+Both headers are on the request that is actually sent - see
+[Mutating the request](#mutating-the-request-pre-request-scripts).
+
 ### Response Time Assertion
 
 ```javascript
@@ -223,14 +261,17 @@ QuickJS supports ES2020 features with some limitations:
 ### Pre-request Scripts
 
 - Execute before sending the HTTP request
-- Can modify `pm.request` (headers, body)
+- Can modify `pm.request` - method, url, headers and body - and the edits are
+  applied to the request that is sent
+  ([rules](#mutating-the-request-pre-request-scripts))
 - Can access `pm.environment` and `pm.variables`
 - Cannot access `pm.response` (request hasn't been sent yet)
+- Run in Design Mode / Send only, not in load tests
 
 ### Test Scripts (Post-request)
 
 - Execute after receiving the HTTP response
-- Can access `pm.request` and `pm.response`
+- Can access `pm.request` (read-only here - it has already been sent) and `pm.response`
 - Can access `pm.environment` and `pm.variables`
 - Test results are included in the response
 

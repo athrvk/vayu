@@ -535,9 +535,11 @@ void register_execution_routes (RouteContext& ctx) {
             }
         }
 
-        // Take the request built above (auth already resolved into headers/url,
-        // so pm.request reflects the real outgoing set). It may be further
-        // modified by the pre-request script.
+        // Take the request built above. Auth is already resolved into its
+        // headers/url, so pm.request reflects the real outgoing set - and
+        // because the pre-request script runs after that and writes back into
+        // this same object, a script-set Authorization header wins over the
+        // engine-applied one.
         auto request = std::move (built.request);
 
         // Auth failure: record a failed result against the run and return the
@@ -556,9 +558,12 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
-        // Execute pre-request script
+        // Execute pre-request script. `make_request_mutable` is what makes its
+        // pm.request edits reach the wire; everything below this line - the
+        // send, the stored trace, the raw request the app shows - reads the
+        // post-script request.
         vayu::runtime::ScriptContext pre_ctx;
-        pre_ctx.request             = &request;
+        pre_ctx.make_request_mutable (request);
         pre_ctx.environment         = &env;
         pre_ctx.globals             = &globals;
         pre_ctx.collectionVariables = &collectionVariables;
