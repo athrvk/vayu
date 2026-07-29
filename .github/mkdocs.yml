@@ -14,6 +14,10 @@ edit_uri: edit/master/docs/
 docs_dir: ../docs
 site_dir: ../site
 
+# A "Cookie settings" link is appended to this by .github/hooks/analytics.py, but
+# only on a build that actually has analytics - see the note there. It is not
+# written in here because a `#__consent` anchor with no consent dialog behind it
+# is a dead link, which is what every local preview would show.
 copyright: Engine AGPL-3.0 &middot; App Apache-2.0
 
 theme:
@@ -154,6 +158,9 @@ plugins:
 
 hooks:
   - hooks/brand_assets.py
+  # Turns the analytics + consent blocks below off when GOOGLE_ANALYTICS_KEY is
+  # unset, which an empty `!ENV` value does not do on its own.
+  - hooks/analytics.py
 
 # Broken cross-references are a build failure in CI (`mkdocs build --strict`),
 # which is the point: these docs cross-link heavily by relative `.md` path.
@@ -168,3 +175,50 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/athrvk/vayu
       name: Vayu on GitHub
+
+  # Google Analytics 4 for this documentation site only. The measurement ID is
+  # deliberately *not* checked in: `.github/workflows/docs.yml` passes it from
+  # the `GOOGLE_ANALYTICS_KEY` Actions repository variable (Settings -> Secrets
+  # and variables -> Actions -> Variables), so a fork, a pull-request preview or
+  # a local `mkdocs serve` builds with the variable unset and gets no analytics
+  # and no cookie banner. `!ENV` with no default yields None when unset, which is
+  # a supported state rather than a build failure - but note that Material still
+  # emits its (inert) gtag snippet for an empty property, so the actual removal
+  # is done by hooks/analytics.py. Empty the variable to switch analytics off
+  # site-wide without a commit.
+  #
+  # An ID is not a secret (it ships in the page source of every built page), but
+  # a repository variable keeps forks from polluting the property, which is the
+  # thing that actually matters.
+  analytics:
+    provider: google
+    property: !ENV GOOGLE_ANALYTICS_KEY
+
+  # Nothing is loaded until the visitor acts: Material defers the gtag snippet
+  # behind `__md_analytics()` and only calls it once `analytics` is in the stored
+  # consent. Removing this block would make GA load on first paint for everyone,
+  # so the two settings belong together.
+  #
+  # The `analytics` key is not arbitrary - Material matches that exact name to
+  # decide whether the analytics provider above may run. Renaming it silently
+  # leaves GA permanently off.
+  consent:
+    title: Cookies on this site
+    # Says which site, because the product's own claim is the opposite and both
+    # are true: the Vayu app ships no telemetry, this docs website measures page
+    # views. Conflating them would make one of the two statements a lie.
+    description: >-
+      This documentation site uses Google Analytics to count page views, so we
+      can see which docs people actually read. The Vayu app itself sends
+      nothing - it runs fully offline, with no account and no telemetry.
+    cookies:
+      # Checked by default so the primary "Accept" button means what it looks
+      # like it means. This is not pre-consent: nothing is stored, and no script
+      # runs, until one of the buttons below is pressed.
+      analytics:
+        name: Google Analytics
+        checked: true
+    actions:
+      - accept
+      - reject
+      - manage
