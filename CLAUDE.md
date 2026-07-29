@@ -314,6 +314,7 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
+| POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
 | POST | `/collections`, `/requests`, `/environments` | **Create only** - 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id` | **Update only** (merge-patch) - 404 on a missing id |
 
@@ -336,9 +337,15 @@ Three things worth knowing before you design around them:
   The rule lives in one place per side - `apply_*_field` in
   `engine/include/vayu/http/routes.hpp`, and `apiService.updateX` in
   `app/src/services/api.ts` - so add fields there rather than re-deriving the
-  rule per handler. A client-supplied `id` on **create** is still accepted,
-  solely because the import orchestrator pre-assigns ids (#96 removes the need,
-  #97 then rejects the field).
+  rule per handler. A client-supplied `id` on **create** is still accepted, but
+  nothing in the app sends one any more: import goes through **`POST
+  /import/apply`** (#96), which takes opaque `tempId`s, generates every real id
+  engine-side, returns the `idMap`, and writes the whole tree in one transaction
+  (a rejected payload persists nothing, so the old client-side rollback is gone).
+  #97 then rejects the `id` field outright. The same per-resource field appliers
+  back both paths - `apply_collection_fields` / `apply_request_fields` /
+  `apply_environment_fields`, declared in `routes.hpp` - so add a field there and
+  bulk import gets it too.
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
   to load a restored request tab or a design-run copy on cold start - one round
   trip, not the old scan of every collection's list. A `404` means the request

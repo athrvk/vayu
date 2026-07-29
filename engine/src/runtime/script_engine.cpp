@@ -1457,12 +1457,22 @@ JSValue js_pm_environment_get (JSContext* ctx, JSValueConst this_val, int argc, 
 // environment/globals/collectionVariables pm.*.set() bindings so a script that
 // re-sets an existing (e.g. secret) variable does not silently strip its flag
 // or reset its type.
+//
+// A brand-new key is also stamped with its creation time, the app's ordering
+// key for the variables editor (issue #135). This is the one place the engine
+// may invent a `created_at`, because it is the only place the engine creates a
+// variable - stamping an existing one would sort it below rows the user added
+// after it.
 void set_variable_preserving (Environment& map, const std::string& key, std::string value) {
     auto it = map.find (key);
     if (it != map.end ()) {
-        it->second.value = std::move (value); // preserve secret, enabled, type
+        it->second.value = std::move (value); // preserve secret, enabled, type, created_at
     } else {
-        map[key] = Variable{ std::move (value), false, true }; // new var: current defaults
+        Variable created{ std::move (value), false, true }; // new var: current defaults
+        created.created_at = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                             .count ();
+        map[key] = std::move (created);
     }
 }
 

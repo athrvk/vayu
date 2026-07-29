@@ -204,35 +204,16 @@ int main (int argc, char* argv[]) {
     vayu::utils::log_debug (
     "Server stopped in " + std::to_string (server_stop_elapsed) + "ms");
 
-    // Signal all active runs to stop
-    size_t active = run_manager.active_count ();
-    if (active > 0) {
-        vayu::utils::log_info ("Stopping " + std::to_string (active) + " active load tests...");
-
-        auto active_runs = run_manager.get_all_active_runs ();
-        for (const auto& context : active_runs) {
-            context->should_stop = true;
-        }
-
-        // Wait for active runs to complete (max 5 seconds)
-        auto shutdown_start = std::chrono::steady_clock::now ();
-        while (run_manager.active_count () > 0) {
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds> (
-            std::chrono::steady_clock::now () - shutdown_start)
-                           .count ();
-
-            if (elapsed >= 5) {
-                vayu::utils::log_warning (
-                "Warning: " + std::to_string (run_manager.active_count ()) +
-                " tests still running after 5s, forcing shutdown");
-                break;
-            }
-
-            std::this_thread::sleep_for (std::chrono::milliseconds (100));
-        }
-
-        vayu::utils::log_info ("All load tests stopped");
-    }
+    // Stop every active run and JOIN its worker before anything it holds a
+    // reference to is torn down. The loop this replaced stopped waiting once
+    // `active_count()` hit zero - which a worker reaches at retain_run, its
+    // last statement, with the thread still unwinding - and gave up entirely
+    // after 5s, leaving detached workers writing to `db` and calling into curl
+    // while both were destroyed underneath them.
+    //
+    // The order below is load-bearing: workers joined, then curl's global
+    // teardown, then `server` / `run_manager` / `db` at scope exit.
+    run_manager.shutdown ();
 
     vayu::http::global_cleanup ();
 

@@ -459,12 +459,25 @@ struct ScriptResult {
  * (per data-model PRD §5.2) declaring the conversion applied when scripts
  * read this variable via pm.*.get(...). One of:
  *   "string" (default), "number", "boolean", "json".
+ *
+ * `created_at` (ms epoch) is the app's row-ordering key - the variables editor
+ * lists a scope oldest-first. The engine does not display it, but it must
+ * round-trip through every read/write of a stored variables blob, or the app's
+ * ordering is destroyed (issue #135). `std::nullopt` means "unknown", which the
+ * app sorts as older than everything; the engine never invents a value for an
+ * existing variable, only for one a script creates.
+ *
+ * Every field here is serialized by `vayu::json::serialize_variables`; adding
+ * one without adding it there silently drops it on the next design run.
  */
 struct Variable {
     std::string value;
     bool secret  = false;
     bool enabled = true;
     std::string type = "string";
+    std::optional<int64_t> created_at;
+
+    bool operator== (const Variable&) const = default;
 };
 
 /**
@@ -749,6 +762,12 @@ struct Run {
     std::string config_snapshot; // JSON string (Full copy of request/env)
     int64_t start_time;
     int64_t end_time;
+    // Whole-run results, written once when the run reaches a terminal status.
+    // JSON object; `""` means "not written" - the report route then falls back
+    // to reconstructing the aggregates from the legacy `metrics` rows. NOT NULL
+    // with a `""` default so sync_schema can ALTER TABLE ADD COLUMN it onto an
+    // existing runs table (same pattern as requests.follow_redirects).
+    std::string summary; // TEXT NOT NULL DEFAULT ''
 };
 
 struct Metric {
@@ -758,6 +777,22 @@ struct Metric {
     MetricName name; // "rps", "latency", "error_rate"
     double value;
     std::string labels; // JSON string
+};
+
+/**
+ * @brief One wide row per persisted metrics tick - the whole tick object as
+ * stored JSON, replacing the ~18 EAV `metrics` rows a tick used to cost.
+ *
+ * `payload` is exactly the snake_case per-tick object `GET /runs/:id/metrics`
+ * returns (the app's `LoadTestMetrics` shape), built once at write time instead
+ * of reassembled per request. Rows map 1:1 to `data[]` entries, which is what
+ * makes that endpoint's pagination tick-aligned.
+ */
+struct MetricTick {
+    int id;
+    std::string run_id;
+    int64_t timestamp;  // Unix ms - the tick's single wall-clock sample
+    std::string payload; // JSON object (see build_metric_tick_payload)
 };
 
 struct Result {

@@ -234,17 +234,44 @@ function buildExecutionPayload(
 		method: (overrides.method as string | undefined) ?? "GET",
 		url: opts?.url ?? (overrides.url as string | undefined) ?? requireStr(args, "url"),
 	};
-	// preRequestScript/postRequestScript here are an agent-supplied ad-hoc
-	// script, not collection-chain composition - there is no chain to collect
-	// parts from, so this deliberately keeps sending the legacy singular key
-	// (still accepted by the engine's `read_script`), not `ScriptPart[]`.
-	// Only `run_request` declares them: the engine runs a pre-request script on
-	// `POST /execute` alone, so a load run has nowhere to run one.
-	for (const key of ["requestId", "environmentId", "preRequestScript", "postRequestScript"]) {
+	// Scripts are deliberately *not* forwarded here. Each handler adds its own,
+	// because what a script *is* differs by caller: an ad-hoc string from the
+	// agent, or the chain-composed `postRequestScripts` list that
+	// `composeLoadRunRequest` builds from a saved request. Forwarding a string
+	// here would quietly sit beside a composed list and, since the engine reads
+	// the list first, be ignored.
+	for (const key of ["requestId", "environmentId"]) {
 		const v = str(args, key);
 		if (v !== undefined) payload[key] = v;
 	}
 	return payload;
+}
+
+/**
+ * The post-response validation script an agent supplied, under either name.
+ *
+ * One concept, historically two engine keys: `POST /execute` grew up calling it
+ * `postRequestScript`, `POST /runs` calls it `tests`. Both endpoints now read
+ * both names (`read_post_request_script`), so the choice here is purely about
+ * what an agent sees: MCP names it `postRequestScript` on both tools - the way
+ * the app's single **Tests** tab drives Send and a load run alike - and keeps
+ * `tests` accepted as the engine's own spelling. Supplying both is rejected
+ * rather than silently resolved: with no way to know which the agent meant,
+ * picking one would drop a script the agent believes is running.
+ *
+ * Ad-hoc, so this stays a plain string (still accepted by the engine's
+ * `read_script`) rather than the `ScriptPart[]` the chain-composing callers
+ * send - there is no collection chain here to collect parts from.
+ */
+function readValidationScript(args: Record<string, unknown>): string | undefined {
+	const post = str(args, "postRequestScript");
+	const tests = str(args, "tests");
+	if (post !== undefined && tests !== undefined) {
+		throw new ToolArgError(
+			'Pass either "postRequestScript" or "tests", not both - they are the same script.'
+		);
+	}
+	return post ?? tests;
 }
 
 /** Regex used only to *detect* whether resolution is needed (non-global: no lastIndex state). */
@@ -352,14 +379,16 @@ async function composeLoadRunRequest(
 		if (auth) payload.auth = auth;
 	}
 
-	// An explicit `tests` replaces the composed script rather than joining it -
-	// and must clear `postRequestScripts`, because the engine prefers that name
-	// and would otherwise run the composed one while silently ignoring what the
-	// agent asked for.
-	const adHocTests = str(args, "tests");
-	if (adHocTests !== undefined) {
+	// An agent-written validation script replaces the composed one rather than
+	// joining it, and must clear `postRequestScripts` to do so: /runs reads both
+	// names now, prefers the list, and would otherwise run the saved request's
+	// assertions while silently ignoring the ones the agent asked for. This is
+	// the only place either name is placed on a run payload - the handler does
+	// not add it again.
+	const adHocScript = readValidationScript(args);
+	if (adHocScript !== undefined) {
 		delete payload.postRequestScripts;
-		payload.tests = adHocTests;
+		payload.tests = adHocScript;
 	}
 
 	return { payload, droppedPreRequestScripts };
@@ -379,6 +408,26 @@ const environmentIdInput = z
 	.string()
 	.optional()
 	.describe("Optional environment ID whose variables resolve {{templates}} in this request.");
+
+/**
+ * The post-response validation script, declared identically on `run_request` and
+ * `start_load_run` so one script an agent writes carries between them - the way
+ * the app's single **Tests** tab drives both Send and a load run. See
+ * `readValidationScript` for why the `tests` alias exists and stays.
+ */
+const validationScriptInput = z
+	.string()
+	.optional()
+	.describe(
+		"JavaScript run after a response arrives; use pm.test(...) for assertions, returned as test results. This is the same script the app's Tests tab holds - under load it runs against sampled responses, not every one."
+	);
+
+const validationScriptAliasInput = z
+	.string()
+	.optional()
+	.describe(
+		"Alias for `postRequestScript` (the engine's own name for it on a load run). Pass one or the other, not both."
+	);
 
 /**
  * Optional auth block. Callers can copy a saved request's `auth` object verbatim
@@ -629,12 +678,8 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					"JavaScript run before the request is sent. It may edit pm.request.url / .method / .headers / .body, and those edits are what gets sent - a script-set header overrides the engine-applied auth."
 				),
-			postRequestScript: z
-				.string()
-				.optional()
-				.describe(
-					"JavaScript run after the response arrives; use pm.test(...) for assertions, returned as test results. Same kind of script as start_load_run's `tests` - the two differ only in name, because that is what each engine endpoint calls the field."
-				),
+			postRequestScript: validationScriptInput,
+			tests: validationScriptAliasInput,
 		},
 		handler: async (args, ctx, signal) => {
 			const rc = await resolutionScopeFor(args, ctx.client, signal);
@@ -642,6 +687,11 @@ export const TOOLS: McpTool[] = [
 			const gate = checkAllowlist(url, ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
 			const payload = buildExecutionPayload(args, { resolver: rc, url });
+			// `/execute`'s own key names for the two ad-hoc scripts.
+			const preScript = str(args, "preRequestScript");
+			if (preScript !== undefined) payload.preRequestScript = preScript;
+			const postScript = readValidationScript(args);
+			if (postScript !== undefined) payload.postRequestScript = postScript;
 			const authArg = readAuthArg(args);
 			if (authArg) {
 				const auth = composeAuth(authArg, rc.chain, rc);
@@ -929,7 +979,7 @@ export const TOOLS: McpTool[] = [
 		name: "start_load_run",
 		category: "load",
 		description:
-			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
+			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain\'s and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu\'s caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here: the engine runs one on a single request only, never on a load run. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
 		readOnly: false,
 		annotations: {
 			title: "Start load test",
@@ -988,12 +1038,8 @@ export const TOOLS: McpTool[] = [
 				),
 			environmentId: environmentIdInput,
 			collectionId: collectionIdInput,
-			tests: z
-				.string()
-				.optional()
-				.describe(
-					"Optional deferred validation script - the same kind of script as run_request's `postRequestScript` (pm.test assertions), named `tests` because that is the field POST /runs reads. Run against a sample of responses, after the run, not on every request. With `requestId`, this replaces the saved request's test scripts rather than adding to them. A load run has no pre-request hook."
-				),
+			postRequestScript: validationScriptInput,
+			tests: validationScriptAliasInput,
 			confirmed: z
 				.boolean()
 				.optional()
@@ -1041,9 +1087,6 @@ export const TOOLS: McpTool[] = [
 			]) {
 				if (typeof args[key] === "number") payload[key] = args[key];
 			}
-			// `tests` is not in this list: composeLoadRunRequest already placed it,
-			// because an explicit one has to displace the composed
-			// `postRequestScripts` rather than sit beside it.
 			for (const key of ["duration", "rampUpDuration"]) {
 				const v = str(args, key);
 				if (v !== undefined) payload[key] = v;

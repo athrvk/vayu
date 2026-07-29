@@ -115,8 +115,17 @@ Manages the lifecycle of load test runs:
   counts still agree.
 - **The move to the retained map is the "worker is finished" signal**: it happens after the
   final metrics flush and status update, which is what `DELETE /runs/:id` waits on before
-  removing rows (see the API reference).
-- **Graceful shutdown**: Stops active runs on daemon shutdown
+  removing rows (see the API reference). It is *not* the "worker thread has exited" signal -
+  the move is the worker's last statement, and the thread is still unwinding after it.
+- **Graceful shutdown drains, then joins**: `RunManager::shutdown()` sets `should_stop` on
+  every active run, waits up to 5s (`RUN_SHUTDOWN_GRACE_MS`) for them to reach a terminal
+  status, and then **joins** every worker thread. The manager owns those thread handles -
+  a worker holds a `shared_ptr` to its own `RunContext`, so a context that owned its thread
+  could end up joining itself. The wait is bounded; the join is not, because abandoning a
+  worker leaves it writing through references to a `Database` that `main` is about to
+  destroy. A run started while the drain is in progress is refused with a `503`.
+- **Finished workers are reaped on the next `start_run`**: a thread cannot join itself, so
+  its handle outlives it until another thread collects it.
 
 ### Metrics Collector
 
@@ -136,8 +145,9 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   generator-internal `queue_wait` are tracked separately.
 - **Rich counters**: bytes sent/received, dropped requests (backpressure), queue-wait average,
   peak in-flight, and a full per-status-code distribution
-- **Batch DB writes**: Per-request results written after test completion; per-tick time-series
-  metrics persisted by the metrics thread during the run
+- **Batch DB writes**: Per-request results written after test completion; the metrics thread
+  persists one wide `metric_ticks` row per second during the run (the complete tick object,
+  built once at write time), and the whole-run `runs.summary` is written once at completion
 - **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only
   the first `maxStoredErrors` (default 10,000) individual records are kept; the rest are counted by
   `errors_dropped()` and logged once. A fully-failing target produces errors at close to the
@@ -368,6 +378,12 @@ prompt cancellation rather than waiting for in-flight requests to drain.
 - **Worker Threads**: One per active load test (executes load strategy)
 - **Metrics Thread**: One per active load test (aggregates and streams metrics)
 - **Event Loop Threads**: One per CPU core (handles curl_multi I/O)
+
+Shutdown unwinds that in a fixed order, because every one of these threads
+holds references to state `main` owns: HTTP server stopped → run workers
+signalled and joined (each joins its own metrics thread and stops its event
+loop first) → `curl_global_cleanup` → `Database` / `RunManager` destroyed at
+scope exit. Nothing is detached.
 
 ## Performance Characteristics
 

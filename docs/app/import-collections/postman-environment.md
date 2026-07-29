@@ -41,7 +41,9 @@ That position is not load-bearing. An environment export carries neither `info` 
 
 On a name collision **the imported value wins**. The user explicitly asked for this file's variables, and silently keeping the old value would be the no-op outcome this import path exists to avoid. The preview states it: *"Existing globals are kept; a variable of the same name is overwritten."*
 
-Globals are written **last**, after every collection and environment. That ordering is load-bearing: it is the one write here that can destroy data the import did not create, so nothing may fail behind it. A failed import therefore never leaves globals half-rewritten, and rollback has no globals case to restore. Do not reorder without adding one.
+Globals are written **last**, after the bulk `POST /import/apply` has landed and its id-map has been checked. That ordering is load-bearing: it is the one write here that can destroy data the import did not create, so nothing may fail behind it. A failed apply therefore never leaves globals half-rewritten.
+
+Globals are **not** part of the `/import/apply` payload - they are an engine singleton with no temp id, not a tree item - so they remain a second request, and that is the one partial outcome the import still has: the tree lands, the globals write fails, and the error surfaces. There is no rollback to undo an atomic apply that already succeeded (see [README.md](README.md#3-persist---orchestratorts)).
 
 A globals export carries a `name` (the workspace's). Vayu's globals scope is a singleton with nowhere to put it, so it is dropped rather than invented into an environment name.
 
@@ -110,7 +112,7 @@ For this format that is the whole result, which puts two states on screen no oth
 
 - `app/src/services/importers/postman-environment.test.ts` - detection for both scopes (and the collection negative), mapping, the secret flag, the empty-secret case, the dropped workspace name, and the `importEnvironments: false` path for each scope.
 - `app/src/services/importers/factory.test.ts` - routing for both exports, plus the guard that a collection export still reaches the collection parser.
-- `app/src/services/importers/orchestrator.test.ts` - the merge, the collision rule, that a result with no globals neither reads nor writes the scope, the `importEnvironments: false` skip, rollback when the globals write fails, and the globals-last ordering.
+- `app/src/services/importers/orchestrator.test.ts` - the merge, the collision rule, that a result with no globals neither reads nor writes the scope, the `importEnvironments: false` skip, that a failed apply never reaches the globals write, that a failed globals write surfaces with the tree already committed, and the globals-last ordering.
 - `app/src/queries/import.test.ts` - `getGlobals` / `updateGlobals` delegation and the globals cache invalidation.
 - `app/src/modules/collections/ImportModal.environments.test.tsx` - the preview rows for both scopes, the merge notice, the blocked Import, and recovery via the toggle.
 - Fixtures: `app/src/services/importers/__fixtures__/postman-environment.json`, `postman-globals.json`.

@@ -88,48 +88,15 @@ const vayu::Response& response) {
     return trace;
 }
 
-namespace {
-
-// Helper function to parse variables JSON string to Environment
-vayu::Environment parse_variables_json (const std::string& json_str) {
-    vayu::Environment env;
-    if (json_str.empty ()) {
-        return env;
-    }
-
-    try {
-        auto json = nlohmann::json::parse (json_str);
-        if (json.is_object ()) {
-            for (auto& [key, value] : json.items ()) {
-                if (value.is_object ()) {
-                    std::string var_value = value.value ("value", "");
-                    bool enabled          = value.value ("enabled", true);
-                    bool secret           = value.value ("secret", false);
-                    std::string type      = value.value ("type", std::string{ "string" });
-                    env[key] = vayu::Variable{ var_value, secret, enabled, type };
-                }
-            }
-        }
-    } catch (const std::exception&) {
-        // Return empty environment on parse error
-    }
-    return env;
-}
-
-// Serialize in-memory variables map to JSON string for DB storage (round-trip with parse_variables_json)
-std::string serialize_variables_json (const vayu::Environment& env) {
-    nlohmann::json obj = nlohmann::json::object ();
-    for (const auto& [key, var] : env) {
-        obj[key] = nlohmann::json::object ();
-        obj[key]["value"]   = var.value;
-        obj[key]["enabled"] = var.enabled;
-        obj[key]["secret"]  = var.secret;
-        obj[key]["type"]    = var.type.empty () ? std::string{ "string" } : var.type;
-    }
-    return obj.dump ();
-}
-
 // Persist script-set variables to DB (design mode only). Best-effort: logs errors, does not change response.
+//
+// A scope is rewritten only when a script actually changed one of its
+// variables. Before this, every Send rewrote all three scopes unconditionally,
+// which bumped each scope's `updated_at` for a run that touched nothing and,
+// worse, pushed every variable through the serializer - so any field the
+// serializer did not know about was erased from disk by merely sending a
+// request (issue #135). Comparing the parsed on-disk blob with the in-memory
+// one is what makes "no script wrote a variable" mean "no write at all".
 void persist_script_variables (vayu::db::Database& db,
 const vayu::db::Run& run,
 const vayu::Environment& env,
@@ -138,10 +105,12 @@ const vayu::Environment& collectionVariables) {
     if (run.environment_id.has_value ()) {
         try {
             if (auto db_env = db.get_environment (*run.environment_id)) {
-                vayu::db::Environment updated = *db_env;
-                updated.variables  = serialize_variables_json (env);
-                updated.updated_at = now_ms ();
-                db.save_environment (updated);
+                if (vayu::json::parse_variables (db_env->variables) != env) {
+                    vayu::db::Environment updated = *db_env;
+                    updated.variables  = vayu::json::serialize_variables (env);
+                    updated.updated_at = now_ms ();
+                    db.save_environment (updated);
+                }
             }
         } catch (const std::exception& e) {
             vayu::utils::log_error (
@@ -151,10 +120,12 @@ const vayu::Environment& collectionVariables) {
 
     try {
         if (auto db_globals = db.get_globals ()) {
-            vayu::db::Globals updated = *db_globals;
-            updated.variables  = serialize_variables_json (globals);
-            updated.updated_at = now_ms ();
-            db.save_globals (updated);
+            if (vayu::json::parse_variables (db_globals->variables) != globals) {
+                vayu::db::Globals updated = *db_globals;
+                updated.variables  = vayu::json::serialize_variables (globals);
+                updated.updated_at = now_ms ();
+                db.save_globals (updated);
+            }
         }
     } catch (const std::exception& e) {
         vayu::utils::log_error (
@@ -167,10 +138,14 @@ const vayu::Environment& collectionVariables) {
                 if (!db_request->collection_id.empty ()) {
                     if (auto db_collection =
                         db.get_collection (db_request->collection_id)) {
-                        vayu::db::Collection updated = *db_collection;
-                        updated.variables  = serialize_variables_json (collectionVariables);
-                        updated.updated_at = now_ms ();
-                        db.create_collection (updated);
+                        if (vayu::json::parse_variables (db_collection->variables) !=
+                        collectionVariables) {
+                            vayu::db::Collection updated = *db_collection;
+                            updated.variables =
+                            vayu::json::serialize_variables (collectionVariables);
+                            updated.updated_at = now_ms ();
+                            db.create_collection (updated);
+                        }
                     }
                 }
             }
@@ -180,6 +155,8 @@ const vayu::Environment& collectionVariables) {
         }
     }
 }
+
+namespace {
 
 // Execute a script and handle exceptions uniformly
 vayu::ScriptResult execute_script (vayu::runtime::ScriptEngine& engine,
@@ -513,12 +490,12 @@ void register_execution_routes (RouteContext& ctx) {
 
         if (run.environment_id.has_value ()) {
             if (auto db_env = ctx.db.get_environment (*run.environment_id)) {
-                env = parse_variables_json (db_env->variables);
+                env = vayu::json::parse_variables (db_env->variables);
             }
         }
 
         if (auto db_globals = ctx.db.get_globals ()) {
-            globals = parse_variables_json (db_globals->variables);
+            globals = vayu::json::parse_variables (db_globals->variables);
         }
 
         if (run.request_id.has_value ()) {
@@ -527,7 +504,7 @@ void register_execution_routes (RouteContext& ctx) {
                     if (auto db_collection =
                         ctx.db.get_collection (db_request->collection_id)) {
                         collectionVariables =
-                        parse_variables_json (db_collection->variables);
+                        vayu::json::parse_variables (db_collection->variables);
                     }
                 }
             }
@@ -717,8 +694,13 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
-        // Start run via RunManager
-        ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose);
+        // Start run via RunManager. A refusal means the daemon is draining its
+        // workers for shutdown; the row exists but nothing will ever run it, so
+        // say so rather than returning a 202 for a run that never starts.
+        if (!ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose)) {
+            send_error (res, 503, "Engine is shutting down");
+            return;
+        }
 
         nlohmann::json response;
         response["runId"]   = run_id;

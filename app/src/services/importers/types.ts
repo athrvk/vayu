@@ -35,7 +35,7 @@ export interface ImportMeta {
 }
 
 export interface RequestDraft {
-	id?: string; // assigned by assign-ids pre-pass
+	tempId?: string; // assigned by assign-ids pre-pass; opaque, never stored
 	name: string;
 	description: string;
 	method: HttpMethod;
@@ -49,7 +49,7 @@ export interface RequestDraft {
 }
 
 export interface CollectionDraft {
-	id?: string; // assigned by assign-ids pre-pass
+	tempId?: string; // assigned by assign-ids pre-pass; opaque, never stored
 	name: string;
 	description: string;
 	variables: Record<string, VariableValue>;
@@ -61,7 +61,7 @@ export interface CollectionDraft {
 }
 
 export interface EnvironmentDraft {
-	id?: string; // assigned by assign-ids pre-pass
+	tempId?: string; // assigned by assign-ids pre-pass; opaque, never stored
 	name: string;
 	description: string;
 	variables: Record<string, VariableValue>;

@@ -57,6 +57,30 @@ using Json = nlohmann::json;
 [[nodiscard]] Json serialize (const vayu::db::Run& run);
 
 /**
+ * @brief Parse a stored variables blob (collections/environments/globals
+ * `variables` column) into an in-memory Environment.
+ *
+ * Entries that are not JSON objects are skipped; a malformed blob yields an
+ * empty Environment rather than throwing. `createdAt` is read only when it is
+ * a number - anything else is treated as absent (see Variable::created_at).
+ */
+[[nodiscard]] vayu::Environment parse_variables (const std::string& json_str);
+
+/**
+ * @brief Serialize an Environment back to a stored variables blob.
+ *
+ * The exact inverse of `parse_variables`: it must write every field the parser
+ * reads. `POST /execute` rewrites the three variable scopes through this pair
+ * after running scripts, so a field missing here is erased from disk on the
+ * next design run - which is how `createdAt` was lost (issue #135).
+ *
+ * `created_at` is omitted when unset rather than defaulted, so a variable whose
+ * creation time is genuinely unknown stays unknown instead of being stamped
+ * with "now" and jumping to the bottom of the user's list.
+ */
+[[nodiscard]] std::string serialize_variables (const vayu::Environment& env);
+
+/**
  * @brief Serialize a Metric to JSON
  */
 [[nodiscard]] Json serialize (const vayu::db::Metric& metric);

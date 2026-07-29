@@ -115,7 +115,7 @@ bool is_create) {
  * anything else with a 400 naming the field. It used to dump whatever it was
  * handed, so `{"variables": 42}` stored `42` and `{"auth": "bearer"}` stored
  * `"bearer"` - blobs that parse as JSON but are not the object each reader
- * expects, and every reader degrades quietly (`parse_variables_json` yields no
+ * expects, and every reader degrades quietly (`parse_variables` yields no
  * variables, `parse_auth` yields no auth, so the request goes out bare). The
  * write returned 200 and the user found out from the wire. That is the same
  * defect the `"null"`-string fix closed, one level up: it removed a bad
@@ -205,6 +205,26 @@ apply_required_string_field (const nlohmann::json& json, const char* key, std::s
     out = json[key].get<std::string> ();
     return std::nullopt;
 }
+
+/**
+ * The per-resource field appliers, shared by the single-resource create/update
+ * cores and by `POST /import/apply` (issue #96). Bulk import must store exactly
+ * what `POST /<resource>` would store, so it calls these rather than re-deriving
+ * the null-vs-absent rule or the per-field validation - a second copy would
+ * drift the moment a field is added.
+ *
+ * Each returns an error response {http_status, json_body} when a no-default
+ * field is missing or null (or, for collections, when the proposed parent would
+ * form a cycle), and nullopt on success. `is_create` selects the absent-field
+ * behaviour; see the rule above. Defined in collections.cpp / requests.cpp /
+ * environments.cpp.
+ */
+std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (
+vayu::db::Database& db, vayu::db::Collection& c, const nlohmann::json& json, bool is_create);
+std::optional<std::pair<int, nlohmann::json>>
+apply_request_fields (vayu::db::Request& r, const nlohmann::json& json, bool is_create);
+std::optional<std::pair<int, nlohmann::json>>
+apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, bool is_create);
 
 /**
  * @brief Callback type for graceful shutdown
