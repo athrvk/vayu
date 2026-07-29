@@ -82,7 +82,7 @@ Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
 | `op.summary` → `op.operationId` → `"{METHOD} {path}"` | `name` | precedence in that order; final fallback uses upper-cased method + raw path, e.g. `"GET /users/{id}"` |
 | `op.description` | `description` | fallback `""` |
 | HTTP method | `method` | `method.toUpperCase()` (e.g. `get` → `GET`), cast to `HttpMethod` |
-| `path` | `url` | `` `{{baseUrl}}${normalizeVars(path)}` `` - always prefixed with `{{baseUrl}}`, even if no server was defined (see [URL](#url--path-parameters)) |
+| `path` | `url` | `` `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}` `` - always prefixed with `{{baseUrl}}`, even if no server was defined (see [URL](#url--path-parameters)) |
 | parameters with `in: "query"` | `params` | `{ key: name, value: "", enabled: true, description? }` - `description` included only when present |
 | parameters with `in: "header"` | `headers` | `{ key: name, value: "", enabled: true }` - **no description carried**; `authorization` and `content-type` headers are dropped (case-insensitive) since Vayu manages those |
 | parameters with `in: "path"` / `in: "cookie"` | - | not emitted as params/headers; path params are represented in the URL via `normalizeVars`. Cookie params are dropped. |
@@ -94,8 +94,8 @@ Built by `buildOperation(method, path, op, resolveRef, pathParams)`.
 
 ## URL & path parameters
 
-- The request `url` is always `` `{{baseUrl}}${normalizeVars(path)}` ``. `{{baseUrl}}` is a Vayu collection variable resolved from `servers[0].url` at import time (defined on the root collection). If the spec has no `servers`, `baseUrl` is absent from the root variables and `{{baseUrl}}` resolves to empty at runtime.
-- OpenAPI path templates `{param}` are converted to Vayu `{{param}}` by `normalizeVars` (`var-normalize.ts`). It rewrites single-brace `{x}` (identifier chars `[\w$-]`) to `{{x}}`, while leaving any existing `{{...}}` pairs intact. So `/users/{userId}/posts/{postId}` becomes `/users/{{userId}}/posts/{{postId}}`. Path parameters are **not** also emitted as `params` entries - they live only in the URL.
+- The request `url` is always `` `{{baseUrl}}${normalizeVars(path, { pathTemplates: true })}` ``. `{{baseUrl}}` is a Vayu collection variable resolved from `servers[0].url` at import time (defined on the root collection). If the spec has no `servers`, `baseUrl` is absent from the root variables and `{{baseUrl}}` resolves to empty at runtime.
+- OpenAPI path templates `{param}` are converted to Vayu `{{param}}` by `normalizeVars` (`var-normalize.ts`). With `pathTemplates` (which only the OpenAPI/Swagger parsers pass) it rewrites single-brace `{x}` (identifier chars `[\w$-]`) to `{{x}}`, while leaving any existing `{{...}}` pairs intact. So `/users/{userId}/posts/{postId}` becomes `/users/{{userId}}/posts/{{postId}}`. Path parameters are **not** also emitted as `params` entries - they live only in the URL.
 
 ## Request body generation
 

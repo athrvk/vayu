@@ -34,6 +34,7 @@ import type { AuthMode } from "@/types";
 /** Display name for every auth mode, editable or not. */
 export const AUTH_MODE_LABELS: Record<AuthMode, string> = {
 	none: "No Auth",
+	noauth: "No Auth (blocks inheriting)",
 	inherit: "Inherit from Collection",
 	bearer: "Bearer Token",
 	basic: "Basic Auth",
@@ -45,10 +46,30 @@ export const AUTH_MODE_LABELS: Record<AuthMode, string> = {
 };
 
 /**
- * The modes an editor may offer, in picker order. `inherit` is deliberately
- * absent - it is request-only, and the request panel prepends it.
+ * The modes an editor may offer, in picker order. `inherit` and `noauth` are
+ * deliberately absent - each belongs to exactly one host, which adds it: the
+ * request panel prepends `inherit`, the collection tab inserts `noauth`
+ * ({@link COLLECTION_AUTH_MODES}).
  */
 export const EDITABLE_AUTH_MODES = ["none", "bearer", "basic", "apikey", "oauth2"] as const;
+
+/**
+ * The collection tab's picker order: `noauth` next to `none`, because the two
+ * differ only in what descendants inherit and are read as a pair.
+ *
+ * `noauth` is collection-only. On a request, `none` already means "send
+ * nothing" - a request's own auth is never walked - so offering both there would
+ * be two options doing one job. See `RequestAuth` in `types/domain.ts` for the
+ * semantics and `resolveAuthSource` for the walk that reads them.
+ */
+export const COLLECTION_AUTH_MODES = [
+	"none",
+	"noauth",
+	...EDITABLE_AUTH_MODES.slice(1),
+] as readonly CollectionAuthMode[];
+
+/** A mode the collection auth tab offers: everything {@link AuthFields} edits, plus `noauth`. */
+export type CollectionAuthMode = EditableAuthMode | "noauth";
 
 /** A mode {@link AuthFields} can edit. */
 export type EditableAuthMode = (typeof EDITABLE_AUTH_MODES)[number];
@@ -64,6 +85,11 @@ export function isUneditableAuthMode(mode: AuthMode | string): mode is Uneditabl
 /** Narrowing guard: is this a mode the shared field editor can render? */
 export function isEditableAuthMode(mode: AuthMode | string): mode is EditableAuthMode {
 	return (EDITABLE_AUTH_MODES as readonly string[]).includes(mode);
+}
+
+/** Narrowing guard: is this a mode the collection auth tab offers? */
+export function isCollectionAuthMode(mode: AuthMode | string): mode is CollectionAuthMode {
+	return (COLLECTION_AUTH_MODES as readonly string[]).includes(mode);
 }
 
 /**

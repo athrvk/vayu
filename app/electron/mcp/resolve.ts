@@ -228,15 +228,26 @@ export function buildCollectionChain(
 
 /** True for auth blocks that carry no credential (nothing to forward). */
 function isEmptyAuth(auth: AuthRecord | undefined): boolean {
-	return !auth || !auth.mode || auth.mode === "none";
+	return !auth || !auth.mode || auth.mode === "none" || auth.mode === "noauth";
+}
+
+/**
+ * True for a collection auth that ends the inheritance walk: an explicit "send
+ * nothing", as opposed to `none`, which means nothing was configured at that
+ * level and the walk continues. Mirrors `resolveAuthSource` in the renderer's
+ * `auth-resolution.ts` - the two copies must stay in step (see CLAUDE.md).
+ */
+function blocksInheritance(auth: AuthRecord | undefined): boolean {
+	return auth?.mode === "noauth";
 }
 
 /**
  * The effective auth for a request, resolved to a concrete block the engine can
  * apply, or `undefined` for no auth. `inherit` walks the ancestor chain
  * leaf→root and takes the first collection with concrete auth (collections are
- * always concrete auth sources - they never store `inherit`). Variables inside
- * the chosen block (e.g. `{{token}}`, an OAuth2 `config`) are resolved.
+ * always concrete auth sources - they never store `inherit`), stopping at a
+ * collection explicitly set to `noauth`. Variables inside the chosen block (e.g.
+ * `{{token}}`, an OAuth2 `config`) are resolved.
  */
 export function composeAuth(
 	requestAuth: AuthRecord | undefined,
@@ -249,6 +260,7 @@ export function composeAuth(
 	let effective: AuthRecord | undefined;
 	if (auth.mode === "inherit") {
 		for (let i = chain.length - 1; i >= 0; i--) {
+			if (blocksInheritance(chain[i].auth)) break;
 			if (!isEmptyAuth(chain[i].auth)) {
 				effective = chain[i].auth;
 				break;

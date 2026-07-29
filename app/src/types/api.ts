@@ -373,6 +373,9 @@ export interface ImportApplyRequestItem {
 	auth?: RequestAuth;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	/** Omitted unless the imported file states them; the engine then applies its own defaults. */
+	followRedirects?: boolean;
+	maxRedirects?: number;
 	order?: number;
 }
 
