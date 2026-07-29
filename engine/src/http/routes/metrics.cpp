@@ -18,16 +18,71 @@
 
 namespace vayu::http::routes {
 
+namespace {
+
+// Wrap the per-tick objects in the `{data, pagination}` envelope both storage
+// paths return. `returned` counts the rows the query yielded, so `hasMore`
+// stays correct even if one stored payload had to be skipped.
+nlohmann::json time_series_envelope (nlohmann::json data,
+int64_t total_count,
+int64_t limit,
+int64_t offset,
+size_t returned) {
+    nlohmann::json response;
+    response["data"]                   = std::move (data);
+    response["pagination"]["total"]    = total_count;
+    response["pagination"]["limit"]    = limit;
+    response["pagination"]["offset"]   = offset;
+    response["pagination"]["hasMore"]  = (offset + static_cast<int64_t> (returned)) < total_count;
+    response["pagination"]["returned"] = returned;
+    return response;
+}
+
+/**
+ * The current path: each `metric_ticks` row already *is* one `data[]` entry, so
+ * the reader parses and forwards it. Pagination is tick-aligned by
+ * construction - a page boundary can no longer land inside a tick and hand the
+ * client a half-populated bucket.
+ */
+nlohmann::json tick_time_series (vayu::db::Database& db,
+const std::string& run_id,
+int64_t total_count,
+int64_t limit,
+int64_t offset) {
+    auto ticks = db.get_metric_ticks_paginated (run_id, limit, offset);
+
+    nlohmann::json data_array = nlohmann::json::array ();
+    for (const auto& tick : ticks) {
+        try {
+            auto payload = nlohmann::json::parse (tick.payload);
+            if (!payload.is_object ()) {
+                throw std::runtime_error ("payload is not an object");
+            }
+            data_array.push_back (std::move (payload));
+        } catch (const std::exception& e) {
+            // A payload this engine wrote always parses; a corrupt one is a
+            // damaged row, not a client error - skip it loudly rather than
+            // failing the whole page.
+            vayu::utils::log_warning ("Skipping unreadable metric tick for run " +
+            run_id + " (id=" + std::to_string (tick.id) + "): " + e.what ());
+        }
+    }
+    return time_series_envelope (
+    std::move (data_array), total_count, limit, offset, ticks.size ());
+}
+
+} // namespace
+
 /**
  * Testable core of the time-series JSON endpoint, returning {http_status,
  * json_body}. Serves both `GET /runs/:id/metrics` (canonical) and the legacy
  * `GET /stats/:id?format=json`, so the two paths cannot drift.
  *
  * A missing run is a definitive 404 with the flat `{"error": message}` shape
- * `send_error` uses. Otherwise it groups the paginated `metrics` rows into
- * per-timestamp tick buckets (the app's snake_case `LoadTestMetrics` shape,
- * consumed without a transformer) and wraps them in the `{data, pagination}`
- * envelope.
+ * `send_error` uses. Otherwise it returns the run's per-tick objects (the app's
+ * snake_case `LoadTestMetrics` shape, consumed without a transformer) in the
+ * `{data, pagination}` envelope - read straight from `metric_ticks`, or, for a
+ * run recorded before that table existed, regrouped from its legacy EAV rows.
  *
  * `limit`/`offset` arrive already parsed and clamped by the caller (limit
  * default 5000, capped at 50000; offset floored at 0) - the raw query-param
@@ -42,6 +97,14 @@ const std::string& run_id, int64_t limit, int64_t offset) {
         return { 404, nlohmann::json{ { "error", "Run not found" } } };
     }
 
+    // Ticks decide the path: a run has them or it predates the table. Counting
+    // is also the pagination total, so this is not an extra query.
+    const int64_t tick_count = db.count_metric_ticks (run_id);
+    if (tick_count > 0) {
+        return { 200, tick_time_series (db, run_id, tick_count, limit, offset) };
+    }
+
+    // Legacy EAV path, unchanged - kept until pre-metric_ticks runs age out.
     // Get total count for pagination
     int64_t total_count = db.count_metrics (run_id);
 
@@ -146,19 +209,50 @@ const std::string& run_id, int64_t limit, int64_t offset) {
         data_array.push_back (bucket);
     }
 
-    // Build response with pagination metadata
-    nlohmann::json response;
-    response["data"] = data_array;
-    response["pagination"]["total"] = total_count;
-    response["pagination"]["limit"] = limit;
-    response["pagination"]["offset"] = offset;
-    response["pagination"]["hasMore"] = (offset + static_cast<int64_t> (metrics.size ())) < total_count;
-    response["pagination"]["returned"] = metrics.size ();
-
-    return { 200, response };
+    return { 200, time_series_envelope (std::move (data_array), total_count, limit,
+                  offset, metrics.size ()) };
 }
 
 namespace {
+
+/**
+ * Fold one stored tick into the legacy `/stats/:id` SSE aggregate.
+ *
+ * That stream predates `metric_ticks` and read the EAV rows directly; every
+ * field it carries comes from the tick object instead, one-for-one - except
+ * `avgLatencyMs`, which the per-tick object has never carried (the canonical
+ * `GET /runs/:id/live` stream serves it from the in-memory collector). Returns
+ * false for an unreadable payload, leaving the aggregate untouched.
+ */
+bool apply_tick_to_stream (const vayu::db::MetricTick& tick,
+nlohmann::json& aggregate,
+const std::string& run_id) {
+    nlohmann::json payload;
+    try {
+        payload = nlohmann::json::parse (tick.payload);
+    } catch (...) {
+        return false;
+    }
+    if (!payload.is_object ()) {
+        return false;
+    }
+
+    const int total_req = payload.value ("requests_completed", 0);
+    const int errors    = payload.value ("requests_failed", 0);
+    aggregate["currentRps"]        = payload.value ("current_rps", 0.0);
+    aggregate["errorRate"]         = payload.value ("error_rate", 0.0);
+    aggregate["activeConnections"] = payload.value ("current_concurrency", 0);
+    aggregate["totalRequests"]     = total_req;
+    aggregate["sendRate"]          = payload.value ("send_rate", 0.0);
+    aggregate["throughput"]        = payload.value ("throughput", 0.0);
+    aggregate["backpressure"]      = payload.value ("backpressure", 0);
+    aggregate["totalErrors"]       = errors;
+    aggregate["totalSuccess"]      = total_req > errors ? total_req - errors : 0;
+    aggregate["elapsedSeconds"]    = payload.value ("elapsed_seconds", 0.0);
+    aggregate["timestamp"]         = payload.value ("timestamp", tick.timestamp);
+    aggregate["runId"]             = run_id;
+    return true;
+}
 
 // Parse and clamp the pagination query params shared by the time-series routes.
 // Raw parsing stays here; the extracted core is handed clean, clamped ints.
@@ -279,9 +373,10 @@ void register_metrics_routes (RouteContext& ctx) {
 
         res.set_content_provider ("text/event-stream",
         [&ctx, run_id] (size_t offset, httplib::DataSink& sink) {
-            int64_t last_id     = 0;
-            bool test_completed = false;
-            int64_t start_time  = 0;
+            int64_t last_id      = 0; // legacy EAV cursor
+            int64_t last_tick_id = 0; // metric_ticks cursor
+            bool test_completed  = false;
+            int64_t start_time   = 0;
 
             nlohmann::json aggregated_metrics;
             aggregated_metrics["totalRequests"]     = 0;
@@ -302,6 +397,28 @@ void register_metrics_routes (RouteContext& ctx) {
                 }
 
                 try {
+                    // A current run writes wide ticks; a run recorded before
+                    // that table existed only has EAV rows. Poll ticks first
+                    // and fall back, so this deprecated stream serves both.
+                    auto ticks = ctx.db.get_metric_ticks_since (run_id, last_tick_id);
+                    if (!ticks.empty ()) {
+                        bool tick_updates = false;
+                        for (const auto& tick : ticks) {
+                            last_tick_id = tick.id;
+                            tick_updates |= apply_tick_to_stream (
+                            tick, aggregated_metrics, run_id);
+                        }
+                        if (tick_updates) {
+                            std::string payload = "event: metrics\ndata: " +
+                            aggregated_metrics.dump () + "\n\n";
+                            if (!sink.write (payload.data (), payload.size ())) {
+                                return false;
+                            }
+                        }
+                        std::this_thread::sleep_for (std::chrono::milliseconds (500));
+                        continue;
+                    }
+
                     auto metrics = ctx.db.get_metrics_since (run_id, last_id);
                     bool has_updates = false;
 

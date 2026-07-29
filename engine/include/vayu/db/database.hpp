@@ -52,6 +52,21 @@ class Database {
     std::vector<Request> get_requests_in_collection (const std::string& collection_id);
     void delete_request (const std::string& id);
 
+    /**
+     * @brief Persist a whole import in one transaction (issue #96).
+     *
+     * Either every row lands or none does: a bulk import that failed halfway
+     * used to leave the tree half-created and depend on a best-effort
+     * client-side rollback to undo it. Rows are written collections -> requests
+     * -> environments so a parent exists before the rows that reference it.
+     * Ids must already be assigned by the caller (`POST /import/apply` resolves
+     * its temp ids first), because nothing here can look up a row that the same
+     * transaction has not committed yet.
+     */
+    void import_apply (const std::vector<Collection>& collections,
+    const std::vector<Request>& requests,
+    const std::vector<Environment>& environments);
+
     void save_environment (const Environment& e);
     std::vector<Environment> get_environments ();
     std::optional<Environment> get_environment (const std::string& id);
@@ -81,6 +96,18 @@ class Database {
     void delete_run (const std::string& id);
 
     /**
+     * @brief Store the whole-run results summary (JSON) on the run row.
+     *
+     * Written once when a run reaches a terminal status; `GET /runs/:id/report`
+     * reads it instead of re-reducing the time-series. A missing run is logged
+     * and ignored (the run may have been deleted mid-flight), never an error.
+     *
+     * Retries on a busy database like the other write paths - losing this write
+     * loses the run's aggregates outright, since nothing else records them.
+     */
+    void update_run_summary (const std::string& id, const std::string& summary);
+
+    /**
      * @brief Prune old runs (and their cascaded metrics/results) by two limits.
      *
      * A run is a victim when it falls beyond @p max_runs most-recent runs
@@ -102,16 +129,26 @@ class Database {
     /**
      * @brief Mark runs left `running`/`pending` by a previous process as failed.
      *
-     * A crash, a kill, or the daemon's 5s forced-shutdown break abandons
-     * in-flight runs with no terminal status write, so `GET /runs` keeps
-     * reporting them as running forever. Called from `init()` - before the
-     * sweeper and the HTTP server start - so no live run can be caught by it.
+     * A crash or a kill abandons in-flight runs with no terminal status write,
+     * so `GET /runs` keeps reporting them as running forever. A graceful
+     * shutdown is not one of those paths - `RunManager::shutdown` stops and
+     * joins every worker, which writes the terminal status. Called from
+     * `init()` - before the sweeper and the HTTP server start - so no live run
+     * can be caught by it.
      *
      * @return Number of rows reconciled.
      */
     size_t reconcile_orphaned_runs ();
 
-    // Metrics
+    // Metric ticks - one wide row per tick; the current time-series storage.
+    void add_metric_tick (const MetricTick& tick);
+    // Ordered (timestamp, id) so a page boundary never splits a tick.
+    std::vector<MetricTick> get_metric_ticks_paginated (const std::string& run_id, int64_t limit, int64_t offset);
+    std::vector<MetricTick> get_metric_ticks_since (const std::string& run_id, int64_t last_id);
+    int64_t count_metric_ticks (const std::string& run_id);
+
+    // Metrics - the legacy EAV time series. No longer written; still read so
+    // runs recorded before `metric_ticks` keep rendering their charts/reports.
     void add_metric (const Metric& metric);
     void add_metrics_batch (const std::vector<Metric>& metrics); // Transactional batch insert
     std::vector<Metric> get_metrics (const std::string& run_id);
@@ -140,6 +177,15 @@ class Database {
     private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    /**
+     * @brief Delete a run and every child row it owns (ticks, metrics, results).
+     *
+     * The single definition of the run cascade - `delete_run` and `prune_runs`
+     * both call it, so a new child table is wired into both by editing one
+     * function. The caller must already hold the DB mutex.
+     */
+    void remove_run_cascade_locked (const std::string& id);
 
     /**
      * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked error.

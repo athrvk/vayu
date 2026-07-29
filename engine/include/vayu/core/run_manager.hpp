@@ -8,6 +8,7 @@
  */
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -15,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -68,7 +70,11 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
 struct RunContext {
     std::string run_id;
     std::unique_ptr<vayu::http::EventLoop> event_loop;
-    std::thread worker_thread;
+    // The run's worker thread is NOT owned here: it holds a shared_ptr to this
+    // context, so a context whose last reference is dropped by its own worker
+    // (a retained run swept while the worker is still unwinding) would join
+    // itself and terminate. RunManager owns the handle instead - see
+    // `run_workers_` - and joins it from a thread that is never the worker.
     std::thread metrics_thread;
     std::atomic<bool> should_stop{ false };
     std::atomic<bool> is_running{ false };
@@ -215,14 +221,87 @@ struct RunContext {
 };
 
 /**
- * @brief Build the per-tick enrichment metric rows (dropped / bytes / status
- * codes) from the collector's current cumulative state. Extracted from
- * collect_metrics so it can be unit-tested deterministically.
+ * @brief One persisted metrics tick, in the field names the time-series
+ * response uses.
+ *
+ * The producer fills this once per DB-gated tick; `build_metric_tick_payload`
+ * turns it into the JSON stored in `metric_ticks.payload` and returned verbatim
+ * as one `data[]` entry by `GET /runs/:id/metrics`. Naming the fields after the
+ * response keys is deliberate - the struct *is* the wire shape, so a reader
+ * comparing the two has one mapping to check, not two.
  */
-[[nodiscard]] std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
-const std::shared_ptr<RunContext>& context,
-int64_t timestamp,
-const std::map<int, size_t>* status_snapshot = nullptr);
+struct MetricTickSample {
+    int64_t timestamp      = 0;   // Unix ms; the tick's single wall-clock sample
+    double elapsed_seconds = 0.0; // Seconds since the run's first persisted tick
+    size_t requests_completed = 0; // Responses received (success + error)
+    size_t requests_failed    = 0; // Of those, errors
+    double current_rps        = 0.0;
+    size_t current_concurrency = 0;
+    double send_rate           = 0.0;
+    double throughput          = 0.0;
+    size_t backpressure        = 0; // Sent but not yet responded
+    double error_rate          = 0.0; // Percent
+    size_t dropped_requests    = 0;
+    size_t bytes_sent          = 0;
+    size_t bytes_received      = 0;
+    std::map<int, size_t> status_codes; // Cumulative; code 0 = transport errors
+    // Windowed (rolling) percentiles for this tick, not cumulative.
+    double latency_p50_ms = 0.0;
+    double latency_p95_ms = 0.0;
+    double latency_p99_ms = 0.0;
+};
+
+/**
+ * @brief Serialize a tick sample into the stored `metric_ticks.payload` object.
+ *
+ * Key set and value types are the contract `GET /runs/:id/metrics` returns; the
+ * legacy EAV reader in `http/routes/metrics.cpp` builds the same object from
+ * ~18 rows, and stats_route_test.cpp pins the two against each other.
+ */
+[[nodiscard]] nlohmann::json build_metric_tick_payload (const MetricTickSample& sample);
+
+/** @brief Script-validation tallies, when deferred validation actually ran. */
+struct ScriptValidationTotals {
+    size_t sampled = 0;
+    size_t passed  = 0;
+    size_t failed  = 0;
+};
+
+/**
+ * @brief Whole-run results, the inputs to the stored `runs.summary` object.
+ *
+ * Everything `GET /runs/:id/report` used to re-derive by scanning the run's
+ * metric rows, known once at completion. `latency` holds the cumulative
+ * (whole-run) percentiles, never a window.
+ */
+struct RunSummaryInputs {
+    size_t total_requests     = 0;
+    double rps                = 0.0;
+    double send_rate          = 0.0;
+    double throughput         = 0.0;
+    double test_duration_s    = 0.0;
+    double setup_overhead_s   = 0.0;
+    size_t peak_concurrency   = 0;
+    size_t dropped_requests   = 0;
+    double queue_wait_avg_ms  = 0.0;
+    size_t bytes_sent         = 0;
+    size_t bytes_received     = 0;
+    std::map<int, size_t> status_codes;
+    MetricsCollector::Percentiles latency; // min/max/p50..p999, whole-run
+    double latency_avg_ms = 0.0; // Mean latency; the histogram does not carry it
+    // Absent when the run had no test script or no sampled responses - the
+    // report then omits its testValidation section, as it always has.
+    std::optional<ScriptValidationTotals> tests;
+};
+
+/**
+ * @brief Serialize whole-run results into the object stored in `runs.summary`.
+ *
+ * The report route reads exactly these keys (`http/routes/runs.cpp`), so the two
+ * sides are locked together by runs_route_test.cpp's summary round-trip rather
+ * than by convention.
+ */
+[[nodiscard]] nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs);
 
 /**
  * @brief Wrap a per-tick stats object as a wire-ready SSE "metrics" event,
@@ -247,6 +326,20 @@ class RunManager {
     // Re-read each tick (not captured once) so a runtime change to
     // liveRetentionMs from the UI takes effect without a daemon restart.
     std::function<int64_t ()> sweeper_ttl_provider_;
+
+    // Joinable handles for the worker threads spawned by start_run, keyed by
+    // run id. A worker cannot join itself, so its handle outlives the thread
+    // until either a later start_run reaps it or shutdown joins it. Guarded by
+    // its own mutex: a worker takes `mutex_` (retain_run) as its last act, so
+    // reaping must never hold `mutex_` while it joins.
+    mutable std::mutex workers_mtx_;
+    std::map<std::string, std::thread> run_workers_;
+    bool shutting_down_{ false }; // workers_mtx_
+
+    // Move out the handles of workers whose runs are no longer active, for the
+    // caller to join once it has dropped every lock. Requires `workers_mtx_`;
+    // takes `mutex_` itself.
+    std::vector<std::thread> take_finished_workers ();
 
     public:
     ~RunManager ();
@@ -279,11 +372,39 @@ class RunManager {
     void start_sweeper (int64_t ttl_ms);
     void stop_sweeper ();
 
-    // Helper to start a run
-    void start_run (const std::string& run_id,
+    // Helper to start a run. Returns false - having registered nothing and
+    // spawned nothing - if shutdown() has already begun, so a request that
+    // races the drain is refused rather than starting a worker nobody will
+    // join. Any other failure still surfaces as an exception from the worker.
+    bool start_run (const std::string& run_id,
     const nlohmann::json& config,
     vayu::db::Database& db,
     bool verbose);
+
+    /**
+     * @brief Stop every active run and join its worker thread.
+     *
+     * The daemon's `Database`, `RunManager` and curl global state are torn down
+     * in `main`'s scope exit while a run worker may still be writing metrics
+     * through references to all three. This is the ordered drain that has to
+     * happen first: signal `should_stop` on every active run, wait for them to
+     * settle, then join.
+     *
+     * `grace` bounds the *wait*, not the join. A worker that has not settled by
+     * then is logged and still joined, because letting go of it is precisely
+     * the use-after-free being prevented - the bound exists to make a slow
+     * shutdown visible, not to permit an unsafe one.
+     *
+     * Idempotent, and safe to call with no runs active. After it returns,
+     * start_run refuses; the destructor calls it as a backstop.
+     */
+    void shutdown (std::chrono::milliseconds grace = std::chrono::milliseconds (
+                   constants::server::RUN_SHUTDOWN_GRACE_MS));
+
+    // Worker thread handles still held (running, or finished but not yet
+    // reaped). Test-only hook - a drain that returns with this non-zero has
+    // left threads running over freed state.
+    [[nodiscard]] size_t tracked_worker_count () const;
 };
 
 // Worker functions

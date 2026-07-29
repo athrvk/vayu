@@ -110,10 +110,10 @@ For collections, requests and environments the engine splits the write verbs:
 `PUT /<resource>/:id` updates and answers an unknown `id` with `404`. They are
 not interchangeable, so `apiService` keeps one method per verb:
 
-- `createX(data)` posts the whole object to the collection path. `data` carries
-  no `id` for an interactive create; the **import** path is the one caller that
-  still supplies its own `id`, because it pre-assigns ids to wire `parentId` /
-  `collectionId` across the tree before anything is persisted.
+- `createX(data)` posts the whole object to the collection path. `data` never
+  carries an `id` - the engine generates every one. (Import used to be the
+  exception, pre-assigning ids to wire `parentId` / `collectionId` across a tree
+  before anything was persisted; it sends one `applyImport` call now, see below.)
 - `updateX(data)` takes `data.id`, puts it in the **path**, and sends the rest
   of the object as a merge-patch body - an omitted field keeps its stored value,
   an explicit `null` resets it to the default. The `id` is not repeated in the
@@ -160,6 +160,23 @@ apiService.deleteEnvironment(id): Promise<void>
 apiService.getGlobals(): Promise<GlobalVariables>
 apiService.updateGlobals(variables): Promise<GlobalVariables>
 ```
+
+#### Import
+
+```typescript
+apiService.importFetch(url): Promise<ImportFetchResponse>          // POST /import/fetch
+apiService.applyImport(payload): Promise<ImportApplyResponse>      // POST /import/apply
+```
+
+`applyImport` sends a whole parsed import - collections, requests, environments -
+in one atomic call. Items reference each other by opaque `tempId`s and the engine
+returns the temp-id -> real-id `idMap`; a rejected payload persisted nothing, so
+there is nothing to roll back. Imported **globals** are not in this payload: they
+are a singleton written through `updateGlobals` after the apply succeeds. See
+[import-collections/README.md](./import-collections/README.md#3-persist---orchestratorts)
+for the pipeline and
+[engine/api-reference.md](../engine/api-reference.md#post-importapply) for the
+contract.
 
 #### Execution
 

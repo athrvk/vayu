@@ -58,6 +58,202 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
     return summary;
 }
 
+// Report fields that live outside the DetailedReport struct: whole-run counters
+// the report injects into its `summary` object. Filled from the stored run
+// summary (new runs) or from the legacy metric rows (pre-metric_ticks runs).
+struct ReportExtras {
+    double peak_concurrency = 0.0;
+    double dropped_total    = 0.0;
+    double queue_wait_avg   = 0.0;
+    double bytes_sent       = 0.0;
+    double bytes_received   = 0.0;
+    // True once an authoritative status-code distribution replaced the one
+    // derived from the sampled results - only then are successful/failed
+    // recounted from it (a run with neither keeps the sampled figures).
+    bool status_codes_overridden = false;
+    // Script-validation tallies; `has_tests` false leaves the report's
+    // testValidation section out entirely.
+    bool has_tests     = false;
+    int tests_sampled  = 0;
+    int tests_passed   = 0;
+    int tests_failed   = 0;
+};
+
+// Read a number out of a JSON object, leaving @p out untouched when the key is
+// absent or not a number - so a summary written by an older engine (or a
+// partial one from a crashed run) falls back to the calculated value instead of
+// zeroing it.
+template <typename T>
+void read_number (const nlohmann::json& obj, const char* key, T& out) {
+    if (obj.contains (key) && obj[key].is_number ()) {
+        out = obj[key].get<T> ();
+    }
+}
+
+/**
+ * Apply the run's stored `summary` (the whole-run results, written once at
+ * terminal status) over the report calculated from the sampled `results`.
+ *
+ * Returns false when there is no usable summary - the caller then falls back to
+ * the legacy `metrics` rows. Keys here are the ones
+ * `vayu::core::build_run_summary_payload` writes; runs_route_test.cpp round-trips
+ * the pair so the two sides cannot drift apart silently.
+ */
+bool apply_run_summary (const std::string& summary_json,
+vayu::DetailedReport& report,
+ReportExtras& extras) {
+    if (summary_json.empty ()) {
+        return false;
+    }
+    nlohmann::json summary;
+    try {
+        summary = nlohmann::json::parse (summary_json);
+    } catch (...) {
+        vayu::utils::log_warning (
+        "Run summary is not valid JSON; falling back to the legacy metrics rows");
+        return false;
+    }
+    if (!summary.is_object ()) {
+        vayu::utils::log_warning (
+        "Run summary is not an object; falling back to the legacy metrics rows");
+        return false;
+    }
+
+    read_number (summary, "total_requests", report.total_requests);
+    read_number (summary, "send_rate", report.send_rate);
+    read_number (summary, "throughput", report.throughput);
+    read_number (summary, "test_duration", report.total_duration_s);
+    read_number (summary, "setup_overhead", report.setup_overhead_s);
+    if (summary.contains ("rps") && summary["rps"].is_number ()) {
+        report.avg_rps    = summary["rps"].get<double> ();
+        report.actual_rps = report.avg_rps;
+    }
+
+    read_number (summary, "peak_concurrency", extras.peak_concurrency);
+    read_number (summary, "dropped_requests", extras.dropped_total);
+    read_number (summary, "queue_wait_avg", extras.queue_wait_avg);
+    read_number (summary, "bytes_sent", extras.bytes_sent);
+    read_number (summary, "bytes_received", extras.bytes_received);
+
+    if (summary.contains ("latency") && summary["latency"].is_object ()) {
+        const auto& latency = summary["latency"];
+        read_number (latency, "min", report.latency_min);
+        read_number (latency, "max", report.latency_max);
+        read_number (latency, "avg", report.latency_avg);
+        read_number (latency, "p50", report.latency_p50);
+        read_number (latency, "p75", report.latency_p75);
+        read_number (latency, "p90", report.latency_p90);
+        read_number (latency, "p95", report.latency_p95);
+        read_number (latency, "p99", report.latency_p99);
+        read_number (latency, "p999", report.latency_p999);
+    }
+
+    if (summary.contains ("status_codes") && summary["status_codes"].is_object () &&
+    !summary["status_codes"].empty ()) {
+        report.status_codes.clear ();
+        extras.status_codes_overridden = true;
+        for (const auto& [code_str, count] : summary["status_codes"].items ()) {
+            try {
+                report.status_codes[std::stoi (code_str)] = count.get<size_t> ();
+            } catch (...) {
+                // Skip an unparseable code rather than losing the whole map.
+            }
+        }
+    }
+
+    if (summary.contains ("tests") && summary["tests"].is_object ()) {
+        extras.has_tests = true;
+        read_number (summary["tests"], "sampled", extras.tests_sampled);
+        read_number (summary["tests"], "passed", extras.tests_passed);
+        read_number (summary["tests"], "failed", extras.tests_failed);
+    }
+    return true;
+}
+
+/**
+ * Legacy path: rebuild the same overrides from the run's EAV `metrics` rows.
+ *
+ * Only reached for runs recorded before `metric_ticks`/`runs.summary` existed.
+ * The `!labels.empty()` guards are what keep the per-tick *windowed* percentile
+ * rows from overwriting the cumulative whole-run ones - the trap that made this
+ * table worth replacing. Delete this once old histories have aged out past the
+ * retention window (see `prune_runs`).
+ */
+void apply_legacy_metrics (const std::vector<vayu::db::Metric>& metrics,
+vayu::DetailedReport& report,
+ReportExtras& extras) {
+    for (const auto& m : metrics) {
+        if (m.name == vayu::MetricName::PeakConcurrency) {
+            extras.peak_concurrency = m.value;
+        } else if (m.name == vayu::MetricName::DroppedRequests) {
+            extras.dropped_total = m.value;
+        } else if (m.name == vayu::MetricName::QueueWaitAvg) {
+            extras.queue_wait_avg = m.value;
+        } else if (m.name == vayu::MetricName::BytesSent) {
+            extras.bytes_sent = m.value;
+        } else if (m.name == vayu::MetricName::BytesReceived) {
+            extras.bytes_received = m.value;
+        } else if (m.name == vayu::MetricName::LatencyP50 && !m.labels.empty ()) {
+            // Only the labeled cumulative final-summary row counts here; the
+            // unlabeled per-tick windowed rows (persisted during the run)
+            // must not overwrite the whole-run percentile in the report.
+            report.latency_p50 = m.value;
+        } else if (m.name == vayu::MetricName::LatencyP75) {
+            report.latency_p75 = m.value;
+        } else if (m.name == vayu::MetricName::LatencyP90) {
+            report.latency_p90 = m.value;
+        } else if (m.name == vayu::MetricName::LatencyP95 && !m.labels.empty ()) {
+            report.latency_p95 = m.value;
+        } else if (m.name == vayu::MetricName::LatencyP99 && !m.labels.empty ()) {
+            report.latency_p99 = m.value;
+        } else if (m.name == vayu::MetricName::LatencyP999) {
+            report.latency_p999 = m.value;
+        } else if (m.name == vayu::MetricName::LatencyMax) {
+            report.latency_max = m.value;
+        } else if (m.name == vayu::MetricName::LatencyMin) {
+            report.latency_min = m.value;
+        } else if (m.name == vayu::MetricName::LatencyAvg) {
+            report.latency_avg = m.value;
+        } else if (m.name == vayu::MetricName::TotalRequests) {
+            report.total_requests = static_cast<size_t> (m.value);
+        } else if (m.name == vayu::MetricName::Rps) {
+            report.avg_rps    = m.value;
+            report.actual_rps = m.value;
+        } else if (m.name == vayu::MetricName::SendRate) {
+            report.send_rate = m.value;
+        } else if (m.name == vayu::MetricName::Throughput) {
+            report.throughput = m.value;
+        } else if (m.name == vayu::MetricName::TestDuration) {
+            // Use actual test duration (excludes setup/teardown overhead)
+            report.total_duration_s = m.value;
+        } else if (m.name == vayu::MetricName::SetupOverhead) {
+            // Time from run creation to test start
+            report.setup_overhead_s = m.value;
+        } else if (m.name == vayu::MetricName::StatusCodes && !m.labels.empty ()) {
+            // Override status codes with accurate data from metrics
+            try {
+                auto status_json = nlohmann::json::parse (m.labels);
+                report.status_codes.clear ();
+                extras.status_codes_overridden = true;
+                for (auto& [code_str, count] : status_json.items ()) {
+                    int code                  = std::stoi (code_str);
+                    report.status_codes[code] = count.get<size_t> ();
+                }
+            } catch (...) {
+                // Keep calculated values if parsing fails
+            }
+        } else if (m.name == vayu::MetricName::TestsPassed) {
+            extras.tests_passed = static_cast<int> (m.value);
+            extras.has_tests    = true;
+        } else if (m.name == vayu::MetricName::TestsFailed) {
+            extras.tests_failed = static_cast<int> (m.value);
+            extras.has_tests    = true;
+        } else if (m.name == vayu::MetricName::TestsSampled) {
+            extras.tests_sampled = static_cast<int> (m.value);
+        }
+    }
+}
+
 // Serialize one run into a list row: identity + status + the compact summary,
 // deliberately *without* the full config_snapshot (that is what makes the list
 // cheap). Mirrors the camelCase keys vayu::json::serialize(Run) emits.
@@ -171,6 +367,236 @@ int64_t stop_wait_ms) {
     db.delete_run (run_id);
     return { 200,
         nlohmann::json{ { "message", "Run deleted successfully" }, { "runId", run_id } } };
+}
+
+/**
+ * Testable core of GET /runs/:id/report, returning {http_status, json_body}. A
+ * missing run is a definitive 404 with the flat `{"error": message}` shape.
+ *
+ * Two sources feed the whole-run aggregates, in order:
+ *   1. `runs.summary` - the values the run itself computed at completion. Used
+ *      whenever it is present, which is every run recorded since `metric_ticks`.
+ *   2. the legacy EAV `metrics` rows - reconstructed as before, for runs
+ *      recorded by an engine that had no summary column. Those rows are only
+ *      fetched when the summary is absent, so a normal report is one run row
+ *      plus its sampled results.
+ *
+ * Everything after the source split (target-RPS from the config snapshot, the
+ * error-rate recompute, the response shape) is common to both, so the two paths
+ * cannot drift in the response they produce. Extracted so both sources are
+ * covered without an in-process HTTP server - see runs_route_test.cpp.
+ * Exceptions propagate to the route's try/catch (500).
+ */
+std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
+const std::string& run_id) {
+    auto run = db.get_run (run_id);
+    if (!run) {
+        return { 404, nlohmann::json{ { "error", "Run not found" } } };
+    }
+
+    auto results = db.get_results (run_id);
+
+    double duration_s = 0;
+    if (run->start_time > 0) {
+        int64_t end = run->end_time > 0 ? run->end_time : now_ms ();
+        duration_s  = static_cast<double> (end - run->start_time) / 1000.0;
+    }
+
+    auto report =
+    vayu::utils::MetricsHelper::calculate_detailed_report (results, duration_s);
+
+    ReportExtras extras;
+    if (!apply_run_summary (run->summary, report, extras)) {
+        apply_legacy_metrics (db.get_metrics (run_id), report, extras);
+    }
+
+    // Recount the success/failure split from whichever distribution won, so
+    // transport errors (status code 0) are counted. Runs with no stored
+    // distribution keep the figures derived from the sampled results.
+    if (extras.status_codes_overridden) {
+        report.successful_requests = 0;
+        report.failed_requests     = 0;
+        report.errors_by_status_code.clear ();
+        for (const auto& [code, count] : report.status_codes) {
+            if (code >= 200 && code < 400) {
+                report.successful_requests += count;
+            } else {
+                report.failed_requests += count;
+            }
+            if (code == 0 || code >= 400) {
+                report.errors_by_status_code[code] = count;
+            }
+        }
+    }
+
+    // Recompute the error rate from the reconciled successful/failed split -
+    // the sampled-results error_rate from calculate_detailed_report omits
+    // transport errors.
+    report.error_rate = report.total_requests > 0 ?
+    static_cast<double> (report.failed_requests) * 100.0 /
+    static_cast<double> (report.total_requests) :
+    0.0;
+
+    // Extract target RPS from config
+    double target_rps = 0.0;
+    try {
+        auto config = nlohmann::json::parse (run->config_snapshot);
+        if (config.contains ("rps")) {
+            target_rps = config["rps"].get<double> ();
+        } else if (config.contains ("targetRps")) {
+            target_rps = config["targetRps"].get<double> ();
+        }
+    } catch (...) {
+    }
+
+    report.target_rps = target_rps;
+    if (report.actual_rps == 0) {
+        report.actual_rps = report.avg_rps;
+    }
+    report.rps_achievement =
+    target_rps > 0 ? (report.actual_rps / target_rps * 100.0) : 0.0;
+
+    // Fallback: calculate duration from RPS when no stored test duration
+    // replaced the wall-clock one (older runs).
+    if (report.total_duration_s == duration_s && report.actual_rps > 0 &&
+    report.total_requests > 0) {
+        report.total_duration_s =
+        static_cast<double> (report.total_requests) / report.actual_rps;
+    }
+
+    // Build response
+    nlohmann::json metadata;
+    metadata["runId"]     = run_id;
+    metadata["runType"]   = vayu::to_string (run->type);
+    metadata["status"]    = vayu::to_string (run->status);
+    metadata["startTime"] = run->start_time;
+    metadata["endTime"]   = run->end_time;
+
+    try {
+        auto config = nlohmann::json::parse (run->config_snapshot);
+        // HTTP request fields are at root level (unified structure)
+        if (config.contains ("url")) {
+            metadata["requestUrl"] = config["url"];
+        }
+        if (config.contains ("method")) {
+            metadata["requestMethod"] = config["method"];
+        }
+
+        nlohmann::json config_obj;
+        // Straight copies share the list-row summary's helper; `rps`
+        // is the one rename (-> targetRps), so it stays inline.
+        for (const char* key : { "mode", "duration", "concurrency",
+             "startConcurrency", "rampUpDuration", "timeout", "comment" }) {
+            add_if_present (config_obj, config, key);
+        }
+        if (config.contains ("rps"))
+            config_obj["targetRps"] = config["rps"];
+        if (config.contains ("targetRps"))
+            config_obj["targetRps"] = config["targetRps"];
+
+        if (!config_obj.empty ()) {
+            metadata["configuration"] = config_obj;
+        }
+    } catch (...) {
+    }
+
+    nlohmann::json json_report;
+    json_report["metadata"] = metadata;
+    json_report["summary"] = { { "totalRequests", report.total_requests },
+        { "successfulRequests", report.successful_requests },
+        { "failedRequests", report.failed_requests },
+        { "errorRate", report.error_rate },
+        { "totalDurationSeconds", report.total_duration_s },
+        { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
+        { "sendRate", report.send_rate }, { "throughput", report.throughput },
+        { "setupOverhead", report.setup_overhead_s },
+        { "peakConcurrency", static_cast<size_t> (extras.peak_concurrency) },
+        { "droppedRequests", static_cast<size_t> (extras.dropped_total) },
+        { "avgQueueWaitMs", extras.queue_wait_avg },
+        { "bytesSent", static_cast<size_t> (extras.bytes_sent) },
+        { "bytesReceived", static_cast<size_t> (extras.bytes_received) },
+        { "throughputBytesPerSec", report.total_duration_s > 0 ?
+        extras.bytes_received / report.total_duration_s :
+        0.0 } };
+    json_report["latency"]     = { { "min", report.latency_min },
+            { "max", report.latency_max }, { "avg", report.latency_avg },
+            { "median", report.latency_p50 }, { "p50", report.latency_p50 },
+            { "p75", report.latency_p75 }, { "p90", report.latency_p90 },
+            { "p95", report.latency_p95 }, { "p99", report.latency_p99 },
+            { "p999", report.latency_p999 } };
+    json_report["statusCodes"] = report.status_codes;
+
+    if (target_rps > 0) {
+        json_report["rateControl"] = { { "targetRps", report.target_rps },
+            { "actualRps", report.actual_rps },
+            { "achievement", report.rps_achievement } };
+    }
+
+    nlohmann::json errors_obj;
+    errors_obj["total"]       = report.failed_requests;
+    errors_obj["withDetails"] = report.errors_with_details;
+    errors_obj["types"]       = report.error_types;
+    if (!report.errors_by_status_code.empty ()) {
+        errors_obj["byStatusCode"] = report.errors_by_status_code;
+    }
+    json_report["errors"] = errors_obj;
+
+    if (report.has_timing_data) {
+        json_report["timingBreakdown"] = { { "avgDnsMs", report.avg_dns_ms },
+            { "avgConnectMs", report.avg_connect_ms },
+            { "avgTlsMs", report.avg_tls_ms },
+            { "avgFirstByteMs", report.avg_first_byte_ms },
+            { "avgDownloadMs", report.avg_download_ms } };
+    }
+
+    if (report.slow_threshold_ms > 0) {
+        json_report["slowRequests"] = { { "count", report.slow_requests_count },
+            { "thresholdMs", report.slow_threshold_ms },
+            { "percentage",
+            report.total_requests > 0 ?
+            (static_cast<double> (report.slow_requests_count) * 100.0 /
+            static_cast<double> (report.total_requests)) :
+            0.0 } };
+    }
+
+    if (extras.has_tests) {
+        json_report["testValidation"] = { { "samplesTested", extras.tests_sampled },
+            { "testsPassed", extras.tests_passed },
+            { "testsFailed", extras.tests_failed },
+            { "successRate",
+            extras.tests_sampled > 0 ?
+            (static_cast<double> (extras.tests_passed) * 100.0 /
+            static_cast<double> (extras.tests_passed + extras.tests_failed)) :
+            0.0 } };
+    }
+
+    // Include sample of request/response results
+    nlohmann::json results_array = nlohmann::json::array ();
+    size_t max_results           = 100;
+    size_t count                 = 0;
+    for (const auto& result : results) {
+        if (count >= max_results)
+            break;
+        nlohmann::json result_obj;
+        result_obj["timestamp"]  = result.timestamp;
+        result_obj["statusCode"] = result.status_code;
+        result_obj["statusText"] = result.status_text;
+        result_obj["latencyMs"]  = result.latency_ms;
+        if (!result.error.empty ())
+            result_obj["error"] = result.error;
+        if (!result.trace_data.empty ()) {
+            try {
+                result_obj["trace"] = nlohmann::json::parse (result.trace_data);
+            } catch (...) {
+                result_obj["trace"] = result.trace_data;
+            }
+        }
+        results_array.push_back (result_obj);
+        count++;
+    }
+    json_report["results"] = results_array;
+
+    return { 200, json_report };
 }
 
 void register_run_routes (RouteContext& ctx) {
@@ -410,292 +836,13 @@ void register_run_routes (RouteContext& ctx) {
         vayu::utils::log_info (
         "GET /runs/:id/report - Generating report for run: " + run_id);
         try {
-            auto run = ctx.db.get_run (run_id);
-            if (!run) {
+            auto [status, body] = run_report_response (ctx.db, run_id);
+            if (status == 404) {
                 vayu::utils::log_warning (
                 "GET /runs/:id/report - Run not found: " + run_id);
-                send_error (res, 404, "Run not found");
-                return;
             }
-
-            auto results = ctx.db.get_results (run_id);
-
-            double duration_s = 0;
-            if (run->start_time > 0) {
-                int64_t end = run->end_time > 0 ? run->end_time : now_ms ();
-                duration_s = static_cast<double> (end - run->start_time) / 1000.0;
-            }
-
-            auto report = vayu::utils::MetricsHelper::calculate_detailed_report (
-            results, duration_s);
-
-            // Enrichment fields not carried on the report struct - collected
-            // from the metrics table into locals, injected into the summary JSON.
-            double peak_concurrency = 0.0, dropped_total = 0.0, queue_wait_avg = 0.0;
-            double bytes_sent = 0.0, bytes_received = 0.0;
-
-            // Override calculated percentiles with HdrHistogram values from Metrics table
-            auto metrics = ctx.db.get_metrics (run_id);
-            for (const auto& m : metrics) {
-                if (m.name == vayu::MetricName::PeakConcurrency) {
-                    peak_concurrency = m.value;
-                } else if (m.name == vayu::MetricName::DroppedRequests) {
-                    dropped_total = m.value;
-                } else if (m.name == vayu::MetricName::QueueWaitAvg) {
-                    queue_wait_avg = m.value;
-                } else if (m.name == vayu::MetricName::BytesSent) {
-                    bytes_sent = m.value;
-                } else if (m.name == vayu::MetricName::BytesReceived) {
-                    bytes_received = m.value;
-                } else if (m.name == vayu::MetricName::LatencyP50 && !m.labels.empty ()) {
-                    // Only the labeled cumulative final-summary row counts here; the
-                    // unlabeled per-tick windowed rows (persisted during the run)
-                    // must not overwrite the whole-run percentile in the report.
-                    report.latency_p50 = m.value;
-                } else if (m.name == vayu::MetricName::LatencyP75) {
-                    report.latency_p75 = m.value;
-                } else if (m.name == vayu::MetricName::LatencyP90) {
-                    report.latency_p90 = m.value;
-                } else if (m.name == vayu::MetricName::LatencyP95 && !m.labels.empty ()) {
-                    report.latency_p95 = m.value;
-                } else if (m.name == vayu::MetricName::LatencyP99 && !m.labels.empty ()) {
-                    report.latency_p99 = m.value;
-                } else if (m.name == vayu::MetricName::LatencyP999) {
-                    report.latency_p999 = m.value;
-                } else if (m.name == vayu::MetricName::LatencyMax) {
-                    report.latency_max = m.value;
-                } else if (m.name == vayu::MetricName::LatencyMin) {
-                    report.latency_min = m.value;
-                } else if (m.name == vayu::MetricName::LatencyAvg) {
-                    report.latency_avg = m.value;
-                } else if (m.name == vayu::MetricName::TotalRequests) {
-                    report.total_requests = static_cast<size_t> (m.value);
-                } else if (m.name == vayu::MetricName::Rps) {
-                    report.avg_rps    = m.value;
-                    report.actual_rps = m.value;
-                } else if (m.name == vayu::MetricName::SendRate) {
-                    report.send_rate = m.value;
-                } else if (m.name == vayu::MetricName::Throughput) {
-                    report.throughput = m.value;
-                } else if (m.name == vayu::MetricName::TestDuration) {
-                    // Use actual test duration (excludes setup/teardown overhead)
-                    report.total_duration_s = m.value;
-                } else if (m.name == vayu::MetricName::SetupOverhead) {
-                    // Time from run creation to test start
-                    report.setup_overhead_s = m.value;
-                } else if (m.name == vayu::MetricName::StatusCodes && !m.labels.empty ()) {
-                    // Override status codes with accurate data from metrics
-                    try {
-                        auto status_json = nlohmann::json::parse (m.labels);
-                        report.status_codes.clear ();
-                        for (auto& [code_str, count] : status_json.items ()) {
-                            int code                  = std::stoi (code_str);
-                            report.status_codes[code] = count.get<size_t> ();
-                        }
-                        // Recalculate successful/failed counts from accurate status codes
-                        report.successful_requests = 0;
-                        report.failed_requests     = 0;
-                        for (const auto& [code, count] : report.status_codes) {
-                            if (code >= 200 && code < 400) {
-                                report.successful_requests += count;
-                            } else {
-                                report.failed_requests += count;
-                            }
-                        }
-                        // Recalculate errors by status code
-                        report.errors_by_status_code.clear ();
-                        for (const auto& [code, count] : report.status_codes) {
-                            if (code == 0 || code >= 400) {
-                                report.errors_by_status_code[code] = count;
-                            }
-                        }
-                    } catch (...) {
-                        // Keep calculated values if parsing fails
-                    }
-                }
-            }
-
-            // Recompute the error rate from the reconciled successful/failed
-            // split so transport errors (status code 0) are counted - the
-            // sampled-results error_rate from calculate_detailed_report omits them.
-            report.error_rate =
-            report.total_requests > 0 ?
-            static_cast<double> (report.failed_requests) * 100.0 /
-            static_cast<double> (report.total_requests) :
-            0.0;
-
-            // Extract target RPS from config
-            double target_rps = 0.0;
-            try {
-                auto config = nlohmann::json::parse (run->config_snapshot);
-                if (config.contains ("rps")) {
-                    target_rps = config["rps"].get<double> ();
-                } else if (config.contains ("targetRps")) {
-                    target_rps = config["targetRps"].get<double> ();
-                }
-            } catch (...) {
-            }
-
-            report.target_rps = target_rps;
-            if (report.actual_rps == 0) {
-                report.actual_rps = report.avg_rps;
-            }
-            report.rps_achievement =
-            target_rps > 0 ? (report.actual_rps / target_rps * 100.0) : 0.0;
-
-            // Fallback: calculate duration from RPS if TestDuration metric
-            // wasn't stored (for backward compatibility with older runs)
-            if (report.total_duration_s == duration_s &&
-            report.actual_rps > 0 && report.total_requests > 0) {
-                report.total_duration_s =
-                static_cast<double> (report.total_requests) / report.actual_rps;
-            }
-
-            // Build response
-            nlohmann::json metadata;
-            metadata["runId"]     = run_id;
-            metadata["runType"]   = vayu::to_string (run->type);
-            metadata["status"]    = vayu::to_string (run->status);
-            metadata["startTime"] = run->start_time;
-            metadata["endTime"]   = run->end_time;
-
-            try {
-                auto config = nlohmann::json::parse (run->config_snapshot);
-                // HTTP request fields are at root level (unified structure)
-                if (config.contains ("url")) {
-                    metadata["requestUrl"] = config["url"];
-                }
-                if (config.contains ("method")) {
-                    metadata["requestMethod"] = config["method"];
-                }
-
-                nlohmann::json config_obj;
-                // Straight copies share the list-row summary's helper; `rps`
-                // is the one rename (-> targetRps), so it stays inline.
-                for (const char* key : { "mode", "duration", "concurrency",
-                     "startConcurrency", "rampUpDuration", "timeout", "comment" }) {
-                    add_if_present (config_obj, config, key);
-                }
-                if (config.contains ("rps"))
-                    config_obj["targetRps"] = config["rps"];
-                if (config.contains ("targetRps"))
-                    config_obj["targetRps"] = config["targetRps"];
-
-                if (!config_obj.empty ()) {
-                    metadata["configuration"] = config_obj;
-                }
-            } catch (...) {
-            }
-
-            nlohmann::json json_report;
-            json_report["metadata"] = metadata;
-            json_report["summary"] = { { "totalRequests", report.total_requests },
-                { "successfulRequests", report.successful_requests },
-                { "failedRequests", report.failed_requests },
-                { "errorRate", report.error_rate },
-                { "totalDurationSeconds", report.total_duration_s },
-                { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
-                { "sendRate", report.send_rate },
-                { "throughput", report.throughput },
-                { "setupOverhead", report.setup_overhead_s },
-                { "peakConcurrency", static_cast<size_t> (peak_concurrency) },
-                { "droppedRequests", static_cast<size_t> (dropped_total) },
-                { "avgQueueWaitMs", queue_wait_avg },
-                { "bytesSent", static_cast<size_t> (bytes_sent) },
-                { "bytesReceived", static_cast<size_t> (bytes_received) },
-                { "throughputBytesPerSec",
-                report.total_duration_s > 0 ? bytes_received / report.total_duration_s : 0.0 } };
-            json_report["latency"]     = { { "min", report.latency_min },
-                    { "max", report.latency_max }, { "avg", report.latency_avg },
-                    { "median", report.latency_p50 }, { "p50", report.latency_p50 },
-                    { "p75", report.latency_p75 }, { "p90", report.latency_p90 },
-                    { "p95", report.latency_p95 }, { "p99", report.latency_p99 },
-                    { "p999", report.latency_p999 } };
-            json_report["statusCodes"] = report.status_codes;
-
-            if (target_rps > 0) {
-                json_report["rateControl"] = { { "targetRps", report.target_rps },
-                    { "actualRps", report.actual_rps },
-                    { "achievement", report.rps_achievement } };
-            }
-
-            nlohmann::json errors_obj;
-            errors_obj["total"]       = report.failed_requests;
-            errors_obj["withDetails"] = report.errors_with_details;
-            errors_obj["types"]       = report.error_types;
-            if (!report.errors_by_status_code.empty ()) {
-                errors_obj["byStatusCode"] = report.errors_by_status_code;
-            }
-            json_report["errors"] = errors_obj;
-
-            if (report.has_timing_data) {
-                json_report["timingBreakdown"] = { { "avgDnsMs", report.avg_dns_ms },
-                    { "avgConnectMs", report.avg_connect_ms },
-                    { "avgTlsMs", report.avg_tls_ms },
-                    { "avgFirstByteMs", report.avg_first_byte_ms },
-                    { "avgDownloadMs", report.avg_download_ms } };
-            }
-
-            if (report.slow_threshold_ms > 0) {
-                json_report["slowRequests"] = { { "count", report.slow_requests_count },
-                    { "thresholdMs", report.slow_threshold_ms },
-                    { "percentage",
-                    report.total_requests > 0 ?
-                    (static_cast<double> (report.slow_requests_count) * 100.0 /
-                    static_cast<double> (report.total_requests)) :
-                    0.0 } };
-            }
-
-            // Test validation results
-            int tests_passed = 0, tests_failed = 0, tests_sampled = 0;
-            bool has_test_results = false;
-            for (const auto& m : metrics) {
-                if (m.name == vayu::MetricName::TestsPassed) {
-                    tests_passed     = static_cast<int> (m.value);
-                    has_test_results = true;
-                } else if (m.name == vayu::MetricName::TestsFailed) {
-                    tests_failed     = static_cast<int> (m.value);
-                    has_test_results = true;
-                } else if (m.name == vayu::MetricName::TestsSampled) {
-                    tests_sampled = static_cast<int> (m.value);
-                }
-            }
-            if (has_test_results) {
-                json_report["testValidation"] = { { "samplesTested", tests_sampled },
-                    { "testsPassed", tests_passed }, { "testsFailed", tests_failed },
-                    { "successRate",
-                    tests_sampled > 0 ? (static_cast<double> (tests_passed) * 100.0 /
-                                        static_cast<double> (tests_passed + tests_failed)) :
-                                        0.0 } };
-            }
-
-            // Include sample of request/response results
-            nlohmann::json results_array = nlohmann::json::array ();
-            size_t max_results           = 100;
-            size_t count                 = 0;
-            for (const auto& result : results) {
-                if (count >= max_results)
-                    break;
-                nlohmann::json result_obj;
-                result_obj["timestamp"]  = result.timestamp;
-                result_obj["statusCode"] = result.status_code;
-                result_obj["statusText"] = result.status_text;
-                result_obj["latencyMs"]  = result.latency_ms;
-                if (!result.error.empty ())
-                    result_obj["error"] = result.error;
-                if (!result.trace_data.empty ()) {
-                    try {
-                        result_obj["trace"] = nlohmann::json::parse (result.trace_data);
-                    } catch (...) {
-                        result_obj["trace"] = result.trace_data;
-                    }
-                }
-                results_array.push_back (result_obj);
-                count++;
-            }
-            json_report["results"] = results_array;
-
-            res.set_content (json_report.dump (2), "application/json");
+            res.status = status;
+            res.set_content (body.dump (2), "application/json");
         } catch (const std::exception& e) {
             send_error (res, 500, e.what ());
         }

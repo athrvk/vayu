@@ -158,6 +158,12 @@ constexpr int DEFAULT_LIVE_REPLAY_WINDOW_MS = 300000;
 constexpr size_t DEFAULT_MAX_LIVE_TICKS = 50000;
 /// Size of the context pool for request handling
 constexpr size_t CONTEXT_POOL_SIZE = 64;
+/// How long `RunManager::shutdown` waits for signalled runs to reach a terminal
+/// status before it logs that they have not. The *wait* is bounded; the join
+/// that follows it is not, because abandoning a still-running worker is exactly
+/// the use-after-free the drain exists to prevent. Matches the 5s the daemon
+/// waited before the drain was ordered.
+constexpr int64_t RUN_SHUTDOWN_GRACE_MS = 5000;
 } // namespace server
 
 /**

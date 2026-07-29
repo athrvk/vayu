@@ -8,18 +8,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
-import { assignIds } from "@/services/importers/assign-ids";
+import { assignTempIds } from "@/services/importers/assign-ids";
 import { ImportOrchestrator, type ImportApi } from "@/services/importers/orchestrator";
 import type { ImportOptions, ImportResult } from "@/services/importers/types";
 
 /** Build an ImportApi backed by the real apiService. */
 export function createImportApi(): ImportApi {
 	return {
-		createCollection: (d) => apiService.createCollection(d),
-		createRequest: (d) => apiService.createRequest(d),
-		createEnvironment: (d) => apiService.createEnvironment(d),
-		deleteCollection: (id) => apiService.deleteCollection(id),
-		deleteEnvironment: (id) => apiService.deleteEnvironment(id),
+		applyImport: (payload) => apiService.applyImport(payload),
 		getGlobals: () => apiService.getGlobals(),
 		updateGlobals: (variables) => apiService.updateGlobals(variables),
 	};
@@ -29,8 +25,8 @@ export function useImportMutation() {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: async ({ result, opts }: { result: ImportResult; opts: ImportOptions }) => {
-			const withIds = assignIds(result);
-			await new ImportOrchestrator(createImportApi()).run(withIds, opts);
+			const withTempIds = assignTempIds(result);
+			await new ImportOrchestrator(createImportApi()).run(withTempIds, opts);
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
