@@ -387,7 +387,7 @@ TEST_F (DatabaseTest, DeletesEnvironment) {
 // rely on which. Named explicitly rather than counted, because sqlite also
 // creates sqlite_autoindex_* entries of its own.
 const std::vector<std::string> EXPECTED_INDEXES = { "idx_metrics_run_id",
-    "idx_results_run_id", "idx_requests_collection_id",
+    "idx_metric_ticks_run_id", "idx_results_run_id", "idx_requests_collection_id",
     "idx_collections_parent_id", "idx_runs_start_time" };
 
 // Reads index names straight out of sqlite_master on a separate connection,
@@ -586,8 +586,8 @@ TEST_F (DatabaseTest, MigratesHttpVersionColumnOntoAPreExistingRequestsTable) {
 
 namespace {
 
-// A terminal run with an explicit id/start_time, plus one metric and one result
-// so prune's cascade delete is observable.
+// A terminal run with an explicit id/start_time, plus one legacy metric row,
+// one metric tick and one result so prune's cascade delete is observable.
 void seed_run_with_children (Database& db,
 const std::string& id,
 int64_t start_time,
@@ -606,6 +606,12 @@ vayu::RunStatus status = vayu::RunStatus::Completed) {
     m.name      = vayu::MetricName::TotalRequests;
     m.value     = 1.0;
     db.add_metric (m);
+
+    vayu::db::MetricTick tick;
+    tick.run_id    = id;
+    tick.timestamp = start_time;
+    tick.payload   = R"({"timestamp":1,"requests_completed":1})";
+    db.add_metric_tick (tick);
 
     vayu::db::Result r;
     r.run_id      = id;
@@ -644,11 +650,13 @@ TEST_F (DatabaseTest, PruneRunsByCountKeepsMostRecentAndCascades) {
     EXPECT_TRUE (ids.count ("run_5"));
     EXPECT_TRUE (ids.count ("run_4"));
 
-    // The pruned runs took their metrics and results with them.
+    // The pruned runs took their ticks, metrics and results with them.
     EXPECT_TRUE (db.get_metrics ("run_1").empty ());
+    EXPECT_EQ (db.count_metric_ticks ("run_1"), 0);
     EXPECT_TRUE (db.get_results ("run_1").empty ());
     // The survivors kept theirs.
     EXPECT_EQ (db.get_metrics ("run_5").size (), 1u);
+    EXPECT_EQ (db.count_metric_ticks ("run_5"), 1);
     EXPECT_EQ (db.get_results ("run_5").size (), 1u);
 }
 
@@ -694,6 +702,79 @@ TEST_F (DatabaseTest, PruneRunsNeverDeletesInFlightRuns) {
     EXPECT_EQ (ids.size (), 3u);
 }
 
+// ============================================================================
+// Startup reconciliation (reconcile_orphaned_runs)
+// ============================================================================
+
+namespace {
+int64_t now_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+    .count ();
+}
+} // namespace
+
+TEST_F (DatabaseTest, ReconcileMarksRunsAbandonedByAPreviousProcessFailed) {
+    // Recent start times: init() prunes by the real retention defaults, and an
+    // epoch-1970 row would be swept away before the assertions run.
+    const int64_t recent = now_ms ();
+
+    // A previous process died mid-run: its rows are still running/pending.
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        seed_run_with_children (db, "crashed", recent, vayu::RunStatus::Running);
+        seed_run_with_children (db, "never_started", recent + 1, vayu::RunStatus::Pending);
+        seed_run_with_children (db, "done", recent + 2, vayu::RunStatus::Completed);
+        seed_run_with_children (db, "stopped", recent + 3, vayu::RunStatus::Stopped);
+    }
+
+    // Next startup reconciles them, without touching terminal rows.
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto status_of = [&db] (const std::string& id) {
+        auto run = db.get_run (id);
+        EXPECT_TRUE (run.has_value ()) << "run vanished: " << id;
+        return run->status;
+    };
+
+    EXPECT_EQ (status_of ("crashed"), vayu::RunStatus::Failed);
+    EXPECT_EQ (status_of ("never_started"), vayu::RunStatus::Failed);
+    EXPECT_EQ (status_of ("done"), vayu::RunStatus::Completed);
+    EXPECT_EQ (status_of ("stopped"), vayu::RunStatus::Stopped);
+
+    // Already reconciled - a second pass has nothing to do.
+    EXPECT_EQ (db.reconcile_orphaned_runs (), 0u);
+}
+
+TEST_F (DatabaseTest, ReconcileKeepsTheEndTimeTheRunAlreadyRecorded) {
+    // update_run_end_time runs before the terminal status write, so a run can
+    // die with a real end_time stored; reconciliation must not overwrite it
+    // with the (arbitrarily much later) restart time.
+    constexpr int64_t RECORDED_END = 1'234'567'890;
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        vayu::db::Run run;
+        run.id              = "half_written";
+        run.type            = vayu::RunType::Load;
+        run.status          = vayu::RunStatus::Running;
+        run.start_time      = now_ms ();
+        run.end_time        = RECORDED_END;
+        run.config_snapshot = "{}";
+        db.create_run (run);
+    }
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto run = db.get_run ("half_written");
+    ASSERT_TRUE (run.has_value ());
+    EXPECT_EQ (run->status, vayu::RunStatus::Failed);
+    EXPECT_EQ (run->end_time, RECORDED_END);
+}
+
 TEST_F (DatabaseTest, PruneRunsZeroLimitsDisableEachCap) {
     Database db (TEST_DB_PATH);
     db.init ();
@@ -706,6 +787,107 @@ TEST_F (DatabaseTest, PruneRunsZeroLimitsDisableEachCap) {
     // Both caps disabled: nothing is pruned even though every run is ancient.
     db.prune_runs (0, 0);
     EXPECT_EQ (run_ids (db).size (), 4u);
+}
+
+// ============================================================================
+// Metric ticks + the stored run summary (the wide-row time series)
+// ============================================================================
+
+TEST_F (DatabaseTest, MetricTicksRoundTripInTimestampOrder) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    vayu::db::Run run;
+    run.id              = "run_1";
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Running;
+    run.start_time      = 1000;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+
+    // Inserted out of order: the reader, not the writer, owns the ordering.
+    for (int64_t ts : { 3000, 1000, 2000 }) {
+        vayu::db::MetricTick tick;
+        tick.run_id    = "run_1";
+        tick.timestamp = ts;
+        tick.payload   = R"({"timestamp":)" + std::to_string (ts) + "}";
+        db.add_metric_tick (tick);
+    }
+
+    EXPECT_EQ (db.count_metric_ticks ("run_1"), 3);
+
+    auto page = db.get_metric_ticks_paginated ("run_1", 10, 0);
+    ASSERT_EQ (page.size (), 3u);
+    EXPECT_EQ (page[0].timestamp, 1000);
+    EXPECT_EQ (page[1].timestamp, 2000);
+    EXPECT_EQ (page[2].timestamp, 3000);
+
+    // A page is a window over that same order.
+    auto second = db.get_metric_ticks_paginated ("run_1", 1, 1);
+    ASSERT_EQ (second.size (), 1u);
+    EXPECT_EQ (second[0].timestamp, 2000);
+
+    // get_metric_ticks_since is the incremental cursor the legacy SSE poll
+    // uses: it walks insertion order (id), not timestamp order, so a late
+    // arrival is still delivered exactly once.
+    auto all_since = db.get_metric_ticks_since ("run_1", 0);
+    ASSERT_EQ (all_since.size (), 3u);
+    EXPECT_EQ (all_since[0].timestamp, 3000); // inserted first
+    const int64_t last_id = all_since.back ().id;
+    EXPECT_TRUE (db.get_metric_ticks_since ("run_1", last_id).empty ());
+    EXPECT_EQ (db.get_metric_ticks_since ("run_1", all_since[0].id).size (), 2u);
+}
+
+TEST_F (DatabaseTest, DeleteRunCascadesMetricTicks) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_run_with_children (db, "run_1", 1000);
+    seed_run_with_children (db, "run_2", 2000);
+    ASSERT_EQ (db.count_metric_ticks ("run_1"), 1);
+
+    db.delete_run ("run_1");
+
+    EXPECT_EQ (db.count_metric_ticks ("run_1"), 0);
+    // The other run's ticks are untouched.
+    EXPECT_EQ (db.count_metric_ticks ("run_2"), 1);
+}
+
+TEST_F (DatabaseTest, RunSummaryRoundTrips) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    vayu::db::Run run;
+    run.id              = "run_1";
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Completed;
+    run.start_time      = 1000;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+
+    // A fresh run has no summary - that emptiness is what the report route
+    // reads as "fall back to the legacy metrics rows".
+    auto before = db.get_run ("run_1");
+    ASSERT_TRUE (before.has_value ());
+    EXPECT_TRUE (before->summary.empty ());
+
+    db.update_run_summary ("run_1", R"({"total_requests":42})");
+
+    auto after = db.get_run ("run_1");
+    ASSERT_TRUE (after.has_value ());
+    EXPECT_EQ (after->summary, R"({"total_requests":42})");
+    // Writing the summary must not disturb the rest of the row.
+    EXPECT_EQ (after->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (after->start_time, 1000);
+}
+
+TEST_F (DatabaseTest, UpdateRunSummaryForMissingRunIsIgnored) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    // A run deleted while its worker was finishing must not create a row or throw.
+    EXPECT_NO_THROW (db.update_run_summary ("run_gone", R"({"total_requests":1})"));
+    EXPECT_FALSE (db.get_run ("run_gone").has_value ());
 }
 
 } // namespace

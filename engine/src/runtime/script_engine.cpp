@@ -21,6 +21,7 @@
 #include <chrono>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1245,6 +1246,205 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
     JS_SetPropertyStr (ctx, pm, "request", request);
 }
 
+// ============================================================================
+// pm.request write-back (pre-request scripts)
+// ============================================================================
+
+// Frees a borrowed JSValue on every exit. The write-back below reads a dozen
+// properties and refuses on most of them, and QuickJS ships no such helper.
+class ScopedValue {
+    public:
+    ScopedValue (JSContext* ctx, JSValue value) : ctx_ (ctx), value_ (value) {
+    }
+    ~ScopedValue () {
+        JS_FreeValue (ctx_, value_);
+    }
+    ScopedValue (const ScopedValue&)            = delete;
+    ScopedValue& operator= (const ScopedValue&) = delete;
+    [[nodiscard]] JSValue get () const {
+        return value_;
+    }
+
+    private:
+    JSContext* ctx_;
+    JSValue value_;
+};
+
+// Name a rejected value the way the script author wrote it, so the error says
+// "got number" rather than showing them a coerced "[object Object]".
+const char* js_type_name (JSContext* ctx, JSValueConst value) {
+    if (JS_IsUndefined (value))
+        return "undefined";
+    if (JS_IsNull (value))
+        return "null";
+    if (JS_IsBool (value))
+        return "boolean";
+    if (JS_IsNumber (value))
+        return "number";
+    if (JS_IsString (value))
+        return "string";
+    if (JS_IsFunction (ctx, value))
+        return "function";
+    if (QJS_IsArray (ctx, value))
+        return "array";
+    if (JS_IsObject (value))
+        return "object";
+    return "value";
+}
+
+// Read the header object the script left behind into `out`.
+// @return why the headers were rejected, or nullopt when `out` is filled.
+std::optional<std::string>
+read_pm_request_headers (JSContext* ctx, JSValueConst js_headers, Headers& out) {
+    if (!JS_IsObject (js_headers) || QJS_IsArray (ctx, js_headers) ||
+    JS_IsFunction (ctx, js_headers)) {
+        return "pm.request.headers must be an object, got " +
+        std::string (js_type_name (ctx, js_headers));
+    }
+
+    JSPropertyEnum* props = nullptr;
+    uint32_t count        = 0;
+    if (JS_GetOwnPropertyNames (ctx, &props, &count, js_headers,
+        JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0) {
+        return std::string ("pm.request.headers could not be enumerated");
+    }
+
+    std::optional<std::string> error;
+    for (uint32_t i = 0; i < count && !error; i++) {
+        const char* raw_key = JS_AtomToCString (ctx, props[i].atom);
+        std::string key     = raw_key ? raw_key : "";
+        if (raw_key) {
+            JS_FreeCString (ctx, raw_key);
+        }
+
+        ScopedValue value (ctx, JS_GetProperty (ctx, js_headers, props[i].atom));
+        // A header field-name cannot be empty, and a value that is not a
+        // primitive has no honest wire form. Both are refused by name rather
+        // than dropped, because a silently missing header is the very defect
+        // this write-back exists to fix.
+        if (key.empty ()) {
+            error = "pm.request.headers has an empty header name";
+        } else if (JS_IsString (value.get ()) || JS_IsNumber (value.get ()) ||
+        JS_IsBool (value.get ())) {
+            // JS object keys are case-sensitive; HTTP header names are not. So
+            // `Authorization` and `authorization` are two properties over there
+            // and one header over here, and whichever enumerated last would
+            // silently win. Which one the script meant is unknowable, and one
+            // of them is an Authorization header - refuse instead of guessing.
+            if (auto clash = out.find (key); clash != out.end () && clash->first != key) {
+                error = "pm.request.headers has both '" + clash->first + "' and '" + key +
+                "' - HTTP header names are case-insensitive, so these are one "
+                "header. "
+                "Keep one.";
+            } else {
+                out[key] = js_to_string (ctx, value.get ());
+            }
+        } else {
+            error = "pm.request.headers['" + key + "'] must be a string, got " +
+            std::string (js_type_name (ctx, value.get ())) +
+            " (use delete pm.request.headers['" + key + "'] to remove it)";
+        }
+    }
+
+    for (uint32_t i = 0; i < count; i++) {
+        JS_FreeAtom (ctx, props[i].atom);
+    }
+    js_free (ctx, props);
+
+    return error;
+}
+
+/**
+ * @brief Apply the script's `pm.request` back onto the request that will be sent.
+ *
+ * The JS object is authoritative, not a diff: the header set it holds when the
+ * script returns is the header set that goes on the wire, so
+ * `delete pm.request.headers['Authorization']` removes an engine-applied
+ * header, and dropping `pm.request.body` drops the body. That is the only rule
+ * that stays true for a script which replaces `pm.request` wholesale.
+ *
+ * Precedence over engine-applied auth falls out of the ordering rather than
+ * being a special case: `build_request` resolves auth into the request before
+ * the script runs, so the script sees the real outgoing set and its writes are
+ * simply later.
+ *
+ * All-or-nothing. Every field is staged and validated before anything is
+ * committed, so a script that sets a good header and a bad method sends
+ * neither instead of half of what it asked for.
+ *
+ * @return why the write-back was rejected, or nullopt when it was applied.
+ */
+std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& request) {
+    ScopedValue global (ctx, JS_GetGlobalObject (ctx));
+    ScopedValue pm (ctx, JS_GetPropertyStr (ctx, global.get (), "pm"));
+    if (!JS_IsObject (pm.get ())) {
+        // No `pm` at all - nothing was ever exposed for the script to write to.
+        return std::nullopt;
+    }
+
+    ScopedValue js_request (ctx, JS_GetPropertyStr (ctx, pm.get (), "request"));
+    if (!JS_IsObject (js_request.get ()) || JS_IsFunction (ctx, js_request.get ())) {
+        return "pm.request must be an object, got " +
+        std::string (js_type_name (ctx, js_request.get ()));
+    }
+
+    Request staged = request;
+
+    ScopedValue js_url (ctx, JS_GetPropertyStr (ctx, js_request.get (), "url"));
+    if (!JS_IsString (js_url.get ())) {
+        return "pm.request.url must be a string, got " +
+        std::string (js_type_name (ctx, js_url.get ()));
+    }
+    staged.url = js_to_string (ctx, js_url.get ());
+    if (staged.url.empty ()) {
+        return std::string ("pm.request.url must not be empty");
+    }
+
+    ScopedValue js_method (ctx, JS_GetPropertyStr (ctx, js_request.get (), "method"));
+    if (!JS_IsString (js_method.get ())) {
+        return "pm.request.method must be a string, got " +
+        std::string (js_type_name (ctx, js_method.get ()));
+    }
+    std::string method_text = js_to_string (ctx, js_method.get ());
+    // `pm.request.method = 'post'` means POST. Upper-casing is a normalisation
+    // of a value the script clearly meant, not the silent acceptance of a
+    // wrong one - an unrecognised verb below still fails loudly.
+    std::transform (method_text.begin (), method_text.end (), method_text.begin (),
+    [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
+    if (auto parsed = parse_method (method_text)) {
+        staged.method = *parsed;
+    } else {
+        return "pm.request.method must be one of GET, POST, PUT, DELETE, "
+               "PATCH, HEAD, OPTIONS (got \"" +
+        js_to_string (ctx, js_method.get ()) + "\")";
+    }
+
+    ScopedValue js_headers (ctx, JS_GetPropertyStr (ctx, js_request.get (), "headers"));
+    staged.headers.clear ();
+    if (auto reason = read_pm_request_headers (ctx, js_headers.get (), staged.headers)) {
+        return reason;
+    }
+
+    ScopedValue js_body (ctx, JS_GetPropertyStr (ctx, js_request.get (), "body"));
+    if (JS_IsUndefined (js_body.get ()) || JS_IsNull (js_body.get ())) {
+        staged.body = Body{};
+    } else if (JS_IsString (js_body.get ())) {
+        staged.body.content = js_to_string (ctx, js_body.get ());
+        if (staged.body.mode == BodyMode::None) {
+            // A body on a request that had none: Text is the mode that means
+            // "this string, as written". Nothing downstream derives
+            // Content-Type from the mode, so the script still owns that header.
+            staged.body.mode = BodyMode::Text;
+        }
+    } else {
+        return "pm.request.body must be a string, got " +
+        std::string (js_type_name (ctx, js_body.get ()));
+    }
+
+    request = std::move (staged);
+    return std::nullopt;
+}
+
 JSValue js_pm_environment_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 1) {
         return JS_UNDEFINED;
@@ -1269,12 +1469,22 @@ JSValue js_pm_environment_get (JSContext* ctx, JSValueConst this_val, int argc, 
 // environment/globals/collectionVariables pm.*.set() bindings so a script that
 // re-sets an existing (e.g. secret) variable does not silently strip its flag
 // or reset its type.
+//
+// A brand-new key is also stamped with its creation time, the app's ordering
+// key for the variables editor (issue #135). This is the one place the engine
+// may invent a `created_at`, because it is the only place the engine creates a
+// variable - stamping an existing one would sort it below rows the user added
+// after it.
 void set_variable_preserving (Environment& map, const std::string& key, std::string value) {
     auto it = map.find (key);
     if (it != map.end ()) {
-        it->second.value = std::move (value); // preserve secret, enabled, type
+        it->second.value = std::move (value); // preserve secret, enabled, type, created_at
     } else {
-        map[key] = Variable{ std::move (value), false, true }; // new var: current defaults
+        Variable created{ std::move (value), false, true }; // new var: current defaults
+        created.created_at = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                             .count ();
+        map[key] = std::move (created);
     }
 }
 
@@ -1605,6 +1815,19 @@ class ScriptEngine::Impl {
 
         JS_FreeValue (js_ctx, eval_result);
 
+        // Apply the script's pm.request edits to the request that is about to
+        // be sent. Deliberately runs even when the script threw: the edits it
+        // made before throwing already happened, the request is sent either
+        // way, and discarding them silently is the defect this replaced.
+        if (ctx.mutable_request) {
+            if (auto reason = apply_pm_request_writeback (js_ctx, *ctx.mutable_request)) {
+                result.success       = false;
+                result.error_message = result.error_message.empty () ?
+                *reason :
+                result.error_message + " (and pm.request was not applied: " + *reason + ")";
+            }
+        }
+
         // Copy results
         result.tests          = std::move (ctx_data.tests);
         result.console_output = std::move (ctx_data.console_output);
@@ -1640,7 +1863,7 @@ ScriptResult ScriptEngine::execute_prerequest (const std::string& script,
 Request& request,
 Environment& env) {
     ScriptContext ctx;
-    ctx.request     = &request;
+    ctx.make_request_mutable (request);
     ctx.environment = &env;
     return execute (script, ctx);
 }

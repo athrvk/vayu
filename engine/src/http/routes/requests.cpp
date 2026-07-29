@@ -151,8 +151,11 @@ static std::string http_version_seed (vayu::db::Database& db) {
  *
  * `collectionId`, `name`, `method` and `url` have no default, so each is
  * required on create and rejects an explicit null on either verb.
+ *
+ * Declared in routes.hpp because `POST /import/apply` applies the same fields to
+ * every request in a bulk payload (issue #96).
  */
-static std::optional<std::pair<int, nlohmann::json>> apply_request_fields (
+std::optional<std::pair<int, nlohmann::json>> apply_request_fields (
 vayu::db::Database& db,
 vayu::db::Request& r,
 const nlohmann::json& json,
@@ -188,11 +191,15 @@ bool is_create) {
         return err;
     }
 
-    apply_json_field (json, "body", r.body, R"({"mode":"none"})", is_create);
+    if (auto err = apply_json_field (json, "body", r.body, R"({"mode":"none"})", is_create)) {
+        return err;
+    }
     apply_string_field (json, "bodyType", r.body_type, "none", is_create);
     // A request's auth may be 'inherit' - that is its default, and the app
     // resolves the collection chain before the request is executed.
-    apply_json_field (json, "auth", r.auth, R"({"mode":"inherit"})", is_create);
+    if (auto err = apply_json_field (json, "auth", r.auth, R"({"mode":"inherit"})", is_create)) {
+        return err;
+    }
     apply_string_field (json, "preRequestScript", r.pre_request_script, "", is_create);
     apply_string_field (json, "postRequestScript", r.post_request_script, "", is_create);
     apply_int_field (json, "order", r.order, 0, is_create);

@@ -89,27 +89,26 @@ nlohmann::json get_script_completions () {
     { "documentation", "The HTTP status code (alias for pm.response.code)." },
     { "sortText", "1_pm_response_status" } });
 
-    completions.push_back ({ { "label", "pm.response.responseTime" },
-    { "kind", KIND_FIELD }, { "insertText", "pm.response.responseTime" },
-    { "detail", "number" },
+    completions.push_back ({ { "label", "pm.response.responseTime" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.responseTime" }, { "detail", "number" },
     { "documentation",
     "Perceived response time in milliseconds (submit → completion). Use "
     "responseTimeWire for server-only timing." },
     { "sortText", "1_pm_response_time" } });
 
-    completions.push_back ({ { "label", "pm.response.responseTimeWire" },
-    { "kind", KIND_FIELD }, { "insertText", "pm.response.responseTimeWire" },
-    { "detail", "number" },
+    completions.push_back ({ { "label", "pm.response.responseTimeWire" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.responseTimeWire" }, { "detail", "number" },
     { "documentation",
     "Wire-only response time in milliseconds (CURLINFO_TOTAL_TIME). Pre-#19 "
     "semantics - use for server-only SLA assertions." },
     { "sortText", "1_pm_response_time_wire" } });
 
-    completions.push_back ({ { "label", "pm.response.responseTimeQueueWait" },
-    { "kind", KIND_FIELD }, { "insertText", "pm.response.responseTimeQueueWait" },
-    { "detail", "number" },
+    completions.push_back (
+    { { "label", "pm.response.responseTimeQueueWait" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.responseTimeQueueWait" }, { "detail", "number" },
     { "documentation",
-    "Generator-side overhead in milliseconds (responseTime − responseTimeWire). "
+    "Generator-side overhead in milliseconds (responseTime − "
+    "responseTimeWire). "
     "Near-zero for single-shot sends." },
     { "sortText", "1_pm_response_time_queue" } });
 
@@ -163,29 +162,87 @@ nlohmann::json get_script_completions () {
     // ========================================
     // pm.request - Request object
     // ========================================
+    // In a pre-request script these four are writable and the write-back sends
+    // what they hold; in a test script they are a read-only record. The
+    // documentation strings say so, because the completion list is where a
+    // script author looks before the docs.
     completions.push_back ({ { "label", "pm.request" }, { "kind", KIND_VARIABLE },
     { "insertText", "pm.request" }, { "detail", "Request object" },
-    { "documentation", "Access the HTTP request data including URL, method, headers, and body." },
+    { "documentation",
+    "Access the HTTP request data including URL, method, headers, and body.\n\n"
+    "In a **pre-request** script these are writable: whatever pm.request holds "
+    "when the script ends is what is sent, and a script-set header overrides "
+    "the one the Auth tab applied. In a **test** script it is a read-only "
+    "record of what was already sent." },
     { "sortText", "0_pm_request" } });
 
     completions.push_back ({ { "label", "pm.request.url" }, { "kind", KIND_FIELD },
-    { "insertText", "pm.request.url" }, { "detail", "string" },
-    { "documentation", "The full request URL." }, { "sortText", "1_pm_request_url" } });
+    { "insertText", "pm.request.url" }, { "detail", "string (writable pre-request)" },
+    { "documentation",
+    "The full request URL. Assign to retarget the request before it is sent - "
+    "must be a non-empty string. {{variables}} are already resolved here." },
+    { "sortText", "1_pm_request_url" } });
 
     completions.push_back ({ { "label", "pm.request.method" }, { "kind", KIND_FIELD },
-    { "insertText", "pm.request.method" }, { "detail", "string" },
-    { "documentation", "The HTTP method (GET, POST, PUT, DELETE, etc.)." },
+    { "insertText", "pm.request.method" }, { "detail", "string (writable pre-request)" },
+    { "documentation",
+    "The HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS). Assign to "
+    "change the verb; case does not matter. A HEAD request carrying a body is "
+    "refused, so delete pm.request.body when switching to HEAD." },
     { "sortText", "1_pm_request_method" } });
 
-    completions.push_back ({ { "label", "pm.request.headers" },
-    { "kind", KIND_FIELD }, { "insertText", "pm.request.headers" },
-    { "detail", "object" }, { "documentation", "Request headers as key-value pairs." },
+    completions.push_back ({ { "label", "pm.request.headers" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.headers" }, { "detail", "object (writable pre-request)" },
+    { "documentation",
+    "Request headers as key-value pairs. The object is authoritative: the set "
+    "it holds at the end is the set that is sent, so delete removes a header. "
+    "Names are case-sensitive here (use 'Authorization', not "
+    "'authorization'), and values must be a string, number or boolean." },
     { "sortText", "1_pm_request_headers" } });
 
     completions.push_back ({ { "label", "pm.request.body" }, { "kind", KIND_FIELD },
-    { "insertText", "pm.request.body" }, { "detail", "string | undefined" },
-    { "documentation", "The request body content (if any)." },
+    { "insertText", "pm.request.body" }, { "detail", "string | undefined (writable pre-request)" },
+    { "documentation",
+    "The request body content (if any). Assign a string to replace it, or "
+    "delete it to send none. A body set on a request that had none is sent as "
+    "raw text - set Content-Type yourself." },
     { "sortText", "1_pm_request_body" } });
+
+    // Snippets for the mutation patterns. Without these, `pm.request.` offers
+    // only the four reads and the capability is invisible in the editor.
+    // filterText keeps each reachable from the prefix a user actually types.
+    completions.push_back ({ { "label", "pm.request.headers[...] = ... (set a header)" },
+    { "kind", KIND_SNIPPET },
+    { "insertText", "pm.request.headers[\"${1:X-Header}\"] = ${2:\"value\"};" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "filterText", "pm.request.headers set" },
+    { "detail", "Add or replace a header (pre-request)" },
+    { "documentation",
+    "Set a header on the outgoing request. Replaces an existing one of the "
+    "same name." },
+    { "sortText", "2_pm_request_headers_set" } });
+
+    completions.push_back ({ { "label", "delete pm.request.headers[...] (remove a header)" },
+    { "kind", KIND_SNIPPET }, { "insertText", "delete pm.request.headers[\"${1:Authorization}\"];" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "filterText", "pm.request.headers delete remove" },
+    { "detail", "Remove a header (pre-request)" },
+    { "documentation",
+    "Remove a header from the outgoing request, including one the Auth tab "
+    "applied. The name is case-sensitive - match it exactly." },
+    { "sortText", "2_pm_request_headers_delete" } });
+
+    completions.push_back (
+    { { "label", "pm.request.body = JSON.stringify(...) (rewrite the body)" },
+    { "kind", KIND_SNIPPET },
+    { "insertText",
+    "var body = JSON.parse(pm.request.body);\n${1:// body.field = \"value\";}\n"
+    "pm.request.body = JSON.stringify(body);" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "filterText", "pm.request.body rewrite json" },
+    { "detail", "Parse, edit and re-serialise the body (pre-request)" },
+    { "documentation",
+    "The body is a string in and a string out, so a structural edit is "
+    "parse - mutate - stringify. Compute anything derived from the body after "
+    "this, or it describes the old one." },
+    { "sortText", "2_pm_request_body_rewrite" } });
 
     // ========================================
     // pm.environment - Environment variables

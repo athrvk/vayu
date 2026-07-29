@@ -74,10 +74,13 @@ omitted field keeps its stored value. We deliberately did not add a separate
 client call site expects it. The `:id` in the path is the record's identity; the
 body carries the changed fields only.
 
-A `POST` may still carry its own `id` on create (the import orchestrator
-pre-assigns ids so it can wire `parentId` / `collectionId` across a whole tree
-before anything is persisted). When `id` is omitted the engine generates one via
-`generate_id`, giving the `<prefix>_<uuidv4>` form.
+A `POST` may still carry its own `id` on create, and when `id` is omitted the
+engine generates one via `generate_id`, giving the `<prefix>_<uuidv4>` form. That
+field existed for the import orchestrator, which pre-assigned ids so it could
+wire `parentId` / `collectionId` across a whole tree before anything was
+persisted; import now sends one
+[`POST /import/apply`](#post-importapply) instead and supplies no ids, so the
+field remains only for third-party clients (issue #97 removes it).
 
 ### The null-vs-absent rule
 
@@ -106,6 +109,26 @@ A field that has **no** default cannot be reset, so `null` is a `400` on either
 verb rather than a silently discarded write. Those fields are a collection's
 `name`, an environment's `name`, and a request's `collectionId`, `name`,
 `method` and `url`. Each is also required on create.
+
+### Accepted field shapes
+
+A field that is present and not `null` must have the shape below, on both verbs.
+Anything else is a `400` naming the field, e.g.
+`{"error": "Invalid 'auth': must be a JSON object"}`.
+
+| Field | Shape |
+|---|---|
+| `variables` (collection / environment / globals) | object |
+| `auth` (collection / request) | object |
+| `body` (request) | object |
+| `params` / `headers` (request) | array of `{key: string, value: string, enabled: bool}` |
+
+Object-shaped fields are stored as JSON blobs, and every reader of one degrades
+quietly when it is not an object - `variables` reads back empty, a request `body`
+is dropped, and `auth` resolves to none, so a request the caller believes carries
+credentials goes out bare. The write is therefore rejected rather than stored:
+`{"variables": 42}` and `{"auth": "bearer"}` are `400`s, and the previously
+stored value is left untouched.
 
 ### Behavior change (pre-1.0)
 
@@ -540,6 +563,95 @@ never turn into a `500`.
 - `502` `{ "error": "Failed to fetch: <detail>" }` - the upstream request failed
   (connection error, transport failure).
 
+### POST /import/apply
+
+Persist an entire parsed import - collections, their requests, and environments -
+in **one atomic call**. Items reference each other by opaque **temp ids** the
+client invents; the engine generates every real id via `generate_id` and returns
+the translation in `idMap`.
+
+This is what replaced ~500 sequential `POST /collections` + `POST /requests`
+calls for a 500-request import, and with it the only reason those endpoints
+accept a client-supplied `id` at all (see
+[Resource writes](#resource-writes-create-vs-update)).
+
+**Request:**
+```json
+{
+  "collections": [
+    { "tempId": "c1", "parentTempId": null, "name": "My API", "order": 0,
+      "variables": {}, "auth": {"mode":"none"},
+      "preRequestScript": "", "postRequestScript": "" },
+    { "tempId": "c2", "parentTempId": "c1", "name": "Users", "order": 0 }
+  ],
+  "requests": [
+    { "tempId": "r1", "collectionTempId": "c2", "name": "List users",
+      "method": "GET", "url": "https://api.example.com/users",
+      "params": [], "headers": [], "body": {"mode":"none"}, "bodyType": "none",
+      "auth": {"mode":"inherit"}, "order": 0 }
+  ],
+  "environments": [
+    { "tempId": "e1", "name": "Prod", "variables": {} }
+  ]
+}
+```
+
+- All three sections are optional; absent or `null` means "none of that kind"
+  (the [null-vs-absent rule](#the-null-vs-absent-rule)). An empty payload is a
+  `200` with an empty `idMap`.
+- Every item needs a non-empty string `tempId`, **unique across all three
+  sections** (they share one namespace, because `idMap` is one flat map). Temp ids
+  are never stored.
+- A collection's `parentTempId` and a request's `collectionTempId` must name a
+  collection `tempId` **in the same payload**; references may point forward, so a
+  child may appear before its parent. `parentTempId` is `null` (or absent) for a
+  root.
+- Every other field is the one the matching `POST /<resource>` accepts, with the
+  same defaults and the same null rule - the engine runs the same per-resource
+  field appliers for both paths. `id` is **not** accepted here: the engine owns
+  ID generation on this path.
+- `order` is optional. For collections, an omitted `order` appends after the
+  existing siblings and then in payload order (each sibling gets the next slot -
+  the per-item default cannot do this in bulk, because none of the payload's own
+  siblings are stored yet). For requests it defaults to `0`, as with
+  `POST /requests`; clients that care about request order should send it.
+- Up to **10,000 items** per call (collections + requests + environments).
+
+**Response:** `200`
+```json
+{ "idMap": { "c1": "col_<uuid>", "c2": "col_<uuid>", "r1": "req_<uuid>", "e1": "env_<uuid>" } }
+```
+
+Every `tempId` sent appears in `idMap`.
+
+**Atomicity:** validation runs over the whole payload before anything is written,
+and the write itself is a single SQLite transaction. A `400` therefore means
+**nothing was persisted** - there is no partial tree to clean up.
+
+**Errors:** every `400` carries `error`, and the per-item ones also carry `item`
+(the offending `tempId`) so a large import can name what broke.
+- `400` `{ "error": "Invalid JSON body" }` - the body did not parse.
+- `400` `{ "error": "Body must be a JSON object" }`.
+- `400` `{ "error": "Invalid 'collections': must be an array" }` - a section was
+  present but not an array (same for `requests` / `environments`).
+- `400` `{ "error": "Invalid collection at index 2: 'tempId' must be a non-empty string" }`.
+- `400` `{ "error": "Invalid collection at index 0: 'id' is not accepted - the engine assigns ids; reference items by 'tempId'" }`.
+- `400` `{ "error": "Duplicate tempId 'c1'", "item": "c1" }`.
+- `400` `{ "error": "Unknown parentTempId 'c9'", "item": "c2" }`, and the same for
+  `collectionTempId` - including a `collectionTempId` that names an environment
+  rather than a collection.
+- `400` `{ "error": "Cycle in parentTempId references at 'c1'", "item": "c2" }` -
+  a cycle (including a self-parent) in the payload's own parent graph. The
+  stored-tree walk that guards `POST /collections` cannot see this one, because
+  none of these rows exist yet, and a cycle makes cascade delete loop forever
+  (issue #79).
+- `400` `{ "error": "Missing required field: name", "item": "c1" }` and the other
+  per-field errors of the matching `POST /<resource>`, including a wrong-typed
+  field (`"name": 42`), which is a `400` rather than a `500`.
+- `400` `{ "error": "Import too large: 10001 items exceeds the limit of 10000 per call" }`.
+- `500` `{ "error": "<detail>" }` - the transaction itself failed; nothing was
+  written.
+
 ## Environments
 
 ### GET /environments
@@ -676,7 +788,9 @@ absent and `variables: null` both mean the default, `{}`.
 `variables: null` used to store the literal four-character text `null`, which
 parses as JSON but is not an object. `GET /globals` returns `{}` for anything it
 cannot read as an object, so the failure showed up as globals silently
-disappearing rather than as an error.
+disappearing rather than as an error. A non-object `variables` (`42`, a string,
+an array) had the same effect and is now a `400` - see
+[Accepted field shapes](#accepted-field-shapes).
 
 ## Authentication
 
@@ -830,6 +944,16 @@ joined with a blank line and run as a single script in one shared scope (see
 earlier part is visible to a later one; parts that are empty or only
 whitespace are dropped.
 
+**The pre-request script can change what is sent.** Its `pm.request` edits -
+method, url, headers, body - are applied to the request before it goes out, and
+because auth is resolved *before* the script runs, a script-set `Authorization`
+overrides the one the engine applied. `requestHeaders` and `rawRequest` in the
+response below, and the stored trace behind `GET /runs/:id`, all report the
+post-script request. A value the engine cannot send (a non-string url, an
+unknown method) rejects the whole write-back, leaves the request unchanged, and
+is reported as `preScriptError`. See
+[scripting.md](scripting.md#mutating-the-request-pre-request-scripts).
+
 **Redirect policy.** `followRedirects` defaults to **true**, so omitting it
 follows every 3xx and only the final response is returned - send
 `followRedirects: false` to see the 3xx status and its `Location` header. Both
@@ -913,6 +1037,15 @@ rows omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`
 without the suffix (`firstByte`, `dns`, …) - consumers of the raw `/execute`
 body written against that dialect must switch to the `*Ms` names.
 
+**Variables the scripts wrote are persisted, and only those.** After the
+post-request script runs, the engine writes back the three variable scopes
+(the run's environment, globals, and the executed request's collection) - but
+only for a scope whose variables a script actually changed. A run that sets no
+variable writes nothing at all, so it does not move a collection's or
+environment's `updatedAt`. Each variable round-trips whole, `createdAt`
+included; see [VariableValue shape](db-schema.md#variablevalue-shape) for why
+that field must survive and who may stamp it.
+
 ### POST /runs
 
 Start a load test run (Vayu Mode).
@@ -974,6 +1107,21 @@ assertions are now actually checked under load - previously only the
 request's own `tests` string was ever sent, so a collection-level assertion
 passed in design mode and was silently never validated by a load run.
 
+**`tests` and `postRequestScript(s)` are the same field.** The post-request
+script is stored as `postRequestScript`, `POST /execute` grew up calling it
+`postRequestScript(s)`, and this endpoint calls it `tests`. All three names are
+accepted on **both** endpoints, so a payload composed for one can start the
+other kind of run unchanged - which is how a saved request's composed test
+scripts reach a load run. The names are tried in a fixed order
+(`postRequestScripts`, `postRequestScript`, then `tests`) and the first that
+yields a non-blank script wins; they are never merged. Previously each route
+knew only its own spelling and silently dropped the other.
+
+**There is no pre-request hook on this endpoint.** `preRequestScript(s)` in a
+run payload is not an error, but nothing runs it - only `POST /execute` executes
+a pre-request script. A request that signs itself in one is sent unsigned under
+load.
+
 **Accepted ranges.** The numeric config is range-checked **before the run row is
 created**, so a rejected request leaves no `pending` row behind. A violation is
 a `400` carrying the nested error shape (`{"error": {"code":
@@ -997,6 +1145,13 @@ itself far lower (the load dialog offers `concurrency` &le; 1000; the MCP
 The sample rates are additionally clamped to &ge; 1 inside the metrics
 collector, so the modulo cannot divide by zero even for a caller that bypasses
 this route.
+
+**Shutdown refuses new runs.** Once the daemon has begun draining its run
+workers, `POST /runs` answers `503 {"error": "Engine is shutting down"}` rather
+than accepting a run nothing will ever execute. The window is small - the HTTP
+server stops before the drain begins - but it is not empty, and a request
+already in a handler when the drain starts must not be able to spawn a worker
+past it (see `RunManager::shutdown`).
 
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
 token **before** creating the run and warms the cache for the workers. An
@@ -1123,6 +1278,21 @@ bucket of every run reported 0 failed requests.
 
 A missing run returns `404` with `{"error":"Run not found"}`.
 
+**Storage (response shape unchanged).** Each `data[]` entry is one stored row of
+`metric_ticks` - the engine writes the tick object once, at write time, instead
+of the reader reassembling it from ~20 EAV `metrics` rows per second. Two things
+follow, both improvements the shape gives for free:
+
+- **Pagination is tick-aligned**: `limit`/`offset` count ticks, so
+  `pagination.total` is the number of ticks (not rows), and a page boundary can
+  no longer return a tick with half its fields zeroed.
+- **`elapsed_seconds` keeps counting across pages** (it is measured from the
+  run's first stored tick), and `requests_failed` carries the real error count
+  the row-order-dependent legacy derivation always reported as `0`.
+
+Runs recorded before `metric_ticks` existed are still served from their legacy
+rows, with exactly the response they produced before.
+
 ### GET /stats/:runId (deprecated)
 
 > **Prefer `GET /runs/:runId/live`** (above) for live dashboards - it replays a retained
@@ -1152,6 +1322,11 @@ data: {"totalRequests":6000,"totalErrors":30,"totalSuccess":5970,"errorRate":0.5
 - `currentRps`: Current requests per second
 - `activeConnections`: Active concurrent connections
 - `elapsedSeconds`: Elapsed time since test start
+
+For runs recorded since `metric_ticks`, this stream is fed from those rows; every
+field above comes from the stored tick except **`avgLatencyMs`, which stays `0`** -
+the per-tick object has never carried mean latency. `GET /runs/:runId/live` serves
+it (from the in-memory collector) and is the endpoint to use.
 
 ### GET /runs/:runId/live
 
@@ -1436,10 +1611,15 @@ A run that is already finished answers `{"status": "<status>", "runId": ...,
 
 > Alias: `GET /run/:runId/report` (deprecated - see [Deprecated aliases](#deprecated-aliases)).
 
-Get the final report for a completed run. Reconstructed from the `runs`, `metrics`, and `results`
-tables (there is no stored `summary` blob). The response is a **nested** object; conditional
+Get the final report for a completed run. The response is a **nested** object; conditional
 sections appear only when relevant (e.g. `rateControl` only for `constant_rps`, `testValidation`
 only when a test script ran).
+
+The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
+a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
+rows for the timing breakdown and the `results[]` array. A run recorded before that column
+existed is reconstructed from its legacy `metrics` rows exactly as before. **The response shape
+is the same either way** - only where the numbers are read from changed.
 
 **Response:**
 ```json
@@ -1582,6 +1762,7 @@ Get script engine API completions for UI autocomplete.
 | 409 | OAuth 2.0 interactive authorization required (`/run` pre-flight, `/oauth2/token`) |
 | 500 | Internal server error |
 | 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
+| 503 | Engine is shutting down (`POST /runs` only - see below) |
 
 ## Notes
 

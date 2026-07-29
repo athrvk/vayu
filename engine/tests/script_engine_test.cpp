@@ -10,6 +10,7 @@
 
 #include <chrono>
 
+#include "vayu/http/request_builder.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/types.hpp"
 
@@ -722,6 +723,249 @@ TEST_F (ScriptEngineTest, PreRequestScript) {
 }
 
 // ============================================================================
+// pm.request write-back (#109)
+// ============================================================================
+//
+// These pin the contract that a pre-request script can change what goes on the
+// wire. Revert the write-back in ScriptEngine::Impl::execute and every one of
+// them fails, because before it existed the JS object was built, mutated and
+// thrown away - the codebase's "written but never read" pattern at the script
+// boundary.
+
+TEST_F (ScriptEngineTest, PreRequestScriptSetsHeaderOnTheOutgoingRequest) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Signature'] = 'abc123';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_TRUE (request.headers.contains ("X-Signature"));
+    EXPECT_EQ (request.headers.at ("X-Signature"), "abc123");
+    // Untouched headers survive: the write-back replaces the set, and the set
+    // the script saw already held these.
+    EXPECT_EQ (request.headers.at ("Content-Type"), "application/json");
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptHeaderOverridesEngineAppliedAuth) {
+    // The precedence rule, end to end: build_request resolves auth into the
+    // request first, the script runs second, so the script wins.
+    const nlohmann::json config = { { "method", "GET" },
+        { "url", "https://api.example.com/v1" },
+        { "auth", { { "mode", "bearer" }, { "token", "engine-token" } } } };
+    auto built = vayu::http::build_request (config, nullptr, 1000);
+    ASSERT_TRUE (built.ok);
+    ASSERT_EQ (built.request.headers.at ("Authorization"), "Bearer engine-token");
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.expect(pm.request.headers['Authorization']).to.equal('Bearer engine-token');
+        pm.request.headers['Authorization'] = 'Bearer script-token';
+    )JS",
+    built.request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (built.request.headers.at ("Authorization"), "Bearer script-token");
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptCanDeleteAHeader) {
+    auto result = engine.execute_prerequest (R"JS(
+        delete pm.request.headers['Authorization'];
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("Authorization"));
+    EXPECT_TRUE (request.headers.contains ("Content-Type"));
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptStringifiesNumberAndBooleanHeaderValues) {
+    // `pm.request.headers['X-Timestamp'] = Date.now()` is the shape users
+    // actually write; a number has one honest wire form, so it is converted
+    // rather than refused.
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Attempt'] = 3;
+        pm.request.headers['X-Retry'] = true;
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.headers.at ("X-Attempt"), "3");
+    EXPECT_EQ (request.headers.at ("X-Retry"), "true");
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptChangesUrlAndMethod) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.url = 'https://api.example.com/v2/users?page=2';
+        pm.request.method = 'post';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/v2/users?page=2");
+    EXPECT_EQ (request.method, HttpMethod::POST); // lower-case verb normalised
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptSettingBodyOnABodylessRequestGivesItTextMode) {
+    ASSERT_EQ (request.body.mode, BodyMode::None);
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body = 'ping';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.content, "ping");
+    // Mode matters, not just content: apply_method_and_body ignores a body
+    // whose mode is None, so leaving it None would send nothing.
+    EXPECT_EQ (request.body.mode, BodyMode::Text);
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptEditingAJsonBodyKeepsItsMode) {
+    request.body.mode    = BodyMode::Json;
+    request.body.content = R"({"n":1})";
+
+    auto result = engine.execute_prerequest (R"JS(
+        var body = JSON.parse(pm.request.body);
+        body.n = 2;
+        pm.request.body = JSON.stringify(body);
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.content, R"({"n":2})");
+    EXPECT_EQ (request.body.mode, BodyMode::Json);
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptDeletingTheBodyDropsIt) {
+    request.body.mode    = BodyMode::Json;
+    request.body.content = R"({"n":1})";
+
+    auto result = engine.execute_prerequest (R"JS(
+        delete pm.request.body;
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.mode, BodyMode::None);
+    EXPECT_TRUE (request.body.content.empty ());
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptEditsMadeBeforeAThrowStillApply) {
+    // The request is sent whether or not the script threw, so a header it
+    // already set is honoured. The failure is still reported.
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Signature'] = 'abc123';
+        undefinedFunction();
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_FALSE (result.error_message.empty ());
+    EXPECT_EQ (request.headers.at ("X-Signature"), "abc123");
+}
+
+TEST_F (ScriptEngineTest, TestScriptMutationsAreNotWrittenBack) {
+    // A post-request script's request has already been sent; writing back
+    // there would only misreport what went out.
+    ScriptContext ctx;
+    ctx.request     = &request;
+    ctx.response    = &response;
+    ctx.environment = &env;
+
+    auto result = engine.execute (R"JS(
+        pm.request.headers['X-Signature'] = 'abc123';
+        pm.request.url = 'https://evil.example.com';
+    )JS",
+    ctx);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("X-Signature"));
+    EXPECT_EQ (request.url, "https://api.example.com/users");
+}
+
+// ---------------------------------------------------------------------------
+// Rejected write-backs: loud, and all-or-nothing.
+// ---------------------------------------------------------------------------
+
+TEST_F (ScriptEngineTest, PreRequestScriptUnknownMethodIsRejectedAndAppliesNothing) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Signature'] = 'abc123';
+        pm.request.method = 'FETCH';
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pm.request.method"), std::string::npos)
+    << result.error_message;
+    // Transactional: the good header in the same script is not applied either.
+    EXPECT_FALSE (request.headers.contains ("X-Signature"));
+    EXPECT_EQ (request.method, HttpMethod::GET);
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptNonStringHeaderValueIsRejectedByName) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Meta'] = { a: 1 };
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("X-Meta"), std::string::npos)
+    << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("X-Meta"));
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptEmptyUrlIsRejected) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.url = '';
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pm.request.url"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/users");
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptNonStringBodyIsRejected) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body = { a: 1 };
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pm.request.body"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (request.body.mode, BodyMode::None);
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptReplacingPmRequestWithANonObjectIsRejected) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request = 'oops';
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pm.request"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/users");
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptThatChangesNothingLeavesTheRequestIdentical) {
+    const Request before = request;
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('touched', 'yes');
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, before.url);
+    EXPECT_EQ (request.method, before.method);
+    EXPECT_EQ (request.headers, before.headers);
+    EXPECT_EQ (request.body.mode, before.body.mode);
+    EXPECT_EQ (request.body.content, before.body.content);
+}
+
+// ============================================================================
 // Complex Script Tests
 // ============================================================================
 
@@ -869,4 +1113,219 @@ TEST_F (ScriptEngineTest, ZeroTimeoutDisablesLimit) {
 #else
     GTEST_SKIP () << "QuickJS not compiled in";
 #endif
+}
+
+// ============================================================================
+// The sandbox's global surface
+// ============================================================================
+//
+// `scripting.md` now teaches request rewriting, so what a script can *compute*
+// is part of the contract. Only `console` and `pm` are installed on top of
+// QuickJS's built-ins - there is no crypto, no base64, no URL parser - which is
+// why the docs' worked examples do string surgery and a pure-JS checksum rather
+// than an HMAC. This pins both halves so a doc example cannot come to rely on
+// something that was never there (`scripting.md` used to show a `computeHash`
+// that does not exist).
+
+TEST_F (ScriptEngineTest, StandardBuiltinsAreAvailableToScripts) {
+    auto result = engine.execute_prerequest (R"JS(
+        var missing = [];
+        var expected = ['JSON', 'Date', 'Math', 'RegExp', 'String', 'Array',
+                        'Object', 'Number', 'encodeURIComponent', 'parseInt'];
+        for (var i = 0; i < expected.length; i++) {
+            if (typeof globalThis[expected[i]] === 'undefined') missing.push(expected[i]);
+        }
+        pm.environment.set('missing', missing.join(','));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["missing"].value, "")
+    << "a built-in the docs rely on disappeared";
+}
+
+TEST_F (ScriptEngineTest, NoCryptoBase64OrUrlParserIsExposed) {
+    auto result = engine.execute_prerequest (R"JS(
+        var present = [];
+        var absent = ['crypto', 'btoa', 'atob', 'TextEncoder', 'URL',
+                      'URLSearchParams', 'require', 'fetch'];
+        for (var i = 0; i < absent.length; i++) {
+            if (typeof globalThis[absent[i]] !== 'undefined') present.push(absent[i]);
+        }
+        pm.environment.set('present', present.join(','));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    // If one of these ever lands, the "you cannot HMAC-sign in a script" note in
+    // scripting.md stops being true and should be rewritten, not left standing.
+    EXPECT_EQ (env["present"].value, "")
+    << "a new global is available - update the request-signing note in "
+       "scripting.md";
+}
+
+// ============================================================================
+// The worked examples in scripting.md actually run
+// ============================================================================
+//
+// This whole issue existed because the docs taught a pattern the runtime threw
+// away, and the example they taught it with called a `computeHash` that has
+// never existed. So the non-trivial examples are executed here against a real
+// request, not eyeballed. If you edit the code in
+// "Worked examples: rewriting a request", edit these with it.
+
+TEST_F (ScriptEngineTest, DocExampleRewritesAJsonBodyThenDerivesFromIt) {
+    request.method       = HttpMethod::POST;
+    request.body.mode    = BodyMode::Json;
+    request.body.content = R"({"n":1,"debugOnly":true})";
+
+    auto result = engine.execute_prerequest (R"JS(
+        var body = JSON.parse(pm.request.body);
+        body.metadata = { client: 'vayu' };
+        delete body.debugOnly;
+        pm.request.body = JSON.stringify(body);
+        pm.request.headers['Content-Length'] = String(pm.request.body.length);
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.content, R"({"n":1,"metadata":{"client":"vayu"}})");
+    // Derived after the edit, so it describes what is sent - the ordering the
+    // doc calls out.
+    EXPECT_EQ (request.headers.at ("Content-Length"),
+    std::to_string (request.body.content.size ()));
+}
+
+TEST_F (ScriptEngineTest, DocExampleSetsAQueryParamAcrossItsThreeCases) {
+    static constexpr const char* kSetQueryParam = R"JS(
+        function setQueryParam(url, name, value) {
+          var pair = encodeURIComponent(name) + '=' + encodeURIComponent(value);
+          var hashAt = url.indexOf('#');
+          var fragment = hashAt === -1 ? '' : url.slice(hashAt);
+          var base = hashAt === -1 ? url : url.slice(0, hashAt);
+
+          var re = new RegExp('([?&])' + name + '=[^&]*');
+          if (re.test(base)) {
+            return base.replace(re, '$1' + pair) + fragment;
+          }
+          return base + (base.indexOf('?') === -1 ? '?' : '&') + pair + fragment;
+        }
+    )JS";
+
+    struct Case {
+        const char* url;
+        const char* expected;
+    };
+    const Case cases[] = {
+        // No query at all.
+        { "https://api.example.com/users", "https://api.example.com/users?traceId=t1" },
+        // Query present, parameter absent.
+        { "https://api.example.com/users?page=2", "https://api.example.com/users?page=2&traceId=t1" },
+        // Parameter already present - replaced, not duplicated.
+        { "https://api.example.com/users?traceId=old&page=2",
+        "https://api.example.com/users?traceId=t1&page=2" },
+        // Fragment is preserved and never searched for the parameter.
+        { "https://api.example.com/users#section", "https://api.example.com/users?traceId=t1#section" },
+    };
+
+    for (const auto& c : cases) {
+        Request req;
+        req.method = HttpMethod::GET;
+        req.url    = c.url;
+        Environment scratch;
+        auto result = engine.execute_prerequest (std::string (kSetQueryParam) +
+        "\npm.request.url = setQueryParam(pm.request.url, 'traceId', 't1');",
+        req, scratch);
+
+        ASSERT_TRUE (result.success) << result.error_message;
+        EXPECT_EQ (req.url, c.expected) << "input: " << c.url;
+    }
+}
+
+TEST_F (ScriptEngineTest, DocExampleChecksumIsComputableAndStable) {
+    env["secret"] = Variable{ "s3cr3t", true, true };
+
+    auto result = engine.execute_prerequest (R"JS(
+        function fnv1a(text) {
+          var hash = 0x811c9dc5;
+          for (var i = 0; i < text.length; i++) {
+            hash ^= text.charCodeAt(i);
+            hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
+          }
+          return ('00000000' + hash.toString(16)).slice(-8);
+        }
+
+        var canonical = [
+          pm.request.method,
+          pm.request.url,
+          '1700000000000',
+          pm.request.body || ''
+        ].join('\n');
+
+        pm.request.headers['X-Timestamp'] = '1700000000000';
+        pm.request.headers['X-Checksum'] = fnv1a(canonical + pm.environment.get('secret'));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.headers.at ("X-Timestamp"), "1700000000000");
+    // Eight lower-case hex digits, deterministic for a fixed canonical string.
+    const std::string checksum = request.headers.at ("X-Checksum");
+    EXPECT_EQ (checksum.size (), 8u) << checksum;
+    EXPECT_EQ (checksum.find_first_not_of ("0123456789abcdef"), std::string::npos) << checksum;
+}
+
+TEST_F (ScriptEngineTest, DocExampleSwapsAuthScheme) {
+    auto result = engine.execute_prerequest (R"JS(
+        delete pm.request.headers['Authorization'];
+        pm.request.headers['X-Api-Key'] = pm.environment.get('api_key');
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("Authorization"));
+    EXPECT_EQ (request.headers.at ("X-Api-Key"), "secret123");
+}
+
+// The trap the doc now warns about, and why it warns: `pm.request.headers` is a
+// JS object, so its keys are case-sensitive even though HTTP header names are
+// not. A lower-case delete of a capitalised header is a silent no-op - this
+// caught a wrong sentence in the docs before it shipped.
+TEST_F (ScriptEngineTest, AWrongCaseDeleteDoesNotRemoveTheHeader) {
+    auto result = engine.execute_prerequest (R"JS(
+        delete pm.request.headers['authorization'];
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (request.headers.contains ("Authorization"));
+}
+
+TEST_F (ScriptEngineTest, DocExampleCaseInsensitiveDeleteLoopRemovesTheHeader) {
+    auto result = engine.execute_prerequest (R"JS(
+        Object.keys(pm.request.headers).forEach(function (name) {
+          if (name.toLowerCase() === 'authorization') delete pm.request.headers[name];
+        });
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("Authorization"));
+    EXPECT_TRUE (request.headers.contains ("Content-Type"));
+}
+
+// Two JS keys, one HTTP header. Whichever enumerated last would have won
+// silently, and one of them is the Authorization header, so the write-back
+// refuses the whole thing instead of guessing.
+TEST_F (ScriptEngineTest, HeaderNamesDifferingOnlyInCaseAreRejected) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['authorization'] = 'Bearer script-token';
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("case-insensitive"), std::string::npos)
+    << result.error_message;
+    // Nothing applied: the original engine-applied header still stands.
+    EXPECT_EQ (request.headers.at ("Authorization"), "Bearer token123");
 }

@@ -308,6 +308,52 @@ Json serialize (const vayu::db::Environment& e) {
     return json;
 }
 
+vayu::Environment parse_variables (const std::string& json_str) {
+    vayu::Environment env;
+    if (json_str.empty ()) {
+        return env;
+    }
+
+    try {
+        auto json = Json::parse (json_str);
+        if (json.is_object ()) {
+            for (auto& [key, value] : json.items ()) {
+                if (!value.is_object ()) {
+                    continue;
+                }
+                vayu::Variable var;
+                var.value   = value.value ("value", "");
+                var.enabled = value.value ("enabled", true);
+                var.secret  = value.value ("secret", false);
+                var.type    = value.value ("type", std::string{ "string" });
+                if (auto it = value.find ("createdAt");
+                    it != value.end () && it->is_number ()) {
+                    var.created_at = it->get<int64_t> ();
+                }
+                env[key] = std::move (var);
+            }
+        }
+    } catch (const std::exception&) {
+        // Return empty environment on parse error
+    }
+    return env;
+}
+
+std::string serialize_variables (const vayu::Environment& env) {
+    Json obj = Json::object ();
+    for (const auto& [key, var] : env) {
+        obj[key]            = Json::object ();
+        obj[key]["value"]   = var.value;
+        obj[key]["enabled"] = var.enabled;
+        obj[key]["secret"]  = var.secret;
+        obj[key]["type"]    = var.type.empty () ? std::string{ "string" } : var.type;
+        if (var.created_at.has_value ()) {
+            obj[key]["createdAt"] = *var.created_at;
+        }
+    }
+    return obj.dump ();
+}
+
 Json serialize (const vayu::db::Metric& metric) {
     Json json;
     json["id"]        = metric.id;

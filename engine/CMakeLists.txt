@@ -247,7 +247,6 @@ add_library(vayu_core STATIC
     src/http/event_loop/event_loop_impl.cpp
     src/http/thread_pool.cpp
     src/http/rate_limiter.cpp
-    src/http/sse.cpp
     src/http/script_parts.cpp
     src/utils/json.cpp
     src/utils/logger.cpp
@@ -377,8 +376,8 @@ if(VAYU_BUILD_TESTS)
         tests/http_client_test.cpp
         tests/json_test.cpp
         tests/script_engine_test.cpp
+        tests/script_completions_test.cpp
         tests/event_loop_test.cpp
-        tests/sse_test.cpp
         tests/db_test.cpp
         tests/db_concurrency_test.cpp
         tests/rate_limit_test.cpp
@@ -386,12 +385,14 @@ if(VAYU_BUILD_TESTS)
         tests/metrics_collector_test.cpp
         tests/execution_trace_test.cpp
         tests/import_route_test.cpp
+        tests/import_apply_route_test.cpp
         tests/config_route_test.cpp
         tests/requests_route_test.cpp
         tests/runs_route_test.cpp
         tests/collections_route_test.cpp
         tests/resource_write_route_test.cpp
         tests/globals_route_test.cpp
+        tests/script_variables_test.cpp
         tests/stats_route_test.cpp
         tests/execution_timeout_test.cpp
         tests/execution_http_version_test.cpp
@@ -401,6 +402,7 @@ if(VAYU_BUILD_TESTS)
         tests/run_manager_test.cpp
         tests/run_route_test.cpp
         tests/run_stop_test.cpp
+        tests/run_shutdown_test.cpp
         tests/run_config_validation_test.cpp
         tests/script_compose_test.cpp
         tests/encoding_test.cpp
@@ -428,6 +430,7 @@ if(VAYU_BUILD_TESTS)
         src/http/routes/oauth.cpp
         src/http/routes/oauth_authorize.cpp
         src/http/routes/execution.cpp
+        src/http/routes/scripting.cpp
     )
     
     target_link_libraries(vayu_tests PRIVATE

@@ -135,7 +135,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_request`       | write    | `POST /requests`                             | write toggle               |
 | `update_environment`   | write    | `GET`+`PUT /environments/:id` (fetch-merge)  | write toggle               |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `start_load_run`       | load     | `POST /runs`                                 | allowlist + caps + confirm |
+| `start_load_run`       | load     | `POST /runs` (+ `GET /requests/:id` with `requestId`) | allowlist + caps + confirm |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 
 Notes:
@@ -180,11 +180,28 @@ list as `preRequestScripts` / `postRequestScripts` on `POST /execute` - the
 script is blank are dropped). The renderer's load path builds the same kind of
 list for its `tests` field on `POST /runs`; MCP's only `POST /runs` caller
 (`start_load_run`) has no collection to chain-compose from - it forwards an
-agent-supplied ad-hoc `tests` string as-is, the same as its ad-hoc
-`preRequestScript`/`postRequestScript` (`tools.ts::buildExecutionPayload`), not
-a chain-built list. Composing the *content* of a script list is engine-side
-now; building the ordered *list* is still client-side, so it still needs both
-clients to agree.
+agent-supplied ad-hoc string as-is, the same as `run_request`'s ad-hoc
+`preRequestScript`/`postRequestScript`, not a chain-built list. Composing the
+*content* of a script list is engine-side now; building the ordered *list* is
+still client-side, so it still needs both clients to agree.
+
+**One validation script, one name.** The post-response script is one field in
+the app - the request builder's **Tests** tab - and has historically reached the
+engine under two key names: `postRequestScript` on `POST /execute`, `tests` on
+`POST /runs`. Both endpoints now accept both names, so MCP declares
+**`postRequestScript` on both `run_request` and `start_load_run`**, and a script
+an agent writes for one carries to the other unchanged. It is still placed under
+`tests` on a run payload (`tools.ts::readValidationScript` +
+`composeLoadRunRequest`), because that is the name a run's own composed scripts
+do *not* use - which is what lets an explicit script displace them rather than
+sit beside them. `tests` stays accepted on both as the
+engine's own spelling - a Zod object strips keys it does not declare, so
+removing it would turn a script the agent believes is running into silence.
+Passing both names is rejected with a `ToolArgError` rather than resolved by
+precedence: they are one slot, and dropping either would report a run as
+validated by assertions that never ran. Under load the script runs against
+*sampled* responses (`max_response_samples` / `response_sample_rate`), not every
+one.
 
 Because MCP talks to the engine directly, it must do that preparation itself.
 `resolve.ts` is the main-process port of the renderer pipeline
@@ -211,6 +228,39 @@ clicking Send:
   the call, so `httpVersion` forwards only when the caller actually supplies
   it - unlike the saved-request path, there is nothing concrete to protect from
   an engine-side default by always sending it.
+  `run_request` takes an agent-written `preRequestScript` / `postRequestScript`
+  instead, since an ad-hoc call has no chain to compose from; `start_load_run`
+  takes the same `postRequestScript` for a URL-only run.
+- **One post-request script, three names, all accepted everywhere.** It is
+  stored as `postRequestScript` (on a request and on a collection), sent as
+  `postRequestScripts` / `postRequestScript` to `POST /execute`, and as `tests`
+  to `POST /runs`. Both routes read every spelling through
+  `read_post_request_script`, so a payload composed for one endpoint starts the
+  other kind of run unchanged - which is what lets `start_load_run` send a saved
+  request's composed `postRequestScripts` to `/runs`. The names are tried in a
+  fixed order and the first non-blank wins; they are never merged. MCP still
+  shows the agent a single name (see *One validation script, one name* above) -
+  that is now a courtesy rather than a translation the wire depends on.
+- **Load-testing a saved request** - `start_load_run` with a `requestId`
+  composes it through the same `composeSavedRequest` that backs
+  `run_collection_smoke`: variables resolved, stored auth applied through the
+  collection chain, and the chain's + its own test scripts attached. Any field
+  stated explicitly (url, method, headers, body, postRequestScript) overrides
+  the composed one; an explicit script *replaces* the composed ones rather than
+  joining them. Without a `requestId` the run is ad-hoc and `url` is required.
+  A saved request's **pre-request** script cannot run under load - `POST /runs`
+  has no such hook - so it is left out of the payload and the count of dropped
+  scripts is reported in the tool's result rather than passing silently.
+- **Request mutation** - a pre-request script's `pm.request` edits (url, method,
+  headers, body) are applied to the request that is sent, so an agent can sign a
+  request or override the engine-applied auth from `run_request`, and a saved
+  request's stored pre-request script does the same under
+  `run_collection_smoke`. The write-back is engine-side
+  ([scripting.md](scripting.md#mutating-the-request-pre-request-scripts)), so
+  both tools get it without composing anything extra. A rejected edit comes back
+  as `preScriptError` in the response. `start_load_run` has no pre-request hook
+  at all - `POST /runs` runs only the deferred `tests` script - so it does not
+  offer the field rather than accepting one that would never run.
 
 Resolution only fetches the variable sources when a call needs them (a field
 carries a `{{template}}`, or auth is `inherit`); a fully-literal call skips the

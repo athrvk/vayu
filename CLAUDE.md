@@ -325,6 +325,7 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
+| POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
 | POST | `/collections`, `/requests`, `/environments` | **Create only** - 409 on an existing id |
 | PUT | `/collections/:id`, `/requests/:id`, `/environments/:id` | **Update only** (merge-patch) - 404 on a missing id |
 
@@ -347,9 +348,15 @@ Three things worth knowing before you design around them:
   The rule lives in one place per side - `apply_*_field` in
   `engine/include/vayu/http/routes.hpp`, and `apiService.updateX` in
   `app/src/services/api.ts` - so add fields there rather than re-deriving the
-  rule per handler. A client-supplied `id` on **create** is still accepted,
-  solely because the import orchestrator pre-assigns ids (#96 removes the need,
-  #97 then rejects the field).
+  rule per handler. A client-supplied `id` on **create** is still accepted, but
+  nothing in the app sends one any more: import goes through **`POST
+  /import/apply`** (#96), which takes opaque `tempId`s, generates every real id
+  engine-side, returns the `idMap`, and writes the whole tree in one transaction
+  (a rejected payload persists nothing, so the old client-side rollback is gone).
+  #97 then rejects the `id` field outright. The same per-resource field appliers
+  back both paths - `apply_collection_fields` / `apply_request_fields` /
+  `apply_environment_fields`, declared in `routes.hpp` - so add a field there and
+  bulk import gets it too.
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
   to load a restored request tab or a design-run copy on cold start - one round
   trip, not the old scan of every collection's list. A `404` means the request
@@ -379,12 +386,17 @@ of that duplication: both clients now collect an ordered list of `ScriptPart`s
 (root-to-leaf chain, then the request's own, each naming its origin) and send
 the list as `preRequestScripts` / `postRequestScripts` on `POST /execute` - and
 the **engine** joins them with `"\n\n"` and runs the result. The renderer's load
-path sends the same kind of list as `tests` on `POST /runs`. MCP has no
-chain-composing `/runs` caller: `start_load_run` takes an agent-supplied ad-hoc
-`tests` string (like its ad-hoc `preRequestScript`/`postRequestScript`, see
-`tools.ts::buildExecutionPayload`), not a chain-built list, so this is not "both
-clients send the list on `/runs`". Each client still builds its own script-part
-list itself (the `scriptParts` helper in
+path sends the same kind of list as `tests` on `POST /runs`; MCP's
+`start_load_run` sends it as `postRequestScripts` when given a `requestId`
+(`tools.ts::composeLoadRunRequest`, reusing `composeSavedRequest`), or an
+agent-supplied ad-hoc `tests` string for a URL-only run. **Both names reach the
+same script**: `read_post_request_script` (`engine/src/http/script_parts.cpp`)
+owns every spelling the post-request script answers to - stored as
+`postRequestScript`, `postRequestScript(s)` on `/execute`, `tests` on `/runs` -
+and both routes read through it, so a payload composed for one endpoint can
+start the other kind of run unchanged. Add a spelling to that table, never to a
+route. Each client still builds its own script-part list itself (the
+`scriptParts` helper in
 `app/src/modules/request-builder/utils/script-parts.ts` and in
 `app/electron/mcp/resolve.ts` - the same intentional duplication, since MCP
 cannot import from `app/src/`), so a change to the list-building rule (e.g. what

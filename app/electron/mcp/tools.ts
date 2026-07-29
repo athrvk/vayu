@@ -130,6 +130,19 @@ function errorResult(message: string): ToolResult {
 	return { content: [{ type: "text", text: message }], isError: true };
 }
 
+/**
+ * Append a note to a result's text without disturbing its structured content.
+ * For telling an agent what a call could *not* do - a caveat printed nowhere is
+ * the same as not having noticed it.
+ */
+function withCaveat(result: ToolResult, caveat: string): ToolResult {
+	if (!caveat) return result;
+	return {
+		...result,
+		content: [...result.content, { type: "text" as const, text: caveat.trimStart() }],
+	};
+}
+
 function engineErrorResult(err: unknown): ToolResult {
 	if (err instanceof EngineRequestError) {
 		return errorResult(`Engine error (${err.status}): ${err.body || err.message}`);
@@ -168,64 +181,104 @@ function requireStr(args: Record<string, unknown>, key: string): string {
 class ToolArgError extends Error {}
 
 /**
- * Build the engine `/execute` or `/runs` body from loose tool arguments. When a
- * `resolver` is supplied, `{{variables}}` are substituted in the URL, header
- * keys/values, and body content (the app resolves these renderer-side before
- * the engine ever sees them; MCP must do the same). `opts.url` lets the caller
- * pass an already-resolved URL (it is resolved once, up front, for the
- * allowlist check). The body is emitted as `{ mode, content }` - the shape the
+ * The request fields an agent stated directly, resolved - and *only* the ones it
+ * actually supplied, so this can be laid over an already-composed saved request
+ * without a `method: "GET"` default clobbering its stored verb.
+ *
+ * Separate from {@link buildExecutionPayload} so the ad-hoc path and the
+ * saved-request path share one copy of the header/body shaping rules rather
+ * than growing a second. When a `resolver` is supplied, `{{variables}}` are
+ * substituted in the URL, header keys/values, and body content (the app
+ * resolves these renderer-side before the engine ever sees them; MCP must do
+ * the same). The body is emitted as `{ mode, content }` - the shape the
  * engine's `deserialize_request` reads (it keys off `mode`, not `type`).
  */
-function buildExecutionPayload(
+function readRequestOverrides(
 	args: Record<string, unknown>,
-	opts?: { resolver?: Resolver; url?: string }
+	resolver?: Resolver
 ): Record<string, unknown> {
-	const rs = (s: string): string => opts?.resolver?.resolveString(s) ?? s;
-	const payload: Record<string, unknown> = {
-		method: str(args, "method") ?? "GET",
-		url: opts?.url ?? rs(requireStr(args, "url")),
-	};
+	const rs = (s: string): string => resolver?.resolveString(s) ?? s;
+	const out: Record<string, unknown> = {};
+	// Upper-cased because the engine's `parse_method` matches the verb exactly,
+	// and because `composeSavedRequest` already normalises this - the two paths
+	// have to agree on what a saved request's method looks like on the wire.
+	const method = str(args, "method");
+	if (method !== undefined) out.method = method.toUpperCase();
+	const url = str(args, "url");
+	if (url !== undefined) out.url = rs(url);
 	if (args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)) {
 		const headers: Record<string, string> = {};
 		for (const [key, value] of Object.entries(args.headers as Record<string, unknown>)) {
 			headers[rs(key)] = rs(String(value));
 		}
-		payload.headers = headers;
+		out.headers = headers;
 	}
 	const bodyContent = str(args, "body");
 	if (bodyContent !== undefined) {
-		payload.body = { mode: str(args, "bodyType") ?? "text", content: rs(bodyContent) };
+		out.body = { mode: str(args, "bodyType") ?? "text", content: rs(bodyContent) };
 	}
-	// preRequestScript/postRequestScript here are an agent-supplied ad-hoc
-	// script, not collection-chain composition - there is no chain to collect
-	// parts from, so this deliberately keeps sending the legacy singular key
-	// (still accepted by the engine's `read_script`), not `ScriptPart[]`.
-	//
-	// httpVersion: unlike `composeSavedRequest`'s saved-request path, there is
-	// no stored row to fall back to here, so this forwards the agent-supplied
-	// value only when present rather than defaulting to "auto" - the same
-	// treatment `followRedirects`/`maxRedirects` get on this ad-hoc path (they
-	// are not forwarded at all unless the caller adds them). The `run_request`/
-	// `start_load_run` Zod schemas restrict the value to a known protocol.
-	//
-	// What makes omitting it *safe* rather than merely consistent: an absent
-	// httpVersion leaves `Request::http_version` at its default member
-	// initializer, which is Auto (`engine/src/utils/json.cpp`'s
-	// deserialize_request only assigns inside `if (json.contains(...))`). Note
-	// `engine/src/http/routes/execution.cpp` calls that equivalence
-	// "incidental" - if a config-backed default is ever resolved at that layer,
-	// omitting the field here stops meaning "auto" and this needs revisiting.
-	for (const key of [
-		"requestId",
-		"environmentId",
-		"preRequestScript",
-		"postRequestScript",
-		"httpVersion",
-	]) {
+	return out;
+}
+
+/**
+ * Build the engine `/execute` or `/runs` body from loose tool arguments.
+ * `opts.url` lets the caller pass an already-resolved URL (it is resolved once,
+ * up front, for the allowlist check).
+ */
+function buildExecutionPayload(
+	args: Record<string, unknown>,
+	opts?: { resolver?: Resolver; url?: string }
+): Record<string, unknown> {
+	const overrides = readRequestOverrides(args, opts?.resolver);
+	const payload: Record<string, unknown> = {
+		...overrides,
+		method: (overrides.method as string | undefined) ?? "GET",
+		url: opts?.url ?? (overrides.url as string | undefined) ?? requireStr(args, "url"),
+	};
+	// Scripts are deliberately *not* forwarded here. Each handler adds its own,
+	// because what a script *is* differs by caller: an ad-hoc string from the
+	// agent, or the chain-composed `postRequestScripts` list that
+	// `composeLoadRunRequest` builds from a saved request. Forwarding a string
+	// here would quietly sit beside a composed list and, since the engine reads
+	// the list first, be ignored.
+	// httpVersion rides with requestId/environmentId rather than with the
+	// scripts above: it is a plain scalar the engine reads the same way on both
+	// endpoints. Forwarded only when the agent supplies it - unlike
+	// composeSavedRequest's path there is no stored row to protect from an
+	// engine-side default, and an absent field already resolves to Auto
+	// (`deserialize_request` only assigns inside `if (json.contains(...))`).
+	for (const key of ["requestId", "environmentId", "httpVersion"]) {
 		const v = str(args, key);
 		if (v !== undefined) payload[key] = v;
 	}
 	return payload;
+}
+
+/**
+ * The post-response validation script an agent supplied, under either name.
+ *
+ * One concept, historically two engine keys: `POST /execute` grew up calling it
+ * `postRequestScript`, `POST /runs` calls it `tests`. Both endpoints now read
+ * both names (`read_post_request_script`), so the choice here is purely about
+ * what an agent sees: MCP names it `postRequestScript` on both tools - the way
+ * the app's single **Tests** tab drives Send and a load run alike - and keeps
+ * `tests` accepted as the engine's own spelling. Supplying both is rejected
+ * rather than silently resolved: with no way to know which the agent meant,
+ * picking one would drop a script the agent believes is running.
+ *
+ * Ad-hoc, so this stays a plain string (still accepted by the engine's
+ * `read_script`) rather than the `ScriptPart[]` the chain-composing callers
+ * send - there is no collection chain here to collect parts from.
+ */
+function readValidationScript(args: Record<string, unknown>): string | undefined {
+	const post = str(args, "postRequestScript");
+	const tests = str(args, "tests");
+	if (post !== undefined && tests !== undefined) {
+		throw new ToolArgError(
+			'Pass either "postRequestScript" or "tests", not both - they are the same script.'
+		);
+	}
+	return post ?? tests;
 }
 
 /** Regex used only to *detect* whether resolution is needed (non-global: no lastIndex state). */
@@ -263,6 +316,91 @@ async function resolutionScopeFor(
 	});
 }
 
+/**
+ * Build the request half of a `POST /runs` body - everything except the load
+ * shape (mode, duration, concurrency…).
+ *
+ * **Two shapes, one rule.** Given a `requestId`, the saved request is composed
+ * exactly as the app composes it for a load run and as `run_collection_smoke`
+ * composes it for a Send - variables resolved, its stored auth applied through
+ * the collection chain, and the chain's + its own test scripts attached. That
+ * composition is `composeSavedRequest`, reused rather than reimplemented, so
+ * "what a saved request means" has one definition for both tools. Anything the
+ * agent states explicitly - url, method, headers, body, auth, tests - overrides
+ * the composed field. Without a `requestId` the run is ad-hoc and `url` is
+ * required.
+ *
+ * The composed scripts stay under `postRequestScripts`: `POST /runs` reads that
+ * name as an alias of `tests` (`read_post_request_script`), which is what lets
+ * one composed request start either kind of run without a second shape. Before
+ * that alias existed, this tool could not have sent them at all.
+ *
+ * `droppedPreRequestScripts` counts what a load run cannot honour - the engine
+ * has no pre-request hook on `POST /runs`, so a saved request that signs itself
+ * in a pre-request script goes out unsigned under load. Counted and reported
+ * rather than dropped in silence.
+ */
+async function composeLoadRunRequest(
+	args: Record<string, unknown>,
+	ctx: ToolContext,
+	signal?: AbortSignal
+): Promise<{ payload: Record<string, unknown>; droppedPreRequestScripts: number }> {
+	const savedId = str(args, "requestId");
+	let payload: Record<string, unknown>;
+	let resolver: ResolutionContext;
+	let droppedPreRequestScripts = 0;
+
+	if (savedId === undefined) {
+		if (str(args, "url") === undefined) {
+			throw new ToolArgError(
+				'Pass "url" for an ad-hoc load run, or "requestId" to load-test a saved request.'
+			);
+		}
+		resolver = await resolutionScopeFor(args, ctx.client, signal);
+		payload = buildExecutionPayload(args, {
+			resolver,
+			url: resolver.resolveString(requireStr(args, "url")),
+		});
+	} else {
+		const saved = (await ctx.client.getRequest(savedId, signal)) as SavedRequestLike | null;
+		if (!saved || typeof saved !== "object") {
+			throw new ToolArgError(`No saved request with id "${savedId}".`);
+		}
+		const environmentId = str(args, "environmentId");
+		// The saved request's own collection scopes resolution; an explicit
+		// collectionId is only a fallback for a request that has none.
+		resolver = await loadResolutionContext(ctx.client, {
+			collectionId: saved.collectionId || str(args, "collectionId"),
+			environmentId,
+			signal,
+		});
+		const composed = composeSavedRequest(saved, resolver.chain, resolver, environmentId);
+		droppedPreRequestScripts = composed.preRequestScripts?.length ?? 0;
+		const { preRequestScripts: _unrunnable, ...runnable } = composed;
+		payload = { ...runnable, ...readRequestOverrides(args, resolver) };
+	}
+
+	const authArg = readAuthArg(args);
+	if (authArg) {
+		const auth = composeAuth(authArg, resolver.chain, resolver);
+		if (auth) payload.auth = auth;
+	}
+
+	// An agent-written validation script replaces the composed one rather than
+	// joining it, and must clear `postRequestScripts` to do so: /runs reads both
+	// names now, prefers the list, and would otherwise run the saved request's
+	// assertions while silently ignoring the ones the agent asked for. This is
+	// the only place either name is placed on a run payload - the handler does
+	// not add it again.
+	const adHocScript = readValidationScript(args);
+	if (adHocScript !== undefined) {
+		delete payload.postRequestScripts;
+		payload.tests = adHocScript;
+	}
+
+	return { payload, droppedPreRequestScripts };
+}
+
 // --- Shared input schema fragments ------------------------------------------
 
 /** Optional resolution scope shared by the ad-hoc execute/load tools. */
@@ -277,6 +415,26 @@ const environmentIdInput = z
 	.string()
 	.optional()
 	.describe("Optional environment ID whose variables resolve {{templates}} in this request.");
+
+/**
+ * The post-response validation script, declared identically on `run_request` and
+ * `start_load_run` so one script an agent writes carries between them - the way
+ * the app's single **Tests** tab drives both Send and a load run. See
+ * `readValidationScript` for why the `tests` alias exists and stays.
+ */
+const validationScriptInput = z
+	.string()
+	.optional()
+	.describe(
+		"JavaScript run after a response arrives; use pm.test(...) for assertions, returned as test results. This is the same script the app's Tests tab holds - under load it runs against sampled responses, not every one."
+	);
+
+const validationScriptAliasInput = z
+	.string()
+	.optional()
+	.describe(
+		"Alias for `postRequestScript` (the engine's own name for it on a load run). Pass one or the other, not both."
+	);
 
 /**
  * Optional auth block. Callers can copy a saved request's `auth` object verbatim
@@ -498,7 +656,7 @@ export const TOOLS: McpTool[] = [
 		name: "run_request",
 		category: "execute",
 		description:
-			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.)",
+			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.)",
 		readOnly: false,
 		annotations: {
 			title: "Send a request",
@@ -527,6 +685,14 @@ export const TOOLS: McpTool[] = [
 			requestId: z.string().optional().describe("Optional saved request ID to link."),
 			environmentId: environmentIdInput,
 			collectionId: collectionIdInput,
+			preRequestScript: z
+				.string()
+				.optional()
+				.describe(
+					"JavaScript run before the request is sent. It may edit pm.request.url / .method / .headers / .body, and those edits are what gets sent - a script-set header overrides the engine-applied auth."
+				),
+			postRequestScript: validationScriptInput,
+			tests: validationScriptAliasInput,
 		},
 		handler: async (args, ctx, signal) => {
 			const rc = await resolutionScopeFor(args, ctx.client, signal);
@@ -534,6 +700,11 @@ export const TOOLS: McpTool[] = [
 			const gate = checkAllowlist(url, ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
 			const payload = buildExecutionPayload(args, { resolver: rc, url });
+			// `/execute`'s own key names for the two ad-hoc scripts.
+			const preScript = str(args, "preRequestScript");
+			if (preScript !== undefined) payload.preRequestScript = preScript;
+			const postScript = readValidationScript(args);
+			if (postScript !== undefined) payload.postRequestScript = postScript;
 			const authArg = readAuthArg(args);
 			if (authArg) {
 				const auth = composeAuth(authArg, rc.chain, rc);
@@ -821,7 +992,7 @@ export const TOOLS: McpTool[] = [
 		name: "start_load_run",
 		category: "load",
 		description:
-			"Start a load test against a URL. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
+			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain\'s and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu\'s caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here: the engine runs one on a single request only, never on a load run. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`.",
 		readOnly: false,
 		annotations: {
 			title: "Start load test",
@@ -831,7 +1002,12 @@ export const TOOLS: McpTool[] = [
 		},
 		inputSchema: {
 			method: z.string().optional(),
-			url: z.string().describe("Target URL (may contain {{variables}})."),
+			url: z
+				.string()
+				.optional()
+				.describe(
+					"Target URL (may contain {{variables}}). Required unless `requestId` names a saved request to load-test; supplying both retargets that request at this URL."
+				),
 			headers: z.record(z.string()).optional(),
 			body: z.string().optional(),
 			bodyType: z.string().optional(),
@@ -873,10 +1049,16 @@ export const TOOLS: McpTool[] = [
 			iterations: z.number().optional().describe("Iteration count (iterations mode)."),
 			targetRps: z.number().optional().describe("Target RPS (constant_rps)."),
 			maxInFlight: z.number().optional().describe("In-flight cap (constant_rps only)."),
-			requestId: z.string().optional(),
+			requestId: z
+				.string()
+				.optional()
+				.describe(
+					"Load-test a saved request. It is composed the way the app composes it: {{variables}} resolved, its stored auth applied (inheriting through the collection chain), and its collection-chain + own test scripts run against sampled responses. Any field you also pass explicitly (url, method, headers, body, auth, tests) overrides the saved one. Omit this and `url` is required, for an ad-hoc run."
+				),
 			environmentId: environmentIdInput,
 			collectionId: collectionIdInput,
-			tests: z.string().optional().describe("Optional deferred validation script."),
+			postRequestScript: validationScriptInput,
+			tests: validationScriptAliasInput,
 			confirmed: z
 				.boolean()
 				.optional()
@@ -885,8 +1067,19 @@ export const TOOLS: McpTool[] = [
 				),
 		},
 		handler: async (args, ctx, signal) => {
-			const rc = await resolutionScopeFor(args, ctx.client, signal);
-			const url = rc.resolveString(requireStr(args, "url"));
+			let composed;
+			try {
+				composed = await composeLoadRunRequest(args, ctx, signal);
+			} catch (err) {
+				if (err instanceof ToolArgError) return errorResult(err.message);
+				return engineErrorResult(err);
+			}
+			const url = String(composed.payload.url ?? "");
+			if (!url) {
+				return errorResult(
+					`Saved request "${str(args, "requestId")}" has no URL to load-test.`
+				);
+			}
 			const gate = checkAllowlist(url, ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
 
@@ -901,14 +1094,9 @@ export const TOOLS: McpTool[] = [
 			if (!caps.ok) return errorResult(caps.error!);
 
 			const payload: Record<string, unknown> = {
-				...buildExecutionPayload(args, { resolver: rc, url }),
+				...composed.payload,
 				mode: str(args, "mode") ?? "constant_concurrency",
 			};
-			const authArg = readAuthArg(args);
-			if (authArg) {
-				const auth = composeAuth(authArg, rc.chain, rc);
-				if (auth) payload.auth = auth;
-			}
 			for (const key of [
 				"concurrency",
 				"startConcurrency",
@@ -918,10 +1106,18 @@ export const TOOLS: McpTool[] = [
 			]) {
 				if (typeof args[key] === "number") payload[key] = args[key];
 			}
-			for (const key of ["duration", "rampUpDuration", "tests"]) {
+			for (const key of ["duration", "rampUpDuration"]) {
 				const v = str(args, key);
 				if (v !== undefined) payload[key] = v;
 			}
+
+			// A saved request's pre-request script cannot run under load - the
+			// engine has no such hook on POST /runs. Say so rather than let an agent
+			// believe the request was prepared the way a Send prepares it.
+			const caveat =
+				composed.droppedPreRequestScripts > 0
+					? `\n\nNote: ${composed.droppedPreRequestScripts} pre-request script(s) on this saved request were NOT applied - POST /runs has no pre-request hook, so anything they sign or rewrite is missing from the requests this run sends.`
+					: "";
 
 			const summary = `Start a load test against ${payload.url} (mode: ${payload.mode})?`;
 
@@ -945,7 +1141,10 @@ export const TOOLS: McpTool[] = [
 					if (outcome.action !== "accept" || outcome.content?.proceed === false) {
 						return textResult("Load run not started - the user declined.");
 					}
-					return callEngine(() => ctx.client.startRun(payload, signal));
+					return withCaveat(
+						await callEngine(() => ctx.client.startRun(payload, signal)),
+						caveat
+					);
 				} catch {
 					// Client can't elicit - fall through to the flag-based gate.
 				}
@@ -956,10 +1155,10 @@ export const TOOLS: McpTool[] = [
 				return textResult(
 					"AWAITING CONFIRMATION - no run was started.\n\n" +
 						"This is a preview. To start the load test, call start_load_run again with confirmed: true and the same arguments.\n\n" +
-						`Planned run:\n${JSON.stringify(payload, null, 2)}`
+						`Planned run:\n${JSON.stringify(payload, null, 2)}${caveat}`
 				);
 			}
-			return callEngine(() => ctx.client.startRun(payload, signal));
+			return withCaveat(await callEngine(() => ctx.client.startRun(payload, signal)), caveat);
 		},
 	},
 	{

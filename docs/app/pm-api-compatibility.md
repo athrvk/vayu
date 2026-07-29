@@ -57,8 +57,9 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   `pm.environment` / `pm.collectionVariables` / `pm.globals` instead)
 - `pm.iterationData.*` - data-file driven runs
 - `pm.cookies.*`
-- Request mutation - `pm.request.headers.add/upsert/remove(...)`, and editing the URL,
-  method, or body from a script (see below)
+- Postman's header *methods* - `pm.request.headers.add/upsert/remove(...)`. Vayu's
+  `pm.request.headers` is a plain object, so assignment and `delete` do the same
+  job (see below)
 - `pm.info`, `pm.execution`, `pm.visualizer`
 - The `tests["name"] = bool` legacy assertion style (use `pm.test`)
 
@@ -66,34 +67,51 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
 
 ## Request mutation & URL variables
 
-A pre-request script **cannot change the outgoing request** in Vayu today.
+A **pre-request** script can change the outgoing request. `pm.request`'s `url` /
+`method` / `headers` / `body` are copied out of the C++ `Request` into a plain JS object
+(`script_engine.cpp`, `setup_pm_request`), and after the script returns that object is read
+back and applied to the same `Request` before `client.send()`
+(`apply_pm_request_writeback`). In a **test** script it stays a read-only record: the
+request has already gone out, so nothing is written back and a mutation there is discarded.
 
-- `pm.request` is a read-only snapshot. Its `url` / `method` / `headers` / `body` are copied
-  out of the C++ `Request` into a plain JS object (`script_engine.cpp`,
-  `setup_pm_request`); there are no setters and the object is never read back after the
-  script runs (only `tests` and console output are). Assigning `pm.request.url = …` mutates
-  the throwaway JS object and is discarded.
-- Setting a variable that the URL references (`pm.environment.set("host", …)` with a
-  `{{host}}` in the URL) also has no effect on the current request: `{{…}}` placeholders are
-  resolved **app-side, before** the payload reaches the engine
+```javascript
+pm.request.headers['X-Signature'] = sign(pm.request.body);
+delete pm.request.headers['Authorization'];
+pm.request.url = 'https://api.example.com/v2/users';
+pm.request.method = 'POST';
+pm.request.body = JSON.stringify({ n: 2 });
+```
+
+- **The object is authoritative, not a diff.** Whatever `pm.request.headers` holds at the
+  end is the header set that is sent, which is what makes `delete` remove a header the
+  engine applied.
+- **The script wins over engine-applied auth.** `build_request` resolves auth into the
+  request before the script runs, so a script-set `Authorization` replaces the resolved one.
+- **A value the engine cannot send is refused, not coerced.** `url`/`method`/`body` must be
+  strings (`method` one of the seven verbs); a header value may be a string, number or
+  boolean. Anything else rejects the whole write-back - all or nothing - and surfaces as
+  `preScriptError`, which the response pane's Console tab shows.
+- **Setting a variable still does not re-render the URL.** `{{…}}` placeholders are resolved
+  **app-side, before** the payload reaches the engine
   (`app/src/modules/request-builder/index.tsx`, `resolveString(request.url)`), whereas the
-  pre-request script runs **later, in the engine**. The variable write only affects
-  subsequent runs.
+  pre-request script runs **later, in the engine**. So `pm.environment.set("host", …)` with
+  a `{{host}}` in the URL affects subsequent runs only - assign `pm.request.url` to change
+  this one.
+- **Load tests do not run pre-request scripts** at all, so this is a Send / Design Mode
+  capability.
 
-This matches Postman's behaviour for the URL/method/body (its docs mark the body immutable
-and provide no URL mutators) but **diverges on headers** - Postman _does_ support
-`pm.request.headers.add/upsert/remove`, which Vayu does not yet implement.
+This goes **further than Postman** on the URL, method and body, which Postman's docs mark
+immutable or provide no mutators for, and reaches the same end as its
+`pm.request.headers.add/upsert/remove` by plain-object assignment and `delete`.
 
 ### TODO (future)
 
-To make the full Postman pattern work - "set a variable in a pre-request script and have it
-change the outgoing URL/headers" - variable resolution has to move (or be duplicated) into
-the engine and run **after** the pre-request script, instead of entirely app-side beforehand.
-That means sending the _unresolved_ URL/headers plus the variable maps to the engine and
-interpolating `{{…}}` in C++ post-script (and applying the same to the load-test path). This
-is a deliberate architectural change in resolution ownership, deferred for now. A smaller
-intermediate step is mutable headers (`pm.request.headers.*`) with write-back from the JS
-request object to the C++ `Request` before `client.send()`.
+"Set a variable in a pre-request script and have it change the outgoing URL" still does not
+work, and cannot until variable resolution moves (or is duplicated) into the engine and runs
+**after** the pre-request script instead of entirely app-side beforehand. That means sending
+the _unresolved_ URL/headers plus the variable maps to the engine and interpolating `{{…}}`
+in C++ post-script (and applying the same to the load-test path) - a deliberate change in
+resolution ownership, deferred for now (`docs/plans/pending-backlog.md` → **A1**).
 
 ---
 

@@ -69,8 +69,10 @@ namespace event_loop {
 constexpr size_t MAX_CONCURRENT = 1000;
 /// Maximum concurrent connections per host (per worker).
 constexpr size_t MAX_PER_HOST = 200;
-/// Timeout for event loop polling in milliseconds
-constexpr int POLL_TIMEOUT_MS = 10;
+/// Timeout for a worker's curl_multi_poll in milliseconds. Deliberately short:
+/// it only bounds how long a worker with active transfers blocks waiting for
+/// IO, and submit() interrupts the poll via curl_multi_wakeup anyway.
+constexpr int POLL_TIMEOUT_MS = 1;
 /// DNS cache timeout in seconds (avoids DNS resolver saturation).
 /// Governs both curl's own cache and the pre-resolution pin cache.
 /// 0 disables caching; a negative value never expires.
@@ -156,6 +158,12 @@ constexpr int DEFAULT_LIVE_REPLAY_WINDOW_MS = 300000;
 constexpr size_t DEFAULT_MAX_LIVE_TICKS = 50000;
 /// Size of the context pool for request handling
 constexpr size_t CONTEXT_POOL_SIZE = 64;
+/// How long `RunManager::shutdown` waits for signalled runs to reach a terminal
+/// status before it logs that they have not. The *wait* is bounded; the join
+/// that follows it is not, because abandoning a still-running worker is exactly
+/// the use-after-free the drain exists to prevent. Matches the 5s the daemon
+/// waited before the drain was ordered.
+constexpr int64_t RUN_SHUTDOWN_GRACE_MS = 5000;
 } // namespace server
 
 /**

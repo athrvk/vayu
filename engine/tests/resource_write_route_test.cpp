@@ -20,6 +20,14 @@
  *    ignoring the write. The environments `variables: null` case is a
  *    regression test: it used to store the literal text `null`.
  *
+ *  - **Object-shaped fields reject a wrong shape** (issue #133).
+ *    `variables`, `auth` and a request's `body` are dumped JSON blobs.
+ *    A non-object used to be dumped verbatim, stored, and then
+ *    silently discarded by every reader - `auth` most severely, since
+ *    a request the user believed carried credentials went out bare.
+ *    Those tests assert the **stored blob**, because a response-only
+ *    assertion passes against the old code too.
+ *
  * Follows the suite's route-test convention (requests_route_test.cpp): the
  * routes' extracted cores are exercised directly, no in-process HTTP server.
  */
@@ -30,6 +38,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -107,6 +116,17 @@ class ResourceWriteRouteTest : public ::testing::Test {
         { "method", "GET" }, { "url", "https://example.com" } });
         EXPECT_EQ (status, 200);
         return body["id"].get<std::string> ();
+    }
+
+    /**
+     * Values that are valid JSON but not an object - each one used to be dumped
+     * into the blob column verbatim. `"bearer"` is the realistic one: an `auth`
+     * written as a bare mode string rather than `{"mode":"bearer",...}`.
+     */
+    static const std::vector<json>& wrong_shapes () {
+        static const std::vector<json> values{ json (42), json ("bearer"),
+            json::array ({ 1, 2 }), json (true) };
+        return values;
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -217,6 +237,46 @@ TEST_F (ResourceWriteRouteTest, CollectionCreateNullMeansDefault) {
     EXPECT_TRUE (body["variables"].empty ());
     EXPECT_EQ (body["auth"]["mode"], "none");
     EXPECT_EQ (body["description"], "");
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionWrongShapeObjectFieldIsRejected) {
+    const std::string id = make_collection ();
+    ASSERT_EQ (
+    update_collection_response (*db_, id,
+    json{ { "variables", { { "token", { { "value", "abc" }, { "enabled", true } } } } },
+    { "auth", { { "mode", "bearer" }, { "token", "t" } } } })
+    .first,
+    200);
+    const auto before = *db_->get_collection (id);
+
+    for (const char* field : { "variables", "auth" }) {
+        for (const json& bad : wrong_shapes ()) {
+            auto [status, body] =
+            update_collection_response (*db_, id, json{ { field, bad } });
+            EXPECT_EQ (status, 400) << field << " = " << bad.dump ();
+            EXPECT_NE (body["error"].get<std::string> ().find (field), std::string::npos)
+            << "the 400 must name the field";
+        }
+    }
+
+    // The stored blobs are what matters: the old helper returned 200 and wrote
+    // the junk, so asserting only the response would pass either way.
+    const auto after = *db_->get_collection (id);
+    EXPECT_EQ (after.variables, before.variables);
+    EXPECT_EQ (after.auth, before.auth);
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionCreateWrongShapeObjectFieldIsRejected) {
+    for (const char* field : { "variables", "auth" }) {
+        for (const json& bad : wrong_shapes ()) {
+            auto [status, body] = create_collection_response (
+            *db_, json{ { "name", "N" }, { field, bad } });
+            EXPECT_EQ (status, 400) << field << " = " << bad.dump ();
+            EXPECT_NE (body["error"].get<std::string> ().find (field), std::string::npos);
+        }
+    }
+    EXPECT_TRUE (db_->get_collections ().empty ())
+    << "a rejected create must not leave a record behind";
 }
 
 TEST_F (ResourceWriteRouteTest, CollectionUpdateKeepsCycleGuard) {
@@ -335,6 +395,48 @@ TEST_F (ResourceWriteRouteTest, RequestMalformedKeyValueEntryIsRejected) {
              { "headers", json::array ({ json{ { "key", "X" } } }) } });
     EXPECT_EQ (status, 400);
     EXPECT_NE (body["error"].get<std::string> ().find ("index 0"), std::string::npos);
+}
+
+TEST_F (ResourceWriteRouteTest, RequestWrongShapeObjectFieldIsRejected) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    ASSERT_EQ (update_request_response (*db_, id,
+               json{ { "body", { { "mode", "raw" }, { "raw", "{}" } } },
+               { "auth", { { "mode", "bearer" }, { "token", "t" } } } })
+               .first,
+    200);
+    const auto before = *db_->get_request (id);
+
+    for (const char* field : { "body", "auth" }) {
+        for (const json& bad : wrong_shapes ()) {
+            auto [status, error] =
+            update_request_response (*db_, id, json{ { field, bad } });
+            EXPECT_EQ (status, 400) << field << " = " << bad.dump ();
+            EXPECT_NE (error["error"].get<std::string> ().find (field), std::string::npos);
+        }
+    }
+
+    const auto after = *db_->get_request (id);
+    EXPECT_EQ (after.body, before.body);
+    EXPECT_EQ (after.auth, before.auth)
+    << "a stored non-object auth reads back as no auth, and the request goes "
+       "out bare";
+}
+
+TEST_F (ResourceWriteRouteTest, RequestCreateWrongShapeObjectFieldIsRejected) {
+    const std::string collection = make_collection ();
+    for (const char* field : { "body", "auth" }) {
+        for (const json& bad : wrong_shapes ()) {
+            json payload{ { "collectionId", collection }, { "name", "R" },
+                { "method", "GET" }, { "url", "https://example.com" } };
+            payload[field]       = bad;
+            auto [status, error] = create_request_response (*db_, payload);
+            EXPECT_EQ (status, 400) << field << " = " << bad.dump ();
+            EXPECT_NE (error["error"].get<std::string> ().find (field), std::string::npos);
+        }
+    }
+    EXPECT_TRUE (db_->get_requests_in_collection (collection).empty ())
+    << "a rejected create must not leave a record behind";
 }
 
 TEST_F (ResourceWriteRouteTest, RequestMaxRedirectsIsClamped) {
@@ -598,6 +700,34 @@ TEST_F (ResourceWriteRouteTest, EnvironmentUpdateAbsentKeepsVariables) {
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["name"], "Renamed");
     EXPECT_TRUE (body["variables"].contains ("token")) << "absent means keep";
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentWrongShapeVariablesIsRejected) {
+    auto [created_status, created] = create_environment_response (*db_,
+    json{ { "name", "Env" },
+    { "variables", { { "token", { { "value", "abc" }, { "enabled", true } } } } } });
+    ASSERT_EQ (created_status, 200);
+    const std::string id     = created["id"].get<std::string> ();
+    const std::string before = db_->get_environment (id)->variables;
+
+    for (const json& bad : wrong_shapes ()) {
+        auto [status, body] =
+        update_environment_response (*db_, id, json{ { "variables", bad } });
+        EXPECT_EQ (status, 400) << "variables = " << bad.dump ();
+        EXPECT_NE (body["error"].get<std::string> ().find ("variables"), std::string::npos);
+    }
+    EXPECT_EQ (db_->get_environment (id)->variables, before)
+    << "a rejected write must not reach the column";
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentCreateWrongShapeVariablesIsRejected) {
+    for (const json& bad : wrong_shapes ()) {
+        auto [status, body] = create_environment_response (
+        *db_, json{ { "name", "Env" }, { "variables", bad } });
+        EXPECT_EQ (status, 400) << "variables = " << bad.dump ();
+    }
+    EXPECT_TRUE (db_->get_environments ().empty ())
+    << "a rejected create must not leave a record behind";
 }
 
 TEST_F (ResourceWriteRouteTest, EnvironmentNullNameIsRejected) {

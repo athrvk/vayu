@@ -45,6 +45,17 @@ export interface ScriptVariantConfig {
 	intro: ReactNode;
 	/** The block below it. Lines, so the panel owns the `<br/>` rhythm. */
 	quickReference: ReactNode[];
+	/**
+	 * Rules the quick reference cannot show, listed under it.
+	 *
+	 * Exists for `pm.request` write-back: a pre-request script can now change
+	 * the outgoing request, and every rule that governs it (the object is
+	 * authoritative, a script beats the Auth tab, a bad value refuses the whole
+	 * edit) is invisible from the snippet alone. Leaving them only in
+	 * `docs/engine/scripting.md` puts them where the person writing the script
+	 * is not.
+	 */
+	notes: ReactNode[];
 }
 
 /** Inline code in the intro sentence. A bare element, not a component - a
@@ -59,7 +70,8 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 		intro: (
 			<>
 				Execute JavaScript before sending the request. Use the{" "}
-				<code className={CODE_CLASS}>pm</code> API.
+				<code className={CODE_CLASS}>pm</code> API. Edits to{" "}
+				<code className={CODE_CLASS}>pm.request</code> change what is actually sent.
 			</>
 		),
 		quickReference: [
@@ -67,6 +79,37 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			'pm.environment.set("key", "value")',
 			'pm.globals.get("variable")',
 			'pm.collectionVariables.get("variable")',
+			'pm.request.headers["X-Timestamp"] = Date.now().toString()',
+			'delete pm.request.headers["Authorization"]',
+			'pm.request.url = pm.request.url + "?trace=1"',
+			"pm.request.body = JSON.stringify({ n: 2 })",
+		],
+		notes: [
+			<>
+				<code className={CODE_CLASS}>url</code>, <code className={CODE_CLASS}>method</code>,{" "}
+				<code className={CODE_CLASS}>headers</code> and{" "}
+				<code className={CODE_CLASS}>body</code> are writable here. Whatever they hold when
+				the script ends is what goes on the wire, so{" "}
+				<code className={CODE_CLASS}>delete</code> removes a header.
+			</>,
+			<>
+				A script wins over the <strong>Auth</strong> tab - auth is applied before the script
+				runs, so setting <code className={CODE_CLASS}>Authorization</code> here replaces it.
+			</>,
+			<>
+				Header names are case-sensitive in JS: use the exact name (
+				<code className={CODE_CLASS}>Authorization</code>, not{" "}
+				<code className={CODE_CLASS}>authorization</code>).
+			</>,
+			<>
+				A value the engine cannot send rejects the whole edit and the request is sent
+				unchanged - the reason appears in the response pane&apos;s <strong>Console</strong>{" "}
+				tab.
+			</>,
+			<>
+				No crypto, base64 or <code className={CODE_CLASS}>URL</code> in the sandbox, and
+				load tests do not run pre-request scripts at all.
+			</>,
 		],
 	},
 	post: {
@@ -86,6 +129,14 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			"pm.response.json()",
 			"pm.response.text()",
 			'pm.response.headers.get("Content-Type")',
+		],
+		notes: [
+			<>
+				<code className={CODE_CLASS}>pm.request</code> is readable here as a record of what
+				was sent, but writing to it does nothing - the request has already gone out. Change
+				it in the <strong>Pre-request</strong> tab instead.
+			</>,
+			<>Under load this runs against sampled responses, not every one.</>,
 		],
 	},
 };

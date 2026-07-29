@@ -184,9 +184,38 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `config_snapshot` | TEXT    | JSON snapshot of the request/env at run time                |
 | `start_time`      | INTEGER | Unix ms                                                     |
 | `end_time`        | INTEGER | Unix ms                                                     |
+| `summary`         | TEXT    | JSON: whole-run results, written once at terminal status (`""` = not written) |
 
-There is **no** `summary` column - aggregate metrics for a finished run are reconstructed at
-read time from the `metrics` and `results` tables (see `GET /runs/:runId/report`).
+**`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every
+metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,
+bytes, and the script-validation tallies. It is written once - by `run_manager.cpp` when the run
+reaches `completed`/`stopped`, and best-effort (minus `setup_overhead`, with a wall-clock
+`test_duration`) when it fails. `""` means the run predates the column, and the report falls back
+to the legacy `metrics` rows. NOT NULL with a `""` default, so `sync_schema()` can
+`ALTER TABLE ADD COLUMN` it onto an existing table (same pattern as `requests.follow_redirects`).
+
+```json
+{
+  "total_requests": 100, "rps": 50.0, "send_rate": 51.0, "throughput": 49.5,
+  "test_duration": 2.0, "setup_overhead": 0.25,
+  "peak_concurrency": 8, "dropped_requests": 2, "queue_wait_avg": 1.5,
+  "bytes_sent": 1024, "bytes_received": 8192,
+  "status_codes": { "200": 90, "500": 7, "0": 3 },
+  "latency": { "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0, "p75": 15.0,
+               "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
+  "tests": { "sampled": 10, "passed": 9, "failed": 1 }
+}
+```
+
+`tests` is **omitted** when deferred script validation did not run, which is what keeps the
+report's `testValidation` section absent rather than reporting zero tests. The writer is
+`vayu::core::build_run_summary_payload` and the reader is `apply_run_summary`
+(`http/routes/runs.cpp`); `runs_route_test.cpp` round-trips the pair, so the key names cannot
+drift apart silently.
+
+Do not confuse this **results** summary with the `summary` key on a `GET /runs` list row - that
+one is a derived view of `config_snapshot` (url/method/mode/duration/concurrency/comment) built
+per request and never stored.
 
 **`config_snapshot` redaction** - the snapshot is the raw run payload, which can
 carry auth credentials. Before persistence, its top-level `auth` object is
@@ -195,13 +224,15 @@ reduced to just `{"mode": "..."}` (via `sanitize_config_snapshot` in
 (`clientSecret`, `password`, tokens) leaks into a stored run.
 
 **Retention** - runs are append-only in normal use (every design-mode click adds a `runs` row,
-every load run its `metrics`/`results`), so `Database::prune_runs(max_runs, max_age_days)` trims
+every load run its `metric_ticks`/`results`), so `Database::prune_runs(max_runs, max_age_days)` trims
 the history. A run is a victim when it falls **beyond the `maxRunsRetained` most-recent runs**
 (ordered by `start_time`) **or** its `start_time` is older than **`runRetentionDays`** days;
 either knob is disabled by `0`. Runs still `running`/`pending` are never pruned and never count
-toward the cap. Deletion goes through the `delete_run` cascade (runs + their `metrics` + their
-`results`), batched inside transactions that release the DB mutex between batches so a large
-backlog cannot stall `/health`, SSE, or the runs poll. `prune_runs_configured()` reads the two
+toward the cap. Deletion goes through the `delete_run` cascade (runs + their `metric_ticks` +
+their legacy `metrics` + their `results`), batched inside transactions that release the DB mutex between batches so a large
+backlog cannot stall `/health`, SSE, or the runs poll. The cascade itself lives in one function
+(`remove_run_cascade_locked`), which both `delete_run` and `prune_runs` call, so a new child table
+is wired into both at once. `prune_runs_configured()` reads the two
 knobs (config, `observability`, defaults 200 / 30) and runs at **startup** (`Database::init`) and
 after a run reaches a **terminal** status (design mode's `store_result`, and the load-run
 completion/failure paths in `run_manager.cpp`).
@@ -233,10 +264,55 @@ refresh. Tokens are plaintext at rest (v1 posture); the row is cleared via
 
 ---
 
-### `metrics`
+### `metric_ticks`
 
-Time-series metrics for a load test. One row per (`run_id`, `name`, `timestamp`) sample; the
-metrics producer thread writes a batch each tick. Struct is `db::Metric`.
+The time series for a load test: **one wide row per persisted tick** (~1/s), written by the
+metrics producer thread. Struct is `db::MetricTick`. Auto-created by `sync_schema()`.
+
+| Column      | Type       | Notes                                          |
+|-------------|------------|------------------------------------------------|
+| `id`        | INTEGER PK | Autoincrement                                  |
+| `run_id`    | TEXT       | FK → `runs.id`                                 |
+| `timestamp` | INTEGER    | Unix ms - the tick's single wall-clock sample  |
+| `payload`   | TEXT       | JSON: the complete tick object (below)         |
+
+`payload` **is** one `data[]` entry of `GET /runs/:runId/metrics` - the app's snake_case
+`LoadTestMetrics` shape, built once at write time by
+`vayu::core::build_metric_tick_payload` instead of being reassembled per request:
+
+```json
+{
+  "timestamp": 1730000001000, "elapsed_seconds": 1.0,
+  "requests_completed": 120, "requests_failed": 2,
+  "current_rps": 118.4, "current_concurrency": 10, "send_rate": 120.0,
+  "throughput": 118.4, "backpressure": 3, "error_rate": 1.66,
+  "dropped_requests": 0, "bytes_sent": 4096, "bytes_received": 65536,
+  "status_codes": { "200": 118, "0": 2 },
+  "latency_p50_ms": 8.1, "latency_p95_ms": 20.4, "latency_p99_ms": 31.9
+}
+```
+
+Two consequences of the row being the tick:
+
+- **Pagination is tick-aligned.** `GET /runs/:runId/metrics` pages rows, and a row is a whole
+  tick, so a page boundary can no longer hand back a half-populated bucket (which row-paginating
+  the EAV table below did every ~277 ticks).
+- **`elapsed_seconds` is measured from the run's first persisted tick**, at write time, so it
+  keeps counting across page boundaries instead of restarting at 0 on each page.
+
+Latency percentiles in a tick are the **windowed** (rolling) values sampled from the
+`hdr_interval_recorder` for that interval - the whole-run cumulative ones live in
+[`runs.summary`](#runs), never here.
+
+---
+
+### `metrics` (legacy, read-only)
+
+The EAV time series this engine **no longer writes**: one row per (`run_id`, `name`, `timestamp`)
+sample, ~20 rows per second of a run. Kept so runs recorded before `metric_ticks`/`runs.summary`
+existed still render their charts and reports - `GET /runs/:runId/metrics` and
+`/runs/:runId/report` fall back to it when a run has no ticks / no summary. It can be deleted once
+old histories have aged out past the retention window. Struct is `db::Metric`.
 
 | Column      | Type            | Notes                                              |
 |-------------|-----------------|----------------------------------------------------|
@@ -255,7 +331,8 @@ metrics producer thread writes a batch each tick. Struct is `db::Metric`.
 `peak_concurrency`, `status_codes`, `test_duration`, `setup_overhead`, and the
 `tests_validating/passed/failed/sampled` script-validation metrics.
 
-**Latency percentile rows come in two flavors, disambiguated by `labels`:**
+**Latency percentile rows come in two flavors, disambiguated by `labels`** - the trap that made
+this shape worth replacing, since only `p50/p95/p99` were ever label-guarded on the read side:
 
 - **Per-tick windowed rows** (`latency_p50/p95/p99`, empty `labels`): written ~1/s during
   the run. Each is a **rolling window** sampled from a phaser-based `hdr_interval_recorder`
@@ -379,16 +456,17 @@ for fresh **and** pre-existing databases, so adding an index is additive and nee
 
 | Index                        | Column                  | Query paths that rely on it                                                                                                                       |
 |------------------------------|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `idx_metrics_run_id`         | `metrics.run_id`        | `get_metrics`, `get_metrics_since` (polled every 500ms by the legacy SSE loop in `http/routes/metrics.cpp`), `get_metrics_paginated`, `count_metrics`, and the `remove_all` in `delete_run` |
+| `idx_metric_ticks_run_id`    | `metric_ticks.run_id`   | `get_metric_ticks_paginated` / `count_metric_ticks` (every `GET /runs/:id/metrics`), `get_metric_ticks_since` (the legacy SSE poll), and the `remove_all` in the run cascade |
+| `idx_metrics_run_id`         | `metrics.run_id`        | The legacy read path (`get_metrics`, `get_metrics_since`, `get_metrics_paginated`, `count_metrics`) and the `remove_all` in the run cascade |
 | `idx_results_run_id`         | `results.run_id`        | `get_results` and the `remove_all` in `delete_run`                                                                                                |
 | `idx_requests_collection_id` | `requests.collection_id`| `get_requests_in_collection` (every sidebar load) and cascade delete                                                                              |
 | `idx_collections_parent_id`  | `collections.parent_id` | The cascade-delete BFS in `Database::delete_collection`, which does one lookup per node in the subtree                                            |
 | `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs` and `get_runs_paginated`, which sort `start_time DESC` on every `GET /runs`                                                        |
 | `idx_runs_request_id`        | `runs.request_id`       | `GET /runs?requestId=` and `useLastDesignRunQuery`'s single-run lookup (`get_runs_paginated` with a `request_id` filter)                          |
 
-`metrics` and `results` are the unbounded-growth tables - a load run writes roughly 20 metric
-rows per second - so without `run_id` indexes a lookup slows down with every run ever recorded,
-not just the current one. `collections.parent_id` is a nullable column; `sqlite_orm` indexes it
+`metric_ticks` and `results` are the unbounded-growth tables - a load run writes one tick row per
+second (the legacy `metrics` table cost roughly 20 rows for the same second) - so without `run_id`
+indexes a lookup slows down with every run ever recorded, not just the current one. `collections.parent_id` is a nullable column; `sqlite_orm` indexes it
 without special handling.
 
 Guarded by `DatabaseTest.CreatesIndexesOnFreshDatabase` and
@@ -406,10 +484,26 @@ Used in `collections.variables`, `environments.variables`, and `globals.variable
   "value": "https://api.example.com",
   "enabled": true,
   "secret": false,
-  "type": "string"
+  "type": "string",
+  "createdAt": 1784967810149
 }
 ```
 
 `secret` is a UI masking hint only - values are not encrypted at rest. `type` is a UI/script
 conversion hint, one of `"string"` (default), `"number"`, `"boolean"`, `"json"` - it controls
 how scripts read the variable via `pm.*.get(...)`.
+
+`createdAt` (ms epoch) is the app's row-ordering key: the variables editor lists a scope
+oldest-first. It is **optional** - a row written before the field existed, or stripped by an
+engine older than the fix for issue #135, simply has none, and the app sorts an absent value as
+older than everything. Neither side may backfill it on an existing variable: stamping a legacy
+row at save time is what made it leapfrog the row the user had just added. Only the two places
+that genuinely create a variable stamp it - the app when the user types a new row, and the
+engine's `pm.*.set()` when a script introduces a key that did not exist.
+
+The engine round-trips the whole shape through `vayu::json::parse_variables` /
+`serialize_variables` (`engine/src/utils/json.cpp`) when `POST /execute` persists script-set
+variables. **A field added here must be added to both**, or a design run erases it from disk;
+`engine/tests/script_variables_test.cpp` pins the round trip field by field. `POST /execute`
+also skips the write entirely for a scope no script changed, so sending a request no longer
+touches a collection's / environment's `updated_at`.

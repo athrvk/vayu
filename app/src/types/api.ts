@@ -336,3 +336,60 @@ export interface ImportFetchResponse {
 	content: string;
 	contentType: string;
 }
+
+/**
+ * POST /import/apply - the whole parsed import in one atomic call.
+ *
+ * Items reference each other by opaque `tempId`s that never reach the database;
+ * the engine assigns every real id and returns the translation in `idMap`. That
+ * is why none of these shapes carries an `id` - the engine rejects one (it owns
+ * ID generation for this path). Field names and defaults are otherwise identical
+ * to the matching `Create*Request`, because the engine runs the same per-resource
+ * field appliers for both.
+ */
+export interface ImportApplyCollection {
+	tempId: string;
+	parentTempId?: string | null;
+	name: string;
+	description?: string;
+	order?: number;
+	variables?: Record<string, VariableValue>;
+	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
+	preRequestScript?: string;
+	postRequestScript?: string;
+}
+
+export interface ImportApplyRequestItem {
+	tempId: string;
+	collectionTempId: string;
+	name: string;
+	description?: string;
+	method: string;
+	url: string;
+	params?: KeyValueEntry[];
+	headers?: KeyValueEntry[];
+	body?: RequestBody;
+	bodyType?: string;
+	auth?: RequestAuth;
+	preRequestScript?: string;
+	postRequestScript?: string;
+	order?: number;
+}
+
+export interface ImportApplyEnvironment {
+	tempId: string;
+	name: string;
+	description?: string;
+	variables?: Record<string, VariableValue>;
+}
+
+export interface ImportApplyRequest {
+	collections: ImportApplyCollection[];
+	requests: ImportApplyRequestItem[];
+	environments: ImportApplyEnvironment[];
+}
+
+export interface ImportApplyResponse {
+	/** Every `tempId` sent, mapped to the engine-generated id it became. */
+	idMap: Record<string, string>;
+}

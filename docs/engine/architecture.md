@@ -66,7 +66,10 @@ The event loop manages concurrent HTTP request execution using libcurl's multi i
 **Architecture:**
 - **Multi-worker design**: One event loop per CPU core (auto-detected)
 - **SPSC queues**: Lock-free single-producer single-consumer queues for request submission
-- **Rate limiting**: Token bucket algorithm for precise RPS control
+- **Rate limiting**: Token bucket algorithm for precise RPS control. `targetRps` is an
+  **aggregate** budget: each worker owns a private bucket and submissions are sharded
+  round-robin, so the rate and burst are split N ways when the loop is built (with a
+  one-token burst floor, since a sub-token bucket could never start a transfer)
 - **Connection pooling**: Reuses connections with keep-alive
 - **DNS caching**: 5-minute cache to avoid resolver saturation
 
@@ -92,7 +95,8 @@ system resolver. Three rules make that safe:
 **Configuration:**
 - Max concurrent requests per worker: 1000 (configurable)
 - Max connections per host: 100
-- Poll timeout: 10ms
+- Poll timeout: 1ms (kept short because a submission interrupts the poll via
+  `curl_multi_wakeup`)
 - TCP keep-alive: 60s idle, 30s probe interval
 - Max response body per transfer: 32MB (`maxResponseBodyBytes`); a larger
   response fails that request rather than being buffered, since every in-flight
@@ -115,8 +119,17 @@ Manages the lifecycle of load test runs:
   counts still agree.
 - **The move to the retained map is the "worker is finished" signal**: it happens after the
   final metrics flush and status update, which is what `DELETE /runs/:id` waits on before
-  removing rows (see the API reference).
-- **Graceful shutdown**: Stops active runs on daemon shutdown
+  removing rows (see the API reference). It is *not* the "worker thread has exited" signal -
+  the move is the worker's last statement, and the thread is still unwinding after it.
+- **Graceful shutdown drains, then joins**: `RunManager::shutdown()` sets `should_stop` on
+  every active run, waits up to 5s (`RUN_SHUTDOWN_GRACE_MS`) for them to reach a terminal
+  status, and then **joins** every worker thread. The manager owns those thread handles -
+  a worker holds a `shared_ptr` to its own `RunContext`, so a context that owned its thread
+  could end up joining itself. The wait is bounded; the join is not, because abandoning a
+  worker leaves it writing through references to a `Database` that `main` is about to
+  destroy. A run started while the drain is in progress is refused with a `503`.
+- **Finished workers are reaped on the next `start_run`**: a thread cannot join itself, so
+  its handle outlives it until another thread collects it.
 
 ### Metrics Collector
 
@@ -136,8 +149,9 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   generator-internal `queue_wait` are tracked separately.
 - **Rich counters**: bytes sent/received, dropped requests (backpressure), queue-wait average,
   peak in-flight, and a full per-status-code distribution
-- **Batch DB writes**: Per-request results written after test completion; per-tick time-series
-  metrics persisted by the metrics thread during the run
+- **Batch DB writes**: Per-request results written after test completion; the metrics thread
+  persists one wide `metric_ticks` row per second during the run (the complete tick object,
+  built once at write time), and the whole-run `runs.summary` is written once at completion
 - **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only
   the first `maxStoredErrors` (default 10,000) individual records are kept; the rest are counted by
   `errors_dropped()` and logged once. A fully-failing target produces errors at close to the
@@ -153,6 +167,8 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
 JavaScript execution engine for pre-request and test scripts:
 
 - **Postman-compatible API**: `pm.test()`, `pm.expect()`, `pm.response`, etc.
+- **Mutable request**: a pre-request script's `pm.request` writes are applied to the
+  request before it is sent (see `docs/engine/scripting.md`)
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script
 - **Sandboxed**: No filesystem or network access
@@ -232,6 +248,20 @@ Persistent storage using sqlite_orm:
 
 See [Database Schema](db-schema.md) for the full column list.
 
+**Startup housekeeping** (`Database::init()`, before the sweeper and HTTP server start):
+
+1. **Reconciliation**: runs still `running`/`pending` were abandoned by a previous
+   process (a crash or a kill - a graceful shutdown stops and joins every worker, so
+   it writes a terminal status) - nothing else would ever move them off those
+   statuses, so `GET /runs` reported them as running forever. They are marked
+   `failed`; `end_time` is left as recorded, since when the process died is
+   unknowable at restart.
+2. **Pruning**: run history is trimmed per `maxRunsRetained` / `runRetentionDays`.
+   Reconciliation runs first so an orphan is terminal, and therefore prunable, in the
+   same startup.
+
+Both passes are best-effort: a failure is logged and never blocks startup.
+
 ## Request Flow
 
 ### Design Mode (Single Request)
@@ -244,7 +274,9 @@ See [Database Schema](db-schema.md) for the full column list.
    ↓
 3. Create Run record (type: Design)
    ↓
-4. Execute pre-request script (if provided)
+4. Execute pre-request script (if provided). Its pm.request edits - method, url,
+   headers, body - are written back into the request, so they override the auth
+   resolved in step 2
    ↓
 5. Send HTTP request via libcurl
    ↓
@@ -364,6 +396,12 @@ prompt cancellation rather than waiting for in-flight requests to drain.
 - **Worker Threads**: One per active load test (executes load strategy)
 - **Metrics Thread**: One per active load test (aggregates and streams metrics)
 - **Event Loop Threads**: One per CPU core (handles curl_multi I/O)
+
+Shutdown unwinds that in a fixed order, because every one of these threads
+holds references to state `main` owns: HTTP server stopped → run workers
+signalled and joined (each joins its own metrics thread and stops its event
+loop first) → `curl_global_cleanup` → `Database` / `RunManager` destroyed at
+scope exit. Nothing is detached.
 
 ## Performance Characteristics
 
