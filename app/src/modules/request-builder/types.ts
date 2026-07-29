@@ -13,6 +13,9 @@
  * adding an ephemeral `id` for stable React keys and a `system` flag.
  */
 
+// Type-only, and therefore safe despite `body-drafts` importing `BodyMode` back
+// from here: `import type` is erased, so no runtime cycle exists.
+import type { BodyDrafts } from "./utils/body-drafts";
 import type {
 	BodyMode,
 	HttpMethod,
@@ -86,6 +89,25 @@ export interface BodyConfig {
 	raw?: string;
 	formData?: KeyValueItem[];
 	urlEncoded?: KeyValueItem[];
+}
+
+/**
+ * The Content-Type row a body mode added on its way in, so leaving that mode can
+ * take it back. Written by `BodyPanel` through the context accessors; the rule
+ * that reads it is in `components/RequestTabs/panels/body/content-type.ts`.
+ *
+ * By **row id**, not by value: `Content-Type: application/json` typed by the
+ * user and the identical row this panel wrote look the same and must not be
+ * treated the same. `value` is kept beside it so a row the user has since
+ * retyped is recognised as no longer ours.
+ *
+ * Ephemeral, like the body drafts - `requestId` says whose row it is, and a
+ * record belonging to another request is dropped rather than applied.
+ */
+export interface AutoContentType {
+	requestId: string | null;
+	rowId: string;
+	value: string;
 }
 
 // ============================================================================
@@ -164,12 +186,23 @@ export interface ResponseState {
 	time: number;
 	timing?: ResponseTiming;
 	/**
-	 * Set only when this response was rebuilt from a stored run rather than sent
-	 * just now - a cold start, or a run opened from History. Drives the pane's
-	 * age chip, which is the only thing that tells the two apart: the request
-	 * beside it may have been edited since. Gone after the next send.
+	 * When this response arrived, ISO. Set on a live send only.
 	 *
-	 * This replaced a bare `timestamp` that had one writer and no reader.
+	 * The pane's status bar reads it as an age - "just now", "4m ago" - which
+	 * answers the question a duration cannot: whether what you are looking at is
+	 * the response to the request beside it *as it is now*, or to a version of
+	 * it from twenty minutes and several edits ago.
+	 *
+	 * A bare `timestamp` used to live here and was removed for having one writer
+	 * and no reader. This one has a reader; that is the whole difference, and
+	 * `response-age.test.tsx` is what keeps it true.
+	 */
+	receivedAt?: string;
+	/**
+	 * Set only when this response was rebuilt from a stored run rather than sent
+	 * just now - a cold start, or a run opened from History. Drives the same age
+	 * chip, labelled "from run" so the two cases stay distinguishable: the
+	 * request beside it may have been edited since. Gone after the next send.
 	 */
 	restoredFrom?: RestoredFrom;
 	errorCode?: string;
@@ -189,6 +222,34 @@ export interface RequestBuilderContextValue {
 	request: RequestState;
 	setRequest: (request: Partial<RequestState>) => void;
 	updateField: <K extends keyof RequestState>(field: K, value: RequestState[K]) => void;
+
+	/**
+	 * What the body modes you are not looking at were holding, so switching mode
+	 * does not destroy them. See `utils/body-drafts.ts` for why there are two
+	 * buckets and not six.
+	 *
+	 * Backed by a ref in the provider, for two reasons that pull the same way:
+	 * nothing renders from it, so writing it must not cause a re-render
+	 * mid-switch; and Radix unmounts an inactive `TabsContent`, so a ref inside
+	 * `BodyPanel` would be thrown away the moment you glance at the Headers tab.
+	 *
+	 * A pair of accessors rather than the ref itself. Handing the ref out means
+	 * consumers assign to `.current` on a value they got from context, which the
+	 * React compiler's immutability rule rejects - correctly, since a context
+	 * value is meant to be read.
+	 */
+	getBodyDrafts: () => BodyDrafts;
+	setBodyDrafts: (drafts: BodyDrafts) => void;
+
+	/**
+	 * The Content-Type row `BodyPanel` wrote when a mode required one, so that
+	 * leaving the mode can take it back. Behind accessors and living in the
+	 * provider for the same reasons as the drafts above - and for one more: the
+	 * record has to outlive the panel, or the header outlives the mode that
+	 * needed it, which is the bug it exists to fix.
+	 */
+	getAutoContentType: () => AutoContentType | null;
+	setAutoContentType: (auto: AutoContentType | null) => void;
 
 	// Response State
 	response: ResponseState | null;

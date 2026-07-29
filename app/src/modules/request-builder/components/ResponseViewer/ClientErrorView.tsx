@@ -100,7 +100,7 @@ export default function ClientErrorView({ errorCode, errorMessage }: ClientError
 				 * so it inherited nothing and aligned to nothing.
 				 */}
 				{hint && (
-					<div className="bg-muted/50 rounded-lg p-3 text-left flex items-start gap-2">
+					<div className="surface-sunken rounded-md border border-rule p-3 text-left flex items-start gap-2">
 						<Lightbulb className="w-3.5 h-3.5 mt-0.5 shrink-0 text-muted-foreground" />
 						<p className="text-xs text-muted-foreground">
 							<span className="font-medium">Tip:</span> {hint}

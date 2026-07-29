@@ -18,6 +18,7 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { RequestBuilderContext } from "./RequestBuilderContext";
+import { emptyDrafts, type BodyDrafts } from "../utils/body-drafts";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import {
 	useGlobalsQuery,
@@ -31,6 +32,7 @@ import {
 import { useSessionStore, useResponseStore } from "@/stores";
 import type { ScriptPart, VariableValue } from "@/types";
 import type {
+	AutoContentType,
 	RequestState,
 	ResponseState,
 	RequestTab,
@@ -176,6 +178,42 @@ export default function RequestBuilderProvider({
 	const [activeTab, setActiveTab] = useState<RequestTab>("params");
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+	/*
+	 * What the body modes you are not looking at were holding. It lives here
+	 * rather than in `BodyPanel` because Radix unmounts an inactive
+	 * `TabsContent`: a panel-local ref is discarded the moment you glance at the
+	 * Headers tab, and your stashed JSON with it.
+	 *
+	 * Not reset by the request-change effect below, deliberately. The drafts
+	 * carry their own `requestId` and `switchBody` drops any that belong to
+	 * another request, so a second reset here would be a copy of that rule that
+	 * could fall out of step with it - and would fire on a *save*, when an
+	 * unsaved request is first assigned an id, wiping drafts the user still has.
+	 */
+	const bodyDraftsRef = useRef<BodyDrafts>(emptyDrafts(initialRequest?.id ?? null));
+	const getBodyDrafts = useCallback(() => bodyDraftsRef.current, []);
+	const setBodyDrafts = useCallback((drafts: BodyDrafts) => {
+		bodyDraftsRef.current = drafts;
+	}, []);
+
+	/*
+	 * The Content-Type row a body mode added on its way in, so leaving the mode
+	 * can remove it again. Here rather than in `BodyPanel` for the drafts' reason
+	 * and one of its own: the panel is unmounted whenever another tab is on
+	 * screen, so a panel-local record is gone by the next mode change - and then
+	 * the header outlives the mode that needed it, which is the bug the record
+	 * exists to fix.
+	 *
+	 * Not reset by the request-change effect below, for the same reason as the
+	 * drafts: the record names its own request and `switchContentType` drops one
+	 * belonging to another.
+	 */
+	const autoContentTypeRef = useRef<AutoContentType | null>(null);
+	const getAutoContentType = useCallback(() => autoContentTypeRef.current, []);
+	const setAutoContentType = useCallback((auto: AutoContentType | null) => {
+		autoContentTypeRef.current = auto;
+	}, []);
 
 	// Variable resolution
 	const {
@@ -452,6 +490,10 @@ export default function RequestBuilderProvider({
 			request,
 			setRequest,
 			updateField,
+			getBodyDrafts,
+			setBodyDrafts,
+			getAutoContentType,
+			setAutoContentType,
 			response,
 			setResponse,
 			inheritedPreScripts,
@@ -480,6 +522,10 @@ export default function RequestBuilderProvider({
 			request,
 			setRequest,
 			updateField,
+			getBodyDrafts,
+			setBodyDrafts,
+			getAutoContentType,
+			setAutoContentType,
 			response,
 			setResponse,
 			inheritedPreScripts,

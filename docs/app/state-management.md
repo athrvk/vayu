@@ -211,19 +211,27 @@ const { setResponse, getResponse, clearResponse, clearAll } = useResponseStore()
 
 #### `client-settings-store.ts` - Renderer Preferences
 
-Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the capacity SLO threshold, the live refresh rate, and auto-save preferences. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.
+Central home for renderer-only preferences that aren't part of the pre-paint appearance set (theme/color/UI-font/scale/radius live in their own localStorage keys so `index.html` can apply them before React mounts). Holds editor behavior, the monospace/code font, chart granularity, the capacity SLO threshold, the live refresh rate, auto-save preferences, and the load-test dialog's ceilings. Backs the Settings **panels** (`modules/settings/main/panels/`). Non-React consumers (services, the dashboard store) read via `getState()`.
 
 **Key exports:**
 ```typescript
-const store = useClientSettingsStore();   // editorPrefs, autoSavePrefs, monoFont, chartBucketSeconds, sloThresholdMs, liveRefreshMs, ...
+const store = useClientSettingsStore();   // editorPrefs, autoSavePrefs, monoFont, chartBucketSeconds, sloThresholdMs, liveRefreshMs, loadTestCeilings, ...
 import { SETTINGS_STORAGE_KEYS } from "@/stores";  // localStorage keys reset by "Reset app settings"
 ```
+
+`loadTestCeilings` is the one slice with a bound outside the app: each value is clamped to `LOAD_TEST_CEILING_BOUNDS` (`constants/load-test.ts`) on write **and** on rehydrate, because the bounds are the engine's crash guards and a build that tightens one must not keep offering a stored ceiling above it. The load dialog turns them into its field ranges via `resolveLoadTestLimits`; nothing else reads them.
 
 **Persisted** to localStorage (via `zustand/persist`); workspace/session state (open tabs, layout, active collection) is deliberately excluded from the reset.
 
 #### `dashboard-store.ts` - Load Test Metrics & State
 
-Manages live load test run state: streaming metrics, final reports, and running aggregates (peak concurrency, SLO breakpoint). Retention is **time-based, not a fixed point count**: `addMetricsBatch` trims ticks older than the user-configurable live window (`liveWindowSeconds`, sourced from `constants/live-window.ts`, default 5m, `null` = full run), backstopped by a hard `MAX_RETAINED_TICKS` safety cap (20,000). The window is kept in sync by the `useLiveChartWindow` hook and drives what the live charts plot. (`app/src/config/metrics.ts` now only holds the SSE commit throttle, `METRICS_UI_THROTTLE_MS`.)
+Manages live load test run state: streaming metrics, final reports, and running aggregates (peak concurrency, SLO breakpoint). Retention is **time-based, not a fixed point count**: `addMetricsBatch` trims ticks older than the user-configurable live window (`liveWindowSeconds`, default 5m, `null` = full run), backstopped by a `maxRetainedTicks` ceiling (default 50,000). Both are kept in sync by the `useLiveChartSettings` hook and drive what the live charts plot. (`app/src/config/metrics.ts` now only holds the SSE commit throttle, `METRICS_UI_THROTTLE_MS`.)
+
+**The window is engine config, not a renderer preference.** It is stored as the engine's `liveReplayWindowMs` entry (milliseconds; `0` = full run), so `useLiveChartSettings` reads it from `useConfigQuery` and writes it with `useUpdateConfigMutation` - there is no localStorage key. The engine needs the same number: it sizes the in-memory SSE tick ring that `GET /runs/:runId/live` replays **from offset 0**, and that replay is what rebuilds these charts when the dashboard attaches or re-attaches mid-run. Two settings would let the retained span and the displayed span disagree, with the engine replaying less than the chart is configured to show. `constants/live-window.ts` owns the option list and the `liveWindowToMs` / `liveWindowFromMs` mapping.
+
+The **tick ceiling** is shared the same way, as `liveMaxRetainedTicks` (default 50,000). It is a memory bound, not a rendering one - `bucketColumns` collapses ticks into `chartBucketSeconds` buckets (0.5s by default) before uPlot sees them, and uPlot draws to canvas, so a full window reaches the screen as a few thousand points however many ticks back it. It also costs nothing at stock settings, since the *window* is what sizes the retained history; it only binds when window / tick-interval exceeds it. `DEFAULT_MAX_RETAINED_TICKS` here and `DEFAULT_MAX_LIVE_TICKS` in the engine are the pre-config defaults and must move together.
+
+Because the value arrives asynchronously, the store seeds `liveWindowSeconds` with the module default rather than reading it synchronously at creation; the hook corrects it once the config query resolves.
 
 **State:**
 ```typescript
@@ -232,7 +240,7 @@ Manages live load test run state: streaming metrics, final reports, and running 
   mode: "running" | "completed" | "stopped"
   isStreaming: boolean
   currentMetrics: LoadTestMetrics | null
-  historicalMetrics: LoadTestMetrics[]  // Trimmed to liveWindowSeconds (cap: MAX_RETAINED_TICKS)
+  historicalMetrics: LoadTestMetrics[]  // Trimmed to liveWindowSeconds (cap: maxRetainedTicks)
   liveWindowSeconds: number | null             // Live retention window; null = full run
   finalReport: RunReport | null
   error: string | null
@@ -606,6 +614,72 @@ const { resolveString } = useVariableResolver({ collectionId });
 const resolvedUrl = resolveString("https://{{baseUrl}}/api/users");
 ```
 
+### `RequestBuilderContext` - body drafts
+
+```typescript
+bodyDrafts: React.MutableRefObject<BodyDrafts>
+```
+
+What the body modes you are not looking at were holding. A request stores
+**one** body - the shape is a discriminated union, `{"mode":"json","content":
+"..."}` - so JSON, text and GraphQL share `request.body`, and switching mode
+handed the same string to a different reader. Switching from JSON to GraphQL
+therefore read the payload as a raw query string and destroyed it.
+
+Two buckets, not six: `json` and `text` are one raw string differing only in
+highlighting, so text carries between them deliberately; `graphql` is an
+envelope and keeps its own; the two form modes use `formData` / `urlEncoded`
+and never touch `body`. The rule lives in
+`modules/request-builder/utils/body-drafts.ts`.
+
+Two things about it are deliberate and easy to undo by accident:
+
+- **It lives in the provider, not in `BodyPanel`.** Radix unmounts an inactive
+  `TabsContent`, so a panel-local ref is discarded the moment you glance at the
+  Headers tab, taking the stashed body with it.
+- **The provider does *not* reset it** on a request change. The drafts carry
+  their own `requestId` and `switchBody` drops any belonging to another
+  request, so a second reset would duplicate that rule - and would fire on the
+  request-change effect, which re-runs on more than the id.
+
+Deliberately **not** persisted: a request has one body, and storing payloads it
+will never send would put them in exports and in the engine's schema.
+
+### `RequestBuilderContext` - the added Content-Type row
+
+```typescript
+getAutoContentType: () => AutoContentType | null
+setAutoContentType: (auto: AutoContentType | null) => void
+```
+
+Which `Content-Type` row a body mode added on its way in, so that leaving the
+mode can take it back. GraphQL is sent as a JSON envelope and genuinely needs
+`Content-Type: application/json`, so `BodyPanel` appends one - but nothing
+removed it, so a single visit to GraphQL left the header on the request for
+good, including after switching back to `none`, which sends no body at all.
+
+The record is `{ requestId, rowId, value }` and the rule that reads it is
+`switchContentType` in
+`modules/request-builder/components/RequestTabs/panels/body/content-type.ts`,
+called once per mode change: it removes the remembered row when the new mode
+does not need that same header, then adds whatever the new mode does need.
+
+Three things it is deliberate about:
+
+- **By row id, not by value.** A `Content-Type` the user typed and the row the
+  panel wrote are identical apart from their id, and only ours may be removed.
+- **A row whose value has been edited is no longer ours** - retyping it is a
+  decision, so it stays and the record is dropped. Merely disabling it is not.
+- **A record naming another request is dropped, not applied.** One provider
+  serves every request tab, and row ids are not unique across a duplicated
+  request.
+
+In the provider rather than in `BodyPanel` for the drafts' reason and one of its
+own: Radix unmounts an inactive `TabsContent`, so a panel-local record is gone
+by the next mode change - and then nothing removes the header, which is the bug
+the record exists to fix. Ephemeral, like the drafts: what is persisted is the
+header row itself, in `request.headers`.
+
 ### `useSaveManager()` - Auto-Save Manager
 
 Orchestrates auto-save for a saveable entity (request, environment, etc.) with debouncing, context registration, and centralized save state tracking. Located in `app/src/hooks/useSaveManager.ts`.
@@ -616,7 +690,6 @@ const {
   forceSave: () => Promise<void>
   status: "idle" | "pending" | "saving" | "saved" | "error"
   isSaving: boolean
-  errorMessage: string | null
 } = useSaveManager({
   entityId: string | null           // Unique ID for this entity
   contextName?: string              // Display name (e.g., "Request: GET /api")
@@ -627,11 +700,20 @@ const {
 ```
 
 **Features:**
-- **Debounced auto-save:** Triggers 3000ms after the last change (defined in `app/src/config/timing.ts` as `TIMING.AUTO_SAVE_DELAY_MS`)
+- **Debounced auto-save:** Triggers after the delay the user chose in Settings → General, defaulting to 5000ms (`autoSave.delayMs` in `client-settings-store`, options in `constants/client-settings.ts`)
 - **Context registration:** Automatically registers with `useSaveStore()` for app-wide Ctrl/Cmd+S integration and tab LRU coordination
 - **Save status:** Updates centralized save store so UI can show "Saving..." or "Saved" indicators
 - **Entity switching:** Flushes pending saves when entity ID changes (in cleanup, before unmounting)
-- **Fixed debounce:** Debounce is a fixed 3000ms constant; there is no `debounceMs` parameter
+- **No `debounceMs` parameter:** the delay is a user preference, not a per-caller
+  one, so the hook reads it from the store rather than taking it as an option.
+  Turning auto-save off in Settings leaves the entity marked dirty - Ctrl/Cmd+S
+  still saves it - but schedules nothing.
+
+`app/src/config/timing.ts` used to carry an `AUTO_SAVE_DELAY_MS: 3000` that
+nothing read and that this section documented as the source of truth. It is
+deleted; `timing-keys-have-readers.test.ts` now fails on any TIMING key without
+a reader, and `useSaveManager.autosave-setting.test.tsx` pins the Settings value
+to the timer that actually runs.
 
 **Usage:**
 ```typescript
@@ -641,6 +723,39 @@ const { forceSave, status, isSaving } = useSaveManager({
   onSave: () => apiService.updateRequest(requestId, changes),
   hasChanges: JSON.stringify(draft) !== JSON.stringify(saved),
   enabled: true
+});
+```
+
+### `useEntityDraft()` - Manual Draft/Save Model
+
+The other save model, and the counterpart to `useSaveManager()`: an editable draft, a Save button gated on `isDirty`, and a Reset that discards it. Located in `app/src/hooks/useEntityDraft.ts`. Used by all three editing tabs of `CollectionDetail` (`AuthTab`, `InfoTab`, `ScriptTab`), where a save is a deliberate button press rather than a keystroke that persists itself.
+
+**API:**
+```typescript
+const {
+  draft: T                                 // The editable copy
+  setDraft: Dispatch<SetStateAction<T>>    // Standard setState signature
+  isDirty: boolean                         // Draft differs from the persisted value
+  reset: () => void                        // Discard the draft
+} = useEntityDraft<T>({
+  entityKey: string                        // Identity of the thing being edited
+  value: T                                 // The persisted value
+  mutation: { reset: () => void }          // The save mutation this editor reports through
+});
+```
+
+**Behaviour:**
+- **Seeds and resyncs:** the draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`.
+- **Tracks by JSON value, not identity:** `value` may be a fresh object literal every render (`InfoTab` builds `{ name, description }` inline); callers do not have to memoize it.
+- **`entityKey` is a switch, not an edit:** a change reseeds the draft *and* calls `mutation.reset()`. These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. `ScriptTab` passes `${collection.id}:${fieldKey}`, since pre- and post-request scripts are two different things to edit under one collection id.
+- **Requiring the mutation is the point:** the three hand-rolled copies this replaced had drifted, and the one that omitted the reset had exactly that bug.
+
+**Usage:**
+```typescript
+const { draft, setDraft, isDirty, reset } = useEntityDraft({
+  entityKey: collection.id,
+  value: collection.auth,
+  mutation: updateCollection,
 });
 ```
 
@@ -701,7 +816,7 @@ const { forceSave, status, isSaving } = useSaveManager({
 
 3. **TanStack Query for server state:** Use TanStack Query for collections, requests, environments, globals, runs, and reports. It is the single source of truth and ensures consistency across the app.
 
-4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.). It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save.
+4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.) that autosaves. It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save. For an editor that saves on an explicit button instead, use `useEntityDraft()` - do not hand-roll the draft/resync/`isDirty`/mutation-reset parts again.
 
 5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes.
 

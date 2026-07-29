@@ -21,6 +21,7 @@
 
 #include "vayu/http/client.hpp"
 #include "vayu/http/debug_redact.hpp"
+#include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/status.hpp"
 
 #include <curl/curl.h>
@@ -211,6 +212,17 @@ Client::Client (Client&&) noexcept            = default;
 Client& Client::operator= (Client&&) noexcept = default;
 
 Result<Response> Client::send (const Request& request) {
+    // Same gate as the event loop's: a request curl cannot send as written is
+    // refused rather than silently sent as something else. Reported as a
+    // status-0 response, not an Error, because send() never returns an Error -
+    // every caller (including /execute, which calls .value() unguarded) reads
+    // the failure off the response.
+    if (auto invalid = detail::validate_transferable (request)) {
+        Response refused        = detail::error_response (*invalid);
+        refused.request_headers = request.headers;
+        return refused;
+    }
+
     impl_->reset ();
     CURL* curl = impl_->curl;
 
@@ -227,31 +239,9 @@ Result<Response> Client::send (const Request& request) {
     // Set URL
     curl_easy_setopt (curl, CURLOPT_URL, request.url.c_str ());
 
-    // Set method
-    switch (request.method) {
-    case HttpMethod::GET: curl_easy_setopt (curl, CURLOPT_HTTPGET, 1L); break;
-    case HttpMethod::POST: curl_easy_setopt (curl, CURLOPT_POST, 1L); break;
-    case HttpMethod::PUT:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "PUT");
-        break;
-    case HttpMethod::DELETE:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-        break;
-    case HttpMethod::PATCH:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "PATCH");
-        break;
-    case HttpMethod::HEAD: curl_easy_setopt (curl, CURLOPT_NOBODY, 1L); break;
-    case HttpMethod::OPTIONS:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "OPTIONS");
-        break;
-    }
-
-    // Set request body
-    if (request.body.mode != BodyMode::None && !request.body.content.empty ()) {
-        curl_easy_setopt (curl, CURLOPT_POSTFIELDS, request.body.content.c_str ());
-        curl_easy_setopt (curl, CURLOPT_POSTFIELDSIZE,
-        static_cast<long> (request.body.content.size ()));
-    }
+    // Set method and body (shared with the event loop path so the two cannot
+    // disagree about what goes on the wire - see apply_method_and_body)
+    detail::apply_method_and_body (curl, request);
 
     // Set headers
     struct curl_slist* headers_list = nullptr;
@@ -374,38 +364,20 @@ Result<Response> Client::send (const Request& request) {
     }
 
     // Get timing info (try to get even on errors, as curl may have partial timing)
-    double wire_seconds = 0, namelookup_time = 0, connect_time = 0;
-    double appconnect_time = 0, starttransfer_time = 0;
-
-    curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &wire_seconds);
-    curl_easy_getinfo (curl, CURLINFO_NAMELOOKUP_TIME, &namelookup_time);
-    curl_easy_getinfo (curl, CURLINFO_CONNECT_TIME, &connect_time);
-    curl_easy_getinfo (curl, CURLINFO_APPCONNECT_TIME, &appconnect_time);
-    curl_easy_getinfo (curl, CURLINFO_STARTTRANSFER_TIME, &starttransfer_time);
+    const detail::CurlPhaseTimes phase_times = detail::read_phase_times (curl);
 
     // Match the event-loop semantics: total_ms is perceived (submit→completion),
     // wire_ms is libcurl's view, queue_wait_ms is the delta. See curl_utils.cpp.
     double perceived_ms = std::chrono::duration<double, std::milli> (
         completion - submitted_at).count ();
-    double wire_ms = wire_seconds * 1000.0;
+    double wire_ms = phase_times.total * 1000.0;
 
     response.timing.total_ms      = perceived_ms;
     response.timing.wire_ms       = wire_ms;
     response.timing.queue_wait_ms = std::max (0.0, perceived_ms - wire_ms);
-    // curl phase timers are cumulative from request start; a skipped phase
-    // reports 0. APPCONNECT_TIME is 0 for plain HTTP and for reused keep-alive
-    // connections, which made the naive successive differences render TLS as a
-    // negative "-0ms" and over-count TTFB (it absorbed the connect time). Treat
-    // a zero appconnect as "no TLS phase" by collapsing it onto connect_time,
-    // and clamp every delta at 0 (mirrors the queue_wait_ms guard above).
-    double appconnect = appconnect_time > 0.0 ? appconnect_time : connect_time;
-    response.timing.dns_ms = std::max (0.0, namelookup_time * 1000.0);
-    response.timing.connect_ms = std::max (0.0, (connect_time - namelookup_time) * 1000.0);
-    response.timing.tls_ms = std::max (0.0, (appconnect - connect_time) * 1000.0);
-    response.timing.first_byte_ms =
-    std::max (0.0, (starttransfer_time - appconnect) * 1000.0);
-    response.timing.download_ms =
-    std::max (0.0, (wire_seconds - starttransfer_time) * 1000.0);
+    // Per-phase durations, clamped and TLS-collapsed by the shared helper -
+    // the event loop had drifted from this code and rendered negative TLS ms.
+    detail::apply_phase_timings (response.timing, phase_times);
 
     // Check for errors
     if (res != CURLE_OK) {

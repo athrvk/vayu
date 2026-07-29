@@ -51,7 +51,14 @@ export default function LegacyScriptNotice({ variant, script }: LegacyScriptNoti
 				scripts alone for this run.
 			</Callout>
 
-			<pre className="m-0 p-3 bg-muted/50 rounded-md border border-input max-h-48 overflow-auto text-[11px] font-mono leading-relaxed text-foreground whitespace-pre-wrap">
+			{/*
+			 * `surface-sunken` + `border-rule`, not `bg-muted/50` + `border-input`.
+			 * `--muted` is the one surface where no border token works: it sits
+			 * between `--border` and `--border-strong` in dark, so the edge was
+			 * wrong in one theme or the other. The surface declares the `--rule`
+			 * that reads on it.
+			 */}
+			<pre className="m-0 p-3 surface-sunken rounded-md border border-rule max-h-48 overflow-auto text-[11px] font-mono leading-relaxed text-foreground whitespace-pre-wrap">
 				{script}
 			</pre>
 		</div>

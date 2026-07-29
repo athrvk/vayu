@@ -31,6 +31,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
+import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Dock } from "./Dock";
 import { TabStrip } from "./TabStrip";
@@ -73,9 +74,21 @@ function iconNames(root: Element): string[] {
 
 beforeEach(cleanup);
 
+/**
+ * `Dock` no longer mounts its own `TooltipProvider` - the delay is set once at
+ * the app root (`main.tsx`), and a bare nested provider would have reset this
+ * strip to Radix's 700ms. So the harness supplies one, as the app does.
+ */
+const renderDock = () =>
+	render(
+		<TooltipProvider>
+			<Dock />
+		</TooltipProvider>
+	);
+
 describe("the variables icon", () => {
 	it("is Braces in the Dock, not the load-test bolt", () => {
-		render(<Dock />);
+		renderDock();
 		const button = screen.getByRole("button", { name: "Variables" });
 
 		const names = iconNames(button);
@@ -87,7 +100,7 @@ describe("the variables icon", () => {
 	});
 
 	it("does not reuse an icon another Dock button already owns", () => {
-		render(<Dock />);
+		renderDock();
 		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
 		const buttons = Array.from(nav.querySelectorAll("button"));
 
@@ -99,7 +112,7 @@ describe("the variables icon", () => {
 	it("keeps the bolt out of the drawer switchers entirely", () => {
 		// `Zap` means "load test" in this app. Any of the four wearing it would
 		// re-introduce the same misreading in a different slot.
-		render(<Dock />);
+		renderDock();
 		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
 		expect(iconNames(nav)).not.toContain("zap");
 	});

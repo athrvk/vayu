@@ -6,7 +6,7 @@
  */
 
 import { useRef, useState } from "react";
-import { Upload, CheckCircle2, X, Folder, AlertTriangle } from "lucide-react";
+import { Upload, CheckCircle2, X, Folder, Layers, Globe, AlertTriangle } from "lucide-react";
 import {
 	Button,
 	Dialog,
@@ -31,7 +31,15 @@ import { MethodBadge } from "@/components/shared";
 type Tab = "file" | "url" | "paste";
 type Phase = "idle" | "detecting" | "preview" | "error";
 
-const FORMAT_BADGES = ["Postman v2.1", "Postman v2.0", "Insomnia v4", "OpenAPI 3.0", "OpenAPI 2.0"];
+const FORMAT_BADGES = [
+	"Postman v2.1",
+	"Postman v2.0",
+	"Postman Env",
+	"Postman Globals",
+	"Insomnia v4",
+	"OpenAPI 3.0",
+	"OpenAPI 2.0",
+];
 
 export function ImportModal() {
 	const { isOpen, close } = useImportModalStore();
@@ -136,6 +144,17 @@ export function ImportModal() {
 		}
 	};
 
+	// A Postman *environment* or *globals* export parses to a result with no
+	// collections, and the options are applied at parse time - so with "Import
+	// environments & variables" off the whole result is empty and Import would create
+	// nothing and close the modal. Block it instead; the toggle that recovers it sits
+	// in the same footer.
+	const nothingToImport =
+		!!result &&
+		result.collections.length === 0 &&
+		result.environments.length === 0 &&
+		Object.keys(result.globals).length === 0;
+
 	const toggleEnvironments = (v: boolean) => {
 		setImportEnvironments(v);
 		redetect({ importEnvironments: v, importScripts });
@@ -150,7 +169,11 @@ export function ImportModal() {
 	const panelBody = (
 		<>
 			{phase === "preview" && result ? (
-				<PreviewView result={result} onDismiss={reset} />
+				<PreviewView
+					result={result}
+					importEnvironments={importEnvironments}
+					onDismiss={reset}
+				/>
 			) : (
 				<>
 					{tab === "file" && (
@@ -386,7 +409,10 @@ export function ImportModal() {
 							>
 								Cancel
 							</Button>
-							<Button onClick={handleImport} disabled={importMutation.isPending}>
+							<Button
+								onClick={handleImport}
+								disabled={importMutation.isPending || nothingToImport}
+							>
 								{importMutation.isPending ? "Importing…" : "Import →"}
 							</Button>
 						</div>
@@ -397,8 +423,17 @@ export function ImportModal() {
 	);
 }
 
-function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: () => void }) {
-	const { meta, collections } = result;
+function PreviewView({
+	result,
+	importEnvironments,
+	onDismiss,
+}: {
+	result: ImportResult;
+	importEnvironments: boolean;
+	onDismiss: () => void;
+}) {
+	const { meta, collections, environments, globals } = result;
+	const globalCount = Object.keys(globals).length;
 	return (
 		<div className="space-y-3">
 			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
@@ -421,11 +456,53 @@ function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: (
 				{collections.map((c, i) => (
 					<TreeNode key={i} name={c.name} requests={c.requests} children={c.children} />
 				))}
+				{/*
+				 * Environments were parsed but never shown. For a Postman environment
+				 * export they are the entire import, so the box rendered empty.
+				 */}
+				{environments.map((e, i) => (
+					<div
+						key={i}
+						className="flex items-center gap-1.5 py-0.5 pl-1 text-xs font-medium"
+					>
+						<Layers className="h-3.5 w-3.5 text-primary" />
+						{e.name}
+						<span className="text-[11px] font-normal text-muted-foreground">
+							{varCountLabel(Object.keys(e.variables).length)}
+						</span>
+					</div>
+				))}
+				{/*
+				 * Globals have no name of their own - they are a singleton scope, not a
+				 * named environment - so the row names the destination rather than the file.
+				 */}
+				{globalCount > 0 && (
+					<div className="flex items-center gap-1.5 py-0.5 pl-1 text-xs font-medium">
+						<Globe className="h-3.5 w-3.5 text-primary" />
+						Globals
+						<span className="text-[11px] font-normal text-muted-foreground">
+							{varCountLabel(globalCount)}
+						</span>
+					</div>
+				)}
 			</div>
 			<p className="text-[11px] text-muted-foreground">
 				{meta.requestCount} requests · {meta.folderCount} folders · {meta.environmentCount}{" "}
-				environments
+				environments · {meta.globalCount} globals
 			</p>
+			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
+				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
+					<AlertTriangle className="h-3.5 w-3.5" />
+					{importEnvironments
+						? "Nothing to import from this file."
+						: "No collections in this file. Enable Import environments & variables below to import its environments."}
+				</p>
+			)}
+			{globalCount > 0 && (
+				<p className="text-[11px] text-muted-foreground">
+					Existing globals are kept; a variable of the same name is overwritten.
+				</p>
+			)}
 			{(meta.skipped.length > 0 || meta.nonExecutableAuth > 0) && (
 				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
 					<AlertTriangle className="h-3.5 w-3.5" />
@@ -439,6 +516,10 @@ function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: (
 			)}
 		</div>
 	);
+}
+
+function varCountLabel(n: number): string {
+	return `${n} ${n === 1 ? "variable" : "variables"}`;
 }
 
 function TreeNode({

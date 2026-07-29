@@ -17,6 +17,7 @@
  */
 
 import { Download, Plus } from "lucide-react";
+import { Eyebrow } from "@/components/ui";
 import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
 import { ActionTile } from "./components/ActionTile";
 import { FooterLinks } from "./components/FooterLinks";
@@ -40,9 +41,7 @@ export function FirstRunWelcome({ onImport, onNewRequest }: FirstRunWelcomeProps
 			</div>
 
 			<section>
-				<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-					Start
-				</p>
+				<Eyebrow className="mb-2">Start</Eyebrow>
 				<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
 					<ActionTile
 						icon={Download}

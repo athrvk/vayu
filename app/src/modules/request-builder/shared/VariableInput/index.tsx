@@ -30,6 +30,7 @@ import { useRequestBuilderContext } from "../../context/RequestBuilderContext";
 import type { VariableScope } from "../../types";
 import EditableVariable from "./EditableVariable";
 import { VARIABLE_PATTERN } from "@/constants/variables";
+import { variableCompletionContext } from "@/lib/variable-completion";
 
 interface VariableInputProps {
 	value: string;
@@ -105,24 +106,21 @@ export default function VariableInput({
 	const segments = useMemo(() => parseSegments(value), [value]);
 	const hasVariables = segments.some((s) => s.type === "variable");
 
-	// Check if we should show autocomplete
+	/*
+	 * Check if we should show autocomplete.
+	 *
+	 * The "am I inside an open `{{`" rule is shared with the Monaco body editors
+	 * via `variableCompletionContext`. It was written inline here - twice in this
+	 * file, once for this check and once in `handleSelectVariable` below - which
+	 * is a pair that drifts the moment either is touched.
+	 */
 	const checkForSuggestions = useCallback((inputValue: string, cursorPos: number) => {
-		const beforeCursor = inputValue.slice(0, cursorPos);
-		const lastOpenIndex = beforeCursor.lastIndexOf("{{");
-
-		if (lastOpenIndex === -1) {
+		const context = variableCompletionContext(inputValue.slice(0, cursorPos));
+		if (!context) {
 			setShowSuggestions(false);
 			return;
 		}
-
-		const afterOpen = beforeCursor.slice(lastOpenIndex);
-		if (afterOpen.includes("}}")) {
-			setShowSuggestions(false);
-			return;
-		}
-
-		const partialName = afterOpen.slice(2);
-		setSearchQuery(partialName);
+		setSearchQuery(context.query);
 		setShowSuggestions(true);
 		setShowPlainSuggestions(false);
 	}, []);
@@ -143,11 +141,14 @@ export default function VariableInput({
 	};
 
 	const handleSelectVariable = (varName: string) => {
-		const beforeCursor = value.slice(0, cursorPosition);
-		const afterCursor = value.slice(cursorPosition);
-		const lastOpenIndex = beforeCursor.lastIndexOf("{{");
-		if (lastOpenIndex === -1) return;
+		// Same rule as `checkForSuggestions` above, from the same place - this
+		// used to re-derive the open index with its own `lastIndexOf`, and the
+		// two disagreed about a closed `{{name}}` earlier in the field.
+		const context = variableCompletionContext(value.slice(0, cursorPosition));
+		if (!context) return;
 
+		const lastOpenIndex = context.openIndex;
+		const afterCursor = value.slice(cursorPosition);
 		const beforeOpen = value.slice(0, lastOpenIndex);
 		const newValue = `${beforeOpen}{{${varName}}}${afterCursor}`;
 		onChange(newValue);

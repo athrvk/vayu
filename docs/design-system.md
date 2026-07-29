@@ -582,28 +582,50 @@ slow → danger (`LatencyMetric.tsx`).
 
 ### Decorative categorical palettes (the one token exception)
 
-A few surfaces use a **fixed decorative palette** to give items a stable
-identity by color rather than to signal state - the same idea as `--chart-*`.
-These intentionally keep Tailwind hue utilities (with `dark:` variants) instead
-of tokens, because they never respond to theme and don't carry semantics:
+A surface may use a **fixed decorative palette** to give items a stable identity
+by color rather than to signal state - the same idea as `--chart-*`. Such a
+palette may keep Tailwind hue utilities (with `dark:` variants) instead of
+tokens, because it never responds to theme and carries no semantics.
 
-- **Timing phases** - DNS / connect / TLS / TTFB / download in the breakdown.
-  These are written as explicit `bg-blue-50 dark:bg-blue-950/30` pairs, so they
-  *are* theme-aware; they are categorical identity, not state.
+**The list is currently empty.** Everything - state, status, scope, semantics,
+and categorical identity alike - uses tokens.
 
-  The history overview tiles used to be listed here too, and should not have
-  been: they encode HTTP severity, which is state. They now use
-  `STATUS_CLASS_STYLE`.
+**Three entries were removed because they no longer describe the code.** The
+per-section Settings accent palette is gone; there are zero `pink/purple/cyan`
+utilities left under `modules/settings/`. The console's Pre-request and Test
+script groups now use `status-running-*` and `status-success-*` tokens rather
+than raw `blue-500` / `green-500`, because the raw values were theme-blind and
+measured 3.76 and 2.22 in light mode; the console body is `bg-muted`, not a
+fixed `zinc-900` terminal. And the timing phases - DNS / connect / TLS / TTFB /
+download - are covered below.
 
-Everything else - state, status, scope, semantics - must use tokens.
+The history overview tiles were on this list too, and should not have been: they
+encode HTTP severity, which is state. They use `STATUS_CLASS_STYLE`.
 
-**Two entries were removed from this list because they no longer describe the
-code.** The per-section Settings accent palette is gone; there are zero
-`pink/purple/cyan` utilities left under `modules/settings/`. And the console's
-Pre-request and Test script groups now use `status-running-*` and
-`status-success-*` tokens rather than raw `blue-500` / `green-500`, because the
-raw values were theme-blind and measured 3.76 and 2.22 in light mode. The
-console body is `bg-muted`, not a fixed `zinc-900` terminal.
+#### Timing phases
+
+The five network phases are a categorical set, and they were the last entry
+here: the history breakdown tinted each tile with an explicit
+`bg-blue-50 dark:bg-blue-950/30` pair. They are `--chart-*` now, declared once
+in `components/shared/response-viewer/timing-phases.ts`:
+
+| Phase | Token |
+|-------|-------|
+| DNS | `--chart-2` (teal) |
+| Connect | `--chart-4` (amber) |
+| TLS | `--chart-5` (rose) |
+| TTFB | `--chart-3` (violet) |
+| Download | `--chart-6` (moss) |
+
+Two rules come with that table. **Never `--primary` or `--chart-1`** - both
+follow the user's accent, so either can land on a neighbouring phase's hue;
+under the green scheme `--primary` and `--success` sat three lightness points
+apart and two of the five phases rendered as one swatch. And **colour is only
+carried where it is the encoding** - the timeline segments in the builder's
+timing tab and the bars in the dashboard's waterfall, where hue is how you tell
+the phases apart. The tile grid (`TimingPhaseTiles`) is deliberately neutral:
+each tile already has the label written in it, so a hue there was decoration
+paying for an exception.
 
 The lesson worth keeping: an entry on this list is a claim about the code, and
 it decays. A raw palette class here is only defensible if it comes with a
@@ -701,9 +723,9 @@ style={{ color: `hsl(${getMethodColor(request.method)})` }}
 
 ### Charts
 
-A cohesive categorical set - `chart-1` tracks the active accent, then four
-evenly-spaced hues (teal / violet / amber / rose) shared across modes and tuned
-only in lightness for each ground.
+A cohesive categorical set - `chart-1` tracks the active accent, then five
+evenly-spaced hues (teal / violet / amber / rose / moss) shared across modes and
+tuned only in lightness for each ground.
 
 ```css
 /* Light */
@@ -712,6 +734,7 @@ only in lightness for each ground.
 --chart-3: 258 55% 55%;   /* violet */
 --chart-4:  38 88% 48%;   /* amber */
 --chart-5: 340 72% 50%;   /* rose */
+--chart-6: 105 58% 34%;   /* moss */
 
 /* Dark - same hues, lifted for the dark ground */
 --chart-1: <accent>;
@@ -719,7 +742,19 @@ only in lightness for each ground.
 --chart-3: 258 78% 72%;
 --chart-4:  38 90% 60%;
 --chart-5: 340 74% 62%;
+--chart-6: 105 52% 50%;
 ```
+
+`--chart-6` was added for the response timing waterfall, which needs five series
+at once. With four fixed hues available, two phases had been reaching outside the
+set - TTFB to `--primary` and Download to `--success` - and under the green
+accent those two land on the same hue (142) three points of lightness apart, so
+two of five phases rendered as the same swatch. Moss sits in the widest gap in
+the ring (38 -> 172), 67 degrees from its nearest neighbour.
+
+**A series never takes `--primary` or `--chart-1`.** Both move with the user's
+accent, so either can drift onto a neighbouring series in one scheme and not
+another - which is invisible when you are looking at the scheme it works in.
 
 ---
 
@@ -1139,7 +1174,57 @@ Section *headers* (e.g. "Environments") stay shorter on purpose - they are group
 labels, not list items, and the difference carries hierarchy.
 
 The disclosure chevron is `w-6 h-6` (24px) so it fits a 32px row. That is still
-an adequate pointer target, and the whole row remains clickable for opening.
+an adequate pointer target, and the row around it opens the collection.
+
+**`h-8 items-center` on the row means the activator needs `self-stretch`.** The
+two rules above interact, and the interaction is a bug the eye cannot see. A
+composite row (see `.focus-row`) paints the height, the hover fill, the selection
+tint and `cursor-pointer`, while the click handler sits on a narrower activator
+button inside it - the row carries a `⋯` menu, so it cannot itself be one button,
+and a plain `<div onClick>` is not keyboard operable. `items-center` then makes
+that button *content*-height: ~22px in a request row, where the `MethodBadge`
+props it open, and ~18px in a collection or environment row. The remaining 5-7px
+above and below took the fill and the pointer and did nothing on click. Measured
+in the running app at the 260px default drawer width, the share of the row that
+actually responded was **41%** for a collection, **51%** for a request and
+**36%** for an environment - and hit-testing 3px inside the top or bottom edge
+landed on the container, which has no handler.
+
+`self-stretch` on the activator overrides the row's centring; the activator's own
+`items-center` still centres its contents, and `.focus-row` is unaffected because
+the row paints the ring either way.
+
+**`self-stretch` fixes the height; the row's own box needs delegation.** The
+indent is `paddingLeft` *on the row* - deliberately, so the fill reaches the panel
+edge - and the flex gaps and right padding belong to no child either. No amount of
+stretching reaches any of it, and on a collection row the indent cannot move onto
+the activator even in principle, because the chevron sits between them. So the row
+takes the click itself and forwards it:
+
+```tsx
+const isRowSurface = (e: React.MouseEvent) => e.target === e.currentTarget;
+// on the row:
+onClick={(e) => isRowSurface(e) && handleClick(e)}
+```
+
+`target === currentTarget` is exactly "the pointer landed on the row's own box".
+It excludes the chevron and the `⋯` menu without naming them - they are children,
+and they own their own actions - and it stops a click on the activator from firing
+twice as it bubbles through. Drop the check and every label click activates twice.
+
+This is *not* the `<div onClick>` the environment row's comment warns against: the
+activator button stays and remains the keyboard path (`useRovingTreeFocus` clicks
+`[data-tree-activate]` on Enter). The row is a second, pointer-only entrance to
+the same handler.
+
+Together the two changes take all three rows to **100% of their own pixels** -
+measured by sweeping `elementFromPoint` across the row box in the running app. The
+only pixels a row does not own are the chevron, the `⋯` menu and the drawer's 8px
+`cursor-col-resize` handle at the panel edge. Both halves are guarded by
+`drawer-row-hit-area.test.tsx`: the height as a `className` assertion (jsdom has
+no layout, so an `offsetHeight` assertion would pass while measuring nothing), the
+delegation behaviourally, because `fireEvent.click(row)` targets the row itself -
+exactly the pointer that used to land on dead padding.
 
 ---
 

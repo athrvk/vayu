@@ -12,16 +12,41 @@
  * one place. Values are milliseconds unless the name says otherwise.
  */
 
+/*
+ * The auto-save delay is deliberately *not* here. It is a user setting, not a
+ * fixed timing: `autoSave.delayMs` in `constants/client-settings.ts`, chosen in
+ * Settings → General and read by `useSaveManager`. An `AUTO_SAVE_DELAY_MS: 3000`
+ * did sit here, with no readers and a value two seconds off the real default -
+ * which is worse than absent, since this file is where CLAUDE.md tells you to
+ * look for a millisecond value.
+ */
 export const TIMING = {
-	/** Debounced auto-save after the user stops editing a request. */
-	AUTO_SAVE_DELAY_MS: 3000,
+	/**
+	 * How often a rendered relative time recomputes itself.
+	 *
+	 * The response pane shows a response's age, and it sits open while you keep
+	 * editing the request beside it - so a "just now" that never updates is a
+	 * claim that goes stale while being looked at. Coarser than the finest
+	 * granularity the formatter has (a minute), which is all it needs to be.
+	 */
+	RELATIVE_TIME_TICK_MS: 30_000,
 	/** How long the "Saved" indicator stays visible after a save. */
 	SAVED_STATUS_DURATION_MS: 3000,
 
 	/** Transient status feedback (copied / saved / error chips) reset delay. */
 	STATUS_RESET_MS: 2000,
 
-	/** Radix tooltip open delay used across the app. */
+	/**
+	 * Radix tooltip open delay, set once on the root `TooltipProvider` in
+	 * `main.tsx` and inherited everywhere.
+	 *
+	 * This comment used to claim "used across the app" while the root provider
+	 * set nothing, so Radix's 700ms default governed almost everything and two
+	 * components opted into 150ms locally. Worse, two more mounted *bare* nested
+	 * providers, which do not inherit - a provider with no `delayDuration` prop
+	 * re-establishes 700ms for its subtree. Those are gone; a nested provider is
+	 * now the exception that has to say why.
+	 */
 	TOOLTIP_DELAY_MS: 150,
 
 	/** Engine health poll interval while the app is open. */

@@ -110,17 +110,45 @@ bool is_create) {
  * Same rule for a field stored as a dumped JSON blob (variables, auth, body).
  * `null` resets to `default_value`, which is the blob's canonical default text
  * (e.g. `{}` for variables, `{"mode":"none"}` for a collection's auth).
+ *
+ * Every field routed through here is **object-shaped**, and the helper rejects
+ * anything else with a 400 naming the field. It used to dump whatever it was
+ * handed, so `{"variables": 42}` stored `42` and `{"auth": "bearer"}` stored
+ * `"bearer"` - blobs that parse as JSON but are not the object each reader
+ * expects, and every reader degrades quietly (`parse_variables_json` yields no
+ * variables, `parse_auth` yields no auth, so the request goes out bare). The
+ * write returned 200 and the user found out from the wire. That is the same
+ * defect the `"null"`-string fix closed, one level up: it removed a bad
+ * *value*, this removes a bad *shape*. Array-shaped fields have their own
+ * validating helper (`apply_key_value_field` for `params` / `headers`).
+ *
+ * `[[nodiscard]]` because dropping the returned error is exactly the silent
+ * acceptance this helper exists to prevent.
  */
-inline void apply_json_field (const nlohmann::json& json,
+[[nodiscard]] inline std::optional<std::pair<int, nlohmann::json>>
+apply_json_field (const nlohmann::json& json,
 const char* key,
 std::string& out,
 const char* default_value,
 bool is_create) {
-    if (json.contains (key)) {
-        out = json[key].is_null () ? default_value : json[key].dump ();
-    } else if (is_create) {
-        out = default_value;
+    if (!json.contains (key)) {
+        if (is_create) {
+            out = default_value;
+        }
+        return std::nullopt;
     }
+    const auto& value = json[key];
+    if (value.is_null ()) {
+        out = default_value;
+        return std::nullopt;
+    }
+    if (!value.is_object ()) {
+        return std::make_pair (400,
+        nlohmann::json{
+        { "error", std::string ("Invalid '") + key + "': must be a JSON object" } });
+    }
+    out = value.dump ();
+    return std::nullopt;
 }
 
 /** Same rule for a boolean field. A non-boolean, non-null value is ignored. */

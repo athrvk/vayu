@@ -21,6 +21,7 @@ import JsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import TsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 
 import { registerGraphqlProviders } from "./graphql/language-providers";
+import { registerHttpLanguage } from "./http-language";
 
 self.MonacoEnvironment = {
 	getWorker(_workerId: string, label: string) {
@@ -40,3 +41,5 @@ self.MonacoEnvironment = {
 loader.config({ monaco });
 
 registerGraphqlProviders(monaco);
+// The Raw tab asks for `http`; Monaco ships no such language, so it is ours.
+registerHttpLanguage(monaco);

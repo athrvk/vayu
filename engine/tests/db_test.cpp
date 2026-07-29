@@ -132,6 +132,48 @@ TEST_F (DatabaseTest, AddsAndRetrievesMetrics) {
     EXPECT_EQ (metrics[1].value, 20.0);
 }
 
+// One tick writes ~18 rows sharing a single timestamp, and there is no index on
+// timestamp - so ordering by timestamp alone leaves the ties in scan order and a
+// page boundary can repeat or drop a row. id (insertion order) is the tiebreaker.
+TEST_F (DatabaseTest, PaginatedMetricsAreStablyOrderedAcrossTimestampTies) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    vayu::db::Run run;
+    run.id              = "run_1";
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Running;
+    run.start_time      = 1000;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+
+    // Two ticks of six rows each - every row within a tick shares a timestamp.
+    constexpr int kPerTick = 6;
+    for (int tick = 0; tick < 2; ++tick) {
+        for (int i = 0; i < kPerTick; ++i) {
+            vayu::db::Metric m;
+            m.run_id    = "run_1";
+            m.timestamp = 2000 + tick;
+            m.name      = vayu::MetricName::Rps;
+            m.value     = static_cast<double> (tick * kPerTick + i);
+            db.add_metric (m);
+        }
+    }
+
+    // Page through in 5s; the concatenation must be every row exactly once.
+    std::vector<double> paged;
+    for (int64_t offset = 0; offset < 2 * kPerTick; offset += 5) {
+        for (const auto& m : db.get_metrics_paginated ("run_1", 5, offset)) {
+            paged.push_back (m.value);
+        }
+    }
+
+    ASSERT_EQ (paged.size (), static_cast<size_t> (2 * kPerTick));
+    for (int i = 0; i < 2 * kPerTick; ++i) {
+        EXPECT_DOUBLE_EQ (paged[static_cast<size_t> (i)], static_cast<double> (i));
+    }
+}
+
 TEST_F (DatabaseTest, RetrievesAllRuns) {
     Database db (TEST_DB_PATH);
     db.init ();

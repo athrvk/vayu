@@ -90,8 +90,6 @@ const std::string& run_id, int64_t limit, int64_t offset) {
             bucket["current_rps"] = metric.value;
         } else if (metric.name == vayu::MetricName::ErrorRate) {
             bucket["error_rate"] = metric.value;
-            int total_req = bucket.value ("requests_completed", 0);
-            bucket["requests_failed"] = static_cast<int> ((metric.value / 100.0) * total_req);
         } else if (metric.name == vayu::MetricName::ConnectionsActive) {
             bucket["current_concurrency"] = static_cast<int> (metric.value);
         } else if (metric.name == vayu::MetricName::RequestsSent ||
@@ -128,6 +126,18 @@ const std::string& run_id, int64_t limit, int64_t offset) {
                 // leave default {}
             }
         }
+    }
+
+    // Derive requests_failed in a second pass, once every row for the tick has
+    // been folded in. Deriving it inside the ErrorRate branch made it depend on
+    // RequestsSent having already been seen for the same timestamp - and the
+    // producer inserts ErrorRate first, so it read requests_completed == 0 and
+    // stored a failed count of 0 for every bucket of every run.
+    for (auto& [ts, bucket] : time_buckets) {
+        double error_rate = bucket.value ("error_rate", 0.0);
+        int completed     = bucket.value ("requests_completed", 0);
+        bucket["requests_failed"] =
+        static_cast<int> ((error_rate / 100.0) * completed + 0.5);
     }
 
     // Convert map to sorted array
@@ -442,10 +452,12 @@ void register_metrics_routes (RouteContext& ctx) {
                 if (!sink.is_writable ()) return false;
 
                 auto batch = context->ticks_since (offset);
-                for (const auto& payload : batch) {
+                for (const auto& payload : batch.payloads) {
                     if (!sink.write (payload.data (), payload.size ())) return false;
                 }
-                offset += batch.size ();
+                // Adopt the producer's offset rather than advancing by the batch
+                // size: a resume from before the retained window skips ahead.
+                offset = batch.next_offset;
 
                 // Terminate only once the producer has appended its final tick
                 // (closed) AND we have drained the buffer - never gate on
@@ -454,7 +466,7 @@ void register_metrics_routes (RouteContext& ctx) {
                 offset >= context->published_count.load (std::memory_order_acquire)) {
                     break;
                 }
-                if (batch.empty ()) {
+                if (batch.payloads.empty ()) {
                     std::this_thread::sleep_for (std::chrono::milliseconds (50));
                 }
             }

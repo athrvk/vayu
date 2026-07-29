@@ -8,17 +8,32 @@
 /**
  * BodyPanel Component
  *
- * Request body editor with multiple modes:
- * - none: No body
- * - json: Monaco editor with JSON syntax
- * - text: Plain text editor
- * - graphql: Split editor - query (top) + variables JSON (bottom)
- * - form-data: Key-value editor
- * - x-www-form-urlencoded: Key-value editor
+ * Mode selection, and whichever editor that mode needs: a code editor for JSON
+ * and text, the key/value table for form-data and urlencoded, and `GraphQLBody`
+ * for GraphQL.
+ *
+ * **GraphQL used to live here**, and was roughly 40% of the file - the only
+ * mode with an editor pair, an introspection lifecycle and a header side effect
+ * of its own. It is its own component now.
+ *
+ * **Choosing GraphQL still adds a Content-Type header, but says so - and
+ * leaving GraphQL removes it again.** It used to write `Content-Type:
+ * application/json` into `request.headers` in silence, on a tab you are not
+ * looking at, and never take it back - so picking GraphQL once and returning to
+ * None left the header behind for good, on a request that sends no body at all.
+ * The header is genuinely required, so it is still added; what changed is that
+ * the panel announces it, and that the next mode change takes back the row it
+ * wrote (`body/content-type.ts`, by row id - a Content-Type the user typed is
+ * indistinguishable by value and must survive).
+ *
+ * **The resolved preview swaps rather than splits.** It used to put the editor
+ * and a read-only echo side by side at `grid-cols-2`, so the code you are
+ * editing gave up half its width - about 250px each on a narrow response split.
+ * A resolved body is something you glance at to confirm, not something you read
+ * alongside, so the two share one full-width surface.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, AlertCircle, Loader2, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { OnMount } from "@monaco-editor/react";
 import {
 	Select,
@@ -28,103 +43,48 @@ import {
 	SelectValue,
 	Button,
 	CodeEditor,
-	ResizablePanelGroup,
-	ResizablePanel,
-	ResizableHandle,
-	Tooltip,
-	TooltipTrigger,
-	TooltipContent,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "../../../shared/KeyValueEditor";
 import type { BodyMode, KeyValueItem } from "../../../types";
 import { createEmptyKeyValue, toFlatHeaders } from "../../../utils/key-value";
-import { generateUUID } from "../../../utils/id";
-import { useSchemaCache } from "@/lib/graphql/schema-cache";
-import { applyVariablesSchema } from "@/lib/graphql/variables-schema";
 import { useResizable } from "@/hooks/useResizable";
 import { cn } from "@/lib/utils";
-import { TIMING } from "@/config/timing";
+import GraphQLBody from "./body/GraphQLBody";
+import { switchContentType, withoutContentType } from "./body/content-type";
+import { ContentTypeNotice } from "./body/ContentTypeNotice";
+import { switchBody } from "../../../utils/body-drafts";
 
-const BODY_MODES: { value: BodyMode; label: string; description: string }[] = [
-	{ value: "none", label: "None", description: "No request body" },
-	{ value: "json", label: "JSON", description: "application/json" },
-	{ value: "text", label: "Text", description: "text/plain" },
-	{ value: "graphql", label: "GraphQL", description: "application/json" },
-	{ value: "form-data", label: "Form Data", description: "multipart/form-data" },
+const BODY_MODES: { value: BodyMode; label: string; contentType: string | null }[] = [
+	{ value: "none", label: "None", contentType: null },
+	{ value: "json", label: "JSON", contentType: "application/json" },
+	{ value: "text", label: "Text", contentType: "text/plain" },
+	{ value: "graphql", label: "GraphQL", contentType: "application/json" },
+	{ value: "form-data", label: "Form Data", contentType: "multipart/form-data" },
 	{
 		value: "x-www-form-urlencoded",
 		label: "URL Encoded",
-		description: "application/x-www-form-urlencoded",
+		contentType: "application/x-www-form-urlencoded",
 	},
 ];
-
-function parseGraphQLBody(body: string): { query: string; variables: string } {
-	try {
-		const parsed = JSON.parse(body);
-		if (parsed && typeof parsed.query === "string") {
-			return {
-				query: parsed.query,
-				variables: parsed.variables ? JSON.stringify(parsed.variables, null, 2) : "",
-			};
-		}
-	} catch {
-		// Body is not JSON - treat as a raw query string (e.g. Insomnia import)
-	}
-	// Raw query string - show as-is, no variables
-	return { query: body, variables: "" };
-}
-
-function serializeGraphQLBody(query: string, variables: string): string {
-	try {
-		const vars = variables.trim() ? JSON.parse(variables) : undefined;
-		return JSON.stringify({ query, ...(vars !== undefined && { variables: vars }) });
-	} catch {
-		// Variables panel has in-progress invalid JSON - preserve query only
-		return JSON.stringify({ query });
-	}
-}
-
-function SchemaStatusBadge({ status }: { status: "idle" | "loading" | "ready" | "error" }) {
-	if (status === "idle") return null;
-	if (status === "loading") {
-		return (
-			<span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-				<Loader2 className="w-3 h-3 animate-spin" />
-				Schema
-			</span>
-		);
-	}
-	if (status === "ready") {
-		return (
-			<span className="flex items-center gap-1 text-[10px] text-success-text">
-				<CheckCircle2 className="w-3 h-3" />
-				Schema
-			</span>
-		);
-	}
-	return (
-		<span
-			className="flex items-center gap-1 text-[10px] text-destructive-text"
-			title="Schema introspection failed - syntax checking only"
-		>
-			<AlertCircle className="w-3 h-3" />
-			No schema
-		</span>
-	);
-}
 
 /** One arrow press. A shade over a text line, so it moves visibly. */
 const RESIZE_STEP = 24;
 
 /**
- * The editor's drag handle.
+ * The handle that resizes the whole editor.
  *
  * It was `role="separator"` with an `onMouseDown` and nothing else: not
  * focusable, no key handling, so the editor's height was mouse-only. A
  * focusable separator is a window splitter, and the keys below are that
  * pattern - arrows to nudge, Page keys for a coarse jump, Home/End for the
  * extremes (which `resizeBy` handles via ±Infinity, since it clamps).
+ *
+ * It carries a **grip**, and the GraphQL query/variables splitter inside the box
+ * is a hairline. The two used to be identical - both `h-1.5 bg-border
+ * hover:bg-primary cursor-row-resize` - so a GraphQL body showed two matching
+ * grey bars doing different jobs. The grip is the same one the request/response
+ * splitter uses, and it says "this whole thing" rather than "this seam".
  */
 function ResizeHandle({
 	onMouseDown,
@@ -171,21 +131,32 @@ function ResizeHandle({
 				}
 			}}
 			className={cn(
-				// h-1.5 is a 6px target, so the focus ring is the only thing making
-				// it findable by keyboard - hence focus-visible, not just hover.
-				"h-1.5 cursor-row-resize bg-border transition-colors hover:bg-primary focus-visible:bg-primary",
-				active && "bg-primary"
+				"group flex h-3 cursor-row-resize items-center justify-center",
+				"focus-visible:outline-none"
 			)}
-		/>
+		>
+			<div
+				className={cn(
+					"h-1 w-7 rounded-full bg-border-strong transition-colors",
+					"group-hover:bg-primary group-focus-visible:bg-primary",
+					active && "bg-primary"
+				)}
+			/>
+		</div>
 	);
 }
 
 export default function BodyPanel() {
-	const { request, updateField, resolveString } = useRequestBuilderContext();
-	const [showPreview, setShowPreview] = useState(false);
-
-	const schemaStatus = useSchemaCache((s) => s.getActiveStatus());
-	const activeSchema = useSchemaCache((s) => s.getActiveSchema());
+	const {
+		request,
+		updateField,
+		resolveString,
+		getBodyDrafts,
+		setBodyDrafts,
+		getAutoContentType,
+		setAutoContentType,
+	} = useRequestBuilderContext();
+	const [showResolved, setShowResolved] = useState(false);
 
 	// Drag-to-resize editor height, shared across body modes that host an editor.
 	const {
@@ -210,16 +181,16 @@ export default function BodyPanel() {
 		for (const editorInstance of editorsRef.current) editorInstance.layout();
 	}, [editorHeight]);
 
-	// Variables-editor smartness: validate/autocomplete the variables JSON against
-	// the query's declared `$variables`. Capture the monaco instance + the
-	// variables model URI on mount, then (re)apply the derived JSON schema.
-	const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
-	const [variablesModelUri, setVariablesModelUri] = useState<string | null>(null);
-	const handleVariablesMount: OnMount = (editorInstance, monacoInstance) => {
-		handleEditorMount(editorInstance, monacoInstance);
-		monacoRef.current = monacoInstance;
-		setVariablesModelUri(editorInstance.getModel()?.uri.toString() ?? null);
-	};
+	/*
+	 * The Content-Type this mode change added, for the notice.
+	 *
+	 * Null once dismissed, undone, or the mode changes again - the notice is
+	 * about the edit that just happened, not a standing state. *Which row* was
+	 * added is remembered separately and durably (`getAutoContentType`), because
+	 * removing it again must survive dismissing the notice and unmounting the
+	 * panel.
+	 */
+	const [addedContentType, setAddedContentType] = useState<string | null>(null);
 
 	const resolvedGqlUrl = resolveString(request.url || "").trim();
 	const buildResolvedHeaders = (): Record<string, string> =>
@@ -230,30 +201,30 @@ export default function BodyPanel() {
 			])
 		);
 
-	// In GraphQL mode, track the resolved endpoint as the active schema URL and
-	// (debounced) introspect it so the editor's language providers can validate
-	// and autocomplete against the schema.
-	useEffect(() => {
-		if (request.bodyMode !== "graphql") {
-			useSchemaCache.getState().setActiveUrl(null);
-			return;
-		}
-		useSchemaCache.getState().setActiveUrl(resolvedGqlUrl || null);
-		if (!resolvedGqlUrl) return;
-		const headers = buildResolvedHeaders();
-		const id = setTimeout(() => {
-			void useSchemaCache.getState().ensureSchema(resolvedGqlUrl, headers);
-		}, TIMING.GRAPHQL_INTROSPECTION_DEBOUNCE_MS);
-		return () => clearTimeout(id);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [request.bodyMode, request.url, request.headers, resolveString]);
-
-	const handleRefreshSchema = () => {
-		if (!resolvedGqlUrl) return;
-		void useSchemaCache.getState().refreshSchema(resolvedGqlUrl, buildResolvedHeaders());
-	};
-
 	const handleModeChange = (mode: BodyMode) => {
+		/*
+		 * What each kind of body held, so switching mode does not destroy it.
+		 *
+		 * JSON, text and GraphQL all share `request.body` - the stored shape is
+		 * one discriminated union - so switching handed the same string to a
+		 * different reader. From JSON to GraphQL that meant the payload was read
+		 * as a raw query, and one keystroke later the body was
+		 * `{"query":"{\"merchant\":\"mrc_8813\"}"}` with the original gone.
+		 *
+		 * The drafts belong to the provider, not to this panel: Radix unmounts an
+		 * inactive `TabsContent`, so a panel-local ref would be discarded every
+		 * time you glanced at the Headers tab.
+		 */
+		const { body, drafts } = switchBody(
+			request.bodyMode,
+			mode,
+			request.body ?? "",
+			request.id,
+			getBodyDrafts()
+		);
+		setBodyDrafts(drafts);
+		if (body !== (request.body ?? "")) updateField("body", body);
+
 		updateField("bodyMode", mode);
 
 		// Initialize appropriate data for mode
@@ -264,159 +235,132 @@ export default function BodyPanel() {
 			updateField("urlEncoded", [createEmptyKeyValue()]);
 		}
 
-		// Auto-inject Content-Type: application/json for GraphQL if not already present
-		if (mode === "graphql") {
-			const hasContentType = request.headers.some(
-				(h) => h.key.toLowerCase() === "content-type" && h.enabled
-			);
-			if (!hasContentType) {
-				updateField("headers", [
-					...request.headers,
-					{
-						id: generateUUID(),
-						key: "Content-Type",
-						value: "application/json",
-						enabled: true,
-					},
-				]);
-			}
-		}
+		/*
+		 * The mode may require a Content-Type, and the mode being left may have
+		 * required one this panel added. Adding it automatically is right - GraphQL
+		 * genuinely needs one - but doing so *silently*, to a tab the user is not
+		 * looking at, was not, and nothing ever removed it: one visit to GraphQL
+		 * left the header on the request permanently, including after switching
+		 * back to None, which sends no body at all. Both halves happen in one call
+		 * because they read and write the same array.
+		 */
+		const contentType = switchContentType(
+			mode,
+			request.headers,
+			request.id,
+			getAutoContentType()
+		);
+		if (contentType.headers !== request.headers) updateField("headers", contentType.headers);
+		setAutoContentType(contentType.auto);
+		setAddedContentType(contentType.added);
 	};
 
-	const handleRawChange = (value: string) => {
-		updateField("body", value);
+	const undoContentType = () => {
+		const auto = getAutoContentType();
+		if (!auto) return;
+		updateField("headers", withoutContentType(request.headers, auto));
+		setAutoContentType(null);
+		setAddedContentType(null);
 	};
 
-	const handleFormDataChange = (items: KeyValueItem[]) => {
-		updateField("formData", items);
-	};
-
-	const handleUrlEncodedChange = (items: KeyValueItem[]) => {
-		updateField("urlEncoded", items);
-	};
-
-	// Check for variables in body
+	const activeMode = BODY_MODES.find((m) => m.value === request.bodyMode);
 	const hasVariables = request.body ? /\{\{[^{}]+\}\}/.test(request.body) : false;
 	const resolvedBody = request.body ? resolveString(request.body) : "";
-
-	// The query is always a valid string, so derive it from the body directly.
-	const gqlQuery = useMemo(
-		() => (request.bodyMode === "graphql" ? parseGraphQLBody(request.body || "").query : ""),
-		[request.bodyMode, request.body]
-	);
-
-	// The variables editor keeps its own raw text as the source of truth: while
-	// the user types an object, intermediate states are invalid JSON which
-	// serializeGraphQLBody drops - so re-deriving the editor value from the body
-	// would wipe their input. Re-sync from the body only on external changes
-	// (request switch, mode switch), tracked via the body value we last wrote.
-	const [gqlVariables, setGqlVariables] = useState("");
-	const lastWrittenBody = useRef<string | undefined>(undefined);
-	useEffect(() => {
-		if (request.bodyMode !== "graphql") return;
-		if (request.body === lastWrittenBody.current) return;
-		setGqlVariables(parseGraphQLBody(request.body || "").variables);
-		lastWrittenBody.current = request.body;
-	}, [request.bodyMode, request.body]);
-
-	const writeGraphqlBody = (query: string, variables: string) => {
-		const body = serializeGraphQLBody(query, variables);
-		lastWrittenBody.current = body;
-		updateField("body", body);
-	};
-
-	// Drive the variables editor's JSON schema from the query's `$variables` +
-	// the introspected schema, so it validates/autocompletes against what the
-	// operation expects. Clears the schema outside GraphQL mode.
-	useEffect(() => {
-		const monaco = monacoRef.current;
-		if (!monaco || !variablesModelUri) return;
-		if (request.bodyMode !== "graphql") {
-			applyVariablesSchema(monaco, variablesModelUri, "", null);
-			return;
-		}
-		applyVariablesSchema(monaco, variablesModelUri, gqlQuery, activeSchema);
-	}, [request.bodyMode, gqlQuery, activeSchema, variablesModelUri]);
+	const isCodeMode = request.bodyMode === "json" || request.bodyMode === "text";
+	const isTable =
+		request.bodyMode === "form-data" || request.bodyMode === "x-www-form-urlencoded";
+	const tableItems = request.bodyMode === "form-data" ? request.formData : request.urlEncoded;
+	const onTableChange = (items: KeyValueItem[]) =>
+		updateField(request.bodyMode === "form-data" ? "formData" : "urlEncoded", items);
 
 	return (
-		<div className="space-y-4">
-			{/* Mode Selector */}
-			<div className="flex items-center justify-between">
-				<Select value={request.bodyMode} onValueChange={handleModeChange}>
-					<SelectTrigger className="w-auto">
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						{BODY_MODES.map((mode) => (
-							<SelectItem key={mode.value} value={mode.value}>
-								<div className="flex justify-start items-center gap-2">
-									<span>{mode.label}</span>
-									<span className="text-xs text-muted-foreground">
-										({mode.description})
-									</span>
-								</div>
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
+		<div className="space-y-3">
+			<div className="flex items-center justify-between gap-3">
+				<div className="flex items-center gap-2 min-w-0">
+					<Select value={request.bodyMode} onValueChange={handleModeChange}>
+						<SelectTrigger className="h-8 w-auto">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							{BODY_MODES.map((mode) => (
+								<SelectItem key={mode.value} value={mode.value}>
+									{mode.label}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
 
-				{hasVariables && request.bodyMode !== "none" && request.bodyMode !== "graphql" && (
-					<Button
-						size="sm"
-						variant={showPreview ? "secondary" : "outline"}
-						onClick={() => setShowPreview(!showPreview)}
-					>
-						{showPreview ? "Hide" : "Show"} Preview
-					</Button>
+					{/*
+					 * What actually goes on the wire, beside the picker. It used to
+					 * appear only *inside* the dropdown, so once a mode was chosen the
+					 * content type it implies was one click away and invisible the rest
+					 * of the time.
+					 */}
+					{activeMode?.contentType ? (
+						<code className="truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+							{activeMode.contentType}
+						</code>
+					) : (
+						<span className="text-xs text-muted-foreground">No body will be sent.</span>
+					)}
+				</div>
+
+				{/*
+				 * Source / Resolved, as a swap. Only offered when the body actually
+				 * contains a variable - there is nothing to resolve otherwise.
+				 */}
+				{hasVariables && isCodeMode && (
+					<div className="flex shrink-0 items-center gap-1">
+						<Button
+							size="sm"
+							variant={showResolved ? "ghost" : "secondary"}
+							onClick={() => setShowResolved(false)}
+							className="h-7 px-2.5 text-xs"
+						>
+							Source
+						</Button>
+						<Button
+							size="sm"
+							variant={showResolved ? "secondary" : "ghost"}
+							onClick={() => setShowResolved(true)}
+							className="h-7 px-2.5 text-xs"
+						>
+							Resolved
+						</Button>
+					</div>
 				)}
 			</div>
 
-			{/* Body Content */}
-			{request.bodyMode === "none" && (
-				<div className="py-12 text-center text-muted-foreground">
-					<p>This request does not have a body.</p>
-				</div>
+			{/* `/10` and `/30`, matching the accent tint the Load Test button and the
+			    variable popover already use - not a bespoke opacity. */}
+			{addedContentType && (
+				<ContentTypeNotice
+					value={addedContentType}
+					onUndo={undoContentType}
+					onDismiss={() => setAddedContentType(null)}
+				/>
 			)}
 
-			{(request.bodyMode === "json" || request.bodyMode === "text") && (
+			{isCodeMode && (
 				<div>
-					<div className={showPreview ? "grid grid-cols-2 gap-4" : ""}>
-						<div className="space-y-2">
-							{showPreview && (
-								<label className="text-xs font-medium text-muted-foreground">
-									Source
-								</label>
-							)}
-							<div
-								className="rounded-md border border-input overflow-hidden"
-								style={{ height: editorHeight }}
-							>
-								<CodeEditor
-									height="100%"
-									language={request.bodyMode === "json" ? "json" : "plaintext"}
-									value={request.body || ""}
-									onChange={handleRawChange}
-									onMount={handleEditorMount}
-								/>
-							</div>
-						</div>
-
-						{showPreview && (
-							<div className="space-y-2">
-								<label className="text-xs font-medium text-muted-foreground">
-									Resolved Preview
-								</label>
-								<pre
-									className="p-3 rounded-md border border-input font-mono text-sm bg-muted/50 overflow-auto whitespace-pre-wrap"
-									style={{ height: editorHeight }}
-								>
-									{resolvedBody || (
-										<span className="text-muted-foreground italic">
-											Empty body
-										</span>
-									)}
-								</pre>
-							</div>
+					<div
+						className="overflow-hidden rounded-md border border-input"
+						style={{ height: editorHeight }}
+					>
+						{showResolved ? (
+							<pre className="h-full overflow-auto whitespace-pre-wrap bg-muted/50 p-3 font-mono text-sm">
+								{resolvedBody || (
+									<span className="italic text-muted-foreground">Empty body</span>
+								)}
+							</pre>
+						) : (
+							<CodeEditor
+								height="100%"
+								language={request.bodyMode === "json" ? "json" : "plaintext"}
+								value={request.body || ""}
+								onChange={(v) => updateField("body", v ?? "")}
+								onMount={handleEditorMount}
+							/>
 						)}
 					</div>
 					<ResizeHandle
@@ -433,101 +377,17 @@ export default function BodyPanel() {
 			{request.bodyMode === "graphql" && (
 				<div>
 					<div
-						className="rounded-md border border-input overflow-hidden"
+						className="overflow-hidden rounded-md border border-input"
 						style={{ height: editorHeight }}
 					>
-						<ResizablePanelGroup orientation="vertical" className="h-full">
-							<ResizablePanel
-								defaultSize="65%"
-								minSize="25%"
-								className="flex flex-col"
-							>
-								<div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-panel shrink-0">
-									<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-										Query
-									</span>
-									<div className="flex items-center gap-2">
-										<SchemaStatusBadge status={schemaStatus} />
-										{resolvedGqlUrl && (
-											// Bespoke tiny affordance (12px, no button chrome),
-											// so it wraps Tooltip by hand rather than using
-											// TooltipIconButton, whose icon-size Button would
-											// dwarf it here. Same result: a real tooltip plus a
-											// name, replacing the old title.
-											<Tooltip>
-												<TooltipTrigger asChild>
-													<button
-														type="button"
-														onClick={handleRefreshSchema}
-														disabled={schemaStatus === "loading"}
-														aria-label="Refresh schema"
-														className="text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
-													>
-														<RefreshCw
-															className={cn(
-																"w-3 h-3",
-																schemaStatus === "loading" &&
-																	"animate-spin"
-															)}
-														/>
-													</button>
-												</TooltipTrigger>
-												<TooltipContent side="top">
-													Refresh schema
-												</TooltipContent>
-											</Tooltip>
-										)}
-									</div>
-								</div>
-								{/*
-								 * min-h-0: a flex item will not shrink below its content, so
-								 * without it the editor keeps its old height when the pane is
-								 * dragged smaller. The panel then overflows and grows a native
-								 * scrollbar beside the editor's own - two scrollbars for one
-								 * editor. Same trap as min-w-0 on truncating rows.
-								 */}
-								<div className="min-h-0 flex-1">
-									<CodeEditor
-										height="100%"
-										language="graphql"
-										value={gqlQuery}
-										onChange={(q) => writeGraphqlBody(q, gqlVariables)}
-										onMount={handleEditorMount}
-									/>
-								</div>
-							</ResizablePanel>
-							<ResizableHandle className="h-1.5 w-full cursor-row-resize bg-border after:hidden hover:bg-primary transition-colors" />
-							<ResizablePanel
-								defaultSize="35%"
-								minSize="15%"
-								className="flex flex-col"
-							>
-								<div className="px-3 py-1.5 border-b border-border bg-panel shrink-0">
-									<span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-										Variables
-									</span>
-								</div>
-								{/*
-								 * min-h-0: a flex item will not shrink below its content, so
-								 * without it the editor keeps its old height when the pane is
-								 * dragged smaller. The panel then overflows and grows a native
-								 * scrollbar beside the editor's own - two scrollbars for one
-								 * editor. Same trap as min-w-0 on truncating rows.
-								 */}
-								<div className="min-h-0 flex-1">
-									<CodeEditor
-										height="100%"
-										language="json"
-										value={gqlVariables}
-										onChange={(v) => {
-											setGqlVariables(v);
-											writeGraphqlBody(gqlQuery, v);
-										}}
-										onMount={handleVariablesMount}
-									/>
-								</div>
-							</ResizablePanel>
-						</ResizablePanelGroup>
+						<GraphQLBody
+							body={request.body || ""}
+							onBodyChange={(b) => updateField("body", b)}
+							resolvedUrl={resolvedGqlUrl}
+							resolvedHeaders={buildResolvedHeaders}
+							onEditorMount={handleEditorMount}
+							active
+						/>
 					</div>
 					<ResizeHandle
 						onMouseDown={startResizing}
@@ -540,27 +400,15 @@ export default function BodyPanel() {
 				</div>
 			)}
 
-			{request.bodyMode === "form-data" && (
-				<div className="space-y-2">
-					<KeyValueEditor
-						items={
-							request.formData.length > 0 ? request.formData : [createEmptyKeyValue()]
-						}
-						onChange={handleFormDataChange}
-						keyPlaceholder="Key"
-						valuePlaceholder="Value"
-						showResolved={true}
-						allowDisable={true}
-					/>
-				</div>
-			)}
-
-			{request.bodyMode === "x-www-form-urlencoded" && (
+			{/*
+			 * form-data and urlencoded render through one branch. They were two
+			 * copies of the same call, differing only in that one was wrapped in a
+			 * `space-y-2` div and the other was not.
+			 */}
+			{isTable && (
 				<KeyValueEditor
-					items={
-						request.urlEncoded.length > 0 ? request.urlEncoded : [createEmptyKeyValue()]
-					}
-					onChange={handleUrlEncodedChange}
+					items={tableItems.length > 0 ? tableItems : [createEmptyKeyValue()]}
+					onChange={onTableChange}
 					keyPlaceholder="Key"
 					valuePlaceholder="Value"
 					showResolved={true}
