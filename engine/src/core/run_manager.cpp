@@ -31,11 +31,15 @@ inline int64_t now_ms () {
 /**
  * @brief Validate sampled responses using test scripts (deferred validation)
  * This runs after the load test completes to avoid impacting throughput.
- * Results are streamed to the database for SSE consumption.
+ *
+ * Returns the tallies for the run summary, or nullopt when validation did not
+ * run at all (no test script, or no sampled responses) - which is what keeps
+ * the report's testValidation section absent instead of all-zero.
  */
-void validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& db, bool verbose) {
+std::optional<ScriptValidationTotals>
+validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& db, bool verbose) {
     if (context->test_script.empty ()) {
-        return; // No script to validate
+        return std::nullopt; // No script to validate
     }
 
     const auto& samples = context->metrics_collector->response_samples ();
@@ -44,21 +48,13 @@ void validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& 
             vayu::utils::log_info (
             "No response samples collected for script validation");
         }
-        return;
+        return std::nullopt;
     }
 
     if (verbose) {
         vayu::utils::log_info ("Validating " + std::to_string (samples.size ()) +
         " response samples with test script...");
     }
-
-    // Send "validating" metric to indicate script validation has started
-    db.add_metric ({ 0, context->run_id, now_ms (), vayu::MetricName::TestsValidating,
-    1.0, R"({"samples":)" + std::to_string (samples.size ()) + "}" });
-
-    // Stream the number of samples being validated
-    db.add_metric ({ 0, context->run_id, now_ms (),
-    vayu::MetricName::TestsSampled, static_cast<double> (samples.size ()), "" });
 
     // Create script engine for validation, bounded by the same timeout/limits
     // the execute path reads so an infinite-loop test script cannot spin the
@@ -133,14 +129,8 @@ void validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& 
         }
     }
 
-    // Store test validation results
-    auto timestamp = now_ms ();
-    db.add_metric ({ 0, context->run_id, timestamp,
-    vayu::MetricName::TestsPassed, static_cast<double> (passed), "" });
-    db.add_metric ({ 0, context->run_id, timestamp,
-    vayu::MetricName::TestsFailed, static_cast<double> (failed), "" });
-
     // Store failure summary as a result record
+    auto timestamp = now_ms ();
     if (!failure_messages.empty ()) {
         nlohmann::json failure_json;
         failure_json["failures"]    = failure_messages;
@@ -162,6 +152,8 @@ void validate_scripts (std::shared_ptr<RunContext> context, vayu::db::Database& 
         vayu::utils::log_info ("  Script validation: " + std::to_string (passed) +
         " passed, " + std::to_string (failed) + " failed");
     }
+
+    return ScriptValidationTotals{ samples.size (), passed, failed };
 }
 } // namespace
 
@@ -519,86 +511,6 @@ RunManager& manager) {
 
         // Calculate percentiles using MetricsCollector (HdrHistogram)
         auto percentiles = context->metrics_collector->calculate_percentiles ();
-        double p50       = percentiles.p50;
-        double p75       = percentiles.p75;
-        double p90       = percentiles.p90;
-        double p95       = percentiles.p95;
-        double p99       = percentiles.p99;
-        double p999      = percentiles.p999;
-
-        // Store final summary metrics (batched in single transaction to reduce lock contention)
-        try {
-            auto timestamp = now_ms ();
-            std::vector<vayu::db::Metric> final_metrics;
-            final_metrics.reserve (12); // Pre-allocate for expected metrics
-
-            final_metrics.push_back (
-            { 0, context->run_id, timestamp, vayu::MetricName::Rps, actual_rps, "" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::LatencyAvg, avg_latency, "" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::LatencyP50, p50, R"({"percentile":"p50"})" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::LatencyP75, p75, R"({"percentile":"p75"})" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::LatencyP90, p90, R"({"percentile":"p90"})" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::LatencyP95, p95, R"({"percentile":"p95"})" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::LatencyP99, p99, R"({"percentile":"p99"})" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::LatencyP999, p999, R"({"percentile":"p999"})" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::LatencyMax, percentiles.max, R"({"percentile":"max"})" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::LatencyMin, percentiles.min, R"({"percentile":"min"})" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::PeakConcurrency,
-            static_cast<double> (context->peak_in_flight.load ()), "" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::DroppedRequests,
-            static_cast<double> (context->metrics_collector->dropped_requests ()), "" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::QueueWaitAvg,
-            context->metrics_collector->average_queue_wait (), "" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::BytesSent,
-            static_cast<double> (context->metrics_collector->total_bytes_sent ()), "" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::BytesReceived,
-            static_cast<double> (context->metrics_collector->total_bytes_received ()), "" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::ErrorRate, error_rate, "" });
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::TotalRequests, static_cast<double> (completed), "" });
-            final_metrics.push_back (
-            { 0, context->run_id, timestamp, vayu::MetricName::Completed, 1.0, "" });
-
-            // Store actual test duration (excludes setup/teardown overhead)
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::TestDuration, total_duration_s, "" });
-
-            // Store setup/teardown overhead for diagnostic purposes
-            final_metrics.push_back ({ 0, context->run_id, timestamp,
-            vayu::MetricName::SetupOverhead, setup_overhead_s, "" });
-
-            // Store status code distribution as JSON in metadata field
-            auto status_codes = context->metrics_collector->status_code_distribution ();
-            if (!status_codes.empty ()) {
-                nlohmann::json status_codes_json;
-                for (const auto& [code, count] : status_codes) {
-                    status_codes_json[std::to_string (code)] = count;
-                }
-                final_metrics.push_back ({ 0, context->run_id, timestamp,
-                vayu::MetricName::StatusCodes, 0.0, status_codes_json.dump () });
-            }
-
-            // Batch insert all metrics in a single transaction
-            db.add_metrics_batch (final_metrics);
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "Failed to store final metrics: " + std::string (e.what ()));
-        }
 
         // Batch flush all results to database (errors and sampled successes)
         try {
@@ -612,12 +524,43 @@ RunManager& manager) {
             "Failed to flush results to database: " + std::string (e.what ()));
         }
 
-        // Run deferred script validation if test script is present
+        // Run deferred script validation if test script is present. Its tallies
+        // go into the summary below, so it has to run before the summary write.
+        std::optional<ScriptValidationTotals> validation;
         try {
-            validate_scripts (context, db, verbose);
+            validation = validate_scripts (context, db, verbose);
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "Script validation failed: " + std::string (e.what ()));
+        }
+
+        // Store the whole-run summary: everything the report used to rebuild by
+        // scanning the run's metric rows, written once, here.
+        try {
+            RunSummaryInputs inputs;
+            inputs.total_requests   = completed;
+            inputs.rps              = actual_rps;
+            inputs.send_rate        = total_duration_s > 0 ?
+            static_cast<double> (context->requests_sent.load ()) / total_duration_s :
+            0.0;
+            inputs.throughput       = actual_rps;
+            inputs.test_duration_s  = total_duration_s;
+            inputs.setup_overhead_s = setup_overhead_s;
+            inputs.peak_concurrency = context->peak_in_flight.load ();
+            inputs.dropped_requests = context->metrics_collector->dropped_requests ();
+            inputs.queue_wait_avg_ms = context->metrics_collector->average_queue_wait ();
+            inputs.bytes_sent      = context->metrics_collector->total_bytes_sent ();
+            inputs.bytes_received  = context->metrics_collector->total_bytes_received ();
+            inputs.status_codes    = context->metrics_collector->status_code_distribution ();
+            inputs.latency         = percentiles;
+            inputs.latency_avg_ms  = avg_latency;
+            inputs.tests           = validation;
+
+            db.update_run_summary (
+            context->run_id, build_run_summary_payload (inputs).dump ());
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "Failed to store run summary: " + std::string (e.what ()));
         }
 
         // Update run status with retry logic to handle any remaining contention
@@ -644,8 +587,9 @@ RunManager& manager) {
             (target_rps > 0 ? std::to_string (target_rps) : "unlimited"));
             vayu::utils::log_info ("  Actual RPS: " + std::to_string (actual_rps));
             vayu::utils::log_info ("  Avg latency: " + std::to_string (avg_latency) + " ms");
-            vayu::utils::log_info ("  P50/P95/P99: " + std::to_string (p50) +
-            "/" + std::to_string (p95) + "/" + std::to_string (p99) + " ms");
+            vayu::utils::log_info ("  P50/P95/P99: " + std::to_string (percentiles.p50) +
+            "/" + std::to_string (percentiles.p95) + "/" +
+            std::to_string (percentiles.p99) + " ms");
         }
     } catch (const std::exception& e) {
         // Stop background metrics collection
@@ -653,17 +597,49 @@ RunManager& manager) {
         std::this_thread::sleep_for (std::chrono::milliseconds (200));
 
         vayu::utils::log_error ("Load test error: " + std::string (e.what ()));
+
+        // A crashed run still gets a summary, with whatever the collector holds
+        // and a wall-clock duration - without one the report route would take
+        // the legacy path and find nothing, reporting an empty run.
+        //
+        // Written *before* the status flips to Failed, matching the success
+        // path: the terminal status is what tells a polling client the report
+        // is ready, so a client that fetches on seeing it must not race a
+        // summary still being written and get the empty-run answer instead.
+        try {
+            RunSummaryInputs inputs;
+            auto& mc                = *context->metrics_collector;
+            inputs.total_requests   = mc.total_requests ();
+            const double elapsed_s = context->start_time_ms > 0 ?
+            static_cast<double> (now_ms () - context->start_time_ms) / 1000.0 :
+            0.0;
+            inputs.rps              = elapsed_s > 0 ?
+            static_cast<double> (inputs.total_requests) / elapsed_s : 0.0;
+            inputs.send_rate        = elapsed_s > 0 ?
+            static_cast<double> (context->requests_sent.load ()) / elapsed_s : 0.0;
+            inputs.throughput       = inputs.rps;
+            inputs.test_duration_s  = elapsed_s;
+            inputs.peak_concurrency = context->peak_in_flight.load ();
+            inputs.dropped_requests = mc.dropped_requests ();
+            inputs.queue_wait_avg_ms = mc.average_queue_wait ();
+            inputs.bytes_sent       = mc.total_bytes_sent ();
+            inputs.bytes_received   = mc.total_bytes_received ();
+            inputs.status_codes     = mc.status_code_distribution ();
+            inputs.latency          = mc.calculate_percentiles ();
+            inputs.latency_avg_ms   = mc.average_latency ();
+
+            db.update_run_summary (
+            context->run_id, build_run_summary_payload (inputs).dump ());
+        } catch (const std::exception& ex) {
+            vayu::utils::log_error (
+            "Failed to store run summary for failed run: " + std::string (ex.what ()));
+        }
+
         try {
             db.update_run_status_with_retry (context->run_id, vayu::RunStatus::Failed);
         } catch (const std::exception& ex) {
             vayu::utils::log_error (
             "Failed to update run status: " + std::string (ex.what ()));
-        }
-
-        try {
-            db.add_metric (
-            { 0, context->run_id, now_ms (), vayu::MetricName::Completed, 1.0, "" });
-        } catch (...) {
         }
 
         // Failed is terminal too - prune per the retention knobs, best-effort.
@@ -683,32 +659,64 @@ std::string build_tick_payload (const nlohmann::json& stats, size_t offset) {
     stats.dump () + "\n\n";
 }
 
-std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
-const std::shared_ptr<RunContext>& context,
-int64_t timestamp,
-const std::map<int, size_t>* status_snapshot) {
-    auto& mc = *context->metrics_collector;
-    std::vector<vayu::db::Metric> rows;
-    rows.reserve (4);
-    rows.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::DroppedRequests,
-    static_cast<double> (mc.dropped_requests ()), "" });
-    rows.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::BytesSent,
-    static_cast<double> (mc.total_bytes_sent ()), "" });
-    rows.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::BytesReceived,
-    static_cast<double> (mc.total_bytes_received ()), "" });
-    // Reuse the tick's snapshot when provided to avoid a second scan/copy of the
-    // distribution; otherwise compute it (e.g. unit tests calling directly).
-    std::map<int, size_t> local_dist;
-    const std::map<int, size_t>& dist = status_snapshot != nullptr ?
-    *status_snapshot :
-    (local_dist = mc.status_code_distribution ());
+nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     nlohmann::json codes = nlohmann::json::object ();
-    for (const auto& [code, count] : dist) {
+    for (const auto& [code, count] : sample.status_codes) {
         codes[std::to_string (code)] = count;
     }
-    rows.push_back (
-    { 0, context->run_id, timestamp, vayu::MetricName::StatusCodes, 0.0, codes.dump () });
-    return rows;
+
+    nlohmann::json payload;
+    payload["timestamp"]           = sample.timestamp;
+    payload["elapsed_seconds"]     = sample.elapsed_seconds;
+    payload["requests_completed"]  = sample.requests_completed;
+    payload["requests_failed"]     = sample.requests_failed;
+    payload["current_rps"]         = sample.current_rps;
+    payload["current_concurrency"] = sample.current_concurrency;
+    payload["send_rate"]           = sample.send_rate;
+    payload["throughput"]          = sample.throughput;
+    payload["backpressure"]        = sample.backpressure;
+    payload["error_rate"]          = sample.error_rate;
+    payload["dropped_requests"]    = sample.dropped_requests;
+    payload["bytes_sent"]          = sample.bytes_sent;
+    payload["bytes_received"]      = sample.bytes_received;
+    payload["status_codes"]        = codes;
+    payload["latency_p50_ms"]      = sample.latency_p50_ms;
+    payload["latency_p95_ms"]      = sample.latency_p95_ms;
+    payload["latency_p99_ms"]      = sample.latency_p99_ms;
+    return payload;
+}
+
+nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
+    nlohmann::json codes = nlohmann::json::object ();
+    for (const auto& [code, count] : inputs.status_codes) {
+        codes[std::to_string (code)] = count;
+    }
+
+    nlohmann::json summary;
+    summary["total_requests"]   = inputs.total_requests;
+    summary["rps"]              = inputs.rps;
+    summary["send_rate"]        = inputs.send_rate;
+    summary["throughput"]       = inputs.throughput;
+    summary["test_duration"]    = inputs.test_duration_s;
+    summary["setup_overhead"]   = inputs.setup_overhead_s;
+    summary["peak_concurrency"] = inputs.peak_concurrency;
+    summary["dropped_requests"] = inputs.dropped_requests;
+    summary["queue_wait_avg"]   = inputs.queue_wait_avg_ms;
+    summary["bytes_sent"]       = inputs.bytes_sent;
+    summary["bytes_received"]   = inputs.bytes_received;
+    summary["status_codes"]     = codes;
+    summary["latency"] = { { "min", inputs.latency.min }, { "max", inputs.latency.max },
+        { "avg", inputs.latency_avg_ms }, { "p50", inputs.latency.p50 },
+        { "p75", inputs.latency.p75 }, { "p90", inputs.latency.p90 },
+        { "p95", inputs.latency.p95 }, { "p99", inputs.latency.p99 },
+        { "p999", inputs.latency.p999 } };
+    // Omitted entirely when validation did not run, so the report keeps
+    // distinguishing "no test script" from "a script that passed nothing".
+    if (inputs.tests.has_value ()) {
+        summary["tests"] = { { "sampled", inputs.tests->sampled },
+            { "passed", inputs.tests->passed }, { "failed", inputs.tests->failed } };
+    }
+    return summary;
 }
 
 void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* db_ptr) {
@@ -722,9 +730,13 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     double live_current_rps = 0.0;
     bool   rps_first        = true;
 
-    // Live tick cadence (default 100 ms); DB batch still gated at 1 Hz.
+    // Live tick cadence (default 100 ms); DB write still gated at 1 Hz.
     // Declared here so it is in scope inside the try block below.
     int tick_interval_ms = 0;
+
+    // Wall clock of the first persisted tick; the origin every stored tick's
+    // elapsed_seconds is relative to. 0 until the first DB-gated tick.
+    int64_t first_tick_wall_ms = 0;
 
     // Windowed (rolling) percentiles sampled by emit_live_tick each tick. Captured
     // here so the 1 Hz DB-gated block below can persist the same window it just
@@ -885,58 +897,46 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
                 ", active=" + std::to_string (context->event_loop->active_count ()) +
                 ", sent=" + std::to_string (requests_sent));
 
-                // Store metrics (batched to reduce lock contention)
+                // Persist the tick: one wide row, built here rather than
+                // reassembled from ~18 EAV rows by every reader.
                 try {
-                    auto timestamp = tick_wall_ms;
-                    std::vector<vayu::db::Metric> metrics;
-                    metrics.reserve (18);
+                    // elapsed_seconds is measured from the *first persisted*
+                    // tick, not from the run's start: the 1 Hz gate means the
+                    // first stored tick lands ~1s in, and a series that starts
+                    // at 0 is what the charts have always drawn.
+                    if (first_tick_wall_ms == 0) {
+                        first_tick_wall_ms = tick_wall_ms;
+                    }
 
-                    metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::Rps, current_rps, "" });
-                    metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::ErrorRate, error_rate, "" });
-                    metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::ConnectionsActive,
-                    static_cast<double> (context->event_loop->active_count ()), "" });
-                    metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::RequestsSent, static_cast<double> (requests_sent), "" });
-                    metrics.push_back ({ 0, context->run_id, timestamp, vayu::MetricName::RequestsExpected,
-                    static_cast<double> (context->requests_expected.load ()), "" });
-                    metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::SendRate, send_rate, "" });
-                    metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::Throughput, throughput, "" });
-                    metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::Backpressure, static_cast<double> (backpressure), "" });
-
-                    // Per-tick enrichment: dropped / bytes / status-code map.
+                    auto& mc = *context->metrics_collector;
+                    MetricTickSample sample;
+                    sample.timestamp = tick_wall_ms;
+                    sample.elapsed_seconds =
+                    static_cast<double> (tick_wall_ms - first_tick_wall_ms) / 1000.0;
+                    sample.requests_completed = current_total;
+                    sample.requests_failed    = current_errors;
+                    sample.current_rps        = current_rps;
+                    sample.current_concurrency = context->event_loop->active_count ();
+                    sample.send_rate           = send_rate;
+                    sample.throughput          = throughput;
+                    sample.backpressure        = backpressure;
+                    sample.error_rate          = error_rate;
+                    sample.dropped_requests    = mc.dropped_requests ();
+                    sample.bytes_sent          = mc.total_bytes_sent ();
+                    sample.bytes_received      = mc.total_bytes_received ();
                     // Reuse the snapshot already taken for the live tick above.
-                    auto enrichment = build_tick_enrichment_metrics (
-                    context, timestamp, &status_snapshot);
-                    metrics.insert (metrics.end (), enrichment.begin (), enrichment.end ());
-
-                    // Avg latency and queue-wait enrichment for the DB batch.
-                    metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::LatencyAvg, context->average_latency_ms (), "" });
-                    metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::QueueWaitAvg,
-                    context->metrics_collector->average_queue_wait (), "" });
-
-                    // Windowed per-tick percentiles (rolling, from the interval
-                    // recorder) - unlabeled to distinguish them from the cumulative
-                    // final-summary percentile rows (which carry a {"percentile":..}
-                    // label). These power the history percentile chart, the
+                    sample.status_codes = status_snapshot;
+                    // Windowed (rolling) percentiles from the interval recorder -
+                    // these power the history percentile chart, the
                     // response-time-vs-concurrency scatter, and the capacity
-                    // breakpoint / saturation derivations. Reuses the window already
+                    // breakpoint / saturation derivations. Reuses the window
                     // sampled by emit_live_tick this tick (do not re-sample).
-                    metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::LatencyP50, win_p50, "" });
-                    metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::LatencyP95, win_p95, "" });
-                    metrics.push_back ({ 0, context->run_id, timestamp,
-                    vayu::MetricName::LatencyP99, win_p99, "" });
+                    sample.latency_p50_ms = win_p50;
+                    sample.latency_p95_ms = win_p95;
+                    sample.latency_p99_ms = win_p99;
 
-                    // Single transaction instead of 5 separate lock acquisitions
-                    db.add_metrics_batch (metrics);
+                    db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
+                    build_metric_tick_payload (sample).dump () });
                 } catch (const std::exception& e) {
                     // Continue on error
                 }
