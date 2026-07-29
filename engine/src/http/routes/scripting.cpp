@@ -40,10 +40,10 @@ nlohmann::json get_script_completions () {
     // pm object
     // ========================================
     completions.push_back ({ { "label", "pm" }, { "kind", KIND_VARIABLE },
-    { "insertText", "pm" }, { "detail", "pm object (Postman-compatible)" },
+    { "insertText", "pm" }, { "detail", "pm object" },
     { "documentation",
     "The pm object provides access to request, response, environment, and "
-    "testing utilities. Vayu implements a Postman-compatible scripting API." },
+    "testing utilities for pre-request and test scripts." },
     { "sortText", "0_pm" } });
 
     // ========================================

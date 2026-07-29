@@ -24,7 +24,7 @@ Vayu is a free, open source desktop app for Windows, macOS, and Linux that merge
 *The load-test dashboard. Throughput, latency percentiles, and error counters stream live from the C++ engine while the UI stays responsive.*
 
 ![GraphQL request builder](docs/images/vayu-graphql.png)
-*REST and GraphQL request builder with collections, layered environments, and Postman-compatible scripting.*
+*REST and GraphQL request builder with collections, layered environments, and a `pm` scripting API.*
 
 ---
 
@@ -90,7 +90,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4, OpenAPI 3.0, Swagger 2.0
 - **Layered environments** - variable resolution flows from globals → collection chain → active environment, with overrides at any level
 - **Auth, the way you expect it** - Bearer token, Basic auth, API key (header or query), and OAuth 2.0 (client credentials, password, and interactive authorization code with PKCE); resolved engine-side and inherits down the collection tree
-- **Postman-compatible test scripts** - QuickJS engine implementing `pm.test()`, `pm.expect()`, `pm.environment.set()`, `pm.response.*` - most Postman scripts run unmodified
+- **Test scripts with the `pm` API** - QuickJS engine implementing `pm.test()`, `pm.expect()`, `pm.environment.set()`, `pm.response.*` - most existing test scripts run unmodified
 - **Composable scripting** - pre/post-request scripts compose down the hierarchy (root → folder → request)
 - **Private by default** - 100% offline execution; no telemetry, no account, no cloud sync
 - **Cross-platform** - native installers for Windows (x64), macOS (universal), and Linux (AppImage)

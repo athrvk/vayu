@@ -12,8 +12,6 @@
  * - Pretty: Formatted/syntax highlighted view (default)
  * - Raw: Unformatted text view
  * - Preview: HTML/image rendering (when applicable)
- *
- * Similar to Postman's response body viewer.
  */
 
 import { useState, useMemo, type ReactNode } from "react";

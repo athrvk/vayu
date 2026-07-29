@@ -11,7 +11,7 @@
  * @file script_engine.hpp
  * @brief JavaScript scripting engine using QuickJS
  *
- * Provides Postman-compatible scripting with pm.test(), pm.expect(),
+ * Provides the `pm` scripting API - pm.test(), pm.expect(),
  * and access to request/response data.
  */
 
@@ -72,7 +72,7 @@ struct ScriptContext {
  * @brief JavaScript scripting engine
  *
  * Executes pre-request and test scripts with access to request/response
- * data through Postman-compatible `pm` object.
+ * data through the `pm` object.
  *
  * Example script:
  * @code

@@ -422,7 +422,8 @@ Result<Response> Client::send (const Request& request) {
         // Convert curl error to ErrorCode and message
         Error error = curl_to_error (res, impl_->error_buffer);
 
-        // Return Response object with error details (Postman-compatible approach)
+        // Return a Response object with error details rather than throwing, so
+        // the caller always gets a uniform result
         response.status_code = 0; // 0 indicates client-side error (no server response)
         response.status_text = vayu::http::status_text (0);
         response.error_code    = error.code;

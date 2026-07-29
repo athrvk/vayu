@@ -1,6 +1,6 @@
 # Vayu Scripting Guide
 
-Vayu uses QuickJS for JavaScript execution in pre-request and test scripts. The scripting API is compatible with Postman's `pm` object, making it easy to migrate tests from Postman.
+Vayu uses QuickJS for JavaScript execution in pre-request and test scripts. The scripting API exposes a `pm` object for tests and assertions, making it easy to migrate tests from Postman.
 
 ## Quick Start
 

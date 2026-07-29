@@ -465,7 +465,7 @@ ways before anyone checked.
 | `docs/app/api-integration.md` | Renderer ↔ engine calls | Request/response shapes the renderer sends |
 | `docs/app/variable-resolution.md` | `{{var}}` resolution + scope precedence | Resolution order, scopes, the resolver hook |
 | `docs/app/import-collections/` | Import pipeline + per-format mapping | Detectors, drafts, any format mapping |
-| `docs/app/pm-api-compatibility.md` | Postman `pm.*` surface | Which `pm.*` APIs the runtime supports |
+| `docs/app/pm-api-compatibility.md` | `pm.*` scripting API surface | Which `pm.*` APIs the runtime supports |
 | `docs/app/file-name-conventions.md` | Naming rules | The conventions themselves |
 | `docs/app/building.md` | App build | App build steps or tooling |
 | `docs/engine/architecture.md` | Engine internals, engine-side auth | Core engine structure, auth resolution |

@@ -538,7 +538,7 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
     return JS_UNDEFINED;
 }
 
-// Terminal getters: assert on property access (Chai/Postman paren-less idiom).
+// Terminal getters: assert on property access (Chai paren-less idiom).
 // Each honors the tracked `negated` flag, throws on failure, and returns the
 // expectation object so a chain can continue.
 
@@ -867,7 +867,7 @@ JSValue create_expectation (JSContext* ctx, JSValue actual) {
     JS_NewCFunction (ctx, expect_to_getter, "at", 0), JS_UNDEFINED, 0);
     JS_FreeAtom (ctx, at_atom);
 
-    // Terminal matchers assert on access (Chai/Postman paren-less idiom), so
+    // Terminal matchers assert on access (Chai paren-less idiom), so
     // register them as getters rather than function-valued properties - a bare
     // `.to.be.true` must run the check, not silently return an uncalled function.
     struct TerminalGetter {
@@ -975,7 +975,7 @@ JSValue js_response_text (JSContext* ctx, JSValueConst this_val, int argc, JSVal
 }
 
 // ============================================================================
-// pm.response.to.have Assertions (Postman-compatible)
+// pm.response.to.have Assertions
 // ============================================================================
 
 JSValue js_response_have_status (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -1083,7 +1083,7 @@ JSValue js_response_have_jsonBody (JSContext* ctx, JSValueConst this_val, int ar
         return JS_ThrowTypeError (ctx, "Response body is not valid JSON");
     }
 
-    // No-arg form asserts only that the body is valid JSON (Postman semantics).
+    // No-arg form asserts only that the body is valid JSON.
     if (argc < 1) {
         JS_FreeValue (ctx, json);
         return JS_UNDEFINED;
@@ -1419,7 +1419,7 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         }
         JS_SetPropertyStr (ctx, response, "headers", headers);
 
-        // pm.response.to.have chain for Postman-compatible assertions
+        // pm.response.to.have chain for response assertions
         JS_SetPropertyStr (ctx, response, "to", create_response_to_object (ctx));
     }
 

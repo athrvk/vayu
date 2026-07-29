@@ -1,6 +1,6 @@
 # `pm` Scripting API Compatibility
 
-Vayu exposes a **Postman-compatible** `pm` scripting API for pre-request and test
+Vayu exposes a `pm` scripting API for pre-request and test
 scripts. Scripts run in the engine's QuickJS runtime
 (`engine/src/runtime/script_engine.cpp`); the global `pm` object is bound there. The
 intent is that the most common Postman scripts paste in and run unchanged.

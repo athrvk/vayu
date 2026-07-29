@@ -31,14 +31,14 @@ export interface McpServerInfo {
 /** Vayu's identity, surfaced to clients via the server's Implementation info. */
 const VAYU_TITLE = "Vayu";
 const VAYU_DESCRIPTION =
-	"Vayu is a local API testing and load-testing platform: Postman-style requests " +
+	"Vayu is a local API testing and load-testing platform: manual API requests " +
 	"plus k6-level load tests in one app, driven by a native C++ engine. This MCP " +
 	"server exposes that engine so an agent can send requests, run and analyze load " +
 	"tests, and read or tune engine configuration on the user's machine.";
 const VAYU_WEBSITE = "https://github.com/athrvk/vayu";
 
 const INSTRUCTIONS =
-	"Vayu is a local API testing and load-testing platform (Postman-style requests " +
+	"Vayu is a local API testing and load-testing platform (manual API requests " +
 	"plus k6-level load tests in one app, backed by a native C++ engine); these " +
 	"tools drive that engine. Call get_engine_health first. Tools are grouped by " +
 	"capability: read (inspect collections, requests, environments, runs, config, " +

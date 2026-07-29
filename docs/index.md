@@ -236,7 +236,7 @@ persists.
 | [State Management](app/state-management.md) | Zustand stores, TanStack Query keys, cache policy |
 | [Talking to the Engine](app/api-integration.md) | What the renderer sends the engine, and when |
 | [Variables](app/variable-resolution.md) | How `{{variables}}` resolve, and scope precedence |
-| [Postman Script Support](app/pm-api-compatibility.md) | Which `pm.*` APIs the runtime supports |
+| [`pm` Scripting API Compatibility](app/pm-api-compatibility.md) | Which `pm.*` APIs the runtime supports |
 | [File Naming](app/file-name-conventions.md) | Naming rules across the renderer |
 | [Importing Collections](app/import-collections/README.md) | The import pipeline, plus per-format mapping |
 
@@ -271,8 +271,8 @@ persists.
 
     Most run unmodified. A QuickJS runtime implements the `pm.*` API -
     `pm.test()`, `pm.expect()`, `pm.environment.get/set()`, `pm.response.*` -
-    and [Postman Script Support](app/pm-api-compatibility.md) lists exactly
-    what is covered.
+    and [`pm` Scripting API Compatibility](app/pm-api-compatibility.md) lists
+    exactly what is covered.
 
 ??? question "Can my coding agent use it?"
 

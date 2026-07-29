@@ -35,7 +35,7 @@ The Vayu Engine is a high-performance C++ daemon that executes HTTP requests and
 │           ▼                │   Script Engine (QuickJS)   │  │
 │  ┌──────────────────┐      │  • Pre-request scripts      │  │
 │  │  Run Manager     │      │  • Test scripts             │  │
-│  │  • Active runs   │      │  • Postman-compatible API   │  │
+│  │  • Active runs   │      │  • pm scripting API         │  │
 │  │  • Lifecycle     │      └─────────────────────────────┘  │
 │  └────────┬─────────┘                                        │
 │           │                                                  │
@@ -166,7 +166,7 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
 
 JavaScript execution engine for pre-request and test scripts:
 
-- **Postman-compatible API**: `pm.test()`, `pm.expect()`, `pm.response`, etc.
+- **`pm` scripting API**: `pm.test()`, `pm.expect()`, `pm.response`, etc.
 - **Mutable request**: a pre-request script's `pm.request` writes are applied to the
   request before it is sent (see `docs/engine/scripting.md`)
 - **Memory limit**: 64MB per script execution
