@@ -85,8 +85,11 @@ export const API_ENDPOINTS = {
 	STATS_TIME_SERIES: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0) =>
 		`/runs/${runId}/metrics?limit=${limit}&offset=${offset}`,
 
-	// Import
+	// Import. FETCH proxies a remote collection past CORS; APPLY persists the
+	// whole parsed tree in one atomic call and returns the temp-id -> real-id map
+	// (the import path no longer creates items one POST at a time).
 	IMPORT_FETCH: `/import/fetch`,
+	IMPORT_APPLY: `/import/apply`,
 
 	// OAuth 2.0
 	OAUTH2_TOKEN: `/oauth2/token`,

@@ -140,6 +140,12 @@ const token = pm.environment.get('auth_token');
 pm.environment.set('auth_token', 'new_token_value');
 ```
 
+`set()` on an existing name replaces only its value - the variable's `secret`,
+`enabled`, `type` and creation time are kept. A name that does not exist yet is
+created with the defaults and stamped with its creation time, so it appears at
+the bottom of that scope in the variables editor rather than above the rows
+that were already there. A scope no script wrote is not persisted at all.
+
 ## Variables (`pm.variables`)
 
 Access collection and global variables:
