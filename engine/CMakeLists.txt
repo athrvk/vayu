@@ -393,6 +393,7 @@ if(VAYU_BUILD_TESTS)
         tests/collections_route_test.cpp
         tests/resource_write_route_test.cpp
         tests/globals_route_test.cpp
+        tests/script_variables_test.cpp
         tests/stats_route_test.cpp
         tests/execution_timeout_test.cpp
         tests/load_strategy_test.cpp

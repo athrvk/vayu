@@ -353,17 +353,28 @@ export default function RequestBuilderProvider({
 	 * "make this value apply" - there is no caller for whom writing a value and
 	 * leaving it switched off is the intent, and the variables editor is where
 	 * enabling and disabling actually belongs.
+	 *
+	 * An existing entry is spread, so its `createdAt` - the variables editor's
+	 * row-ordering key - survives untouched, including when it is *absent*, which
+	 * that editor reads as "older than everything". Only a variable created here
+	 * is stamped, so it lands at the bottom of its scope's list rather than above
+	 * every row that already existed (issue #135).
 	 */
 	const mergeVariable = (
 		existing: Record<string, VariableValue> | undefined,
 		name: string,
 		newValue: string
-	): Record<string, VariableValue> => ({
-		...existing,
-		[name]: { ...existing?.[name], value: newValue, enabled: true },
-	});
+	): Record<string, VariableValue> => {
+		const current = existing?.[name];
+		return {
+			...existing,
+			[name]: current
+				? { ...current, value: newValue, enabled: true }
+				: { value: newValue, enabled: true, createdAt: Date.now() },
+		};
+	};
 
-	// Update variable value
+	// Update variable value.
 	const updateVariable = useCallback(
 		(name: string, newValue: string, scope: VariableScope) => {
 			switch (scope) {

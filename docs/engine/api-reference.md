@@ -945,6 +945,15 @@ rows omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`
 without the suffix (`firstByte`, `dns`, …) - consumers of the raw `/execute`
 body written against that dialect must switch to the `*Ms` names.
 
+**Variables the scripts wrote are persisted, and only those.** After the
+post-request script runs, the engine writes back the three variable scopes
+(the run's environment, globals, and the executed request's collection) - but
+only for a scope whose variables a script actually changed. A run that sets no
+variable writes nothing at all, so it does not move a collection's or
+environment's `updatedAt`. Each variable round-trips whole, `createdAt`
+included; see [VariableValue shape](db-schema.md#variablevalue-shape) for why
+that field must survive and who may stamp it.
+
 ### POST /runs
 
 Start a load test run (Vayu Mode).

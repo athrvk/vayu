@@ -459,12 +459,25 @@ struct ScriptResult {
  * (per data-model PRD §5.2) declaring the conversion applied when scripts
  * read this variable via pm.*.get(...). One of:
  *   "string" (default), "number", "boolean", "json".
+ *
+ * `created_at` (ms epoch) is the app's row-ordering key - the variables editor
+ * lists a scope oldest-first. The engine does not display it, but it must
+ * round-trip through every read/write of a stored variables blob, or the app's
+ * ordering is destroyed (issue #135). `std::nullopt` means "unknown", which the
+ * app sorts as older than everything; the engine never invents a value for an
+ * existing variable, only for one a script creates.
+ *
+ * Every field here is serialized by `vayu::json::serialize_variables`; adding
+ * one without adding it there silently drops it on the next design run.
  */
 struct Variable {
     std::string value;
     bool secret  = false;
     bool enabled = true;
     std::string type = "string";
+    std::optional<int64_t> created_at;
+
+    bool operator== (const Variable&) const = default;
 };
 
 /**

@@ -115,7 +115,7 @@ bool is_create) {
  * anything else with a 400 naming the field. It used to dump whatever it was
  * handed, so `{"variables": 42}` stored `42` and `{"auth": "bearer"}` stored
  * `"bearer"` - blobs that parse as JSON but are not the object each reader
- * expects, and every reader degrades quietly (`parse_variables_json` yields no
+ * expects, and every reader degrades quietly (`parse_variables` yields no
  * variables, `parse_auth` yields no auth, so the request goes out bare). The
  * write returned 200 and the user found out from the wire. That is the same
  * defect the `"null"`-string fix closed, one level up: it removed a bad

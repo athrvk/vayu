@@ -175,7 +175,7 @@ describe("writing a variable enables it", () => {
 		const r = setup({ globalVars: {} });
 		r.current.updateVariable("token", "abc", "global");
 		expect(mutateGlobals).toHaveBeenCalledWith({
-			variables: { token: { value: "abc", enabled: true } },
+			variables: { token: expect.objectContaining({ value: "abc", enabled: true }) },
 		});
 	});
 
@@ -222,7 +222,42 @@ describe("writing a variable enables it", () => {
 		r.current.updateVariable("token", "abc", "collection");
 		expect(mutateCollection).toHaveBeenCalledWith({
 			id: "c1",
-			variables: { token: { value: "abc", enabled: true } },
+			variables: { token: expect.objectContaining({ value: "abc", enabled: true }) },
 		});
+	});
+});
+
+describe("writing a variable leaves row ordering alone", () => {
+	/*
+	 * `createdAt` is the variables editor's sort key, and absent means "older
+	 * than everything". So a variable created here must be stamped, or it sorts
+	 * above rows that genuinely predate it; one that already exists must keep the
+	 * stamp it has; and one that has none must keep having none, because
+	 * backfilling on a write reshuffles a settled list every time a value happens
+	 * to be edited (issue #135).
+	 */
+	it("stamps a variable it creates", () => {
+		const before = Date.now();
+		const r = setup({ globalVars: {} });
+		r.current.updateVariable("token", "abc", "global");
+		expect(mutateGlobals.mock.calls[0][0].variables.token.createdAt).toBeGreaterThanOrEqual(
+			before
+		);
+	});
+
+	it("keeps the stamp an existing variable already carries", () => {
+		const r = setup({ globalVars: { token: { value: "old", enabled: true, createdAt: 42 } } });
+		r.current.updateVariable("token", "abc", "global");
+		expect(mutateGlobals.mock.calls[0][0].variables.token).toEqual({
+			value: "abc",
+			enabled: true,
+			createdAt: 42,
+		});
+	});
+
+	it("does not backfill a stamp onto an existing variable that has none", () => {
+		const r = setup({ globalVars: { token: { value: "old", enabled: true } } });
+		r.current.updateVariable("token", "abc", "global");
+		expect(mutateGlobals.mock.calls[0][0].variables.token).not.toHaveProperty("createdAt");
 	});
 });
