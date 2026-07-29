@@ -507,6 +507,19 @@ heading anchor, so:
 - **Links out of `docs/`** (`SECURITY.md`, `LICENSE`, `CONTRIBUTING.md`) must be
   absolute `https://github.com/athrvk/vayu/blob/master/...` URLs - those files
   are outside the published tree.
+- **Analytics is on the published site only, and only when it has an ID.** The
+  GA4 measurement ID comes from the `GOOGLE_ANALYTICS_KEY` Actions *repository
+  variable* (Settings -> Secrets and variables -> Actions -> Variables), read by
+  `extra.analytics.property` via `!ENV`. With it unset - every fork, every
+  pull-request preview, every local `mkdocs serve` - `.github/hooks/analytics.py`
+  strips `extra.analytics`, `extra.consent` and the footer's "Cookie settings"
+  link, so those builds ship no tracker and no banner. `!ENV` alone does **not**
+  do this: Material emits its gtag snippet even for an empty property, which is
+  the whole reason that hook exists. On the published site GA is consent-gated -
+  the snippet is defined but only runs once the visitor accepts. **This is the
+  docs website, not the app**; `no telemetry` in `docs/index.md` and `README.md`
+  is a claim about the app and stays true, so keep the two apart when editing
+  either.
 - **Jekyll is not an option here** and the workflow says why: Pages' default
   Jekyll build runs Liquid over page content, and these docs contain 40+
   `{{variable}}` examples (rendered as empty strings) plus `{% ... %}` (an
