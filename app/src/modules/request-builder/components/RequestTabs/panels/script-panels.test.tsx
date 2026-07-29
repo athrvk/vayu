@@ -199,6 +199,35 @@ describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegac
 	 * asserting `border-rule` alone proves nothing, and the colour it resolves
 	 * to is a computed-style question jsdom cannot answer.
 	 */
+	/*
+	 * A pre-request script can now change the outgoing request, and none of the
+	 * rules that govern it are visible from a snippet: that the object is
+	 * authoritative, that it beats the Auth tab, that a bad value refuses the
+	 * whole edit. Leaving those only in `docs/engine/scripting.md` puts them
+	 * where the person writing the script is not - so the panel carries them,
+	 * and this checks it still does.
+	 */
+	it("tells the reader what its scripts can and cannot change", () => {
+		const { container } = render(<Panel />);
+		const text = container.textContent ?? "";
+
+		// Both variants render notes at all - an empty list would pass every
+		// substring check below by never contradicting one.
+		expect(container.querySelectorAll("ul li").length).toBeGreaterThan(0);
+
+		if (variant === "pre") {
+			expect(text).toContain("what is actually sent");
+			expect(text).toMatch(/wins over the Auth tab|beats the/i);
+			expect(text).toMatch(/case-sensitive/i);
+			// The failure path is the half a user only meets when it bites.
+			expect(text).toMatch(/rejects the whole edit/i);
+			expect(text).toMatch(/load tests do not run pre-request scripts/i);
+		} else {
+			// The other half of the contract: writing here is a no-op.
+			expect(text).toMatch(/writing to it does nothing/i);
+		}
+	});
+
 	describe("the sunken slabs", () => {
 		it("declares the surface its rule reads from", () => {
 			const { container } = render(<Panel />);

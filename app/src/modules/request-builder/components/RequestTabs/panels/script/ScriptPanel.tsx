@@ -133,6 +133,16 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 				<pre className="m-0 p-2 surface-sunken rounded-md border border-rule font-mono whitespace-pre-wrap">
 					{config.quickReference.join("\n")}
 				</pre>
+				{/*
+				 * The rules a snippet cannot show. `list-disc` needs the inside
+				 * position: the panel has no gutter to hang markers in, and
+				 * outside markers would sit under the pre block's left edge.
+				 */}
+				<ul className="list-disc list-inside space-y-1 pt-1">
+					{config.notes.map((note, index) => (
+						<li key={index}>{note}</li>
+					))}
+				</ul>
 			</div>
 		</div>
 	);

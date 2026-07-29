@@ -1114,3 +1114,218 @@ TEST_F (ScriptEngineTest, ZeroTimeoutDisablesLimit) {
     GTEST_SKIP () << "QuickJS not compiled in";
 #endif
 }
+
+// ============================================================================
+// The sandbox's global surface
+// ============================================================================
+//
+// `scripting.md` now teaches request rewriting, so what a script can *compute*
+// is part of the contract. Only `console` and `pm` are installed on top of
+// QuickJS's built-ins - there is no crypto, no base64, no URL parser - which is
+// why the docs' worked examples do string surgery and a pure-JS checksum rather
+// than an HMAC. This pins both halves so a doc example cannot come to rely on
+// something that was never there (`scripting.md` used to show a `computeHash`
+// that does not exist).
+
+TEST_F (ScriptEngineTest, StandardBuiltinsAreAvailableToScripts) {
+    auto result = engine.execute_prerequest (R"JS(
+        var missing = [];
+        var expected = ['JSON', 'Date', 'Math', 'RegExp', 'String', 'Array',
+                        'Object', 'Number', 'encodeURIComponent', 'parseInt'];
+        for (var i = 0; i < expected.length; i++) {
+            if (typeof globalThis[expected[i]] === 'undefined') missing.push(expected[i]);
+        }
+        pm.environment.set('missing', missing.join(','));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["missing"].value, "")
+    << "a built-in the docs rely on disappeared";
+}
+
+TEST_F (ScriptEngineTest, NoCryptoBase64OrUrlParserIsExposed) {
+    auto result = engine.execute_prerequest (R"JS(
+        var present = [];
+        var absent = ['crypto', 'btoa', 'atob', 'TextEncoder', 'URL',
+                      'URLSearchParams', 'require', 'fetch'];
+        for (var i = 0; i < absent.length; i++) {
+            if (typeof globalThis[absent[i]] !== 'undefined') present.push(absent[i]);
+        }
+        pm.environment.set('present', present.join(','));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    // If one of these ever lands, the "you cannot HMAC-sign in a script" note in
+    // scripting.md stops being true and should be rewritten, not left standing.
+    EXPECT_EQ (env["present"].value, "")
+    << "a new global is available - update the request-signing note in "
+       "scripting.md";
+}
+
+// ============================================================================
+// The worked examples in scripting.md actually run
+// ============================================================================
+//
+// This whole issue existed because the docs taught a pattern the runtime threw
+// away, and the example they taught it with called a `computeHash` that has
+// never existed. So the non-trivial examples are executed here against a real
+// request, not eyeballed. If you edit the code in
+// "Worked examples: rewriting a request", edit these with it.
+
+TEST_F (ScriptEngineTest, DocExampleRewritesAJsonBodyThenDerivesFromIt) {
+    request.method       = HttpMethod::POST;
+    request.body.mode    = BodyMode::Json;
+    request.body.content = R"({"n":1,"debugOnly":true})";
+
+    auto result = engine.execute_prerequest (R"JS(
+        var body = JSON.parse(pm.request.body);
+        body.metadata = { client: 'vayu' };
+        delete body.debugOnly;
+        pm.request.body = JSON.stringify(body);
+        pm.request.headers['Content-Length'] = String(pm.request.body.length);
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.content, R"({"n":1,"metadata":{"client":"vayu"}})");
+    // Derived after the edit, so it describes what is sent - the ordering the
+    // doc calls out.
+    EXPECT_EQ (request.headers.at ("Content-Length"),
+    std::to_string (request.body.content.size ()));
+}
+
+TEST_F (ScriptEngineTest, DocExampleSetsAQueryParamAcrossItsThreeCases) {
+    static constexpr const char* kSetQueryParam = R"JS(
+        function setQueryParam(url, name, value) {
+          var pair = encodeURIComponent(name) + '=' + encodeURIComponent(value);
+          var hashAt = url.indexOf('#');
+          var fragment = hashAt === -1 ? '' : url.slice(hashAt);
+          var base = hashAt === -1 ? url : url.slice(0, hashAt);
+
+          var re = new RegExp('([?&])' + name + '=[^&]*');
+          if (re.test(base)) {
+            return base.replace(re, '$1' + pair) + fragment;
+          }
+          return base + (base.indexOf('?') === -1 ? '?' : '&') + pair + fragment;
+        }
+    )JS";
+
+    struct Case {
+        const char* url;
+        const char* expected;
+    };
+    const Case cases[] = {
+        // No query at all.
+        { "https://api.example.com/users", "https://api.example.com/users?traceId=t1" },
+        // Query present, parameter absent.
+        { "https://api.example.com/users?page=2", "https://api.example.com/users?page=2&traceId=t1" },
+        // Parameter already present - replaced, not duplicated.
+        { "https://api.example.com/users?traceId=old&page=2",
+        "https://api.example.com/users?traceId=t1&page=2" },
+        // Fragment is preserved and never searched for the parameter.
+        { "https://api.example.com/users#section", "https://api.example.com/users?traceId=t1#section" },
+    };
+
+    for (const auto& c : cases) {
+        Request req;
+        req.method = HttpMethod::GET;
+        req.url    = c.url;
+        Environment scratch;
+        auto result = engine.execute_prerequest (std::string (kSetQueryParam) +
+        "\npm.request.url = setQueryParam(pm.request.url, 'traceId', 't1');",
+        req, scratch);
+
+        ASSERT_TRUE (result.success) << result.error_message;
+        EXPECT_EQ (req.url, c.expected) << "input: " << c.url;
+    }
+}
+
+TEST_F (ScriptEngineTest, DocExampleChecksumIsComputableAndStable) {
+    env["secret"] = Variable{ "s3cr3t", true, true };
+
+    auto result = engine.execute_prerequest (R"JS(
+        function fnv1a(text) {
+          var hash = 0x811c9dc5;
+          for (var i = 0; i < text.length; i++) {
+            hash ^= text.charCodeAt(i);
+            hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
+          }
+          return ('00000000' + hash.toString(16)).slice(-8);
+        }
+
+        var canonical = [
+          pm.request.method,
+          pm.request.url,
+          '1700000000000',
+          pm.request.body || ''
+        ].join('\n');
+
+        pm.request.headers['X-Timestamp'] = '1700000000000';
+        pm.request.headers['X-Checksum'] = fnv1a(canonical + pm.environment.get('secret'));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.headers.at ("X-Timestamp"), "1700000000000");
+    // Eight lower-case hex digits, deterministic for a fixed canonical string.
+    const std::string checksum = request.headers.at ("X-Checksum");
+    EXPECT_EQ (checksum.size (), 8u) << checksum;
+    EXPECT_EQ (checksum.find_first_not_of ("0123456789abcdef"), std::string::npos) << checksum;
+}
+
+TEST_F (ScriptEngineTest, DocExampleSwapsAuthScheme) {
+    auto result = engine.execute_prerequest (R"JS(
+        delete pm.request.headers['Authorization'];
+        pm.request.headers['X-Api-Key'] = pm.environment.get('api_key');
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("Authorization"));
+    EXPECT_EQ (request.headers.at ("X-Api-Key"), "secret123");
+}
+
+// The trap the doc now warns about, and why it warns: `pm.request.headers` is a
+// JS object, so its keys are case-sensitive even though HTTP header names are
+// not. A lower-case delete of a capitalised header is a silent no-op - this
+// caught a wrong sentence in the docs before it shipped.
+TEST_F (ScriptEngineTest, AWrongCaseDeleteDoesNotRemoveTheHeader) {
+    auto result = engine.execute_prerequest (R"JS(
+        delete pm.request.headers['authorization'];
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (request.headers.contains ("Authorization"));
+}
+
+TEST_F (ScriptEngineTest, DocExampleCaseInsensitiveDeleteLoopRemovesTheHeader) {
+    auto result = engine.execute_prerequest (R"JS(
+        Object.keys(pm.request.headers).forEach(function (name) {
+          if (name.toLowerCase() === 'authorization') delete pm.request.headers[name];
+        });
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("Authorization"));
+    EXPECT_TRUE (request.headers.contains ("Content-Type"));
+}
+
+// Two JS keys, one HTTP header. Whichever enumerated last would have won
+// silently, and one of them is the Authorization header, so the write-back
+// refuses the whole thing instead of guessing.
+TEST_F (ScriptEngineTest, HeaderNamesDifferingOnlyInCaseAreRejected) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['authorization'] = 'Bearer script-token';
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("case-insensitive"), std::string::npos)
+    << result.error_message;
+    // Nothing applied: the original engine-applied header still stands.
+    EXPECT_EQ (request.headers.at ("Authorization"), "Bearer token123");
+}

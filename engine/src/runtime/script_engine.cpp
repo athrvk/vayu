@@ -1326,7 +1326,19 @@ read_pm_request_headers (JSContext* ctx, JSValueConst js_headers, Headers& out) 
             error = "pm.request.headers has an empty header name";
         } else if (JS_IsString (value.get ()) || JS_IsNumber (value.get ()) ||
         JS_IsBool (value.get ())) {
-            out[key] = js_to_string (ctx, value.get ());
+            // JS object keys are case-sensitive; HTTP header names are not. So
+            // `Authorization` and `authorization` are two properties over there
+            // and one header over here, and whichever enumerated last would
+            // silently win. Which one the script meant is unknowable, and one
+            // of them is an Authorization header - refuse instead of guessing.
+            if (auto clash = out.find (key); clash != out.end () && clash->first != key) {
+                error = "pm.request.headers has both '" + clash->first + "' and '" + key +
+                "' - HTTP header names are case-insensitive, so these are one "
+                "header. "
+                "Keep one.";
+            } else {
+                out[key] = js_to_string (ctx, value.get ());
+            }
         } else {
             error = "pm.request.headers['" + key + "'] must be a string, got " +
             std::string (js_type_name (ctx, value.get ())) +
