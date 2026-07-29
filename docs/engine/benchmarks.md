@@ -5,26 +5,31 @@ testers? This page documents a head-to-head against
 [`wrk`](https://github.com/wg/wrk) and [`vegeta`](https://github.com/tsenart/vegeta),
 the methodology, and how to reproduce it.
 
-**TL;DR - Vayu is in the same performance class as wrk and vegeta.** At
-saturation concurrency it matches/slightly exceeds vegeta and reaches **~93% of
-wrk at c=128 and ~96% at c=256**, with all three converging on the same system
-throughput ceiling. wrk remains the efficiency leader at low connection counts.
+**TL;DR - Vayu is in the same performance class as wrk and vegeta.** On a
+standalone engine, tuned, it reached **56,880 req/s** against a loopback mock -
+**104.8% of `wrk` measured on the same machine in the same session** (54,280) -
+with every client converging on the same **~57k system ceiling**. Driven from the
+app's own UI, a 60 s run sustained **51,922 req/s / 3.1 M requests with zero
+errors**. The dominant tuning lever is not an engine knob at all: it is the run's
+own **`concurrency`**, and the optimum on this target is **64**.
 
 ## Methodology
 
 - **All three clients hit the same mock server** (`scripts/test/mock-server.go`,
   `:8080`, `/fast` endpoint - an 11-byte response with ~1 µs handler latency),
-  so the comparison is apples-to-apples.
-- **CLI only - no UI.** Measurements drive `vayu-cli → daemon` directly. The
-  Electron UI is *not* used for performance numbers: its renderer (Chromium
-  compositor + React re-drawing the live SVG charts every metrics tick) contends
-  for the same CPU cores as the engine and depresses throughput by ~30–40%. The
-  UI is for *driving and visualising* tests, not for measuring peak engine RPS.
+  so the comparison is apples-to-apples. Endpoint choice does not move the
+  number (`wrk`: `/` 54,096, `/fast` 53,994, `/string` 54,471 req/s), so neither
+  the response body nor the per-handler work is the limiter.
+- **Peak numbers come from a standalone engine daemon**, not from the app.
+  Running through the app costs a **measured ~9%** on this machine (see
+  [The app-engine gap](#the-app-engine-gap)). The UI is for *driving and
+  visualising* tests; the standalone daemon is for measuring peak engine RPS.
 - **Matched concurrency.** wrk holds `-c` connections, vegeta runs
-  `-rate=0 -max-workers=N` (open-loop, capped workers), Vayu runs closed-loop
-  constant-concurrency (`concurrency=N`, no target rate). 10–12 s per run, with
-  cooldowns between runs.
-- All runs are **error-free** (0 non-2xx, 0 failures).
+  `-rate=N -max-workers=N` (open-loop), Vayu runs closed-loop
+  constant-concurrency (`concurrency=N`, no target rate). 10-20 s per run for
+  the sweeps, 60 s for headline figures, with cooldowns between runs.
+- All runs are **error-free** (0 non-2xx, 0 failures, 0 dropped) - across roughly
+  23 M requests through Vayu in the 2026-07-29 session alone.
 
 ### Hardware
 
@@ -32,9 +37,149 @@ MacBook Pro **M3 Pro, 18 GB**, macOS. 12 cores = **6 performance + 6 efficiency*
 (no SMT). This asymmetry matters: macOS assigns threads to P- vs E-cores by QoS
 class, and on a single machine the load-test *client and the mock server share
 the same 12 cores* - so the measured ceiling (~57k RPS for a trivial request) is
-a **shared system limit**, not any one client's ceiling.
+a **shared system limit**, not any one client's ceiling. `ulimit -n` was
+1,048,576 and never a constraint.
 
-## Results
+## Results (2026-07-29, engine 0.11.0)
+
+### Headline
+
+| | req/s | vs `wrk` |
+|---|---:|:---:|
+| **Vayu, standalone engine** (c=64, workers=8, verbose 1) | **56,880** | **104.8%** |
+| `wrk` (`-t6 -c64 -d10s`) | 54,280 | 100% |
+| `vegeta` (`-rate=90000 -max-workers=400`, achieved) | 51,847 | 95.5% |
+| Vayu, through the app's engine (c=64, 30 s) | 52,028 | 95.9% |
+| **Vayu, started from the app UI** (c=64, 60 s) | **51,922** | 95.7% |
+
+The `wrk` figure here (54,280) was measured with the app and its engine alive in
+the background; an earlier sweep on a quieter machine put `wrk` at 56,649. Read
+the ratio, not the absolute: **all clients land between 52k and 57k, and Vayu
+sits at the top of that band when measured the same way `wrk` is.**
+
+### Reference clients
+
+| Client | Configuration | Result |
+|---|---|---|
+| `wrk` | `-t6 -c64 -d10s` | **54,280 req/s**, p50 1.10 ms, p99 1.21 ms |
+| `wrk` | `-t6 -c128 -d8s` | 54,138 req/s, p50 2.32 ms |
+| `wrk` | `-t6 -c256 -d8s` | 53,059 req/s, p50 4.70 ms |
+| `vegeta` | `-rate=90000 -max-workers=400 -duration=8s` | 51,847 achieved of 90,000 requested, 100% success, mean 7.66 ms |
+
+### Concurrency sweep (app engine, workers=12, 9 s per point)
+
+| concurrency | 32 | 64 | 128 | 192 | 256 |
+|---|---:|---:|---:|---:|---:|
+| throughput | 51,215 | **52,158** | 51,986 | 51,398 | 49,516 |
+| p50 (ms) | 0.60 | 1.13 | 2.25 | 3.44 | 4.59 |
+| p95 (ms) | 0.75 | 1.52 | 3.40 | 5.34 | 9.54 |
+| p99 (ms) | 0.93 | 2.90 | 9.01 | 10.78 | 23.18 |
+| errors / dropped | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+
+Peak is a broad plateau across c=32-192 that degrades past 256. Latency scales
+almost exactly linearly with concurrency while throughput stays pinned - the
+signature of a saturated *target*, not a client running out of capacity. Neither
+side is CPU-bound at that point: sampled mid-run at 52,738 req/s, the system was
+**79% idle** (~2.5 of 12 cores busy).
+
+**Concurrency is the single largest lever, and over-driving costs more than any
+engine knob returns:**
+
+| | c=400 | c=64 | change |
+|---|---:|---:|---|
+| throughput | 44,299 | 52,028 | **+17.4%** |
+| p50 | 7.28 ms | 1.19 ms | 6x better |
+| p99 | 59.90 ms | 1.57 ms | **38x better** |
+| p999 | 307.46 ms | - | gone |
+
+### `workers` A/B: 8 vs 12
+
+Interleaved A/B/A/B/A/B on a standalone engine to control for drift, 3 reps per
+arm, c=64, 20 s per run, `--verbose 0`. No restarts - `workers` is read per run.
+
+| rep | workers | throughput | p50 | p95 | p99 | OS threads mid-run |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 12 | 56,201 | 0.96 | 2.21 | 4.39 | 29 |
+| 1 | 8 | 54,458 | 1.07 | 1.44 | 3.44 | 25 |
+| 2 | 12 | 55,885 | 0.94 | 2.33 | 4.86 | 29 |
+| 2 | 8 | 56,849 | 1.08 | 1.35 | 1.86 | 25 |
+| 3 | 12 | 55,960 | 0.94 | 2.31 | 4.65 | 29 |
+| 3 | 8 | 56,587 | 1.08 | 1.37 | 2.15 | 25 |
+
+| metric | workers=12 | workers=8 | winner |
+|---|---:|---:|---|
+| mean throughput | 56,015 | 55,965 | tie (0.09% apart) |
+| mean p50 | 0.947 ms | 1.077 ms | 12, by 0.13 ms |
+| mean p95 | 2.28 ms | 1.387 ms | **8**, by 39% |
+| mean p99 | 4.63 ms | 2.48 ms | **8**, by 46% |
+
+**Throughput is a statistical tie; the tail is not.** 12 workers give a slightly
+better median and a distinctly worse tail, consistently across every rep. The
+plausible mechanism is that 12 event-loop threads spill onto the 6 efficiency
+cores and work landing on an E-core lands in the tail; 8 threads fit the 6
+performance cores far more closely. **`workers = 8` is the recommendation, for
+tail latency rather than throughput.**
+
+Two things this A/B did *not* reproduce, both worth noting against the older
+numbers below: there was **no throughput collapse at `workers = ncpu`** (12 tied
+with 8 and never dipped), and `workers = 8` was never faster than 12 by more than
+noise. The `workers=8` spread is inflated entirely by its rep 1 (54,458), the
+first run after a config change - excluding it the mean is 56,718.
+
+### Verbose logging costs nothing measurable
+
+Same standalone instance, `workers = 8`, restarted with `--verbose 1`:
+
+| rep | throughput | p50 | p95 | p99 |
+|---:|---:|---:|---:|---:|
+| 1 | 56,652 | 1.09 | 1.31 | 1.70 |
+| 2 | **56,880** | 1.08 | 1.32 | 1.78 |
+| 3 | 56,773 | 1.06 | 1.45 | 3.12 |
+
+Mean **56,768 with verbose on** versus 55,965 off. The shipped app always runs
+the engine at `--verbose 1` (`app/electron/sidecar.ts`), which sets
+`CURLOPT_VERBOSE` on the load path - so this was expected to be the biggest
+available win, and it is not one. Keep-alive means libcurl emits few debug
+events once connections are established, and the log grew only 5,256 bytes
+across 3.4 M requests. Gating the debug callback on log level remains worthwhile
+hygiene; it is not a performance lever.
+
+### The in-app proof run
+
+Started from the app's own Load Test panel (not the CLI, not MCP), 60 s,
+constant concurrency 64, against a saved request:
+
+![In-app load test: 51,922 req/s sustained over 60 s, 3,115,391 requests, 0 errors, 100% concurrency utilisation, with a flat throughput plateau and a steady ~1.2 ms latency line.](../images/vayu-loadtest4.png)
+
+| Metric | 15 s run | **60 s run** |
+|---|---:|---:|
+| Throughput | 50,985 req/s | **51,922 req/s** |
+| Total requests | 764,831 | **3,115,391** |
+| Errors / failed / dropped | 0 / 0 / 0 | 0 / 0 / 0 |
+| p50 | 1.195 ms | 1.195 ms |
+| p95 | 1.399 ms | 1.383 ms |
+| p99 | 1.935 ms | **1.516 ms** |
+| p999 | 6.455 ms | **2.819 ms** |
+| max | 37.983 ms | **16.319 ms** |
+| setup overhead | 0.508 s | 0.119 s |
+
+**Use 60 s for any headline figure.** The tail improves markedly with the longer
+window because the fixed cost of opening 64 connections is amortised over 4x the
+requests. Those opening connects are also the source of `max` (38.0 ms at 15 s,
+16.3 ms at 60 s), so `max` on a short run is not a steady-state number. Trace
+samples confirm connection reuse is working: the first batch carries a real
+`dnsMs` / `connectMs`, every sample after it reports `0`.
+
+Between c=64 and c=128 the app engine sits inside a 0.8% band (51,439 / 51,849 /
+51,743 at c=64 / 96 / 128), and the live-tick rate does not measurably affect
+throughput (`liveTickIntervalMs` 500 vs 1000: 51,518 vs 51,439) - so it can be
+left at 500 ms for a smoother chart.
+
+## Prior results (2026-07, CLI, unreconciled)
+
+These numbers were measured earlier via `scripts/test/bench-compare.sh` on a
+quieter machine. The ceiling agrees with the session above; the **shape of the
+curve does not**, and the discrepancy is not yet explained.
 
 ### Throughput vs concurrency (single run each, `/fast`, workers=8)
 
@@ -53,38 +198,103 @@ a **shared system limit**, not any one client's ceiling.
 | 3   | 56,543      | 56,215         | 53,835       |
 | **avg** | **56,802** | **53,811**  | **52,825**   |
 
-At c=128 Vayu averages **93% of wrk** and **98% of vegeta**.
+**The open discrepancy.** This table has Vayu at 66% of `wrk` at c=64, rising to
+its best at c=256. The 2026-07-29 session measured the opposite curve: best at
+c=64 (56,880, above `wrk`), declining past c=192. A 37,148 vs 56,880 gap at the
+same concurrency is far too large to be run-to-run noise, so one of the two
+measurements is not measuring what it claims. Re-running
+`scripts/test/bench-compare.sh` on a quiet machine is the way to settle it - do
+that before quoting either curve shape.
 
 ## Reading the results
 
-- **Convergence at the ceiling.** Pushing past the optimum (c=256) makes *every*
-  client slower (wrk 57,765 → 56,124; vayu peaks then dips) - the classic sign
-  that the bottleneck is the shared server/CPU, not the client. Vayu reaches that
-  ceiling as effectively as the best tools.
-- **wrk leads at low concurrency.** With only 64 connections wrk already
-  saturates the server (56.6k) while vayu and vegeta need more connections to get
-  there. wrk's bespoke kqueue event loop has the lowest per-connection overhead;
-  Vayu uses libcurl-multi, which carries more per-request machinery, so it scales
-  *up* to the ceiling rather than hitting it immediately.
-- **Vayu ≈ vegeta, ~5–10% behind wrk.** A fair, defensible claim:
-  *Vayu is on par with vegeta and competitive with wrk* - not faster than wrk.
+- **Convergence at the ceiling.** Pushing past the optimum makes *every* client
+  slower, and at 52k the machine is ~79% idle - the classic sign that the
+  bottleneck is the shared target/CPU rather than any client. **Vayu was never
+  the bottleneck in any measurement on this page**, which also means ~57k is not
+  Vayu's ceiling; finding that needs a faster target (nginx serving a static
+  byte, or a target on another machine over a fast link).
+- **The claim to make.** *Vayu is on par with `wrk` and `vegeta` on this target.*
+  Measured the same way, on the same machine, in the same session, it edged past
+  `wrk` - but by less than the spread between machines, so "matches" is the
+  defensible word, not "beats".
+- **Tune concurrency before anything else.** c=400 costs 17% of throughput and
+  38x the p99 versus c=64. No engine knob on this page moves the number that far.
+
+### The app-engine gap
+
+The app's engine (51.4k-52.0k) runs about **9% slower than a standalone engine**
+(56.2k-56.9k) on identical settings. The effect is real and reproducible; the
+cause is not isolated. Three candidates are ruled out by measurement:
+
+- **Not verbose logging** - verbose on was marginally *faster*.
+- **Not the live-metrics tick rate** - 500 vs 1000 ms made no difference.
+- **Not the DB pragmas** - the standalone instance ran a fresh DB on *default*
+  pragmas and was still 9% faster.
+
+What remains untested: Electron's own CPU use, and the app engine's much larger
+DB (200-run retention plus a prune pass after every run) versus a fresh scratch
+DB. Note this is the same direction as, but far smaller than, the 30-40% UI
+contention figure this page previously carried - that larger figure was not
+reproduced and should not be quoted.
+
+## Config semantics: live, restart-gated, and dead
+
+Every entry below was verified by locating the read site in the engine source.
+This matters because the seeded labels are wrong in places.
+
+| Key | Read site | When it applies |
+|---|---|---|
+| `workers` | `core/run_manager.cpp` | **Per run.** No restart, despite the "(Requires Restart)" label |
+| `eventLoopMaxPerHost` | `core/run_manager.cpp` | Per run |
+| `eventLoopMaxConcurrent` | `core/run_manager.cpp` | Per run, but **overridden** by the run's own `concurrency` |
+| `dnsCacheTimeout` | `core/run_manager.cpp` | Per run |
+| `scriptEnableConsole` | `core/run_manager.cpp` | Per run |
+| `liveTickIntervalMs` | `core/run_manager.cpp` | Per run |
+| `maxResponseBodyBytes` | `core/run_manager.cpp` | Per run |
+| `dbSynchronous`, `dbBusyTimeout`, `dbCacheSize`, `dbTempStore`, `dbMmapSize`, `dbWalAutocheckpoint` | `db/database.cpp` | DB open. **Restart required** |
+| `maxConnections` | **none** - only the seed | **Dead config**, tracked in [#112](https://github.com/athrvk/vayu/issues/112) |
+| `statsInterval` | **none** - only the seed | **Dead config**, tracked in [#112](https://github.com/athrvk/vayu/issues/112) |
+
+`loop_config.max_concurrent` is set from the run's `concurrency`, which is why
+`eventLoopMaxConcurrent` acts only as a default for runs that do not specify one.
+
+**`GET /health`'s `workers` field is `std::thread::hardware_concurrency()`, not
+the configured worker count** - it reported 12 while the engine was configured
+for and running 8. There is currently no way to read the effective worker count
+over the API; count OS threads instead (see [Reproduce it](#reproduce-it)).
+Tracked in [#197](https://github.com/athrvk/vayu/issues/197).
 
 ## Engine tuning notes
 
-Knobs that move RPS (set via `POST /config`; read **per run** by the engine - no
+Knobs that move RPS (set via `POST /config`; most are read **per run** - no
 restart needed despite the "Requires Restart" label on some):
 
-- **`workers`** - libcurl-multi event-loop threads. Inverted-U with a peak around
-  **7–9** on this 6P+6E machine; 12 (= core count) oversubscribes because the
-  mock server also wants cores, and 24 is markedly worse. **8 is the sweet spot.**
+- **run `concurrency`** - the dominant lever, and it is a property of the run,
+  not the engine config. **64** on this target. Note the MCP safety cap
+  (`maxConcurrency`, default 400) is a ceiling, not a suggestion: driving at 400
+  produces a *worse* headline number than 64.
+- **`workers`** - libcurl-multi event-loop threads. **8 is the sweet spot** on
+  this 6P+6E machine, chosen for tail latency; 12 (= core count) ties on
+  throughput but roughly doubles p99. Worker threads are created per run, so the
+  effective value is observable as a thread-count delta (15 idle → 25 at
+  `workers=8` → 29 at `workers=12`).
 - **`maxInFlight`** (per-run, open-loop) - the dispatch hard cap. The default
   `max(targetRps × 10, 1000)` is effectively unbounded at high target RPS and
   causes congestion collapse (in-flight balloons to tens of thousands, multi-second
-  queue latency, throughput *halves*). Bound it to **~256–500** for clean,
+  queue latency, throughput *halves*). Bound it to **~256-500** for clean,
   low-latency saturation. Closed-loop constant-concurrency avoids the issue entirely.
   Bounding it does not hide the demand: requests that come due while the cap is
   reached are counted as **dropped**, so a run that could not keep up says so
   instead of running past its `duration` to catch up.
+- `eventLoopMaxPerHost` - not binding at c=64; 200 → 500 changed nothing. Note it
+  is applied **per worker**, so the effective per-host budget is
+  `workers × maxPerHost`.
+- `dnsCacheTimeout` - set it high (3600) for a fixed target; the hostname never
+  needs re-resolution. Worth little on a warm run, since DNS cost per request
+  amortises to ~0.005 ms over 60 s.
+- `eventLoopMaxConcurrent` - inert for any run that sets its own `concurrency`,
+  which is every run the app starts.
 
 **How `constant_rps` paces.** Open-loop, and time-bound rather than quota-bound:
 each tick accrues `targetRps × elapsed` and dispatches the whole requests owed,
@@ -93,8 +303,21 @@ on the tick length (1ms above 1000 RPS, the request interval below it) - timer
 jitter is corrected on the following tick, and a rate like 1500 RPS is delivered
 as asked rather than floored to the nearest 1000. Comparing against wrk/vegeta
 at a fixed rate, `sent + dropped` should equal `targetRps × duration`.
-- `eventLoopMaxConcurrent` / `eventLoopMaxPerHost` -
-  secondary; effects are within run-to-run noise once the above are set.
+
+### Recommended settings
+
+For load testing this class of target on this machine:
+
+| Setting | Value | Why |
+|---|---|---|
+| run `concurrency` | **64** | The dominant lever - peak throughput with a tight tail |
+| run `duration` | **60s** | Higher average and a much cleaner tail than 15 s |
+| `workers` | **8** | Throughput tie with 12, tail latency roughly 2x better |
+| `eventLoopMaxPerHost` | 500 | Not binding at c=64; removes any doubt |
+| `dnsCacheTimeout` | 3600 | Target hostname never needs re-resolution |
+| `scriptEnableConsole` | false | Matters only when scripts run |
+| `dbSynchronous` / `dbTempStore` | 0 / 2 | Already optimal by default |
+| measurement method | standalone engine | Worth ~9% versus running through the app |
 
 ## Reproduce it
 
@@ -109,4 +332,43 @@ engine/build/vayu-engine --port 9876 --data-dir engine/data
 bash scripts/test/bench-compare.sh            # prints the markdown table
 
 # tunables via env: URL=... DUR=12 CONCS="64 128 256" WORKERS=8
+```
+
+To tune freely without disturbing a running app, start a second instance of the
+same binary on its own port and data dir. **Pick a free port - 9877 is the app's
+MCP HTTP endpoint**, and the engine currently aborts (`libc++abi: terminating`)
+rather than reporting a clean "port in use" error:
+
+```bash
+BIN=/Applications/Vayu.app/Contents/Resources/bin/vayu-engine
+"$BIN" --port 9899 --data-dir /tmp/ab-data --verbose 0 &
+curl -s http://127.0.0.1:9899/health
+
+# Set a config key (this endpoint echoes the whole config, so redirect it)
+curl -s -X POST http://127.0.0.1:9899/config -H 'Content-Type: application/json' \
+  -d '{"key":"workers","value":"8"}' > /dev/null
+
+# Run and report
+RID=$(curl -s -X POST http://127.0.0.1:9899/runs -H 'Content-Type: application/json' \
+  -d '{"method":"GET","url":"http://127.0.0.1:8080/fast",
+       "mode":"constant_concurrency","duration":"20s","concurrency":64}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['runId'])")
+sleep 24
+curl -s "http://127.0.0.1:9899/runs/$RID/report" | python3 -m json.tool
+```
+
+Verify the **effective** worker count by counting OS threads, since `/health`
+reports the CPU count instead:
+
+```bash
+PID=$(pgrep -f "vayu-engine --port 9899")
+ps -M $PID | tail -n +2 | wc -l     # 15 idle, 25 at workers=8, 29 at workers=12
+```
+
+The same run through MCP:
+
+```
+start_load_run { url: "http://127.0.0.1:8080/fast", mode: "constant_concurrency",
+                 concurrency: 64, duration: "20s", confirmed: true }
+get_run_report { runId: "<returned runId>" }
 ```
