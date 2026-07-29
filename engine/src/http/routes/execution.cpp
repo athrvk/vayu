@@ -714,8 +714,13 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
-        // Start run via RunManager
-        ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose);
+        // Start run via RunManager. A refusal means the daemon is draining its
+        // workers for shutdown; the row exists but nothing will ever run it, so
+        // say so rather than returning a 202 for a run that never starts.
+        if (!ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose)) {
+            send_error (res, 503, "Engine is shutting down");
+            return;
+        }
 
         nlohmann::json response;
         response["runId"]   = run_id;

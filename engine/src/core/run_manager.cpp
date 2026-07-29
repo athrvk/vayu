@@ -219,9 +219,10 @@ RunContext::~RunContext () {
     // Wake the closed-loop controller so it observes should_stop without
     // waiting for its 50ms safety-net timeout before the join below.
     notify_refill ();
-    if (worker_thread.joinable ()) {
-        worker_thread.join ();
-    }
+    // The worker joins this itself before it returns; the join here only covers
+    // a context destroyed before its worker ever ran. The *worker* thread is
+    // owned by RunManager (run_workers_), never by the context - see the
+    // declaration for why.
     if (metrics_thread.joinable ()) {
         metrics_thread.join ();
     }
@@ -334,7 +335,84 @@ void RunManager::stop_sweeper () {
 }
 
 RunManager::~RunManager () {
+    // A destructor must not throw; shutdown() only logs and joins, but the
+    // logger and the joins are the parts a broken invariant would surface in.
+    try {
+        shutdown ();
+    } catch (...) {
+    }
     stop_sweeper ();
+}
+
+size_t RunManager::tracked_worker_count () const {
+    std::lock_guard<std::mutex> lock (workers_mtx_);
+    return run_workers_.size ();
+}
+
+std::vector<std::thread> RunManager::take_finished_workers () {
+    // `mutex_` answers "is this run still active"; `workers_mtx_` owns the
+    // handle. Whenever both are held the order is workers_mtx_ -> mutex_,
+    // which is what lets start_run hold the former across register_run.
+    std::vector<std::thread> finished;
+    std::lock_guard<std::mutex> runs_lock (mutex_);
+    for (auto it = run_workers_.begin (); it != run_workers_.end ();) {
+        if (active_runs_.find (it->first) == active_runs_.end ()) {
+            finished.push_back (std::move (it->second));
+            it = run_workers_.erase (it);
+        } else {
+            ++it;
+        }
+    }
+    return finished;
+}
+
+void RunManager::shutdown (std::chrono::milliseconds grace) {
+    {
+        std::lock_guard<std::mutex> lock (workers_mtx_);
+        shutting_down_ = true;
+    }
+
+    // Signal first, then wait: every worker gets its stop request before any
+    // of them is waited on, so the grace period is shared rather than serial.
+    auto active = get_all_active_runs ();
+    for (const auto& context : active) {
+        context->should_stop = true;
+        context->notify_refill ();
+    }
+
+    if (!active.empty ()) {
+        vayu::utils::log_info (
+        "Stopping " + std::to_string (active.size ()) + " active load test(s)...");
+        auto deadline = std::chrono::steady_clock::now () + grace;
+        while (active_count () > 0 && std::chrono::steady_clock::now () < deadline) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+        if (size_t remaining = active_count (); remaining > 0) {
+            vayu::utils::log_warning (std::to_string (remaining) +
+            " load test(s) had not settled after " + std::to_string (grace.count ()) +
+            "ms; waiting for them anyway - abandoning a worker would leave it "
+            "writing to a destroyed database");
+        }
+    }
+
+    std::vector<std::thread> workers;
+    {
+        std::lock_guard<std::mutex> lock (workers_mtx_);
+        for (auto& entry : run_workers_) {
+            workers.push_back (std::move (entry.second));
+        }
+        run_workers_.clear ();
+    }
+    // Joined outside every lock: a worker's last act is retain_run, which takes
+    // `mutex_`, so joining while holding it would deadlock the drain.
+    for (auto& thread : workers) {
+        if (thread.joinable ())
+            thread.join ();
+    }
+
+    if (!active.empty ()) {
+        vayu::utils::log_info ("All load tests stopped");
+    }
 }
 
 std::vector<std::shared_ptr<RunContext>> RunManager::get_all_active_runs () const {
@@ -346,35 +424,65 @@ std::vector<std::shared_ptr<RunContext>> RunManager::get_all_active_runs () cons
     return runs;
 }
 
-void RunManager::start_run (const std::string& run_id,
+bool RunManager::start_run (const std::string& run_id,
 const nlohmann::json& config,
 vayu::db::Database& db,
 bool verbose) {
-    auto context = std::make_shared<RunContext> (run_id, config,
-    static_cast<size_t> (db.get_config_int ("maxStoredErrors",
-    static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS))));
-    register_run (run_id, context);
+    // `workers_mtx_` is held from the shutting_down_ check through the moment
+    // the new worker's handle is recorded. Anything narrower loses the run:
+    // shutdown() could set the flag, snapshot run_workers_ and join it between
+    // the check and the insert, leaving this worker running over state the
+    // drain has already declared safe to destroy.
+    std::vector<std::thread> finished;
+    {
+        std::lock_guard<std::mutex> workers_lock (workers_mtx_);
+        if (shutting_down_) {
+            vayu::utils::log_warning (
+            "Refusing to start run " + run_id + ": engine is shutting down");
+            return false;
+        }
 
-    // Sweep stale retained runs on each new registration so that headless /
-    // API-only usage (which never hits /metrics/live) doesn't accumulate them.
-    int retention_ms = db.get_config_int ("liveRetentionMs", 60000);
-    sweep_retained (retention_ms);
+        // Reap the handles of runs that have already finished, so a long-lived
+        // daemon does not accumulate one per run. Done here rather than by the
+        // workers themselves because a thread cannot join itself.
+        finished = take_finished_workers ();
 
-    // IMPORTANT: Set is_running BEFORE spawning threads to avoid race condition
-    // where metrics_thread exits immediately because is_running is still false
-    context->is_running    = true;
-    context->start_time_ms = now_ms ();
+        auto context = std::make_shared<RunContext> (run_id, config,
+        static_cast<size_t> (db.get_config_int ("maxStoredErrors",
+        static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS))));
+        register_run (run_id, context);
 
-    // Spawn metrics collection thread first (will be joined by worker thread)
-    context->metrics_thread =
-    std::thread ([context, &db] () { collect_metrics (context, &db); });
-    // Note: metrics_thread is NOT detached - it will be joined by the worker thread
+        // Sweep stale retained runs on each new registration so that headless /
+        // API-only usage (which never hits /metrics/live) doesn't accumulate them.
+        int retention_ms = db.get_config_int ("liveRetentionMs", 60000);
+        sweep_retained (retention_ms);
 
-    // Spawn background thread for execution
-    context->worker_thread = std::thread ([context, &db, verbose, this] () {
-        execute_load_test (context, &db, verbose, *this);
-    });
-    context->worker_thread.detach ();
+        // IMPORTANT: Set is_running BEFORE spawning threads to avoid race condition
+        // where metrics_thread exits immediately because is_running is still false
+        context->is_running    = true;
+        context->start_time_ms = now_ms ();
+
+        // Spawn metrics collection thread first (will be joined by worker thread)
+        context->metrics_thread =
+        std::thread ([context, &db] () { collect_metrics (context, &db); });
+        // Note: metrics_thread is NOT detached - it will be joined by the worker thread
+
+        // Spawn background thread for execution. The handle is kept - not
+        // detached - so shutdown can join it before `db` and this manager go
+        // out of scope from under the references the lambda captures.
+        run_workers_[run_id] = std::thread ([context, &db, verbose, this] () {
+            execute_load_test (context, &db, verbose, *this);
+        });
+    }
+
+    // Outside the lock: these threads are past retain_run and only unwinding,
+    // so the join is a formality - but it is still a join, and the discipline
+    // is that no lock is held across one.
+    for (auto& thread : finished) {
+        if (thread.joinable ())
+            thread.join ();
+    }
+    return true;
 }
 
 void execute_load_test (std::shared_ptr<RunContext> context,

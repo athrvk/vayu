@@ -8,6 +8,7 @@
  */
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -68,7 +69,11 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
 struct RunContext {
     std::string run_id;
     std::unique_ptr<vayu::http::EventLoop> event_loop;
-    std::thread worker_thread;
+    // The run's worker thread is NOT owned here: it holds a shared_ptr to this
+    // context, so a context whose last reference is dropped by its own worker
+    // (a retained run swept while the worker is still unwinding) would join
+    // itself and terminate. RunManager owns the handle instead - see
+    // `run_workers_` - and joins it from a thread that is never the worker.
     std::thread metrics_thread;
     std::atomic<bool> should_stop{ false };
     std::atomic<bool> is_running{ false };
@@ -248,6 +253,20 @@ class RunManager {
     // liveRetentionMs from the UI takes effect without a daemon restart.
     std::function<int64_t ()> sweeper_ttl_provider_;
 
+    // Joinable handles for the worker threads spawned by start_run, keyed by
+    // run id. A worker cannot join itself, so its handle outlives the thread
+    // until either a later start_run reaps it or shutdown joins it. Guarded by
+    // its own mutex: a worker takes `mutex_` (retain_run) as its last act, so
+    // reaping must never hold `mutex_` while it joins.
+    mutable std::mutex workers_mtx_;
+    std::map<std::string, std::thread> run_workers_;
+    bool shutting_down_{ false }; // workers_mtx_
+
+    // Move out the handles of workers whose runs are no longer active, for the
+    // caller to join once it has dropped every lock. Requires `workers_mtx_`;
+    // takes `mutex_` itself.
+    std::vector<std::thread> take_finished_workers ();
+
     public:
     ~RunManager ();
 
@@ -279,11 +298,39 @@ class RunManager {
     void start_sweeper (int64_t ttl_ms);
     void stop_sweeper ();
 
-    // Helper to start a run
-    void start_run (const std::string& run_id,
+    // Helper to start a run. Returns false - having registered nothing and
+    // spawned nothing - if shutdown() has already begun, so a request that
+    // races the drain is refused rather than starting a worker nobody will
+    // join. Any other failure still surfaces as an exception from the worker.
+    bool start_run (const std::string& run_id,
     const nlohmann::json& config,
     vayu::db::Database& db,
     bool verbose);
+
+    /**
+     * @brief Stop every active run and join its worker thread.
+     *
+     * The daemon's `Database`, `RunManager` and curl global state are torn down
+     * in `main`'s scope exit while a run worker may still be writing metrics
+     * through references to all three. This is the ordered drain that has to
+     * happen first: signal `should_stop` on every active run, wait for them to
+     * settle, then join.
+     *
+     * `grace` bounds the *wait*, not the join. A worker that has not settled by
+     * then is logged and still joined, because letting go of it is precisely
+     * the use-after-free being prevented - the bound exists to make a slow
+     * shutdown visible, not to permit an unsafe one.
+     *
+     * Idempotent, and safe to call with no runs active. After it returns,
+     * start_run refuses; the destructor calls it as a backstop.
+     */
+    void shutdown (std::chrono::milliseconds grace = std::chrono::milliseconds (
+                   constants::server::RUN_SHUTDOWN_GRACE_MS));
+
+    // Worker thread handles still held (running, or finished but not yet
+    // reaped). Test-only hook - a drain that returns with this non-zero has
+    // left threads running over freed state.
+    [[nodiscard]] size_t tracked_worker_count () const;
 };
 
 // Worker functions

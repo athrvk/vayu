@@ -400,6 +400,7 @@ if(VAYU_BUILD_TESTS)
         tests/run_manager_test.cpp
         tests/run_route_test.cpp
         tests/run_stop_test.cpp
+        tests/run_shutdown_test.cpp
         tests/run_config_validation_test.cpp
         tests/script_compose_test.cpp
         tests/encoding_test.cpp
