@@ -45,6 +45,8 @@ import type {
 	UpdateConfigRequest,
 	GlobalsResponse,
 	ImportFetchResponse,
+	ImportApplyRequest,
+	ImportApplyResponse,
 	OAuth2TokenRequest,
 	OAuth2TokenResponse,
 	OAuth2TokenStatusResponse,
@@ -285,6 +287,15 @@ export const apiService = {
 			{ url },
 			{ timeout: proxiedRequestTimeoutMs() }
 		);
+	},
+
+	/**
+	 * Persist a whole parsed import in one call. All-or-nothing: a rejected
+	 * payload wrote nothing, so there is no partial tree to clean up. The engine
+	 * owns every id here and returns the temp-id -> real-id map.
+	 */
+	async applyImport(payload: ImportApplyRequest): Promise<ImportApplyResponse> {
+		return await httpClient.post<ImportApplyResponse>(API_ENDPOINTS.IMPORT_APPLY, payload);
 	},
 
 	// OAuth 2.0 - the engine proxies the token endpoint, so use the longer

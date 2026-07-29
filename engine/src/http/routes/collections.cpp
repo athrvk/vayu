@@ -84,8 +84,11 @@ const std::optional<std::string>& parent_id) {
  *
  * Returns an error response when a no-default field (`name`) is missing or
  * null, or when the proposed parent would form a cycle; nullopt on success.
+ *
+ * Declared in routes.hpp because `POST /import/apply` applies the same fields to
+ * every collection in a bulk payload (issue #96).
  */
-static std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (
+std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (
 vayu::db::Database& db,
 vayu::db::Collection& c,
 const nlohmann::json& json,

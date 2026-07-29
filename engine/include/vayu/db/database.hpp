@@ -52,6 +52,21 @@ class Database {
     std::vector<Request> get_requests_in_collection (const std::string& collection_id);
     void delete_request (const std::string& id);
 
+    /**
+     * @brief Persist a whole import in one transaction (issue #96).
+     *
+     * Either every row lands or none does: a bulk import that failed halfway
+     * used to leave the tree half-created and depend on a best-effort
+     * client-side rollback to undo it. Rows are written collections -> requests
+     * -> environments so a parent exists before the rows that reference it.
+     * Ids must already be assigned by the caller (`POST /import/apply` resolves
+     * its temp ids first), because nothing here can look up a row that the same
+     * transaction has not committed yet.
+     */
+    void import_apply (const std::vector<Collection>& collections,
+    const std::vector<Request>& requests,
+    const std::vector<Environment>& environments);
+
     void save_environment (const Environment& e);
     std::vector<Environment> get_environments ();
     std::optional<Environment> get_environment (const std::string& id);

@@ -386,6 +386,7 @@ if(VAYU_BUILD_TESTS)
         tests/metrics_collector_test.cpp
         tests/execution_trace_test.cpp
         tests/import_route_test.cpp
+        tests/import_apply_route_test.cpp
         tests/config_route_test.cpp
         tests/requests_route_test.cpp
         tests/runs_route_test.cpp

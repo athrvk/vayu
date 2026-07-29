@@ -8,20 +8,32 @@
 import type { CollectionDraft, ImportResult } from "./types";
 
 /**
- * Assign client-side unique IDs to every draft before any create call.
- * Eliminates the engine's now_ms() id-collision risk and lets parent references
- * (parentId / collectionId) resolve without server round-trips.
+ * Stamp every draft with a temp id before the import is sent.
+ *
+ * These are **opaque client strings**, not record ids: `POST /import/apply` uses
+ * them only to let one item reference another (`parentTempId`,
+ * `collectionTempId`) inside a payload whose real ids do not exist yet, and the
+ * engine returns the temp-id -> real-id map it generated. They are never stored.
+ *
+ * This used to mint real `col_`/`req_`/`env_` UUIDs, because the orchestrator
+ * created items one POST at a time and had to wire the tree together itself -
+ * which is the only reason `POST /<resource>` ever accepted a client-supplied id
+ * (issues #96, #97). Counters are enough now that the ids are per-call and
+ * opaque, and they make a failing import name a readable item (`c3`, `r17`).
  *
  * Mutates the result in place (and returns it).
  */
-export function assignIds(result: ImportResult): ImportResult {
-	for (const c of result.collections) assignCollection(c);
-	for (const e of result.environments) e.id = `env_${crypto.randomUUID()}`;
+export function assignTempIds(result: ImportResult): ImportResult {
+	const next = { collection: 0, request: 0, environment: 0 };
+	for (const c of result.collections) assignCollection(c, next);
+	for (const e of result.environments) e.tempId = `e${++next.environment}`;
 	return result;
 }
 
-function assignCollection(c: CollectionDraft): void {
-	c.id = `col_${crypto.randomUUID()}`;
-	for (const r of c.requests) r.id = `req_${crypto.randomUUID()}`;
-	for (const child of c.children) assignCollection(child);
+type Counters = { collection: number; request: number; environment: number };
+
+function assignCollection(c: CollectionDraft, next: Counters): void {
+	c.tempId = `c${++next.collection}`;
+	for (const r of c.requests) r.tempId = `r${++next.request}`;
+	for (const child of c.children) assignCollection(child, next);
 }
