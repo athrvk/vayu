@@ -18,7 +18,7 @@ of it on your machine: no account, no cloud sync, no telemetry.
 [Use it from your agent](#drive-vayu-from-your-coding-agent){ .md-button }
 [See what it does](#what-you-can-do){ .md-button }
 
-![The load-test dashboard: throughput, latency percentiles and error counters streaming live from the C++ engine while the UI stays responsive.](images/vayu-loadtest.png){ .shot }
+![The load-test dashboard mid-run at 51,922 req/s: throughput, latency percentiles and error counters streaming live from the C++ engine while the UI stays responsive.](images/vayu-loadtest4.png){ .shot }
 
 ## Install
 

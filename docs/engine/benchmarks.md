@@ -262,7 +262,10 @@ This matters because the seeded labels are wrong in places.
 **`GET /health`'s `workers` field is `std::thread::hardware_concurrency()`, not
 the configured worker count** - it reported 12 while the engine was configured
 for and running 8. There is currently no way to read the effective worker count
-over the API; count OS threads instead (see [Reproduce it](#reproduce-it)).
+over the API. The workers A/B above was therefore validated by counting the
+engine's OS threads - `ps -M <pid> | tail -n +2 | wc -l`, which read 15 idle, 25
+at `workers=8` and 29 at `workers=12`, a delta of exactly 4 matching the config
+delta.
 Tracked in [#197](https://github.com/athrvk/vayu/issues/197).
 
 ## Engine tuning notes
@@ -334,41 +337,3 @@ bash scripts/test/bench-compare.sh            # prints the markdown table
 # tunables via env: URL=... DUR=12 CONCS="64 128 256" WORKERS=8
 ```
 
-To tune freely without disturbing a running app, start a second instance of the
-same binary on its own port and data dir. **Pick a free port - 9877 is the app's
-MCP HTTP endpoint**, and the engine currently aborts (`libc++abi: terminating`)
-rather than reporting a clean "port in use" error:
-
-```bash
-BIN=/Applications/Vayu.app/Contents/Resources/bin/vayu-engine
-"$BIN" --port 9899 --data-dir /tmp/ab-data --verbose 0 &
-curl -s http://127.0.0.1:9899/health
-
-# Set a config key (this endpoint echoes the whole config, so redirect it)
-curl -s -X POST http://127.0.0.1:9899/config -H 'Content-Type: application/json' \
-  -d '{"key":"workers","value":"8"}' > /dev/null
-
-# Run and report
-RID=$(curl -s -X POST http://127.0.0.1:9899/runs -H 'Content-Type: application/json' \
-  -d '{"method":"GET","url":"http://127.0.0.1:8080/fast",
-       "mode":"constant_concurrency","duration":"20s","concurrency":64}' \
-  | python3 -c "import sys,json;print(json.load(sys.stdin)['runId'])")
-sleep 24
-curl -s "http://127.0.0.1:9899/runs/$RID/report" | python3 -m json.tool
-```
-
-Verify the **effective** worker count by counting OS threads, since `/health`
-reports the CPU count instead:
-
-```bash
-PID=$(pgrep -f "vayu-engine --port 9899")
-ps -M $PID | tail -n +2 | wc -l     # 15 idle, 25 at workers=8, 29 at workers=12
-```
-
-The same run through MCP:
-
-```
-start_load_run { url: "http://127.0.0.1:8080/fast", mode: "constant_concurrency",
-                 concurrency: 64, duration: "20s", confirmed: true }
-get_run_report { runId: "<returned runId>" }
-```
