@@ -180,11 +180,25 @@ list as `preRequestScripts` / `postRequestScripts` on `POST /execute` - the
 script is blank are dropped). The renderer's load path builds the same kind of
 list for its `tests` field on `POST /runs`; MCP's only `POST /runs` caller
 (`start_load_run`) has no collection to chain-compose from - it forwards an
-agent-supplied ad-hoc `tests` string as-is, the same as its ad-hoc
-`preRequestScript`/`postRequestScript` (`tools.ts::buildExecutionPayload`), not
-a chain-built list. Composing the *content* of a script list is engine-side
-now; building the ordered *list* is still client-side, so it still needs both
-clients to agree.
+agent-supplied ad-hoc string as-is, the same as `run_request`'s ad-hoc
+`preRequestScript`/`postRequestScript`, not a chain-built list. Composing the
+*content* of a script list is engine-side now; building the ordered *list* is
+still client-side, so it still needs both clients to agree.
+
+**One validation script, one name.** The post-response script is one field in
+the app - the request builder's **Tests** tab - and reaches the engine under two
+key names: `postRequestScript` on `POST /execute`, `tests` on `POST /runs`. MCP
+therefore declares **`postRequestScript` on both `run_request` and
+`start_load_run`**, so a script an agent writes for one carries to the other
+unchanged, and maps it to `tests` when it builds the run payload
+(`tools.ts::readValidationScript`). `tests` stays accepted on both as the
+engine's own spelling - a Zod object strips keys it does not declare, so
+removing it would turn a script the agent believes is running into silence.
+Passing both names is rejected with a `ToolArgError` rather than resolved by
+precedence: they are one slot, and dropping either would report a run as
+validated by assertions that never ran. Under load the script runs against
+*sampled* responses (`max_response_samples` / `response_sample_rate`), not every
+one.
 
 Because MCP talks to the engine directly, it must do that preparation itself.
 `resolve.ts` is the main-process port of the renderer pipeline
@@ -203,7 +217,8 @@ clicking Send:
   script parts (root→leaf) and the request's own, and sends the list for the
   engine to join and run, so a request's tests and setup actually execute.
   `run_request` takes an agent-written `preRequestScript` / `postRequestScript`
-  instead, since an ad-hoc call has no chain to compose from.
+  instead, since an ad-hoc call has no chain to compose from; `start_load_run`
+  takes the same `postRequestScript` and sends it as the run's `tests`.
 - **Request mutation** - a pre-request script's `pm.request` edits (url, method,
   headers, body) are applied to the request that is sent, so an agent can sign a
   request or override the engine-applied auth from `run_request`, and a saved
