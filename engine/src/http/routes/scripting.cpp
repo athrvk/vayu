@@ -10,6 +10,8 @@
  * @brief Scripting API routes - provides script engine capabilities for UI autocomplete
  */
 
+#include <string>
+
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -158,6 +160,46 @@ nlohmann::json get_script_completions () {
     { "detail", "pm.response.to.have.jsonBody()" },
     { "documentation", "Assert that the response has a valid JSON body." },
     { "sortText", "1_pm_response_to_have_jsonBody" } });
+
+    // ========================================
+    // pm.response.to.be - Status-class assertions
+    // ========================================
+    // Getters, so the offered text is paren-less: writing the parentheses would
+    // call the assertion's result rather than assert. Every name the runtime
+    // implements belongs here - one it does not offer is one an author never
+    // finds, and one that is offered but missing throws at run time.
+    struct StatusClassCompletion {
+        const char* name;
+        const char* condition;
+    };
+    constexpr StatusClassCompletion status_classes[] = {
+        { "ok", "a 2xx status code" },
+        { "success", "a 2xx status code" },
+        { "info", "a 1xx status code" },
+        { "redirection", "a 3xx status code" },
+        { "clientError", "a 4xx status code" },
+        { "serverError", "a 5xx status code" },
+        { "error", "a 4xx or 5xx status code" },
+        { "accepted", "status 202" },
+        { "badRequest", "status 400" },
+        { "unauthorized", "status 401" },
+        { "forbidden", "status 403" },
+        { "notFound", "status 404" },
+        { "rateLimited", "status 429" },
+        { "json", "a body that parses as JSON" },
+        { "withBody", "a non-empty body" },
+    };
+
+    for (const auto& status_class : status_classes) {
+        const std::string label = std::string ("pm.response.to.be.") + status_class.name;
+        completions.push_back ({ { "label", label }, { "kind", KIND_FIELD },
+        { "insertText", label }, { "detail", label },
+        { "documentation",
+        std::string ("Assert that the response has ") + status_class.condition +
+        ".\n\nWritten without parentheses - the property access is the "
+        "assertion.\n\nExample:\n" + label + ";" },
+        { "sortText", std::string ("1_pm_response_to_be_") + status_class.name } });
+    }
 
     // ========================================
     // pm.request - Request object

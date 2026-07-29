@@ -18,7 +18,7 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | ------------------- | -------------------------------------------------------------------------------- |
 | Core                | `pm`, `pm.test(name, fn)`, `pm.expect(value)`                                    |
 | Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()` |
-| Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`               |
+| Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url`, `.method`, `.headers`, `.body`                                 |
 | Environment         | `pm.environment.get(name)`, `pm.environment.set(name, value)`                    |
 | Globals             | `pm.globals.get(name)`, `pm.globals.set(name, value)`                            |
@@ -45,6 +45,28 @@ Chai-style chains, implemented in the QuickJS runtime:
 .to.be.a(type)    .to.be.an(type)   .to.match(/regex/)
 .to.not …         (negates the chain)
 ```
+
+### Response status classes (`pm.response.to.be`)
+
+Getters, so the paren-less form is the assertion:
+
+```
+.to.be.ok          .to.be.success       (2xx)
+.to.be.info        (1xx)                .to.be.redirection   (3xx)
+.to.be.clientError (4xx)                .to.be.serverError   (5xx)
+.to.be.error       (4xx or 5xx)
+.to.be.accepted    (202)                .to.be.badRequest    (400)
+.to.be.unauthorized(401)                .to.be.forbidden     (403)
+.to.be.notFound    (404)                .to.be.rateLimited   (429)
+.to.be.json        (body parses as JSON)
+.to.be.withBody    (body is not empty)
+```
+
+**Every other name under `pm.response.to` throws a `TypeError`** naming the
+chain - a misspelling, or an idiom Vayu does not implement such as the negated
+`pm.response.to.not.be.ok`. This is deliberate: a paren-less assertion is an
+expression statement, so a name that merely evaluated to `undefined` would
+report PASS against a broken API.
 
 ---
 

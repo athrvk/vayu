@@ -82,6 +82,34 @@ pm.response.to.have.header('Content-Type');
 pm.response.to.have.jsonBody();
 ```
 
+Status-class assertions hang off `pm.response.to.be`. They are **getters** - the
+paren-less form is the assertion:
+
+```javascript
+pm.response.to.be.ok;            // 2xx
+pm.response.to.be.success;       // 2xx
+pm.response.to.be.info;          // 1xx
+pm.response.to.be.redirection;   // 3xx
+pm.response.to.be.clientError;   // 4xx
+pm.response.to.be.serverError;   // 5xx
+pm.response.to.be.error;         // 4xx or 5xx
+pm.response.to.be.accepted;      // 202
+pm.response.to.be.badRequest;    // 400
+pm.response.to.be.unauthorized;  // 401
+pm.response.to.be.forbidden;     // 403
+pm.response.to.be.notFound;      // 404
+pm.response.to.be.rateLimited;   // 429
+pm.response.to.be.json;          // body parses as JSON
+pm.response.to.be.withBody;      // body is not empty
+```
+
+**Anything else under `pm.response.to` throws.** A misspelled or unimplemented
+name - `pm.response.to.be.definitelyNotAMatcher`, or the negated
+`pm.response.to.not.be.ok`, which Vayu does not have - raises a `TypeError`
+naming the chain rather than evaluating to `undefined`. A paren-less assertion
+is an expression statement, so a silent `undefined` would report PASS against a
+broken API; failing loudly is the point.
+
 ## Request Object (`pm.request`)
 
 Access request data:
