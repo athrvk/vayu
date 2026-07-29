@@ -511,7 +511,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"JavaScript run after the response arrives; use pm.test(...) for assertions, returned as test results."
+					"JavaScript run after the response arrives; use pm.test(...) for assertions, returned as test results. Same kind of script as start_load_run's `tests` - the two differ only in name, because that is what each engine endpoint calls the field."
 				),
 		},
 		handler: async (args, ctx, signal) => {
@@ -856,7 +856,12 @@ export const TOOLS: McpTool[] = [
 			requestId: z.string().optional(),
 			environmentId: environmentIdInput,
 			collectionId: collectionIdInput,
-			tests: z.string().optional().describe("Optional deferred validation script."),
+			tests: z
+				.string()
+				.optional()
+				.describe(
+					"Optional deferred validation script - the same kind of script as run_request's `postRequestScript` (pm.test assertions), named `tests` because that is the field POST /runs reads. Run against a sample of responses, after the run, not on every request. A load run has no pre-request hook."
+				),
 			confirmed: z
 				.boolean()
 				.optional()

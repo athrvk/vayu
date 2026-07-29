@@ -204,6 +204,14 @@ clicking Send:
   engine to join and run, so a request's tests and setup actually execute.
   `run_request` takes an agent-written `preRequestScript` / `postRequestScript`
   instead, since an ad-hoc call has no chain to compose from.
+- **One post-request script, three names.** It is stored as
+  `postRequestScript` (on a request and on a collection), sent as
+  `postRequestScripts` / `postRequestScript` to `POST /execute`, and as `tests`
+  to `POST /runs` - the engine reads *only* the endpoint's own key, they are not
+  interchangeable. Both clients map the one script onto whichever key the target
+  endpoint reads, so MCP's `run_request.postRequestScript` and
+  `start_load_run.tests` are the same script under the two engine names, exactly
+  as the app's single Tests tab feeds both a Send and a load run.
 - **Request mutation** - a pre-request script's `pm.request` edits (url, method,
   headers, body) are applied to the request that is sent, so an agent can sign a
   request or override the engine-applied auth from `run_request`, and a saved
