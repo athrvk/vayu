@@ -254,6 +254,15 @@ never modified. All configurable in **Settings → MCP** and persisted.
   bypasses the list (still rejects unresolved `{{variables}}`); off by default.
 - **Hard caps** - max RPS / concurrency / duration on `start_load_run`; over-cap
   requests are rejected. With the allowlist, these are the real limits on load.
+  The caps bound values from above; `concurrency` is additionally constrained to
+  a positive integer by the tool's own schema, because "unlimited" is an obvious
+  guess to spell `-1` or `0` and the engine reads it as an eager per-worker
+  pre-allocation count (see the accepted ranges under
+  [POST /runs](api-reference.md#post-runs)).
+  `duration` / `rampUpDuration` are also rejected when they are not durations at
+  all (`ms`/`s`/`m`/`h`, or a bare number of seconds - the same grammar the
+  engine parses), since the engine now fails such a run rather than quietly
+  substituting 60s.
 - **Load-run confirmation** - anti-accident, not anti-adversary: it stops a stray
   tool call from starting load, but on HTTP it is agent-side (the caps/allowlist
   are the enforcement). Elicitation upgrades it to a human prompt where supported.

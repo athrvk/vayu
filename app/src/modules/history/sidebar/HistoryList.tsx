@@ -7,7 +7,8 @@
 
 import { useEffect, useState } from "react";
 import { Search, Clock } from "lucide-react";
-import { useTabsStore, useLayoutStore } from "@/stores";
+import { useTabsStore, useLayoutStore, useToastStore } from "@/stores";
+import { ApiError } from "@/services";
 import { useHistoryStore, filterRuns } from "@/modules/history/history-store";
 import { useRunsQuery, useDeleteRunMutation, flattenRunPages, runsTotal } from "@/queries";
 import {
@@ -28,6 +29,24 @@ import {
 	DeleteConfirmDialog,
 } from "@/components/ui";
 import RunItem from "./RunItem";
+
+/**
+ * A run that is still executing is stopped by the engine before it is deleted,
+ * and the delete is refused with a 409 if the run's worker has not finished
+ * writing within the engine's wait - deleting rows out from under a live writer
+ * is what used to orphan metrics against a deleted run id. Nothing is removed in
+ * that case, so the right thing to tell the user is to try again shortly.
+ *
+ * The engine's error body is a bare `{"error": "..."}` string, which the shared
+ * http client cannot read into `ApiError.message` (it looks for `error.message`),
+ * so the wording lives here rather than being echoed from the response.
+ */
+function deleteRunErrorMessage(error: unknown): string {
+	if (error instanceof ApiError && error.statusCode === 409) {
+		return "This run is still stopping - try deleting it again in a moment";
+	}
+	return error instanceof Error ? `Couldn't delete run: ${error.message}` : "Couldn't delete run";
+}
 
 export default function HistoryList() {
 	const { openTab, openTabs, activeTabId } = useTabsStore();
@@ -70,6 +89,7 @@ export default function HistoryList() {
 		isFetchingNextPage,
 	} = useRunsQuery(debouncedSearch);
 	const deleteRunMutation = useDeleteRunMutation();
+	const showToast = useToastStore((s) => s.showToast);
 
 	const [deletingId, setDeletingId] = useState<string | null>(null);
 	const [deleteConfirmRunId, setDeleteConfirmRunId] = useState<string | null>(null);
@@ -102,6 +122,11 @@ export default function HistoryList() {
 	const deleteConfirmLabel =
 		runToDelete?.summary?.url ??
 		(deleteConfirmRunId ? `${deleteConfirmRunId.slice(0, 8)}…` : "");
+	// Deleting one of these stops it first, which is a second consequence the
+	// dialog has to name - "permanently removed" alone does not cover ending a
+	// test that is still generating load.
+	const deleteConfirmStopsRun =
+		runToDelete?.status === "running" || runToDelete?.status === "pending";
 
 	const handleDeleteClick = (runId: string, event: React.MouseEvent) => {
 		event.stopPropagation();
@@ -118,6 +143,10 @@ export default function HistoryList() {
 			if (selectedRunId === runIdToDelete) {
 				navigateToHistory();
 			}
+		} catch (error) {
+			// Without this the rejection was unhandled: the row stayed in the
+			// list with no explanation, which reads as the click not registering.
+			showToast(deleteRunErrorMessage(error), "error");
 		} finally {
 			setDeletingId(null);
 		}
@@ -286,7 +315,9 @@ export default function HistoryList() {
 					title="Delete run?"
 					description={
 						<>
-							This run will be permanently removed. This cannot be undone.
+							{deleteConfirmStopsRun
+								? "This run is still in progress - deleting it stops it first, then removes it permanently. This cannot be undone."
+								: "This run will be permanently removed. This cannot be undone."}
 							{deleteConfirmLabel && (
 								<TruncatedText
 									as="span"

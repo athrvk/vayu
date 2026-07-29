@@ -13,6 +13,7 @@
  */
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <future>
@@ -73,8 +74,13 @@ struct EventLoopConfig {
     /// Event loop poll timeout in milliseconds
     int poll_timeout_ms = vayu::core::constants::event_loop::POLL_TIMEOUT_MS;
 
-    /// DNS cache timeout in seconds (0 = no caching)
+    /// DNS cache timeout in seconds (0 = no caching, negative = never expires).
+    /// Governs curl's own resolver cache and the pre-resolution pin cache.
     long dns_cache_timeout = vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS;
+
+    /// Largest response body one transfer may buffer (0 = unbounded).
+    /// Exceeding it fails that transfer instead of allocating without bound.
+    size_t max_response_body_bytes = vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES;
 
     /// Target requests per second (0 = unlimited, no rate limiting)
     double target_rps = 0.0;
@@ -149,10 +155,20 @@ class EventLoop {
     /**
      * @brief Stop the event loop
      *
-     * Waits for all pending requests to complete.
-     * @param wait_for_pending If true, waits for pending requests; if false, cancels them
+     * @param wait_for_pending If true, queued requests are still sent and
+     *        in-flight ones are awaited. If false, both are cancelled: the
+     *        queued backlog is discarded without being sent, and every
+     *        in-flight transfer is removed from curl and completed with an
+     *        `ErrorCode::InternalError` "Request cancelled" result, so a stop
+     *        cannot be held hostage by an upstream that never answers.
+     * @param drain_timeout Upper bound on the wait when `wait_for_pending` is
+     *        true; whatever is still in flight when it expires is cancelled the
+     *        same way. Zero (the default) means wait indefinitely, which is
+     * only safe when every transfer carries a timeout of its own. Ignored when
+     *        `wait_for_pending` is false - that path cancels immediately.
      */
-    void stop (bool wait_for_pending = true);
+    void stop (bool wait_for_pending = true,
+    std::chrono::milliseconds drain_timeout = std::chrono::milliseconds::zero ());
 
     /**
      * @brief Check if the event loop is running

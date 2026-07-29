@@ -53,6 +53,29 @@ describe("dashboard-store live retention window", () => {
 		expect(useDashboardStore.getState().historicalMetrics).toHaveLength(500);
 	});
 
+	// The ceiling is the engine's `liveMaxRetainedTicks`, synced in by
+	// useLiveChartSettings - so the trim has to read the store's value, not a
+	// module constant, or raising the setting would enlarge the engine's ring
+	// while this side kept discarding at the old number.
+	it("trims to the configured tick ceiling, not a fixed constant", () => {
+		const s = useDashboardStore.getState();
+		s.setLiveWindowSeconds(null); // full run - the ceiling is the only bound
+		s.setMaxRetainedTicks(120);
+		s.addMetricsBatch(Array.from({ length: 500 }, (_, i) => tick(i)));
+
+		const hist = useDashboardStore.getState().historicalMetrics;
+		expect(hist).toHaveLength(120);
+		// The newest are kept, so the chart's right edge stays live.
+		expect(hist[hist.length - 1].elapsed_seconds).toBe(499);
+		expect(hist[0].elapsed_seconds).toBe(380);
+	});
+
+	it("ignores a non-positive ceiling rather than emptying the history", () => {
+		const s = useDashboardStore.getState();
+		s.setMaxRetainedTicks(0);
+		expect(useDashboardStore.getState().maxRetainedTicks).toBe(50000);
+	});
+
 	it("latched aggregates survive ticks rolling out of the window", () => {
 		const s = useDashboardStore.getState();
 		s.setLiveWindowSeconds(60);

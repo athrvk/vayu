@@ -45,7 +45,10 @@ import {
 } from "@/constants/load-test";
 
 /** localStorage keys reset by "Reset app settings" - all renderer preferences,
- *  but NOT workspace/session state (open tabs, layout, active collection). */
+ *  but NOT workspace/session state (open tabs, layout, active collection).
+ *  The live chart window is deliberately absent: it is engine config
+ *  (`liveReplayWindowMs`), not a renderer preference, so it resets with the
+ *  engine's settings rather than with the app's. */
 export const SETTINGS_STORAGE_KEYS: readonly string[] = [
 	STORAGE_KEYS.THEME_SOURCE,
 	STORAGE_KEYS.COLOR_SCHEME,
@@ -53,7 +56,6 @@ export const SETTINGS_STORAGE_KEYS: readonly string[] = [
 	STORAGE_KEYS.UI_FONT_CUSTOM,
 	STORAGE_KEYS.UI_SCALE,
 	STORAGE_KEYS.UI_RADIUS,
-	STORAGE_KEYS.LIVE_CHART_WINDOW,
 	STORAGE_KEYS.CLIENT_SETTINGS,
 ];
 

@@ -225,7 +225,13 @@ import { SETTINGS_STORAGE_KEYS } from "@/stores";  // localStorage keys reset by
 
 #### `dashboard-store.ts` - Load Test Metrics & State
 
-Manages live load test run state: streaming metrics, final reports, and running aggregates (peak concurrency, SLO breakpoint). Retention is **time-based, not a fixed point count**: `addMetricsBatch` trims ticks older than the user-configurable live window (`liveWindowSeconds`, sourced from `constants/live-window.ts`, default 5m, `null` = full run), backstopped by a hard `MAX_RETAINED_TICKS` safety cap (20,000). The window is kept in sync by the `useLiveChartWindow` hook and drives what the live charts plot. (`app/src/config/metrics.ts` now only holds the SSE commit throttle, `METRICS_UI_THROTTLE_MS`.)
+Manages live load test run state: streaming metrics, final reports, and running aggregates (peak concurrency, SLO breakpoint). Retention is **time-based, not a fixed point count**: `addMetricsBatch` trims ticks older than the user-configurable live window (`liveWindowSeconds`, default 5m, `null` = full run), backstopped by a `maxRetainedTicks` ceiling (default 50,000). Both are kept in sync by the `useLiveChartSettings` hook and drive what the live charts plot. (`app/src/config/metrics.ts` now only holds the SSE commit throttle, `METRICS_UI_THROTTLE_MS`.)
+
+**The window is engine config, not a renderer preference.** It is stored as the engine's `liveReplayWindowMs` entry (milliseconds; `0` = full run), so `useLiveChartSettings` reads it from `useConfigQuery` and writes it with `useUpdateConfigMutation` - there is no localStorage key. The engine needs the same number: it sizes the in-memory SSE tick ring that `GET /runs/:runId/live` replays **from offset 0**, and that replay is what rebuilds these charts when the dashboard attaches or re-attaches mid-run. Two settings would let the retained span and the displayed span disagree, with the engine replaying less than the chart is configured to show. `constants/live-window.ts` owns the option list and the `liveWindowToMs` / `liveWindowFromMs` mapping.
+
+The **tick ceiling** is shared the same way, as `liveMaxRetainedTicks` (default 50,000). It is a memory bound, not a rendering one - `bucketColumns` collapses ticks into `chartBucketSeconds` buckets (0.5s by default) before uPlot sees them, and uPlot draws to canvas, so a full window reaches the screen as a few thousand points however many ticks back it. It also costs nothing at stock settings, since the *window* is what sizes the retained history; it only binds when window / tick-interval exceeds it. `DEFAULT_MAX_RETAINED_TICKS` here and `DEFAULT_MAX_LIVE_TICKS` in the engine are the pre-config defaults and must move together.
+
+Because the value arrives asynchronously, the store seeds `liveWindowSeconds` with the module default rather than reading it synchronously at creation; the hook corrects it once the config query resolves.
 
 **State:**
 ```typescript
@@ -234,7 +240,7 @@ Manages live load test run state: streaming metrics, final reports, and running 
   mode: "running" | "completed" | "stopped"
   isStreaming: boolean
   currentMetrics: LoadTestMetrics | null
-  historicalMetrics: LoadTestMetrics[]  // Trimmed to liveWindowSeconds (cap: MAX_RETAINED_TICKS)
+  historicalMetrics: LoadTestMetrics[]  // Trimmed to liveWindowSeconds (cap: maxRetainedTicks)
   liveWindowSeconds: number | null             // Live retention window; null = full run
   finalReport: RunReport | null
   error: string | null

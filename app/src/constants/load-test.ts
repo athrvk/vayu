@@ -73,8 +73,9 @@ export const LOAD_TEST_LIMITS: LoadTestLimits = {
 	 * keep*, converted to the engine's sampling period by
 	 * `successSamplePeriod`. 0% has no period that expresses it (the period
 	 * would be infinite, and a literal 0 on the wire is a division by zero
-	 * engine-side), so "keep no success traces" is the Save timing breakdown
-	 * toggle instead - that gates storage entirely.
+	 * engine-side, which the engine now rejects with a 400), so "keep no
+	 * success traces" is the Save timing breakdown toggle instead - that gates
+	 * storage entirely.
 	 */
 	SAMPLE_RATE_PCT: { MIN: 1, MAX: 100 },
 	SLOW_THRESHOLD_MS: { MIN: 0, MAX: 60_000 },

@@ -124,9 +124,13 @@ bool is_create) {
         c.order = 0; // Explicit null on update -> reset to the column default.
     }
 
-    apply_json_field (json, "variables", c.variables, "{}", is_create);
+    if (auto err = apply_json_field (json, "variables", c.variables, "{}", is_create)) {
+        return err;
+    }
     // Collection auth is never 'inherit' - a collection is the root of a chain.
-    apply_json_field (json, "auth", c.auth, R"({"mode":"none"})", is_create);
+    if (auto err = apply_json_field (json, "auth", c.auth, R"({"mode":"none"})", is_create)) {
+        return err;
+    }
     apply_string_field (json, "preRequestScript", c.pre_request_script, "", is_create);
     apply_string_field (json, "postRequestScript", c.post_request_script, "", is_create);
 

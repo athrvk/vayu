@@ -29,8 +29,8 @@ void EventLoop::start () {
     impl_->start ();
 }
 
-void EventLoop::stop (bool wait_for_pending) {
-    impl_->stop (wait_for_pending);
+void EventLoop::stop (bool wait_for_pending, std::chrono::milliseconds drain_timeout) {
+    impl_->stop (wait_for_pending, drain_timeout);
 }
 
 bool EventLoop::is_running () const {

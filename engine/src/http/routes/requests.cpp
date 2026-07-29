@@ -167,11 +167,15 @@ apply_request_fields (vayu::db::Request& r, const nlohmann::json& json, bool is_
         return err;
     }
 
-    apply_json_field (json, "body", r.body, R"({"mode":"none"})", is_create);
+    if (auto err = apply_json_field (json, "body", r.body, R"({"mode":"none"})", is_create)) {
+        return err;
+    }
     apply_string_field (json, "bodyType", r.body_type, "none", is_create);
     // A request's auth may be 'inherit' - that is its default, and the app
     // resolves the collection chain before the request is executed.
-    apply_json_field (json, "auth", r.auth, R"({"mode":"inherit"})", is_create);
+    if (auto err = apply_json_field (json, "auth", r.auth, R"({"mode":"inherit"})", is_create)) {
+        return err;
+    }
     apply_string_field (json, "preRequestScript", r.pre_request_script, "", is_create);
     apply_string_field (json, "postRequestScript", r.post_request_script, "", is_create);
     apply_int_field (json, "order", r.order, 0, is_create);

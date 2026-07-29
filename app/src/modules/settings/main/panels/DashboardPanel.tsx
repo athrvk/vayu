@@ -25,7 +25,7 @@ import {
 	Eyebrow,
 	Input,
 } from "@/components/ui";
-import { useLiveChartWindow } from "@/hooks/useLiveChartWindow";
+import { useLiveChartSettings } from "@/hooks/useLiveChartSettings";
 import { useClientSettingsStore } from "@/stores";
 import { LIVE_WINDOW_OPTIONS } from "@/constants/live-window";
 import {
@@ -37,7 +37,7 @@ import {
 import { OptionButtons } from "./SettingControls";
 
 export default function DashboardPanel() {
-	const { window: liveWindow, setWindow: setLiveWindow } = useLiveChartWindow();
+	const { window: liveWindow, setWindow: setLiveWindow } = useLiveChartSettings();
 	const sloThresholdMs = useClientSettingsStore((s) => s.sloThresholdMs);
 	const setSloThresholdMs = useClientSettingsStore((s) => s.setSloThresholdMs);
 	const chartBucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);

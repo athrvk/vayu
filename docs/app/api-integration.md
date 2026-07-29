@@ -199,6 +199,15 @@ apiService.stopRun(id): Promise<StopRunResponse>
 apiService.deleteRun(id): Promise<void>
 ```
 
+`deleteRun` on a run that is still in progress stops it engine-side first, so it
+takes as long as the stop does, and it **rejects with a 409** if the run's worker
+has not finished writing in time - nothing is deleted in that case. Callers must
+handle that rejection: `HistoryList` turns it into a toast telling the user to
+retry, and Settings' *Clear run history* already counts per-run failures through
+`Promise.allSettled`. The engine's error body is a bare `{"error": "..."}`
+string, which `httpClient` cannot read into `ApiError.message` (it looks for
+`error.message`), so the wording is the caller's, keyed off `statusCode`.
+
 #### Scripting
 
 ```typescript
@@ -418,6 +427,12 @@ await apiService.startLoadTest({
   comment: "Stress test"
 });
 ```
+
+The engine range-checks this payload before it creates the run row and answers a
+violation with `400 invalid_run_config` (accepted ranges are tabulated under
+[POST /runs](../engine/api-reference.md#post-runs)). The renderer's own limits
+live in `LOAD_TEST_LIMITS` (`src/constants/load-test.ts`) and must stay at or
+inside the engine's.
 
 #### `success_sample_rate` is a period, not a percentage
 
