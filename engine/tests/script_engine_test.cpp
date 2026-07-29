@@ -1165,6 +1165,70 @@ TEST_F (ScriptEngineTest, NoCryptoBase64OrUrlParserIsExposed) {
 }
 
 // ============================================================================
+// The `pm` surface the docs and the app teach
+// ============================================================================
+//
+// Same reason as the two above: a name that is written down but not installed
+// throws in the user's face, and nothing else notices. `scripting.md` taught
+// `pm.variables` and the Tests panel's quick reference taught
+// `pm.response.headers.get()`; neither has ever existed. These pin the runtime
+// so the docs can be trusted, and so implementing either one flips a test red
+// and forces the doc to be rewritten with it.
+
+TEST_F (ScriptEngineTest, PmVariablesIsAbsentAndTheScopedAccessorsAreNot) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('mergedAccessor', typeof pm.variables);
+        var missing = [];
+        var scopes = ['environment', 'globals', 'collectionVariables'];
+        for (var i = 0; i < scopes.length; i++) {
+            var scope = pm[scopes[i]];
+            if (!scope || typeof scope.get !== 'function'
+                || typeof scope.set !== 'function') {
+                missing.push(scopes[i]);
+            }
+        }
+        pm.environment.set('missingScopes', missing.join(','));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["missingScopes"].value, "")
+    << "a scoped accessor the docs point at instead of pm.variables is gone";
+    // Implementing the merged accessor is #184. When it lands, this expectation
+    // is the one that says "now rewrite the 'not supported' section in
+    // scripting.md and the unsupported list in pm-api-compatibility.md".
+    EXPECT_EQ (env["mergedAccessor"].value, "undefined")
+    << "pm.variables now exists; both docs say it does not";
+}
+
+TEST_F (ScriptEngineTest, ResponseHeadersIsAPlainObjectReadByLowerCasedKey) {
+    // The header names a real response arrives with: `client.cpp` lower-cases
+    // every key as it parses, so this - not the fixture's mixed-case default -
+    // is the shape a script actually sees.
+    response.headers = { { "content-type", "application/json" },
+        { "x-request-id", "abc123" } };
+
+    auto result = engine.execute_test (R"JS(
+        pm.test("the form the Tests panel suggests reads the header", function() {
+            pm.expect(pm.response.headers['content-type']).to.equal('application/json');
+        });
+        pm.environment.set('getType', typeof pm.response.headers.get);
+        pm.environment.set('hasType', typeof pm.response.headers.has);
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed);
+    // Postman's `headers` is a HeaderList with these; ours is a bag. The Tests
+    // panel taught `.get("Content-Type")`, which threw "not a function".
+    EXPECT_EQ (env["getType"].value, "undefined")
+    << "pm.response.headers.get exists now - say so in pm-api-compatibility.md "
+       "and put it back in the Tests panel quick reference";
+    EXPECT_EQ (env["hasType"].value, "undefined");
+}
+
+// ============================================================================
 // The worked examples in scripting.md actually run
 // ============================================================================
 //

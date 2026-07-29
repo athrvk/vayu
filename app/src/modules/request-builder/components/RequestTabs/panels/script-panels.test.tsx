@@ -228,6 +228,26 @@ describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegac
 		}
 	});
 
+	/*
+	 * The quick reference is copy-paste bait: it sits next to the editor and a
+	 * script author types what it shows. It showed
+	 * `pm.response.headers.get("Content-Type")` for as long as the panel has
+	 * existed, and that throws `TypeError: not a function` - the runtime builds
+	 * `headers` as a plain object (`script_engine.cpp`, `setup_pm_response`),
+	 * with keys the HTTP client has already lower-cased.
+	 */
+	it("suggests only header reads that the runtime supports", () => {
+		const { container } = render(<Panel />);
+		const text = container.textContent ?? "";
+
+		expect(text).not.toContain("headers.get(");
+		if (variant === "post") {
+			expect(text).toContain('pm.response.headers["content-type"]');
+			// The rule the snippet cannot show: why the key is lower-cased.
+			expect(text).toMatch(/lower-cases every key/i);
+		}
+	});
+
 	describe("the sunken slabs", () => {
 		it("declares the surface its rule reads from", () => {
 			const { container } = render(<Panel />);

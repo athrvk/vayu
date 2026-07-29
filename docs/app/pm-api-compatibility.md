@@ -25,6 +25,9 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Collection vars     | `pm.collectionVariables.get(name)`, `pm.collectionVariables.set(name, value)`    |
 | Console             | `console.log/info/warn/error`                                                    |
 
+`pm.response.headers` is a plain object keyed by the **lower-cased** header name -
+`pm.response.headers['content-type']`, not Postman's `HeaderList` (see below).
+
 Variable writes persist to the scope they target (environment / collection / globals) and
 participate in [variable resolution](./variable-resolution.md). Calling `set(name, value)`
 on a variable that already exists updates only its value - the existing `secret` flag,
@@ -55,6 +58,11 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
 - `pm.sendRequest(...)` - sending auxiliary requests from a script
 - `pm.variables.*` - the merged/resolved variable accessor (use the scoped
   `pm.environment` / `pm.collectionVariables` / `pm.globals` instead)
+- `pm.response.headers.get/has(...)` - Postman's `headers` is a `HeaderList`;
+  Vayu's is a plain object keyed by the **lower-cased** header name, so read it
+  as `pm.response.headers['content-type']`. The engine's HTTP client lower-cases
+  every response header name as it parses it (`client.cpp`), so a mixed-case key
+  reads back `undefined`.
 - `pm.iterationData.*` - data-file driven runs
 - `pm.cookies.*`
 - Postman's header *methods* - `pm.request.headers.add/upsert/remove(...)`. Vayu's

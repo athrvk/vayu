@@ -68,7 +68,9 @@ pm.response.responseTimeWire  // CURLINFO_TOTAL_TIME in ms - DNS + TCP + TLS +
 pm.response.responseTimeQueueWait // Generator-side queue overhead in ms,
                               // i.e. responseTime − responseTimeWire (clamped
                               // to >= 0). For single-shot sends this is ~0.
-pm.response.headers           // Headers object (lowercase keys)
+pm.response.headers           // Plain object, lower-cased keys. Read it with
+                              // pm.response.headers['content-type'] - it is not
+                              // Postman's HeaderList, so there is no .get()/.has().
 pm.response.body              // Raw body string
 pm.response.text()            // Body as string
 pm.response.json()            // Parse JSON (throws if invalid)
@@ -146,22 +148,36 @@ created with the defaults and stamped with its creation time, so it appears at
 the bottom of that scope in the variables editor rather than above the rows
 that were already there. A scope no script wrote is not persisted at all.
 
-## Variables (`pm.variables`)
+## Collection and Global Variables
 
-Access collection and global variables:
+The other two scopes are reached the same way as the environment, each through
+its own accessor:
 
 ```javascript
-// Get variable (searches: environment → collection → global)
-const value = pm.variables.get('baseUrl');
+const value = pm.collectionVariables.get('baseUrl');
+pm.collectionVariables.set('baseUrl', 'https://api.example.com');
 
-// Set variable
-pm.variables.set('baseUrl', 'https://api.example.com');
+const runId = pm.globals.get('run_id');
+pm.globals.set('run_id', '42');
 ```
 
-**Variable Resolution Order:**
-1. Environment variables
-2. Collection variables
-3. Global variables
+Each `set()` persists to the scope it names, with the same
+keep-the-flags behaviour described for `pm.environment` above.
+
+### `pm.variables` is not supported
+
+Postman's merged accessor - `pm.variables.get(name)`, which searches every scope
+in precedence order - **does not exist in the runtime**. `pm.variables` is
+`undefined`, so `pm.variables.get('baseUrl')` throws
+`TypeError: cannot read property 'get' of undefined`. Use the three scoped
+accessors above.
+
+Scope precedence (environment, then collection, then global) is applied when
+`{{baseUrl}}` is resolved before the request is sent - see
+[Variable Resolution](../app/variable-resolution.md) - not by anything a script
+can call. Implementing `pm.variables` on top of that order is tracked in
+[#184](https://github.com/athrvk/vayu/issues/184); when it lands, this section is
+what it replaces.
 
 ## Console Output
 
@@ -435,7 +451,7 @@ QuickJS supports ES2020 features with some limitations:
 - Can modify `pm.request` - method, url, headers and body - and the edits are
   applied to the request that is sent
   ([rules](#mutating-the-request-pre-request-scripts))
-- Can access `pm.environment` and `pm.variables`
+- Can access `pm.environment`, `pm.collectionVariables` and `pm.globals`
 - Cannot access `pm.response` (request hasn't been sent yet)
 - Run in Design Mode / Send only, not in load tests
 
@@ -443,7 +459,7 @@ QuickJS supports ES2020 features with some limitations:
 
 - Execute after receiving the HTTP response
 - Can access `pm.request` (read-only here - it has already been sent) and `pm.response`
-- Can access `pm.environment` and `pm.variables`
+- Can access `pm.environment`, `pm.collectionVariables` and `pm.globals`
 - Test results are included in the response
 
 ### Load Test Scripts
