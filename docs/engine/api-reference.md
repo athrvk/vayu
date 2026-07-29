@@ -1027,6 +1027,13 @@ The sample rates are additionally clamped to &ge; 1 inside the metrics
 collector, so the modulo cannot divide by zero even for a caller that bypasses
 this route.
 
+**Shutdown refuses new runs.** Once the daemon has begun draining its run
+workers, `POST /runs` answers `503 {"error": "Engine is shutting down"}` rather
+than accepting a run nothing will ever execute. The window is small - the HTTP
+server stops before the drain begins - but it is not empty, and a request
+already in a handler when the drain starts must not be able to spawn a worker
+past it (see `RunManager::shutdown`).
+
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
 token **before** creating the run and warms the cache for the workers. An
 unauthorizable config is rejected up front with `409` (interactive sign-in
@@ -1609,6 +1616,7 @@ Get script engine API completions for UI autocomplete.
 | 409 | OAuth 2.0 interactive authorization required (`/run` pre-flight, `/oauth2/token`) |
 | 500 | Internal server error |
 | 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
+| 503 | Engine is shutting down (`POST /runs` only - see below) |
 
 ## Notes
 
