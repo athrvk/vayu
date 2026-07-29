@@ -86,6 +86,9 @@ class Database {
      * Written once when a run reaches a terminal status; `GET /runs/:id/report`
      * reads it instead of re-reducing the time-series. A missing run is logged
      * and ignored (the run may have been deleted mid-flight), never an error.
+     *
+     * Retries on a busy database like the other write paths - losing this write
+     * loses the run's aggregates outright, since nothing else records them.
      */
     void update_run_summary (const std::string& id, const std::string& summary);
 

@@ -597,16 +597,15 @@ RunManager& manager) {
         std::this_thread::sleep_for (std::chrono::milliseconds (200));
 
         vayu::utils::log_error ("Load test error: " + std::string (e.what ()));
-        try {
-            db.update_run_status_with_retry (context->run_id, vayu::RunStatus::Failed);
-        } catch (const std::exception& ex) {
-            vayu::utils::log_error (
-            "Failed to update run status: " + std::string (ex.what ()));
-        }
 
         // A crashed run still gets a summary, with whatever the collector holds
         // and a wall-clock duration - without one the report route would take
         // the legacy path and find nothing, reporting an empty run.
+        //
+        // Written *before* the status flips to Failed, matching the success
+        // path: the terminal status is what tells a polling client the report
+        // is ready, so a client that fetches on seeing it must not race a
+        // summary still being written and get the empty-run answer instead.
         try {
             RunSummaryInputs inputs;
             auto& mc                = *context->metrics_collector;
@@ -634,6 +633,13 @@ RunManager& manager) {
         } catch (const std::exception& ex) {
             vayu::utils::log_error (
             "Failed to store run summary for failed run: " + std::string (ex.what ()));
+        }
+
+        try {
+            db.update_run_status_with_retry (context->run_id, vayu::RunStatus::Failed);
+        } catch (const std::exception& ex) {
+            vayu::utils::log_error (
+            "Failed to update run status: " + std::string (ex.what ()));
         }
 
         // Failed is terminal too - prune per the retention knobs, best-effort.

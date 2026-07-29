@@ -840,15 +840,24 @@ void Database::delete_run (const std::string& id) {
     remove_run_cascade_locked (id);
 }
 
+// Retried like every other write here, and for a sharper reason: this row is
+// now the *only* record of a run's whole-run aggregates. The final metric batch
+// it replaced was written under add_metrics_batch's retry, and a lock lost here
+// is not a lost tick - it is a report that falls back to legacy rows that do
+// not exist and renders the run as empty, permanently. The read-modify-write
+// runs inside the retried callback so a retry re-reads the row rather than
+// replaying a stale copy over a status the worker updated in between.
 void Database::update_run_summary (const std::string& id, const std::string& summary) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    auto run = get_run (id);
-    if (!run) {
-        vayu::utils::log_warning ("Run summary write skipped, run not found: " + id);
-        return;
-    }
-    run->summary = summary;
-    impl_->storage.update (*run);
+    retry_on_busy ("store run summary", 5, std::chrono::milliseconds (100), [&] {
+        auto run = get_run (id);
+        if (!run) {
+            vayu::utils::log_warning (
+            "Run summary write skipped, run not found: " + id);
+            return;
+        }
+        run->summary = summary;
+        impl_->storage.update (*run);
+    });
 }
 
 // Retention: drop runs beyond the count cap and/or older than the age cap.
