@@ -817,6 +817,47 @@ describe("dispatchTool", () => {
 		expect(payload.postRequestScripts).toHaveLength(2);
 	});
 
+	// The saved request stores http1.1 and the agent asks for http2, so a pass
+	// cannot come from both sides agreeing on the "auto" default. `httpVersion`
+	// has to be read with the other agent-stated overrides: this branch never
+	// calls `buildExecutionPayload`, and `composeSavedRequest` always emits a
+	// protocol, so reading it anywhere else loses to the stored value and the
+	// tool's `httpVersion` argument is advertised but never applied here.
+	test("start_load_run: an explicit httpVersion overrides the saved request's", async () => {
+		const client = savedRequestClient({
+			getRequest: vi.fn().mockResolvedValue({ ...savedRequest, httpVersion: "http1.1" }),
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", httpVersion: "http2", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.httpVersion).toBe("http2");
+		// Only the stated field is overridden; the rest of the request stands.
+		expect(payload.url).toBe("https://api.example.com/users");
+		expect(payload.postRequestScripts).toHaveLength(2);
+	});
+
+	// The other half of the rule: with nothing stated the stored protocol runs,
+	// so the override must not write a default over it.
+	test("start_load_run keeps the saved request's httpVersion when none is stated", async () => {
+		const client = savedRequestClient({
+			getRequest: vi.fn().mockResolvedValue({ ...savedRequest, httpVersion: "http1.1" }),
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.httpVersion).toBe("http1.1");
+	});
+
 	test("start_load_run checks the allowlist against the saved request's host", async () => {
 		const client = savedRequestClient();
 		const res = await dispatchTool(

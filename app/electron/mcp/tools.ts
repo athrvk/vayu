@@ -217,6 +217,20 @@ function readRequestOverrides(
 	if (bodyContent !== undefined) {
 		out.body = { mode: str(args, "bodyType") ?? "text", content: rs(bodyContent) };
 	}
+	// httpVersion is an override, so it has to be read here rather than on the
+	// ad-hoc payload builder: `composeLoadRunRequest`'s saved-request branch
+	// never calls that builder, and `composeSavedRequest` always emits a
+	// protocol - so a `start_load_run { requestId, httpVersion }` would go out
+	// at the *stored* protocol while the tool advertised the argument.
+	//
+	// Forwarded only when the agent supplies one. On a URL-only call there is no
+	// stored row to protect from an engine-side default, the same treatment
+	// `followRedirects` / `maxRedirects` get here; an absent field already
+	// resolves to Auto (`deserialize_request` only assigns inside
+	// `if (json.contains(...))`). The `run_request` / `start_load_run` Zod
+	// schemas restrict the value to a known protocol.
+	const httpVersion = str(args, "httpVersion");
+	if (httpVersion !== undefined) out.httpVersion = httpVersion;
 	return out;
 }
 
@@ -241,13 +255,7 @@ function buildExecutionPayload(
 	// `composeLoadRunRequest` builds from a saved request. Forwarding a string
 	// here would quietly sit beside a composed list and, since the engine reads
 	// the list first, be ignored.
-	// httpVersion rides with requestId/environmentId rather than with the
-	// scripts above: it is a plain scalar the engine reads the same way on both
-	// endpoints. Forwarded only when the agent supplies it - unlike
-	// composeSavedRequest's path there is no stored row to protect from an
-	// engine-side default, and an absent field already resolves to Auto
-	// (`deserialize_request` only assigns inside `if (json.contains(...))`).
-	for (const key of ["requestId", "environmentId", "httpVersion"]) {
+	for (const key of ["requestId", "environmentId"]) {
 		const v = str(args, key);
 		if (v !== undefined) payload[key] = v;
 	}

@@ -219,18 +219,21 @@ clicking Send:
 - **Scripts** - `run_collection_smoke` collects the collection-chain pre/post
   script parts (root→leaf) and the request's own, and sends the list for the
   engine to join and run, so a request's tests and setup actually execute.
+  `run_request` takes an agent-written `preRequestScript` / `postRequestScript`
+  instead, since an ad-hoc call has no chain to compose from; `start_load_run`
+  takes the same `postRequestScript` for a URL-only run.
 - **Protocol** - `run_request` and `start_load_run` both take an optional
   `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
   mirroring the request builder's Settings-tab picker. `run_collection_smoke`
   has no such arg: it replays each saved request exactly as-is, so its stored
   `httpVersion` goes through `composeSavedRequest` unconditionally, the same
-  path the renderer uses. On the two ad-hoc tools there is no saved row behind
-  the call, so `httpVersion` forwards only when the caller actually supplies
-  it - unlike the saved-request path, there is nothing concrete to protect from
-  an engine-side default by always sending it.
-  `run_request` takes an agent-written `preRequestScript` / `postRequestScript`
-  instead, since an ad-hoc call has no chain to compose from; `start_load_run`
-  takes the same `postRequestScript` for a URL-only run.
+  path the renderer uses. `start_load_run` with a `requestId` composes the same
+  way, and a stated `httpVersion` overrides the composed one like any other
+  agent-stated field - it is read with those overrides rather than with the
+  ad-hoc payload fields, which that branch never builds. On a URL-only call
+  there is no saved row behind the request, so `httpVersion` is forwarded only
+  when the caller actually supplies it - unlike the saved-request path, there is
+  nothing concrete to protect from an engine-side default by always sending it.
 - **One post-request script, three names, all accepted everywhere.** It is
   stored as `postRequestScript` (on a request and on a collection), sent as
   `postRequestScripts` / `postRequestScript` to `POST /execute`, and as `tests`
@@ -245,8 +248,8 @@ clicking Send:
   composes it through the same `composeSavedRequest` that backs
   `run_collection_smoke`: variables resolved, stored auth applied through the
   collection chain, and the chain's + its own test scripts attached. Any field
-  stated explicitly (url, method, headers, body, postRequestScript) overrides
-  the composed one; an explicit script *replaces* the composed ones rather than
+  stated explicitly (url, method, headers, body, httpVersion, postRequestScript)
+  overrides the composed one; an explicit script *replaces* the composed ones rather than
   joining them. Without a `requestId` the run is ad-hoc and `url` is required.
   A saved request's **pre-request** script cannot run under load - `POST /runs`
   has no such hook - so it is left out of the payload and the count of dropped
