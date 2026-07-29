@@ -20,8 +20,8 @@ Vayu is a free, open source desktop app for Windows, macOS, and Linux that merge
 
 ## See it in action
 
-![Load test dashboard](docs/images/vayu-loadtest4.png)
-*The load-test dashboard, mid-run at 51,922 req/s. Throughput, latency percentiles, and error counters stream live from the C++ engine while the UI stays responsive.*
+![Load test dashboard](docs/images/vayu-loadtest2.png)
+*The load-test dashboard: 52,738 req/s at concurrency 64, 738,406 requests, 100% success. Throughput, latency percentiles, and error counters stream live from the C++ engine while the UI stays responsive, with every run kept in the history sidebar.*
 
 ![GraphQL request builder](docs/images/vayu-graphql.png)
 *REST and GraphQL request builder with collections, layered environments, and Postman-compatible scripting.*
@@ -50,7 +50,9 @@ The HTTP core is a multi-worker libcurl event loop in C++20, isolated from the E
 
 Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same ~57k system throughput ceiling, and at that ceiling the machine is still 79% idle, so it is the target saturating, not the client. Full methodology, the concurrency sweep, the `workers` A/B, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](docs/engine/benchmarks.md)**.
 
-**And from the UI, not just the CLI.** The dashboard [above](#see-it-in-action) is a 60-second run started from the app's own Load Test panel: **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout.
+**And from the UI, not just the CLI.** A 60-second run started from the app's own Load Test panel sustained **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout:
+
+![In-app load test sustaining 51,922 req/s over 60 seconds with 3,115,391 requests and a 0.0% error rate](docs/images/vayu-loadtest4.png)
 
 A broader comparison against k6, JMeter, and the Postman collection runner is in progress - follow [the issues board](https://github.com/athrvk/vayu/issues) to track it.
 
