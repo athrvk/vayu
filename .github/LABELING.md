@@ -26,7 +26,7 @@ Special                                        priority:critical  🔴  Blocks o
   help wanted        🟪  Needs expertise
   severity:blocking  🔴  Breaking change
   dependencies       ⚪  Dependency updates
-  release            🟡  Version-bump PR (auto)
+  release            🔵  Version-bump PR (auto)
 ```
 
 ## Label Categories
@@ -120,7 +120,7 @@ These labels indicate **urgency**. Apply manually based on impact and timeline.
 | `build` | Gray (#95A5A6) | Build-related | Used manually; path-based label is `component:build` |
 | `ci` | Gray (#95A5A6) | CI/CD related | Used manually; path-based label is `component:ci` |
 | `correctness` | Red (#E74C3C) | Correctness issue | Logic error or incorrect behavior |
-| `release` | Yellow (#F1C40F) | Version-bump / release PR | Auto-applied whenever `VERSION` changes |
+| `release` | Navy (#062477) | Version-bump / release PR | Auto-applied whenever `VERSION` changes |
 
 ## Labeling Guidelines
 
