@@ -44,6 +44,28 @@ struct ScriptContext {
     Environment* environment         = nullptr;
     Environment* globals             = nullptr;
     Environment* collectionVariables = nullptr;
+
+    /**
+     * @brief Where the script's `pm.request` edits land, or null to discard them.
+     *
+     * Set only for pre-request scripts, and only through
+     * `make_request_mutable()` - it must be the same object `request` points
+     * at, so the script writes back to the snapshot it was shown. A test script
+     * leaves it null: its request has already gone out, so a mutation there
+     * could only misreport what was sent.
+     */
+    Request* mutable_request = nullptr;
+
+    /**
+     * @brief Expose @p req to the script as a mutable `pm.request`.
+     *
+     * The one supported way to opt into write-back, so the read snapshot and
+     * the write target cannot drift apart.
+     */
+    void make_request_mutable (Request& req) {
+        request         = &req;
+        mutable_request = &req;
+    }
 };
 
 /**
@@ -93,10 +115,18 @@ class ScriptEngine {
 
     /**
      * @brief Execute a pre-request script
+     *
+     * The script sees the fully composed request - auth is already resolved
+     * into its headers and URL by the time it runs - and whatever it leaves in
+     * `pm.request` when it returns is written back into @p request before the
+     * send. A script-set header therefore overrides an engine-applied one of
+     * the same name.
+     *
      * @param script JavaScript code
-     * @param request Request to potentially modify
+     * @param request Request the script may modify through `pm.request`
      * @param env Environment variables
-     * @return Script result
+     * @return Script result; unsuccessful if the script threw or its
+     *         `pm.request` edits were rejected (see `ScriptResult::error_message`)
      */
     [[nodiscard]] ScriptResult
     execute_prerequest (const std::string& script, Request& request, Environment& env);

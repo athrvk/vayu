@@ -93,6 +93,41 @@ pm.request.headers           // Request headers (object)
 pm.request.body              // Request body (string, if any)
 ```
 
+### Mutating the request (pre-request scripts)
+
+In a **pre-request** script these four fields are writable, and what they hold
+when the script returns is what goes on the wire. In a **test** script they are
+a read-only record of what was already sent - writes there are discarded.
+
+```javascript
+pm.request.headers['X-Signature'] = 'abc123';   // add or replace a header
+delete pm.request.headers['Authorization'];     // remove one
+pm.request.url = 'https://api.example.com/v2';  // retarget
+pm.request.method = 'POST';                     // case-insensitive
+pm.request.body = JSON.stringify({ n: 2 });     // replace the body
+delete pm.request.body;                         // send no body
+```
+
+Rules worth knowing before you rely on them:
+
+- **The object is authoritative, not a diff.** The header set left in
+  `pm.request.headers` is the header set that is sent, which is what makes
+  `delete` work.
+- **A script beats engine-applied auth.** Auth (bearer / basic / apikey /
+  oauth2) is resolved into the request *before* the script runs, so the script
+  sees the real `Authorization` header and can replace or remove it.
+- **A bad value is refused, not coerced.** `url` and `method` must be strings
+  (`method` one of the seven HTTP verbs), header values must be strings,
+  numbers or booleans, and `body` must be a string. Anything else fails the
+  whole write-back - the request is sent unchanged and the reason is reported
+  as the pre-request script error, visible in the response pane's Console tab.
+- **Setting a variable does not re-render the URL.** `{{placeholders}}` are
+  resolved app-side before the payload reaches the engine, so
+  `pm.environment.set('host', …)` affects later runs only. To change this
+  request's URL, assign `pm.request.url` directly.
+- **Load tests do not run pre-request scripts** - only the `tests` (post-request)
+  script runs there, so this applies to Send / Design Mode.
+
 ## Environment Variables (`pm.environment`)
 
 Access and modify environment variables:
@@ -174,14 +209,14 @@ pm.environment.set('token', json.token);
 Modify request before sending:
 
 ```javascript
-// Add timestamp header
+// Add timestamp and correlation headers
 pm.request.headers['X-Timestamp'] = Date.now().toString();
-
-// Add signature header
-const secret = pm.environment.get('secret');
-const data = pm.request.body + secret;
-pm.request.headers['X-Signature'] = computeHash(data);
+pm.request.headers['X-Request-Id'] = 'req-' + Math.random().toString(36).slice(2, 10);
 ```
+
+Both headers are on the request that is actually sent - see
+[Mutating the request](#mutating-the-request-pre-request-scripts) for the rules
+and [Worked examples](#worked-examples-rewriting-a-request) for harder cases.
 
 ### Response Time Assertion
 
@@ -211,6 +246,174 @@ pm.test('Has Content-Type header', function() {
 });
 ```
 
+## Worked examples: rewriting a request
+
+Everything below runs in a **pre-request** script and changes what goes on the
+wire. The rules these rely on are in
+[Mutating the request](#mutating-the-request-pre-request-scripts); read the
+[sandbox note](#what-a-script-can-compute) first if you are here to sign a
+request, because what is missing decides the shape of most of these.
+
+### Rewrite a JSON body, then fix the headers that describe it
+
+The body is a string in and a string out, so a structural edit is
+parse - mutate - stringify. Anything derived from the body (a length, a digest,
+a checksum) has to be computed *after* the edit, or it describes the old one.
+
+```javascript
+var body = JSON.parse(pm.request.body);
+body.metadata = { client: 'vayu', sentAt: new Date().toISOString() };
+delete body.debugOnly;
+pm.request.body = JSON.stringify(body);
+
+// Recomputed from the final body, not the original.
+pm.request.headers['Content-Length'] = String(pm.request.body.length);
+```
+
+`Content-Length` is illustrative - libcurl sets it from the body it is given, so
+you do not need to. Any header you derive yourself works the same way.
+
+### Add or replace a query parameter
+
+There is no `URL` or `URLSearchParams` in the sandbox, so this is string work.
+Handle three cases - no query, parameter absent, parameter already present -
+and encode the value.
+
+```javascript
+function setQueryParam(url, name, value) {
+  var pair = encodeURIComponent(name) + '=' + encodeURIComponent(value);
+  var hashAt = url.indexOf('#');
+  var fragment = hashAt === -1 ? '' : url.slice(hashAt);
+  var base = hashAt === -1 ? url : url.slice(0, hashAt);
+
+  var re = new RegExp('([?&])' + name + '=[^&]*');
+  if (re.test(base)) {
+    return base.replace(re, '$1' + pair) + fragment;
+  }
+  return base + (base.indexOf('?') === -1 ? '?' : '&') + pair + fragment;
+}
+
+pm.request.url = setQueryParam(pm.request.url, 'traceId', 'run-' + Date.now());
+```
+
+### Switch method and body together
+
+Changing the verb and the payload in one script is fine - the write-back applies
+all of it or none of it, so the request never goes out as a POST that still
+carries the GET's shape.
+
+```javascript
+if (pm.environment.get('mode') === 'bulk') {
+  pm.request.method = 'POST';
+  pm.request.url = pm.request.url.replace('/items/1', '/items/bulk');
+  pm.request.body = JSON.stringify({ ids: [1, 2, 3] });
+  pm.request.headers['Content-Type'] = 'application/json';
+}
+```
+
+Two edges worth knowing. A **HEAD** request that carries a body is refused by
+the send path with a clear error rather than silently stripped, so do not switch
+to HEAD without also `delete pm.request.body`. And a body set on a request that
+had none is sent as raw text - Vayu does not infer a `Content-Type`, so set it
+yourself as above.
+
+### Replace engine-applied auth with a custom scheme
+
+Auth is resolved into the request *before* the script runs, so the script sees
+the real header and has the last word. Removing and re-adding is how you swap
+schemes rather than stack them.
+
+```javascript
+delete pm.request.headers['Authorization'];
+pm.request.headers['X-Api-Key'] = pm.environment.get('apiKey');
+```
+
+**Use the exact name, capitals included.** `pm.request.headers` is a plain JS
+object, and JS property names are case-sensitive, so
+`delete pm.request.headers['authorization']` deletes nothing and the header
+survives - even though HTTP itself treats the two as one name. The engine
+applies auth as `Authorization`. When in doubt, look before you delete:
+
+```javascript
+Object.keys(pm.request.headers).forEach(function (name) {
+  if (name.toLowerCase() === 'authorization') delete pm.request.headers[name];
+});
+```
+
+For the same reason, **do not leave two names that differ only in case** -
+setting `authorization` while `Authorization` is still there is two JS
+properties but one HTTP header, so the write-back rejects it rather than
+picking a winner, and the request is sent unchanged with the reason in
+`preScriptError`.
+
+### Sign a request with a checksum you can actually compute
+
+**There is no crypto in the sandbox** - no `crypto`, no `TextEncoder`, no
+`btoa`. A real HMAC is therefore not possible in-script today, and any example
+claiming otherwise is wrong. What *is* possible is a pure-JS digest over a
+canonical string, which is enough for a checksum, a cache key, or a test double
+of a signing scheme:
+
+```javascript
+// FNV-1a, 32-bit. Not a cryptographic hash - do not use it as one.
+function fnv1a(text) {
+  var hash = 0x811c9dc5;
+  for (var i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
+  }
+  return ('00000000' + hash.toString(16)).slice(-8);
+}
+
+var timestamp = Date.now().toString();
+var canonical = [
+  pm.request.method,
+  pm.request.url,
+  timestamp,
+  pm.request.body || ''
+].join('\n');
+
+pm.request.headers['X-Timestamp'] = timestamp;
+pm.request.headers['X-Checksum'] = fnv1a(canonical + pm.environment.get('secret'));
+```
+
+Note the ordering: the canonical string is built from `pm.request` *after* the
+other edits, so it covers what is actually sent. If you sign first and rewrite
+the body second, the signature describes a request that never existed.
+
+### Hand a value to the test script
+
+A pre-request script and its test script share the variable scopes, not their
+local state. Stash what the assertion needs:
+
+```javascript
+// Pre-request
+var nonce = 'n-' + Math.random().toString(36).slice(2);
+pm.request.headers['X-Nonce'] = nonce;
+pm.environment.set('lastNonce', nonce);
+```
+
+```javascript
+// Tests
+pm.test('server echoed our nonce', function () {
+  pm.expect(pm.response.headers['x-nonce']).to.equal(pm.environment.get('lastNonce'));
+});
+```
+
+### What a script can compute
+
+The sandbox is QuickJS plus exactly two globals, `pm` and `console`. Available:
+`JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`, `Number`,
+`Promise`, `BigInt`, `encodeURIComponent`, `parseInt` and the rest of the ES2020
+built-ins. **Not** available: `crypto`, `btoa` / `atob`, `TextEncoder`, `URL`,
+`URLSearchParams`, `setTimeout`, `require`, `fetch`.
+
+The practical consequences: no HMAC or SHA signing, no base64 (so no
+hand-rolled Basic auth header - use the request's Auth tab, which the engine
+applies), no URL parsing helper, and nothing asynchronous. Both halves of this
+list are pinned by tests in `engine/tests/script_engine_test.cpp`, so if a
+global is ever added this section is what needs rewriting.
+
 ## Limitations
 
 QuickJS supports ES2020 features with some limitations:
@@ -229,14 +432,17 @@ QuickJS supports ES2020 features with some limitations:
 ### Pre-request Scripts
 
 - Execute before sending the HTTP request
-- Can modify `pm.request` (headers, body)
+- Can modify `pm.request` - method, url, headers and body - and the edits are
+  applied to the request that is sent
+  ([rules](#mutating-the-request-pre-request-scripts))
 - Can access `pm.environment` and `pm.variables`
 - Cannot access `pm.response` (request hasn't been sent yet)
+- Run in Design Mode / Send only, not in load tests
 
 ### Test Scripts (Post-request)
 
 - Execute after receiving the HTTP response
-- Can access `pm.request` and `pm.response`
+- Can access `pm.request` (read-only here - it has already been sent) and `pm.response`
 - Can access `pm.environment` and `pm.variables`
 - Test results are included in the response
 

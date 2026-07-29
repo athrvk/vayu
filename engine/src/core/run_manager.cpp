@@ -194,14 +194,14 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     mc_config.response_sample_rate =
     static_cast<size_t> (config.value ("response_sample_rate", 100));
 
-    // Extract test script from config (now at root level)
-    if (config.contains ("tests")) {
-        // Either a plain string or a list of parts. `read_script` handles both
-        // and picks the list when both are present. Load runs now receive the
-        // collection chain's test scripts as well as the request's own; before
-        // this, a collection-level assertion was silently never checked.
-        test_script = vayu::http::read_script (config, "tests", "tests");
-    }
+    // Extract the test script from the run config (root level). Either a plain
+    // string or a list of parts, under `tests` or the `postRequestScript(s)`
+    // the same script is stored and sent to /execute under - one concept, and
+    // `read_post_request_script` owns every name it answers to. Load runs
+    // receive the collection chain's test scripts as well as the request's
+    // own; before that, a collection-level assertion was silently never
+    // checked.
+    test_script = vayu::http::read_post_request_script (config);
 
     metrics_collector = std::make_unique<MetricsCollector> (id, mc_config);
 }

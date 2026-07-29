@@ -167,6 +167,8 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
 JavaScript execution engine for pre-request and test scripts:
 
 - **Postman-compatible API**: `pm.test()`, `pm.expect()`, `pm.response`, etc.
+- **Mutable request**: a pre-request script's `pm.request` writes are applied to the
+  request before it is sent (see `docs/engine/scripting.md`)
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script
 - **Sandboxed**: No filesystem or network access
@@ -272,7 +274,9 @@ Both passes are best-effort: a failure is logged and never blocks startup.
    ↓
 3. Create Run record (type: Design)
    ↓
-4. Execute pre-request script (if provided)
+4. Execute pre-request script (if provided). Its pm.request edits - method, url,
+   headers, body - are written back into the request, so they override the auth
+   resolved in step 2
    ↓
 5. Send HTTP request via libcurl
    ↓

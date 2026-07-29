@@ -27,6 +27,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		getConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "8" }] }),
 		updateConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "16" }] }),
 		getGlobals: vi.fn().mockResolvedValue({ variables: {} }),
+		getRequest: vi.fn().mockResolvedValue(null),
 		createRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "New" }),
 		getEnvironment: vi.fn().mockResolvedValue({
 			id: "env_1",
@@ -373,6 +374,153 @@ describe("dispatchTool", () => {
 		});
 	});
 
+	test("run_request forwards an ad-hoc pre-request script the agent supplied", async () => {
+		// Parsed through the tool's own inputSchema first, because that is the
+		// only thing standing between the agent and the engine: `registerTool`
+		// hands the SDK this shape, and a zod object *strips* keys it does not
+		// declare. `buildExecutionPayload` has always read `preRequestScript`
+		// off `args`, but until it was declared here nothing could put it there
+		// - so a request the agent asked to have signed went out unsigned.
+		// dispatchTool alone does not validate, so asserting on it would pass
+		// with the field removed and prove nothing.
+		const tool = TOOLS.find((t) => t.name === "run_request");
+		const args = z.object(tool!.inputSchema as Record<string, z.ZodTypeAny>).parse({
+			url: "https://api.example.com/users",
+			preRequestScript: "pm.request.headers['X-Signature'] = 'abc';",
+			postRequestScript: "pm.test('ok', function () {});",
+		});
+
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			args,
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.preRequestScript).toBe("pm.request.headers['X-Signature'] = 'abc';");
+		expect(payload.postRequestScript).toBe("pm.test('ok', function () {});");
+	});
+
+	test("start_load_run does not offer a pre-request script", () => {
+		// POST /runs never runs one - only the deferred `tests` script - so
+		// offering the field would promise a hook that silently does nothing.
+		// The renderer's load path sends no pre-request script either, so this
+		// asymmetry is the app's, not MCP's.
+		const loadRun = TOOLS.find((t) => t.name === "start_load_run");
+		expect(loadRun).toBeDefined();
+		expect(Object.keys(loadRun!.inputSchema)).not.toContain("preRequestScript");
+		expect(Object.keys(loadRun!.inputSchema)).toContain("tests");
+	});
+
+	test("both execute-shaped tools name the validation script the same way", () => {
+		// One field in the app - the request builder's Tests tab - drives both
+		// Send and a load run. It reached the engine under two names
+		// (`postRequestScript` on /execute, `tests` on /runs), and MCP exposed
+		// whichever name its endpoint used, so a script an agent wrote for
+		// run_request could not be handed to start_load_run unchanged.
+		for (const name of ["run_request", "start_load_run"]) {
+			const shape = TOOLS.find((t) => t.name === name)!.inputSchema as Record<
+				string,
+				z.ZodTypeAny
+			>;
+			expect(Object.keys(shape)).toContain("postRequestScript");
+			// The engine's own spelling stays accepted on both: a zod object
+			// strips what it does not declare, so dropping it from either tool
+			// would turn a script the agent believes is running into silence.
+			expect(Object.keys(shape)).toContain("tests");
+		}
+	});
+
+	/**
+	 * Parse through the tool's own `inputSchema` before dispatching, as the SDK
+	 * does in production: a zod object strips undeclared keys, so a test that
+	 * hands `dispatchTool` the argument directly passes even with the field
+	 * removed from the schema and proves nothing.
+	 */
+	const parseArgs = (name: string, args: Record<string, unknown>) =>
+		z
+			.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodTypeAny>)
+			.parse(args);
+
+	test("start_load_run sends postRequestScript to /runs under the key it reads", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+				postRequestScript: "pm.test('ok', function () {});",
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.tests).toBe("pm.test('ok', function () {});");
+		// Forwarding it verbatim would look right and validate nothing: the
+		// engine's run config reads `tests` and never `postRequestScript`.
+		expect(payload.postRequestScript).toBeUndefined();
+	});
+
+	test("start_load_run still accepts the engine's own `tests` spelling", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+				tests: "pm.test('a', () => {});",
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.tests).toBe("pm.test('a', () => {});");
+	});
+
+	test("run_request accepts `tests` as the same script as postRequestScript", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			parseArgs("run_request", {
+				url: "https://api.example.com/users",
+				tests: "pm.test('b', () => {});",
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.postRequestScript).toBe("pm.test('b', () => {});");
+	});
+
+	test.each(["run_request", "start_load_run"])(
+		"%s rejects both names for one script rather than picking one",
+		async (name) => {
+			// Two different scripts under two names for one slot: whichever is
+			// dropped, the agent is told the run validated something it did not.
+			const client = fakeClient();
+			const res = await dispatchTool(
+				name,
+				parseArgs(name, {
+					url: "https://api.example.com",
+					confirmed: true,
+					postRequestScript: "pm.test('a', () => {});",
+					tests: "pm.test('b', () => {});",
+				}),
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/not both/i);
+			expect(client.startRun).not.toHaveBeenCalled();
+			expect(client.executeRequest).not.toHaveBeenCalled();
+		}
+	);
+
 	test("run_request resolves {{variables}} in the URL from the environment", async () => {
 		const client = fakeClient({
 			getEnvironment: vi.fn().mockResolvedValue({
@@ -503,6 +651,173 @@ describe("dispatchTool", () => {
 		);
 		expect(res.isError).toBeFalsy();
 		expect(client.startRun).toHaveBeenCalledTimes(1);
+	});
+
+	// --- Load-testing a saved request (#176) --------------------------------
+	//
+	// The gap these close: `start_load_run` used to send only an ad-hoc `tests`
+	// string, so "load test this saved request" through MCP ran none of the
+	// assertions the same request runs in the app. Composition is now
+	// `composeSavedRequest` - the same function run_collection_smoke uses - and
+	// the composed scripts ride under `postRequestScripts`, which POST /runs
+	// reads as an alias of `tests`.
+
+	const savedRequest = {
+		id: "req_1",
+		collectionId: "col_1",
+		name: "Get users",
+		method: "post",
+		url: "https://api.example.com/users",
+		headers: [{ key: "X-Api", value: "v1", enabled: true }],
+		body: { mode: "json", content: '{"a":1}' },
+		preRequestScript: "pm.request.headers['X-Sig'] = 'abc';",
+		postRequestScript: "pm.test('own', function () {});",
+	};
+
+	const savedRequestClient = (over: Record<string, unknown> = {}) =>
+		fakeClient({
+			getRequest: vi.fn().mockResolvedValue(savedRequest),
+			listCollections: vi.fn().mockResolvedValue([
+				{
+					id: "col_1",
+					name: "API",
+					postRequestScript: "pm.test('chain', function () {});",
+				},
+			]),
+			...over,
+		});
+
+	test("start_load_run composes a saved request, chain test scripts included", async () => {
+		const client = savedRequestClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// The saved request defines the target - no `url` was passed at all.
+		expect(payload.url).toBe("https://api.example.com/users");
+		expect(payload.method).toBe("POST");
+		expect(payload.headers).toMatchObject({ "X-Api": "v1" });
+		expect(payload.requestId).toBe("req_1");
+		// The whole point: the collection's assertion and the request's own both
+		// travel, in chain-then-own order, under the key /runs now reads.
+		expect(payload.postRequestScripts).toEqual([
+			{
+				origin: "collection",
+				id: "col_1",
+				name: "API",
+				script: "pm.test('chain', function () {});",
+			},
+			{ origin: "request", id: "req_1", script: "pm.test('own', function () {});" },
+		]);
+	});
+
+	test("start_load_run reports the pre-request script it cannot run", async () => {
+		const client = savedRequestClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// POST /runs has no pre-request hook, so the script must not be sent
+		// pretending it will run...
+		expect(payload.preRequestScripts).toBeUndefined();
+		// ...and the agent has to be told, or a request that signs itself goes
+		// out unsigned with nothing saying so.
+		const text = res.content.map((c) => c.text).join("\n");
+		expect(text).toMatch(/pre-request script\(s\).*NOT applied/i);
+	});
+
+	// Under either agent-facing name - `postRequestScript` is the one both
+	// execute-shaped tools declare, `tests` the engine spelling kept as an alias.
+	test.each(["postRequestScript", "tests"])(
+		"start_load_run: an explicit %s replaces the saved request's composed scripts",
+		async (key) => {
+			const client = savedRequestClient();
+			const res = await dispatchTool(
+				"start_load_run",
+				{
+					requestId: "req_1",
+					[key]: "pm.test('adhoc', function () {});",
+					duration: "30s",
+					confirmed: true,
+				},
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+
+			expect(res.isError).toBeFalsy();
+			const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(payload.tests).toBe("pm.test('adhoc', function () {});");
+			// Must be cleared, not merely accompanied: /runs reads both names and
+			// prefers the list, so leaving it would run the saved request's
+			// assertions and silently ignore the ones the agent asked for.
+			expect(payload.postRequestScripts).toBeUndefined();
+		}
+	);
+
+	test("start_load_run: an explicit url retargets the saved request", async () => {
+		const client = savedRequestClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				requestId: "req_1",
+				url: "https://staging.example.com/users",
+				duration: "30s",
+				confirmed: true,
+			},
+			ctxWith(client, { allowlist: ["staging.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.url).toBe("https://staging.example.com/users");
+		// Only the stated field is overridden; the rest of the request stands.
+		expect(payload.method).toBe("POST");
+		expect(payload.postRequestScripts).toHaveLength(2);
+	});
+
+	test("start_load_run checks the allowlist against the saved request's host", async () => {
+		const client = savedRequestClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["elsewhere.example.com"] })
+		);
+
+		expect(res.isError).toBe(true);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("start_load_run needs a url or a requestId, and says so", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/requestId/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("start_load_run reports an unknown requestId instead of running an empty request", async () => {
+		const client = fakeClient({ getRequest: vi.fn().mockResolvedValue(null) });
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_missing", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/req_missing/);
+		expect(client.startRun).not.toHaveBeenCalled();
 	});
 
 	test("start_load_run enforces caps before any engine call", async () => {

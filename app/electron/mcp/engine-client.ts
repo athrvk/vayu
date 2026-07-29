@@ -107,6 +107,16 @@ export class EngineClient {
 		);
 	}
 
+	/**
+	 * Fetch a single saved request. Unlike environments, the engine does have a
+	 * `GET /requests/:id` route, so this is one round trip rather than a scan of
+	 * every collection's list. A `404` surfaces as an `EngineRequestError`, which
+	 * is what distinguishes "that request was deleted" from an unreachable engine.
+	 */
+	getRequest(id: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", `/requests/${encodeURIComponent(id)}`, undefined, signal);
+	}
+
 	listEnvironments(signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", "/environments", undefined, signal);
 	}

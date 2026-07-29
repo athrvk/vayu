@@ -893,6 +893,16 @@ joined with a blank line and run as a single script in one shared scope (see
 earlier part is visible to a later one; parts that are empty or only
 whitespace are dropped.
 
+**The pre-request script can change what is sent.** Its `pm.request` edits -
+method, url, headers, body - are applied to the request before it goes out, and
+because auth is resolved *before* the script runs, a script-set `Authorization`
+overrides the one the engine applied. `requestHeaders` and `rawRequest` in the
+response below, and the stored trace behind `GET /runs/:id`, all report the
+post-script request. A value the engine cannot send (a non-string url, an
+unknown method) rejects the whole write-back, leaves the request unchanged, and
+is reported as `preScriptError`. See
+[scripting.md](scripting.md#mutating-the-request-pre-request-scripts).
+
 **Redirect policy.** `followRedirects` defaults to **true**, so omitting it
 follows every 3xx and only the final response is returned - send
 `followRedirects: false` to see the 3xx status and its `Location` header. Both
@@ -1002,6 +1012,21 @@ wins when both are sent. Sending the collection chain's parts means its
 assertions are now actually checked under load - previously only the
 request's own `tests` string was ever sent, so a collection-level assertion
 passed in design mode and was silently never validated by a load run.
+
+**`tests` and `postRequestScript(s)` are the same field.** The post-request
+script is stored as `postRequestScript`, `POST /execute` grew up calling it
+`postRequestScript(s)`, and this endpoint calls it `tests`. All three names are
+accepted on **both** endpoints, so a payload composed for one can start the
+other kind of run unchanged - which is how a saved request's composed test
+scripts reach a load run. The names are tried in a fixed order
+(`postRequestScripts`, `postRequestScript`, then `tests`) and the first that
+yields a non-blank script wins; they are never merged. Previously each route
+knew only its own spelling and silently dropped the other.
+
+**There is no pre-request hook on this endpoint.** `preRequestScript(s)` in a
+run payload is not an error, but nothing runs it - only `POST /execute` executes
+a pre-request script. A request that signs itself in one is sent unsigned under
+load.
 
 **Accepted ranges.** The numeric config is range-checked **before the run row is
 created**, so a rejected request leaves no `pending` row behind. A violation is
