@@ -43,6 +43,7 @@
 #include <nlohmann/json.hpp>
 
 #include "vayu/db/database.hpp"
+#include "vayu/types.hpp"
 
 using nlohmann::json;
 
@@ -64,10 +65,16 @@ create_environment_response (vayu::db::Database& db, const nlohmann::json& json)
 std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json);
+// Defined in config.cpp - used here only to flip the "defaultHttpVersion"
+// global mid-test, proving the httpVersion seed is read live rather than
+// baked in at process start.
+std::pair<int, nlohmann::json>
+apply_config_update (vayu::db::Database& db, const std::string& body);
 } // namespace vayu::http::routes
 
 namespace {
 
+using vayu::http::routes::apply_config_update;
 using vayu::http::routes::create_collection_response;
 using vayu::http::routes::create_environment_response;
 using vayu::http::routes::create_request_response;
@@ -439,6 +446,178 @@ TEST_F (ResourceWriteRouteTest, RequestMaxRedirectsIsClamped) {
     update_request_response (*db_, id, json{ { "maxRedirects", 5000 } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["maxRedirects"], 100);
+}
+
+// ---------------------------------------------------------------------------
+// Requests - httpVersion (issue: task 5, the requests-CRUD ingest/validate/
+// seed matrix). All eight cells of:
+//
+//   |        | absent            | null              | valid | invalid |
+//   | create | seed from global  | seed from global  | store | 400     |
+//   | update | keep              | seed from global  | store | 400     |
+//
+// "Seed from global" means the *live* "defaultHttpVersion" config entry, not
+// vayu::DEFAULT_HTTP_VERSION - a user who changes the global must see it apply
+// to the next request they create/reset, without an engine restart.
+// ---------------------------------------------------------------------------
+
+TEST_F (ResourceWriteRouteTest, RequestCreateAbsentHttpVersionSeedsFromGlobal) {
+    // Global starts at its compiled-in default ("auto") - nothing has changed
+    // it yet in a fresh test DB.
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.com" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["httpVersion"], "auto");
+}
+
+TEST_F (ResourceWriteRouteTest, RequestCreateAbsentHttpVersionSeedsFromConfiguredGlobal) {
+    // The discriminating case: flip the global away from its compiled-in
+    // default *before* creating, so a seed of vayu::DEFAULT_HTTP_VERSION
+    // (rather than a live config read) would fail this.
+    ASSERT_EQ (
+    apply_config_update (*db_, R"({"entries":{"defaultHttpVersion":"http2"}})").first, 200);
+
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.com" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["httpVersion"], "http2");
+}
+
+TEST_F (ResourceWriteRouteTest, RequestCreateNullHttpVersionSeedsFromConfiguredGlobal) {
+    ASSERT_EQ (
+    apply_config_update (*db_, R"({"entries":{"defaultHttpVersion":"http2"}})").first, 200);
+
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.com" }, { "httpVersion", nullptr } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["httpVersion"], "http2");
+}
+
+TEST_F (ResourceWriteRouteTest, RequestCreateValidHttpVersionIsStored) {
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.com" }, { "httpVersion", "http1.1" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["httpVersion"], "http1.1");
+    EXPECT_EQ (db_->get_request (body["id"].get<std::string> ())->http_version, "http1.1");
+}
+
+TEST_F (ResourceWriteRouteTest, RequestCreateInvalidHttpVersionIsRejectedAndNotStored) {
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.com" }, { "httpVersion", "http3" } });
+    EXPECT_EQ (status, 400);
+    const auto message = body["error"].get<std::string> ();
+    EXPECT_NE (message.find ("httpVersion"), std::string::npos)
+    << "the 400 must name the offending field";
+    EXPECT_NE (message.find ("http3"), std::string::npos)
+    << "the 400 must echo the offending value";
+    for (const auto version : vayu::all_http_versions ()) {
+        EXPECT_NE (message.find (vayu::to_string (version)), std::string::npos)
+        << "the 400 must list the valid values (missing '"
+        << vayu::to_string (version) << "')";
+    }
+}
+
+TEST_F (ResourceWriteRouteTest, RequestCreateNonStringHttpVersionIsRejected) {
+    // Diverges deliberately from apply_bool_field/apply_int_field, which
+    // silently ignore a wrong-typed value - a wrong type on an enumerated
+    // field is exactly the kind of mistake the reject-don't-coerce rule
+    // exists for.
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.com" }, { "httpVersion", 2 } });
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (body["error"].get<std::string> ().find ("httpVersion"), std::string::npos);
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateAbsentHttpVersionKeepsExisting) {
+    const std::string collection  = make_collection ();
+    auto [create_status, created] = create_request_response (*db_,
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" }, { "httpVersion", "http2" } });
+    ASSERT_EQ (create_status, 200);
+    const std::string id = created["id"].get<std::string> ();
+
+    // Flipping the global afterwards must not retroactively touch a request
+    // that did not ask to be reset.
+    ASSERT_EQ (apply_config_update (*db_, R"({"entries":{"defaultHttpVersion":"http1.1"}})")
+               .first,
+    200);
+
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["httpVersion"], "http2") << "absent means keep";
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateNullHttpVersionReReadsGlobalAtWriteTime) {
+    // The other discriminating case: create while the global is still "auto",
+    // then flip the global, then reset with null. Only a write-time config
+    // read (not a value captured at create time, and not
+    // vayu::DEFAULT_HTTP_VERSION) produces "http2" here.
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    ASSERT_EQ (db_->get_request (id)->http_version, "auto");
+
+    ASSERT_EQ (
+    apply_config_update (*db_, R"({"entries":{"defaultHttpVersion":"http2"}})").first, 200);
+
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "httpVersion", nullptr } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["httpVersion"], "http2");
+    EXPECT_EQ (db_->get_request (id)->http_version, "http2");
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateValidHttpVersionIsStored) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "httpVersion", "http2" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["httpVersion"], "http2");
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateInvalidHttpVersionIsRejectedAndUnchanged) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    ASSERT_EQ (
+    update_request_response (*db_, id, json{ { "httpVersion", "http2" } }).first, 200);
+
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "httpVersion", "spdy" } });
+    EXPECT_EQ (status, 400);
+    const auto message = body["error"].get<std::string> ();
+    EXPECT_NE (message.find ("httpVersion"), std::string::npos);
+    EXPECT_NE (message.find ("spdy"), std::string::npos);
+    EXPECT_EQ (db_->get_request (id)->http_version, "http2")
+    << "a rejected update must leave the stored value untouched";
+}
+
+TEST_F (ResourceWriteRouteTest, RequestAllHttpVersionsAreAcceptedAndRoundTrip) {
+    // Mutation-check analogue of Task 4's SeededDefaultHttpVersionOptions...
+    // test: derived from the same all_http_versions() the seeded config
+    // options use, so validation cannot silently drop or add an entry
+    // relative to what the config UI offers.
+    const std::string collection = make_collection ();
+    for (const auto version : vayu::all_http_versions ()) {
+        const std::string wire = vayu::to_string (version);
+        auto [status, body]    = create_request_response (*db_,
+           json{ { "collectionId", collection }, { "name", "R-" + wire }, { "method", "GET" },
+           { "url", "https://example.com" }, { "httpVersion", wire } });
+        ASSERT_EQ (status, 200) << "rejected valid value '" << wire << "'";
+        EXPECT_EQ (body["httpVersion"], wire);
+    }
 }
 
 // ---------------------------------------------------------------------------

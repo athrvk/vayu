@@ -32,6 +32,11 @@ namespace vayu::http::routes {
 // Defined in runs.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json> get_runs_response (vayu::db::Database& db,
 const vayu::db::RunFilter& filter, int64_t limit, int64_t offset);
+
+// Defined in runs.cpp; builds the GET /runs/:id/report `configuration`
+// object from an already-parsed config_snapshot, extracted so it is testable
+// without the report handler's DB/metrics dependencies.
+nlohmann::json build_run_report_config (const nlohmann::json& config);
 // Defined in runs.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
 const std::string& run_id);
@@ -131,28 +136,64 @@ TEST_F (RunsRouteTest, PaginationHasMoreAndOffset) {
     EXPECT_EQ (page3["pagination"]["hasMore"], false);
 }
 
-TEST_F (RunsRouteTest, SummaryHasExactlySixKeysAndOmitsAbsent) {
-    seed ({ .id = "run_full",
-    .config_snapshot = R"({"url":"https://a/","method":"POST","mode":"constant_rps",
-    "duration":"60s","concurrency":100,"comment":"nightly","headers":{"X":"1"}})" });
-    seed ({ .id = "run_sparse", .start_time = 1,
-    .config_snapshot = R"({"url":"https://b/"})" });
+TEST_F (RunsRouteTest, SummaryHasExactlyNineKeysAndOmitsAbsent) {
+    seed ({ .id = "run_full", .config_snapshot = R"({"url":"https://a/","method":"POST","mode":"constant_rps",
+    "duration":"60s","concurrency":100,"comment":"nightly","httpVersion":"http2",
+    "followRedirects":false,"maxRedirects":5,"headers":{"X":"1"}})" });
+    seed ({ .id = "run_sparse", .start_time = 1, .config_snapshot = R"({"url":"https://b/"})" });
 
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0);
     // Sparse row is newest (start_time 1 > 0).
     const auto& sparse = body["data"][0]["summary"];
     EXPECT_EQ (body["data"][0]["id"], "run_sparse");
-    EXPECT_EQ (sparse.size (), 1u); // only url present
+    // url present; httpVersion always defaults to "auto" when absent -
+    // followRedirects/maxRedirects/comment stay omitted, they have no such
+    // engine-side default to fall back to.
+    EXPECT_EQ (sparse.size (), 2u);
     EXPECT_EQ (sparse["url"], "https://b/");
+    // ASSERT, not EXPECT: operator[] on a missing key of a const json trips
+    // nlohmann's assert and aborts the process, so a regression that drops the
+    // key would surface as a crash instead of a readable Expected/Actual diff.
+    ASSERT_TRUE (sparse.contains ("httpVersion"));
+    EXPECT_EQ (sparse["httpVersion"], "auto");
     EXPECT_FALSE (sparse.contains ("comment"));
+    EXPECT_FALSE (sparse.contains ("followRedirects"));
+    EXPECT_FALSE (sparse.contains ("maxRedirects"));
 
     const auto& full = body["data"][1]["summary"];
-    // Exactly the six documented keys, no more (headers must not leak in).
-    EXPECT_EQ (full.size (), 6u);
-    for (const char* k : { "url", "method", "mode", "duration", "concurrency", "comment" })
-        EXPECT_TRUE (full.contains (k)) << k;
+    // Exactly the nine documented keys, no more (headers must not leak in).
+    EXPECT_EQ (full.size (), 9u);
+    // ASSERT so a dropped key stops here with a legible failure rather than
+    // aborting on the operator[] reads below.
+    for (const char* k : { "url", "method", "mode", "duration", "concurrency",
+         "comment", "httpVersion", "followRedirects", "maxRedirects" })
+        ASSERT_TRUE (full.contains (k)) << k;
     EXPECT_FALSE (full.contains ("headers"));
     EXPECT_EQ (full["concurrency"], 100);
+    EXPECT_EQ (full["httpVersion"], "http2");
+    EXPECT_EQ (full["followRedirects"], false);
+    EXPECT_EQ (full["maxRedirects"], 5);
+}
+
+// A raw POST /runs body of `"httpVersion": null` (the client asked for no
+// explicit protocol) lands in config_snapshot verbatim - the snapshot is built
+// from the raw request body, before normalize_run_http_version erases the key
+// from the *executed* request (see execution.cpp). A run predating this
+// field has no httpVersion key at all. Both cases mean the same thing - the
+// run executed at the engine's default - so both normalize to the literal
+// string "auto" rather than being silently omitted, which would misrepresent
+// "we know it defaulted" as "we don't know".
+TEST_F (RunsRouteTest, SummaryHttpVersionDefaultsToAutoOnNullOrAbsent) {
+    seed ({ .id      = "run_null_version",
+    .config_snapshot = R"({"url":"https://a/","httpVersion":null})" });
+    seed ({ .id = "run_no_version", .start_time = 1, .config_snapshot = R"({"url":"https://b/"})" });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0);
+    // Newest first: run_no_version (start_time 1), then run_null_version (0).
+    EXPECT_EQ (body["data"][0]["id"], "run_no_version");
+    EXPECT_EQ (body["data"][0]["summary"]["httpVersion"], "auto");
+    EXPECT_EQ (body["data"][1]["id"], "run_null_version");
+    EXPECT_EQ (body["data"][1]["summary"]["httpVersion"], "auto");
 }
 
 TEST_F (RunsRouteTest, MalformedSnapshotYieldsEmptySummaryNot500) {
@@ -260,11 +301,49 @@ TEST_F (RunsRouteTest, LegacySerializationKeepsConfigSnapshot) {
     EXPECT_TRUE (legacy["configSnapshot"].contains ("headers"));
 }
 
+// GET /runs/:id/report's `configuration` object: same nine-key extension as
+// the list-row summary (mode/duration/concurrency/startConcurrency/
+// rampUpDuration/timeout/comment + httpVersion/followRedirects/maxRedirects),
+// covered directly against build_run_report_config rather than through the
+// full report handler, which needs a completed run's DB rows and metrics.
+TEST (RunReportConfigTest, IncludesHttpVersionFollowRedirectsMaxRedirects) {
+    auto config = json::parse (R"({"mode":"constant_rps","duration":"60s",
+    "concurrency":50,"httpVersion":"http1.1","followRedirects":true,"maxRedirects":10})");
+
+    auto config_obj = vayu::http::routes::build_run_report_config (config);
+
+    EXPECT_EQ (config_obj.size (), 6u);
+    EXPECT_EQ (config_obj["mode"], "constant_rps");
+    EXPECT_EQ (config_obj["httpVersion"], "http1.1");
+    EXPECT_EQ (config_obj["followRedirects"], true);
+    EXPECT_EQ (config_obj["maxRedirects"], 10);
+}
+
+// Same "auto" default as the list-row summary - and for the same reason: the
+// raw config_snapshot can hold an explicit httpVersion:null, and a run
+// predating this field has no key at all. Both mean "ran at the default".
+TEST (RunReportConfigTest, HttpVersionDefaultsToAutoOnNullOrAbsent) {
+    auto with_null = json::parse (R"({"mode":"once","httpVersion":null})");
+    auto without   = json::parse (R"({"mode":"once"})");
+
+    EXPECT_EQ (
+    vayu::http::routes::build_run_report_config (with_null)["httpVersion"], "auto");
+    EXPECT_EQ (
+    vayu::http::routes::build_run_report_config (without)["httpVersion"], "auto");
+}
+
+TEST (RunReportConfigTest, OmitsFollowRedirectsAndMaxRedirectsWhenAbsent) {
+    auto config     = json::parse (R"({"mode":"once"})");
+    auto config_obj = vayu::http::routes::build_run_report_config (config);
+
+    EXPECT_FALSE (config_obj.contains ("followRedirects"));
+    EXPECT_FALSE (config_obj.contains ("maxRedirects"));
+    EXPECT_EQ (config_obj.size (), 2u); // mode + httpVersion("auto")
+}
+
 // ============================================================================
 // GET /runs/:id/report - the stored summary vs the legacy metric rows
 // ============================================================================
-
-namespace {
 
 // The whole-run results a completed load run stores on its row.
 vayu::core::RunSummaryInputs summary_inputs () {
@@ -293,8 +372,6 @@ vayu::core::RunSummaryInputs summary_inputs () {
     inputs.tests             = vayu::core::ScriptValidationTotals{ 10, 9, 1 };
     return inputs;
 }
-
-} // namespace
 
 TEST_F (RunsRouteTest, ReportMissingRunIs404) {
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_nope");

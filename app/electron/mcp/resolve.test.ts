@@ -287,6 +287,7 @@ describe("composeSavedRequest", () => {
 			postRequestScripts: [{ origin: "request", id: "r1", script: "post" }],
 			followRedirects: true,
 			maxRedirects: 10,
+			httpVersion: "auto",
 			requestId: "r1",
 			environmentId: "env_1",
 		});
@@ -352,5 +353,52 @@ describe("redirect policy parity with the renderer", () => {
 			resolver
 		);
 		expect(junk.maxRedirects).toBe(10);
+	});
+});
+
+/*
+ * The renderer sends `httpVersion` on every execute/run payload too (see
+ * `RequestTransformer.coerceHttpVersion` and `request-builder/index.tsx`).
+ * Same rationale as the redirect policy above: the engine defaults
+ * `httpVersion` to "auto", so omitting a stored non-default protocol would
+ * silently negotiate the wrong one.
+ */
+describe("protocol (httpVersion) parity with the renderer", () => {
+	const resolver = makeResolver(new Map());
+
+	test("forwards a stored non-default protocol", () => {
+		const out = composeSavedRequest(
+			{ method: "GET", url: "https://x/y", httpVersion: "http2" },
+			[],
+			resolver
+		);
+		expect(out.httpVersion).toBe("http2");
+	});
+
+	test("a row saved before the column existed reads as auto", () => {
+		const out = composeSavedRequest({ method: "GET", url: "https://x/y" }, [], resolver);
+		expect(out.httpVersion).toBe("auto");
+	});
+
+	test("sends the field even when it equals the default", () => {
+		// Omitting it would let the engine default win, which is the same value
+		// today but silently re-couples the app to the engine's choice.
+		const out = composeSavedRequest(
+			{ method: "GET", url: "https://x/y", httpVersion: "auto" },
+			[],
+			resolver
+		);
+		expect(Object.keys(out)).toContain("httpVersion");
+	});
+
+	test("coerces an out-of-domain value like the renderer does", () => {
+		const out = composeSavedRequest(
+			// A row written by a newer/corrupted engine, carrying a protocol this
+			// build has never heard of.
+			{ method: "GET", url: "https://x/y", httpVersion: "http3" },
+			[],
+			resolver
+		);
+		expect(out.httpVersion).toBe("auto");
 	});
 });

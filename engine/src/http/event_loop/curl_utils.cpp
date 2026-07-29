@@ -19,6 +19,7 @@
 #include <system_error>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/event_loop/curl_callbacks.hpp"
 #include "vayu/http/event_loop/event_loop_worker.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
@@ -384,9 +385,11 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
         curl_easy_setopt (curl, CURLOPT_TCP_KEEPALIVE, 0L);
     }
 
-    // HTTP/2: Enable multiplexing (many requests over single connection)
-    // This dramatically reduces connection establishment overhead
-    curl_easy_setopt (curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+    // Protocol selection. Until nghttp2 was linked this was a hardcoded
+    // CURL_HTTP_VERSION_2TLS that libcurl silently ignored, so every request
+    // went out as HTTP/1.1 regardless. It now follows the request's field.
+    curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
+    vayu::http::to_curl_http_version (request.http_version));
 
     // Connection reuse: Don't close connection after request
     curl_easy_setopt (curl, CURLOPT_FORBID_REUSE, 0L);
@@ -424,6 +427,14 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // single-request client has always extracted first for this reason.
     const CurlPhaseTimes phase_times = read_phase_times (curl);
     const double wire_seconds        = phase_times.total;
+
+    // Negotiated protocol - what actually got used, not what was requested.
+    // Empty when curl reports CURL_HTTP_VERSION_NONE or anything this driver
+    // doesn't recognize; see http_version_from_curl for why that's not
+    // coerced into a guessed "HTTP/1.1".
+    long negotiated_version = 0;
+    curl_easy_getinfo (curl, CURLINFO_HTTP_VERSION, &negotiated_version);
+    response.http_version = vayu::http::http_version_from_curl (negotiated_version);
 
     // Get curl timing info - these are wire-only (libcurl's view)
     // Perceived latency: wall-clock from submit() to now. steady_clock is

@@ -619,6 +619,22 @@ describe("dispatchTool", () => {
 		expect(client.executeRequest).not.toHaveBeenCalled();
 	});
 
+	// The ad-hoc path has no saved request behind it, so an agent-supplied
+	// httpVersion is the only way to specify the protocol at all - it is
+	// forwarded when present, same treatment as the other ad-hoc string args
+	// (preRequestScript, environmentId, ...).
+	test("run_request forwards an agent-supplied httpVersion", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			{ url: "https://api.example.com/users", httpVersion: "http2" },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.httpVersion).toBe("http2");
+	});
+
 	test("start_load_run previews (no run) when confirmed is absent", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
@@ -651,6 +667,25 @@ describe("dispatchTool", () => {
 		);
 		expect(res.isError).toBeFalsy();
 		expect(client.startRun).toHaveBeenCalledTimes(1);
+	});
+
+	test("start_load_run forwards an agent-supplied httpVersion", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				url: "https://api.example.com",
+				targetRps: 100,
+				mode: "constant_rps",
+				duration: "30s",
+				confirmed: true,
+				httpVersion: "http2",
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.httpVersion).toBe("http2");
 	});
 
 	// --- Load-testing a saved request (#176) --------------------------------
@@ -780,6 +815,47 @@ describe("dispatchTool", () => {
 		// Only the stated field is overridden; the rest of the request stands.
 		expect(payload.method).toBe("POST");
 		expect(payload.postRequestScripts).toHaveLength(2);
+	});
+
+	// The saved request stores http1.1 and the agent asks for http2, so a pass
+	// cannot come from both sides agreeing on the "auto" default. `httpVersion`
+	// has to be read with the other agent-stated overrides: this branch never
+	// calls `buildExecutionPayload`, and `composeSavedRequest` always emits a
+	// protocol, so reading it anywhere else loses to the stored value and the
+	// tool's `httpVersion` argument is advertised but never applied here.
+	test("start_load_run: an explicit httpVersion overrides the saved request's", async () => {
+		const client = savedRequestClient({
+			getRequest: vi.fn().mockResolvedValue({ ...savedRequest, httpVersion: "http1.1" }),
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", httpVersion: "http2", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.httpVersion).toBe("http2");
+		// Only the stated field is overridden; the rest of the request stands.
+		expect(payload.url).toBe("https://api.example.com/users");
+		expect(payload.postRequestScripts).toHaveLength(2);
+	});
+
+	// The other half of the rule: with nothing stated the stored protocol runs,
+	// so the override must not write a default over it.
+	test("start_load_run keeps the saved request's httpVersion when none is stated", async () => {
+		const client = savedRequestClient({
+			getRequest: vi.fn().mockResolvedValue({ ...savedRequest, httpVersion: "http1.1" }),
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.httpVersion).toBe("http1.1");
 	});
 
 	test("start_load_run checks the allowlist against the saved request's host", async () => {

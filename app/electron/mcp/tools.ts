@@ -27,6 +27,7 @@ import {
 	loadResolutionContext,
 	composeAuth,
 	composeSavedRequest,
+	HTTP_VERSIONS,
 	type AuthRecord,
 	type Resolver,
 	type ResolutionContext,
@@ -216,6 +217,20 @@ function readRequestOverrides(
 	if (bodyContent !== undefined) {
 		out.body = { mode: str(args, "bodyType") ?? "text", content: rs(bodyContent) };
 	}
+	// httpVersion is an override, so it has to be read here rather than on the
+	// ad-hoc payload builder: `composeLoadRunRequest`'s saved-request branch
+	// never calls that builder, and `composeSavedRequest` always emits a
+	// protocol - so a `start_load_run { requestId, httpVersion }` would go out
+	// at the *stored* protocol while the tool advertised the argument.
+	//
+	// Forwarded only when the agent supplies one. On a URL-only call there is no
+	// stored row to protect from an engine-side default, the same treatment
+	// `followRedirects` / `maxRedirects` get here; an absent field already
+	// resolves to Auto (`deserialize_request` only assigns inside
+	// `if (json.contains(...))`). The `run_request` / `start_load_run` Zod
+	// schemas restrict the value to a known protocol.
+	const httpVersion = str(args, "httpVersion");
+	if (httpVersion !== undefined) out.httpVersion = httpVersion;
 	return out;
 }
 
@@ -669,6 +684,12 @@ export const TOOLS: McpTool[] = [
 					"Body type: json, text, form-data, x-www-form-urlencoded (default text)."
 				),
 			auth: authInput,
+			httpVersion: z
+				.enum(HTTP_VERSIONS)
+				.optional()
+				.describe(
+					'Protocol to negotiate: "auto" | "http1.1" | "http2" (default "auto"). Mirrors the request builder\'s Settings tab picker.'
+				),
 			requestId: z.string().optional().describe("Optional saved request ID to link."),
 			environmentId: environmentIdInput,
 			collectionId: collectionIdInput,
@@ -999,6 +1020,12 @@ export const TOOLS: McpTool[] = [
 			body: z.string().optional(),
 			bodyType: z.string().optional(),
 			auth: authInput,
+			httpVersion: z
+				.enum(HTTP_VERSIONS)
+				.optional()
+				.describe(
+					'Protocol to negotiate for this ad-hoc run: "auto" | "http1.1" | "http2" (default "auto"). There is no saved request behind this call, so this is how the protocol gets specified at all - not an override of a per-run setting.'
+				),
 			mode: z
 				.string()
 				.optional()

@@ -159,6 +159,7 @@ export default function RequestBuilder() {
 			testScript: fetchedRequest.postRequestScript,
 			followRedirects: fetchedRequest.followRedirects,
 			maxRedirects: fetchedRequest.maxRedirects,
+			httpVersion: fetchedRequest.httpVersion,
 			collectionId: fetchedRequest.collectionId,
 		};
 	}, [fetchedRequest]);
@@ -225,6 +226,10 @@ export default function RequestBuilder() {
 						// silently follow the redirect the user asked to see.
 						followRedirects: request.followRedirects,
 						maxRedirects: request.maxRedirects,
+						// Same rule, same reason: an omitted httpVersion lets the
+						// engine's own default win silently, which is not a
+						// decision this client should hand over.
+						httpVersion: request.httpVersion,
 						requestId: fetchedRequest.id,
 					},
 					activeEnvironmentId || undefined
@@ -334,6 +339,7 @@ export default function RequestBuilder() {
 				postRequestScript: request.testScript || undefined,
 				followRedirects: request.followRedirects,
 				maxRedirects: request.maxRedirects,
+				httpVersion: request.httpVersion,
 			});
 		},
 		[fetchedRequest, updateRequestMutation]
@@ -434,6 +440,11 @@ export default function RequestBuilder() {
 					// load test measures the same hops the user sees.
 					followRedirects: pendingLoadTestRequest.followRedirects,
 					maxRedirects: pendingLoadTestRequest.maxRedirects,
+					// Same protocol the single-request Send uses, and always
+					// sent for the same reason - see the execute payload above.
+					// One control in the Settings tab governs both modes; the
+					// load dialog decides load shape, not request semantics.
+					httpVersion: pendingLoadTestRequest.httpVersion,
 					// Load test config
 					mode: config.mode,
 					duration: config.duration_seconds ? `${config.duration_seconds}s` : undefined,

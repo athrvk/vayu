@@ -24,7 +24,12 @@ import type { RequestState } from "@/modules/request-builder/types";
 import { toKeyValueItems } from "@/modules/request-builder/utils/key-value";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
-import { DEFAULT_FOLLOW_REDIRECTS, DEFAULT_MAX_REDIRECTS } from "@/constants/request";
+import {
+	DEFAULT_FOLLOW_REDIRECTS,
+	DEFAULT_HTTP_VERSION,
+	DEFAULT_MAX_REDIRECTS,
+	isHttpVersion,
+} from "@/constants/request";
 
 /** The part of a design run's snapshot this reads. */
 interface DesignSnapshot {
@@ -39,6 +44,7 @@ interface DesignSnapshot {
 	postRequestScript?: string;
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	httpVersion?: string;
 }
 
 export interface DesignRunSeed {
@@ -136,6 +142,9 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			testScript: ownScript(snapshot.postRequestScripts),
 			followRedirects: snapshot.followRedirects ?? DEFAULT_FOLLOW_REDIRECTS,
 			maxRedirects: snapshot.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
+			httpVersion: isHttpVersion(snapshot.httpVersion)
+				? snapshot.httpVersion
+				: DEFAULT_HTTP_VERSION,
 		},
 		collectionPreScripts: collectionParts(snapshot.preRequestScripts),
 		collectionPostScripts: collectionParts(snapshot.postRequestScripts),

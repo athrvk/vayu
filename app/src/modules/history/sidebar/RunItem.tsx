@@ -11,6 +11,7 @@ import type { Run } from "@/types";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { MethodBadge } from "@/components/shared";
+import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import {
 	CheckCircle2,
 	XCircle,
@@ -20,6 +21,7 @@ import {
 	Loader2,
 	Trash2,
 	Zap,
+	Network,
 } from "lucide-react";
 
 interface RunItemProps {
@@ -50,10 +52,22 @@ export default function RunItem({
 		const url = run.summary.url || null;
 		const method = run.summary.method || "GET";
 		const type = run.summary.mode;
-		return { url, method, type };
+		// Requested protocol only - see design-run-seed.ts's doc comment for the
+		// requested-vs-negotiated distinction. A load run's summary has no single
+		// negotiated protocol to show (many exchanges, one requested setting).
+		const httpVersion = run.summary.httpVersion;
+		return { url, method, type, httpVersion };
 	};
 
-	const { url: requestUrl, method, type: loadTestType } = getRequestInfo();
+	const {
+		url: requestUrl,
+		method,
+		type: loadTestType,
+		httpVersion: requestedHttpVersion,
+	} = getRequestInfo();
+	const protocolLabel = isHttpVersion(requestedHttpVersion)
+		? HTTP_VERSIONS.find((v) => v.value === requestedHttpVersion)?.label
+		: undefined;
 
 	// Get status icon and color
 	const getStatusIcon = () => {
@@ -189,6 +203,12 @@ export default function RunItem({
 							<span className="flex items-center gap-1 shrink-0">
 								<Zap className="w-3 h-3" />
 								{loadTestTypeToLabel(loadTestType)}
+							</span>
+						)}
+						{protocolLabel && (
+							<span className="flex items-center gap-1 shrink-0">
+								<Network className="w-3 h-3" />
+								{protocolLabel}
 							</span>
 						)}
 					</div>

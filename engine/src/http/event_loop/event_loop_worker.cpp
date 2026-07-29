@@ -248,8 +248,10 @@ EventLoopWorker::EventLoopWorker (const EventLoopConfig& cfg)
     curl_multi_setopt (multi_handle, CURLMOPT_MAX_HOST_CONNECTIONS,
     static_cast<long> (config.max_per_host));
 
-    // Enable HTTP/2 multiplexing (many requests over single connection)
-    // This is critical for high-RPS as it reduces connection establishment overhead
+    // Allow HTTP/2 multiplexing on any transfer whose request opted into
+    // HTTP/2 (curl_utils.cpp sets CURLOPT_HTTP_VERSION per request from
+    // request.http_version). This setting itself is inert on an HTTP/1.1
+    // transfer, so it is left unconditional here rather than gated per-run.
     curl_multi_setopt (multi_handle, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
 
     // Set max total connections (connection pool size)

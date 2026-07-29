@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "vayu/db/database.hpp"
+#include "vayu/types.hpp"
 
 using nlohmann::json;
 
@@ -128,6 +129,114 @@ TEST_F (ConfigRouteTest, SingleUpdateFormatSucceeds) {
     auto stored = db_->get_config_entry ("workers");
     ASSERT_TRUE (stored.has_value ());
     EXPECT_EQ (stored->value, "8");
+}
+
+// Find one entry by key in the "entries" array of an apply_config_update
+// response body. Fails the calling test if the key is missing.
+json find_entry (const json& body, const std::string& key) {
+    for (const auto& entry : body["entries"]) {
+        if (entry["key"] == key) {
+            return entry;
+        }
+    }
+    ADD_FAILURE () << "entry '" << key << "' not found in response";
+    return json{};
+}
+
+TEST_F (ConfigRouteTest, EnumEntrySerializesOptionsAsArrayOfValueLabel) {
+    // Any successful update returns the full entry list, including the
+    // seeded "defaultHttpVersion" enum entry - trigger via an unrelated key.
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"4"}})");
+    ASSERT_EQ (status, 200);
+
+    json entry = find_entry (body, "defaultHttpVersion");
+    ASSERT_EQ (entry["type"], "enum");
+    ASSERT_TRUE (entry.contains ("options"));
+    ASSERT_TRUE (entry["options"].is_array ());
+
+    const auto& versions = vayu::all_http_versions ();
+    ASSERT_EQ (entry["options"].size (), versions.size ());
+    for (size_t i = 0; i < versions.size (); ++i) {
+        EXPECT_EQ (entry["options"][i]["value"], vayu::to_string (versions[i]));
+        EXPECT_EQ (entry["options"][i]["label"], vayu::http_version_label (versions[i]));
+    }
+}
+
+TEST_F (ConfigRouteTest, NonEnumEntryOmitsOptionsEntirely) {
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"4"}})");
+    ASSERT_EQ (status, 200);
+
+    json entry = find_entry (body, "workers");
+    EXPECT_FALSE (entry.contains ("options")); // absent, not null
+}
+
+TEST_F (ConfigRouteTest, EnumUpdateRejectsValueOutsideOptionsWith400) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"defaultHttpVersion":"http3"}})");
+    EXPECT_EQ (status, 400);
+    const auto message = body["error"]["message"].get<std::string> ();
+    EXPECT_NE (message.find ("defaultHttpVersion"), std::string::npos);
+    EXPECT_NE (message.find ("http3"), std::string::npos);
+}
+
+TEST_F (ConfigRouteTest, EnumUpdateAcceptsValidOption) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"defaultHttpVersion":"http2"}})");
+    EXPECT_EQ (status, 200);
+    EXPECT_TRUE (body["success"].get<bool> ());
+
+    auto stored = db_->get_config_entry ("defaultHttpVersion");
+    ASSERT_TRUE (stored.has_value ());
+    EXPECT_EQ (stored->value, "http2");
+    // save_config_entry replaces the whole row, so a value-only update must not
+    // drop the option list - without it the entry becomes unrenderable.
+    ASSERT_TRUE (stored->options.has_value ());
+    EXPECT_EQ (nlohmann::json::parse (*stored->options).size (),
+    vayu::all_http_versions ().size ());
+}
+
+TEST_F (ConfigRouteTest, MalformedOptionsOmitsTheKeyInsteadOfFailingTheWholeListing) {
+    // Only seed_default_config writes this column, so this state means a
+    // tampered or truncated row. It must cost one entry's option list, not the
+    // entire GET /config payload - an unguarded parse here would 500 the whole
+    // settings screen.
+    auto entry = db_->get_config_entry ("defaultHttpVersion");
+    ASSERT_TRUE (entry.has_value ());
+    entry->options = "{not valid json";
+    db_->save_config_entry (*entry);
+
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"4"}})");
+    ASSERT_EQ (status, 200);
+
+    json broken = find_entry (body, "defaultHttpVersion");
+    EXPECT_EQ (broken["type"], "enum");
+    EXPECT_FALSE (broken.contains ("options"));
+
+    // The rest of the listing is unaffected.
+    json healthy = find_entry (body, "workers");
+    EXPECT_EQ (healthy["value"], "4");
+}
+
+// Mutation-check target: if seed_default_config() ever hardcodes the option
+// list instead of deriving it from all_http_versions(), this must fail. The
+// two most likely mutations - dropping an entry, or reordering it - are both
+// caught because the comparison is index-by-index against the exact same
+// domain source production is supposed to consult.
+TEST_F (ConfigRouteTest, SeededDefaultHttpVersionOptionsMatchAllHttpVersionsInOrder) {
+    auto entry = db_->get_config_entry ("defaultHttpVersion");
+    ASSERT_TRUE (entry.has_value ());
+    ASSERT_TRUE (entry->options.has_value ());
+
+    json options         = json::parse (*entry->options);
+    const auto& versions = vayu::all_http_versions ();
+    ASSERT_EQ (options.size (), versions.size ());
+    for (size_t i = 0; i < versions.size (); ++i) {
+        EXPECT_EQ (options[i]["value"], vayu::to_string (versions[i]));
+        EXPECT_EQ (options[i]["label"], vayu::http_version_label (versions[i]));
+    }
 }
 
 } // namespace

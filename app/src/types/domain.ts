@@ -7,6 +7,15 @@
 
 // Core Domain Types
 
+/**
+ * HTTP protocol to negotiate. Declared in `@/constants/request` (derived from
+ * the `HTTP_VERSIONS` list, the single source of truth also consumed by the
+ * Settings tab picker) and re-exported here, same pattern as `ColorScheme` in
+ * `types/ui.ts`, so `Request.httpVersion` below can reference it.
+ */
+import type { HttpVersion } from "@/constants/request";
+export type { HttpVersion };
+
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export type BodyMode = "none" | "json" | "text" | "graphql" | "form-data" | "x-www-form-urlencoded";
@@ -161,6 +170,14 @@ export interface Request {
 	followRedirects: boolean;
 	/** Redirect hops allowed when {@link followRedirects} is on. Engine default is 10. */
 	maxRedirects: number;
+	/**
+	 * HTTP protocol to negotiate for this request. `"auto"` lets curl pick
+	 * (ALPN over TLS, HTTP/1.1 otherwise) - see {@link HTTP_VERSIONS}. This is
+	 * the *requested* protocol; the protocol actually negotiated for a given
+	 * response is `ResponseState.httpVersion`, a different, display-string
+	 * value space - do not unify them.
+	 */
+	httpVersion: HttpVersion;
 	order: number;
 	createdAt: string;
 	updatedAt: string;
@@ -282,6 +299,14 @@ export interface RunConfigSnapshot {
 	rampUpDuration?: string;
 	startConcurrency?: number;
 	comment?: string;
+	/**
+	 * Requested protocol the run executed with - `build_run_report_config` in
+	 * `engine/src/http/routes/runs.cpp` normalizes an absent or explicit-`null`
+	 * key to `"auto"` before this ever reaches the client, so it is always
+	 * present in practice despite the optional `?`. Distinct from the
+	 * *negotiated* protocol on a single exchange (`ResponseState.httpVersion`).
+	 */
+	httpVersion?: HttpVersion;
 	[key: string]: unknown;
 }
 
@@ -345,6 +370,16 @@ export interface RunResultTrace {
 		bodyTruncated?: boolean;
 		/** The response body's original byte length, present only when truncated. */
 		bodyBytes?: number;
+		/**
+		 * The protocol negotiated for this exchange, as stored by
+		 * `build_result_trace` (`engine/src/http/routes/execution.cpp`) - same
+		 * display-string value space as `ResponseState.httpVersion`
+		 * (`app/src/modules/request-builder/types.ts`), not the request-side
+		 * `HttpVersion` union. Read by `restore-response.ts`'s `sentSide` (onto
+		 * the rebuilt raw request line) and `responseFromRunResult` (onto
+		 * `ResponseState.httpVersion`, for the Raw tab's status line).
+		 */
+		httpVersion?: string;
 	};
 }
 
@@ -365,9 +400,19 @@ export interface RunResult {
 
 /**
  * The compact per-row summary the paginated `GET /runs` list carries in place
- * of the full {@link RunConfigSnapshot}. Exactly the six keys the history and
- * dashboard list UIs read; each is omitted by the engine when absent from the
- * stored snapshot. The full snapshot is still available on `GET /runs/:id`.
+ * of the full {@link RunConfigSnapshot}. Mirrors all nine keys
+ * `build_run_summary` sends (`engine/src/http/routes/runs.cpp`); each is
+ * omitted by the engine when absent from the stored snapshot, except
+ * `httpVersion` which the engine always normalizes to a value (see
+ * `add_http_version`, same file). The full snapshot is still available on
+ * `GET /runs/:id`.
+ *
+ * `followRedirects` / `maxRedirects` are declared but **not rendered
+ * anywhere yet** - this type mirrors the wire, so a field the engine sends is
+ * declared whether or not a screen reads it, and a reader can trust that what
+ * is missing here is missing from the payload too. If you are looking for
+ * somewhere to surface them, the history sidebar row and the load test report
+ * both already show `httpVersion` and would be the consistent home.
  */
 export interface RunSummary {
 	url?: string;
@@ -376,6 +421,12 @@ export interface RunSummary {
 	duration?: string;
 	concurrency?: number;
 	comment?: string;
+	/** Requested protocol - see {@link RunConfigSnapshot.httpVersion}. */
+	httpVersion?: HttpVersion;
+	/** Sent by the engine, not yet rendered - see the note above. */
+	followRedirects?: boolean;
+	/** Sent by the engine, not yet rendered - see the note above. */
+	maxRedirects?: number;
 }
 
 export interface Run {
@@ -480,6 +531,14 @@ export interface HttpResponse {
 	timing: ResponseTiming;
 	errorCode?: string;
 	errorMessage?: string;
+	/**
+	 * The protocol negotiated for this exchange, as `serialize(Response)`
+	 * (`engine/src/utils/json.cpp`) emits it on `POST /execute` - `""` when
+	 * nothing was negotiated, not omitted. Same display-string value space as
+	 * `ResponseState.httpVersion` (`app/src/modules/request-builder/types.ts`),
+	 * not the request-side `HttpVersion` union - do not unify the two.
+	 */
+	httpVersion?: string;
 }
 
 export interface TestResult {
@@ -542,6 +601,20 @@ export interface RunReport {
 			rampUpDuration?: string;
 			timeout?: number;
 			comment?: string;
+			/**
+			 * Requested protocol - see {@link RunConfigSnapshot.httpVersion}. Built by
+			 * `build_run_report_config` (`engine/src/http/routes/runs.cpp`), which
+			 * always normalizes it to a value via `add_http_version`, so this is
+			 * effectively always present despite the optional `?` - kept loosely
+			 * typed as `string` (not `HttpVersion`) like its siblings above, since
+			 * nothing here is runtime-validated; narrow with `isHttpVersion` before
+			 * using it as a value.
+			 */
+			httpVersion?: string;
+		/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
+		followRedirects?: boolean;
+		/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
+		maxRedirects?: number;
 		};
 	};
 	summary: {
@@ -631,7 +704,7 @@ export interface EngineConfig {
 export interface ConfigEntry {
 	key: string;
 	value: string;
-	type: "integer" | "string" | "boolean" | "number";
+	type: "integer" | "string" | "boolean" | "number" | "enum";
 	label: string;
 	description: string;
 	category: string;
@@ -640,6 +713,14 @@ export interface ConfigEntry {
 	max?: string;
 	updatedAt: number;
 	requiresRestart?: boolean;
+	/**
+	 * Present only on `type: "enum"` entries (e.g. `defaultHttpVersion`); the
+	 * engine omits the key entirely rather than sending `null` or `[]` when a
+	 * stored row's options fail to parse (`engine/src/http/routes/config.cpp`),
+	 * so a renderer must treat a missing `options` as "nothing to offer", not
+	 * as a bug.
+	 */
+	options?: { value: string; label: string }[];
 }
 
 /** Client-side settings panels (localStorage-backed prefs, rendered by app panels). */

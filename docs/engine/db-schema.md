@@ -80,6 +80,7 @@ Stores individual HTTP request definitions.
 | `order`               | INTEGER | Sort order within collection; default 0              |
 | `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
 | `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
+| `http_version`        | TEXT    | `'auto'` \| `'http1.1'` \| `'http2'`; default `'auto'` |
 | `created_at`          | INTEGER | Unix ms                                              |
 | `updated_at`          | INTEGER | Unix ms                                              |
 
@@ -112,16 +113,31 @@ placement options, etc. Secret fields (`clientSecret`, `password`) are stored
 **in plaintext** here, same as bearer/basic credentials - the v1 posture. The
 resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
 
-**follow_redirects / max_redirects** - the request's redirect policy, surfaced
-in the request builder's **Settings** tab and serialized as `followRedirects` /
-`maxRedirects`. They mirror the executable `vayu::Request` fields of the same
-name, so the saved policy is what `POST /execute` and `POST /runs` apply.
+**follow_redirects / max_redirects / http_version** - the request's execution
+options, surfaced in the request builder's **Settings** tab and serialized as
+`followRedirects` / `maxRedirects` / `httpVersion`. They mirror the executable
+`vayu::Request` fields of the same name, so the saved options are what
+`POST /execute` and `POST /runs` apply - `http_version` governs both Send and
+load test alike; there is no separate per-run protocol control.
 
-Both columns are `NOT NULL` with a `DEFAULT`, which is what lets `sync_schema()`
-add them to an existing, non-empty `requests` table - a `NOT NULL` column with
-no default cannot be added by `ALTER TABLE ADD COLUMN`. Rows written before the
-columns existed backfill to `1` / `10`, i.e. the behaviour they already had.
-`max_redirects` is clamped to `0..100` on write.
+All three columns are `NOT NULL` with a `DEFAULT`, which is what lets
+`sync_schema()` add them to an existing, non-empty `requests` table - a
+`NOT NULL` column with no default cannot be added by `ALTER TABLE ADD COLUMN`.
+Rows written before the columns existed backfill to `1` / `10` / `'auto'`, i.e.
+the behaviour they already had (a row predating this column could only ever
+have run HTTP/1.1, since nghttp2 was not yet linked). `max_redirects` is
+clamped to `0..100` on write.
+
+**http_version** stores `Request::http_version` (the *requested* protocol, an
+enum member spelled as text) - a different value and a different value space
+from `Response::http_version`, the *negotiated* protocol string
+(`"HTTP/1.1"` / `"HTTP/2"` / `""`) that lands in a design run's `trace_data`
+(see [`results`](#results)) and the live `/execute` response. Conflating the
+two would show a user a protocol they asked for but were not actually granted.
+On create or on an explicit `null` reset, this column seeds from the
+`defaultHttpVersion` [`config_entries`](#config_entries) row (`'auto'` unless
+changed) - a write-time default only, never consulted at execution. Changing
+the global afterward does not alter a request already saved.
 
 ---
 
@@ -359,7 +375,7 @@ than assuming all eight are there and flat:
 |--------|----------------------------|
 | Load run, success sample (`load_strategy.cpp`) | timing only, flat, all eight keys - and only when `save_timing_breakdown` is on or the sample crossed `slow_threshold_ms` (which also adds `isSlow` / `thresholdMs`) |
 | Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0` |
-| Design mode (`store_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`). Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
+| Design mode (`store_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`). Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). The `response` node carries `headers`, `body` and `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference.md#post-execute)); a row written before this field existed simply has no `httpVersion` key, so `restore-response.ts` must default it. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
 
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
 (config, `observability`, default 5 MiB) before storage, so downloading one 50 MB response does
@@ -396,14 +412,39 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 |-----------------|---------|--------------------------------------------------------|
 | `key`           | TEXT PK | e.g. `workers`, `maxConnections`, `liveTickIntervalMs` |
 | `value`         | TEXT    | Current value (parsed per `type`)                      |
-| `type`          | TEXT    | `"integer"` / `"string"` / `"boolean"` / `"number"`    |
+| `type`          | TEXT    | `"integer"` / `"string"` / `"boolean"` / `"number"` / `"enum"` |
 | `label`         | TEXT    | Display label                                          |
 | `description`   | TEXT    | Help text                                              |
 | `category`      | TEXT    | Grouping (e.g. `server`, `network_performance`)        |
 | `default_value` | TEXT    | Default as string                                      |
 | `min_value`     | TEXT    | Optional minimum (numbers)                             |
 | `max_value`     | TEXT    | Optional maximum (numbers)                             |
+| `options`       | TEXT    | JSON array of `{value, label}`; `"enum"` entries only  |
 | `updated_at`    | INTEGER | Unix ms                                                |
+
+**options** is nullable and populated only for `type: "enum"` entries. It is
+JSON-in-TEXT, the same convention as every other structured column in this
+schema (`variables`, `auth`, `config_snapshot`, ...), never a delimited string.
+Labels travel with values so the Settings UI never holds its own
+value-to-label map that could drift from the engine's. `min_value` / `max_value`
+were considered and rejected as a place to carry the option list - they are
+engine-side validation only and unread by the app, whereas `options` is part of
+the client contract: the renderer cannot draw the dropdown without it.
+
+The one seeded `enum` entry today is **`defaultHttpVersion`**
+(`upsert_config` in `database.cpp`), whose `options` is derived from the same
+`HttpVersion` enumeration that validates `requests.http_version` - see
+[`requests`](#requests) above - so the two cannot drift:
+```json
+[
+  {"value": "auto", "label": "Auto"},
+  {"value": "http1.1", "label": "HTTP/1.x"},
+  {"value": "http2", "label": "HTTP/2"}
+]
+```
+Its `value` is this instance's current global, read fresh (not cached) on
+every request create; changing it applies to the next request created, never
+retroactively.
 
 ---
 

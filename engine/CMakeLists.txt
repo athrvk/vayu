@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(vayu-engine
-    VERSION 0.10.0
+    VERSION 0.11.0
     DESCRIPTION "High-performance API execution engine"
     LANGUAGES C CXX
 )
@@ -395,6 +395,7 @@ if(VAYU_BUILD_TESTS)
         tests/script_variables_test.cpp
         tests/stats_route_test.cpp
         tests/execution_timeout_test.cpp
+        tests/execution_http_version_test.cpp
         tests/load_strategy_test.cpp
         tests/refill_deficit_test.cpp
         tests/load_pacing_test.cpp
@@ -416,6 +417,8 @@ if(VAYU_BUILD_TESTS)
         tests/curl_utils_test.cpp
         tests/curl_transfer_test.cpp
         tests/dns_cache_test.cpp
+        tests/http_version_support_test.cpp
+        tests/http_version_test.cpp
         src/http/routes/import.cpp
         src/http/routes/config.cpp
         src/http/routes/requests.cpp

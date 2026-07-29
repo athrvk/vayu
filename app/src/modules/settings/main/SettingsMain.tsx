@@ -34,6 +34,11 @@ import {
 	Input,
 	Label,
 	Switch,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 	Card,
 	CardContent,
 	CardDescription,
@@ -294,6 +299,12 @@ export default function SettingsMain() {
 		entry: ConfigEntry,
 		value: string
 	): { isValid: boolean; error?: string } => {
+		if (entry.type === "enum") {
+			// The value comes from a Select populated with `entry.options`, so it
+			// is never free text - no numeric parsing applies here, unlike the
+			// integer/number branch below.
+			return { isValid: true };
+		}
 		if (entry.type === "integer" || entry.type === "number") {
 			const num = entry.type === "integer" ? parseInt(value, 10) : parseFloat(value);
 			if (isNaN(num)) {
@@ -598,6 +609,38 @@ export default function SettingsMain() {
 												{currentValue === "true" ? "Enabled" : "Disabled"}
 											</Label>
 										</div>
+									) : entry.type === "enum" ? (
+										// The engine omits `options` entirely when a stored row's
+										// options fail to parse (logged there, not here) - render
+										// nothing rather than a select with no items, and never
+										// fall back to a label map kept in this file: labels come
+										// from the payload so the two sides of the boundary cannot
+										// drift apart.
+										entry.options && entry.options.length > 0 ? (
+											<Select
+												value={currentValue}
+												onValueChange={(value) =>
+													handleValueChange(entry, value)
+												}
+											>
+												<SelectTrigger
+													className="max-w-xs"
+													aria-label={entry.label}
+												>
+													<SelectValue />
+												</SelectTrigger>
+												<SelectContent>
+													{entry.options.map((option) => (
+														<SelectItem
+															key={option.value}
+															value={option.value}
+														>
+															{option.label}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+										) : null
 									) : (
 										<div className="space-y-2">
 											<div className="flex items-center gap-2">

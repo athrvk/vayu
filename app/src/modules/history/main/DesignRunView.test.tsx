@@ -104,6 +104,7 @@ function designRun(overrides: Partial<Run> = {}): Run {
 			],
 			followRedirects: false,
 			maxRedirects: 3,
+			httpVersion: "http2",
 			requestId: "req_1",
 		},
 		result: {
@@ -311,6 +312,27 @@ describe("DesignRunView - sending it again", () => {
 		]);
 		// Filed under the same request, so the new run lands beside the old one.
 		expect(payload.requestId).toBe("req_1");
+	});
+
+	it("resends on the protocol the run actually used, not the default", async () => {
+		// design-run-seed.ts seeds httpVersion from the snapshot; this is the
+		// fourth send site, alongside the request builder's execute/save/load
+		// test - dropping it here has the same silent-downgrade shape as the
+		// confirmed initialRequest bug.
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+
+		renderView(designRun());
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
+
+		const payload = executeRequest.mock.calls[0][0];
+		expect(payload.httpVersion).toBe("http2");
 	});
 });
 

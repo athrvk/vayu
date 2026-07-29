@@ -10,6 +10,7 @@
  * @brief Configuration management routes
  */
 
+#include <algorithm>
 #include <chrono>
 #include <string>
 #include <unordered_map>
@@ -39,6 +40,28 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
     }
     if (entry.max_value) {
         entry_json["max"] = *entry.max_value;
+    }
+    if (entry.options) {
+        // Stored as a JSON-array string (JSON-in-TEXT, same convention as
+        // every other structured column); parse it back to a real array so
+        // the wire shape is `"options": [...]`, not a string of one.
+        //
+        // Guarded for the same reason the enum branch of apply_config_update
+        // is: an unguarded parse here would turn one malformed row into a 500
+        // on the whole of GET /config, taking the entire settings screen down
+        // rather than one entry. Omitting the key leaves an enum entry with no
+        // option list, which a renderer can show as unavailable.
+        //
+        // Only seed_default_config writes this column today, so a malformed
+        // value means the stored row was tampered with or truncated. Log it -
+        // silently dropping the key would make the setting vanish from the UI
+        // with no trail to follow.
+        try {
+            entry_json["options"] = nlohmann::json::parse (*entry.options);
+        } catch (const std::exception& e) {
+            vayu::utils::log_warning ("config entry '" + entry.key +
+            "' has malformed options JSON, omitting it: " + e.what ());
+        }
     }
     entry_json["updatedAt"] = entry.updated_at;
     return entry_json;
@@ -159,6 +182,25 @@ const std::string& body) {
         } else if (existing->type == "boolean") {
             if (value != "true" && value != "false") {
                 reason = "'" + key + "' must be 'true' or 'false' (got '" + value + "')";
+            }
+        } else if (existing->type == "enum") {
+            std::vector<std::string> allowed;
+            std::string allowed_list;
+            if (existing->options) {
+                try {
+                    for (const auto& option : nlohmann::json::parse (*existing->options)) {
+                        std::string opt_value = option.at ("value").get<std::string> ();
+                        allowed.push_back (opt_value);
+                        allowed_list += (allowed_list.empty () ? "" : ", ") + opt_value;
+                    }
+                } catch (const std::exception&) {
+                    // Malformed options - fall through with an empty allowed
+                    // list so the value is rejected rather than accepted.
+                }
+            }
+            if (std::find (allowed.begin (), allowed.end (), value) == allowed.end ()) {
+                reason = "'" + key + "' must be one of [" + allowed_list +
+                "] (got '" + value + "')";
             }
         }
 

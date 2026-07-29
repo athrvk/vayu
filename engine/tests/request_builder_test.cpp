@@ -70,4 +70,13 @@ TEST (SanitizeConfigSnapshot, MissingAuthLeavesBodyIntact) {
     EXPECT_FALSE (parsed.contains ("auth"));
 }
 
+// Task 6: a POST /runs per-run httpVersion override rides into config_snapshot
+// automatically, since sanitize_config_snapshot only touches the auth
+// subtree - nothing in the execution route needs to copy it there separately.
+TEST (SanitizeConfigSnapshot, PreservesPerRunHttpVersionOverride) {
+    const std::string body = R"({"method":"GET","url":"https://x","httpVersion":"http1.1"})";
+    const auto parsed = json::parse (vayu::json::sanitize_config_snapshot (body));
+    EXPECT_EQ (parsed["httpVersion"], "http1.1");
+}
+
 } // namespace

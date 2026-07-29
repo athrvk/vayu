@@ -358,6 +358,7 @@ export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetIte
 		String(live.maxRedirects),
 		String(patch.maxRedirects ?? live.maxRedirects)
 	);
+	scalar("Protocol", live.httpVersion, patch.httpVersion ?? live.httpVersion);
 
 	items.push(authItem(seed, live));
 
@@ -383,6 +384,7 @@ export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateReq
 		headers: userEntries(items(request.headers)),
 		followRedirects: request.followRedirects ?? live.followRedirects,
 		maxRedirects: request.maxRedirects ?? live.maxRedirects,
+		httpVersion: request.httpVersion ?? live.httpVersion,
 	};
 
 	// The body is only written when the run's stored request body was not

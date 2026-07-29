@@ -24,6 +24,7 @@ import {
 } from "@/components/ui";
 import { formatNumber, loadTestTypeToLabel } from "@/utils";
 import { TruncatedText } from "@/components/shared";
+import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
@@ -35,6 +36,13 @@ import type { LoadTestDetailProps, TimeSeriesResponse } from "../types";
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const [activeTab, setActiveTab] = useState("overview");
 	const config = report.metadata?.configuration;
+	// Requested protocol, not the negotiated one (`RunResultTrace.response.httpVersion`
+	// is per-exchange and has no single value across a load run's many requests).
+	// Labelled from the shared HTTP_VERSIONS list so this never keeps its own copy.
+	const requestedHttpVersion = config?.httpVersion;
+	const protocolLabel = isHttpVersion(requestedHttpVersion)
+		? HTTP_VERSIONS.find((v) => v.value === requestedHttpVersion)?.label
+		: undefined;
 
 	// Fetch the persisted per-tick time-series once, here, so both the Overview
 	// stat cards (breakpoint / saturation, derived below) and the Performance tab
@@ -98,8 +106,12 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					</TruncatedText>
 				</div>
 
-				{/* Load test config used for this run */}
-				{(config?.mode || config?.comment) && (
+				{/* Load test config used for this run. Gated on protocolLabel too, not
+				    just mode/comment - POST /runs accepts an iterations-only body with
+				    no `mode` key (execution.cpp only requires mode+duration OR
+				    iterations), so a run can legitimately have neither and still carry
+				    a protocol worth showing. */}
+				{config && (config.mode || config.comment || protocolLabel) && (
 					<div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm mb-3 p-3 border rounded-md bg-background/50">
 						<div className="flex items-center gap-2 text-muted-foreground">
 							<Settings2 className="w-4 h-4 shrink-0" />
@@ -111,6 +123,12 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 								<span className="text-foreground capitalize">
 									{loadTestTypeToLabel(config.mode as LoadTestConfig["mode"])}
 								</span>
+							</div>
+						)}
+						{protocolLabel && (
+							<div className="flex items-center gap-2">
+								<span className="text-muted-foreground">Protocol:</span>
+								<span className="text-foreground font-mono">{protocolLabel}</span>
 							</div>
 						)}
 						{config.duration != null && config.duration !== "" && (

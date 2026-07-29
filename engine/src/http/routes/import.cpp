@@ -333,7 +333,8 @@ std::vector<vayu::db::Collection>& out) {
 }
 
 /** Pass 3b - request rows, owner resolved from `collectionTempId`. */
-std::optional<std::pair<int, nlohmann::json>> build_request_rows (const nlohmann::json& requests,
+std::optional<std::pair<int, nlohmann::json>> build_request_rows (vayu::db::Database& db,
+const nlohmann::json& requests,
 const TempIds& temps,
 int64_t now,
 std::vector<vayu::db::Request>& out) {
@@ -360,7 +361,7 @@ std::vector<vayu::db::Request>& out) {
         r.updated_at = now;
 
         if (auto err = apply_item_fields (
-            [&] { return apply_request_fields (r, fields, /*is_create=*/true); }, "request", temp)) {
+            [&] { return apply_request_fields (db, r, fields, /*is_create=*/true); }, "request", temp)) {
             return err;
         }
         out.push_back (std::move (r));
@@ -461,7 +462,7 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
     if (auto err = build_collection_rows (db, *collections, temps, now, collection_rows)) {
         return *err;
     }
-    if (auto err = build_request_rows (*requests, temps, now, request_rows)) {
+    if (auto err = build_request_rows (db, *requests, temps, now, request_rows)) {
         return *err;
     }
     if (auto err = build_environment_rows (*environments, temps, now, environment_rows)) {

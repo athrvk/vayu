@@ -133,6 +133,7 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		headers: result.headers || {},
 		requestHeaders: result.requestHeaders,
 		rawRequest: result.rawRequest,
+		httpVersion: result.httpVersion,
 		body,
 		bodyRaw,
 		bodyType: bodyTypeFromContentType(result.headers),

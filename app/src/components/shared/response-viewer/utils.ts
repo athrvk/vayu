@@ -255,12 +255,27 @@ export function formatSize(bytes: number): string {
  * This follows the engine's order so the two read the same: request line with
  * the path, `Host` from the URL, the sent headers, `Content-Length` for a body,
  * blank line, body.
+ *
+ * `httpVersion` is the negotiated protocol as a *display* string (`"HTTP/2"`,
+ * `"HTTP/1.1"`, or `""` when nothing was negotiated - the engine's convention,
+ * see `Response::http_version` in `engine/src/http/client.cpp`) - never the
+ * request-side `auto`/`http1.1`/`http2` union; do not pass that here. It
+ * defaults to `"HTTP/1.1"` so callers that predate this parameter, and stored
+ * runs from before the field existed, keep printing what they always did.
+ *
+ * An explicit `""` collapses to the same default. The engine's own rawRequest
+ * builder falls back to the *requested* protocol in that case (it has
+ * `request.http_version` in hand); this generic formatter only ever sees a
+ * display string, so replicating that fallback here would mean threading the
+ * requested union into a function whose contract is display-string-only -
+ * exactly the value-space merge this field's docs elsewhere warn against.
  */
 export function buildRawRequest(
 	method: string,
 	url: string,
 	headers: Record<string, string> = {},
-	body?: string
+	body?: string,
+	httpVersion: string = "HTTP/1.1"
 ): string {
 	let target = url;
 	let host = "";
@@ -274,7 +289,8 @@ export function buildRawRequest(
 		// than inventing a split, and let the Host header fall away with it.
 	}
 
-	let raw = `${method || "GET"} ${target} HTTP/1.1\r\n`;
+	const versionLabel = httpVersion || "HTTP/1.1";
+	let raw = `${method || "GET"} ${target} ${versionLabel}\r\n`;
 	if (host) raw += `Host: ${host}\r\n`;
 
 	for (const [key, value] of Object.entries(headers)) {
@@ -294,15 +310,23 @@ export function buildRawRequest(
 }
 
 /**
- * Build raw HTTP response string
+ * Build raw HTTP response string.
+ *
+ * `httpVersion` is the negotiated protocol as a display string - see
+ * `buildRawRequest`'s doc comment above for the full contract, including why
+ * `""` (the engine's "nothing negotiated" convention) collapses to the same
+ * `"HTTP/1.1"` default as an omitted argument rather than trying to recover
+ * the requested protocol.
  */
 export function buildRawResponse(
 	status: number,
 	statusText: string,
 	headers: Record<string, string>,
-	body: string
+	body: string,
+	httpVersion: string = "HTTP/1.1"
 ): string {
-	let raw = `HTTP/1.1 ${status} ${statusText}\r\n`;
+	const versionLabel = httpVersion || "HTTP/1.1";
+	let raw = `${versionLabel} ${status} ${statusText}\r\n`;
 
 	// Add response headers
 	for (const [key, value] of Object.entries(headers)) {

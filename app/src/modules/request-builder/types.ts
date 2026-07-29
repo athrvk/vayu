@@ -19,6 +19,7 @@ import type { BodyDrafts } from "./utils/body-drafts";
 import type {
 	BodyMode,
 	HttpMethod,
+	HttpVersion,
 	KeyValueEntry,
 	RequestAuth,
 	ResolvedVariable,
@@ -143,6 +144,8 @@ export interface RequestState {
 	// Execution settings (Settings tab)
 	followRedirects: boolean;
 	maxRedirects: number;
+	/** Protocol to negotiate. See `Request.httpVersion` for the full rationale. */
+	httpVersion: HttpVersion;
 }
 
 // ============================================================================
@@ -185,6 +188,16 @@ export interface ResponseState {
 	bodyBytes?: number;
 	time: number;
 	timing?: ResponseTiming;
+	/**
+	 * The protocol actually negotiated for this exchange - `"HTTP/2"`,
+	 * `"HTTP/1.1"`, etc, or `""` when the transfer never got far enough to
+	 * negotiate one (e.g. a connection error). This is a *display* string the
+	 * engine reports after the transfer (`response.http_version` /
+	 * `Response::http_version` in `engine/src/http/client.cpp`), not a member
+	 * of the `HttpVersion` request-side union (`auto` | `http1.1` | `http2`) -
+	 * do not unify the two types.
+	 */
+	httpVersion?: string;
 	/**
 	 * When this response arrived, ISO. Set on a live send only.
 	 *

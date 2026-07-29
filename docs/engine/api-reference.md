@@ -97,6 +97,14 @@ for `params` / `headers`, `""` for `description` and the two script fields,
 `{"mode":"none"}` for a request `body`, `0` for `order` on update, `true` for
 `followRedirects`, `10` for `maxRedirects`, and `false` for `isActive`.
 
+A request's `httpVersion` is the one field whose default is not fixed: absent
+or `null` seeds it from the live `defaultHttpVersion` config entry (`"auto"`
+unless changed), read fresh on every write rather than cached - see
+[POST /requests](#post-requests). Unlike every other field above, an
+unrecognized `httpVersion` value is rejected with a `400` rather than silently
+coerced, because a typo'd protocol silently running as HTTP/1.1 is the worst
+available outcome.
+
 A field that has **no** default cannot be reset, so `null` is a `400` on either
 verb rather than a silently discarded write. Those fields are a collection's
 `name`, an environment's `name`, and a request's `collectionId`, `name`,
@@ -177,7 +185,7 @@ lock file is released, logs are flushed, and the process exits.
 Get global configuration settings. Backed by the `config_entries` table. The
 response is an `entries` array; each entry carries its value plus the UI metadata
 the Settings panel renders (label, description, category, default, and optional
-min/max):
+min/max/options):
 
 ```json
 {
@@ -193,14 +201,36 @@ min/max):
       "min": "1",
       "max": "256",
       "updatedAt": 1234567890
+    },
+    {
+      "key": "defaultHttpVersion",
+      "value": "auto",
+      "type": "enum",
+      "label": "Default HTTP Version",
+      "description": "Protocol a newly created request starts with...",
+      "category": "general_engine",
+      "default": "auto",
+      "options": [
+        { "value": "auto", "label": "Auto" },
+        { "value": "http1.1", "label": "HTTP/1.x" },
+        { "value": "http2", "label": "HTTP/2" }
+      ],
+      "updatedAt": 1234567890
     }
   ]
 }
 ```
 
-`min` and `max` are present only for entries that declare them. `value` and
-`default` are always strings; `type` is one of `integer`, `number`, `boolean`,
-or `string`.
+`min` and `max` are present only for entries that declare them (numeric
+types). `options` is present only for `type: "enum"` entries - a JSON array of
+`{value, label}`, so the renderer can draw a picker without a second,
+hand-maintained value-to-label map. `value` and `default` are always strings;
+`type` is one of `integer`, `number`, `boolean`, `string`, or `enum`.
+
+`defaultHttpVersion` is the only seeded `enum` entry today: the protocol a
+**newly created** request starts with (see [POST /requests](#post-requests)).
+It is a write-time seed only - changing it never alters a request that already
+exists, and it is never consulted at execution time.
 
 The Settings panel renders entries dynamically, so new keys appear without app
 changes. These `observability` keys govern how much a run keeps - three of them
@@ -231,9 +261,10 @@ Update one or more configuration entries. Two body shapes are accepted:
 
 In both shapes, non-string values (numbers, booleans) are coerced to strings.
 Each key is validated against its registered `type` and, for `integer` / `number`
-entries, its `min`/`max` range; `boolean` entries must be `"true"` or `"false"`.
-Validation is all-or-nothing: if any key is unknown or out of range, nothing is
-applied and the response is `400` with the specific reason(s):
+entries, its `min`/`max` range; `boolean` entries must be `"true"` or `"false"`;
+`enum` entries (e.g. `defaultHttpVersion`) must equal one of that entry's stored
+`options` values. Validation is all-or-nothing: if any key is unknown or out of
+range, nothing is applied and the response is `400` with the specific reason(s):
 
 ```json
 { "error": { "code": "invalid_config", "message": "'workers' must be at most 256 (got 9999)" } }
@@ -367,16 +398,20 @@ field (ascending), the same contract `GET /collections` has for collections.
     "postRequestScript": "",
     "followRedirects": true,
     "maxRedirects": 10,
+    "httpVersion": "auto",
     "updatedAt": 1234567890,
     "createdAt": 1234567890
   }
 ]
 ```
 
-`followRedirects` / `maxRedirects` are the request's stored redirect policy.
-They are always present in the response: a request saved before these columns
-existed reads back as the engine defaults (`true` / `10`), which is the
-behaviour it already had.
+`followRedirects` / `maxRedirects` / `httpVersion` are the request's stored
+execution options. They are always present in the response: a request saved
+before these columns existed reads back as the engine defaults
+(`true` / `10` / `"auto"`), which is the behaviour it already had.
+`httpVersion` is `"auto"` | `"http1.1"` | `"http2"` - what was *requested*, not
+what was negotiated; see [POST /execute](#post-execute) for the negotiated
+value on a response.
 
 ### GET /requests/:id
 
@@ -407,6 +442,7 @@ entry.
   "postRequestScript": "",
   "followRedirects": true,
   "maxRedirects": 10,
+  "httpVersion": "auto",
   "createdAt": 1234567890,
   "updatedAt": 1234567890
 }
@@ -439,15 +475,19 @@ the null-vs-absent rule.
   "postRequestScript": "",           // Optional, JavaScript test script
   "order": 0,                        // Optional, position within the collection
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
-  "maxRedirects": 10                 // Optional, hops while following, clamped to 0..100. Default 10
+  "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
+  "httpVersion": "auto"              // Optional: "auto" | "http1.1" | "http2". Absent/null seeds
+                                      // from the "defaultHttpVersion" config entry
 }
 ```
 
 **Response:** The created request object.
 
 **Errors:** `409` if `id` already exists (use `PUT /requests/:id`); `400` if a
-required field is missing or `null`, on an unrecognized `method`, or on a
-`params` / `headers` entry that is not `{key: string, value: string, enabled: bool}`.
+required field is missing or `null`, on an unrecognized `method`, on a
+`params` / `headers` entry that is not `{key: string, value: string, enabled: bool}`,
+or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
+names the field and lists the valid values).
 
 ### PUT /requests/:id
 
@@ -460,11 +500,21 @@ untouched; sending `null` resets them to `true` / `10`. A non-boolean
 `followRedirects` or a non-integer `maxRedirects` is ignored rather than
 rejected. `maxRedirects` is clamped to `0..100` on the way in.
 
+**`httpVersion`** follows the same [null-vs-absent rule](#the-null-vs-absent-rule)
+as the fields above, but validates more strictly: absent keeps the stored
+value; explicit `null` resets it to the live `defaultHttpVersion` config value;
+a recognized string stores as given; anything else - an unrecognized string, or
+a non-string - is a `400` naming the field and the valid values, never silently
+coerced. Changing the global `defaultHttpVersion` afterward does not
+retroactively alter a request already saved; only an explicit `null` on this
+request re-seeds it.
+
 **Response:** The updated request object.
 
 **Errors:** `404` if the request does not exist; `400` on a `null`
-`collectionId` / `name` / `method` / `url`, an unrecognized `method`, or a
-malformed `params` / `headers` entry.
+`collectionId` / `name` / `method` / `url`, an unrecognized `method`, a
+malformed `params` / `headers` entry, or an `httpVersion` that is not
+`"auto"` / `"http1.1"` / `"http2"`.
 
 ### DELETE /requests/:id
 
@@ -868,7 +918,8 @@ If a non-interactive OAuth 2.0 token cannot be obtained, the engine still return
   "postRequestScript": "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));",
   "followRedirects": true,             // Optional, default true
   "maxRedirects": 10,                  // Optional, default 10
-  "verifySSL": true                    // Optional, default true
+  "verifySSL": true,                   // Optional, default true
+  "httpVersion": "auto"                // Optional: "auto" | "http1.1" | "http2", default "auto"
 }
 ```
 
@@ -911,6 +962,25 @@ clients send these explicitly for exactly that reason (see
 three fields with the same defaults, so a load test can be run under the policy
 the request was configured with.
 
+**Protocol.** `httpVersion` selects which HTTP version curl attempts:
+`"auto"` lets ALPN negotiate (curl's own default), `"http1.1"` forces
+HTTP/1.1, and `"http2"` attempts h2 over TLS and falls back to 1.1
+(`CURL_HTTP_VERSION_2TLS` - against a plain `http://` URL this silently
+negotiates 1.1, since h2 is not offered over cleartext). This is what was
+*requested*; the response's own `httpVersion` (below) reports what was
+actually negotiated, and the two can differ. The renderer always sends this
+field on every execute, never eliding it even when it equals the default - the
+same rule `followRedirects` follows, and for the same reason: an omitted field
+lets an engine-side default win silently. MCP's saved-request path
+(`run_collection_smoke`) does the same through `composeExecutionOptions`; its
+two ad-hoc tools (`run_request` / `start_load_run`) forward `httpVersion` only
+when the caller supplies it, since there is no saved request behind an ad-hoc
+call for an omission to silently override (see
+[mcp.md](mcp.md#request-composition)). It governs **both** Send and load test -
+`POST /requests`/`PUT /requests/:id` is where a request's protocol is actually
+stored (see [Requests](#requests) above); `POST /runs` (below) is simply the
+run-shaped way of stating the same field, not a second store.
+
 **Response:**
 ```json
 {
@@ -924,6 +994,7 @@ the request was configured with.
   "body": { "id": 1, "name": "John" },
   "bodyRaw": "{\"id\":1,\"name\":\"John\"}",
   "bodySize": 20,
+  "httpVersion": "HTTP/1.1",
   "timing": {
     "totalMs": 245.5,
     "wireMs": 245.1,
@@ -943,6 +1014,17 @@ the request was configured with.
   "consoleLogs": []
 }
 ```
+
+**`httpVersion` on the response** is the protocol actually **negotiated**
+(`CURLINFO_HTTP_VERSION` after the transfer), e.g. `"HTTP/1.1"` or `"HTTP/2"` -
+an *outcome*, not an echo of the request's own `httpVersion` field, and
+deliberately a different value space (see
+[requests.http_version](db-schema.md#requests) for the full distinction). It is
+`""`, not omitted, when nothing was negotiated (e.g. the connection never
+reached a server) - empty rather than guessing `"HTTP/1.1"` and presenting a
+guess as fact. The same field is stored in a design run's `trace_data.response`
+and reported back unchanged by `GET /runs/:runId` and
+`GET /runs/:runId/report`.
 
 **One timing convention.** The `timing` keys above are the same `*Ms` names the
 stored trace uses (`store_result` / `load_strategy` → `results[].trace` in
@@ -992,9 +1074,21 @@ Start a load test run (Vayu Mode).
   "environmentId": "env_1234567890",  // Optional
   "tests": "",               // Optional, deferred validation script
   "followRedirects": true,   // Optional, default true - see POST /execute
-  "maxRedirects": 10         // Optional, default 10
+  "maxRedirects": 10,        // Optional, default 10
+  "httpVersion": "auto"      // Optional: "auto" | "http1.1" | "http2", default "auto" - see POST /execute
 }
 ```
+
+**`httpVersion` on `POST /runs`** is not a per-run override of a stored
+request - it is simply how this endpoint states which protocol the run uses at
+all, the same way `method` and `url` state the rest of the request. The
+renderer always sends the saved request's own `httpVersion` here (there is no
+second, load-test-only protocol control in the app); MCP's ad-hoc
+`start_load_run` - which has no saved request behind it - is the caller that
+actually depends on this field to specify a protocol in the first place. An
+explicit `null` is treated exactly like an absent key. An unrecognized string
+is a `400` naming the field and the valid values, the same validation
+`POST /requests` uses.
 
 **Response:**
 ```json
@@ -1362,10 +1456,20 @@ stays cheap as history grows.
   (SQL `LIKE`). It searches the raw snapshot, so it may over-match JSON keys or
   structure - acceptable for a search box.
 
-**`summary`** carries exactly these six keys, each **omitted** when absent from
-the snapshot (a malformed snapshot yields an empty `summary`, never a `500`):
-`url`, `method`, `mode`, `duration`, `concurrency`, `comment`. The full snapshot
-stays available on `GET /runs/:runId`.
+**`summary`** carries exactly these nine keys: `url`, `method`, `mode`,
+`duration`, `concurrency`, `comment`, `followRedirects`, `maxRedirects`, and
+`httpVersion`. The first eight are each **omitted** when absent from the
+snapshot (a malformed snapshot yields an empty `summary`, never a `500`);
+`httpVersion` alone is always present. A raw `POST /runs` body of
+`"httpVersion": null` (erased before execution, so it behaves exactly like an
+absent key - see [POST /runs](#post-runs)) lands in the stored snapshot
+verbatim, and a run predating this field has no key at all; neither case
+recorded a protocol, so both normalize to the literal string `"auto"` rather
+than being omitted, which would misrepresent "nothing was recorded" as "we
+lost it". Do not read `"auto"` on an old run as the protocol it used: a load
+run stored before 0.11.0 hardcoded `CURL_HTTP_VERSION_2TLS`, and every run
+before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The full snapshot stays available on
+`GET /runs/:runId`.
 
 **Response (envelope):**
 ```json
@@ -1385,7 +1489,10 @@ stays available on `GET /runs/:runId`.
         "mode": "constant_rps",
         "duration": "60s",
         "concurrency": 100,
-        "comment": "nightly"
+        "comment": "nightly",
+        "followRedirects": true,
+        "maxRedirects": 10,
+        "httpVersion": "auto"
       }
     }
   ],
@@ -1525,7 +1632,14 @@ is the same either way** - only where the numbers are read from changed.
     "endTime": 1234567950,
     "requestUrl": "https://api.example.com/users",
     "requestMethod": "GET",
-    "configuration": { "...": "config snapshot" }
+    "configuration": {
+      "mode": "constant_rps",
+      "duration": "60s",
+      "concurrency": 100,
+      "followRedirects": true,
+      "maxRedirects": 10,
+      "httpVersion": "auto"
+    }
   },
   "summary": {
     "totalRequests": 6000,
@@ -1571,6 +1685,13 @@ is the same either way** - only where the numbers are read from changed.
 `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the persisted
 per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percentiles) is
 **perceived** latency.
+
+`metadata.configuration` carries the load-test tuning knobs present in the
+snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,
+`rampUpDuration`, `timeout`, `comment`, `followRedirects`, `maxRedirects` -
+each omitted when absent) plus `httpVersion`, which is always present with the
+same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see
+above). `rps` in the raw snapshot is renamed to `targetRps` here.
 
 ### DELETE /runs/:runId
 

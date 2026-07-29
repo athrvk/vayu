@@ -119,6 +119,42 @@ TEST_F (EventLoopTest, SubmitSingleRequest) {
     EXPECT_EQ (result_holder.value ().status_code, 200);
 }
 
+// extract_response (curl_utils.cpp) is the event-loop's curl driver - the
+// separate one from client.cpp's Client::send, covered by
+// HttpClientTest.ReportsNegotiatedHttpVersion. Same real transfer, same
+// loopback plain-HTTP mock, so the one negotiable outcome is HTTP/1.1; this
+// exercises the CURLINFO_HTTP_VERSION read on the event-loop path
+// specifically, since the two drivers read it independently.
+TEST_F (EventLoopTest, ReportsNegotiatedHttpVersion) {
+    vayu::http::EventLoop loop;
+    loop.start ();
+
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = test_url;
+
+    std::atomic<bool> completed{ false };
+    vayu::Result<vayu::Response> result_holder{ vayu::Error{
+    vayu::ErrorCode::InternalError, "Not set" } };
+
+    loop.submit (request, [&] (size_t id, vayu::Result<vayu::Response> result) {
+        result_holder = std::move (result);
+        completed     = true;
+    });
+
+    auto start = std::chrono::steady_clock::now ();
+    while (!completed &&
+    std::chrono::steady_clock::now () - start < std::chrono::seconds (30)) {
+        std::this_thread::sleep_for (std::chrono::milliseconds (100));
+    }
+
+    loop.stop ();
+
+    ASSERT_TRUE (completed);
+    ASSERT_TRUE (result_holder.is_ok ());
+    EXPECT_EQ (result_holder.value ().http_version, "HTTP/1.1");
+}
+
 TEST_F (EventLoopTest, SubmitAsyncWithFuture) {
     vayu::http::EventLoop loop;
     loop.start ();

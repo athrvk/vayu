@@ -16,7 +16,11 @@
 
 import { describe, expect, it } from "vitest";
 import { RequestTransformer } from "./request-transformer";
-import { DEFAULT_FOLLOW_REDIRECTS, DEFAULT_MAX_REDIRECTS } from "@/constants/request";
+import {
+	DEFAULT_FOLLOW_REDIRECTS,
+	DEFAULT_HTTP_VERSION,
+	DEFAULT_MAX_REDIRECTS,
+} from "@/constants/request";
 
 const base = {
 	id: "req_1",
@@ -62,5 +66,29 @@ describe("RequestTransformer redirect policy", () => {
 	it("falls back when the stored value is not a number", () => {
 		const req = RequestTransformer.toFrontend({ ...base, maxRedirects: "ten" });
 		expect(req.maxRedirects).toBe(DEFAULT_MAX_REDIRECTS);
+	});
+});
+
+/**
+ * `httpVersion` is a new column, same story as the redirect policy above: a
+ * row written before this feature existed - or by a newer engine with a
+ * protocol this app does not know about - must not surface as a value the
+ * request-builder can't render or send back unchanged.
+ */
+describe("RequestTransformer httpVersion coercion", () => {
+	it("keeps a valid stored value", () => {
+		const req = RequestTransformer.toFrontend({ ...base, httpVersion: "http2" });
+		expect(req.httpVersion).toBe("http2");
+	});
+
+	it("falls back to auto for a value outside the domain", () => {
+		// A row written by a newer engine version, or a corrupted one.
+		const req = RequestTransformer.toFrontend({ ...base, httpVersion: "http3" });
+		expect(req.httpVersion).toBe(DEFAULT_HTTP_VERSION);
+	});
+
+	it("falls back to auto when the field is absent", () => {
+		const req = RequestTransformer.toFrontend({ ...base });
+		expect(req.httpVersion).toBe(DEFAULT_HTTP_VERSION);
 	});
 });

@@ -47,6 +47,72 @@ int resolve_request_timeout_ms (const nlohmann::json& json, int configured_defau
     return configured_default;
 }
 
+// Validate and normalize the optional "httpVersion" on a POST /runs body.
+// Absent leaves `json` untouched: the request's own httpVersion field, read
+// like any other field by build_request/deserialize_request further down the
+// pipeline, decides. This is NOT a per-run override - the request builder's
+// Settings tab holds the single protocol control and it governs Send and load
+// test alike. The field exists on this payload because that is how a run
+// states its protocol at all, the same way it states its redirect policy, and
+// because MCP's ad-hoc runs have no saved request to read one from. It never
+// touches the stored request - `json` here is the handler's local copy of the
+// request body, not anything persisted.
+//
+// Present is validated through apply_http_version_field/http_version_valid_list
+// (the same helpers Task 5's CRUD routes use - see routes.hpp), so a typo'd
+// protocol name is a 400 naming the field and the valid values, rather than
+// deserialize_request's lenient string-to-Auto coercion, which exists to keep
+// a corrupted *stored* row executable and is the wrong behavior for a
+// hand-crafted /runs body.
+//
+// An explicit `null` is erased, making it behave exactly like an absent key,
+// so this function has two outcomes rather than three.
+//
+// Be precise about why, because the obvious justification is wrong: there is
+// no stored-request lookup in this pipeline. `build_request` deserializes the
+// same POST body this function mutates, so the only `httpVersion` in play is
+// the one the client sent (clients send the whole request here, the same way
+// they do followRedirects/maxRedirects). The `db.get_request` calls further
+// down this file read `collection_id` to persist collection variables; they
+// never read `http_version`.
+//
+// So today, erasing and writing the seed are indistinguishable: both end at
+// `Auto`, because `Request::http_version`'s default member initializer is
+// `DEFAULT_HTTP_VERSION` - the very value the seed would have written. That
+// equivalence is incidental, and erasing is what keeps it from becoming a bug.
+// The moment a config-backed default is resolved at this layer, writing a seed
+// would start pinning a concrete value onto a run that asked for none, while
+// erasing keeps deferring to whatever decides later.
+//
+// This is also why CLAUDE.md's null-means-reset-to-default rule does not apply:
+// that rule resets a *stored* field on POST/PUT of a resource, and a run has no
+// stored field to reset.
+//
+// The validated value is written back onto `json["httpVersion"]` so it reaches
+// deserialize_request as a concrete string; `null` would otherwise hit
+// `.get<std::string>()` there and throw.
+std::optional<std::pair<int, nlohmann::json>> normalize_run_http_version (
+nlohmann::json& json) {
+    if (!json.contains ("httpVersion")) {
+        return std::nullopt;
+    }
+    if (json["httpVersion"].is_null ()) {
+        json.erase ("httpVersion");
+        return std::nullopt;
+    }
+    // Both early returns above mean the key is present and non-null by now, so
+    // the two branches of apply_http_version_field that consume `seed` are
+    // unreachable from here. The argument is required by the signature; it does
+    // not select behaviour at this call site.
+    std::string version;
+    if (auto err = apply_http_version_field (json, "httpVersion", version,
+        vayu::to_string (vayu::DEFAULT_HTTP_VERSION), /*is_create=*/false)) {
+        return err;
+    }
+    json["httpVersion"] = version;
+    return std::nullopt;
+}
+
 // Build the trace_data JSON a design run persists for its single exchange.
 // Non-static (tested by execution_trace_test.cpp): the stored trace is a
 // contract - restore-response.ts rebuilds the response pane from it after a
@@ -68,8 +134,11 @@ const vayu::Response& response) {
     }
 
     if (!response.has_error ()) {
+        // "" when nothing was negotiated, not omitted - same convention as
+        // serialize(Response) in json.cpp, so restore-response.ts can't
+        // confuse "empty" with "this key doesn't exist on a stored trace".
         trace["response"] = { { "headers", response.headers },
-            { "body", response.body } };
+            { "body", response.body }, { "httpVersion", response.http_version } };
     } else {
         trace["error_type"]    = to_string (response.error_code);
         trace["error_message"] = response.error_message;
@@ -628,6 +697,19 @@ void register_execution_routes (RouteContext& ctx) {
             { "error", { { "code", "invalid_run_config" }, { "message", *invalid } } } }
             .dump (),
             "application/json");
+            return;
+        }
+
+        // Validate/normalize the body's httpVersion, beside the config check
+        // above and for the same reason: both run before run.config_snapshot is
+        // built, so a rejected request leaves no row behind, and the snapshot
+        // still reflects the raw client body (sanitize_config_snapshot reads
+        // req.body directly, not this normalized `json`).
+        if (auto err = normalize_run_http_version (json)) {
+            vayu::utils::log_warning (
+            "POST /runs - Invalid httpVersion: " + err->second.dump ());
+            res.status = err->first;
+            res.set_content (err->second.dump (), "application/json");
             return;
         }
 

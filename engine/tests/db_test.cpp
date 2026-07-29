@@ -327,6 +327,35 @@ TEST_F (DatabaseTest, SeedRemovesRetiredRequestBatchSizeEntry) {
     EXPECT_FALSE (db.get_config_entry ("requestBatchSize").has_value ());
 }
 
+// The "options" column is new (Task 4); an existing on-disk database predates
+// it, so sync_schema must add the nullable column without a migration, and
+// re-seeding on an already-upgraded row must both preserve the user's chosen
+// value and backfill the options metadata that older row would be missing.
+// Simulates the upgrade the same way SeedRemovesRetiredRequestBatchSizeEntry
+// does: plant a pre-Task-4-shaped row (no options), then re-run the seed.
+TEST_F (DatabaseTest, SeedBackfillsOptionsOnUpgradeWithoutLosingUserValue) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto seeded = db.get_config_entry ("defaultHttpVersion");
+    ASSERT_TRUE (seeded.has_value ());
+    ASSERT_TRUE (seeded->options.has_value ());
+
+    ConfigEntry upgraded_row = *seeded;
+    upgraded_row.value       = "http2";  // user's choice, must survive re-seed
+    upgraded_row.options = std::nullopt; // pre-Task-4 row never had this column
+    db.save_config_entry (upgraded_row);
+    ASSERT_FALSE (db.get_config_entry ("defaultHttpVersion")->options.has_value ());
+
+    db.seed_default_config ();
+
+    auto after = db.get_config_entry ("defaultHttpVersion");
+    ASSERT_TRUE (after.has_value ());
+    EXPECT_EQ (after->value, "http2");         // user's value preserved
+    ASSERT_TRUE (after->options.has_value ()); // metadata backfilled
+    EXPECT_EQ (*after->options, *seeded->options);
+}
+
 // ==================== Environment Delete Tests ====================
 
 TEST_F (DatabaseTest, DeletesEnvironment) {
@@ -453,6 +482,102 @@ TEST_F (DatabaseTest, RecreatesIndexesOnExistingDatabase) {
         EXPECT_TRUE (recreated.contains (expected))
         << "sync_schema did not recreate: " << expected;
     }
+}
+
+// requests.http_version (Task 3) is NOT NULL with a default_value specifically
+// so sync_schema can ALTER TABLE ADD COLUMN it onto a requests table that
+// predates the column, rather than dropping and recreating the table (which
+// would lose every saved request). Simulates that pre-existing database by
+// dropping the column back off a freshly-created one, the same way
+// RecreatesIndexesOnExistingDatabase simulates a pre-index database.
+TEST_F (DatabaseTest, MigratesHttpVersionColumnOntoAPreExistingRequestsTable) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+
+        Collection col;
+        col.id    = "col_pre_migration";
+        col.name  = "Pre-migration collection";
+        col.order = 0;
+        db.create_collection (col);
+
+        Request r;
+        r.id            = "req_pre_migration";
+        r.collection_id = "col_pre_migration";
+        r.name          = "Pre-migration request";
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test/pre-migration";
+        r.order         = 0;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+    }
+
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+        char* err = nullptr;
+        ASSERT_EQ (sqlite3_exec (handle, "ALTER TABLE requests DROP COLUMN http_version",
+                   nullptr, nullptr, &err),
+        SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+        sqlite3_close (handle);
+    }
+
+    // Guard the guard: if the drop silently did nothing, the re-open
+    // assertions below would pass without proving anything.
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+        sqlite3_stmt* stmt = nullptr;
+        ASSERT_EQ (sqlite3_prepare_v2 (handle, "PRAGMA table_info(requests)", -1, &stmt, nullptr),
+        SQLITE_OK);
+        bool has_column = false;
+        while (sqlite3_step (stmt) == SQLITE_ROW) {
+            const auto* col_name = sqlite3_column_text (stmt, 1);
+            if (col_name != nullptr &&
+            std::string (reinterpret_cast<const char*> (col_name)) == "http_version") {
+                has_column = true;
+            }
+        }
+        sqlite3_finalize (stmt);
+        sqlite3_close (handle);
+        ASSERT_FALSE (has_column) << "drop did not remove http_version";
+    }
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    // The column is back, NOT NULL-safe, and the pre-existing row survived
+    // with its data intact and its missing http_version backfilled to auto -
+    // not silently dropped and recreated empty.
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (TEST_DB_PATH.c_str (), &handle), SQLITE_OK);
+
+    sqlite3_stmt* count_stmt = nullptr;
+    ASSERT_EQ (sqlite3_prepare_v2 (handle, "SELECT COUNT(*) FROM requests", -1,
+               &count_stmt, nullptr),
+    SQLITE_OK);
+    ASSERT_EQ (sqlite3_step (count_stmt), SQLITE_ROW);
+    EXPECT_EQ (sqlite3_column_int (count_stmt, 0), 1)
+    << "pre-existing row did not survive the migration";
+    sqlite3_finalize (count_stmt);
+
+    sqlite3_stmt* row_stmt = nullptr;
+    ASSERT_EQ (sqlite3_prepare_v2 (handle, "SELECT name, http_version FROM requests WHERE id = 'req_pre_migration'",
+               -1, &row_stmt, nullptr),
+    SQLITE_OK);
+    ASSERT_EQ (sqlite3_step (row_stmt), SQLITE_ROW);
+    EXPECT_EQ (
+    std::string (reinterpret_cast<const char*> (sqlite3_column_text (row_stmt, 0))),
+    "Pre-migration request");
+    EXPECT_EQ (
+    std::string (reinterpret_cast<const char*> (sqlite3_column_text (row_stmt, 1))), "auto");
+    sqlite3_finalize (row_stmt);
+    sqlite3_close (handle);
 }
 
 // ============================================================================

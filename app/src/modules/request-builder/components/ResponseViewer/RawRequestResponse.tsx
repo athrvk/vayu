@@ -57,6 +57,12 @@ export interface RawRequestResponseProps {
 		statusText: string;
 		headers: Record<string, string>;
 		body: string;
+		/**
+		 * The negotiated protocol - `ResponseState.httpVersion`. See
+		 * `buildRawResponse`'s doc comment for the display-string contract and
+		 * what an omitted or empty value falls back to.
+		 */
+		httpVersion?: string;
 	};
 }
 
@@ -65,7 +71,8 @@ export default function RawRequestResponse({ rawRequest, response }: RawRequestR
 		response.status,
 		response.statusText,
 		response.headers,
-		response.body
+		response.body,
+		response.httpVersion
 	);
 
 	const received = markLines(rawResponse, RECEIVED_MARKER);

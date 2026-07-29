@@ -196,7 +196,8 @@ Set `VCPKG_ROOT` environment variable or install vcpkg in a standard location.
 
 ### Linker Errors
 
-- Ensure all vcpkg dependencies are installed: `vcpkg install curl nlohmann-json cpp-httplib sqlite3 sqlite-orm gtest`
+- Ensure all vcpkg dependencies are installed: `vcpkg install curl[http2] nlohmann-json cpp-httplib sqlite3 sqlite-orm gtest`
+  (the `http2` feature is required - without it libcurl is built without nghttp2 and the HTTP/2 support test fails)
 - On Windows, ensure Visual Studio C++ tools are installed
 
 ### Build Script Issues
