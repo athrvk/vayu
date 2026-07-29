@@ -12,6 +12,7 @@
 	--color-popover-foreground: hsl(var(--popover-foreground));
 	--color-primary: hsl(var(--primary));
 	--color-primary-fill: hsl(var(--primary-fill));
+	--color-primary-text: hsl(var(--primary-text));
 	--color-primary-foreground: hsl(var(--primary-foreground));
 	--color-secondary: hsl(var(--secondary));
 	--color-secondary-foreground: hsl(var(--secondary-foreground));
@@ -153,12 +154,35 @@
 		--popover: 0 0% 100%;
 		--popover-foreground: 240 6% 10%;
 
-		/* Primary - Sunset orange (default). --primary is the accent (text/border/
-		 * tints); --primary-fill is the button-background value (white labels).
-		 * They match in light mode and diverge in dark (see .dark). */
+		/* Primary. --primary is the accent (text/border/tints); --primary-fill is
+		 * the button-background value (white labels). They match in light mode
+		 * and diverge in dark (see .dark). The values here are Sunset; the
+		 * default scheme is Ocean, applied by [data-color-scheme] below. */
 		--primary: 24 90% 46%;
 		--primary-fill: 24 90% 46%;
 		--primary-foreground: 0 0% 100%;
+
+		/*
+		 * The accent when the accent *is* the label, and has to separate from
+		 * --muted-foreground beside it.
+		 *
+		 * That separation is carried almost entirely by saturation, not
+		 * lightness: accent text and muted text sit within a 1.01-1.56 contrast
+		 * ratio of each other in every scheme, so the eye reads "coloured vs
+		 * grey". With 55-95% saturation against an inactive 4-5% that is plenty,
+		 * which is why this defaults to --primary and seven of the eight schemes
+		 * never override it.
+		 *
+		 * `graphite` does. It is the only desaturated scheme (S=12%/15%), so it
+		 * has no hue to spend and must separate by lightness instead - the same
+		 * bind --primary-fill exists to solve, answered the same way. Retuning
+		 * its --primary is not an option: that also paints its buttons, ring and
+		 * --chart-1.
+		 *
+		 * Declared once here rather than per theme: `.dark` sits on the same
+		 * element as `:root`, so var(--primary) already resolves per theme.
+		 */
+		--primary-text: var(--primary);
 
 		/* Secondary */
 		--secondary: 240 5% 94%;
@@ -199,14 +223,23 @@
 		--destructive-foreground: 0 0% 98%;
 		--destructive-text: 0 60% 48%; /* muted rose - accessible text on light bg, ~4.8:1 */
 
-		/* Charts - cohesive categorical set: accent + 4 evenly-spaced hues,
+		/* Charts - cohesive categorical set: accent + 5 evenly-spaced hues,
 		 * consistent with dark mode (tuned only in lightness). chart-1 tracks
-		 * the active accent. */
+		 * the active accent.
+		 *
+		 * `--chart-6` exists because the response timing waterfall needs five
+		 * series at once and the set offered four fixed hues, so two phases had
+		 * been reaching outside it - one to `--primary` and one to `--success`.
+		 * Under the green accent those two land on the same hue (142) three
+		 * points of lightness apart, which is two of five phases rendered the
+		 * same colour. Moss sits in the widest gap in the ring (38 -> 172), 67
+		 * degrees from its nearest neighbour. */
 		--chart-1: 24 90% 46%;
 		--chart-2: 172 66% 38%; /* teal */
 		--chart-3: 258 55% 55%; /* violet */
 		--chart-4: 38 88% 48%; /* amber */
 		--chart-5: 340 72% 50%; /* rose */
+		--chart-6: 105 58% 34%; /* moss - the fifth fixed hue, see below */
 
 		/* HTTP method colors (light).
 		 *
@@ -338,6 +371,64 @@
 
 		/* Geometry */
 		--radius: 0.375rem;
+
+		/*
+		 * Height of the Dock, the footer status strip.
+		 *
+		 * A token rather than a bare `h-8` because a second element has to know
+		 * it: the toast viewport is `position: fixed`, so it anchors to the window
+		 * rather than to the layout and has to subtract this height by hand or it
+		 * lands on top of the strip. It did - toasts covered the lower half of the
+		 * Dock, "Connected" and the version string included, with nothing in
+		 * either file pointing at the other. Theme-independent, so declared once.
+		 */
+		--dock-height: 2rem;
+
+		/*
+		 * Height of the TitleBar, the strip holding the document tabs.
+		 *
+		 * Same reason as --dock-height, at the other edge. The toast stack can
+		 * now be anchored to the top of the window, and `position: fixed` means
+		 * it would sit on top of the tab strip unless it subtracts this. Two
+		 * files had the 38px independently - TitleBar.tsx and TITLEBAR_HEIGHT in
+		 * electron/constants.ts - and the toast viewport would have been a third.
+		 * Theme-independent, so declared once.
+		 *
+		 * The Electron constant cannot read a CSS variable, so it stays the
+		 * source of truth for the window frame; this mirrors it for the renderer,
+		 * and `toast-position.test.tsx` holds the two together.
+		 */
+		--titlebar-height: 32px;
+	}
+
+	/*
+	 * macOS runs a 28px title bar as its own standard, and 28 still clears the
+	 * 12px traffic lights with 8px of margin. Windows cannot follow it down: its
+	 * caption buttons are drawn by the OS at 46x32, so 32 is a floor there, not
+	 * a preference.
+	 *
+	 * `data-platform` is stamped before first paint by the inline script in
+	 * index.html, so the bar is never briefly the wrong height. The matching
+	 * numbers live in electron/constants.ts, and titlebar-height.test.ts holds
+	 * the two files together - the renderer and main tsconfigs share no module
+	 * graph, so nothing else can.
+	 */
+	:root[data-platform="mac"] {
+		/* Same 32px as the default today. Declared anyway: the height is a
+		 * per-platform value by design (the Electron map is the source of truth,
+		 * and `titlebar-height.test.ts` checks this selector against `darwin`), so
+		 * dropping it would make the two files silently disagree the moment the
+		 * platforms diverge again. */
+		--titlebar-height: 32px;
+		/*
+		 * Width reserved for the traffic lights, so the first tab does not sit
+		 * under them. A 20px lead plus three 12px buttons on a 20px pitch ends at
+		 * 84px; 104 leaves a 20px gutter before the first tab. At 80 it was 16px,
+		 * which read as the lights being crammed against the tab strip. Mirrors TRAFFIC_LIGHT_INSET in
+		 * electron/constants.ts, which positions the buttons themselves -
+		 * titlebar-height.test.ts holds the two together.
+		 */
+		--traffic-light-inset: 104px;
 	}
 
 	/* ── Accent color schemes (light mode) ── */
@@ -428,6 +519,12 @@
 		--ring: 220 12% 46%;
 		--variable: 220 12% 46%;
 		--chart-1: 220 12% 46%;
+		/* The only scheme that overrides --primary-text - see the note on the
+		 * token in :root. At 46% this measured 1.14 against --muted-foreground,
+		 * i.e. the same brightness, with no saturation to tell them apart; 26%
+		 * takes it to 1.86, and the label's own contrast on --card from 4.94 to
+		 * 10.46. */
+		--primary-text: 220 12% 26%;
 	}
 
 	/* ── Dark mode ── */
@@ -499,6 +596,7 @@
 		--chart-3: 258 78% 72%; /* violet */
 		--chart-4: 38 90% 60%; /* amber */
 		--chart-5: 340 74% 62%; /* rose */
+		--chart-6: 105 52% 50%; /* moss */
 
 		/* Variable highlight */
 		--variable: 24 95% 58%;
@@ -627,6 +725,9 @@
 		--ring: 220 15% 72%;
 		--variable: 220 15% 72%;
 		--chart-1: 220 15% 72%;
+		/* 72% measured 1.23 against --muted-foreground; 86% takes it to 1.81,
+		 * and the label on --card from 8.31 to 12.29. */
+		--primary-text: 220 15% 86%;
 	}
 }
 
@@ -727,6 +828,13 @@
 	 * Rows inside a clipping panel: an outset ring is cut off by the ancestor's
 	 * overflow, so tuck it inward. Put .panel-clip on the element carrying the
 	 * overflow-* and every focusable descendant inherits this.
+	 *
+	 * Note the element list is *narrower* than the baseline's above: it omits
+	 * a[href], input, select, textarea and summary, so .panel-clip does nothing
+	 * for those. Prefer clearance for a control that also appears outside a
+	 * clipping panel - tucking the ring in would give the same control two
+	 * different looks depending on the screen (see the checkbox note in
+	 * docs/design-system.md).
 	 */
 	:where(.panel-clip)
 		:where(button, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
@@ -877,6 +985,21 @@
 	 * `--rule` is a variable, each theme gets the token that lands on ~1.29 -
 	 * which is the target the design system already states.
 	 */
+	/*
+	 * A label that is a URL path, cut from the left.
+	 *
+	 * `/v1/orders` and `/v1/orders/42` differ only in the part a normal ellipsis
+	 * removes first, so a right-hand cut turns two different tabs into the same
+	 * `/v1/or`. `direction: rtl` moves the ellipsis to the head;
+	 * `unicode-bidi: plaintext` stops the leading "/" being reordered to the end,
+	 * which is what makes the naive version render "v1/orders/" instead.
+	 */
+	.tab-path {
+		direction: rtl;
+		text-align: left;
+		unicode-bidi: plaintext;
+	}
+
 	.surface-card {
 		background-color: hsl(var(--card));
 		--rule: hsl(var(--border));
@@ -1002,6 +1125,28 @@
 }
 
 @layer utilities {
+	/*
+	 * A row in a long list that the browser may skip laying out while it is off
+	 * screen.
+	 *
+	 * Console output is unbounded - `script_engine.cpp` pushes every
+	 * `console.log` line into a vector with no cap - so a script with a loop can
+	 * produce a hundred thousand of them, and the user asked for every one. The
+	 * answer is not to cap what they get; it is to stop paying layout and paint
+	 * for rows nobody is looking at.
+	 *
+	 * `contain-intrinsic-size` is the placeholder height a skipped row reports,
+	 * which is what keeps the scrollbar from jumping as rows come into view. The
+	 * `auto` keyword means "remember the real height once measured", so a wrapped
+	 * line settles after its first appearance instead of re-estimating forever.
+	 *
+	 * Chromium-only, which is fine: this ships in Electron.
+	 */
+	.skip-offscreen {
+		content-visibility: auto;
+		contain-intrinsic-size: auto 1.25rem;
+	}
+
 	.font-code {
 		font-family: "JetBrains Mono", "Consolas", "Monaco", monospace;
 	}

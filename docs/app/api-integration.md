@@ -103,12 +103,34 @@ apiService.getConfig(): Promise<EngineConfig>
 apiService.updateConfig(config): Promise<EngineConfig>
 ```
 
+#### Create vs update
+
+For collections, requests and environments the engine splits the write verbs:
+`POST /<resource>` creates and answers a known `id` with `409`;
+`PUT /<resource>/:id` updates and answers an unknown `id` with `404`. They are
+not interchangeable, so `apiService` keeps one method per verb:
+
+- `createX(data)` posts the whole object to the collection path. `data` never
+  carries an `id` - the engine generates every one. (Import used to be the
+  exception, pre-assigning ids to wire `parentId` / `collectionId` across a tree
+  before anything was persisted; it sends one `applyImport` call now, see below.)
+- `updateX(data)` takes `data.id`, puts it in the **path**, and sends the rest
+  of the object as a merge-patch body - an omitted field keeps its stored value,
+  an explicit `null` resets it to the default. The `id` is not repeated in the
+  body.
+
+The full contract, including the null-vs-absent table and which fields have no
+default, is in [engine/api-reference.md](../engine/api-reference.md) under
+"Resource writes". `src/services/api.write-verbs.test.ts` pins the method and
+path of every one of these calls - a regression here is invisible at every other
+layer, because the payload shape does not change.
+
 #### Collections
 
 ```typescript
 apiService.listCollections(): Promise<Collection[]>
-apiService.createCollection(data): Promise<Collection>
-apiService.updateCollection(data): Promise<Collection>
+apiService.createCollection(data): Promise<Collection>   // POST /collections
+apiService.updateCollection(data): Promise<Collection>   // PUT  /collections/:id
 apiService.deleteCollection(id): Promise<void>
 ```
 
@@ -117,8 +139,8 @@ apiService.deleteCollection(id): Promise<void>
 ```typescript
 apiService.listRequests(params?): Promise<Request[]>
 apiService.getRequest(id): Promise<Request>
-apiService.createRequest(data): Promise<Request>
-apiService.updateRequest(data): Promise<Request>
+apiService.createRequest(data): Promise<Request>         // POST /requests
+apiService.updateRequest(data): Promise<Request>         // PUT  /requests/:id
 apiService.deleteRequest(id): Promise<void>
 ```
 
@@ -127,8 +149,8 @@ apiService.deleteRequest(id): Promise<void>
 ```typescript
 apiService.listEnvironments(): Promise<Environment[]>
 apiService.getEnvironment(id): Promise<Environment>
-apiService.createEnvironment(data): Promise<Environment>
-apiService.updateEnvironment(data): Promise<Environment>
+apiService.createEnvironment(data): Promise<Environment> // POST /environments
+apiService.updateEnvironment(data): Promise<Environment> // PUT  /environments/:id
 apiService.deleteEnvironment(id): Promise<void>
 ```
 
@@ -138,6 +160,23 @@ apiService.deleteEnvironment(id): Promise<void>
 apiService.getGlobals(): Promise<GlobalVariables>
 apiService.updateGlobals(variables): Promise<GlobalVariables>
 ```
+
+#### Import
+
+```typescript
+apiService.importFetch(url): Promise<ImportFetchResponse>          // POST /import/fetch
+apiService.applyImport(payload): Promise<ImportApplyResponse>      // POST /import/apply
+```
+
+`applyImport` sends a whole parsed import - collections, requests, environments -
+in one atomic call. Items reference each other by opaque `tempId`s and the engine
+returns the temp-id -> real-id `idMap`; a rejected payload persisted nothing, so
+there is nothing to roll back. Imported **globals** are not in this payload: they
+are a singleton written through `updateGlobals` after the apply succeeds. See
+[import-collections/README.md](./import-collections/README.md#3-persist---orchestratorts)
+for the pipeline and
+[engine/api-reference.md](../engine/api-reference.md#post-importapply) for the
+contract.
 
 #### Execution
 
@@ -149,12 +188,25 @@ apiService.startLoadTest(data): Promise<StartLoadTestResponse>
 #### Run Management
 
 ```typescript
-apiService.listRuns(): Promise<Run[]>
-apiService.getRun(id): Promise<Run>
+// Paginated, filtered history (newest first). Rows carry a compact `summary`
+// (url/method/mode/duration/concurrency/comment), not the full configSnapshot.
+apiService.listRuns(params?: RunListParams): Promise<RunListResponse>
+// Every page as a flat list (Settings' count + clear).
+apiService.listAllRuns(params?): Promise<Run[]>
+apiService.getRun(id): Promise<Run>            // full configSnapshot
 apiService.getRunReport(id): Promise<RunReport>
 apiService.stopRun(id): Promise<StopRunResponse>
 apiService.deleteRun(id): Promise<void>
 ```
+
+`deleteRun` on a run that is still in progress stops it engine-side first, so it
+takes as long as the stop does, and it **rejects with a 409** if the run's worker
+has not finished writing in time - nothing is deleted in that case. Callers must
+handle that rejection: `HistoryList` turns it into a toast telling the user to
+retry, and Settings' *Clear run history* already counts per-run failures through
+`Promise.allSettled`. The engine's error body is a bare `{"error": "..."}`
+string, which `httpClient` cannot read into `ApiError.message` (it looks for
+`error.message`), so the wording is the caller's, keyed off `statusCode`.
 
 #### Scripting
 
@@ -192,13 +244,13 @@ Server-Sent Events client for real-time load test metrics streaming.
 
 ### Features
 
-- **Single endpoint**: Connects to `/metrics/live/:runId`. The engine retains a replayable tick
-  topic, so the client connects immediately after `POST /run` with no attach race - it replays
+- **Single endpoint**: Connects to `/runs/:runId/live`. The engine retains a replayable tick
+  topic, so the client connects immediately after `POST /runs` with no attach race - it replays
   from offset 0 and tails to the `complete` event (even for sub-second runs).
 - **No custom reconnect loop**: The engine sends an explicit `complete` event at normal run end,
   so a `CLOSED` readyState is treated as terminal. Transient `CONNECTING` errors are left to the
   browser's built-in `EventSource` retry. At run end the app converges on the stored report
-  (`GET /run/:id/report`) rather than reconnecting to the stream.
+  (`GET /runs/:id/report`) rather than reconnecting to the stream.
 - **Event Handling**: `metrics` events, `complete` event, `error` handling
 - **Metrics Parsing**: `mapSseMetrics()` transforms the engine's camelCase blob to the frontend
   `LoadTestMetrics` shape (includes drops, queue-wait, percentiles, bytes, status-code map)
@@ -245,8 +297,8 @@ export const API_ENDPOINTS = {
   REQUEST_BY_ID: (id: string) => `/requests/${id}`,
   
   // Execution
-  EXECUTE_REQUEST: "/request",
-  START_LOAD_TEST: "/run",
+  EXECUTE_REQUEST: "/execute",
+  START_LOAD_TEST: "/runs",
 
   // OAuth 2.0
   OAUTH2_TOKEN: "/oauth2/token",
@@ -256,16 +308,16 @@ export const API_ENDPOINTS = {
   
   // Runs
   RUNS: "/runs",
-  RUN_BY_ID: (id: string) => `/run/${id}`,
-  RUN_REPORT: (id: string) => `/run/${id}/report`,
-  RUN_STOP: (id: string) => `/run/${id}/stop`,
+  RUN_BY_ID: (id: string) => `/runs/${id}`,
+  RUN_REPORT: (id: string) => `/runs/${id}/report`,
+  RUN_STOP: (id: string) => `/runs/${id}/stop`,
   
   // Real-time stats (SSE)
-  METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`,
+  METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,
 
   // Time-series metrics (JSON, paginated) - used to hydrate history
   STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0) =>
-    `/stats/${runId}?format=json&limit=${limit}&offset=${offset}`,
+    `/runs/${runId}/metrics?limit=${limit}&offset=${offset}`,
 };
 ```
 
@@ -279,7 +331,7 @@ export const API_ENDPOINTS = {
 1. **User Action**: Clicks "Send" in RequestBuilder
 2. **Variable Resolution**: `useVariableResolver()` resolves `{{variables}}` in URL, headers, body
 3. **Request Transformation**: Frontend format → backend format
-4. **API Call**: `apiService.executeRequest()` → `POST /request`
+4. **API Call**: `apiService.executeRequest()` → `POST /execute`
 5. **Response Transformation**: Backend format → frontend format
 6. **Display**: Response shown in ResponseViewer
 
@@ -295,23 +347,44 @@ await apiService.executeRequest({
   method: "GET",
   url: "https://api.example.com/users",
   headers: { "Authorization": "Bearer {{token}}" },
-  preRequestScript: "console.log('Pre-request');",
-  postRequestScript: "pm.test('Status 200', () => pm.expect(pm.response.code).to.equal(200));",
+  preRequestScripts: [
+    { origin: "request", id: "req_123", script: "console.log('Pre-request');" }
+  ],
+  postRequestScripts: [
+    {
+      origin: "request",
+      id: "req_123",
+      script: "pm.test('Status 200', () => pm.expect(pm.response.code).to.equal(200));"
+    }
+  ],
   followRedirects: true,
   maxRedirects: 10,
+  httpVersion: "auto",
   requestId: "req_123",
   environmentId: "env_456"
 });
 ```
 
-**Redirect policy is always sent, never elided.** `followRedirects` and
-`maxRedirects` come from the request's **Settings** tab and are included on
-every execute even when they equal the defaults. The engine defaults
-`follow_redirects` to `true`, so omitting a `false` would follow the 3xx the
-user asked to inspect - a bug the app shipped with for a long time, when nothing
-in the renderer sent these fields at all. The same pair goes out with
-`startLoadTest()`, so a load test exercises the policy the request was
-configured with.
+`preRequestScripts` / `postRequestScripts` are an ordered list of `ScriptPart`s
+(`{ origin: "collection" | "request", id?, name?, script }`), not a single
+string: the collection chain's scripts (root→leaf), then the request's own,
+built client-side by `scriptParts()` (`request-builder/utils/script-parts.ts`
+for the renderer, `resolve.ts` for MCP). The **engine** joins the parts and runs
+the result - see `docs/engine/architecture.md` → *Request composition boundary*.
+
+**Redirect policy and protocol are always sent, never elided.**
+`followRedirects`, `maxRedirects` and `httpVersion` all come from the request's
+**Settings** tab and are included on every execute even when they equal the
+defaults. The engine defaults `follow_redirects` to `true`, so omitting a
+`false` would follow the 3xx the user asked to inspect - a bug the app shipped
+with for a long time, when nothing in the renderer sent these fields at all.
+The same three fields go out with `startLoadTest()`, so a load test exercises
+the same policy and protocol the request was configured with - there is no
+separate, load-test-only protocol control; the Settings tab's picker is the
+only one, and it governs Send and load test alike. `httpVersion` is
+`"auto" | "http1.1" | "http2"`: `"auto"` lets ALPN negotiate, `"http1.1"`
+forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
+1.1 over plain `http://` (curl's `CURL_HTTP_VERSION_2TLS` semantics).
 
 **Example Response:**
 ```typescript
@@ -321,6 +394,7 @@ configured with.
   headers: { "content-type": "application/json" },
   body: { users: [...] },
   bodyRaw: '{"users":[...]}',
+  httpVersion: "HTTP/1.1",
   timing: { total: 150, dns: 10, connect: 20, ... },
   testResults: [
     { name: "Status 200", passed: true }
@@ -329,16 +403,21 @@ configured with.
 }
 ```
 
+`httpVersion` here is the **negotiated** protocol (`"HTTP/1.1"` / `"HTTP/2"` /
+`""` when nothing was negotiated) - an outcome, not an echo of the request's
+own `httpVersion`. The Raw tab in the response viewer prints it on the
+request/status line instead of a hardcoded `HTTP/1.1`.
+
 ### Load Test Execution
 
 1. **User Action**: Configures and starts load test
 2. **Request Transformation**: Frontend `LoadTestConfig` → backend format
-3. **API Call**: `apiService.startLoadTest()` → `POST /run`
+3. **API Call**: `apiService.startLoadTest()` → `POST /runs`
 4. **Response**: `{ runId: "run_123", status: "running" }`
 5. **Dashboard Initialization**: `useDashboardStore().startRun(runId)`
-6. **SSE Connection**: `useSSE()` connects to `/metrics/live/:runId`
+6. **SSE Connection**: `useSSE()` connects to `/runs/:runId/live`
 7. **Metrics Streaming**: Real-time metrics update dashboard
-8. **Completion**: When test completes, fetch final report via `GET /run/:id/report`
+8. **Completion**: When test completes, fetch final report via `GET /runs/:id/report`
 
 **Example Load Test Request:**
 ```typescript
@@ -351,6 +430,7 @@ await apiService.startLoadTest({
   },
   followRedirects: true,
   maxRedirects: 10,
+  httpVersion: "auto",
   mode: "constant_rps",
   duration: "30s",
   targetRps: 100,
@@ -360,6 +440,40 @@ await apiService.startLoadTest({
   comment: "Stress test"
 });
 ```
+
+The engine range-checks this payload before it creates the run row and answers a
+violation with `400 invalid_run_config` (accepted ranges are tabulated under
+[POST /runs](../engine/api-reference.md#post-runs)). The renderer's own limits
+live in `LOAD_TEST_LIMITS` (`src/constants/load-test.ts`) and must stay at or
+inside the engine's.
+
+#### `success_sample_rate` is a period, not a percentage
+
+The engine keeps a success trace when `counter % success_sample_rate == 0` - one
+in every N. The dialog's control is a percentage, and the renderer converts
+between them with `successSamplePeriod` (`constants/load-test.ts`): 100% becomes
+a period of `1`, 1% becomes `100`, and the default 10% is the fixed point where
+the two units coincide. Sending the percentage straight through, as the renderer
+did before, inverts the slider - "100% - everything" kept 1%.
+
+A `0` is a division by zero engine-side, so the control's floor is 1%. "Keep no
+success traces" is the **Save timing breakdown** toggle, which gates storage
+outright.
+
+#### Dialog ceilings are a user setting
+
+`LOAD_TEST_LIMITS` (`constants/load-test.ts`) holds the ranges the load dialog
+offers, and four of its ceilings are user-adjustable in **Settings → Load
+testing** (`loadTestCeilings` on `client-settings-store`). The dialog reads them
+through `resolveLoadTestLimits`, never off the constant.
+
+These are the app's policy and sit inside the engine's own bounds, which are
+crash guards rather than throttles: a run's `concurrency` becomes an *eager*
+per-worker curl-handle pre-allocation, so the engine caps it at 10x
+`event_loop::MAX_CONCURRENT`. `LOAD_TEST_CEILING_BOUNDS` pins each settable
+ceiling at that guard, so no value on the settings screen can compose a run the
+engine rejects. The floors are not settable at all - below them the values are
+not "small", they are unusable (a `concurrency` of 0, a sample period of 0).
 
 ## Error Handling
 
@@ -466,7 +580,7 @@ jest.spyOn(apiService, 'executeRequest').mockResolvedValue(mockResponse);
 
 1. Verify load test is running (`status: "running"`)
 2. Check browser console for SSE errors
-3. Verify endpoint: `/metrics/live/:runId` or `/stats/:runId`
+3. Verify endpoint: `/runs/:runId/live` or `/runs/:runId/metrics`
 
 ### CORS Errors
 

@@ -36,7 +36,7 @@ const runs = [
 ];
 
 vi.mock("@/queries/runs", () => ({
-	useRunsQuery: () => ({ data: runs }),
+	useAllRunsQuery: () => ({ data: runs }),
 	useInvalidateRuns: () => invalidateRuns,
 }));
 

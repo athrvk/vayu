@@ -6,7 +6,12 @@
 #include "vayu/runtime/script_engine.hpp"
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
+#include <chrono>
+
+#include "vayu/http/request_builder.hpp"
+#include "vayu/http/script_parts.hpp"
 #include "vayu/types.hpp"
 
 using namespace vayu;
@@ -241,6 +246,163 @@ TEST_F (ScriptEngineTest, ExpectTrueFalse) {
     EXPECT_TRUE (result.success);
 }
 
+// Mutation-checked: the paren-less terminal must actually run the assertion.
+// Before the getter fix `.to.be.true` was a discarded function reference, so a
+// deliberately-wrong assertion still passed. This asserts the failing case fails.
+TEST_F (ScriptEngineTest, ExpectTrueFalseAssertsOnAccess) {
+    auto result = engine.execute_test (R"(
+        pm.test("false is not true", function() {
+            pm.expect(false).to.be.true;
+        });
+
+        pm.test("true is not false", function() {
+            pm.expect(true).to.be.false;
+        });
+
+        pm.test("negation works", function() {
+            pm.expect(false).to.not.be.true;
+        });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 3);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_FALSE (result.tests[0].error_message.empty ());
+    EXPECT_FALSE (result.tests[1].passed);
+    EXPECT_TRUE (result.tests[2].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectNullUndefinedOkEmpty) {
+    auto result = engine.execute_test (R"(
+        pm.test("null", function() { pm.expect(null).to.be.null; });
+        pm.test("undefined", function() { pm.expect(undefined).to.be.undefined; });
+        pm.test("ok", function() { pm.expect(1).to.be.ok; });
+        pm.test("not ok", function() { pm.expect(0).to.not.be.ok; });
+        pm.test("empty string", function() { pm.expect("").to.be.empty; });
+        pm.test("empty array", function() { pm.expect([]).to.be.empty; });
+        pm.test("empty object", function() { pm.expect({}).to.be.empty; });
+        pm.test("non-empty array", function() { pm.expect([1]).to.not.be.empty; });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectNullFailsForNonNull) {
+    auto result = engine.execute_test (R"(
+        pm.test("1 is not null", function() { pm.expect(1).to.be.null; });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectLength) {
+    auto result = engine.execute_test (R"(
+        pm.test("array length", function() { pm.expect([1,2,3]).to.have.length(3); });
+        pm.test("string lengthOf", function() { pm.expect("abcd").to.have.lengthOf(4); });
+        pm.test("wrong length not", function() { pm.expect([1,2]).to.not.have.length(3); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectLengthFailsNotThrows) {
+    auto result = engine.execute_test (R"(
+        pm.test("wrong length", function() { pm.expect([1,2,3]).to.have.length(2); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    // A mismatch must fail, not throw "not a function".
+    EXPECT_EQ (result.tests[0].error_message.find ("not a function"), std::string::npos);
+}
+
+TEST_F (ScriptEngineTest, ExpectTypeMatcher) {
+    auto result = engine.execute_test (R"(
+        pm.test("string", function() { pm.expect("hi").to.be.a("string"); });
+        pm.test("number", function() { pm.expect(5).to.be.a("number"); });
+        pm.test("array", function() { pm.expect([1]).to.be.an("array"); });
+        pm.test("object", function() { pm.expect({}).to.be.an("object"); });
+        pm.test("wrong type", function() { pm.expect("hi").to.not.be.a("number"); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectTypeMatcherFails) {
+    auto result = engine.execute_test (R"(
+        pm.test("string is not number", function() { pm.expect("hi").to.be.a("number"); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_EQ (result.tests[0].error_message.find ("not a function"), std::string::npos);
+}
+
+TEST_F (ScriptEngineTest, ExpectMatchRegex) {
+    auto result = engine.execute_test (R"(
+        pm.test("matches", function() { pm.expect("hello123").to.match(/[0-9]+/); });
+        pm.test("does not match", function() { pm.expect("hello").to.not.match(/[0-9]+/); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectMatchFails) {
+    auto result = engine.execute_test (R"(
+        pm.test("no digits", function() { pm.expect("hello").to.match(/[0-9]+/); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectAtLeastAtMost) {
+    auto result = engine.execute_test (R"(
+        pm.test("at least equal boundary", function() { pm.expect(5).to.be.at.least(5); });
+        pm.test("at least above", function() { pm.expect(10).to.be.at.least(5); });
+        pm.test("at most equal boundary", function() { pm.expect(5).to.be.at.most(5); });
+        pm.test("at most below", function() { pm.expect(3).to.be.at.most(5); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ExpectAtLeastFails) {
+    auto result = engine.execute_test (R"(
+        pm.test("4 is not at least 5", function() { pm.expect(4).to.be.at.least(5); });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectContain) {
+    auto result = engine.execute_test (R"(
+        pm.test("string contain", function() { pm.expect("hello world").to.contain("world"); });
+        pm.test("array contain", function() { pm.expect([1,2,3]).to.contain(2); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
 // ============================================================================
 // pm.response Tests
 // ============================================================================
@@ -275,6 +437,184 @@ TEST_F (ScriptEngineTest, ResponseJson) {
     request, response, env);
 
     EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ResponseHasJsonBodyNoArg) {
+    auto result = engine.execute_test (R"(
+        pm.test("body is valid JSON", function() {
+            pm.response.to.have.jsonBody();
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+TEST_F (ScriptEngineTest, ResponseJsonBodyNoArgFailsOnNonJson) {
+    response.body = "this is not json";
+    auto result   = engine.execute_test (R"(
+        pm.test("invalid json fails", function() {
+            pm.response.to.have.jsonBody();
+        });
+    )",
+      request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+}
+
+// ============================================================================
+// pm.response.to.be Tests
+// ============================================================================
+//
+// `to.be` was an empty object, so every assertion hanging off it evaluated to
+// undefined and, as an expression statement, asserted nothing: a test whose
+// only line was `pm.response.to.be.ok` reported PASS against a 500. The first
+// two tests below are the mutation check - restore the empty placeholder and
+// ResponseToBeOkFailsOnServerError goes green while the API stays broken.
+
+TEST_F (ScriptEngineTest, ResponseToBeOkFailsOnServerError) {
+    response.status_code = 500;
+    response.status_text = "Internal Server Error";
+
+    auto result = engine.execute_test (R"(
+        pm.test("api is healthy", function() {
+            pm.response.to.be.ok;
+        });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("500"), std::string::npos)
+    << "the failure must name the status it got: " << result.tests[0].error_message;
+}
+
+TEST_F (ScriptEngineTest, ResponseToBeOkPassesOnSuccess) {
+    auto result = engine.execute_test (R"(
+        pm.test("api is healthy", function() {
+            pm.response.to.be.ok;
+            pm.response.to.be.success;
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed);
+}
+
+// Each matcher, on both sides of its boundary. A matcher that passed
+// unconditionally would satisfy the first half of every pair and fail here.
+TEST_F (ScriptEngineTest, ResponseToBeStatusClassMatchersAssertOnBothSides) {
+    struct Case {
+        int status;
+        const char* matches;
+        const char* does_not_match;
+    };
+    const Case cases[] = {
+        { 100, "info", "ok" },
+        { 202, "accepted", "notFound" },
+        { 301, "redirection", "success" },
+        { 400, "badRequest", "serverError" },
+        { 401, "unauthorized", "forbidden" },
+        { 403, "forbidden", "unauthorized" },
+        { 404, "notFound", "badRequest" },
+        { 429, "rateLimited", "serverError" },
+        { 404, "clientError", "serverError" },
+        { 503, "serverError", "clientError" },
+        { 503, "error", "redirection" },
+        { 404, "error", "info" },
+    };
+
+    for (const auto& c : cases) {
+        response.status_code = c.status;
+
+        const std::string passing = std::string ("pm.test(\"t\", function() { "
+                                                 "pm.response.to.be.") +
+        c.matches + "; });";
+        auto pass_result = engine.execute_test (passing, request, response, env);
+        ASSERT_EQ (pass_result.tests.size (), 1u) << passing;
+        EXPECT_TRUE (pass_result.tests[0].passed)
+        << c.matches << " should match status " << c.status << ": "
+        << pass_result.tests[0].error_message;
+
+        const std::string failing = std::string ("pm.test(\"t\", function() { "
+                                                 "pm.response.to.be.") +
+        c.does_not_match + "; });";
+        auto fail_result = engine.execute_test (failing, request, response, env);
+        ASSERT_EQ (fail_result.tests.size (), 1u) << failing;
+        EXPECT_FALSE (fail_result.tests[0].passed)
+        << c.does_not_match << " must not match status " << c.status;
+    }
+}
+
+TEST_F (ScriptEngineTest, ResponseToBeJsonAndWithBody) {
+    auto json_result = engine.execute_test (R"(
+        pm.test("json body", function() {
+            pm.response.to.be.json;
+            pm.response.to.be.withBody;
+        });
+    )",
+    request, response, env);
+    EXPECT_TRUE (json_result.success) << json_result.tests[0].error_message;
+
+    response.body   = "not json at all";
+    auto not_json   = engine.execute_test (R"(
+        pm.test("json body", function() { pm.response.to.be.json; });
+    )",
+      request, response, env);
+    ASSERT_EQ (not_json.tests.size (), 1u);
+    EXPECT_FALSE (not_json.tests[0].passed);
+
+    response.body   = "";
+    auto empty_body = engine.execute_test (R"(
+        pm.test("has a body", function() { pm.response.to.be.withBody; });
+    )",
+    request, response, env);
+    ASSERT_EQ (empty_body.tests.size (), 1u);
+    EXPECT_FALSE (empty_body.tests[0].passed);
+}
+
+// A name nothing implements must fail loudly. Silently returning undefined is
+// the whole defect - a misspelled matcher would otherwise report PASS.
+TEST_F (ScriptEngineTest, ResponseToChainRejectsUnknownAssertions) {
+    const char* scripts[] = {
+        R"(pm.test("t", function() { pm.response.to.be.definitelyNotAMatcher; });)",
+        R"(pm.test("t", function() { pm.response.to.have.definitelyNotAMatcher; });)",
+        R"(pm.test("t", function() { pm.response.to.definitelyNotAMatcher; });)",
+        // The negated form is not implemented; it must throw, not pass.
+        R"(pm.test("t", function() { pm.response.to.not.be.ok; });)",
+    };
+
+    for (const char* script : scripts) {
+        auto result = engine.execute_test (script, request, response, env);
+        ASSERT_EQ (result.tests.size (), 1u) << script;
+        EXPECT_FALSE (result.tests[0].passed) << script;
+        EXPECT_NE (result.tests[0].error_message.find ("not a supported assertion"), std::string::npos)
+        << script << " -> " << result.tests[0].error_message;
+    }
+}
+
+// The exotic hook only rejects assertion names: the object still has to behave
+// like an object for the plumbing that touches it (printing, serialising).
+TEST_F (ScriptEngineTest, ResponseToChainStillBehavesLikeAnObject) {
+    auto result = engine.execute_test (R"(
+        pm.test("printable", function() {
+            var label = String(pm.response.to.be);
+            pm.expect(label).to.include("object");
+            pm.expect(typeof pm.response.to.have.status).to.equal("function");
+            // console.log(pm.response) serialises the whole response; a chain
+            // link that rejected `toJSON` would turn that into a throw.
+            pm.expect(JSON.stringify(pm.response)).to.include("to");
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
 TEST_F (ScriptEngineTest, ResponseHeaders) {
@@ -381,6 +721,65 @@ TEST_F (ScriptEngineTest, EnvironmentSet) {
     EXPECT_EQ (env["new_var"].value, "new_value");
 }
 
+// Regression for #110: pm.*.set() on an existing key must preserve the
+// variable's secret flag, enabled flag and type - only the value changes. The
+// pre-fix whole-record replace silently un-masked a secret variable in the UI
+// and reset its type. Mutation-check: restore the Variable{value,false,true}
+// assignment in set_variable_preserving and the secret/type asserts here fail.
+TEST_F (ScriptEngineTest, SetPreservesSecretFlagAndType) {
+    env["token"] = Variable{ "old", true, true, "json" };
+
+    auto result = engine.execute_test (R"(
+        pm.environment.set("token", "rotated");
+        pm.test("dummy", function() {});
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_EQ (env["token"].value, "rotated"); // value updated
+    EXPECT_TRUE (env["token"].secret);         // secret preserved
+    EXPECT_TRUE (env["token"].enabled);        // enabled preserved
+    EXPECT_EQ (env["token"].type, "json");     // type preserved
+}
+
+// A brand-new key still gets the current defaults (not secret, enabled, string).
+TEST_F (ScriptEngineTest, SetNewKeyGetsDefaults) {
+    auto result = engine.execute_test (R"(
+        pm.environment.set("fresh", "value");
+        pm.test("dummy", function() {});
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_TRUE (env.count ("fresh"));
+    EXPECT_EQ (env["fresh"].value, "value");
+    EXPECT_FALSE (env["fresh"].secret);
+    EXPECT_TRUE (env["fresh"].enabled);
+    EXPECT_EQ (env["fresh"].type, "string");
+}
+
+// Guards that the collectionVariables setter is wired to the shared helper too
+// (all three setters must preserve, not just pm.environment).
+TEST_F (ScriptEngineTest, CollectionVariableSetPreservesSecretFlagAndType) {
+    Environment collVars;
+    collVars["cv_token"] = Variable{ "old", true, true, "json" };
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.response            = &response;
+    ctx.collectionVariables = &collVars;
+
+    auto result = engine.execute (R"(
+        pm.collectionVariables.set("cv_token", "rotated");
+    )",
+    ctx);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_EQ (collVars["cv_token"].value, "rotated");
+    EXPECT_TRUE (collVars["cv_token"].secret);
+    EXPECT_EQ (collVars["cv_token"].type, "json");
+}
+
 // ============================================================================
 // Console Output Tests
 // ============================================================================
@@ -397,6 +796,35 @@ TEST_F (ScriptEngineTest, ConsoleLog) {
     ASSERT_GE (result.console_output.size (), 2);
     EXPECT_EQ (result.console_output[0], "Hello, World!");
     EXPECT_EQ (result.console_output[1], "Value: 42");
+}
+
+// ============================================================================
+// Script Parts: Shared Scope
+// ============================================================================
+
+// Pins the property the whole script-parts feature depends on: parts joined
+// by vayu::http::read_script and run through a single engine.execute() call
+// share one JavaScript scope, so a const declared in an earlier part is
+// visible to a later one. This does not catch someone splitting the execute
+// call apart in execution.cpp (a source-level regression, not a behavioral
+// one this test can see) - it only pins read_script's join, run once,
+// behaving as documented.
+TEST_F (ScriptEngineTest, ComposedPartsShareOneScope) {
+    auto json = nlohmann::json::parse (R"({
+      "preRequestScripts": [
+        {"origin":"collection","script":"const shared = 42;"},
+        {"origin":"request","script":"console.log(\"got \" + shared);"}
+      ]
+    })");
+    auto script = vayu::http::read_script (json, "preRequestScripts", "preRequestScript");
+
+    ScriptContext ctx;
+    ctx.request = &request;
+    auto result = engine.execute (script, ctx);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_GE (result.console_output.size (), 1);
+    EXPECT_EQ (result.console_output[0], "got 42");
 }
 
 // ============================================================================
@@ -445,6 +873,249 @@ TEST_F (ScriptEngineTest, PreRequestScript) {
 
     EXPECT_TRUE (result.success);
     EXPECT_TRUE (env.find ("timestamp") != env.end ());
+}
+
+// ============================================================================
+// pm.request write-back (#109)
+// ============================================================================
+//
+// These pin the contract that a pre-request script can change what goes on the
+// wire. Revert the write-back in ScriptEngine::Impl::execute and every one of
+// them fails, because before it existed the JS object was built, mutated and
+// thrown away - the codebase's "written but never read" pattern at the script
+// boundary.
+
+TEST_F (ScriptEngineTest, PreRequestScriptSetsHeaderOnTheOutgoingRequest) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Signature'] = 'abc123';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_TRUE (request.headers.contains ("X-Signature"));
+    EXPECT_EQ (request.headers.at ("X-Signature"), "abc123");
+    // Untouched headers survive: the write-back replaces the set, and the set
+    // the script saw already held these.
+    EXPECT_EQ (request.headers.at ("Content-Type"), "application/json");
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptHeaderOverridesEngineAppliedAuth) {
+    // The precedence rule, end to end: build_request resolves auth into the
+    // request first, the script runs second, so the script wins.
+    const nlohmann::json config = { { "method", "GET" },
+        { "url", "https://api.example.com/v1" },
+        { "auth", { { "mode", "bearer" }, { "token", "engine-token" } } } };
+    auto built = vayu::http::build_request (config, nullptr, 1000);
+    ASSERT_TRUE (built.ok);
+    ASSERT_EQ (built.request.headers.at ("Authorization"), "Bearer engine-token");
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.expect(pm.request.headers['Authorization']).to.equal('Bearer engine-token');
+        pm.request.headers['Authorization'] = 'Bearer script-token';
+    )JS",
+    built.request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (built.request.headers.at ("Authorization"), "Bearer script-token");
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptCanDeleteAHeader) {
+    auto result = engine.execute_prerequest (R"JS(
+        delete pm.request.headers['Authorization'];
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("Authorization"));
+    EXPECT_TRUE (request.headers.contains ("Content-Type"));
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptStringifiesNumberAndBooleanHeaderValues) {
+    // `pm.request.headers['X-Timestamp'] = Date.now()` is the shape users
+    // actually write; a number has one honest wire form, so it is converted
+    // rather than refused.
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Attempt'] = 3;
+        pm.request.headers['X-Retry'] = true;
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.headers.at ("X-Attempt"), "3");
+    EXPECT_EQ (request.headers.at ("X-Retry"), "true");
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptChangesUrlAndMethod) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.url = 'https://api.example.com/v2/users?page=2';
+        pm.request.method = 'post';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/v2/users?page=2");
+    EXPECT_EQ (request.method, HttpMethod::POST); // lower-case verb normalised
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptSettingBodyOnABodylessRequestGivesItTextMode) {
+    ASSERT_EQ (request.body.mode, BodyMode::None);
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body = 'ping';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.content, "ping");
+    // Mode matters, not just content: apply_method_and_body ignores a body
+    // whose mode is None, so leaving it None would send nothing.
+    EXPECT_EQ (request.body.mode, BodyMode::Text);
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptEditingAJsonBodyKeepsItsMode) {
+    request.body.mode    = BodyMode::Json;
+    request.body.content = R"({"n":1})";
+
+    auto result = engine.execute_prerequest (R"JS(
+        var body = JSON.parse(pm.request.body);
+        body.n = 2;
+        pm.request.body = JSON.stringify(body);
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.content, R"({"n":2})");
+    EXPECT_EQ (request.body.mode, BodyMode::Json);
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptDeletingTheBodyDropsIt) {
+    request.body.mode    = BodyMode::Json;
+    request.body.content = R"({"n":1})";
+
+    auto result = engine.execute_prerequest (R"JS(
+        delete pm.request.body;
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.mode, BodyMode::None);
+    EXPECT_TRUE (request.body.content.empty ());
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptEditsMadeBeforeAThrowStillApply) {
+    // The request is sent whether or not the script threw, so a header it
+    // already set is honoured. The failure is still reported.
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Signature'] = 'abc123';
+        undefinedFunction();
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_FALSE (result.error_message.empty ());
+    EXPECT_EQ (request.headers.at ("X-Signature"), "abc123");
+}
+
+TEST_F (ScriptEngineTest, TestScriptMutationsAreNotWrittenBack) {
+    // A post-request script's request has already been sent; writing back
+    // there would only misreport what went out.
+    ScriptContext ctx;
+    ctx.request     = &request;
+    ctx.response    = &response;
+    ctx.environment = &env;
+
+    auto result = engine.execute (R"JS(
+        pm.request.headers['X-Signature'] = 'abc123';
+        pm.request.url = 'https://evil.example.com';
+    )JS",
+    ctx);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("X-Signature"));
+    EXPECT_EQ (request.url, "https://api.example.com/users");
+}
+
+// ---------------------------------------------------------------------------
+// Rejected write-backs: loud, and all-or-nothing.
+// ---------------------------------------------------------------------------
+
+TEST_F (ScriptEngineTest, PreRequestScriptUnknownMethodIsRejectedAndAppliesNothing) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Signature'] = 'abc123';
+        pm.request.method = 'FETCH';
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pm.request.method"), std::string::npos)
+    << result.error_message;
+    // Transactional: the good header in the same script is not applied either.
+    EXPECT_FALSE (request.headers.contains ("X-Signature"));
+    EXPECT_EQ (request.method, HttpMethod::GET);
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptNonStringHeaderValueIsRejectedByName) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Meta'] = { a: 1 };
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("X-Meta"), std::string::npos)
+    << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("X-Meta"));
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptEmptyUrlIsRejected) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.url = '';
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pm.request.url"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/users");
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptNonStringBodyIsRejected) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body = { a: 1 };
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pm.request.body"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (request.body.mode, BodyMode::None);
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptReplacingPmRequestWithANonObjectIsRejected) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request = 'oops';
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pm.request"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/users");
+}
+
+TEST_F (ScriptEngineTest, PreRequestScriptThatChangesNothingLeavesTheRequestIdentical) {
+    const Request before = request;
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('touched', 'yes');
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, before.url);
+    EXPECT_EQ (request.method, before.method);
+    EXPECT_EQ (request.headers, before.headers);
+    EXPECT_EQ (request.body.mode, before.body.mode);
+    EXPECT_EQ (request.body.content, before.body.content);
 }
 
 // ============================================================================
@@ -520,4 +1191,358 @@ TEST_F (ScriptEngineTest, ContextPooling) {
         ASSERT_EQ (result.tests.size (), 1);
         EXPECT_TRUE (result.tests[0].passed);
     }
+}
+
+// ============================================================================
+// Script Execution Timeout Tests (#107)
+// ============================================================================
+
+// A non-allocating infinite loop must be interrupted by the wall-clock deadline
+// rather than hanging the calling thread. Mutation-check: revert the
+// JS_SetInterruptHandler wiring in acquire_context/execute and this test hangs.
+TEST_F (ScriptEngineTest, InfiniteLoopTimesOut) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 200;
+    ScriptEngine timeout_engine (cfg);
+
+    ScriptContext ctx;
+    ctx.response = &response;
+
+    const auto start   = std::chrono::steady_clock::now ();
+    auto result        = timeout_engine.execute ("while (true) {}", ctx);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - start)
+                         .count ();
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("timed out"), std::string::npos)
+    << "error was: " << result.error_message;
+    // Should abort near the deadline, not run indefinitely. Generous upper bound to
+    // stay robust on slow CI while still proving the loop does not run forever.
+    EXPECT_LT (elapsed, 5000) << "took " << elapsed << "ms";
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// A fast script under the limit must not be falsely aborted by the deadline.
+TEST_F (ScriptEngineTest, FastScriptUnderTimeoutStillPasses) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 200;
+    ScriptEngine timeout_engine (cfg);
+
+    auto result = timeout_engine.execute_test (R"(
+        pm.test("Fast test", function() {
+            pm.expect(1).to.equal(1);
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_TRUE (result.error_message.empty ());
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed);
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// timeout_ms == 0 disables the wall-clock limit (escape hatch); a bounded loop
+// still completes normally with no false timeout.
+TEST_F (ScriptEngineTest, ZeroTimeoutDisablesLimit) {
+#ifdef VAYU_HAS_QUICKJS
+    ScriptConfig cfg;
+    cfg.timeout_ms = 0;
+    ScriptEngine no_timeout_engine (cfg);
+
+    ScriptContext ctx;
+    auto result = no_timeout_engine.execute (
+    "var n = 0; for (var i = 0; i < 100000; i++) { n += i; } n", ctx);
+
+    EXPECT_TRUE (result.success);
+    EXPECT_TRUE (result.error_message.empty ());
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// ============================================================================
+// The sandbox's global surface
+// ============================================================================
+//
+// `scripting.md` now teaches request rewriting, so what a script can *compute*
+// is part of the contract. Only `console` and `pm` are installed on top of
+// QuickJS's built-ins - there is no crypto, no base64, no URL parser - which is
+// why the docs' worked examples do string surgery and a pure-JS checksum rather
+// than an HMAC. This pins both halves so a doc example cannot come to rely on
+// something that was never there (`scripting.md` used to show a `computeHash`
+// that does not exist).
+
+TEST_F (ScriptEngineTest, StandardBuiltinsAreAvailableToScripts) {
+    auto result = engine.execute_prerequest (R"JS(
+        var missing = [];
+        var expected = ['JSON', 'Date', 'Math', 'RegExp', 'String', 'Array',
+                        'Object', 'Number', 'encodeURIComponent', 'parseInt'];
+        for (var i = 0; i < expected.length; i++) {
+            if (typeof globalThis[expected[i]] === 'undefined') missing.push(expected[i]);
+        }
+        pm.environment.set('missing', missing.join(','));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["missing"].value, "")
+    << "a built-in the docs rely on disappeared";
+}
+
+TEST_F (ScriptEngineTest, NoCryptoBase64OrUrlParserIsExposed) {
+    auto result = engine.execute_prerequest (R"JS(
+        var present = [];
+        var absent = ['crypto', 'btoa', 'atob', 'TextEncoder', 'URL',
+                      'URLSearchParams', 'require', 'fetch'];
+        for (var i = 0; i < absent.length; i++) {
+            if (typeof globalThis[absent[i]] !== 'undefined') present.push(absent[i]);
+        }
+        pm.environment.set('present', present.join(','));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    // If one of these ever lands, the "you cannot HMAC-sign in a script" note in
+    // scripting.md stops being true and should be rewritten, not left standing.
+    EXPECT_EQ (env["present"].value, "")
+    << "a new global is available - update the request-signing note in "
+       "scripting.md";
+}
+
+// ============================================================================
+// The `pm` surface the docs and the app teach
+// ============================================================================
+//
+// Same reason as the two above: a name that is written down but not installed
+// throws in the user's face, and nothing else notices. `scripting.md` taught
+// `pm.variables` and the Tests panel's quick reference taught
+// `pm.response.headers.get()`; neither has ever existed. These pin the runtime
+// so the docs can be trusted, and so implementing either one flips a test red
+// and forces the doc to be rewritten with it.
+
+TEST_F (ScriptEngineTest, PmVariablesIsAbsentAndTheScopedAccessorsAreNot) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('mergedAccessor', typeof pm.variables);
+        var missing = [];
+        var scopes = ['environment', 'globals', 'collectionVariables'];
+        for (var i = 0; i < scopes.length; i++) {
+            var scope = pm[scopes[i]];
+            if (!scope || typeof scope.get !== 'function'
+                || typeof scope.set !== 'function') {
+                missing.push(scopes[i]);
+            }
+        }
+        pm.environment.set('missingScopes', missing.join(','));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["missingScopes"].value, "")
+    << "a scoped accessor the docs point at instead of pm.variables is gone";
+    // Implementing the merged accessor is #184. When it lands, this expectation
+    // is the one that says "now rewrite the 'not supported' section in
+    // scripting.md and the unsupported list in pm-api-compatibility.md".
+    EXPECT_EQ (env["mergedAccessor"].value, "undefined")
+    << "pm.variables now exists; both docs say it does not";
+}
+
+TEST_F (ScriptEngineTest, ResponseHeadersIsAPlainObjectReadByLowerCasedKey) {
+    // The header names a real response arrives with: `client.cpp` lower-cases
+    // every key as it parses, so this - not the fixture's mixed-case default -
+    // is the shape a script actually sees.
+    response.headers = { { "content-type", "application/json" },
+        { "x-request-id", "abc123" } };
+
+    auto result = engine.execute_test (R"JS(
+        pm.test("the form the Tests panel suggests reads the header", function() {
+            pm.expect(pm.response.headers['content-type']).to.equal('application/json');
+        });
+        pm.environment.set('getType', typeof pm.response.headers.get);
+        pm.environment.set('hasType', typeof pm.response.headers.has);
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed);
+    // Postman's `headers` is a HeaderList with these; ours is a bag. The Tests
+    // panel taught `.get("Content-Type")`, which threw "not a function".
+    EXPECT_EQ (env["getType"].value, "undefined")
+    << "pm.response.headers.get exists now - say so in pm-api-compatibility.md "
+       "and put it back in the Tests panel quick reference";
+    EXPECT_EQ (env["hasType"].value, "undefined");
+}
+
+// ============================================================================
+// The worked examples in scripting.md actually run
+// ============================================================================
+//
+// This whole issue existed because the docs taught a pattern the runtime threw
+// away, and the example they taught it with called a `computeHash` that has
+// never existed. So the non-trivial examples are executed here against a real
+// request, not eyeballed. If you edit the code in
+// "Worked examples: rewriting a request", edit these with it.
+
+TEST_F (ScriptEngineTest, DocExampleRewritesAJsonBodyThenDerivesFromIt) {
+    request.method       = HttpMethod::POST;
+    request.body.mode    = BodyMode::Json;
+    request.body.content = R"({"n":1,"debugOnly":true})";
+
+    auto result = engine.execute_prerequest (R"JS(
+        var body = JSON.parse(pm.request.body);
+        body.metadata = { client: 'vayu' };
+        delete body.debugOnly;
+        pm.request.body = JSON.stringify(body);
+        pm.request.headers['Content-Length'] = String(pm.request.body.length);
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.content, R"({"n":1,"metadata":{"client":"vayu"}})");
+    // Derived after the edit, so it describes what is sent - the ordering the
+    // doc calls out.
+    EXPECT_EQ (request.headers.at ("Content-Length"),
+    std::to_string (request.body.content.size ()));
+}
+
+TEST_F (ScriptEngineTest, DocExampleSetsAQueryParamAcrossItsThreeCases) {
+    static constexpr const char* kSetQueryParam = R"JS(
+        function setQueryParam(url, name, value) {
+          var pair = encodeURIComponent(name) + '=' + encodeURIComponent(value);
+          var hashAt = url.indexOf('#');
+          var fragment = hashAt === -1 ? '' : url.slice(hashAt);
+          var base = hashAt === -1 ? url : url.slice(0, hashAt);
+
+          var re = new RegExp('([?&])' + name + '=[^&]*');
+          if (re.test(base)) {
+            return base.replace(re, '$1' + pair) + fragment;
+          }
+          return base + (base.indexOf('?') === -1 ? '?' : '&') + pair + fragment;
+        }
+    )JS";
+
+    struct Case {
+        const char* url;
+        const char* expected;
+    };
+    const Case cases[] = {
+        // No query at all.
+        { "https://api.example.com/users", "https://api.example.com/users?traceId=t1" },
+        // Query present, parameter absent.
+        { "https://api.example.com/users?page=2", "https://api.example.com/users?page=2&traceId=t1" },
+        // Parameter already present - replaced, not duplicated.
+        { "https://api.example.com/users?traceId=old&page=2",
+        "https://api.example.com/users?traceId=t1&page=2" },
+        // Fragment is preserved and never searched for the parameter.
+        { "https://api.example.com/users#section", "https://api.example.com/users?traceId=t1#section" },
+    };
+
+    for (const auto& c : cases) {
+        Request req;
+        req.method = HttpMethod::GET;
+        req.url    = c.url;
+        Environment scratch;
+        auto result = engine.execute_prerequest (std::string (kSetQueryParam) +
+        "\npm.request.url = setQueryParam(pm.request.url, 'traceId', 't1');",
+        req, scratch);
+
+        ASSERT_TRUE (result.success) << result.error_message;
+        EXPECT_EQ (req.url, c.expected) << "input: " << c.url;
+    }
+}
+
+TEST_F (ScriptEngineTest, DocExampleChecksumIsComputableAndStable) {
+    env["secret"] = Variable{ "s3cr3t", true, true };
+
+    auto result = engine.execute_prerequest (R"JS(
+        function fnv1a(text) {
+          var hash = 0x811c9dc5;
+          for (var i = 0; i < text.length; i++) {
+            hash ^= text.charCodeAt(i);
+            hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
+          }
+          return ('00000000' + hash.toString(16)).slice(-8);
+        }
+
+        var canonical = [
+          pm.request.method,
+          pm.request.url,
+          '1700000000000',
+          pm.request.body || ''
+        ].join('\n');
+
+        pm.request.headers['X-Timestamp'] = '1700000000000';
+        pm.request.headers['X-Checksum'] = fnv1a(canonical + pm.environment.get('secret'));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.headers.at ("X-Timestamp"), "1700000000000");
+    // Eight lower-case hex digits, deterministic for a fixed canonical string.
+    const std::string checksum = request.headers.at ("X-Checksum");
+    EXPECT_EQ (checksum.size (), 8u) << checksum;
+    EXPECT_EQ (checksum.find_first_not_of ("0123456789abcdef"), std::string::npos) << checksum;
+}
+
+TEST_F (ScriptEngineTest, DocExampleSwapsAuthScheme) {
+    auto result = engine.execute_prerequest (R"JS(
+        delete pm.request.headers['Authorization'];
+        pm.request.headers['X-Api-Key'] = pm.environment.get('api_key');
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("Authorization"));
+    EXPECT_EQ (request.headers.at ("X-Api-Key"), "secret123");
+}
+
+// The trap the doc now warns about, and why it warns: `pm.request.headers` is a
+// JS object, so its keys are case-sensitive even though HTTP header names are
+// not. A lower-case delete of a capitalised header is a silent no-op - this
+// caught a wrong sentence in the docs before it shipped.
+TEST_F (ScriptEngineTest, AWrongCaseDeleteDoesNotRemoveTheHeader) {
+    auto result = engine.execute_prerequest (R"JS(
+        delete pm.request.headers['authorization'];
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (request.headers.contains ("Authorization"));
+}
+
+TEST_F (ScriptEngineTest, DocExampleCaseInsensitiveDeleteLoopRemovesTheHeader) {
+    auto result = engine.execute_prerequest (R"JS(
+        Object.keys(pm.request.headers).forEach(function (name) {
+          if (name.toLowerCase() === 'authorization') delete pm.request.headers[name];
+        });
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("Authorization"));
+    EXPECT_TRUE (request.headers.contains ("Content-Type"));
+}
+
+// Two JS keys, one HTTP header. Whichever enumerated last would have won
+// silently, and one of them is the Authorization header, so the write-back
+// refuses the whole thing instead of guessing.
+TEST_F (ScriptEngineTest, HeaderNamesDifferingOnlyInCaseAreRejected) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers['authorization'] = 'Bearer script-token';
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("case-insensitive"), std::string::npos)
+    << result.error_message;
+    // Nothing applied: the original engine-applied header still stands.
+    EXPECT_EQ (request.headers.at ("Authorization"), "Bearer token123");
 }

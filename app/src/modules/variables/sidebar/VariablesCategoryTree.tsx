@@ -303,19 +303,36 @@ export default function VariablesCategoryTree() {
 										const isDeleting = deletingEnvId === environment.id;
 										return (
 											/*
-											 * Container + inner activator, not a
-											 * <div onClick>. The row carries a
+											 * Container + inner activator, never a
+											 * bare <div onClick>. The row carries a
 											 * RowActionsMenu, so it cannot be one
 											 * button (the collection rows below can,
 											 * and are). As a plain div it was not
 											 * focusable and not operable by keyboard
 											 * at all - the ⋯ menu was reachable but
 											 * selecting the environment was not.
+											 *
+											 * The button therefore stays and owns the
+											 * action. The row *additionally* delegates
+											 * clicks landing on its own box - the 50px
+											 * `pl-12.5` indent, the gap, `px-3` - which
+											 * belong to no child and so had nowhere to
+											 * go. RequestItem carries the rule and why
+											 * the target check is what it is.
 											 */
 											<div
 												key={environment.id}
+												onClick={(e) => {
+													if (e.target !== e.currentTarget) return;
+													if (isDeleting) return;
+													if (renamingEnvId === environment.id) return;
+													selectCategory({
+														type: "environment",
+														environmentId: environment.id,
+													});
+												}}
 												className={cn(
-													"focus-row group flex h-8 items-center gap-2 px-3 pl-12.5 text-sm hover:bg-accent transition-colors",
+													"focus-row group flex h-8 cursor-pointer items-center gap-2 px-3 pl-12.5 text-sm hover:bg-accent transition-colors",
 													isSelected({
 														type: "environment",
 														environmentId: environment.id,
@@ -355,7 +372,15 @@ export default function VariablesCategoryTree() {
 																environmentId: environment.id,
 															})
 														}
-														className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+														// self-stretch: the row above is
+														// `items-center`, which leaves this
+														// button - the only thing wired to
+														// selectCategory - as tall as its 18px
+														// label inside a 32px row. The band above
+														// and below it took the hover fill but
+														// not the click. Same fix as the
+														// collection and request rows.
+														className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch text-left"
 													>
 														<TruncatedText className="flex-1">
 															{environment.name}

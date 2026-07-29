@@ -23,13 +23,14 @@ import {
 	CardHeader,
 	CardTitle,
 	Button,
+	Eyebrow,
 	Kbd,
 	DeleteConfirmDialog,
 } from "@/components/ui";
 import { modKey } from "@/lib/platform";
 import { useClientSettingsStore } from "@/stores";
 import { useToastStore } from "@/stores";
-import { useRunsQuery, useInvalidateRuns } from "@/queries/runs";
+import { useAllRunsQuery, useInvalidateRuns } from "@/queries/runs";
 import { apiService } from "@/services";
 import { AUTO_SAVE_DELAY_OPTIONS } from "@/constants/client-settings";
 import { OptionButtons, ToggleRow } from "./SettingControls";
@@ -48,7 +49,9 @@ export default function GeneralPanel() {
 	const setAutoSave = useClientSettingsStore((s) => s.setAutoSave);
 	const resetAll = useClientSettingsStore((s) => s.resetAll);
 
-	const { data: runs = [] } = useRunsQuery();
+	// The whole history (all pages) - this panel counts and clears every run,
+	// not just a polled page.
+	const { data: runs = [] } = useAllRunsQuery();
 	const invalidateRuns = useInvalidateRuns();
 	const showToast = useToastStore((s) => s.showToast);
 	const [clearing, setClearing] = useState(false);
@@ -135,9 +138,7 @@ export default function GeneralPanel() {
 					/>
 					{autoSave.enabled && (
 						<div>
-							<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-								Save delay
-							</p>
+							<Eyebrow className="mb-2">Save delay</Eyebrow>
 							<OptionButtons
 								options={AUTO_SAVE_DELAY_OPTIONS}
 								value={autoSave.delayMs}

@@ -22,6 +22,7 @@
  *   data-tree-activate  the primary control (open the collection/request)
  *   data-tree-toggle    expand/collapse control (collections only)
  *   data-tree-menu      row actions            (Shift+F10 / Menu key)
+ *   data-tree-rename    rename control         (F2 key)
  *   data-tree-delete    delete control         (Delete key)
  *
  * Focus is deliberately separate from selection: arrows move focus without
@@ -130,6 +131,10 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 				case " ":
 					take();
 					click("[data-tree-activate]");
+					break;
+				case "F2":
+					take();
+					click("[data-tree-rename]");
 					break;
 				case "Delete":
 					take();

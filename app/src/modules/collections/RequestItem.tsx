@@ -5,13 +5,11 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useRef } from "react";
 import { Loader2, Trash2, Edit2, Copy } from "lucide-react";
 import type { Request } from "@/types";
 import { Input } from "@/components/ui";
 import { RowActionsMenu, MethodBadge, TruncatedText } from "@/components/shared";
 import { cn } from "@/lib/utils";
-import { TIMING } from "@/config/timing";
 import { INDENT_STEP } from "@/constants/layout";
 
 export interface RequestItemProps {
@@ -50,40 +48,35 @@ export default function RequestItem({
 	onStartRename,
 	onDuplicate,
 }: RequestItemProps) {
-	const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-	const CLICK_DELAY_MS = TIMING.TREE_CLICK_DELAY_MS;
-
-	const handleClick = () => {
+	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
-
-		// Clear any existing timeout
-		if (clickTimeoutRef.current) {
-			clearTimeout(clickTimeoutRef.current);
-			clickTimeoutRef.current = null;
-			// This was a double-click, don't trigger single click
-			return;
-		}
-
-		// Set timeout for single click
-		clickTimeoutRef.current = setTimeout(() => {
-			onSelect(collectionId, request.id);
-			clickTimeoutRef.current = null;
-		}, CLICK_DELAY_MS); // 80ms delay to detect double-click
+		// The second click of a double-click also fires `click`; ignore it so the
+		// double-click starts a rename. The first click already opened the request
+		// (opening is idempotent), so there is nothing to defer - and none of the
+		// 80ms delay that made a single click to open feel laggy.
+		if (e.detail > 1) return;
+		onSelect(collectionId, request.id);
 	};
 
 	const handleDoubleClick = (e: React.MouseEvent) => {
 		e.stopPropagation();
 		if (isDeleting || isRenaming) return;
-
-		// Clear single click timeout
-		if (clickTimeoutRef.current) {
-			clearTimeout(clickTimeoutRef.current);
-			clickTimeoutRef.current = null;
-		}
-
 		onStartRename?.(request);
 	};
+
+	/**
+	 * The row's own box - the indent, the flex gap, `pr-3` - belongs to no child,
+	 * so a click there has nowhere to go. `self-stretch` on the label button
+	 * recovered the height; it cannot recover the indent, because the indent is
+	 * padding on the row (deliberately, so the fill reaches the panel edge) and on
+	 * a collection row the chevron sits between it and the button.
+	 *
+	 * So the row delegates. `target === currentTarget` is exactly "the pointer
+	 * landed on the row itself, not on anything inside it", which excludes the
+	 * label button, the ⋯ menu and the chevron without naming any of them - and
+	 * without double-firing when a click on the button bubbles through here.
+	 */
+	const isRowSurface = (e: React.MouseEvent) => e.target === e.currentTarget;
 
 	// Prefer the confirmation flow when the tree supplies one.
 	const handleDelete = () => {
@@ -98,6 +91,8 @@ export default function RequestItem({
 			role="treeitem"
 			tabIndex={-1}
 			aria-selected={isSelected}
+			onClick={(e) => isRowSurface(e) && handleClick(e)}
+			onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
 			// Indent inside the row (see CollectionItem) so the fill still
 			// reaches both panel edges.
 			style={{ paddingLeft: 8 + depth * INDENT_STEP }}
@@ -119,7 +114,14 @@ export default function RequestItem({
 				onDoubleClick={handleDoubleClick}
 				tabIndex={-1}
 				data-tree-activate
-				className="flex min-w-0 items-center gap-2 flex-1 text-left cursor-pointer"
+				// self-stretch: the row is `items-center`, which makes every child
+				// content-height - so this button, the only thing wired to onSelect,
+				// was ~22px tall inside a 32px row that paints a full-height hover
+				// fill and `cursor-pointer`. The top and bottom ~5px of the row
+				// looked clickable and were not. Stretching to the row's height
+				// costs nothing (the button's own `items-center` still centres the
+				// badge and label) and `focus-row` keeps painting the ring.
+				className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
 				disabled={isDeleting || isRenaming}
 			>
 				<MethodBadge method={request.method} size="md" />
@@ -152,10 +154,18 @@ export default function RequestItem({
 			)}
 
 			{/*
-			 * Delete moved into the ⋯ menu, but the Delete key still targets a
-			 * data-tree-delete element (see useRovingTreeFocus). This is that
-			 * target: never shown, never announced - a keyboard path only.
+			 * Keyboard-only targets for the roving tree (see useRovingTreeFocus):
+			 * F2 clicks data-tree-rename, Delete clicks data-tree-delete. Never
+			 * shown, never announced - the same actions live in the ⋯ menu.
 			 */}
+			<button
+				type="button"
+				className="hidden"
+				aria-hidden="true"
+				tabIndex={-1}
+				data-tree-rename
+				onClick={() => onStartRename?.(request)}
+			/>
 			<button
 				type="button"
 				className="hidden"

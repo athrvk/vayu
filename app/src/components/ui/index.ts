@@ -60,11 +60,30 @@ export {
 	DropdownMenuRadioGroup,
 } from "./dropdown-menu";
 
-export { Tabs, TabsList, TabsTrigger, TabsContent } from "./tabs";
+export { Tabs, TabsList, TabsTrigger, TabsContent, TabLabel, TabCount, TabErrorDot } from "./tabs";
+export { Eyebrow, EYEBROW_CLASS } from "./eyebrow";
+export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "./table";
 
+export {
+	ToastProvider,
+	ToastViewport,
+	Toast,
+	ToastIcon,
+	ToastTitle,
+	ToastDescription,
+	ToastAction,
+	ToastClose,
+	toastVariants,
+} from "./toast";
+export type { ToastVariantName } from "./toast";
+
+export { ToggleGroup, ToggleGroupItem } from "./toggle-group";
+export type { ToggleGroupProps } from "./toggle-group";
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./tooltip";
 export { TooltipIconButton } from "./tooltip-icon-button";
 export type { TooltipIconButtonProps } from "./tooltip-icon-button";
+export { InfoChip } from "./info-chip";
+export type { InfoChipProps } from "./info-chip";
 
 export {
 	Select,
@@ -103,10 +122,16 @@ export { Label } from "./label";
 export { VariableScopeBadge } from "./variable-scope-badge";
 export type { VariableScopeBadgeProps, VariableScope } from "./variable-scope-badge";
 
+export { MarkdownView } from "./markdown-view";
+export type { MarkdownViewProps } from "./markdown-view";
+export { MarkdownEditor } from "./markdown-editor";
+export type { MarkdownEditorProps } from "./markdown-editor";
 export { VariablePopover } from "./variable-popover";
 export type { VariablePopoverProps, VariableInfo as VariablePopoverInfo } from "./variable-popover";
 
 export { VariableAutocomplete } from "./variable-autocomplete";
+export { SuggestionList } from "./suggestion-list";
+export type { SuggestionListProps } from "./suggestion-list";
 export type {
 	VariableAutocompleteProps,
 	VariableInfo as VariableAutocompleteInfo,

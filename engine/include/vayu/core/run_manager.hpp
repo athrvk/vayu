@@ -8,26 +8,73 @@
  */
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
 
 namespace vayu::core {
 
+/**
+ * @brief Ring capacity for a run's live tick topic: how many ticks fit in
+ * `window_ms` at a cadence of `tick_interval_ms`, floored at one tick and
+ * clamped to `max_ticks` (the `liveMaxRetainedTicks` setting).
+ *
+ * Sizing from a duration rather than a fixed count is the point: both inputs
+ * are user-configurable, and `liveTickIntervalMs` spans 10-1000ms, so one tick
+ * count means a 30-second window at one end of that range and a 50-minute one
+ * at the other. Deriving the count preserves the *time* the user asked for -
+ * the same unit the dashboard's live-chart window setting uses.
+ *
+ * `window_ms == 0` is the "Full run" setting - no time limit - and yields the
+ * ceiling, which is then the whole bound. A *negative* window is not a setting
+ * (POST /config rejects it); like a non-positive interval it can only reach
+ * here from a hand-edited config row, so it falls back to the default rather
+ * than being trusted.
+ */
+[[nodiscard]] constexpr size_t live_ring_size (int64_t window_ms,
+int64_t tick_interval_ms,
+size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
+    if (tick_interval_ms <= 0) {
+        tick_interval_ms = constants::server::STATS_INTERVAL_MS;
+    }
+    if (max_ticks < 1) {
+        max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS;
+    }
+    if (window_ms == 0) {
+        return max_ticks;
+    }
+    if (window_ms < 0) {
+        window_ms = constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS;
+    }
+    auto ticks = static_cast<size_t> (window_ms / tick_interval_ms);
+    if (ticks < 1) {
+        ticks = 1;
+    }
+    return ticks > max_ticks ? max_ticks : ticks;
+}
+
 struct RunContext {
     std::string run_id;
     std::unique_ptr<vayu::http::EventLoop> event_loop;
-    std::thread worker_thread;
+    // The run's worker thread is NOT owned here: it holds a shared_ptr to this
+    // context, so a context whose last reference is dropped by its own worker
+    // (a retained run swept while the worker is still unwinding) would join
+    // itself and terminate. RunManager owns the handle instead - see
+    // `run_workers_` - and joins it from a thread that is never the worker.
     std::thread metrics_thread;
     std::atomic<bool> should_stop{ false };
     std::atomic<bool> is_running{ false };
@@ -56,28 +103,72 @@ struct RunContext {
     std::atomic<size_t> peak_in_flight{ 0 }; // high-water mark of in_flight()
 
     // ---- Live metrics "topic" (N1) ---------------------------------------
-    // Append-only buffer of wire-ready SSE payload strings (each is a full
+    // Ring capacity in ticks, derived from `liveReplayWindowMs` and this run's
+    // tick cadence once the metrics thread reads config (see collect_metrics).
+    // The initializer covers the stock window at the stock cadence, so a direct
+    // append_tick caller - a test, or a run whose thread has not read config
+    // yet - is bounded too rather than falling back to unlimited.
+    std::atomic<size_t> max_live_ticks{ live_ring_size (
+    constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS, constants::server::STATS_INTERVAL_MS) };
+
+    // Bounded ring of wire-ready SSE payload strings (each is a full
     // "event: metrics\nid: <n>\ndata: {...}\n\n"). Produced by the metrics
-    // thread, replayed+tailed by /metrics/live. MUST be mutex-guarded - a
-    // vector realloc would move/free the backing array under a concurrent
-    // reader (UAF) even for already-published indices, so the atomic offset
-    // alone is not enough. Readers copy out under the lock.
+    // thread, replayed+tailed by /runs/:id/live. MUST be mutex-guarded - a
+    // realloc would move/free the backing array under a concurrent reader (UAF)
+    // even for already-published indices, so the atomic offset alone is not
+    // enough. Readers copy out under the lock.
+    //
+    // The ring holds the newest `max_live_ticks` payloads; `published_count`
+    // keeps counting every tick ever published, so SSE event ids stay monotonic
+    // across an eviction and the /live termination check still compares like
+    // with like. Duration is user-controlled with no upper bound, so an
+    // append-only buffer grows without limit for the life of a run (~0.5 GB
+    // over an overnight soak at the default 10 ticks/sec).
     mutable std::mutex tick_mtx;
-    std::vector<std::string> tick_buffer;
-    std::atomic<size_t> published_count{ 0 }; // == tick_buffer.size() (hint)
+    std::deque<std::string> tick_buffer;
+    size_t tick_base_offset{ 0 };  // absolute index of tick_buffer.front(); tick_mtx
+    std::atomic<size_t> published_count{ 0 }; // total ticks ever published
     std::atomic<bool> closed{ false };         // set true AFTER final tick appended
     std::atomic<int64_t> completed_at_ms{ 0 }; // 0 while running; stamped at completion
+
+    // A batch of replayed ticks plus the absolute offset the consumer should ask
+    // for next. `next_offset` is not always `from + payloads.size()`: a consumer
+    // resuming from before the retained window is fast-forwarded to the oldest
+    // retained tick, and must adopt this offset or it would re-request evicted
+    // ids forever.
+    struct TickBatch {
+        std::vector<std::string> payloads;
+        size_t next_offset = 0;
+    };
+
+    // Resize the retained window. Called once per run by the metrics thread
+    // before the first tick; the ring trims on the next append rather than
+    // here, so a shrink costs nothing on the caller's path.
+    void set_max_live_ticks (size_t cap) {
+        max_live_ticks.store (cap > 0 ? cap : 1, std::memory_order_relaxed);
+    }
 
     void append_tick (std::string payload) {
         std::lock_guard<std::mutex> lock (tick_mtx);
         tick_buffer.push_back (std::move (payload));
-        published_count.store (tick_buffer.size (), std::memory_order_release);
+        // A loop, not an `if`: the cap can drop between appends, and one
+        // eviction per append would take the whole run to converge on it.
+        size_t cap = max_live_ticks.load (std::memory_order_relaxed);
+        while (tick_buffer.size () > cap) {
+            tick_buffer.pop_front ();
+            ++tick_base_offset;
+        }
+        published_count.store (tick_base_offset + tick_buffer.size (),
+        std::memory_order_release);
     }
-    [[nodiscard]] std::vector<std::string> ticks_since (size_t from) const {
+    [[nodiscard]] TickBatch ticks_since (size_t from) const {
         std::lock_guard<std::mutex> lock (tick_mtx);
-        if (from >= tick_buffer.size ()) return {};
-        return { tick_buffer.begin () + static_cast<std::ptrdiff_t> (from),
-        tick_buffer.end () };
+        size_t end = tick_base_offset + tick_buffer.size ();
+        if (from >= end) return { {}, from };
+        size_t start = from < tick_base_offset ? tick_base_offset : from;
+        auto begin_it =
+        tick_buffer.begin () + static_cast<std::ptrdiff_t> (start - tick_base_offset);
+        return { { begin_it, tick_buffer.end () }, end };
     }
     [[nodiscard]] size_t tick_count () const {
         std::lock_guard<std::mutex> lock (tick_mtx);
@@ -109,23 +200,108 @@ struct RunContext {
     [[nodiscard]] size_t total_errors () const {
         return metrics_collector ? metrics_collector->total_errors () : 0;
     }
-    [[nodiscard]] double total_latency_ms () const {
-        return metrics_collector ? metrics_collector->total_latency_sum () : 0.0;
+    // The one average-latency definition for this run: the latency sum over the
+    // requests that contributed to it (successes). Every caller - the stop
+    // response, the per-tick rows, the final report - goes through here so they
+    // cannot disagree; dividing the same sum by total_requests() instead
+    // silently reports a lower figure on any run with errors.
+    [[nodiscard]] double average_latency_ms () const {
+        return metrics_collector ? metrics_collector->average_latency () : 0.0;
     }
 
-    RunContext (const std::string& id, nlohmann::json cfg);
+    // `max_errors` is the `maxStoredErrors` setting (0 = unlimited). It is a
+    // constructor argument rather than something set afterwards because the
+    // collector sizes its error store from it up front; RunManager::start_run
+    // reads the key, and the default keeps direct constructions (tests, and any
+    // caller without a database to hand) on the stock cap.
+    RunContext (const std::string& id,
+    nlohmann::json cfg,
+    size_t max_errors = constants::metrics_collector::DEFAULT_MAX_ERRORS);
     ~RunContext ();
 };
 
 /**
- * @brief Build the per-tick enrichment metric rows (dropped / bytes / status
- * codes) from the collector's current cumulative state. Extracted from
- * collect_metrics so it can be unit-tested deterministically.
+ * @brief One persisted metrics tick, in the field names the time-series
+ * response uses.
+ *
+ * The producer fills this once per DB-gated tick; `build_metric_tick_payload`
+ * turns it into the JSON stored in `metric_ticks.payload` and returned verbatim
+ * as one `data[]` entry by `GET /runs/:id/metrics`. Naming the fields after the
+ * response keys is deliberate - the struct *is* the wire shape, so a reader
+ * comparing the two has one mapping to check, not two.
  */
-[[nodiscard]] std::vector<vayu::db::Metric> build_tick_enrichment_metrics (
-const std::shared_ptr<RunContext>& context,
-int64_t timestamp,
-const std::map<int, size_t>* status_snapshot = nullptr);
+struct MetricTickSample {
+    int64_t timestamp      = 0;   // Unix ms; the tick's single wall-clock sample
+    double elapsed_seconds = 0.0; // Seconds since the run's first persisted tick
+    size_t requests_completed = 0; // Responses received (success + error)
+    size_t requests_failed    = 0; // Of those, errors
+    double current_rps        = 0.0;
+    size_t current_concurrency = 0;
+    double send_rate           = 0.0;
+    double throughput          = 0.0;
+    size_t backpressure        = 0; // Sent but not yet responded
+    double error_rate          = 0.0; // Percent
+    size_t dropped_requests    = 0;
+    size_t bytes_sent          = 0;
+    size_t bytes_received      = 0;
+    std::map<int, size_t> status_codes; // Cumulative; code 0 = transport errors
+    // Windowed (rolling) percentiles for this tick, not cumulative.
+    double latency_p50_ms = 0.0;
+    double latency_p95_ms = 0.0;
+    double latency_p99_ms = 0.0;
+};
+
+/**
+ * @brief Serialize a tick sample into the stored `metric_ticks.payload` object.
+ *
+ * Key set and value types are the contract `GET /runs/:id/metrics` returns; the
+ * legacy EAV reader in `http/routes/metrics.cpp` builds the same object from
+ * ~18 rows, and stats_route_test.cpp pins the two against each other.
+ */
+[[nodiscard]] nlohmann::json build_metric_tick_payload (const MetricTickSample& sample);
+
+/** @brief Script-validation tallies, when deferred validation actually ran. */
+struct ScriptValidationTotals {
+    size_t sampled = 0;
+    size_t passed  = 0;
+    size_t failed  = 0;
+};
+
+/**
+ * @brief Whole-run results, the inputs to the stored `runs.summary` object.
+ *
+ * Everything `GET /runs/:id/report` used to re-derive by scanning the run's
+ * metric rows, known once at completion. `latency` holds the cumulative
+ * (whole-run) percentiles, never a window.
+ */
+struct RunSummaryInputs {
+    size_t total_requests     = 0;
+    double rps                = 0.0;
+    double send_rate          = 0.0;
+    double throughput         = 0.0;
+    double test_duration_s    = 0.0;
+    double setup_overhead_s   = 0.0;
+    size_t peak_concurrency   = 0;
+    size_t dropped_requests   = 0;
+    double queue_wait_avg_ms  = 0.0;
+    size_t bytes_sent         = 0;
+    size_t bytes_received     = 0;
+    std::map<int, size_t> status_codes;
+    MetricsCollector::Percentiles latency; // min/max/p50..p999, whole-run
+    double latency_avg_ms = 0.0; // Mean latency; the histogram does not carry it
+    // Absent when the run had no test script or no sampled responses - the
+    // report then omits its testValidation section, as it always has.
+    std::optional<ScriptValidationTotals> tests;
+};
+
+/**
+ * @brief Serialize whole-run results into the object stored in `runs.summary`.
+ *
+ * The report route reads exactly these keys (`http/routes/runs.cpp`), so the two
+ * sides are locked together by runs_route_test.cpp's summary round-trip rather
+ * than by convention.
+ */
+[[nodiscard]] nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs);
 
 /**
  * @brief Wrap a per-tick stats object as a wire-ready SSE "metrics" event,
@@ -150,6 +326,20 @@ class RunManager {
     // Re-read each tick (not captured once) so a runtime change to
     // liveRetentionMs from the UI takes effect without a daemon restart.
     std::function<int64_t ()> sweeper_ttl_provider_;
+
+    // Joinable handles for the worker threads spawned by start_run, keyed by
+    // run id. A worker cannot join itself, so its handle outlives the thread
+    // until either a later start_run reaps it or shutdown joins it. Guarded by
+    // its own mutex: a worker takes `mutex_` (retain_run) as its last act, so
+    // reaping must never hold `mutex_` while it joins.
+    mutable std::mutex workers_mtx_;
+    std::map<std::string, std::thread> run_workers_;
+    bool shutting_down_{ false }; // workers_mtx_
+
+    // Move out the handles of workers whose runs are no longer active, for the
+    // caller to join once it has dropped every lock. Requires `workers_mtx_`;
+    // takes `mutex_` itself.
+    std::vector<std::thread> take_finished_workers ();
 
     public:
     ~RunManager ();
@@ -182,11 +372,39 @@ class RunManager {
     void start_sweeper (int64_t ttl_ms);
     void stop_sweeper ();
 
-    // Helper to start a run
-    void start_run (const std::string& run_id,
+    // Helper to start a run. Returns false - having registered nothing and
+    // spawned nothing - if shutdown() has already begun, so a request that
+    // races the drain is refused rather than starting a worker nobody will
+    // join. Any other failure still surfaces as an exception from the worker.
+    bool start_run (const std::string& run_id,
     const nlohmann::json& config,
     vayu::db::Database& db,
     bool verbose);
+
+    /**
+     * @brief Stop every active run and join its worker thread.
+     *
+     * The daemon's `Database`, `RunManager` and curl global state are torn down
+     * in `main`'s scope exit while a run worker may still be writing metrics
+     * through references to all three. This is the ordered drain that has to
+     * happen first: signal `should_stop` on every active run, wait for them to
+     * settle, then join.
+     *
+     * `grace` bounds the *wait*, not the join. A worker that has not settled by
+     * then is logged and still joined, because letting go of it is precisely
+     * the use-after-free being prevented - the bound exists to make a slow
+     * shutdown visible, not to permit an unsafe one.
+     *
+     * Idempotent, and safe to call with no runs active. After it returns,
+     * start_run refuses; the destructor calls it as a backstop.
+     */
+    void shutdown (std::chrono::milliseconds grace = std::chrono::milliseconds (
+                   constants::server::RUN_SHUTDOWN_GRACE_MS));
+
+    // Worker thread handles still held (running, or finished but not yet
+    // reaped). Test-only hook - a drain that returns with this non-zero has
+    // left threads running over freed state.
+    [[nodiscard]] size_t tracked_worker_count () const;
 };
 
 // Worker functions

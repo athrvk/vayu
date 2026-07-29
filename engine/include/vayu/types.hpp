@@ -120,6 +120,51 @@ struct Body {
 };
 
 /**
+ * @brief Transport HTTP version for a request, stored as TEXT in the DB.
+ *
+ * `all_http_versions()` is the single enumeration of this domain - request
+ * validation and the seeded config `options` list both derive their allowed
+ * values from it rather than writing a literal list, so the two cannot drift.
+ */
+enum class HttpVersion { Auto, Http1_1, Http2 };
+
+inline std::string to_string (HttpVersion version) {
+    switch (version) {
+    case HttpVersion::Auto: return "auto";
+    case HttpVersion::Http1_1: return "http1.1";
+    case HttpVersion::Http2: return "http2";
+    }
+    return "unknown";
+}
+
+inline std::string http_version_label (HttpVersion version) {
+    switch (version) {
+    case HttpVersion::Auto: return "Auto";
+    case HttpVersion::Http1_1: return "HTTP/1.x";
+    case HttpVersion::Http2: return "HTTP/2";
+    }
+    return "Unknown";
+}
+
+inline std::optional<HttpVersion> http_version_from_string (const std::string& str) {
+    if (str == "auto")
+        return HttpVersion::Auto;
+    if (str == "http1.1")
+        return HttpVersion::Http1_1;
+    if (str == "http2")
+        return HttpVersion::Http2;
+    return std::nullopt;
+}
+
+inline const std::vector<HttpVersion>& all_http_versions () {
+    static const std::vector<HttpVersion> versions = { HttpVersion::Auto,
+        HttpVersion::Http1_1, HttpVersion::Http2 };
+    return versions;
+}
+
+constexpr HttpVersion DEFAULT_HTTP_VERSION = HttpVersion::Auto;
+
+/**
  * @brief HTTP Request definition
  */
 struct Request {
@@ -129,10 +174,11 @@ struct Request {
     Body body;
 
     // Options
-    int timeout_ms        = 30000;
-    bool follow_redirects = true;
-    int max_redirects     = 10;
-    bool verify_ssl       = true;
+    int timeout_ms           = 30000;
+    bool follow_redirects    = true;
+    int max_redirects        = 10;
+    bool verify_ssl          = true;
+    HttpVersion http_version = DEFAULT_HTTP_VERSION;
 };
 
 /**
@@ -201,6 +247,27 @@ struct Response {
     std::string body;
     size_t body_size = 0;
     Timing timing;
+
+    /**
+     * @brief The protocol actually negotiated for this transfer, e.g.
+     * "HTTP/1.1" or "HTTP/2" - read from CURLINFO_HTTP_VERSION after the
+     * transfer completes.
+     *
+     * This is an *outcome*, not the request. It is deliberately a different
+     * type and a different value space from the two other things also
+     * called "http_version" in this codebase:
+     *   - `Request::http_version` (HttpVersion enum) is what was asked for -
+     *     Auto/Http1_1/Http2 - before the transfer ran.
+     *   - `db::Request::http_version` (string) is that same request-side
+     *     enum, persisted to disk.
+     * Conflating either of those with this field would show a user a
+     * protocol they asked for but were not actually granted.
+     *
+     * Empty when nothing was negotiated (e.g. the connection never reached a
+     * server) - deliberately not defaulted to "HTTP/1.1", since that would be
+     * a guess presented as a fact.
+     */
+    std::string http_version;
 
     // Error information (for client-side failures like invalid URL, connection errors)
     // When set, indicates the request failed before receiving a server response
@@ -286,48 +353,6 @@ template <typename T> class Result {
     private:
     std::variant<T, Error> data_;
 };
-
-// ============================================================================
-// SSE Types
-// ============================================================================
-
-/**
- * @brief A single Server-Sent Event
- */
-struct SseEvent {
-    /// Event type (defaults to "message" if not specified)
-    std::string type = "message";
-
-    /// Event data (may contain multiple lines joined by newlines)
-    std::string data;
-
-    /// Optional event ID for reconnection
-    std::optional<std::string> id;
-
-    /// Server-suggested retry interval in milliseconds
-    std::optional<int> retry_ms;
-};
-
-/**
- * @brief EventSource connection state
- */
-enum class EventSourceState {
-    Connecting, ///< Connection is being established
-    Open,       ///< Connection is open and receiving events
-    Closed      ///< Connection is closed
-};
-
-/**
- * @brief Convert state to string
- */
-inline const char* to_string (EventSourceState state) {
-    switch (state) {
-    case EventSourceState::Connecting: return "CONNECTING";
-    case EventSourceState::Open: return "OPEN";
-    case EventSourceState::Closed: return "CLOSED";
-    }
-    return "UNKNOWN";
-}
 
 // ============================================================================
 // Event Loop Types
@@ -459,12 +484,25 @@ struct ScriptResult {
  * (per data-model PRD §5.2) declaring the conversion applied when scripts
  * read this variable via pm.*.get(...). One of:
  *   "string" (default), "number", "boolean", "json".
+ *
+ * `created_at` (ms epoch) is the app's row-ordering key - the variables editor
+ * lists a scope oldest-first. The engine does not display it, but it must
+ * round-trip through every read/write of a stored variables blob, or the app's
+ * ordering is destroyed (issue #135). `std::nullopt` means "unknown", which the
+ * app sorts as older than everything; the engine never invents a value for an
+ * existing variable, only for one a script creates.
+ *
+ * Every field here is serialized by `vayu::json::serialize_variables`; adding
+ * one without adding it there silently drops it on the next design run.
  */
 struct Variable {
     std::string value;
     bool secret  = false;
     bool enabled = true;
     std::string type = "string";
+    std::optional<int64_t> created_at;
+
+    bool operator== (const Variable&) const = default;
 };
 
 /**
@@ -724,8 +762,9 @@ struct Request {
     // saved request keeps the redirect policy the user chose. The in-struct
     // defaults match the column defaults, so a default-constructed row and a row
     // written before these columns existed agree.
-    bool follow_redirects = true; // INTEGER NOT NULL DEFAULT 1
-    int max_redirects     = 10;   // INTEGER NOT NULL DEFAULT 10
+    bool follow_redirects    = true;   // INTEGER NOT NULL DEFAULT 1
+    int max_redirects        = 10;     // INTEGER NOT NULL DEFAULT 10
+    std::string http_version = "auto"; // TEXT NOT NULL DEFAULT 'auto'
     int64_t created_at;
     int64_t updated_at;
 };
@@ -749,6 +788,12 @@ struct Run {
     std::string config_snapshot; // JSON string (Full copy of request/env)
     int64_t start_time;
     int64_t end_time;
+    // Whole-run results, written once when the run reaches a terminal status.
+    // JSON object; `""` means "not written" - the report route then falls back
+    // to reconstructing the aggregates from the legacy `metrics` rows. NOT NULL
+    // with a `""` default so sync_schema can ALTER TABLE ADD COLUMN it onto an
+    // existing runs table (same pattern as requests.follow_redirects).
+    std::string summary; // TEXT NOT NULL DEFAULT ''
 };
 
 struct Metric {
@@ -758,6 +803,22 @@ struct Metric {
     MetricName name; // "rps", "latency", "error_rate"
     double value;
     std::string labels; // JSON string
+};
+
+/**
+ * @brief One wide row per persisted metrics tick - the whole tick object as
+ * stored JSON, replacing the ~18 EAV `metrics` rows a tick used to cost.
+ *
+ * `payload` is exactly the snake_case per-tick object `GET /runs/:id/metrics`
+ * returns (the app's `LoadTestMetrics` shape), built once at write time instead
+ * of reassembled per request. Rows map 1:1 to `data[]` entries, which is what
+ * makes that endpoint's pagination tick-aligned.
+ */
+struct MetricTick {
+    int id;
+    std::string run_id;
+    int64_t timestamp;  // Unix ms - the tick's single wall-clock sample
+    std::string payload; // JSON object (see build_metric_tick_payload)
 };
 
 struct Result {
@@ -777,14 +838,15 @@ struct Result {
 struct ConfigEntry {
     std::string key;   // Unique identifier (e.g., "defaultTimeout")
     std::string value; // Current value as string (will be parsed based on type)
-    std::string type;  // "integer", "string", "boolean", "number"
+    std::string type;  // "integer", "string", "boolean", "number", "enum"
     std::string label; // Display label (e.g., "Default Request Timeout")
     std::string description; // Help text for UI
     std::string category; // Grouping (e.g., "server", "scripting", "performance")
     std::string default_value;            // Default value as string
     std::optional<std::string> min_value; // Optional minimum (for numbers)
     std::optional<std::string> max_value; // Optional maximum (for numbers)
-    int64_t updated_at;                   // Last update timestamp
+    std::optional<std::string> options; // JSON array of {value,label}, enum types only
+    int64_t updated_at;                 // Last update timestamp
 };
 
 /**

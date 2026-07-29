@@ -24,17 +24,22 @@ export const API_ENDPOINTS = {
 	HEALTH: `/health`,
 	CONFIG: `/config`,
 
-	// Collections
+	// Collections. POST the collection path to create; PUT the by-id path to
+	// update. The engine split the verbs in #95 - POST no longer upserts, so an
+	// update sent as a POST is a 409, and a create sent as a PUT is a 404.
 	COLLECTIONS: `/collections`,
 	COLLECTION_BY_ID: (id: string) => `/collections/${id}`,
+	COLLECTIONS_UPDATE: (id: string) => `/collections/${id}`,
 
 	// Requests
 	REQUESTS: `/requests`,
 	REQUEST_BY_ID: (id: string) => `/requests/${id}`,
+	REQUESTS_UPDATE: (id: string) => `/requests/${id}`,
 
 	// Environments
 	ENVIRONMENTS: `/environments`,
 	ENVIRONMENT_BY_ID: (id: string) => `/environments/${id}`,
+	ENVIRONMENTS_UPDATE: (id: string) => `/environments/${id}`,
 
 	// Global Variables
 	GLOBALS: `/globals`,
@@ -43,24 +48,48 @@ export const API_ENDPOINTS = {
 	SCRIPT_COMPLETIONS: `/scripting/completions`,
 
 	// Execution
-	EXECUTE_REQUEST: `/request`,
-	START_LOAD_TEST: `/run`,
+	EXECUTE_REQUEST: `/execute`,
+	START_LOAD_TEST: `/runs`,
 
 	// Runs
 	RUNS: `/runs`,
-	RUN_BY_ID: (id: string) => `/run/${id}`,
-	RUN_REPORT: (id: string) => `/run/${id}/report`,
-	RUN_STOP: (id: string) => `/run/${id}/stop`,
+	// Paginated, filtered list. Passing any param opts into the `{data,
+	// pagination}` envelope; a bare `/runs` (no params) still returns the
+	// legacy bare array (removed next minor).
+	RUNS_LIST: (params: {
+		limit?: number;
+		offset?: number;
+		type?: string;
+		status?: string;
+		requestId?: string;
+		q?: string;
+	}) => {
+		const qs = new URLSearchParams();
+		if (params.limit !== undefined) qs.set("limit", String(params.limit));
+		if (params.offset !== undefined) qs.set("offset", String(params.offset));
+		if (params.type) qs.set("type", params.type);
+		if (params.status) qs.set("status", params.status);
+		if (params.requestId) qs.set("requestId", params.requestId);
+		if (params.q) qs.set("q", params.q);
+		const s = qs.toString();
+		return s ? `/runs?${s}` : `/runs`;
+	},
+	RUN_BY_ID: (id: string) => `/runs/${id}`,
+	RUN_REPORT: (id: string) => `/runs/${id}/report`,
+	RUN_STOP: (id: string) => `/runs/${id}/stop`,
 
-	// Real-time stats (SSE)
-	METRICS_LIVE: (runId: string) => `/metrics/live/${runId}`, // New endpoint (memory-based, faster)
+	// Real-time stats (SSE, memory-based, faster)
+	METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,
 
-	// Time-series metrics (JSON, paginated)
+	// Time-series metrics (JSON, paginated). Always JSON - no format param.
 	STATS_TIME_SERIES: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0) =>
-		`/stats/${runId}?format=json&limit=${limit}&offset=${offset}`,
+		`/runs/${runId}/metrics?limit=${limit}&offset=${offset}`,
 
-	// Import
+	// Import. FETCH proxies a remote collection past CORS; APPLY persists the
+	// whole parsed tree in one atomic call and returns the temp-id -> real-id map
+	// (the import path no longer creates items one POST at a time).
 	IMPORT_FETCH: `/import/fetch`,
+	IMPORT_APPLY: `/import/apply`,
 
 	// OAuth 2.0
 	OAUTH2_TOKEN: `/oauth2/token`,

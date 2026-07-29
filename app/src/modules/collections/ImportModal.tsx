@@ -6,7 +6,7 @@
  */
 
 import { useRef, useState } from "react";
-import { Upload, CheckCircle2, X, Folder, AlertTriangle } from "lucide-react";
+import { Upload, CheckCircle2, X, Folder, Layers, Globe, AlertTriangle } from "lucide-react";
 import {
 	Button,
 	Dialog,
@@ -18,6 +18,7 @@ import {
 	TabsContent,
 	TabsList,
 	TabsTrigger,
+	TabLabel,
 	Textarea,
 } from "@/components/ui";
 import { useImportModalStore } from "@/stores";
@@ -30,7 +31,15 @@ import { MethodBadge } from "@/components/shared";
 type Tab = "file" | "url" | "paste";
 type Phase = "idle" | "detecting" | "preview" | "error";
 
-const FORMAT_BADGES = ["Postman v2.1", "Postman v2.0", "Insomnia v4", "OpenAPI 3.0", "OpenAPI 2.0"];
+const FORMAT_BADGES = [
+	"Postman v2.1",
+	"Postman v2.0",
+	"Postman Env",
+	"Postman Globals",
+	"Insomnia v4",
+	"OpenAPI 3.0",
+	"OpenAPI 2.0",
+];
 
 export function ImportModal() {
 	const { isOpen, close } = useImportModalStore();
@@ -135,6 +144,17 @@ export function ImportModal() {
 		}
 	};
 
+	// A Postman *environment* or *globals* export parses to a result with no
+	// collections, and the options are applied at parse time - so with "Import
+	// environments & variables" off the whole result is empty and Import would create
+	// nothing and close the modal. Block it instead; the toggle that recovers it sits
+	// in the same footer.
+	const nothingToImport =
+		!!result &&
+		result.collections.length === 0 &&
+		result.environments.length === 0 &&
+		Object.keys(result.globals).length === 0;
+
 	const toggleEnvironments = (v: boolean) => {
 		setImportEnvironments(v);
 		redetect({ importEnvironments: v, importScripts });
@@ -149,7 +169,11 @@ export function ImportModal() {
 	const panelBody = (
 		<>
 			{phase === "preview" && result ? (
-				<PreviewView result={result} onDismiss={reset} />
+				<PreviewView
+					result={result}
+					importEnvironments={importEnvironments}
+					onDismiss={reset}
+				/>
 			) : (
 				<>
 					{tab === "file" && (
@@ -161,9 +185,19 @@ export function ImportModal() {
 						 * works; the button is the keyboard path to the same
 						 * hidden <input type="file">.
 						 */
+						/*
+						 * The dashed edge is a drag-target affordance and wants
+						 * prominence - but on this fill (`--muted`/`--accent`)
+						 * `--border-strong` is the *faintest* option in dark (1.108,
+						 * below plain `--border` at 1.157), because the fill sits
+						 * between the two tokens in lightness. `surface-sunken`'s
+						 * alpha-of-foreground rule is the strongest edge available
+						 * here in both themes (1.356 light / 1.343 dark), and its
+						 * background is the same value `bg-accent` carried.
+						 */
 						<button
 							type="button"
-							className="w-full cursor-pointer rounded-lg border-2 border-dashed border-border-strong bg-accent px-6 py-9 text-center"
+							className="w-full cursor-pointer rounded-lg border-2 border-dashed border-rule surface-sunken px-6 py-9 text-center"
 							onClick={() => fileInputRef.current?.click()}
 							onDragOver={(e) => e.preventDefault()}
 							onDrop={(e) => {
@@ -183,7 +217,10 @@ export function ImportModal() {
 								{FORMAT_BADGES.map((b) => (
 									<span
 										key={b}
-										className="rounded-md border border-border bg-card px-2 py-0.5 text-[10px] font-semibold"
+										// Bare `bg-card` on purpose: the chip's edge faces the
+										// sunken drop zone, so its `border-rule` must inherit the
+										// zone's declaration, not declare a card rule of its own.
+										className="rounded-md border border-rule bg-card px-2 py-0.5 text-[10px] font-semibold"
 									>
 										{b}
 									</span>
@@ -261,12 +298,20 @@ export function ImportModal() {
 			<DialogContent
 				// Overrides the default padded grid: this dialog manages its own
 				// header/tabs/body/footer bands, each with its own divider.
-				className="flex w-[500px] max-w-[500px] max-h-[82vh] flex-col gap-0 overflow-hidden border-border-strong bg-card p-0"
+				//
+				// `bg-card surface-card` must stay a pair: `surface-card` sets the
+				// same background, but from `@layer components`, so the primitive's
+				// `bg-background` utility would outrank it - and tailwind-merge does
+				// not treat `surface-card` as a background class, so only `bg-card`
+				// strips the primitive's. The utility wins the cascade; the surface
+				// class contributes the `--rule` declaration the dividers below
+				// resolve against.
+				className="flex w-[500px] max-w-[500px] max-h-[82vh] flex-col gap-0 overflow-hidden border-border-strong bg-card surface-card p-0"
 				// No prose description; without this Radix logs a missing
 				// aria-describedby warning.
 				aria-describedby={undefined}
 			>
-				<DialogHeader className="flex-row items-center justify-between space-y-0 border-b border-border px-5 py-4">
+				<DialogHeader className="flex-row items-center justify-between space-y-0 border-b border-rule px-5 py-4">
 					<DialogTitle className="text-sm font-bold tracking-tight">
 						Import Collection
 					</DialogTitle>
@@ -293,14 +338,12 @@ export function ImportModal() {
 					}}
 					className="flex min-h-0 flex-1 flex-col"
 				>
-					<TabsList className="h-auto w-full justify-start rounded-none border-b border-border bg-transparent p-0 px-5">
+					<TabsList className="w-full px-4">
 						{(["file", "url", "paste"] as Tab[]).map((t) => (
-							<TabsTrigger
-								key={t}
-								value={t}
-								className="shrink-0 rounded-none border-b-2 border-transparent px-4 py-2.5 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-							>
-								{t === "file" ? "File" : t === "url" ? "URL" : "Paste JSON"}
+							<TabsTrigger key={t} value={t}>
+								<TabLabel>
+									{t === "file" ? "File" : t === "url" ? "URL" : "Paste JSON"}
+								</TabLabel>
 							</TabsTrigger>
 						))}
 					</TabsList>
@@ -331,7 +374,7 @@ export function ImportModal() {
 				</Tabs>
 
 				{phase === "preview" && (
-					<div className="flex items-center justify-between gap-3 border-t border-border px-5 py-4">
+					<div className="flex items-center justify-between gap-3 border-t border-rule px-5 py-4">
 						{/*
 						 * One <label> each. These were two checkboxes inside a single
 						 * <label>: a label's control is its *first* labelable
@@ -366,7 +409,10 @@ export function ImportModal() {
 							>
 								Cancel
 							</Button>
-							<Button onClick={handleImport} disabled={importMutation.isPending}>
+							<Button
+								onClick={handleImport}
+								disabled={importMutation.isPending || nothingToImport}
+							>
 								{importMutation.isPending ? "Importing…" : "Import →"}
 							</Button>
 						</div>
@@ -377,8 +423,17 @@ export function ImportModal() {
 	);
 }
 
-function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: () => void }) {
-	const { meta, collections } = result;
+function PreviewView({
+	result,
+	importEnvironments,
+	onDismiss,
+}: {
+	result: ImportResult;
+	importEnvironments: boolean;
+	onDismiss: () => void;
+}) {
+	const { meta, collections, environments, globals } = result;
+	const globalCount = Object.keys(globals).length;
 	return (
 		<div className="space-y-3">
 			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
@@ -397,15 +452,57 @@ function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: (
 					<X className="h-3.5 w-3.5" />
 				</button>
 			</div>
-			<div className="max-h-[190px] overflow-y-auto rounded-md border border-border bg-accent p-2">
+			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
 				{collections.map((c, i) => (
 					<TreeNode key={i} name={c.name} requests={c.requests} children={c.children} />
 				))}
+				{/*
+				 * Environments were parsed but never shown. For a Postman environment
+				 * export they are the entire import, so the box rendered empty.
+				 */}
+				{environments.map((e, i) => (
+					<div
+						key={i}
+						className="flex items-center gap-1.5 py-0.5 pl-1 text-xs font-medium"
+					>
+						<Layers className="h-3.5 w-3.5 text-primary" />
+						{e.name}
+						<span className="text-[11px] font-normal text-muted-foreground">
+							{varCountLabel(Object.keys(e.variables).length)}
+						</span>
+					</div>
+				))}
+				{/*
+				 * Globals have no name of their own - they are a singleton scope, not a
+				 * named environment - so the row names the destination rather than the file.
+				 */}
+				{globalCount > 0 && (
+					<div className="flex items-center gap-1.5 py-0.5 pl-1 text-xs font-medium">
+						<Globe className="h-3.5 w-3.5 text-primary" />
+						Globals
+						<span className="text-[11px] font-normal text-muted-foreground">
+							{varCountLabel(globalCount)}
+						</span>
+					</div>
+				)}
 			</div>
 			<p className="text-[11px] text-muted-foreground">
 				{meta.requestCount} requests · {meta.folderCount} folders · {meta.environmentCount}{" "}
-				environments
+				environments · {meta.globalCount} globals
 			</p>
+			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
+				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
+					<AlertTriangle className="h-3.5 w-3.5" />
+					{importEnvironments
+						? "Nothing to import from this file."
+						: "No collections in this file. Enable Import environments & variables below to import its environments."}
+				</p>
+			)}
+			{globalCount > 0 && (
+				<p className="text-[11px] text-muted-foreground">
+					Existing globals are kept; a variable of the same name is overwritten.
+				</p>
+			)}
 			{(meta.skipped.length > 0 || meta.nonExecutableAuth > 0) && (
 				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
 					<AlertTriangle className="h-3.5 w-3.5" />
@@ -419,6 +516,10 @@ function PreviewView({ result, onDismiss }: { result: ImportResult; onDismiss: (
 			)}
 		</div>
 	);
+}
+
+function varCountLabel(n: number): string {
+	return `${n} ${n === 1 ? "variable" : "variables"}`;
 }
 
 function TreeNode({

@@ -20,8 +20,8 @@ Vayu is a free, open source desktop app for Windows, macOS, and Linux that merge
 
 ## See it in action
 
-![Load test dashboard](docs/images/vayu-loadtest.png)
-*The load-test dashboard. Throughput, latency percentiles, and error counters stream live from the C++ engine while the UI stays responsive.*
+![Load test dashboard](docs/images/vayu-loadtest2.png)
+*The load-test dashboard: 52,738 req/s at concurrency 64, 738,406 requests, 100% success. Throughput, latency percentiles, and error counters stream live from the C++ engine while the UI stays responsive, with every run kept in the history sidebar.*
 
 ![GraphQL request builder](docs/images/vayu-graphql.png)
 *REST and GraphQL request builder with collections, layered environments, and Postman-compatible scripting.*
@@ -40,15 +40,19 @@ Vayu collapses that workflow into one app. Build a request once, point the load 
 
 The HTTP core is a multi-worker libcurl event loop in C++20, isolated from the Electron UI by a local HTTP sidecar so rendering never blocks on the request load. In practice that lets a single laptop saturate a gigabit link while the dashboard keeps streaming metrics frame-by-frame - well past what Node.js-backed Electron tools manage on the same hardware.
 
-**Proof - head-to-head vs `wrk` and `vegeta`.** Same mock server, same machine, matched concurrency, measured from the CLI:
+**Proof - head-to-head vs `wrk` and `vegeta`.** Same mock server, same machine, same session, matched concurrency (64), measured from a standalone engine:
 
-| Client | req/s @ 128 conns |
-|---|---:|
-| wrk | 56,802 |
-| vegeta | 53,811 |
-| **Vayu** | **52,825** |
+| Client | req/s | vs wrk |
+|---|---:|:---:|
+| **Vayu** | **56,880** | **105%** |
+| wrk | 54,280 | 100% |
+| vegeta | 51,847 | 96% |
 
-Vayu lands at **~93% of wrk and on par with vegeta** (and edges past vegeta at 256 connections) - all three converge on the same system throughput ceiling. Full methodology, the concurrency sweep, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](docs/engine/benchmarks.md)**.
+Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same ~57k system throughput ceiling, and at that ceiling the machine is still 79% idle, so it is the target saturating, not the client. Full methodology, the concurrency sweep, the `workers` A/B, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](docs/engine/benchmarks.md)**.
+
+**And from the UI, not just the CLI.** A 60-second run started from the app's own Load Test panel sustained **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout:
+
+![In-app load test sustaining 51,922 req/s over 60 seconds with 3,115,391 requests and a 0.0% error rate](docs/images/vayu-loadtest4.png)
 
 A broader comparison against k6, JMeter, and the Postman collection runner is in progress - follow [the issues board](https://github.com/athrvk/vayu/issues) to track it.
 
@@ -74,9 +78,9 @@ A broader comparison against k6, JMeter, and the Postman collection runner is in
 
 ## Coming from Postman, Insomnia, or an OpenAPI spec?
 
-Migrating takes seconds. Drop an existing export onto Vayu and the workspace is rebuilt as a native collection - folders, environments, variables, auth, and pre/post-request scripts all carry across.
+Migrating takes seconds. Drop an existing export onto Vayu and the workspace is rebuilt as a native collection - folders, variables, auth, and pre/post-request scripts all carry across, plus environments - from an Insomnia workspace, or from the separate file Postman exports them as.
 
-- **Postman** - Collection v2.0 and v2.1 JSON exports
+- **Postman** - Collection v2.0 and v2.1 JSON exports, plus environment and globals exports
 - **Insomnia** - v4 exports
 - **OpenAPI / Swagger** - 3.0 and 2.0 specs (JSON or YAML); generates a ready-to-use collection from the spec
 
@@ -87,7 +91,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **Native load testing** - multi-worker C++ event loop sustains tens of thousands of req/s with metrics streamed over SSE in real time; no second tool needed
 - **REST + GraphQL request builder** - GET, POST, PUT, PATCH, DELETE and more; JSON, form-data, URL-encoded, raw text, and GraphQL bodies
 - **Collections & folder hierarchy** - nested collections with per-collection variables, auth, and pre/post scripts
-- **One-drop import** - Postman v2.0/v2.1, Insomnia v4, OpenAPI 3.0, Swagger 2.0
+- **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4, OpenAPI 3.0, Swagger 2.0
 - **Layered environments** - variable resolution flows from globals → collection chain → active environment, with overrides at any level
 - **Auth, the way you expect it** - Bearer token, Basic auth, API key (header or query), and OAuth 2.0 (client credentials, password, and interactive authorization code with PKCE); resolved engine-side and inherits down the collection tree
 - **Postman-compatible test scripts** - QuickJS engine implementing `pm.test()`, `pm.expect()`, `pm.environment.set()`, `pm.response.*` - most Postman scripts run unmodified
@@ -189,6 +193,8 @@ See [Architecture Documentation](docs/architecture.md) for the full process mode
 
 ## Documentation
 
+**Full docs: [athrvk.github.io/vayu](https://athrvk.github.io/vayu/)** - searchable, and built from `docs/` on every push to `master`.
+
 | Document | Description |
 |---|---|
 | [Architecture](docs/architecture.md) | Sidecar pattern, process model, IPC |
@@ -225,7 +231,7 @@ Yes. All execution happens locally. Vayu never contacts external servers during 
 No. Download, install, and use it immediately with no sign-up.
 
 **Can I import my Postman collections?**
-Yes - Postman Collection v2.0 and v2.1 JSON exports, including folders, environments, variables, auth settings, and pre/post-request scripts.
+Yes - Postman Collection v2.0 and v2.1 JSON exports, including folders, collection variables, auth settings, and pre/post-request scripts. Postman environments live in a separate export file; drop that in too and it imports as a Vayu environment. A Postman globals export imports the same way, merging into Vayu's globals scope. Insomnia workspace environments import as well.
 
 **Can I import OpenAPI / Swagger specs?**
 Yes. Drop in an OpenAPI 3.0 or Swagger 2.0 file (JSON or YAML) and Vayu generates a ready-to-use collection from the spec.

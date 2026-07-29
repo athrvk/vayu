@@ -40,7 +40,13 @@ struct TransferData {
     RequestCallback callback;
     ProgressCallback progress;
     std::promise<Result<Response>> promise;
-    bool has_promise                   = false;
+    bool has_promise = false;
+    /// Largest response body this transfer may buffer, 0 = unbounded.
+    /// Set from EventLoopConfig when the handle is configured.
+    size_t max_response_bytes = 0;
+    /// Set by write_callback when it refused to buffer more, so the completion
+    /// can name the cap instead of reporting curl's generic write failure.
+    bool body_limit_exceeded           = false;
     char error_buffer[CURL_ERROR_SIZE] = { 0 };
     struct curl_slist* headers_list    = nullptr;
     struct curl_slist* resolve_list    = nullptr; // DNS pre-resolution list

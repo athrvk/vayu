@@ -12,13 +12,22 @@ automatically on startup - no migration scripts are needed for additive changes.
 
 ## Tables
 
+**ID format.** Row IDs are `<prefix>_` + a random UUIDv4 (lowercase `8-4-4-4-12`
+hex, e.g. `col_3f2b1c9a-...`), the same shape whether a row is created by the app
+or the engine. The engine generates them with `vayu::utils::generate_id("col_")`
+(see `engine/src/utils/id.cpp`); the app's import pipeline uses
+`col_${crypto.randomUUID()}`. The engine formerly built IDs from a millisecond
+timestamp, so two rows created in the same millisecond collided and - because
+persistence upserts (`storage.replace()`) - silently merged; the random UUID
+removes that. `globals.id` is the one exception: a fixed literal `"globals"`.
+
 ### `collections`
 
 Stores folder/group hierarchy for requests.
 
 | Column               | Type    | Notes                                        |
 |----------------------|---------|----------------------------------------------|
-| `id`                 | TEXT PK | UUID                                         |
+| `id`                 | TEXT PK | `col_` + UUID                                |
 | `parent_id`          | TEXT    | NULL for root collections                    |
 | `name`               | TEXT    |                                              |
 | `description`        | TEXT    | Default `""`                                 |
@@ -36,7 +45,16 @@ Stores folder/group hierarchy for requests.
 Collections are always auth sources - they never store `{"mode":"inherit"}`.
 
 **Cascade delete**: deleting a collection performs BFS to collect all descendant IDs, then
-deletes all their requests before deleting the collections deepest-first. See `Database::delete_collection()`.
+deletes all their requests before deleting the collections deepest-first, wrapped in a single
+transaction so a crash mid-cascade cannot leave a half-deleted subtree. See
+`Database::delete_collection()`.
+
+`parent_id` forms a tree, but SQLite enforces no such constraint, so the BFS carries a visited
+set and is **cycle-safe**: a self-parent (`parent_id == id`) or an `A -> B -> A` loop terminates
+instead of growing the work list forever under the global DB mutex (which would hang every
+endpoint, including `/health`). `POST /collections` rejects the writes that would create such a
+cycle (see [api-reference.md](api-reference.md) - POST /collections), so cycles only arise from
+data written before that validation existed; the visited set is what lets deletion recover from it.
 
 ---
 
@@ -46,7 +64,7 @@ Stores individual HTTP request definitions.
 
 | Column                | Type    | Notes                                                |
 |-----------------------|---------|------------------------------------------------------|
-| `id`                  | TEXT PK | UUID                                                 |
+| `id`                  | TEXT PK | `req_` + UUID                                        |
 | `collection_id`       | TEXT    | FK → `collections.id` (not enforced by SQLite FK)   |
 | `name`                | TEXT    |                                                      |
 | `description`         | TEXT    | Default `""`                                         |
@@ -62,6 +80,7 @@ Stores individual HTTP request definitions.
 | `order`               | INTEGER | Sort order within collection; default 0              |
 | `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
 | `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
+| `http_version`        | TEXT    | `'auto'` \| `'http1.1'` \| `'http2'`; default `'auto'` |
 | `created_at`          | INTEGER | Unix ms                                              |
 | `updated_at`          | INTEGER | Unix ms                                              |
 
@@ -94,16 +113,31 @@ placement options, etc. Secret fields (`clientSecret`, `password`) are stored
 **in plaintext** here, same as bearer/basic credentials - the v1 posture. The
 resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
 
-**follow_redirects / max_redirects** - the request's redirect policy, surfaced
-in the request builder's **Settings** tab and serialized as `followRedirects` /
-`maxRedirects`. They mirror the executable `vayu::Request` fields of the same
-name, so the saved policy is what `POST /request` and `POST /run` apply.
+**follow_redirects / max_redirects / http_version** - the request's execution
+options, surfaced in the request builder's **Settings** tab and serialized as
+`followRedirects` / `maxRedirects` / `httpVersion`. They mirror the executable
+`vayu::Request` fields of the same name, so the saved options are what
+`POST /execute` and `POST /runs` apply - `http_version` governs both Send and
+load test alike; there is no separate per-run protocol control.
 
-Both columns are `NOT NULL` with a `DEFAULT`, which is what lets `sync_schema()`
-add them to an existing, non-empty `requests` table - a `NOT NULL` column with
-no default cannot be added by `ALTER TABLE ADD COLUMN`. Rows written before the
-columns existed backfill to `1` / `10`, i.e. the behaviour they already had.
-`max_redirects` is clamped to `0..100` on write.
+All three columns are `NOT NULL` with a `DEFAULT`, which is what lets
+`sync_schema()` add them to an existing, non-empty `requests` table - a
+`NOT NULL` column with no default cannot be added by `ALTER TABLE ADD COLUMN`.
+Rows written before the columns existed backfill to `1` / `10` / `'auto'`, i.e.
+the behaviour they already had (a row predating this column could only ever
+have run HTTP/1.1, since nghttp2 was not yet linked). `max_redirects` is
+clamped to `0..100` on write.
+
+**http_version** stores `Request::http_version` (the *requested* protocol, an
+enum member spelled as text) - a different value and a different value space
+from `Response::http_version`, the *negotiated* protocol string
+(`"HTTP/1.1"` / `"HTTP/2"` / `""`) that lands in a design run's `trace_data`
+(see [`results`](#results)) and the live `/execute` response. Conflating the
+two would show a user a protocol they asked for but were not actually granted.
+On create or on an explicit `null` reset, this column seeds from the
+`defaultHttpVersion` [`config_entries`](#config_entries) row (`'auto'` unless
+changed) - a write-time default only, never consulted at execution. Changing
+the global afterward does not alter a request already saved.
 
 ---
 
@@ -113,7 +147,7 @@ Stores named variable sets.
 
 | Column       | Type    | Notes                                 |
 |--------------|---------|---------------------------------------|
-| `id`         | TEXT PK | UUID                                  |
+| `id`         | TEXT PK | `env_` + UUID                         |
 | `name`       | TEXT    |                                       |
 | `description`| TEXT    | Default `""`                          |
 | `variables`  | TEXT    | JSON: `Record<string, VariableValue>` |
@@ -142,7 +176,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 
 | Column            | Type    | Notes                                                       |
 |-------------------|---------|-------------------------------------------------------------|
-| `id`              | TEXT PK | UUID                                                        |
+| `id`              | TEXT PK | `run_` + UUID                                               |
 | `request_id`      | TEXT    | FK → `requests.id` (optional; set in design mode)           |
 | `environment_id`  | TEXT    | FK → `environments.id` (optional)                           |
 | `type`            | TEXT    | `"design"` or `"load"`                                      |
@@ -150,15 +184,58 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `config_snapshot` | TEXT    | JSON snapshot of the request/env at run time                |
 | `start_time`      | INTEGER | Unix ms                                                     |
 | `end_time`        | INTEGER | Unix ms                                                     |
+| `summary`         | TEXT    | JSON: whole-run results, written once at terminal status (`""` = not written) |
 
-There is **no** `summary` column - aggregate metrics for a finished run are reconstructed at
-read time from the `metrics` and `results` tables (see `GET /run/:runId/report`).
+**`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every
+metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,
+bytes, and the script-validation tallies. It is written once - by `run_manager.cpp` when the run
+reaches `completed`/`stopped`, and best-effort (minus `setup_overhead`, with a wall-clock
+`test_duration`) when it fails. `""` means the run predates the column, and the report falls back
+to the legacy `metrics` rows. NOT NULL with a `""` default, so `sync_schema()` can
+`ALTER TABLE ADD COLUMN` it onto an existing table (same pattern as `requests.follow_redirects`).
+
+```json
+{
+  "total_requests": 100, "rps": 50.0, "send_rate": 51.0, "throughput": 49.5,
+  "test_duration": 2.0, "setup_overhead": 0.25,
+  "peak_concurrency": 8, "dropped_requests": 2, "queue_wait_avg": 1.5,
+  "bytes_sent": 1024, "bytes_received": 8192,
+  "status_codes": { "200": 90, "500": 7, "0": 3 },
+  "latency": { "min": 1.0, "max": 90.0, "avg": 12.5, "p50": 10.0, "p75": 15.0,
+               "p90": 20.0, "p95": 25.0, "p99": 30.0, "p999": 35.0 },
+  "tests": { "sampled": 10, "passed": 9, "failed": 1 }
+}
+```
+
+`tests` is **omitted** when deferred script validation did not run, which is what keeps the
+report's `testValidation` section absent rather than reporting zero tests. The writer is
+`vayu::core::build_run_summary_payload` and the reader is `apply_run_summary`
+(`http/routes/runs.cpp`); `runs_route_test.cpp` round-trips the pair, so the key names cannot
+drift apart silently.
+
+Do not confuse this **results** summary with the `summary` key on a `GET /runs` list row - that
+one is a derived view of `config_snapshot` (url/method/mode/duration/concurrency/comment) built
+per request and never stored.
 
 **`config_snapshot` redaction** - the snapshot is the raw run payload, which can
 carry auth credentials. Before persistence, its top-level `auth` object is
 reduced to just `{"mode": "..."}` (via `sanitize_config_snapshot` in
 `utils/json.cpp`) - an allowlist, so no current or future auth field
 (`clientSecret`, `password`, tokens) leaks into a stored run.
+
+**Retention** - runs are append-only in normal use (every design-mode click adds a `runs` row,
+every load run its `metric_ticks`/`results`), so `Database::prune_runs(max_runs, max_age_days)` trims
+the history. A run is a victim when it falls **beyond the `maxRunsRetained` most-recent runs**
+(ordered by `start_time`) **or** its `start_time` is older than **`runRetentionDays`** days;
+either knob is disabled by `0`. Runs still `running`/`pending` are never pruned and never count
+toward the cap. Deletion goes through the `delete_run` cascade (runs + their `metric_ticks` +
+their legacy `metrics` + their `results`), batched inside transactions that release the DB mutex between batches so a large
+backlog cannot stall `/health`, SSE, or the runs poll. The cascade itself lives in one function
+(`remove_run_cascade_locked`), which both `delete_run` and `prune_runs` call, so a new child table
+is wired into both at once. `prune_runs_configured()` reads the two
+knobs (config, `observability`, defaults 200 / 30) and runs at **startup** (`Database::init`) and
+after a run reaches a **terminal** status (design mode's `store_result`, and the load-run
+completion/failure paths in `run_manager.cpp`).
 
 ---
 
@@ -187,10 +264,55 @@ refresh. Tokens are plaintext at rest (v1 posture); the row is cleared via
 
 ---
 
-### `metrics`
+### `metric_ticks`
 
-Time-series metrics for a load test. One row per (`run_id`, `name`, `timestamp`) sample; the
-metrics producer thread writes a batch each tick. Struct is `db::Metric`.
+The time series for a load test: **one wide row per persisted tick** (~1/s), written by the
+metrics producer thread. Struct is `db::MetricTick`. Auto-created by `sync_schema()`.
+
+| Column      | Type       | Notes                                          |
+|-------------|------------|------------------------------------------------|
+| `id`        | INTEGER PK | Autoincrement                                  |
+| `run_id`    | TEXT       | FK → `runs.id`                                 |
+| `timestamp` | INTEGER    | Unix ms - the tick's single wall-clock sample  |
+| `payload`   | TEXT       | JSON: the complete tick object (below)         |
+
+`payload` **is** one `data[]` entry of `GET /runs/:runId/metrics` - the app's snake_case
+`LoadTestMetrics` shape, built once at write time by
+`vayu::core::build_metric_tick_payload` instead of being reassembled per request:
+
+```json
+{
+  "timestamp": 1730000001000, "elapsed_seconds": 1.0,
+  "requests_completed": 120, "requests_failed": 2,
+  "current_rps": 118.4, "current_concurrency": 10, "send_rate": 120.0,
+  "throughput": 118.4, "backpressure": 3, "error_rate": 1.66,
+  "dropped_requests": 0, "bytes_sent": 4096, "bytes_received": 65536,
+  "status_codes": { "200": 118, "0": 2 },
+  "latency_p50_ms": 8.1, "latency_p95_ms": 20.4, "latency_p99_ms": 31.9
+}
+```
+
+Two consequences of the row being the tick:
+
+- **Pagination is tick-aligned.** `GET /runs/:runId/metrics` pages rows, and a row is a whole
+  tick, so a page boundary can no longer hand back a half-populated bucket (which row-paginating
+  the EAV table below did every ~277 ticks).
+- **`elapsed_seconds` is measured from the run's first persisted tick**, at write time, so it
+  keeps counting across page boundaries instead of restarting at 0 on each page.
+
+Latency percentiles in a tick are the **windowed** (rolling) values sampled from the
+`hdr_interval_recorder` for that interval - the whole-run cumulative ones live in
+[`runs.summary`](#runs), never here.
+
+---
+
+### `metrics` (legacy, read-only)
+
+The EAV time series this engine **no longer writes**: one row per (`run_id`, `name`, `timestamp`)
+sample, ~20 rows per second of a run. Kept so runs recorded before `metric_ticks`/`runs.summary`
+existed still render their charts and reports - `GET /runs/:runId/metrics` and
+`/runs/:runId/report` fall back to it when a run has no ticks / no summary. It can be deleted once
+old histories have aged out past the retention window. Struct is `db::Metric`.
 
 | Column      | Type            | Notes                                              |
 |-------------|-----------------|----------------------------------------------------|
@@ -209,7 +331,8 @@ metrics producer thread writes a batch each tick. Struct is `db::Metric`.
 `peak_concurrency`, `status_codes`, `test_duration`, `setup_overhead`, and the
 `tests_validating/passed/failed/sampled` script-validation metrics.
 
-**Latency percentile rows come in two flavors, disambiguated by `labels`:**
+**Latency percentile rows come in two flavors, disambiguated by `labels`** - the trap that made
+this shape worth replacing, since only `p50/p95/p99` were ever label-guarded on the read side:
 
 - **Per-tick windowed rows** (`latency_p50/p95/p99`, empty `labels`): written ~1/s during
   the run. Each is a **rolling window** sampled from a phaser-based `hdr_interval_recorder`
@@ -219,7 +342,7 @@ metrics producer thread writes a batch each tick. Struct is `db::Metric`.
   derivations. `latency_p75/p90/p999/min/max` are **not** persisted per tick.
 - **Final-summary rows** (`latency_p50/p75/p90/p95/p99/p999/min/max`, `labels` =
   `{"percentile":"p50"}` etc.): written once at completion from the cumulative-from-start
-  HdrHistogram - the whole-run numbers the report surfaces. The `/run/:id/report` reader
+  HdrHistogram - the whole-run numbers the report surfaces. The `/runs/:id/report` reader
   keys on the non-empty label so the per-tick windowed rows never overwrite these.
 
 ---
@@ -252,10 +375,31 @@ than assuming all eight are there and flat:
 |--------|----------------------------|
 | Load run, success sample (`load_strategy.cpp`) | timing only, flat, all eight keys - and only when `save_timing_breakdown` is on or the sample crossed `slow_threshold_ms` (which also adds `isSlow` / `thresholdMs`) |
 | Load run, error (`load_strategy.cpp`) | an error envelope (`error_type`, `message`, `request_number`) with the eight keys **nested under `timing`**, present whenever `totalMs > 0` |
-| Design mode (`store_result` in `execution.cpp`) | the five phase keys flat (`dnsMs`…`downloadMs`), **each only when non-zero** - a reused connection writes no `connectMs`/`tlsMs`. No `totalMs`/`wireMs`/`queueWaitMs`; perceived total lives in the `latency_ms` column. Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). |
+| Design mode (`store_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`). Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). The `response` node carries `headers`, `body` and `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference.md#post-execute)); a row written before this field existed simply has no `httpVersion` key, so `restore-response.ts` must default it. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
+
+The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
+(config, `observability`, default 5 MiB) before storage, so downloading one 50 MB response does
+not live in SQLite forever. When a body is cut, its node gains two keys:
+
+| Key on `request` / `response` | Type | Meaning |
+|-------------------------------|------|---------|
+| `bodyTruncated`               | bool | Present and `true` only when the stored `body` is a prefix, not the whole body |
+| `bodyBytes`                   | int  | The **original** body length in bytes (the stored `body` is the first `maxTraceBodyBytes` of it) |
+
+The cut is on a raw byte boundary (the body is an opaque string), so a split UTF-8 sequence is
+possible; `store_result` dumps the trace with `error_handler_t::replace`, turning a stray
+continuation byte into U+FFFD rather than throwing. The cap is applied by
+`vayu::json::cap_trace_bodies` (`utils/json.cpp`) to the trace `build_result_trace`
+(`execution.cpp`) produces. It applies **only** to the design-mode writer - the load-run writers
+store timing/error envelopes, not bodies.
 
 That design-mode subset is what rebuilds the request builder's response pane (Timing tab included)
-after a restart - see `app/src/modules/request-builder/utils/restore-response.ts`.
+after a restart - see `app/src/modules/request-builder/utils/restore-response.ts`, which surfaces
+`bodyTruncated`/`bodyBytes` as a "body truncated for storage" notice.
+
+A design run has exactly one `results` row. `GET /runs/:runId` serves it (as `result`)
+alongside the run itself, in addition to `GET /runs/:runId/report`'s `results` array - the
+same row, read by two routes for two different callers.
 
 ---
 
@@ -268,14 +412,66 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 |-----------------|---------|--------------------------------------------------------|
 | `key`           | TEXT PK | e.g. `workers`, `maxConnections`, `liveTickIntervalMs` |
 | `value`         | TEXT    | Current value (parsed per `type`)                      |
-| `type`          | TEXT    | `"integer"` / `"string"` / `"boolean"` / `"number"`    |
+| `type`          | TEXT    | `"integer"` / `"string"` / `"boolean"` / `"number"` / `"enum"` |
 | `label`         | TEXT    | Display label                                          |
 | `description`   | TEXT    | Help text                                              |
 | `category`      | TEXT    | Grouping (e.g. `server`, `network_performance`)        |
 | `default_value` | TEXT    | Default as string                                      |
 | `min_value`     | TEXT    | Optional minimum (numbers)                             |
 | `max_value`     | TEXT    | Optional maximum (numbers)                             |
+| `options`       | TEXT    | JSON array of `{value, label}`; `"enum"` entries only  |
 | `updated_at`    | INTEGER | Unix ms                                                |
+
+**options** is nullable and populated only for `type: "enum"` entries. It is
+JSON-in-TEXT, the same convention as every other structured column in this
+schema (`variables`, `auth`, `config_snapshot`, ...), never a delimited string.
+Labels travel with values so the Settings UI never holds its own
+value-to-label map that could drift from the engine's. `min_value` / `max_value`
+were considered and rejected as a place to carry the option list - they are
+engine-side validation only and unread by the app, whereas `options` is part of
+the client contract: the renderer cannot draw the dropdown without it.
+
+The one seeded `enum` entry today is **`defaultHttpVersion`**
+(`upsert_config` in `database.cpp`), whose `options` is derived from the same
+`HttpVersion` enumeration that validates `requests.http_version` - see
+[`requests`](#requests) above - so the two cannot drift:
+```json
+[
+  {"value": "auto", "label": "Auto"},
+  {"value": "http1.1", "label": "HTTP/1.x"},
+  {"value": "http2", "label": "HTTP/2"}
+]
+```
+Its `value` is this instance's current global, read fresh (not cached) on
+every request create; changing it applies to the next request created, never
+retroactively.
+
+---
+
+## Indexes
+
+Declared alongside the tables in `make_storage()` (`engine/src/db/database.cpp`). `sqlite_orm`
+requires index arguments to precede the table arguments. `sync_schema()` creates them on startup
+for fresh **and** pre-existing databases, so adding an index is additive and needs no migration.
+
+| Index                        | Column                  | Query paths that rely on it                                                                                                                       |
+|------------------------------|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `idx_metric_ticks_run_id`    | `metric_ticks.run_id`   | `get_metric_ticks_paginated` / `count_metric_ticks` (every `GET /runs/:id/metrics`), `get_metric_ticks_since` (the legacy SSE poll), and the `remove_all` in the run cascade |
+| `idx_metrics_run_id`         | `metrics.run_id`        | The legacy read path (`get_metrics`, `get_metrics_since`, `get_metrics_paginated`, `count_metrics`) and the `remove_all` in the run cascade |
+| `idx_results_run_id`         | `results.run_id`        | `get_results` and the `remove_all` in `delete_run`                                                                                                |
+| `idx_requests_collection_id` | `requests.collection_id`| `get_requests_in_collection` (every sidebar load) and cascade delete                                                                              |
+| `idx_collections_parent_id`  | `collections.parent_id` | The cascade-delete BFS in `Database::delete_collection`, which does one lookup per node in the subtree                                            |
+| `idx_runs_start_time`        | `runs.start_time`       | `get_all_runs` and `get_runs_paginated`, which sort `start_time DESC` on every `GET /runs`                                                        |
+| `idx_runs_request_id`        | `runs.request_id`       | `GET /runs?requestId=` and `useLastDesignRunQuery`'s single-run lookup (`get_runs_paginated` with a `request_id` filter)                          |
+
+`metric_ticks` and `results` are the unbounded-growth tables - a load run writes one tick row per
+second (the legacy `metrics` table cost roughly 20 rows for the same second) - so without `run_id`
+indexes a lookup slows down with every run ever recorded, not just the current one. `collections.parent_id` is a nullable column; `sqlite_orm` indexes it
+without special handling.
+
+Guarded by `DatabaseTest.CreatesIndexesOnFreshDatabase` and
+`DatabaseTest.RecreatesIndexesOnExistingDatabase` in `engine/tests/db_test.cpp`, which read
+`sqlite_master` directly rather than trusting what `sqlite_orm` reports about itself.
 
 ---
 
@@ -288,10 +484,26 @@ Used in `collections.variables`, `environments.variables`, and `globals.variable
   "value": "https://api.example.com",
   "enabled": true,
   "secret": false,
-  "type": "string"
+  "type": "string",
+  "createdAt": 1784967810149
 }
 ```
 
 `secret` is a UI masking hint only - values are not encrypted at rest. `type` is a UI/script
 conversion hint, one of `"string"` (default), `"number"`, `"boolean"`, `"json"` - it controls
 how scripts read the variable via `pm.*.get(...)`.
+
+`createdAt` (ms epoch) is the app's row-ordering key: the variables editor lists a scope
+oldest-first. It is **optional** - a row written before the field existed, or stripped by an
+engine older than the fix for issue #135, simply has none, and the app sorts an absent value as
+older than everything. Neither side may backfill it on an existing variable: stamping a legacy
+row at save time is what made it leapfrog the row the user had just added. Only the two places
+that genuinely create a variable stamp it - the app when the user types a new row, and the
+engine's `pm.*.set()` when a script introduces a key that did not exist.
+
+The engine round-trips the whole shape through `vayu::json::parse_variables` /
+`serialize_variables` (`engine/src/utils/json.cpp`) when `POST /execute` persists script-set
+variables. **A field added here must be added to both**, or a design run erases it from disk;
+`engine/tests/script_variables_test.cpp` pins the round trip field by field. `POST /execute`
+also skips the write entirely for a scope no script changed, so sending a request no longer
+touches a collection's / environment's `updated_at`.

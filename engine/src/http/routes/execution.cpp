@@ -16,13 +16,20 @@
  * - Server's HTTP status code is always in the response body, never translated to engine status
  */
 
+#include <cmath>
+#include <optional>
+#include <regex>
+#include <string>
+
 #include "vayu/core/constants.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/http/script_parts.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/runtime/script_engine.hpp"
+#include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -40,48 +47,125 @@ int resolve_request_timeout_ms (const nlohmann::json& json, int configured_defau
     return configured_default;
 }
 
-namespace {
-
-// Helper function to parse variables JSON string to Environment
-vayu::Environment parse_variables_json (const std::string& json_str) {
-    vayu::Environment env;
-    if (json_str.empty ()) {
-        return env;
+// Validate and normalize the optional "httpVersion" on a POST /runs body.
+// Absent leaves `json` untouched: the request's own httpVersion field, read
+// like any other field by build_request/deserialize_request further down the
+// pipeline, decides. This is NOT a per-run override - the request builder's
+// Settings tab holds the single protocol control and it governs Send and load
+// test alike. The field exists on this payload because that is how a run
+// states its protocol at all, the same way it states its redirect policy, and
+// because MCP's ad-hoc runs have no saved request to read one from. It never
+// touches the stored request - `json` here is the handler's local copy of the
+// request body, not anything persisted.
+//
+// Present is validated through apply_http_version_field/http_version_valid_list
+// (the same helpers Task 5's CRUD routes use - see routes.hpp), so a typo'd
+// protocol name is a 400 naming the field and the valid values, rather than
+// deserialize_request's lenient string-to-Auto coercion, which exists to keep
+// a corrupted *stored* row executable and is the wrong behavior for a
+// hand-crafted /runs body.
+//
+// An explicit `null` is erased, making it behave exactly like an absent key,
+// so this function has two outcomes rather than three.
+//
+// Be precise about why, because the obvious justification is wrong: there is
+// no stored-request lookup in this pipeline. `build_request` deserializes the
+// same POST body this function mutates, so the only `httpVersion` in play is
+// the one the client sent (clients send the whole request here, the same way
+// they do followRedirects/maxRedirects). The `db.get_request` calls further
+// down this file read `collection_id` to persist collection variables; they
+// never read `http_version`.
+//
+// So today, erasing and writing the seed are indistinguishable: both end at
+// `Auto`, because `Request::http_version`'s default member initializer is
+// `DEFAULT_HTTP_VERSION` - the very value the seed would have written. That
+// equivalence is incidental, and erasing is what keeps it from becoming a bug.
+// The moment a config-backed default is resolved at this layer, writing a seed
+// would start pinning a concrete value onto a run that asked for none, while
+// erasing keeps deferring to whatever decides later.
+//
+// This is also why CLAUDE.md's null-means-reset-to-default rule does not apply:
+// that rule resets a *stored* field on POST/PUT of a resource, and a run has no
+// stored field to reset.
+//
+// The validated value is written back onto `json["httpVersion"]` so it reaches
+// deserialize_request as a concrete string; `null` would otherwise hit
+// `.get<std::string>()` there and throw.
+std::optional<std::pair<int, nlohmann::json>> normalize_run_http_version (
+nlohmann::json& json) {
+    if (!json.contains ("httpVersion")) {
+        return std::nullopt;
     }
-
-    try {
-        auto json = nlohmann::json::parse (json_str);
-        if (json.is_object ()) {
-            for (auto& [key, value] : json.items ()) {
-                if (value.is_object ()) {
-                    std::string var_value = value.value ("value", "");
-                    bool enabled          = value.value ("enabled", true);
-                    bool secret           = value.value ("secret", false);
-                    std::string type      = value.value ("type", std::string{ "string" });
-                    env[key] = vayu::Variable{ var_value, secret, enabled, type };
-                }
-            }
-        }
-    } catch (const std::exception&) {
-        // Return empty environment on parse error
+    if (json["httpVersion"].is_null ()) {
+        json.erase ("httpVersion");
+        return std::nullopt;
     }
-    return env;
+    // Both early returns above mean the key is present and non-null by now, so
+    // the two branches of apply_http_version_field that consume `seed` are
+    // unreachable from here. The argument is required by the signature; it does
+    // not select behaviour at this call site.
+    std::string version;
+    if (auto err = apply_http_version_field (json, "httpVersion", version,
+        vayu::to_string (vayu::DEFAULT_HTTP_VERSION), /*is_create=*/false)) {
+        return err;
+    }
+    json["httpVersion"] = version;
+    return std::nullopt;
 }
 
-// Serialize in-memory variables map to JSON string for DB storage (round-trip with parse_variables_json)
-std::string serialize_variables_json (const vayu::Environment& env) {
-    nlohmann::json obj = nlohmann::json::object ();
-    for (const auto& [key, var] : env) {
-        obj[key] = nlohmann::json::object ();
-        obj[key]["value"]   = var.value;
-        obj[key]["enabled"] = var.enabled;
-        obj[key]["secret"]  = var.secret;
-        obj[key]["type"]    = var.type.empty () ? std::string{ "string" } : var.type;
+// Build the trace_data JSON a design run persists for its single exchange.
+// Non-static (tested by execution_trace_test.cpp): the stored trace is a
+// contract - restore-response.ts rebuilds the response pane from it after a
+// restart, so what lands here decides what a restored tab can show.
+//
+// Timing carries all eight keys, unconditionally, the same `*Ms` set the live
+// /execute response serializes (json.cpp) and the load-mode success writer
+// stores (load_strategy.cpp). A skipped phase (reused connection, plain HTTP)
+// is stored as 0, exactly as the live response reports it. Rows written before
+// this change omitted zero phases and the three totals, so readers must keep
+// defaulting missing keys.
+nlohmann::json build_result_trace (const vayu::Request& request,
+const vayu::Response& response) {
+    nlohmann::json trace;
+    trace["request"] = { { "method", to_string (request.method) },
+        { "url", request.url }, { "headers", request.headers } };
+    if (!request.body.content.empty ()) {
+        trace["request"]["body"] = request.body.content;
     }
-    return obj.dump ();
+
+    if (!response.has_error ()) {
+        // "" when nothing was negotiated, not omitted - same convention as
+        // serialize(Response) in json.cpp, so restore-response.ts can't
+        // confuse "empty" with "this key doesn't exist on a stored trace".
+        trace["response"] = { { "headers", response.headers },
+            { "body", response.body }, { "httpVersion", response.http_version } };
+    } else {
+        trace["error_type"]    = to_string (response.error_code);
+        trace["error_message"] = response.error_message;
+    }
+
+    const auto& timing   = response.timing;
+    trace["totalMs"]     = timing.total_ms;
+    trace["wireMs"]      = timing.wire_ms;
+    trace["queueWaitMs"] = timing.queue_wait_ms;
+    trace["dnsMs"]       = timing.dns_ms;
+    trace["connectMs"]   = timing.connect_ms;
+    trace["tlsMs"]       = timing.tls_ms;
+    trace["firstByteMs"] = timing.first_byte_ms;
+    trace["downloadMs"]  = timing.download_ms;
+
+    return trace;
 }
 
 // Persist script-set variables to DB (design mode only). Best-effort: logs errors, does not change response.
+//
+// A scope is rewritten only when a script actually changed one of its
+// variables. Before this, every Send rewrote all three scopes unconditionally,
+// which bumped each scope's `updated_at` for a run that touched nothing and,
+// worse, pushed every variable through the serializer - so any field the
+// serializer did not know about was erased from disk by merely sending a
+// request (issue #135). Comparing the parsed on-disk blob with the in-memory
+// one is what makes "no script wrote a variable" mean "no write at all".
 void persist_script_variables (vayu::db::Database& db,
 const vayu::db::Run& run,
 const vayu::Environment& env,
@@ -90,10 +174,12 @@ const vayu::Environment& collectionVariables) {
     if (run.environment_id.has_value ()) {
         try {
             if (auto db_env = db.get_environment (*run.environment_id)) {
-                vayu::db::Environment updated = *db_env;
-                updated.variables  = serialize_variables_json (env);
-                updated.updated_at = now_ms ();
-                db.save_environment (updated);
+                if (vayu::json::parse_variables (db_env->variables) != env) {
+                    vayu::db::Environment updated = *db_env;
+                    updated.variables  = vayu::json::serialize_variables (env);
+                    updated.updated_at = now_ms ();
+                    db.save_environment (updated);
+                }
             }
         } catch (const std::exception& e) {
             vayu::utils::log_error (
@@ -103,10 +189,12 @@ const vayu::Environment& collectionVariables) {
 
     try {
         if (auto db_globals = db.get_globals ()) {
-            vayu::db::Globals updated = *db_globals;
-            updated.variables  = serialize_variables_json (globals);
-            updated.updated_at = now_ms ();
-            db.save_globals (updated);
+            if (vayu::json::parse_variables (db_globals->variables) != globals) {
+                vayu::db::Globals updated = *db_globals;
+                updated.variables  = vayu::json::serialize_variables (globals);
+                updated.updated_at = now_ms ();
+                db.save_globals (updated);
+            }
         }
     } catch (const std::exception& e) {
         vayu::utils::log_error (
@@ -119,10 +207,14 @@ const vayu::Environment& collectionVariables) {
                 if (!db_request->collection_id.empty ()) {
                     if (auto db_collection =
                         db.get_collection (db_request->collection_id)) {
-                        vayu::db::Collection updated = *db_collection;
-                        updated.variables  = serialize_variables_json (collectionVariables);
-                        updated.updated_at = now_ms ();
-                        db.create_collection (updated);
+                        if (vayu::json::parse_variables (db_collection->variables) !=
+                        collectionVariables) {
+                            vayu::db::Collection updated = *db_collection;
+                            updated.variables =
+                            vayu::json::serialize_variables (collectionVariables);
+                            updated.updated_at = now_ms ();
+                            db.create_collection (updated);
+                        }
                     }
                 }
             }
@@ -132,6 +224,8 @@ const vayu::Environment& collectionVariables) {
         }
     }
 }
+
+namespace {
 
 // Execute a script and handle exceptions uniformly
 vayu::ScriptResult execute_script (vayu::runtime::ScriptEngine& engine,
@@ -217,40 +311,34 @@ const vayu::Response& response) {
         db_result.latency_ms  = response.timing.total_ms;
         db_result.error       = has_error ? response.error_message : "";
 
-        // Build trace data
-        nlohmann::json trace;
-        trace["request"] = { { "method", to_string (request.method) },
-            { "url", request.url }, { "headers", request.headers } };
-        if (!request.body.content.empty ()) {
-            trace["request"]["body"] = request.body.content;
-        }
+        // Build the full-fidelity trace, then cap the request/response bodies at
+        // the configured limit so one large exchange cannot bloat the DB forever.
+        // When a body is cut, cap_trace_bodies records bodyTruncated/bodyBytes.
+        nlohmann::json trace = build_result_trace (request, response);
+        const auto max_trace_body_bytes = static_cast<size_t> (db.get_config_int (
+        "maxTraceBodyBytes",
+        static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
+        vayu::json::cap_trace_bodies (trace, max_trace_body_bytes);
 
-        if (!has_error) {
-            trace["response"] = { { "headers", response.headers },
-                { "body", response.body } };
-        } else {
-            trace["error_type"]    = to_string (response.error_code);
-            trace["error_message"] = response.error_message;
-        }
-
-        // Timing information
-        const auto& timing = response.timing;
-        if (timing.dns_ms > 0)
-            trace["dnsMs"] = timing.dns_ms;
-        if (timing.connect_ms > 0)
-            trace["connectMs"] = timing.connect_ms;
-        if (timing.tls_ms > 0)
-            trace["tlsMs"] = timing.tls_ms;
-        if (timing.first_byte_ms > 0)
-            trace["firstByteMs"] = timing.first_byte_ms;
-        if (timing.download_ms > 0)
-            trace["downloadMs"] = timing.download_ms;
-
-        db_result.trace_data = trace.dump ();
+        // A capped body may split a UTF-8 sequence, and the raw response body can
+        // be arbitrary bytes - dump with error_handler_t::replace so a lone
+        // continuation byte becomes U+FFFD instead of throwing (import.cpp uses
+        // the same guard).
+        db_result.trace_data =
+        trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
         db.add_result (db_result);
 
         auto status = has_error ? vayu::RunStatus::Failed : vayu::RunStatus::Completed;
         db.update_run_status_with_retry (run_id, status);
+
+        // A design run reached a terminal status - trim the run history so
+        // per-request clicks do not accumulate forever (retention knobs, or 0
+        // to disable). Best-effort: a prune failure must not fail the request.
+        try {
+            db.prune_runs_configured ();
+        } catch (const std::exception& e) {
+            vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
+        }
 
     } catch (const std::exception& e) {
         vayu::utils::log_error ("Failed to save result: " + std::string (e.what ()));
@@ -263,18 +351,133 @@ const vayu::Response& response) {
     }
 }
 
+// One numeric field of a run config: what it is called on the wire, and the
+// closed interval it must fall in. Kept as data so the four checks below read
+// as a table rather than four hand-written branches that can drift apart.
+struct NumericRunField {
+    const char* key;
+    int64_t min;
+    int64_t max;
+    const char* why; // appended to the message, explains the bound
+};
+
+// Reject a numeric field that is present but of the wrong JSON type or outside
+// its range. Absent is always fine - every field has a default.
+std::optional<std::string> check_numeric_field (const nlohmann::json& config,
+const NumericRunField& field) {
+    if (!config.contains (field.key) || config[field.key].is_null ()) {
+        return std::nullopt;
+    }
+    const auto& value = config[field.key];
+    if (!value.is_number ()) {
+        return std::string ("'") + field.key + "' must be a number (got " +
+        std::string (value.type_name ()) + ")";
+    }
+    // Read as a double first: an integer read of a fractional or huge value is
+    // itself undefined, and this is the guard that has to be total.
+    const double raw = value.get<double> ();
+    if (!std::isfinite (raw) || raw < static_cast<double> (field.min) ||
+    raw > static_cast<double> (field.max)) {
+        return std::string ("'") + field.key + "' must be between " +
+        std::to_string (field.min) + " and " + std::to_string (field.max) +
+        " (got " + value.dump () + "). " + field.why;
+    }
+    return std::nullopt;
+}
+
 } // namespace
+
+/**
+ * @brief Validate a POST /runs config before the run row is created.
+ *
+ * Every field below is read downstream with `config.value (...)` and cast to
+ * `size_t` or fed to a modulo, in code that runs on a detached worker thread
+ * with no `catch` above it. Out of range there is not a bad run, it is a dead
+ * daemon: `success_sample_rate: 0` is `% 0` (SIGFPE), `concurrency: -1` becomes
+ * ~1.8e19 eagerly pre-allocated curl handles, `timeout: 0` leaves transfers
+ * that never expire, and a JSON-number `duration` throws out of `RunContext`'s
+ * constructor *after* the run row exists, stranding it `pending` forever.
+ *
+ * So this runs in the route, before `create_run`: a rejected request must leave
+ * no trace. Non-static - `run_config_validation_test.cpp` drives it directly.
+ *
+ * @return The reason the config is invalid, or `std::nullopt` if it is usable.
+ */
+std::optional<std::string> validate_run_config (const nlohmann::json& config) {
+    if (!config.is_object ()) {
+        return "Run config must be a JSON object";
+    }
+
+    // `duration` is the one non-numeric field here, and the only one whose bad
+    // value throws rather than miscomputes: `RunContext` reads it as a string.
+    if (config.contains ("duration") && !config["duration"].is_null ()) {
+        const auto& duration = config["duration"];
+        if (!duration.is_string ()) {
+            return "'duration' must be a string with a unit, e.g. \"60s\" "
+                   "(got " +
+            std::string (duration.type_name ()) + ")";
+        }
+        // Accept an optional unit: the unit-aware parser is #126's, and a bare
+        // "60" is what a client that never read the docs sends. This only has
+        // to separate "parses to something positive" from "wedges the run".
+        static const std::regex duration_pattern (
+        R"(^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h)?\s*$)", std::regex::icase);
+        std::smatch match;
+        const std::string text = duration.get<std::string> ();
+        if (!std::regex_match (text, match, duration_pattern)) {
+            return "'duration' must be a number with an optional unit "
+                   "(ms|s|m|h), e.g. \"60s\" (got \"" +
+            text + "\")";
+        }
+        // The regex already proved group 1 is a plain decimal, so `stod` cannot
+        // fail on it - but this guard exists precisely because a conversion
+        // threw somewhere nobody was catching, so it stays total here too.
+        double magnitude = 0.0;
+        try {
+            magnitude = std::stod (match[1].str ());
+        } catch (const std::exception&) {
+            magnitude = 0.0; // out of double's range; falls into the check below
+        }
+        if (!(magnitude > 0.0)) {
+            return "'duration' must be greater than zero (got \"" + text + "\")";
+        }
+    }
+
+    namespace limits               = vayu::core::constants::run_config;
+    const NumericRunField fields[] = {
+        { "success_sample_rate", 1, 100000,
+        "It is a sampling period (keep 1 in N), and 0 is a division by zero." },
+        { "response_sample_rate", 1, 100000,
+        "It is a sampling period (keep 1 in N), and 0 is a division by zero." },
+        { "max_response_samples", 0, limits::MAX_RESPONSE_SAMPLES,
+        "Each retained sample holds a full response body." },
+        { "concurrency", 1, limits::MAX_CONCURRENCY,
+        "Connections are pre-allocated per worker before any traffic flows." },
+        { "timeout", 1, 86400000,
+        "A transfer with no timeout never completes, so the run can never "
+        "reach "
+        "a terminal status." },
+    };
+    for (const auto& field : fields) {
+        if (auto reason = check_numeric_field (config, field)) {
+            return reason;
+        }
+    }
+
+    return std::nullopt;
+}
 
 void register_execution_routes (RouteContext& ctx) {
     /**
-     * POST /request
+     * POST /execute  (alias: POST /request, deprecated)
      * Executes a single HTTP request (Design Mode).
      *
      * Returns:
      * - 200: Request was processed (check response body for server status/errors)
      * - 400: Invalid request format (malformed JSON, missing required fields)
      */
-    ctx.server.Post ("/request", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler execute_request =
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string run_id;
 
         // Parse and validate request
@@ -283,7 +486,7 @@ void register_execution_routes (RouteContext& ctx) {
             json = nlohmann::json::parse (req.body);
         } catch (const nlohmann::json::exception& e) {
             vayu::utils::log_warning (
-            "POST /request - Invalid JSON: " + std::string (e.what ()));
+            "POST /execute - Invalid JSON: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
             return;
         }
@@ -296,18 +499,17 @@ void register_execution_routes (RouteContext& ctx) {
         "defaultTimeout", vayu::core::constants::server::DEFAULT_TIMEOUT_MS));
         auto built = vayu::http::build_request (json, &ctx.db, request_timeout_ms);
         if (built.parse_failed) {
-            vayu::utils::log_warning ("POST /request - Invalid request format");
+            vayu::utils::log_warning ("POST /execute - Invalid request format");
             send_error (res, 400, built.error_message);
             return;
         }
 
         // Extract scripts
-        std::string pre_request_script = json.value ("preRequestScript", std::string{});
-        std::string post_request_script =
-        json.value ("postRequestScript", std::string{});
+        std::string pre_request_script = vayu::http::read_pre_request_script (json);
+        std::string post_request_script = vayu::http::read_post_request_script (json);
 
         // Create Run record
-        run_id = "run_" + std::to_string (now_ms ());
+        run_id = vayu::utils::generate_id ("run_");
         vayu::db::Run run;
         run.id              = run_id;
         run.type            = vayu::RunType::Design;
@@ -323,7 +525,7 @@ void register_execution_routes (RouteContext& ctx) {
         }
 
         // Log request details
-        vayu::utils::log_info ("POST /request - Design Mode: run_id=" + run_id +
+        vayu::utils::log_info ("POST /execute - Design Mode: run_id=" + run_id +
         ", method=" + json.value ("method", "UNKNOWN") +
         ", url=" + json.value ("url", "UNKNOWN") +
         ", request_id=" + run.request_id.value_or ("none") +
@@ -357,12 +559,12 @@ void register_execution_routes (RouteContext& ctx) {
 
         if (run.environment_id.has_value ()) {
             if (auto db_env = ctx.db.get_environment (*run.environment_id)) {
-                env = parse_variables_json (db_env->variables);
+                env = vayu::json::parse_variables (db_env->variables);
             }
         }
 
         if (auto db_globals = ctx.db.get_globals ()) {
-            globals = parse_variables_json (db_globals->variables);
+            globals = vayu::json::parse_variables (db_globals->variables);
         }
 
         if (run.request_id.has_value ()) {
@@ -371,15 +573,17 @@ void register_execution_routes (RouteContext& ctx) {
                     if (auto db_collection =
                         ctx.db.get_collection (db_request->collection_id)) {
                         collectionVariables =
-                        parse_variables_json (db_collection->variables);
+                        vayu::json::parse_variables (db_collection->variables);
                     }
                 }
             }
         }
 
-        // Take the request built above (auth already resolved into headers/url,
-        // so pm.request reflects the real outgoing set). It may be further
-        // modified by the pre-request script.
+        // Take the request built above. Auth is already resolved into its
+        // headers/url, so pm.request reflects the real outgoing set - and
+        // because the pre-request script runs after that and writes back into
+        // this same object, a script-set Authorization header wins over the
+        // engine-applied one.
         auto request = std::move (built.request);
 
         // Auth failure: record a failed result against the run and return the
@@ -398,9 +602,12 @@ void register_execution_routes (RouteContext& ctx) {
             return;
         }
 
-        // Execute pre-request script
+        // Execute pre-request script. `make_request_mutable` is what makes its
+        // pm.request edits reach the wire; everything below this line - the
+        // send, the stored trace, the raw request the app shows - reads the
+        // post-script request.
         vayu::runtime::ScriptContext pre_ctx;
-        pre_ctx.request             = &request;
+        pre_ctx.make_request_mutable (request);
         pre_ctx.environment         = &env;
         pre_ctx.globals             = &globals;
         pre_ctx.collectionVariables = &collectionVariables;
@@ -435,24 +642,27 @@ void register_execution_routes (RouteContext& ctx) {
         res.set_content (
         build_response_json (response, pre_script_result, post_script_result).dump (2),
         "application/json");
-    });
+    };
+    ctx.server.Post ("/execute", execute_request);
+    ctx.server.Post ("/request", deprecated_alias (execute_request));
 
     /**
-     * POST /run
+     * POST /runs  (alias: POST /run, deprecated)
      * Starts a load test run (Vayu Mode).
      *
      * Returns:
      * - 202: Load test accepted and started
      * - 400: Invalid request format
      */
-    ctx.server.Post ("/run", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+    httplib::Server::Handler start_load_test =
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         // Parse JSON
         nlohmann::json json;
         try {
             json = nlohmann::json::parse (req.body);
         } catch (const nlohmann::json::exception& e) {
             vayu::utils::log_warning (
-            "POST /run - Invalid JSON: " + std::string (e.what ()));
+            "POST /runs - Invalid JSON: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
             return;
         }
@@ -460,7 +670,7 @@ void register_execution_routes (RouteContext& ctx) {
         // Validate required fields
         if (!json.contains ("method") || !json.contains ("url")) {
             vayu::utils::log_warning (
-            "POST /run - Missing required fields: method, url");
+            "POST /runs - Missing required fields: method, url");
             send_error (res, 400, "Missing required fields: method, url");
             return;
         }
@@ -468,13 +678,43 @@ void register_execution_routes (RouteContext& ctx) {
         if (!json.contains ("mode") && !json.contains ("duration") &&
         !json.contains ("iterations")) {
             vayu::utils::log_warning (
-            "POST /run - Missing mode/duration/iterations config");
+            "POST /runs - Missing mode/duration/iterations config");
             send_error (res, 400, "Must specify either 'mode' with 'duration' or 'iterations'");
             return;
         }
 
+        // Range-check the numeric config *before* the run row exists, so a
+        // rejected request leaves nothing behind. The nested error shape is
+        // deliberate: the app's http-client reads `errorData.error.message`
+        // and drops the flat `{"error": "..."}` body, which would surface this
+        // as a bare "HTTP 400" with no reason (same shape as the auth
+        // pre-flight below and POST /config).
+        if (auto invalid = validate_run_config (json)) {
+            vayu::utils::log_warning ("POST /runs - Invalid run config: " + *invalid);
+            res.status = 400;
+            res.set_content (
+            nlohmann::json{
+            { "error", { { "code", "invalid_run_config" }, { "message", *invalid } } } }
+            .dump (),
+            "application/json");
+            return;
+        }
+
+        // Validate/normalize the body's httpVersion, beside the config check
+        // above and for the same reason: both run before run.config_snapshot is
+        // built, so a rejected request leaves no row behind, and the snapshot
+        // still reflects the raw client body (sanitize_config_snapshot reads
+        // req.body directly, not this normalized `json`).
+        if (auto err = normalize_run_http_version (json)) {
+            vayu::utils::log_warning (
+            "POST /runs - Invalid httpVersion: " + err->second.dump ());
+            res.status = err->first;
+            res.set_content (err->second.dump (), "application/json");
+            return;
+        }
+
         // Create run record
-        std::string run_id = "run_" + std::to_string (now_ms ());
+        std::string run_id = vayu::utils::generate_id ("run_");
         vayu::db::Run run;
         run.id              = run_id;
         run.type            = vayu::RunType::Load;
@@ -500,7 +740,7 @@ void register_execution_routes (RouteContext& ctx) {
             }
         }
 
-        vayu::utils::log_info ("POST /run - Load Test: run_id=" + run_id +
+        vayu::utils::log_info ("POST /runs - Load Test: run_id=" + run_id +
         ", mode=" + json.value ("mode", "unspecified") +
         ", method=" + json.value ("method", "UNKNOWN") +
         ", url=" + json.value ("url", "UNKNOWN") + ", duration=" + duration_str +
@@ -515,7 +755,7 @@ void register_execution_routes (RouteContext& ctx) {
         auto preflight =
         vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
         if (!preflight.ok) {
-            vayu::utils::log_warning ("POST /run - Auth pre-flight failed: " +
+            vayu::utils::log_warning ("POST /runs - Auth pre-flight failed: " +
             preflight.message);
             res.status =
             (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
@@ -531,13 +771,18 @@ void register_execution_routes (RouteContext& ctx) {
             ctx.db.create_run (run);
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "POST /run - Failed to create run: " + std::string (e.what ()));
+            "POST /runs - Failed to create run: " + std::string (e.what ()));
             send_error (res, 400, "Failed to create run record");
             return;
         }
 
-        // Start run via RunManager
-        ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose);
+        // Start run via RunManager. A refusal means the daemon is draining its
+        // workers for shutdown; the row exists but nothing will ever run it, so
+        // say so rather than returning a 202 for a run that never starts.
+        if (!ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose)) {
+            send_error (res, 503, "Engine is shutting down");
+            return;
+        }
 
         nlohmann::json response;
         response["runId"]   = run_id;
@@ -546,7 +791,9 @@ void register_execution_routes (RouteContext& ctx) {
 
         res.status = 202;
         res.set_content (response.dump (), "application/json");
-    });
+    };
+    ctx.server.Post ("/runs", start_load_test);
+    ctx.server.Post ("/run", deprecated_alias (start_load_test));
 }
 
 } // namespace vayu::http::routes

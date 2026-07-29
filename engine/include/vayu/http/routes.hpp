@@ -11,9 +11,13 @@
 
 #include <chrono>
 #include <nlohmann/json.hpp>
+#include <optional>
+#include <string>
+#include <utility>
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/utils/logger.hpp"
 
 namespace vayu::http {
 // Owns interactive OAuth 2.0 authorization attempts; defined in oauth_authorize.hpp.
@@ -47,6 +51,253 @@ inline void send_error (httplib::Response& res, int status, const std::string& m
 inline void send_json (httplib::Response& res, const nlohmann::json& data) {
     res.set_content (data.dump (), "application/json");
 }
+
+/**
+ * @brief Wrap a handler so a deprecated-alias registration is distinguishable
+ *        in the logs from its canonical counterpart.
+ *
+ * The renamed routes register one shared handler under both the canonical path
+ * (first) and the legacy path (second). cpp-httplib handlers are copyable
+ * std::functions, so the body is never duplicated; `req.matches[1]` is identical
+ * under both patterns. The alias registration wraps the handler with this so the
+ * per-request logs carry a ` (deprecated alias)` marker and the actual `req.path`
+ * that was hit - the canonical registration logs unchanged.
+ */
+inline httplib::Server::Handler
+deprecated_alias (httplib::Server::Handler handler) {
+    return [handler = std::move (handler)] (
+           const httplib::Request& req, httplib::Response& res) {
+        vayu::utils::log_info (req.method + " " + req.path +
+        " (deprecated alias) - prefer the canonical path");
+        handler (req, res);
+    };
+}
+
+/**
+ * The one null-vs-absent rule for resource writes (POST create / PUT update).
+ *
+ * Before issue #95 each resource - and in places each *field* - invented its
+ * own reading of a null: `collections.variables: null` reset to `{}`,
+ * `collections.name: null` meant "keep", and `environments.variables: null`
+ * stored the literal four-character string `null` because that handler had no
+ * guard at all. The rule below replaces all of that, is identical across
+ * collections, requests and environments, and is stated once in
+ * `docs/engine/api-reference.md`:
+ *
+ *   - On create (POST): absent and `null` both mean "use the default".
+ *   - On update (PUT): absent means "keep the current value"; `null` means
+ *     "reset to the default".
+ *   - A field that has no default (a collection's `name`; a request's
+ *     `collectionId` / `name` / `method` / `url`) cannot be reset, so `null` is
+ *     a 400 on either verb rather than a silently ignored write.
+ *
+ * The helpers take `is_create` rather than reading it off the request so the
+ * cores stay unit-testable without an in-process HTTP server.
+ */
+inline void apply_string_field (const nlohmann::json& json,
+const char* key,
+std::string& out,
+const std::string& default_value,
+bool is_create) {
+    if (json.contains (key)) {
+        out = json[key].is_null () ? default_value : json[key].get<std::string> ();
+    } else if (is_create) {
+        out = default_value;
+    }
+}
+
+/**
+ * Same rule for a field stored as a dumped JSON blob (variables, auth, body).
+ * `null` resets to `default_value`, which is the blob's canonical default text
+ * (e.g. `{}` for variables, `{"mode":"none"}` for a collection's auth).
+ *
+ * Every field routed through here is **object-shaped**, and the helper rejects
+ * anything else with a 400 naming the field. It used to dump whatever it was
+ * handed, so `{"variables": 42}` stored `42` and `{"auth": "bearer"}` stored
+ * `"bearer"` - blobs that parse as JSON but are not the object each reader
+ * expects, and every reader degrades quietly (`parse_variables` yields no
+ * variables, `parse_auth` yields no auth, so the request goes out bare). The
+ * write returned 200 and the user found out from the wire. That is the same
+ * defect the `"null"`-string fix closed, one level up: it removed a bad
+ * *value*, this removes a bad *shape*. Array-shaped fields have their own
+ * validating helper (`apply_key_value_field` for `params` / `headers`).
+ *
+ * `[[nodiscard]]` because dropping the returned error is exactly the silent
+ * acceptance this helper exists to prevent.
+ */
+[[nodiscard]] inline std::optional<std::pair<int, nlohmann::json>>
+apply_json_field (const nlohmann::json& json,
+const char* key,
+std::string& out,
+const char* default_value,
+bool is_create) {
+    if (!json.contains (key)) {
+        if (is_create) {
+            out = default_value;
+        }
+        return std::nullopt;
+    }
+    const auto& value = json[key];
+    if (value.is_null ()) {
+        out = default_value;
+        return std::nullopt;
+    }
+    if (!value.is_object ()) {
+        return std::make_pair (400,
+        nlohmann::json{
+        { "error", std::string ("Invalid '") + key + "': must be a JSON object" } });
+    }
+    out = value.dump ();
+    return std::nullopt;
+}
+
+/** Same rule for a boolean field. A non-boolean, non-null value is ignored. */
+inline void apply_bool_field (const nlohmann::json& json,
+const char* key,
+bool& out,
+bool default_value,
+bool is_create) {
+    if (json.contains (key)) {
+        if (json[key].is_null ()) {
+            out = default_value;
+        } else if (json[key].is_boolean ()) {
+            out = json[key].get<bool> ();
+        }
+    } else if (is_create) {
+        out = default_value;
+    }
+}
+
+/** Same rule for an integer field. A non-integer, non-null value is ignored. */
+inline void
+apply_int_field (const nlohmann::json& json, const char* key, int& out, int default_value, bool is_create) {
+    if (json.contains (key)) {
+        if (json[key].is_null ()) {
+            out = default_value;
+        } else if (json[key].is_number_integer ()) {
+            out = json[key].get<int> ();
+        }
+    } else if (is_create) {
+        out = default_value;
+    }
+}
+
+/**
+ * The domain's wire values as quoted, comma-separated text, for the "Valid
+ * values: ..." tail of a rejection. Built from `all_http_versions()` so the
+ * message can never list a different set than the one actually accepted.
+ */
+inline std::string http_version_valid_list () {
+    std::string list;
+    for (const auto version : vayu::all_http_versions ()) {
+        if (!list.empty ()) {
+            list += ", ";
+        }
+        list += "'" + vayu::to_string (version) + "'";
+    }
+    return list;
+}
+
+/**
+ * Same null-vs-absent rule for a field validated against `all_http_versions()`
+ * (currently only `httpVersion`, but written generically since the pattern -
+ * "a string that must be one of an enumerated set" - is not itself
+ * HTTP-version-specific).
+ *
+ * Unlike `apply_bool_field` / `apply_int_field`, a value that fails validation
+ * is a 400, never a silent ignore: a typo'd protocol name quietly running as
+ * something else is worse than a rejected write. @p seed is the value used for
+ * "absent on create" and "null" on either verb - the caller reads it from the
+ * live `defaultHttpVersion` config entry, not a compiled-in constant, so a
+ * user-configured global takes effect for new/reset requests.
+ *
+ * Acceptance goes through `http_version_from_string`, and the 400's
+ * valid-values text through `http_version_valid_list()`. Both resolve to
+ * `all_http_versions()`, so the set accepted and the set advertised cannot
+ * drift apart - a hand-written accept-list here would be exactly the risk
+ * `all_http_versions()` exists to prevent.
+ */
+inline std::optional<std::pair<int, nlohmann::json>> apply_http_version_field (
+const nlohmann::json& json,
+const char* key,
+std::string& out,
+const std::string& seed,
+bool is_create) {
+    if (!json.contains (key)) {
+        if (is_create) {
+            out = seed;
+        }
+        return std::nullopt;
+    }
+    if (json[key].is_null ()) {
+        out = seed;
+        return std::nullopt;
+    }
+
+    if (json[key].is_string ()) {
+        const std::string candidate = json[key].get<std::string> ();
+        // Acceptance goes through the domain's own parser rather than a
+        // hand-rolled comparison, so this cannot come to disagree with what
+        // deserialize_request and the config seed accept.
+        if (vayu::http_version_from_string (candidate).has_value ()) {
+            out = candidate;
+            return std::nullopt;
+        }
+        return std::make_pair (400,
+        nlohmann::json{ { "error",
+        std::string ("Invalid '") + key + "': '" + candidate +
+        "' is not a valid HTTP version. Valid values: " + http_version_valid_list () } });
+    }
+
+    return std::make_pair (400,
+    nlohmann::json{ { "error",
+    std::string ("Invalid '") + key +
+    "': must be a string. Valid values: " + http_version_valid_list () } });
+}
+
+/**
+ * A field with no default: absent on create and `null` on either verb are both
+ * 400s, because there is nothing to fall back to. Returns the error response
+ * body, or nullopt when the value is acceptable (including "absent on update",
+ * which keeps the stored value).
+ */
+inline std::optional<std::pair<int, nlohmann::json>>
+apply_required_string_field (const nlohmann::json& json, const char* key, std::string& out, bool is_create) {
+    if (!json.contains (key)) {
+        if (is_create) {
+            return std::make_pair (400,
+            nlohmann::json{ { "error", std::string ("Missing required field: ") + key } });
+        }
+        return std::nullopt; // Absent on update -> keep.
+    }
+    if (json[key].is_null ()) {
+        return std::make_pair (400,
+        nlohmann::json{ { "error",
+        std::string ("Invalid '") + key + "': null is not allowed (this field has no default)" } });
+    }
+    out = json[key].get<std::string> ();
+    return std::nullopt;
+}
+
+/**
+ * The per-resource field appliers, shared by the single-resource create/update
+ * cores and by `POST /import/apply` (issue #96). Bulk import must store exactly
+ * what `POST /<resource>` would store, so it calls these rather than re-deriving
+ * the null-vs-absent rule or the per-field validation - a second copy would
+ * drift the moment a field is added.
+ *
+ * Each returns an error response {http_status, json_body} when a no-default
+ * field is missing or null (or, for collections, when the proposed parent would
+ * form a cycle), and nullopt on success. `is_create` selects the absent-field
+ * behaviour; see the rule above. Defined in collections.cpp / requests.cpp /
+ * environments.cpp.
+ */
+std::optional<std::pair<int, nlohmann::json>> apply_collection_fields (
+vayu::db::Database& db, vayu::db::Collection& c, const nlohmann::json& json, bool is_create);
+std::optional<std::pair<int, nlohmann::json>> apply_request_fields (
+vayu::db::Database& db, vayu::db::Request& r, const nlohmann::json& json, bool is_create);
+std::optional<std::pair<int, nlohmann::json>>
+apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, bool is_create);
 
 /**
  * @brief Callback type for graceful shutdown

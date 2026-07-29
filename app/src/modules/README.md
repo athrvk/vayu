@@ -12,7 +12,12 @@ Some modules have components displayed in both the sidebar and main content area
 
 - **Location:** Both sidebar and main
 - **Sidebar:** `sidebar/HistoryList.tsx` - List of test runs
-- **Main:** `main/HistoryDetail.tsx`, `main/LoadTestDetail.tsx`, `main/DesignRunDetail.tsx` - Run detail views
+- **Main:** `main/HistoryDetail.tsx`, `main/LoadTestDetail.tsx`, `main/DesignRunView.tsx` - Run detail views
+- **A design run opens as an editable copy, not a viewer.** `DesignRunView`
+  renders the request builder itself, seeded from the stored run by
+  `main/design-run-seed.ts`. The copy is detached: `id: null` and no `onSave`,
+  so nothing typed in it can reach the saved request. Writing values back is a
+  separate button that asks first.
 - **Usage:**
 
     ```tsx

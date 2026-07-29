@@ -10,19 +10,20 @@
  * @brief Request-composition pipeline for the MCP layer.
  *
  * When the Vayu app sends a request, the **renderer** - not the engine - does
- * the preparation: it resolves `{{variables}}`, walks the collection ancestor
- * chain to resolve `inherit` auth, and composes the collection-chain pre/post
- * scripts with the request's own. The engine only *applies* a concrete `auth`
- * block (bearer/basic/apikey/oauth2, incl. the OAuth2 token cache) and *runs*
- * whatever script strings arrive in the body; it performs **no** `{{var}}`
- * interpolation and explicitly drops `{"mode":"inherit"}` auth as
- * "resolved app-side" (see engine `auth_resolver.cpp::parse_auth`).
+ * the preparation: it resolves `{{variables}}` and walks the collection
+ * ancestor chain to resolve `inherit` auth. It also collects the
+ * collection-chain scripts (root→leaf) and the request's own as an ordered
+ * list of {@link ScriptPart}s; the engine now joins them and runs the result.
+ * The engine *applies* a concrete `auth` block (bearer/basic/apikey/oauth2,
+ * incl. the OAuth2 token cache); it performs **no** `{{var}}` interpolation
+ * and explicitly drops `{"mode":"inherit"}` auth as "resolved app-side" (see
+ * engine `auth_resolver.cpp::parse_auth`).
  *
  * MCP talks to the engine directly, bypassing the renderer, so without this
  * module MCP requests would ship unresolved `{{vars}}`, no auth, and no scripts.
  * This module is the main-process counterpart of the renderer pipeline
  * (`useVariableResolver.ts` + `request-builder/index.tsx` +
- * `utils/auth-mapping.ts`); the two must stay in agreement on precedence and
+ * `utils/auth-resolution.ts`); the two must stay in agreement on precedence and
  * `inherit`/script semantics. Everything here is pure and transport-agnostic
  * except {@link loadResolutionContext}, which reads the data it needs via the
  * engine client.
@@ -65,6 +66,7 @@ export type AuthRecord = Record<string, unknown> & { mode?: string };
 /** A collection row (`GET /collections`). Collections never store `inherit`. */
 export interface CollectionLike {
 	id: string;
+	name?: string;
 	parentId?: string | null;
 	variables?: VariableBag;
 	auth?: AuthRecord;
@@ -88,19 +90,45 @@ export interface SavedRequestLike {
 	/** Redirect policy. Absent on rows saved before the columns existed. */
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	/**
+	 * Protocol to negotiate. Loose (`string`, not {@link HttpVersion}) like the
+	 * rest of this interface - a row saved before this column existed, or one
+	 * written by a newer/corrupted engine, is coerced by
+	 * {@link composeExecutionOptions}, not typed away here.
+	 */
+	httpVersion?: string;
 }
 
-/** The fully-composed body the engine's `POST /request` and `/run` accept. */
+/**
+ * One part of a script that runs for a request, and where it came from.
+ * Mirrors `ScriptPart` in `app/src/types/domain.ts` - restated here because
+ * `resolve.ts` cannot import from `app/src/` (see `app/tsconfig.node.json`).
+ * Keep the two definitions structurally identical.
+ *
+ * `origin`/`id`/`name` are sent and persisted starting with this change, but
+ * nothing in the app reads them back yet - intentional groundwork for the
+ * run/history views to attribute a script failure to its source later.
+ */
+export interface ScriptPart {
+	origin: "collection" | "request";
+	id?: string;
+	/** Collection name, for showing the user where a part came from. */
+	name?: string;
+	script: string;
+}
+
+/** The body the engine's `POST /execute` accepts. `POST /runs` takes its own shape. */
 export interface OutgoingRequest {
 	method: string;
 	url: string;
 	headers?: Record<string, string>;
 	body?: RequestBodyLike;
 	auth?: AuthRecord;
-	preRequestScript?: string;
-	postRequestScript?: string;
+	preRequestScripts?: ScriptPart[];
+	postRequestScripts?: ScriptPart[];
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	httpVersion?: HttpVersion;
 	requestId?: string;
 	environmentId?: string;
 }
@@ -235,36 +263,61 @@ export function composeAuth(
 
 // --- Script composition ------------------------------------------------------
 
-function joinScripts(parts: Array<string | undefined>): string | undefined {
-	const composed = parts.filter((s): s is string => Boolean(s && s.trim())).join("\n\n");
-	return composed.length > 0 ? composed : undefined;
+/**
+ * Collect the script parts that run for a request: the collection chain's,
+ * root to leaf, then the request's own. Each part records where it came from.
+ *
+ * The engine joins them and runs the result as one script. It used to be joined
+ * here, which meant a stored run could not say which part came from where.
+ */
+function scriptParts(
+	chain: CollectionLike[],
+	pick: (c: CollectionLike) => string | undefined,
+	requestId: string | undefined,
+	requestScript: string | undefined
+): ScriptPart[] | undefined {
+	const parts: ScriptPart[] = [];
+	for (const c of chain) {
+		const script = pick(c);
+		if (script && script.trim()) {
+			parts.push({ origin: "collection", id: c.id, name: c.name, script });
+		}
+	}
+	if (requestScript && requestScript.trim()) {
+		parts.push({ origin: "request", id: requestId, script: requestScript });
+	}
+	return parts.length > 0 ? parts : undefined;
 }
 
 /**
- * Compose the effective pre/post scripts: collection-chain scripts (root→leaf)
- * followed by the request's own, joined with blank lines - the same order the
- * renderer sends so parent-collection setup runs before the request's script.
+ * Compose the effective pre/post script parts: collection-chain parts
+ * (root→leaf) followed by the request's own - the same order the renderer
+ * sends so parent-collection setup runs before the request's script.
  */
 export function composeScripts(
 	request: SavedRequestLike,
 	chain: CollectionLike[]
-): { preRequestScript?: string; postRequestScript?: string } {
+): { preRequestScripts?: ScriptPart[]; postRequestScripts?: ScriptPart[] } {
 	return {
-		preRequestScript: joinScripts([
-			...chain.map((c) => c.preRequestScript),
-			request.preRequestScript,
-		]),
-		postRequestScript: joinScripts([
-			...chain.map((c) => c.postRequestScript),
-			request.postRequestScript,
-		]),
+		preRequestScripts: scriptParts(
+			chain,
+			(c) => c.preRequestScript,
+			request.id,
+			request.preRequestScript
+		),
+		postRequestScripts: scriptParts(
+			chain,
+			(c) => c.postRequestScript,
+			request.id,
+			request.postRequestScript
+		),
 	};
 }
 
 // --- Headers & body ----------------------------------------------------------
 
 /**
- * Flatten a `KeyValueEntry[]` into the object map the engine's `POST /request`
+ * Flatten a `KeyValueEntry[]` into the object map the engine's `POST /execute`
  * expects, keeping only enabled rows and resolving variables in keys and
  * values. Later duplicates win, matching header-map semantics.
  */
@@ -299,13 +352,15 @@ export function resolveBody(
 	return out;
 }
 
-// --- Redirect policy ---------------------------------------------------------
+// --- Execution options (redirect policy + protocol) --------------------------
 
 /**
- * Engine defaults for the redirect policy, restated here because the main
- * process shares no module graph with the renderer (`electron/` has no `@/`
- * alias). Keep in step with `src/constants/request.ts` and with
- * `vayu::Request` in `engine/include/vayu/types.hpp`.
+ * Engine defaults for the redirect policy and protocol negotiation, restated
+ * here because the main process shares no module graph with the renderer
+ * (`electron/` has no `@/` alias). Keep in step with `src/constants/request.ts`
+ * (`DEFAULT_FOLLOW_REDIRECTS`/`DEFAULT_MAX_REDIRECTS`/`HTTP_VERSIONS`/
+ * `DEFAULT_HTTP_VERSION`) and with `vayu::Request` in
+ * `engine/include/vayu/types.hpp`.
  */
 const DEFAULT_FOLLOW_REDIRECTS = true;
 const DEFAULT_MAX_REDIRECTS = 10;
@@ -313,15 +368,43 @@ const MIN_MAX_REDIRECTS = 0;
 const MAX_MAX_REDIRECTS = 100;
 
 /**
- * The redirect policy to forward for a saved request. Both fields are always
- * sent - the engine defaults to following, so eliding a stored
- * `followRedirects: false` would quietly follow the redirect the request opted
- * out of. Missing or out-of-range values fall back the same way the renderer's
- * `RequestTransformer` does, so MCP and the UI execute a row identically.
+ * HTTP protocol a request asks the engine to negotiate. Mirrors
+ * `HTTP_VERSIONS` in `src/constants/request.ts` - restated here rather than
+ * imported (see the module docblock: MCP cannot import from `app/src/`).
+ * Exported so `tools.ts` builds its Zod enum from this one array instead of
+ * declaring a third copy.
+ *
+ * The two arrays hold the same *values* but deliberately differ in *shape*:
+ * the renderer's is `{value, label}[]` because it populates a picker, this one
+ * is a flat tuple because `z.enum` takes bare strings. Do not "fix" the
+ * difference by diffing them literally - it is the value list that must stay
+ * in step, not the structure.
  */
-export function composeRedirectPolicy(request: SavedRequestLike): {
+export const HTTP_VERSIONS = ["auto", "http1.1", "http2"] as const;
+export type HttpVersion = (typeof HTTP_VERSIONS)[number];
+const DEFAULT_HTTP_VERSION: HttpVersion = "auto";
+
+/** Narrow an unknown value to a {@link HttpVersion}, mirroring `isHttpVersion` in `src/constants/request.ts`. */
+function isHttpVersion(value: unknown): value is HttpVersion {
+	return typeof value === "string" && (HTTP_VERSIONS as readonly string[]).includes(value);
+}
+
+/**
+ * The redirect policy and protocol to forward for a saved request. All three
+ * fields are always sent - the engine defaults to following redirects and to
+ * "auto" protocol negotiation, so eliding a stored `followRedirects: false` or
+ * a stored `httpVersion: "http2"` would quietly hand the decision back to the
+ * engine. Missing or out-of-range/out-of-domain values fall back the same way
+ * the renderer's `RequestTransformer` does (`clampMaxRedirects` /
+ * `coerceHttpVersion`), so MCP and the UI execute a row identically.
+ *
+ * Named for what it returns, not just the redirect fields - it also decides
+ * protocol, and a name that didn't say so is how that would get missed.
+ */
+export function composeExecutionOptions(request: SavedRequestLike): {
 	followRedirects: boolean;
 	maxRedirects: number;
+	httpVersion: HttpVersion;
 } {
 	const followRedirects =
 		typeof request.followRedirects === "boolean"
@@ -332,7 +415,10 @@ export function composeRedirectPolicy(request: SavedRequestLike): {
 		typeof raw === "number" && Number.isFinite(raw)
 			? Math.min(MAX_MAX_REDIRECTS, Math.max(MIN_MAX_REDIRECTS, Math.trunc(raw)))
 			: DEFAULT_MAX_REDIRECTS;
-	return { followRedirects, maxRedirects };
+	const httpVersion = isHttpVersion(request.httpVersion)
+		? request.httpVersion
+		: DEFAULT_HTTP_VERSION;
+	return { followRedirects, maxRedirects, httpVersion };
 }
 
 // --- High-level composition --------------------------------------------------
@@ -341,8 +427,9 @@ export function composeRedirectPolicy(request: SavedRequestLike): {
  * Compose a saved request into the fully-resolved payload the engine executes -
  * the MCP equivalent of the app clicking **Send** on that request. Variables are
  * resolved in the URL, headers, and body; `inherit`/chain auth is resolved to a
- * concrete block; the collection-chain + request scripts are composed; and the
- * request's redirect policy is forwarded.
+ * concrete block; the collection-chain + request script parts are collected
+ * (the engine joins and runs them); and the request's redirect policy and
+ * protocol are forwarded.
  */
 export function composeSavedRequest(
 	request: SavedRequestLike,
@@ -361,11 +448,12 @@ export function composeSavedRequest(
 	if (body) out.body = body;
 	const auth = composeAuth(request.auth, chain, resolver);
 	if (auth) out.auth = auth;
-	if (scripts.preRequestScript) out.preRequestScript = scripts.preRequestScript;
-	if (scripts.postRequestScript) out.postRequestScript = scripts.postRequestScript;
-	const redirects = composeRedirectPolicy(request);
-	out.followRedirects = redirects.followRedirects;
-	out.maxRedirects = redirects.maxRedirects;
+	if (scripts.preRequestScripts) out.preRequestScripts = scripts.preRequestScripts;
+	if (scripts.postRequestScripts) out.postRequestScripts = scripts.postRequestScripts;
+	const options = composeExecutionOptions(request);
+	out.followRedirects = options.followRedirects;
+	out.maxRedirects = options.maxRedirects;
+	out.httpVersion = options.httpVersion;
 	if (typeof request.id === "string") out.requestId = request.id;
 	if (environmentId) out.environmentId = environmentId;
 	return out;

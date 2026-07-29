@@ -7,6 +7,15 @@
 
 // Core Domain Types
 
+/**
+ * HTTP protocol to negotiate. Declared in `@/constants/request` (derived from
+ * the `HTTP_VERSIONS` list, the single source of truth also consumed by the
+ * Settings tab picker) and re-exported here, same pattern as `ColorScheme` in
+ * `types/ui.ts`, so `Request.httpVersion` below can reference it.
+ */
+import type { HttpVersion } from "@/constants/request";
+export type { HttpVersion };
+
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export type BodyMode = "none" | "json" | "text" | "graphql" | "form-data" | "x-www-form-urlencoded";
@@ -121,6 +130,28 @@ export function compareCollectionOrder(a: Collection, b: Collection): number {
 	return (a.id ?? "").localeCompare(b.id ?? "");
 }
 
+/**
+ * One part of a script that runs for a request, and where it came from.
+ *
+ * The clients used to join the collection chain's scripts with the request's
+ * own and send a single string, so a stored run could not say which part came
+ * from where - and writing that string back to a request would put the
+ * collection's script inside it permanently. The engine joins them now.
+ *
+ * `origin`/`id`/`name` are sent and persisted starting with this change, but
+ * nothing in the app reads them back yet - that is intentional groundwork for
+ * the run/history views (not yet built) to attribute a script failure to the
+ * collection or request it came from. Do not read this as dead weight; it is
+ * the next layer's job to add the reader.
+ */
+export interface ScriptPart {
+	origin: "collection" | "request";
+	id?: string;
+	/** Collection name, for showing the user where a part came from. */
+	name?: string;
+	script: string;
+}
+
 export interface Request {
 	id: string;
 	collectionId: string;
@@ -139,6 +170,14 @@ export interface Request {
 	followRedirects: boolean;
 	/** Redirect hops allowed when {@link followRedirects} is on. Engine default is 10. */
 	maxRedirects: number;
+	/**
+	 * HTTP protocol to negotiate for this request. `"auto"` lets curl pick
+	 * (ALPN over TLS, HTTP/1.1 otherwise) - see {@link HTTP_VERSIONS}. This is
+	 * the *requested* protocol; the protocol actually negotiated for a given
+	 * response is `ResponseState.httpVersion`, a different, display-string
+	 * value space - do not unify them.
+	 */
+	httpVersion: HttpVersion;
 	order: number;
 	createdAt: string;
 	updatedAt: string;
@@ -190,6 +229,51 @@ export interface ResolvedVariable {
 	secret?: boolean;
 	type?: VariableValue["type"];
 	typedValue?: unknown;
+	/**
+	 * Which collection or environment this value came from. Absent for `global`,
+	 * which is a singleton and has no name to give.
+	 *
+	 * These sat on `VariableInfo` for a long time, declared and never written by
+	 * anything in `src/` - so the popover could say a variable came from "an
+	 * environment" but not *which* one, in an app where having several is the
+	 * point. Moved down to `ResolvedVariable` because the resolver is what knows,
+	 * and it produces this type.
+	 */
+	sourceId?: string;
+	sourceName?: string;
+}
+
+/**
+ * One definition of a variable name, at one scope.
+ *
+ * The resolver flattens every scope into a single winner, which is all execution
+ * needs and strictly less than the UI needs: "why is this the value?" cannot be
+ * answered from the winner alone. Two cases in particular are invisible without
+ * the losers - a name defined at several scopes, and a name whose highest-scope
+ * definition is *disabled*, which is the most common reason a value is not the
+ * one you expected.
+ *
+ * Disabled definitions are therefore kept here even though they never resolve.
+ */
+export interface VariableOrigin {
+	scope: VariableScope;
+	/** Absent for `global`, as on ResolvedVariable. */
+	sourceId?: string;
+	sourceName?: string;
+	value: string;
+	secret?: boolean;
+	/** The declared conversion, carried so the winner can rebuild `typedValue`. */
+	type?: VariableValue["type"];
+	/** A disabled definition is listed but never wins. */
+	enabled: boolean;
+	/**
+	 * The definition that actually resolves. Exactly one origin per name carries
+	 * this, unless every definition is disabled, in which case none does.
+	 *
+	 * Explicit rather than "the last one", because precedence order and win order
+	 * are not the same list once disabled definitions are included.
+	 */
+	winner: boolean;
 }
 
 /**
@@ -197,8 +281,6 @@ export interface ResolvedVariable {
  */
 export interface VariableInfo extends ResolvedVariable {
 	name: string;
-	sourceId?: string; // Collection ID or Environment ID
-	sourceName?: string; // Collection name or Environment name
 }
 
 /**
@@ -217,7 +299,134 @@ export interface RunConfigSnapshot {
 	rampUpDuration?: string;
 	startConcurrency?: number;
 	comment?: string;
+	/**
+	 * Requested protocol the run executed with - `build_run_report_config` in
+	 * `engine/src/http/routes/runs.cpp` normalizes an absent or explicit-`null`
+	 * key to `"auto"` before this ever reaches the client, so it is always
+	 * present in practice despite the optional `?`. Distinct from the
+	 * *negotiated* protocol on a single exchange (`ResponseState.httpVersion`).
+	 */
+	httpVersion?: HttpVersion;
 	[key: string]: unknown;
+}
+
+/**
+ * One HTTP exchange's trace, as the engine stores it. A design-mode trace
+ * (`POST /request` -> `store_result`, execution.cpp) nests the request and
+ * response; a load-test trace flattens timing and status onto the object
+ * directly. Both writers omit fields freely, so everything here is optional.
+ * Named once and shared by {@link RunResult} and {@link RunReport} rather
+ * than declared inline in both places.
+ */
+export interface RunResultTrace {
+	totalMs?: number;
+	/** libcurl's transfer time; `queueWaitMs` is generator-side overhead. Both
+	 * writers store them now, but rows persisted by older engines lack them. */
+	wireMs?: number;
+	queueWaitMs?: number;
+	dnsMs?: number;
+	connectMs?: number;
+	tlsMs?: number;
+	firstByteMs?: number;
+	downloadMs?: number;
+	isSlow?: boolean;
+	thresholdMs?: number;
+	request_number?: number;
+	error_code?: number;
+	/** `to_string(ErrorCode)` - the same words a live `errorCode` uses. */
+	error_type?: string;
+	/** The load-test writer's failure text (`load_strategy.cpp`). */
+	message?: string;
+	/** The design-mode writer's failure text (`store_result`, execution.cpp). */
+	error_message?: string;
+	/**
+	 * Per-test validation failures from a load run's `validate_scripts`
+	 * (`run_manager.cpp`), stored on the summary result row's trace. Each entry
+	 * is a `"<test name>: <assertion>"` line (or a `Script error:` / `Exception:`
+	 * line when the whole script threw). Written by the engine but rendered
+	 * nowhere before issue #111.
+	 */
+	failures?: string[];
+	totalFailed?: number;
+	totalPassed?: number;
+	headers?: Record<string, string>;
+	body?: string;
+	// Design-mode traces (`POST /request`) nest the exchange instead of
+	// flattening it - see `store_result` in engine/src/http/routes/execution.cpp.
+	request?: {
+		method?: string;
+		url?: string;
+		headers?: Record<string, string>;
+		body?: string;
+		/** Set by `store_result` when the request body exceeded `maxTraceBodyBytes`. */
+		bodyTruncated?: boolean;
+		/** The request body's original byte length, present only when truncated. */
+		bodyBytes?: number;
+	};
+	response?: {
+		headers?: Record<string, string>;
+		body?: unknown;
+		/** Set by `store_result` when the response body exceeded `maxTraceBodyBytes`. */
+		bodyTruncated?: boolean;
+		/** The response body's original byte length, present only when truncated. */
+		bodyBytes?: number;
+		/**
+		 * The protocol negotiated for this exchange, as stored by
+		 * `build_result_trace` (`engine/src/http/routes/execution.cpp`) - same
+		 * display-string value space as `ResponseState.httpVersion`
+		 * (`app/src/modules/request-builder/types.ts`), not the request-side
+		 * `HttpVersion` union. Read by `restore-response.ts`'s `sentSide` (onto
+		 * the rebuilt raw request line) and `responseFromRunResult` (onto
+		 * `ResponseState.httpVersion`, for the Raw tab's status line).
+		 */
+		httpVersion?: string;
+	};
+}
+
+/**
+ * The single exchange for a design run, attached by `GET /runs/:id` -
+ * `attach_design_result` in engine/src/utils/json.cpp. Design runs only: a
+ * design run has exactly one result, so the engine embeds it on the run
+ * itself instead of requiring a second `/results` fetch.
+ */
+export interface RunResult {
+	timestamp: number;
+	statusCode: number;
+	statusText: string;
+	latencyMs: number;
+	error?: string;
+	trace?: RunResultTrace;
+}
+
+/**
+ * The compact per-row summary the paginated `GET /runs` list carries in place
+ * of the full {@link RunConfigSnapshot}. Mirrors all nine keys
+ * `build_run_summary` sends (`engine/src/http/routes/runs.cpp`); each is
+ * omitted by the engine when absent from the stored snapshot, except
+ * `httpVersion` which the engine always normalizes to a value (see
+ * `add_http_version`, same file). The full snapshot is still available on
+ * `GET /runs/:id`.
+ *
+ * `followRedirects` / `maxRedirects` are declared but **not rendered
+ * anywhere yet** - this type mirrors the wire, so a field the engine sends is
+ * declared whether or not a screen reads it, and a reader can trust that what
+ * is missing here is missing from the payload too. If you are looking for
+ * somewhere to surface them, the history sidebar row and the load test report
+ * both already show `httpVersion` and would be the consistent home.
+ */
+export interface RunSummary {
+	url?: string;
+	method?: string;
+	mode?: string;
+	duration?: string;
+	concurrency?: number;
+	comment?: string;
+	/** Requested protocol - see {@link RunConfigSnapshot.httpVersion}. */
+	httpVersion?: HttpVersion;
+	/** Sent by the engine, not yet rendered - see the note above. */
+	followRedirects?: boolean;
+	/** Sent by the engine, not yet rendered - see the note above. */
+	maxRedirects?: number;
 }
 
 export interface Run {
@@ -226,9 +435,39 @@ export interface Run {
 	status: "pending" | "running" | "completed" | "stopped" | "failed";
 	startTime: number; // Unix timestamp in ms
 	endTime: number;
+	/**
+	 * Present on list rows from the paginated `GET /runs`. The single-run
+	 * `GET /runs/:id` returns {@link configSnapshot} instead.
+	 */
+	summary?: RunSummary;
+	/** Full snapshot - present on `GET /runs/:id`, not on paginated list rows. */
 	configSnapshot?: RunConfigSnapshot;
 	requestId?: string | null;
 	environmentId?: string | null;
+	/** The exchange, present only for a design run once it has completed or failed. */
+	result?: RunResult;
+}
+
+/** The `{data, pagination}` envelope the paginated `GET /runs` returns. */
+export interface RunListResponse {
+	data: Run[];
+	pagination: {
+		total: number;
+		limit: number;
+		offset: number;
+		hasMore: boolean;
+		returned: number;
+	};
+}
+
+/** Server-side filters for the paginated `GET /runs` list. */
+export interface RunListParams {
+	limit?: number;
+	offset?: number;
+	type?: "load" | "design";
+	status?: Run["status"];
+	requestId?: string;
+	q?: string;
 }
 
 /** Load-test execution strategy. Single source of truth for the mode union. */
@@ -243,12 +482,41 @@ export interface LoadTestConfig {
 	ramp_duration_seconds?: number;
 	/** Ramp-Up only: connections at t=0, climbing to `concurrency`. */
 	start_concurrency?: number;
-	data_sample_rate?: number;
+	/**
+	 * Sampling **period** for stored success traces - keep 1 in N, engine-side
+	 * `counter % N`. Named for the unit on purpose: the dialog's control is a
+	 * percentage, and the two used to be the same number, so the slider meant
+	 * the inverse of its own label. `successSamplePeriod` does the conversion.
+	 */
+	success_sample_period?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
 	comment?: string;
 	latency_percentiles?: number[];
 	max_in_flight?: number;
+}
+
+/**
+ * Per-request timing breakdown (milliseconds), as `POST /execute` returns it
+ * (`serialize(Response)`, engine/src/utils/json.cpp). Phase fields
+ * (dns…download) are sequential segments of the request; `wireMs` is libcurl's
+ * transfer time and `queueWaitMs` is generator-side overhead (total − wire).
+ *
+ * The field names are the engine's wire keys - the same `*Ms` convention the
+ * stored trace ({@link RunResultTrace}) uses, so a live response and one
+ * restored from a stored design run agree without renaming. `wireMs` /
+ * `queueWaitMs` stay optional because traces stored by older engines omitted
+ * them (current ones store all eight); consumers must treat both as optional.
+ */
+export interface ResponseTiming {
+	totalMs: number;
+	wireMs?: number;
+	queueWaitMs?: number;
+	dnsMs: number;
+	connectMs: number;
+	tlsMs: number;
+	firstByteMs: number;
+	downloadMs: number;
 }
 
 export interface HttpResponse {
@@ -260,18 +528,17 @@ export interface HttpResponse {
 	body: unknown;
 	bodyRaw: string;
 	bodySize: number;
-	timing: {
-		total: number;
-		wire?: number;
-		queueWait?: number;
-		dns: number;
-		connect: number;
-		tls: number;
-		firstByte: number;
-		download: number;
-	};
+	timing: ResponseTiming;
 	errorCode?: string;
 	errorMessage?: string;
+	/**
+	 * The protocol negotiated for this exchange, as `serialize(Response)`
+	 * (`engine/src/utils/json.cpp`) emits it on `POST /execute` - `""` when
+	 * nothing was negotiated, not omitted. Same display-string value space as
+	 * `ResponseState.httpVersion` (`app/src/modules/request-builder/types.ts`),
+	 * not the request-side `HttpVersion` union - do not unify the two.
+	 */
+	httpVersion?: string;
 }
 
 export interface TestResult {
@@ -334,6 +601,20 @@ export interface RunReport {
 			rampUpDuration?: string;
 			timeout?: number;
 			comment?: string;
+			/**
+			 * Requested protocol - see {@link RunConfigSnapshot.httpVersion}. Built by
+			 * `build_run_report_config` (`engine/src/http/routes/runs.cpp`), which
+			 * always normalizes it to a value via `add_http_version`, so this is
+			 * effectively always present despite the optional `?` - kept loosely
+			 * typed as `string` (not `HttpVersion`) like its siblings above, since
+			 * nothing here is runtime-validated; narrow with `isHttpVersion` before
+			 * using it as a value.
+			 */
+			httpVersion?: string;
+		/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
+		followRedirects?: boolean;
+		/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
+		maxRedirects?: number;
 		};
 	};
 	summary: {
@@ -403,34 +684,7 @@ export interface RunReport {
 		statusText?: string;
 		latencyMs: number;
 		error?: string;
-		trace?: {
-			totalMs?: number;
-			dnsMs?: number;
-			connectMs?: number;
-			tlsMs?: number;
-			firstByteMs?: number;
-			downloadMs?: number;
-			isSlow?: boolean;
-			thresholdMs?: number;
-			request_number?: number;
-			error_code?: number;
-			error_type?: string;
-			message?: string;
-			headers?: Record<string, string>;
-			body?: string;
-			// Design-mode traces (`POST /request`) nest the exchange instead of
-			// flattening it - see `store_result` in engine/src/http/routes/execution.cpp.
-			request?: {
-				method?: string;
-				url?: string;
-				headers?: Record<string, string>;
-				body?: string;
-			};
-			response?: {
-				headers?: Record<string, string>;
-				body?: unknown;
-			};
-		};
+		trace?: RunResultTrace;
 	}>;
 }
 
@@ -450,7 +704,7 @@ export interface EngineConfig {
 export interface ConfigEntry {
 	key: string;
 	value: string;
-	type: "integer" | "string" | "boolean" | "number";
+	type: "integer" | "string" | "boolean" | "number" | "enum";
 	label: string;
 	description: string;
 	category: string;
@@ -459,10 +713,25 @@ export interface ConfigEntry {
 	max?: string;
 	updatedAt: number;
 	requiresRestart?: boolean;
+	/**
+	 * Present only on `type: "enum"` entries (e.g. `defaultHttpVersion`); the
+	 * engine omits the key entirely rather than sending `null` or `[]` when a
+	 * stored row's options fail to parse (`engine/src/http/routes/config.cpp`),
+	 * so a renderer must treat a missing `options` as "nothing to offer", not
+	 * as a bug.
+	 */
+	options?: { value: string; label: string }[];
 }
 
 /** Client-side settings panels (localStorage-backed prefs, rendered by app panels). */
-export type ClientSettingsCategory = "appearance" | "editor" | "dashboard" | "general" | "mcp";
+export type ClientSettingsCategory =
+	| "appearance"
+	| "editor"
+	| "dashboard"
+	| "load-testing"
+	| "notifications"
+	| "general"
+	| "mcp";
 
 /** Engine settings categories (data-driven from the engine `/config` API). */
 export type EngineSettingsCategory =

@@ -103,6 +103,7 @@ Json serialize (const Request& request) {
     json["followRedirects"] = request.follow_redirects;
     json["maxRedirects"]    = request.max_redirects;
     json["verifySSL"]       = request.verify_ssl;
+    json["httpVersion"]     = to_string (request.http_version);
 
     return json;
 }
@@ -127,6 +128,58 @@ Json serialize (const vayu::db::Run& run) {
     Json (run.environment_id.value ()) :
     Json (nullptr);
     return json;
+}
+
+void attach_design_result (nlohmann::json& json,
+const vayu::db::Run& run,
+const std::vector<vayu::db::Result>& results) {
+    if (run.type != vayu::RunType::Design || results.empty ())
+        return;
+
+    const auto& result = results.front ();
+    nlohmann::json out;
+    out["timestamp"]  = result.timestamp;
+    out["statusCode"] = result.status_code;
+    out["statusText"] = result.status_text;
+    out["latencyMs"]  = result.latency_ms;
+    if (!result.error.empty ())
+        out["error"] = result.error;
+    if (!result.trace_data.empty ()) {
+        try {
+            out["trace"] = nlohmann::json::parse (result.trace_data);
+        } catch (...) {
+            out["trace"] = result.trace_data;
+        }
+    }
+    json["result"] = out;
+}
+
+namespace {
+
+// Cap a single trace node's `body` string in place. Records bodyTruncated +
+// bodyBytes (the original length) when the body is cut so a reader can tell a
+// stored slice from the whole body.
+void cap_node_body (nlohmann::json& node, size_t max_body_bytes) {
+    if (!node.is_object () || !node.contains ("body") || !node["body"].is_string ()) {
+        return;
+    }
+    const std::string body = node["body"].get<std::string> ();
+    if (body.size () > max_body_bytes) {
+        node["body"]          = body.substr (0, max_body_bytes);
+        node["bodyTruncated"] = true;
+        node["bodyBytes"]     = body.size ();
+    }
+}
+
+} // namespace
+
+void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes) {
+    if (trace.contains ("request")) {
+        cap_node_body (trace["request"], max_body_bytes);
+    }
+    if (trace.contains ("response")) {
+        cap_node_body (trace["response"], max_body_bytes);
+    }
 }
 
 Json serialize (const vayu::db::Collection& c) {
@@ -227,6 +280,7 @@ Json serialize (const vayu::db::Request& r) {
     json["postRequestScript"] = r.post_request_script;
     json["followRedirects"]   = r.follow_redirects;
     json["maxRedirects"]      = r.max_redirects;
+    json["httpVersion"]       = r.http_version;
     json["updatedAt"]         = r.updated_at;
     json["createdAt"]         = r.created_at;
     return json;
@@ -252,6 +306,52 @@ Json serialize (const vayu::db::Environment& e) {
     json["isActive"]  = e.is_active;
     json["updatedAt"] = e.updated_at;
     return json;
+}
+
+vayu::Environment parse_variables (const std::string& json_str) {
+    vayu::Environment env;
+    if (json_str.empty ()) {
+        return env;
+    }
+
+    try {
+        auto json = Json::parse (json_str);
+        if (json.is_object ()) {
+            for (auto& [key, value] : json.items ()) {
+                if (!value.is_object ()) {
+                    continue;
+                }
+                vayu::Variable var;
+                var.value   = value.value ("value", "");
+                var.enabled = value.value ("enabled", true);
+                var.secret  = value.value ("secret", false);
+                var.type    = value.value ("type", std::string{ "string" });
+                if (auto it = value.find ("createdAt");
+                    it != value.end () && it->is_number ()) {
+                    var.created_at = it->get<int64_t> ();
+                }
+                env[key] = std::move (var);
+            }
+        }
+    } catch (const std::exception&) {
+        // Return empty environment on parse error
+    }
+    return env;
+}
+
+std::string serialize_variables (const vayu::Environment& env) {
+    Json obj = Json::object ();
+    for (const auto& [key, var] : env) {
+        obj[key]            = Json::object ();
+        obj[key]["value"]   = var.value;
+        obj[key]["enabled"] = var.enabled;
+        obj[key]["secret"]  = var.secret;
+        obj[key]["type"]    = var.type.empty () ? std::string{ "string" } : var.type;
+        if (var.created_at.has_value ()) {
+            obj[key]["createdAt"] = *var.created_at;
+        }
+    }
+    return obj.dump ();
 }
 
 Json serialize (const vayu::db::Metric& metric) {
@@ -347,6 +447,30 @@ Result<Request> deserialize_request (const Json& json) {
         if (json.contains ("verifySSL")) {
             request.verify_ssl = json["verifySSL"].get<bool> ();
         }
+        if (json.contains ("httpVersion")) {
+            // A corrupted or downgraded stored row must not execute as
+            // something arbitrary, so an unrecognized *string* coerces to Auto
+            // rather than being rejected (rejecting user input is the route
+            // layer's job - see routes.hpp).
+            //
+            // Note POST /execute is the one write path that relies on this
+            // coercion instead of validating: POST /runs
+            // (normalize_run_http_version) and the requests CRUD
+            // (apply_http_version_field) both reject an unrecognized value
+            // with a 400. Neither shipped client can send one - the renderer
+            // sends a typed union, MCP validates with z.enum - so this is a
+            // gap in consistency, not a live hole.
+            //
+            // A non-string value throws here and fails the whole parse, which
+            // is deliberate and matches every sibling field in this block. It
+            // is unreachable from storage - db::Request::http_version is a
+            // std::string and both serializers emit it as one - so it can only
+            // come from a hand-crafted payload, where failing closed with a 400
+            // is the right answer.
+            auto parsed_version =
+            http_version_from_string (json["httpVersion"].get<std::string> ());
+            request.http_version = parsed_version.value_or (HttpVersion::Auto);
+        }
 
         return request;
     } catch (const std::exception& e) {
@@ -375,6 +499,11 @@ Json serialize (const Response& response) {
     json["requestHeaders"] = response.request_headers;
     json["rawRequest"]     = response.raw_request;
     json["bodySize"]       = response.body_size;
+    // The negotiated protocol, distinct from the requested `httpVersion` on
+    // the Request side (see Response::http_version). "" when nothing was
+    // negotiated - not omitted, so a caller reading this field can't confuse
+    // "we don't know" with "this key doesn't exist on responses".
+    json["httpVersion"] = response.http_version;
 
     // Try to parse body as JSON
     if (auto parsed = try_parse_body (response.body)) {
@@ -390,17 +519,18 @@ Json serialize (const Response& response) {
         json["errorMessage"] = response.error_message;
     }
 
-    // Timing
+    // Timing. Same `*Ms` key convention as the stored trace (store_result /
+    // load_strategy), so the live response and a restored one need no renaming.
     Json timing;
-    timing["total"]      = response.timing.total_ms;
-    timing["wire"]       = response.timing.wire_ms;
-    timing["queueWait"]  = response.timing.queue_wait_ms;
-    timing["dns"]        = response.timing.dns_ms;
-    timing["connect"]    = response.timing.connect_ms;
-    timing["tls"]        = response.timing.tls_ms;
-    timing["firstByte"]  = response.timing.first_byte_ms;
-    timing["download"]   = response.timing.download_ms;
-    json["timing"]       = timing;
+    timing["totalMs"]     = response.timing.total_ms;
+    timing["wireMs"]      = response.timing.wire_ms;
+    timing["queueWaitMs"] = response.timing.queue_wait_ms;
+    timing["dnsMs"]       = response.timing.dns_ms;
+    timing["connectMs"]   = response.timing.connect_ms;
+    timing["tlsMs"]       = response.timing.tls_ms;
+    timing["firstByteMs"] = response.timing.first_byte_ms;
+    timing["downloadMs"]  = response.timing.download_ms;
+    json["timing"]        = timing;
 
     return json;
 }
@@ -617,6 +747,7 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"postRequestScript\":" << Json (r.post_request_script).dump () << ",";
     out << "\"followRedirects\":" << (r.follow_redirects ? "true" : "false") << ",";
     out << "\"maxRedirects\":" << r.max_redirects << ",";
+    out << "\"httpVersion\":" << Json (r.http_version).dump () << ",";
     out << "\"updatedAt\":" << r.updated_at << ",";
     out << "\"createdAt\":" << r.created_at;
     out << "}";

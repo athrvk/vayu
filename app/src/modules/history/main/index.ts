@@ -13,5 +13,5 @@
 
 export { default as HistoryDetail } from "./HistoryDetail";
 export { default as LoadTestDetail } from "./LoadTestDetail";
-export { default as DesignRunDetail } from "./DesignRunDetail";
+export { default as DesignRunView } from "./DesignRunView";
 export * from "../types";

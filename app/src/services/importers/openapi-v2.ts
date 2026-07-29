@@ -109,11 +109,13 @@ export class OpenApiV2Parser implements ImportParser {
 		return {
 			collections: [root],
 			environments: [],
+			globals: {}, // a spec has no environment or globals concept
 			meta: {
 				format: this.formatName,
 				requestCount,
 				folderCount: tagCollections.size,
 				environmentCount: 0,
+				globalCount: 0,
 				skipped: [],
 				nonExecutableAuth: 0,
 			},

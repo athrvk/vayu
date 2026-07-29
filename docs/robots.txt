@@ -1,0 +1,6 @@
+# Vayu documentation and product site - https://athrvk.github.io/vayu/
+# Everything here is public and meant to be indexed.
+User-agent: *
+Allow: /
+
+Sitemap: https://athrvk.github.io/vayu/sitemap.xml

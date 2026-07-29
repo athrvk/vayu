@@ -106,7 +106,7 @@ Resize handle on the right edge (double-click resets to defaults). Visibility to
 Footer bar (h-8, shrink-0). Horizontal layout:
 
 - **Left - drawer switchers:** buttons for Collections (⇧⌘E), History (⇧⌘H), Variables (⇧⌘U), Settings (⌘,). Each activates its Drawer view; active state highlights when the drawer is open on that view. Settings sits here too because it is now a Drawer view like the rest.
-- **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved / error), app version.
+- **Middle - ambient status:** engine connection status (green dot + text if connected), save status (Saving… / Saved), app version. A save *failure* is not shown here - it is reported as a toast, like every other failure in the app.
 - **Right - toggles:** Context bar toggle (⌘I).
 
 ## Request Builder (`modules/request-builder/`)
@@ -127,10 +127,9 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 |---|---|
 | `context/RequestBuilderProvider.tsx`, `context/RequestBuilderContext.tsx` | Local request-editing state + the execute/save/load-test callbacks |
 | `components/RequestBuilderLayout.tsx` | Resizable vertical layout composing UrlBar / RequestTabs / ResponseViewer |
-| `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput` - method dropdown, URL input (variable highlighting), Send + Load Test buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
-| `components/RequestTabs/` | `index` + `panels/`: `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `PreScriptPanel`, `TestScriptPanel`, `SettingsPanel`. `AuthPanel` supports None / Bearer / Basic / API Key / **OAuth 2.0** (via the shared [`OAuth2Form`](#shared-oauth-20-form)). `SettingsPanel` holds the per-request redirect policy (**Follow redirects** + **Maximum redirects**); the tab strip badges it via `isRedirectPolicyNonDefault` (in `utils/request-state`) only when the request departs from the engine defaults |
-| `components/ResponseViewer/` | `index`, `ResponseCookies`, `ResponseTimingTab`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` (status bar, actions and the Headers tab now come from `shared/response-viewer/`) |
-| `components/RequestDescription.tsx` | Editable request description |
+| `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput`. The method dropdown lives **inside** the URL field's border (one control, not two - it was a separate `w-[76px]` box sized for OPTIONS). Send + Load Test are one **attached** pair on the same accent: Send is `--primary-fill` with a white label, Load Test is `--primary` at 12% with `--primary-text` and a transparent left border, so the join is a step in weight rather than a seam between materials. Send owns both corners when `canStartLoadTest` is false. Both shortcuts (`⌘↵` / `⌘⇧↵`) come from `constants/shortcuts.ts` and are shown on the buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below) |
+| `components/RequestTabs/` | `index` + `panels/`: `InfoPanel` (**first in the row**), `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `script/ScriptPanel`, `InheritedScriptsNotice`, `ChainCard`, `SettingsPanel`. `AuthPanel` owns the mode picker (it is the only host that offers `inherit`) and delegates every field group to the shared [`AuthFields`](#shared-auth-fields-componentssharedauthfields), injecting a variable-aware `VariableInput`; OAuth 2.0 reaches [`OAuth2Form`](#shared-oauth-20-form-componentssharedoauth2form) through it. One `ScriptPanel` serves both script tabs, as `variant="pre"` and `variant="post"`; everything that differs between them - the field it binds, the two context keys it reads, the intro sentence and the quick reference - is data in `script/script-variants.tsx`. It replaced `PreScriptPanel` and `TestScriptPanel`, two ~155-line files that a normalised `diff` showed differing in three places. It renders `InheritedScriptsNotice` (the script equivalent of `AuthInheritBanner`) to name which ancestor collections contribute a pre-request or test script; that accepts an optional `entries` prop so a stored-run view can supply parts directly instead of reading the live chain. `AuthInheritBanner` and `InheritedScriptsNotice` share their chrome through `ChainCard` - the tinted box, summary row, captioned list and hairline separators - which they previously wrote out twice, identically. `InfoPanel` holds the request description and is first because a description is the first thing you want to read about a request; it replaced `RequestDescription`, a permanent ~30px band above the tab strip that every request paid for whether or not it had one. Its badge is `1` for "there is something here", matching Body/Auth/Scripts/Settings. `SettingsPanel` holds the per-request redirect policy (**Follow redirects** + **Maximum redirects**); the tab strip badges it via `isRedirectPolicyNonDefault` (in `utils/request-state`) only when the request departs from the engine defaults |
+| `components/ResponseViewer/` | `index`, `ResponseCookies`, `ResponseTimingTab`, `TestResults`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView` (status bar, actions and the Headers tab now come from `shared/response-viewer/`). The Console tab renders whenever the response carries console logs **or** a `preScriptError`/`postScriptError`, so a script that throws before logging still shows its error rather than a silent 200 |
 | `components/LoadTestConfigDialog.tsx` | Load-test configuration dialog (mode, duration, RPS, concurrency, …). Renders `OAuth2LoadTestGuard` when the request's effective auth is OAuth 2.0 |
 | `components/OAuth2LoadTestGuard.tsx`, `components/oauth2-load-test-coverage.ts` | Warns when a duration-based load test would outlive its access token (the engine acquires a token once per run, no mid-run refresh): offers **Refresh** when a fresh token would cover the run, or **blocks Start** (with a "Start anyway" override) when even a fresh token can't. The pure coverage decision lives in `oauth2-load-test-coverage.ts` |
 | `shared/KeyValueEditor/` | `index`, `KeyValueRow` - reusable key/value table (params, headers, form fields) |
@@ -140,6 +139,8 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 > **cURL / wget import:** pasting a `curl` or `wget` command into the URL field auto-populates the whole request (method, URL, params, headers, body, auth). Auth maps `-u`/`--user` (and wget `--http-user`/`--http-password`) to Basic, and curl `--oauth2-bearer` to Bearer; an `Authorization` header is left as a raw header (to preserve `{{variables}}`). Form-shaped `-d`/`--data` without an explicit `Content-Type` maps to `x-www-form-urlencoded` rows (curl's on-the-wire default), while a raw JSON/text blob stays a text body. Detection + parsing live in `services/curl/` (`tokenize.ts` shell tokenizer + `parseCurl.ts`), kept separate from the collection `importers/` pipeline since this targets the active request. The paste is a request-shape replacement - identity (`id`, `name`, `collectionId`) and scripts are preserved; file references (`-d @file`, `-F field=@file`, `--post-file`) are skipped since they can't be read from pasted text. Non-command pastes fall through to normal input.
 
 > **Body tabs** support `none` / `json` / `text` / `graphql` / `form-data` / `x-www-form-urlencoded`. The `graphql` mode renders a split resizable editor: a **Query** pane (Monaco `graphql` language with diagnostics, autocomplete, hover, and formatting) and a **Variables** pane (Monaco `json` with schema-derived validation). **Scripts** are two separate panels - pre-request and test - not a single tab.
+
+> **Choosing GraphQL writes a header, and leaving GraphQL removes it.** GraphQL is sent as a JSON envelope, so picking it appends `Content-Type: application/json` to the Headers tab (unless an enabled `Content-Type` is already there) and says so in a notice with an Undo. The next mode change that no longer needs that header takes the row back out. The row is tracked **by id** - a `Content-Type` the user typed is indistinguishable by value and always survives, as does one whose value has since been edited. The rule is `panels/body/content-type.ts`; the record lives in `RequestBuilderProvider` (see [state-management](state-management.md#requestbuildercontext---the-added-content-type-row)) because the panel is unmounted whenever another tab is on screen.
 
 ## GraphQL Library (`lib/graphql/`)
 
@@ -172,18 +173,20 @@ Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows n
 | Tab | Component | Notes |
 |---|---|---|
 | Info | `InfoTab.tsx` | Name, description, request count |
-| Auth | `AuthTab.tsx` | Collection-level auth (concrete; never `inherit`) |
+| Auth | `AuthTab.tsx` | Collection-level auth (concrete; never `inherit`). Mode picker + hints only - the fields are the shared [`AuthFields`](#shared-auth-fields-componentssharedauthfields) |
 | Pre-request | `ScriptTab.tsx` (`kind="pre"`) | Collection pre-request script |
 | Post-request | `ScriptTab.tsx` (`kind="post"`) | Collection post-request script |
 | Variables | `VariablesTab.tsx` | Collection-scoped variables (count badge) |
 
 `InheritanceChain.tsx` and `shared.tsx` are helpers used by these tabs (e.g. visualizing the auth/variable inheritance chain).
 
+Info, Auth and both Script tabs share one save model: an editable draft with a Save button gated on `isDirty` and a Reset, held by [`useEntityDraft()`](./state-management.md#useentitydraft---manual-draftsave-model). It is the manual counterpart to the request builder's `useSaveManager()` autosave, and it owns the mutation reset on a collection switch - that part had been hand-rolled per tab and one tab had omitted it.
+
 ## Load Test Dashboard (`modules/dashboard/`)
 
 Live load-test metrics. Entry: `modules/dashboard/index.tsx`.
 
-Connects to the engine SSE metrics stream (`/metrics/live/:runId`, via the load-test service / dashboard store), shows live metrics while running, and converges on the final report on completion. Stop action supported.
+Connects to the engine SSE metrics stream (`/runs/:runId/live`, via the load-test service / dashboard store), shows live metrics while running, and converges on the final report on completion. Stop action supported.
 
 The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run config to one of `constant_rps` / `constant_concurrency` / `iterations` / `ramp_up`, and the hero row + stat row + charts render the surfaces appropriate to that mode. `MetricsView` is a thin orchestrator over a modular tree:
 
@@ -194,8 +197,7 @@ The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run con
 | `DashboardHeader.tsx` | Title, run status, stop button |
 | `RunMetadata.tsx` | Endpoint, config (mode/duration/RPS/concurrency), timing |
 | `MetricsView.tsx` | Orchestrator - composes the hero row, stat row, and charts per mode |
-| `RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests |
-| `MetricCard.tsx` | Single metric stat card |
+| `RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests. An expanded validation-failure sample lists each failing test's `trace.failures` message, not just the `ERR` chip and pass/fail counts |
 | `shared.tsx`, `tooltips.tsx` | Shared bits (Eyebrow/InfoChip) + centralized InfoChip wording |
 
 **`hero/` - mode-adaptive hero cards** (`HeroRow.tsx` selects per mode, all built on `HeroCardShell.tsx`): `RateFidelityCard`, `DroppedRequestsCard`, `AchievedThroughputCard`, `ThroughputCard`, `ThroughputTwinCard`, `CurrentConcurrencyCard`, `ConcurrencyUtilCard`, `SaturationCard`, `ProgressCard`, `ErrorRateCard`.
@@ -214,7 +216,13 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 
 **Sidebar (`sidebar/`):** `HistoryList.tsx` (filter/sort all runs; state from `useHistoryStore`, data from `useRunsQuery`) and `RunItem.tsx` (one run row - method badge, status, relative time, URL, load-test chips).
 
-**Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunDetail.tsx` (single request execution - reuses the shared response viewer) or `LoadTestDetail.tsx` (load-test report). `LoadTestDetail` is **mode-aware** (header strip + tabs adapt to the run's mode, derived via `reportToDerived` → the same `DashboardDerived` shape the live dashboard uses) and composes the tabbed report under `main/components/`:
+**Detail (`main/`):** `HistoryDetail.tsx` routes by run type to `DesignRunView.tsx` (a single request execution, opened as an editable copy) or `LoadTestDetail.tsx` (load-test report).
+
+`HistoryDetail` fetches the **run** (`useRunQuery`) and asks for the report only when the run is a load run. `GET /runs/:id/report` is a load-test aggregate: against a design run its percentiles all come from one sample and `metadata.configuration` is absent, so it cannot say what a design run's auth, scripts or redirect settings were. `GET /runs/:id` can, and for a design run it also carries the stored exchange. The header shows the run's identity, type and status but **not** its URL - the builder below renders its own URL bar, and two stacked read as a bug.
+
+`DesignRunView.tsx` renders `RequestBuilderProvider` + `RequestBuilderLayout` with starting values from `design-run-seed.ts` (`seedFromRun`), the stored exchange as `initialResponse`, and the run's recorded collection script parts as `inheritedPreScripts` / `inheritedPostScripts`. It **holds the pane until `useRequestQuery` settles**, and tells a genuine deletion from a transport failure before seeding: `seedFromRun` reads a falsy live request as "deleted", so a query in flight, a deletion and an unreachable engine all look alike unless kept apart. The provider re-seeds only on a change of `initialRequest.id` - null for every detached copy - so an early or wrong seed would stick. Loading holds the pane; a genuine deletion (the `RequestNotFoundError` sentinel from `useRequestQuery`, matched via `isRequestNotFound` not a message string) seeds the orphan copy that replays the recorded wire headers; any other settled error is a transport failure and renders `ErrorState` with a retry rather than guessing a copy. The run's recorded auth **mode** (`seed.recordedAuthMode`, all that survives storage) is shown read-only beside the copy, so a user can see when the request's current auth differs from what the run sent. A run recorded before script parts existed passes its one glued string as `legacyPreScript` / `legacyPostScript`; `LegacyScriptNotice` shows it whole with a note that its parts cannot be separated, and the replay sends it as a single request-origin part. **The copy is detached** by two independent gates - `id: null` and no `onSave` - so editing it cannot rewrite the saved request. Sending again replays the recorded collection parts unchanged plus the edited request part, under the same `requestId`. `SaveRunToRequestDialog.tsx` + `save-run-to-request.ts` write chosen values back behind a confirm; they never write auth (only the mode survives storage) and never write scripts for a run stored before script parts existed.
+
+`LoadTestDetail` is **mode-aware** (header strip + tabs adapt to the run's mode, derived via `reportToDerived` → the same `DashboardDerived` shape the live dashboard uses) and composes the tabbed report under `main/components/`:
 
 | Component | Role |
 |---|---|
@@ -222,7 +230,7 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 | `PerformanceTab.tsx` | Latency/throughput detail |
 | `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs |
 | `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
-| `LatencyMetric.tsx`, `MetricCard.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts |
+| `LatencyMetric.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts |
 
 > History detail reuses the live dashboard's `hero/`, `charts/`, and `stats/` components by feeding them a `DashboardDerived` built from the stored report (`reportToDerived`), so live and historical views stay visually consistent.
 
@@ -236,7 +244,11 @@ Past runs (single executions and load tests), split into a sidebar list and a ma
 Same nav/content split as Variables: the category tree renders in the **Drawer** (`settings` view), not inside the settings tab. Selecting a category sets `useSettingsStore.selectedCategory` **and** opens the settings tab, so `SettingsMain` shows that panel. There is no `SettingsLayout` two-pane wrapper anymore - the Drawer is the left pane.
 
 - **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** - settings category navigation; rendered by the Drawer.
-- **Main (`main/`)** - `SettingsMain.tsx` (screen `"settings"`) hosts the app-settings category panels under `main/panels/`: `AppearancePanel.tsx`, `DashboardPanel.tsx`, `GeneralPanel.tsx`, and `EditorPanel.tsx`, plus the shared `ClientSettingsPanel.tsx` wrapper, `FontPicker.tsx`, and `SettingControls.tsx` primitives. `app-panels.ts` is the panel registry/metadata. (The former monolithic `UISettingsPanel.tsx` was split into these panels in PR #55.)
+- **Main (`main/`)** - `SettingsMain.tsx` (screen `"settings"`) hosts the app-settings category panels under `main/panels/`: `AppearancePanel.tsx`, `DashboardPanel.tsx`, `LoadTestingPanel.tsx`, `GeneralPanel.tsx`, and `EditorPanel.tsx`, plus the shared `ClientSettingsPanel.tsx` wrapper, `FontPicker.tsx`, and `SettingControls.tsx` primitives. `app-panels.ts` is the panel registry/metadata. (The former monolithic `UISettingsPanel.tsx` was split into these panels in PR #55.)
+
+Adding an app panel is three edits and no branching: a member on `ClientSettingsCategory` (`types/domain.ts`), one entry in `APP_SETTINGS_PANELS`, and the panel file. The sidebar tree and `SettingsMain` both read the registry.
+
+`LoadTestingPanel.tsx` is the ceilings the load-test dialog offers - the app's own policy, clamped to the engine's crash guards on the way into `client-settings-store`. The engine's bounds themselves are deliberately **not** settings; see `docs/app/api-integration.md` (Dialog ceilings are a user setting).
 
 ## Welcome (`modules/welcome/`)
 
@@ -253,18 +265,73 @@ Doc links go through `window.electronAPI.openAppLink(key)`, a keyed IPC channel 
 
 Design rationale: `app/src/modules/welcome/README.md`
 
+## Toaster (`components/shared/Toaster.tsx`)
+
+Mounted once by `App.tsx`. Renders the queue in `stores/toast-store.ts` through
+the shadcn/Radix primitive in `components/ui/toast.tsx`, which owns the dismiss
+timer, pausing on hover / focus / window blur, swipe-to-dismiss, and the
+`data-state` the exit animation keys off. `F8` moves focus into the stack.
+
+Toasts are the app's **single** channel for reporting the outcome of an action
+the user took, including save failures (see `save-store.failSave`). Four
+variants - `info`, `success`, `warning`, `error` - each carried by an icon and a
+left rail rather than colour alone; tokens and durations in
+`docs/design-system.md` -> Toasts.
+
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 
 Response-rendering primitives reused outside the request builder (e.g. history detail):
 
 - `UnifiedResponseViewer.tsx` - top-level response view for stored runs
 - `ResponseBody.tsx` - body rendering (JSON/text/HTML/XML)
-- `HeadersViewer.tsx` - response headers (plus `CompactHeadersViewer`)
+- `HeadersViewer.tsx` - the headers family, three variants in one file: the collapsible table, `CompactHeadersViewer` (same content on a sunken slab, for panes with no room for a table), and `ResponseHeadersPanel` (the Headers *tab* - request collapsed above response open, with the empty state `HeadersViewer` alone cannot give)
 - `StatusCodeBadge.tsx` - the status chip
 - `ResponseStatusBar.tsx` - status chip + elapsed time + payload size
 - `ResponseActions.tsx` - the copy/download pair
-- `ResponseHeadersPanel.tsx` - the Headers tab body
 - `tab-trigger.ts` - `RESPONSE_TAB_TRIGGER`, the underline-on-active class
+- `phase-tips.ts` - `PHASE_TIPS`, the five per-phase timing tooltips (DNS -> Connect -> TLS -> TTFB -> Download), shared so every renderer of those numbers reads one string
+- `timing-phases.ts` - `TIMING_PHASES`, the same five phases as one descriptor list (label, hue, tooltip, and the trace/average field each reads), plus the `phasesFromTrace` / `phasesFromAverages` selectors
+- `TimingPhaseTiles.tsx` - the dense tile grid (one labelled box per phase), rendered by both sampled-exchange views
+- `SampledExchange.tsx` - the sampled-exchange shell: summary row, expansion, error block and timing tiles
+
+> **One shell, two sample lists.** The dashboard's live sample list and the
+> history detail's stored one show the same thing - a sampled HTTP exchange you
+> can expand - and were two components. #60 gave them the same per-concern
+> primitives, which moved the drift up into the shells rather than removing it:
+> each still owned its summary row, its expansion chrome and its section order,
+> so a spacing or empty-state fix to one did not reach the other. By the time
+> they were merged the rows differed in almost everything that is not data - one
+> chevron and one hand-drawn CSS triangle, two different icon sets, and a
+> slow-request state on only one side.
+>
+> `SampledExchange` is **presentational over already-shaped data**: a status
+> code, a latency, a pre-resolved phase list. Expansion stays the parent's
+> state, as it already was on the history side - the dashboard holds a `Set` of
+> open indices, the history detail a single one. Sections that genuinely differ
+> arrive as slots (`details` before the timing tiles, `children` after), not as
+> boolean flags; the callers keep their own chrome (the history card's
+> outcome-tinted border) and their own timestamp formatting, because a live row
+> placing a sample inside a seconds-old run wants milliseconds where a stored
+> row dating a run wants the day.
+>
+> Guarded by `sampled-exchange-adoption.test.tsx` (the shell is replaced with a
+> sentinel, so a view that hand-rolls a row again fails) and
+> `SampledExchange.test.tsx` (the shell's own behaviour).
+
+> **One list, five renderers.** The five network phases are drawn by the
+> request-builder's `ResponseTimingTab` (timeline + legend), the dashboard's
+> run-level averages card and per-sample tiles, the dashboard's
+> `charts/TimingWaterfall`, and the history `SampleRequestCard`. Each used to
+> declare its own copy of the list, so adding a phase meant finding all five and
+> nothing pointed you at the other four. Two had already drifted: the waterfall
+> painted TTFB with `--primary` - an accent-tracking token the design system
+> forbids for a chart series, and the very bug `ResponseTimingTab`'s header
+> comment describes fixing in its own copy - and carried private tooltip strings
+> that `phase-tips.ts` existed to replace.
+>
+> Add a phase to `TIMING_PHASES` and all five pick it up.
+> `timing-phases.test.tsx` guards that by mocking in a sixth phase and asking
+> each renderer to show it, so a call site that goes back to a local array fails.
 
 > **Two shells, shared parts.** The request builder has its own richer
 > `components/ResponseViewer/` (console output, test results, cookies, timing,
@@ -284,12 +351,40 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 > Adding a genuinely shared piece: put it here and consume it from both. Adding
 > something only one shell needs: leave it in that shell.
 
+## Shared Auth Fields (`components/shared/AuthFields/`)
+
+The one editor for a request's or collection's **concrete** auth, consumed by the
+request builder's `AuthPanel` and the collection `AuthTab`. Both hosts hold the
+domain `RequestAuth` shape, so the component reads `mode` and `in` directly -
+there is no editor-local vocabulary and nothing to translate at the boundary.
+
+- `AuthFields.tsx` - the None / Bearer / Basic / API Key field groups, and
+  oauth2 delegated to [`OAuth2Form`](#shared-oauth-20-form-componentssharedoauth2form). Takes an **injected
+  `TextInput`** (the same contract `OAuth2Form` defines) so the builder supplies
+  a variable-aware token editor while the collection editor takes the default
+  plain input, which accents `{{var}}`. `noAuthDescription` is host-supplied: a
+  request sends nothing, a collection hands nothing down, and those are different
+  statements under one empty state.
+- `types.ts` - `AuthFieldsProps`, `AuthTextInput`, `EditableAuth`.
+
+What stays with each host: the mode picker (only the request offers `inherit`),
+the collection's per-mode inheritance hints, and the "stored but not editable"
+warning for `digest`/`aws`/`ntlm` - modes the engine cannot resolve, which both
+editors surface rather than collapse to "none". `AuthFields` renders nothing for
+them and carries their config through untouched.
+
+Mode names and the editable list live in `constants/auth-modes.ts`
+(`AUTH_MODE_LABELS`, `EDITABLE_AUTH_MODES`), which every auth surface reads -
+including `AuthInheritBanner`. Four places used to name the modes independently
+and had drifted; `auth-modes.test.ts` and `AuthFields/auth-editor-parity.test.tsx`
+hold that line, the latter by rendering both hosts and comparing what they show.
+
 ## Shared OAuth 2.0 Form (`components/shared/OAuth2Form/`)
 
 The reusable OAuth 2.0 auth editor, consumed by the request builder's `AuthPanel` (and structured to be host-agnostic). A barreled module like `response-viewer/` (its `index.ts` exports the public surface):
 
 - `OAuth2Form.tsx` - grant-type select (Client Credentials / Password / Authorization Code + PKCE), per-grant fields, an advanced section (placement, prefix, audience/resource, credentials id), and the token status row. Takes an **injected `TextInput`** so the host supplies a variable-aware input; secret fields render the masked `SecretInput` instead.
-- `TokenStatusRow.tsx` - cached-token status (masked token + expiry countdown, with a reveal toggle) and Get/Refresh/Clear actions. Drives interactive sign-in via `services/oauth/authorize.ts` for the Authorization Code grant. Internal to the module.
+- `TokenStatusRow.tsx` - cached-token status (masked token + expiry countdown, with a reveal toggle) and Get/Refresh/Clear actions. Drives interactive sign-in via `services/oauth/authorize.ts` for the Authorization Code grant. The row always renders: an incomplete config **disables** the token action and names the fields still missing (by their on-screen labels) rather than hiding the affordance. Presence only - the engine owns URL validity, and its 400 surfaces as a toast **relabelled** through `constants/oauth2-fields.ts`, so `accessTokenUrl must be an http(s) URL` reads as *Access Token URL*. The same registry supplies the form's labels for those fields, and the `AUTH_FAILED` toasts in the request builder and `DesignRunView` relabel the identical engine string. Internal to the module.
 - `types.ts` - `OAuth2FormProps`, `OAuth2TextInput`.
 
 Config resolution (`{{variables}}`), the token cache key (`services/oauth/cache-key.ts`, byte-identical to the engine), and the token queries (`queries/oauth.ts`) sit behind it.
@@ -298,7 +393,57 @@ Config resolution (`{{variables}}`), the token cache key (`services/oauth/cache-
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`.
+`badge`, `button`, `card`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - used for client secret / passwords), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+
+### `info-chip`
+
+The 14px "i" dot with a tooltip, beside a label that needs a sentence -
+timing phases, chart axes, the wire/queue/total summary. It lived in
+`modules/dashboard/components/shared.tsx`, where nothing outside the dashboard
+could import it without a module reaching into another module, so the request
+builder grew its own copy - and the copy is the one that got the `border-rule`
+fix, leaving the original outline-less in dark. The border stays a prop
+(default `border-border`, pass `border-rule` on a declared surface) because
+`border-rule` falls back to the invisible default where no surface declares one.
+`dashboard/components/shared.tsx` re-exports it so existing imports resolve.
+
+### Markdown (`markdown-view`, `markdown-editor`)
+
+`MarkdownView` renders a description; `MarkdownEditor` wraps it in the
+click-to-edit field used by the request **Info** tab and by
+`CollectionDetail/InfoTab`. Both fields stored markdown and rendered none of it
+before this existed - the collection one even advertised "Markdown supported"
+beside a plain textarea.
+
+**Two rules are load-bearing, not stylistic:**
+
+1. **`MarkdownView` never emits a navigating anchor.** The main window has no
+   `will-navigate` handler, no `setWindowOpenHandler` and no CSP, and the
+   preload re-runs on the new origin - so a clicked `<a href>` would hand
+   `window.electronAPI` to whatever site it landed on. Descriptions arrive from
+   imported Postman / Insomnia / OpenAPI files, which are third-party documents.
+   Links therefore render as `<button>`, with no `href` in the DOM, and open via
+   the scheme-validated `openExternalUrl` IPC. `remark-gfm` autolinks bare URLs,
+   so that override covers those too. Guarded by `markdown-view.test.tsx`.
+2. **`react-markdown` with the default `urlTransform`.** It builds React
+   elements from an AST, so there is no `dangerouslySetInnerHTML` and no
+   sanitiser to forget. Raw HTML is inert because `rehype-raw` is deliberately
+   not installed. Overriding `urlTransform` disables the built-in URL sanitising
+   (there is a published advisory for exactly that), so it stays on the default.
+
+`MarkdownEditor`'s rule is **focus, not dirtiness**: rendered while unfocused,
+source the moment you click in. The caret goes to the end - mapping a rendered
+offset back to a source offset needs a real WYSIWYG editor. `keepSourceOpen`
+holds the source open for a caller whose save failed, and a source pin (Obsidian's
+"source mode") lets you read your own markdown without editing.
+
+### `suggestion-list`
+
+A plain-text dropdown on the shared `Command` primitive, used by
+`VariableInput` for header-name suggestions. It replaced a hand-rolled copy in
+that file - its own selected-index state, five keyboard branches, a render-phase
+index reset and a 200ms blur timeout - all of which `cmdk` already did, two
+branches away in the same component, for variables.
 
 ## Component Patterns
 

@@ -5,15 +5,13 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useRef, useEffect } from "react";
-import { ChevronRight, ChevronDown, Folder, Loader2 } from "lucide-react";
+import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import type { Collection, Request } from "@/types";
 import { compareCollectionOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
 import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { cn } from "@/lib/utils";
-import { TIMING } from "@/config/timing";
 import { INDENT_STEP } from "@/constants/layout";
 
 export interface CollectionItemProps {
@@ -91,6 +89,8 @@ export default function CollectionItem({
 	onStartRequestRename,
 }: CollectionItemProps) {
 	const isExpanded = expandedCollectionIds.has(collection.id);
+	// Open-folder glyph while expanded, so the folder itself echoes the chevron.
+	const FolderIcon = isExpanded ? FolderOpen : Folder;
 	const isSelected = selectedCollectionId === collection.id;
 	const requests = getRequestsByCollection(collection.id);
 	const isRenaming = renamingId === collection.id;
@@ -99,41 +99,19 @@ export default function CollectionItem({
 		.filter((c) => c.parentId === collection.id)
 		.sort(compareCollectionOrder);
 
-	const expandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const CLICK_DELAY_MS = TIMING.TREE_CLICK_DELAY_MS;
-
-	useEffect(
-		() => () => {
-			if (expandTimeoutRef.current) clearTimeout(expandTimeoutRef.current);
-		},
-		[]
-	);
-
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
-		// Second click of a double-click: ignore (double-click handler will run rename only)
-		if (e.detail === 2) return;
-
-		if (expandTimeoutRef.current) {
-			clearTimeout(expandTimeoutRef.current);
-			expandTimeoutRef.current = null;
-		}
-
-		expandTimeoutRef.current = setTimeout(() => {
-			expandTimeoutRef.current = null;
-			onCollectionClick(collection);
-		}, CLICK_DELAY_MS);
+		// The second click of a double-click also fires `click`; ignore it so the
+		// double-click starts a rename. The first click already opened the
+		// collection (opening is idempotent), so there is nothing to defer - and
+		// none of the 80ms delay that made a single click to open feel laggy.
+		if (e.detail > 1) return;
+		onCollectionClick(collection);
 	};
 
 	const handleDoubleClick = (e: React.MouseEvent) => {
 		e.stopPropagation();
 		if (isDeleting || isRenaming) return;
-
-		if (expandTimeoutRef.current) {
-			clearTimeout(expandTimeoutRef.current);
-			expandTimeoutRef.current = null;
-		}
-
 		onStartRename(collection);
 	};
 
@@ -143,6 +121,15 @@ export default function CollectionItem({
 		if (isDeleting || isRenaming) return;
 		onCollectionToggle(collection);
 	};
+
+	/**
+	 * The row's own box delegates to the label button - see RequestItem for the
+	 * rule and why the check is what it is. This is the row where the indent
+	 * *cannot* move onto that button even in principle: the chevron sits between
+	 * them, so padding on the button would push the label away from the chevron
+	 * rather than indent the row.
+	 */
+	const isRowSurface = (e: React.MouseEvent) => e.target === e.currentTarget;
 
 	/**
 	 * Indentation is padding *inside* the row, never margin around it. A margin
@@ -162,8 +149,13 @@ export default function CollectionItem({
 			<div
 				role="treeitem"
 				tabIndex={-1}
+				// Lets the tree scroll a selected collection into view, the way
+				// `data-request-id` on RequestItem already does for a request.
+				data-collection-id={collection.id}
 				aria-expanded={isExpanded}
 				aria-selected={isSelected}
+				onClick={(e) => isRowSurface(e) && handleClick(e)}
+				onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
 				className={cn(
 					// focus-row: this row is the perceived target, not the narrower
 					// label button inside it - it paints the keyboard focus ring.
@@ -213,10 +205,15 @@ export default function CollectionItem({
 					onDoubleClick={handleDoubleClick}
 					tabIndex={-1}
 					data-tree-activate
-					className="flex min-w-0 items-center gap-2 flex-1 text-left cursor-pointer"
+					// self-stretch: see RequestItem. The row is `items-center`, so
+					// this button - the only thing wired to onCollectionClick - was
+					// as tall as its 18px label inside a 32px row, leaving ~7px of
+					// dead space above and below that still showed the hover fill
+					// and the pointer cursor.
+					className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
 					disabled={isDeleting || isRenaming}
 				>
-					<Folder
+					<FolderIcon
 						className={cn(
 							"w-4 h-4 shrink-0",
 							depth === 0 ? "text-primary" : "text-primary/70"
@@ -274,6 +271,16 @@ export default function CollectionItem({
 						actions={getCollectionActions(collection)}
 					/>
 				)}
+				{/* Keyboard-only rename target: F2 clicks it (see useRovingTreeFocus).
+				    Never shown; the same action lives in the row's menu. */}
+				<button
+					type="button"
+					className="hidden"
+					aria-hidden="true"
+					tabIndex={-1}
+					data-tree-rename
+					onClick={() => onStartRename(collection)}
+				/>
 			</div>
 
 			{/* Children (Subfolders + Requests) - indented by depth */}

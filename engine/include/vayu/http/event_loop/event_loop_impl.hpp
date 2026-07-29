@@ -8,6 +8,7 @@
  */
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <vector>
 
@@ -18,6 +19,22 @@ namespace vayu::http::detail {
 // Forward declarations
 struct TransferData;
 class EventLoopWorker;
+
+/**
+ * @brief Split an aggregate rate-limit budget into one worker's share.
+ *
+ * Each worker owns a private token bucket and submissions are sharded
+ * round-robin, so handing every worker the full `target_rps` made the real
+ * aggregate cap `num_workers x target_rps` - the limiter enforced nothing.
+ *
+ * The one-token burst floor is load-bearing, not cosmetic: `refill_tokens()`
+ * clamps the bucket to `burst_size`, so a share below a single token could
+ * never accumulate one and that worker would never start a transfer (any run
+ * with `target_rps < num_workers`).
+ *
+ * @return @p config with `target_rps`/`burst_size` scaled to one worker.
+ */
+EventLoopConfig per_worker_config (const EventLoopConfig& config, size_t num_workers);
 
 /**
  * @brief EventLoop implementation managing a pool of workers
@@ -32,7 +49,8 @@ class EventLoopImpl {
     ~EventLoopImpl ();
 
     void start ();
-    void stop (bool wait_for_pending);
+    void stop (bool wait_for_pending,
+    std::chrono::milliseconds drain_timeout = std::chrono::milliseconds::zero ());
 
     size_t submit (const Request& request, RequestCallback callback, ProgressCallback progress);
     RequestHandle submit_async (const Request& request);

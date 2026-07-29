@@ -18,8 +18,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -536,6 +538,296 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
     return JS_UNDEFINED;
 }
 
+// Terminal getters: assert on property access (Chai/Postman paren-less idiom).
+// Each honors the tracked `negated` flag, throws on failure, and returns the
+// expectation object so a chain can continue.
+
+JSValue expect_null_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    bool is_null = JS_IsNull (state->actual);
+    bool pass    = state->negated ? !is_null : is_null;
+
+    if (!pass) {
+        const char* msg = state->negated ? "Expected value to not be null" :
+                                           "Expected value to be null";
+        return JS_ThrowTypeError (ctx, "%s", msg);
+    }
+
+    return JS_DupValue (ctx, this_val);
+}
+
+JSValue expect_undefined_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    bool is_undef = JS_IsUndefined (state->actual);
+    bool pass     = state->negated ? !is_undef : is_undef;
+
+    if (!pass) {
+        const char* msg = state->negated ?
+        "Expected value to not be undefined" :
+        "Expected value to be undefined";
+        return JS_ThrowTypeError (ctx, "%s", msg);
+    }
+
+    return JS_DupValue (ctx, this_val);
+}
+
+JSValue expect_ok_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    bool is_ok = JS_ToBool (ctx, state->actual) == 1;
+    bool pass  = state->negated ? !is_ok : is_ok;
+
+    if (!pass) {
+        const char* msg = state->negated ? "Expected value to not be truthy" :
+                                           "Expected value to be truthy";
+        return JS_ThrowTypeError (ctx, "%s", msg);
+    }
+
+    return JS_DupValue (ctx, this_val);
+}
+
+JSValue expect_empty_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    bool is_empty = false;
+    if (JS_IsString (state->actual)) {
+        is_empty = js_to_string (ctx, state->actual).empty ();
+    } else if (QJS_IsArray (ctx, state->actual)) {
+        JSValue length = JS_GetPropertyStr (ctx, state->actual, "length");
+        uint32_t len   = 0;
+        JS_ToUint32 (ctx, &len, length);
+        JS_FreeValue (ctx, length);
+        is_empty = (len == 0);
+    } else if (JS_IsObject (state->actual)) {
+        JSPropertyEnum* tab = nullptr;
+        uint32_t count      = 0;
+        if (JS_GetOwnPropertyNames (ctx, &tab, &count, state->actual,
+            JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
+            is_empty = (count == 0);
+            for (uint32_t i = 0; i < count; i++) {
+                JS_FreeAtom (ctx, tab[i].atom);
+            }
+            js_free (ctx, tab);
+        }
+    }
+
+    bool pass = state->negated ? !is_empty : is_empty;
+
+    if (!pass) {
+        const char* msg = state->negated ? "Expected value to not be empty" :
+                                           "Expected value to be empty";
+        return JS_ThrowTypeError (ctx, "%s", msg);
+    }
+
+    return JS_DupValue (ctx, this_val);
+}
+
+// Callable matchers documented in pm-api-compatibility.md but previously absent.
+
+JSValue expect_least (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "least() requires an argument");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    double actual, expected;
+    if (JS_ToFloat64 (ctx, &actual, state->actual) < 0 ||
+    JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
+        return JS_ThrowTypeError (ctx, "least() requires numeric values");
+    }
+
+    bool at_least = actual >= expected;
+    bool pass     = state->negated ? !at_least : at_least;
+
+    if (!pass) {
+        std::string msg = "Expected " + std::to_string (actual) +
+        (state->negated ? " to not be at least " : " to be at least ") +
+        std::to_string (expected);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue expect_most (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "most() requires an argument");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    double actual, expected;
+    if (JS_ToFloat64 (ctx, &actual, state->actual) < 0 ||
+    JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
+        return JS_ThrowTypeError (ctx, "most() requires numeric values");
+    }
+
+    bool at_most = actual <= expected;
+    bool pass    = state->negated ? !at_most : at_most;
+
+    if (!pass) {
+        std::string msg = "Expected " + std::to_string (actual) +
+        (state->negated ? " to not be at most " : " to be at most ") +
+        std::to_string (expected);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "length() requires an argument");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    JSValue length_val = JS_GetPropertyStr (ctx, state->actual, "length");
+    if (JS_IsUndefined (length_val)) {
+        JS_FreeValue (ctx, length_val);
+        return JS_ThrowTypeError (ctx, "length() requires a value with a length");
+    }
+
+    double actual_len, expected;
+    JS_ToFloat64 (ctx, &actual_len, length_val);
+    JS_FreeValue (ctx, length_val);
+    if (JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
+        return JS_ThrowTypeError (ctx, "length() requires a numeric argument");
+    }
+
+    bool matches = (actual_len == expected);
+    bool pass    = state->negated ? !matches : matches;
+
+    if (!pass) {
+        std::string msg = "Expected length " + std::to_string (actual_len) +
+        (state->negated ? " to not equal " : " to equal ") + std::to_string (expected);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue expect_a (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "a() requires a type name");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    std::string type_name;
+    if (JS_IsNull (state->actual)) {
+        type_name = "null";
+    } else if (JS_IsUndefined (state->actual)) {
+        type_name = "undefined";
+    } else if (QJS_IsArray (ctx, state->actual)) {
+        type_name = "array";
+    } else if (JS_IsString (state->actual)) {
+        type_name = "string";
+    } else if (JS_IsNumber (state->actual)) {
+        type_name = "number";
+    } else if (JS_IsBool (state->actual)) {
+        type_name = "boolean";
+    } else if (JS_IsFunction (ctx, state->actual)) {
+        type_name = "function";
+    } else if (JS_IsObject (state->actual)) {
+        type_name = "object";
+    } else {
+        type_name = "undefined";
+    }
+
+    std::string expected = js_to_string (ctx, argv[0]);
+    for (auto& c : expected) {
+        c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+    }
+
+    bool matches = (type_name == expected);
+    bool pass    = state->negated ? !matches : matches;
+
+    if (!pass) {
+        std::string msg = "Expected type " + type_name +
+        (state->negated ? " to not be " : " to be ") + expected;
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue expect_match (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "match() requires a regular expression");
+    }
+
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    JSValue test_fn = JS_GetPropertyStr (ctx, argv[0], "test");
+    if (!JS_IsFunction (ctx, test_fn)) {
+        JS_FreeValue (ctx, test_fn);
+        return JS_ThrowTypeError (ctx, "match() requires a regular expression");
+    }
+
+    std::string subject = js_to_string (ctx, state->actual);
+    JSValue arg         = JS_NewString (ctx, subject.c_str ());
+    JSValue result      = JS_Call (ctx, test_fn, argv[0], 1, &arg);
+    JS_FreeValue (ctx, arg);
+    JS_FreeValue (ctx, test_fn);
+
+    if (JS_IsException (result)) {
+        JS_FreeValue (ctx, result);
+        return JS_EXCEPTION;
+    }
+
+    bool matched = JS_ToBool (ctx, result) == 1;
+    JS_FreeValue (ctx, result);
+    bool pass = state->negated ? !matched : matched;
+
+    if (!pass) {
+        std::string msg = state->negated ?
+        "Expected '" + subject + "' to not match the pattern" :
+        "Expected '" + subject + "' to match the pattern";
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
 JSValue create_expectation (JSContext* ctx, JSValue actual) {
     JSValue obj = JS_NewObjectClass (ctx, static_cast<int> (expect_class_id));
     if (JS_IsException (obj)) {
@@ -569,16 +861,48 @@ JSValue create_expectation (JSContext* ctx, JSValue actual) {
     JS_NewCFunction (ctx, expect_to_getter, "have", 0), JS_UNDEFINED, 0);
     JS_FreeAtom (ctx, have_atom);
 
-    // Add assertion methods
+    // Add "at" getter for chaining (for `.at.least(n)` / `.at.most(n)`)
+    JSAtom at_atom = JS_NewAtom (ctx, "at");
+    JS_DefinePropertyGetSet (ctx, obj, at_atom,
+    JS_NewCFunction (ctx, expect_to_getter, "at", 0), JS_UNDEFINED, 0);
+    JS_FreeAtom (ctx, at_atom);
+
+    // Terminal matchers assert on access (Chai/Postman paren-less idiom), so
+    // register them as getters rather than function-valued properties - a bare
+    // `.to.be.true` must run the check, not silently return an uncalled function.
+    struct TerminalGetter {
+        const char* name;
+        JSCFunction* fn;
+    };
+    const TerminalGetter terminals[] = { { "exist", expect_exist },
+        { "true", expect_true }, { "false", expect_false },
+        { "null", expect_null_getter }, { "undefined", expect_undefined_getter },
+        { "ok", expect_ok_getter }, { "empty", expect_empty_getter } };
+    for (const auto& t : terminals) {
+        JSAtom atom = JS_NewAtom (ctx, t.name);
+        JS_DefinePropertyGetSet (
+        ctx, obj, atom, JS_NewCFunction (ctx, t.fn, t.name, 0), JS_UNDEFINED, 0);
+        JS_FreeAtom (ctx, atom);
+    }
+
+    // Add callable assertion methods
     JS_SetPropertyStr (ctx, obj, "equal", JS_NewCFunction (ctx, expect_equal, "equal", 1));
     JS_SetPropertyStr (ctx, obj, "eql", JS_NewCFunction (ctx, expect_equal, "eql", 1));
-    JS_SetPropertyStr (ctx, obj, "exist", JS_NewCFunction (ctx, expect_exist, "exist", 0));
-    JS_SetPropertyStr (ctx, obj, "true", JS_NewCFunction (ctx, expect_true, "true", 0));
-    JS_SetPropertyStr (ctx, obj, "false", JS_NewCFunction (ctx, expect_false, "false", 0));
     JS_SetPropertyStr (ctx, obj, "above", JS_NewCFunction (ctx, expect_above, "above", 1));
     JS_SetPropertyStr (ctx, obj, "below", JS_NewCFunction (ctx, expect_below, "below", 1));
+    JS_SetPropertyStr (ctx, obj, "least", JS_NewCFunction (ctx, expect_least, "least", 1));
+    JS_SetPropertyStr (ctx, obj, "most", JS_NewCFunction (ctx, expect_most, "most", 1));
     JS_SetPropertyStr (
     ctx, obj, "include", JS_NewCFunction (ctx, expect_include, "include", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "contain", JS_NewCFunction (ctx, expect_include, "contain", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "length", JS_NewCFunction (ctx, expect_length, "length", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "lengthOf", JS_NewCFunction (ctx, expect_length, "lengthOf", 1));
+    JS_SetPropertyStr (ctx, obj, "a", JS_NewCFunction (ctx, expect_a, "a", 1));
+    JS_SetPropertyStr (ctx, obj, "an", JS_NewCFunction (ctx, expect_a, "an", 1));
+    JS_SetPropertyStr (ctx, obj, "match", JS_NewCFunction (ctx, expect_match, "match", 1));
     JS_SetPropertyStr (ctx, obj, "property",
     JS_NewCFunction (ctx, expect_have_property, "property", 2));
 
@@ -745,23 +1069,27 @@ JSValue js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, 
 }
 
 JSValue js_response_have_jsonBody (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    if (argc < 1) {
-        return JS_ThrowTypeError (ctx, "jsonBody() requires a property path");
-    }
-
     auto* data = get_context_data (ctx);
     if (!data->response) {
         return JS_ThrowInternalError (ctx, "No response available");
     }
 
-    std::string prop_path = js_to_string (ctx, argv[0]);
-
     // Parse body as JSON
     JSValue json = JS_ParseJSON (ctx, data->response->body.c_str (),
     data->response->body.size (), "<response>");
     if (JS_IsException (json)) {
+        // Swallow the parse exception so we report a clean assertion failure.
+        JS_FreeValue (ctx, JS_GetException (ctx));
         return JS_ThrowTypeError (ctx, "Response body is not valid JSON");
     }
+
+    // No-arg form asserts only that the body is valid JSON (Postman semantics).
+    if (argc < 1) {
+        JS_FreeValue (ctx, json);
+        return JS_UNDEFINED;
+    }
+
+    std::string prop_path = js_to_string (ctx, argv[0]);
 
     // Navigate to the property
     JSValue current              = JS_DupValue (ctx, json);
@@ -797,9 +1125,190 @@ JSValue js_response_have_jsonBody (JSContext* ctx, JSValueConst this_val, int ar
     return JS_UNDEFINED;
 }
 
+// ============================================================================
+// pm.response.to.be Status-Class Assertions
+// ============================================================================
+
+// Each matcher asserts the status code falls in [lo, hi]. Single-code matchers
+// set lo == hi. `expectation` completes "Expected response to have ...".
+struct StatusClassMatcher {
+    const char* name;
+    int lo;
+    int hi;
+    const char* expectation;
+};
+
+// Status ranges only. The body-shape assertions (`json`, `withBody`) are not
+// ranges, so they get their own getters below.
+constexpr StatusClassMatcher status_class_matchers[] = {
+    { "info", 100, 199, "a 1xx status code" },
+    { "ok", 200, 299, "a 2xx status code" },
+    { "success", 200, 299, "a 2xx status code" },
+    { "accepted", 202, 202, "status 202" },
+    { "redirection", 300, 399, "a 3xx status code" },
+    { "clientError", 400, 499, "a 4xx status code" },
+    { "badRequest", 400, 400, "status 400" },
+    { "unauthorized", 401, 401, "status 401" },
+    { "forbidden", 403, 403, "status 403" },
+    { "notFound", 404, 404, "status 404" },
+    { "rateLimited", 429, 429, "status 429" },
+    { "serverError", 500, 599, "a 5xx status code" },
+    { "error", 400, 599, "a 4xx or 5xx status code" },
+};
+
+// `magic` indexes status_class_matchers. Registered as a getter, never a plain
+// property: `pm.response.to.be.ok` is written without parentheses, so a
+// function-valued property would be a discarded reference that asserts nothing
+// (the defect ExpectTrueFalseAssertsOnAccess pins for pm.expect).
+JSValue js_response_be_status_class (
+JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto* data = get_context_data (ctx);
+    if (!data || !data->response) {
+        return JS_ThrowInternalError (ctx, "No response available");
+    }
+
+    const StatusClassMatcher& matcher = status_class_matchers[magic];
+    const int code                    = data->response->status_code;
+    if (code < matcher.lo || code > matcher.hi) {
+        std::string msg = std::string ("Expected response to have ") +
+        matcher.expectation + " but got " + std::to_string (code);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue js_response_be_json (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto* data = get_context_data (ctx);
+    if (!data || !data->response) {
+        return JS_ThrowInternalError (ctx, "No response available");
+    }
+
+    JSValue json = JS_ParseJSON (ctx, data->response->body.c_str (),
+    data->response->body.size (), "<response>");
+    if (JS_IsException (json)) {
+        return JS_ThrowTypeError (ctx, "Expected response body to be valid JSON");
+    }
+    JS_FreeValue (ctx, json);
+
+    return JS_UNDEFINED;
+}
+
+JSValue js_response_be_with_body (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto* data = get_context_data (ctx);
+    if (!data || !data->response) {
+        return JS_ThrowInternalError (ctx, "No response available");
+    }
+
+    if (data->response->body.empty ()) {
+        return JS_ThrowTypeError (ctx, "Expected response to have a body");
+    }
+
+    return JS_UNDEFINED;
+}
+
+// ============================================================================
+// pm.response.to chain objects
+// ============================================================================
+
+// Every link in the chain carries this class. Its exotic hook turns an
+// unrecognised member into a throw: `pm.response.to.be.ok` is an expression
+// statement, so a member that does not exist evaluates to undefined and
+// asserts nothing - a green test against a broken API, which is strictly worse
+// than a missing matcher that fails loudly. Own properties are resolved before
+// the hook runs, so it only ever sees names nothing implements.
+JSClassID response_chain_class_id = 0;
+
+// Names the engine itself probes on an arbitrary value. Answering "no own
+// property" for them keeps JSON.stringify and promise resolution working;
+// reporting them as misspelled assertions would make console.log(pm.response)
+// throw. They are not on Object.prototype, so the prototype check below does
+// not cover them.
+constexpr const char* response_chain_passthrough[] = { "toJSON", "then" };
+
+int response_chain_unknown_member (
+JSContext* ctx, JSPropertyDescriptor* desc, JSValueConst obj, JSAtom prop) {
+    (void)desc;
+
+    // The opaque path doubles as the armed flag. Defining a property looks up
+    // the existing own property first, so a hook that threw from the moment the
+    // object existed would reject the chain's own members as they are installed
+    // - arm_response_chain_object runs last, once every member is in place.
+    const auto* path =
+    static_cast<const char*> (JS_GetOpaque (obj, response_chain_class_id));
+    if (!path) {
+        return 0;
+    }
+
+    // Symbol keys (Symbol.toPrimitive, Symbol.toStringTag) are plumbing too.
+    JSValue key              = JS_AtomToValue (ctx, prop);
+    const bool is_string_key = JS_IsString (key);
+    JS_FreeValue (ctx, key);
+    if (!is_string_key) {
+        return 0;
+    }
+
+    const char* name_cstr = JS_AtomToCString (ctx, prop);
+    const std::string name (name_cstr ? name_cstr : "<unknown>");
+    JS_FreeCString (ctx, name_cstr);
+
+    for (const char* passthrough : response_chain_passthrough) {
+        if (name == passthrough) {
+            return 0;
+        }
+    }
+
+    // Anything the prototype answers (toString, hasOwnProperty) is not an
+    // assertion either; let the normal lookup continue to it.
+    JSValue proto      = JS_GetPrototype (ctx, obj);
+    const int on_proto = JS_IsObject (proto) ? JS_HasProperty (ctx, proto, prop) : 0;
+    JS_FreeValue (ctx, proto);
+    if (on_proto != 0) {
+        return on_proto < 0 ? -1 : 0;
+    }
+
+    const std::string msg = std::string (path) + "." + name + " is not a supported assertion";
+    JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    return -1;
+}
+
+JSClassExoticMethods response_chain_exotic = {
+    .get_own_property = response_chain_unknown_member,
+};
+
+JSClassDef response_chain_class = { .class_name = "ResponseAssertionChain",
+    .finalizer                                  = nullptr,
+    .gc_mark                                    = nullptr,
+    .call                                       = nullptr,
+    .exotic                                     = &response_chain_exotic };
+
+JSValue create_response_chain_object (JSContext* ctx) {
+    return JS_NewObjectClass (ctx, static_cast<int> (response_chain_class_id));
+}
+
+// Arms the unknown-member hook. Call once the object holds every member it is
+// meant to have; `path` names the chain in the error and must outlive the
+// object, so every caller passes a string literal and the class needs no
+// finalizer.
+void arm_response_chain_object (JSValue obj, const char* path) {
+    (void)JS_SetOpaque (obj, const_cast<char*> (path));
+}
+
 // Create the pm.response.to.have chain object
 JSValue create_response_have_object (JSContext* ctx) {
-    JSValue have = JS_NewObject (ctx);
+    JSValue have = create_response_chain_object (ctx);
+    if (JS_IsException (have)) {
+        return have;
+    }
     JS_SetPropertyStr (ctx, have, "status",
     JS_NewCFunction (ctx, js_response_have_status, "status", 1));
     JS_SetPropertyStr (ctx, have, "header",
@@ -808,14 +1317,51 @@ JSValue create_response_have_object (JSContext* ctx) {
     ctx, have, "body", JS_NewCFunction (ctx, js_response_have_body, "body", 1));
     JS_SetPropertyStr (ctx, have, "jsonBody",
     JS_NewCFunction (ctx, js_response_have_jsonBody, "jsonBody", 1));
+    arm_response_chain_object (have, "pm.response.to.have");
     return have;
+}
+
+// Create the pm.response.to.be chain object
+JSValue create_response_be_object (JSContext* ctx) {
+    JSValue be = create_response_chain_object (ctx);
+    if (JS_IsException (be)) {
+        return be;
+    }
+
+    int magic = 0;
+    for (const auto& matcher : status_class_matchers) {
+        JSAtom atom = JS_NewAtom (ctx, matcher.name);
+        JS_DefinePropertyGetSet (ctx, be, atom,
+        JS_NewCFunctionMagic (ctx, js_response_be_status_class, matcher.name, 0,
+        JS_CFUNC_generic_magic, magic),
+        JS_UNDEFINED, 0);
+        JS_FreeAtom (ctx, atom);
+        magic++;
+    }
+
+    JSAtom json_atom = JS_NewAtom (ctx, "json");
+    JS_DefinePropertyGetSet (ctx, be, json_atom,
+    JS_NewCFunction (ctx, js_response_be_json, "json", 0), JS_UNDEFINED, 0);
+    JS_FreeAtom (ctx, json_atom);
+
+    JSAtom with_body_atom = JS_NewAtom (ctx, "withBody");
+    JS_DefinePropertyGetSet (ctx, be, with_body_atom,
+    JS_NewCFunction (ctx, js_response_be_with_body, "withBody", 0), JS_UNDEFINED, 0);
+    JS_FreeAtom (ctx, with_body_atom);
+
+    arm_response_chain_object (be, "pm.response.to.be");
+    return be;
 }
 
 // Create the pm.response.to chain object
 JSValue create_response_to_object (JSContext* ctx) {
-    JSValue to = JS_NewObject (ctx);
+    JSValue to = create_response_chain_object (ctx);
+    if (JS_IsException (to)) {
+        return to;
+    }
     JS_SetPropertyStr (ctx, to, "have", create_response_have_object (ctx));
-    JS_SetPropertyStr (ctx, to, "be", JS_NewObject (ctx)); // placeholder for future assertions
+    JS_SetPropertyStr (ctx, to, "be", create_response_be_object (ctx));
+    arm_response_chain_object (to, "pm.response.to");
     return to;
 }
 
@@ -918,6 +1464,205 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
     JS_SetPropertyStr (ctx, pm, "request", request);
 }
 
+// ============================================================================
+// pm.request write-back (pre-request scripts)
+// ============================================================================
+
+// Frees a borrowed JSValue on every exit. The write-back below reads a dozen
+// properties and refuses on most of them, and QuickJS ships no such helper.
+class ScopedValue {
+    public:
+    ScopedValue (JSContext* ctx, JSValue value) : ctx_ (ctx), value_ (value) {
+    }
+    ~ScopedValue () {
+        JS_FreeValue (ctx_, value_);
+    }
+    ScopedValue (const ScopedValue&)            = delete;
+    ScopedValue& operator= (const ScopedValue&) = delete;
+    [[nodiscard]] JSValue get () const {
+        return value_;
+    }
+
+    private:
+    JSContext* ctx_;
+    JSValue value_;
+};
+
+// Name a rejected value the way the script author wrote it, so the error says
+// "got number" rather than showing them a coerced "[object Object]".
+const char* js_type_name (JSContext* ctx, JSValueConst value) {
+    if (JS_IsUndefined (value))
+        return "undefined";
+    if (JS_IsNull (value))
+        return "null";
+    if (JS_IsBool (value))
+        return "boolean";
+    if (JS_IsNumber (value))
+        return "number";
+    if (JS_IsString (value))
+        return "string";
+    if (JS_IsFunction (ctx, value))
+        return "function";
+    if (QJS_IsArray (ctx, value))
+        return "array";
+    if (JS_IsObject (value))
+        return "object";
+    return "value";
+}
+
+// Read the header object the script left behind into `out`.
+// @return why the headers were rejected, or nullopt when `out` is filled.
+std::optional<std::string>
+read_pm_request_headers (JSContext* ctx, JSValueConst js_headers, Headers& out) {
+    if (!JS_IsObject (js_headers) || QJS_IsArray (ctx, js_headers) ||
+    JS_IsFunction (ctx, js_headers)) {
+        return "pm.request.headers must be an object, got " +
+        std::string (js_type_name (ctx, js_headers));
+    }
+
+    JSPropertyEnum* props = nullptr;
+    uint32_t count        = 0;
+    if (JS_GetOwnPropertyNames (ctx, &props, &count, js_headers,
+        JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0) {
+        return std::string ("pm.request.headers could not be enumerated");
+    }
+
+    std::optional<std::string> error;
+    for (uint32_t i = 0; i < count && !error; i++) {
+        const char* raw_key = JS_AtomToCString (ctx, props[i].atom);
+        std::string key     = raw_key ? raw_key : "";
+        if (raw_key) {
+            JS_FreeCString (ctx, raw_key);
+        }
+
+        ScopedValue value (ctx, JS_GetProperty (ctx, js_headers, props[i].atom));
+        // A header field-name cannot be empty, and a value that is not a
+        // primitive has no honest wire form. Both are refused by name rather
+        // than dropped, because a silently missing header is the very defect
+        // this write-back exists to fix.
+        if (key.empty ()) {
+            error = "pm.request.headers has an empty header name";
+        } else if (JS_IsString (value.get ()) || JS_IsNumber (value.get ()) ||
+        JS_IsBool (value.get ())) {
+            // JS object keys are case-sensitive; HTTP header names are not. So
+            // `Authorization` and `authorization` are two properties over there
+            // and one header over here, and whichever enumerated last would
+            // silently win. Which one the script meant is unknowable, and one
+            // of them is an Authorization header - refuse instead of guessing.
+            if (auto clash = out.find (key); clash != out.end () && clash->first != key) {
+                error = "pm.request.headers has both '" + clash->first + "' and '" + key +
+                "' - HTTP header names are case-insensitive, so these are one "
+                "header. "
+                "Keep one.";
+            } else {
+                out[key] = js_to_string (ctx, value.get ());
+            }
+        } else {
+            error = "pm.request.headers['" + key + "'] must be a string, got " +
+            std::string (js_type_name (ctx, value.get ())) +
+            " (use delete pm.request.headers['" + key + "'] to remove it)";
+        }
+    }
+
+    for (uint32_t i = 0; i < count; i++) {
+        JS_FreeAtom (ctx, props[i].atom);
+    }
+    js_free (ctx, props);
+
+    return error;
+}
+
+/**
+ * @brief Apply the script's `pm.request` back onto the request that will be sent.
+ *
+ * The JS object is authoritative, not a diff: the header set it holds when the
+ * script returns is the header set that goes on the wire, so
+ * `delete pm.request.headers['Authorization']` removes an engine-applied
+ * header, and dropping `pm.request.body` drops the body. That is the only rule
+ * that stays true for a script which replaces `pm.request` wholesale.
+ *
+ * Precedence over engine-applied auth falls out of the ordering rather than
+ * being a special case: `build_request` resolves auth into the request before
+ * the script runs, so the script sees the real outgoing set and its writes are
+ * simply later.
+ *
+ * All-or-nothing. Every field is staged and validated before anything is
+ * committed, so a script that sets a good header and a bad method sends
+ * neither instead of half of what it asked for.
+ *
+ * @return why the write-back was rejected, or nullopt when it was applied.
+ */
+std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& request) {
+    ScopedValue global (ctx, JS_GetGlobalObject (ctx));
+    ScopedValue pm (ctx, JS_GetPropertyStr (ctx, global.get (), "pm"));
+    if (!JS_IsObject (pm.get ())) {
+        // No `pm` at all - nothing was ever exposed for the script to write to.
+        return std::nullopt;
+    }
+
+    ScopedValue js_request (ctx, JS_GetPropertyStr (ctx, pm.get (), "request"));
+    if (!JS_IsObject (js_request.get ()) || JS_IsFunction (ctx, js_request.get ())) {
+        return "pm.request must be an object, got " +
+        std::string (js_type_name (ctx, js_request.get ()));
+    }
+
+    Request staged = request;
+
+    ScopedValue js_url (ctx, JS_GetPropertyStr (ctx, js_request.get (), "url"));
+    if (!JS_IsString (js_url.get ())) {
+        return "pm.request.url must be a string, got " +
+        std::string (js_type_name (ctx, js_url.get ()));
+    }
+    staged.url = js_to_string (ctx, js_url.get ());
+    if (staged.url.empty ()) {
+        return std::string ("pm.request.url must not be empty");
+    }
+
+    ScopedValue js_method (ctx, JS_GetPropertyStr (ctx, js_request.get (), "method"));
+    if (!JS_IsString (js_method.get ())) {
+        return "pm.request.method must be a string, got " +
+        std::string (js_type_name (ctx, js_method.get ()));
+    }
+    std::string method_text = js_to_string (ctx, js_method.get ());
+    // `pm.request.method = 'post'` means POST. Upper-casing is a normalisation
+    // of a value the script clearly meant, not the silent acceptance of a
+    // wrong one - an unrecognised verb below still fails loudly.
+    std::transform (method_text.begin (), method_text.end (), method_text.begin (),
+    [] (unsigned char c) { return static_cast<char> (std::toupper (c)); });
+    if (auto parsed = parse_method (method_text)) {
+        staged.method = *parsed;
+    } else {
+        return "pm.request.method must be one of GET, POST, PUT, DELETE, "
+               "PATCH, HEAD, OPTIONS (got \"" +
+        js_to_string (ctx, js_method.get ()) + "\")";
+    }
+
+    ScopedValue js_headers (ctx, JS_GetPropertyStr (ctx, js_request.get (), "headers"));
+    staged.headers.clear ();
+    if (auto reason = read_pm_request_headers (ctx, js_headers.get (), staged.headers)) {
+        return reason;
+    }
+
+    ScopedValue js_body (ctx, JS_GetPropertyStr (ctx, js_request.get (), "body"));
+    if (JS_IsUndefined (js_body.get ()) || JS_IsNull (js_body.get ())) {
+        staged.body = Body{};
+    } else if (JS_IsString (js_body.get ())) {
+        staged.body.content = js_to_string (ctx, js_body.get ());
+        if (staged.body.mode == BodyMode::None) {
+            // A body on a request that had none: Text is the mode that means
+            // "this string, as written". Nothing downstream derives
+            // Content-Type from the mode, so the script still owns that header.
+            staged.body.mode = BodyMode::Text;
+        }
+    } else {
+        return "pm.request.body must be a string, got " +
+        std::string (js_type_name (ctx, js_body.get ()));
+    }
+
+    request = std::move (staged);
+    return std::nullopt;
+}
+
 JSValue js_pm_environment_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 1) {
         return JS_UNDEFINED;
@@ -937,6 +1682,30 @@ JSValue js_pm_environment_get (JSContext* ctx, JSValueConst this_val, int argc, 
     return JS_UNDEFINED;
 }
 
+// Update a variable's value while preserving an existing key's secret, enabled
+// and type fields; a brand-new key gets the current defaults. Shared by the
+// environment/globals/collectionVariables pm.*.set() bindings so a script that
+// re-sets an existing (e.g. secret) variable does not silently strip its flag
+// or reset its type.
+//
+// A brand-new key is also stamped with its creation time, the app's ordering
+// key for the variables editor (issue #135). This is the one place the engine
+// may invent a `created_at`, because it is the only place the engine creates a
+// variable - stamping an existing one would sort it below rows the user added
+// after it.
+void set_variable_preserving (Environment& map, const std::string& key, std::string value) {
+    auto it = map.find (key);
+    if (it != map.end ()) {
+        it->second.value = std::move (value); // preserve secret, enabled, type, created_at
+    } else {
+        Variable created{ std::move (value), false, true }; // new var: current defaults
+        created.created_at = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                             .count ();
+        map[key] = std::move (created);
+    }
+}
+
 JSValue js_pm_environment_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 2) {
         return JS_UNDEFINED;
@@ -950,7 +1719,7 @@ JSValue js_pm_environment_set (JSContext* ctx, JSValueConst this_val, int argc, 
     std::string key   = js_to_string (ctx, argv[0]);
     std::string value = js_to_string (ctx, argv[1]);
 
-    (*data->environment)[key] = Variable{ value, false, true };
+    set_variable_preserving (*data->environment, key, std::move (value));
 
     return JS_UNDEFINED;
 }
@@ -998,7 +1767,7 @@ JSValue js_pm_globals_set (JSContext* ctx, JSValueConst this_val, int argc, JSVa
     std::string key   = js_to_string (ctx, argv[0]);
     std::string value = js_to_string (ctx, argv[1]);
 
-    (*data->globals)[key] = Variable{ value, false, true };
+    set_variable_preserving (*data->globals, key, std::move (value));
 
     return JS_UNDEFINED;
 }
@@ -1046,7 +1815,7 @@ JSValue js_pm_collectionVariables_set (JSContext* ctx, JSValueConst this_val, in
     std::string key   = js_to_string (ctx, argv[0]);
     std::string value = js_to_string (ctx, argv[1]);
 
-    (*data->collectionVariables)[key] = Variable{ value, false, true };
+    set_variable_preserving (*data->collectionVariables, key, std::move (value));
 
     return JS_UNDEFINED;
 }
@@ -1065,6 +1834,15 @@ void setup_pm_collectionVariables (JSContext* ctx, JSValue pm) {
 void setup_pm_object (JSContext* ctx) {
     JSValue global = JS_GetGlobalObject (ctx);
     JSValue pm     = JS_NewObject (ctx);
+
+    // A class registered with JS_NewClass has no prototype until one is set, so
+    // without this the pm.response.to.* objects would answer nothing but their
+    // own members - toString, hasOwnProperty and friends would reach the
+    // unknown-member hook and throw.
+    JSValue plain        = JS_NewObject (ctx);
+    JSValue object_proto = JS_GetPrototype (ctx, plain);
+    JS_FreeValue (ctx, plain);
+    JS_SetClassProto (ctx, response_chain_class_id, object_proto);
 
     // pm.test()
     JS_SetPropertyStr (ctx, pm, "test", JS_NewCFunction (ctx, js_pm_test, "test", 2));
@@ -1097,6 +1875,25 @@ void setup_pm_object (JSContext* ctx) {
 // ScriptEngine Implementation
 // ============================================================================
 
+// Per-runtime deadline state for the interrupt handler. One instance is owned by
+// each pooled JSRuntime (stored as its runtime opaque) and refreshed before every
+// execution. QuickJS runtimes are single-threaded, and each pooled context pair is
+// used by one thread at a time, so no synchronization is needed here.
+struct RuntimeState {
+    bool enabled = false; // false => no wall-clock limit (timeout_ms == 0)
+    std::chrono::steady_clock::time_point deadline{};
+};
+
+// QuickJS calls this periodically during evaluation. Returning non-zero aborts
+// the current JS_Eval with an InternalError, which the execute() exception path
+// turns into result.error_message.
+extern "C" int script_interrupt_handler (JSRuntime* /*rt*/, void* opaque) {
+    auto* state = static_cast<RuntimeState*> (opaque);
+    if (!state || !state->enabled)
+        return 0;
+    return std::chrono::steady_clock::now () > state->deadline ? 1 : 0;
+}
+
 class ScriptEngine::Impl {
     public:
     ScriptConfig config;
@@ -1112,8 +1909,10 @@ class ScriptEngine::Impl {
     ~Impl () {
         std::lock_guard<std::mutex> lock (pool_mutex);
         for (auto& pair : context_pool) {
+            auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (pair.first));
             JS_FreeContext (pair.second);
             JS_FreeRuntime (pair.first);
+            delete rt_state;
         }
         context_pool.clear ();
     }
@@ -1134,11 +1933,25 @@ class ScriptEngine::Impl {
         JS_SetMemoryLimit (rt, config.memory_limit);
         JS_SetMaxStackSize (rt, config.stack_size);
 
+        // Install a wall-clock deadline interrupt so infinite-loop scripts
+        // cannot hang the thread. The RuntimeState is owned by this runtime
+        // (freed in ~Impl) and refreshed before each execute().
+        auto* rt_state = new RuntimeState ();
+        JS_SetRuntimeOpaque (rt, rt_state);
+        JS_SetInterruptHandler (rt, &script_interrupt_handler, rt_state);
+
         // Register Expectation class
         if (expect_class_id == 0) {
             QJS_NewClassID (rt, &expect_class_id);
         }
         JS_NewClass (rt, expect_class_id, &expect_class);
+
+        // Register the pm.response.to.* chain class, whose exotic hook makes an
+        // unknown assertion throw instead of silently evaluating to undefined.
+        if (response_chain_class_id == 0) {
+            QJS_NewClassID (rt, &response_chain_class_id);
+        }
+        JS_NewClass (rt, response_chain_class_id, &response_chain_class);
 
         JSContext* ctx = JS_NewContext (rt);
         if (ctx) {
@@ -1180,6 +1993,16 @@ class ScriptEngine::Impl {
             return result;
         }
 
+        // Refresh the per-execution deadline. A pooled context reused for the next
+        // script gets a fresh budget; timeout_ms == 0 disables the wall-clock limit.
+        if (auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt))) {
+            rt_state->enabled = config.timeout_ms != 0;
+            if (rt_state->enabled) {
+                rt_state->deadline = std::chrono::steady_clock::now () +
+                std::chrono::milliseconds (config.timeout_ms);
+            }
+        }
+
         // Set up context data
         ContextData ctx_data;
         ctx_data.request             = ctx.request;
@@ -1207,15 +2030,37 @@ class ScriptEngine::Impl {
         wrapped_script.size (), "<script>", JS_EVAL_TYPE_GLOBAL);
 
         if (JS_IsException (eval_result)) {
-            JSValue exc          = JS_GetException (js_ctx);
-            result.success       = false;
-            result.error_message = js_to_string (js_ctx, exc);
+            JSValue exc    = JS_GetException (js_ctx);
+            result.success = false;
+            // If the deadline interrupt fired, report a clear timeout message
+            // rather than QuickJS's raw "interrupted" InternalError.
+            auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt));
+            if (rt_state && rt_state->enabled &&
+            std::chrono::steady_clock::now () > rt_state->deadline) {
+                result.error_message = "Script execution timed out after " +
+                std::to_string (config.timeout_ms) + "ms";
+            } else {
+                result.error_message = js_to_string (js_ctx, exc);
+            }
             JS_FreeValue (js_ctx, exc);
         } else {
             result.success = true;
         }
 
         JS_FreeValue (js_ctx, eval_result);
+
+        // Apply the script's pm.request edits to the request that is about to
+        // be sent. Deliberately runs even when the script threw: the edits it
+        // made before throwing already happened, the request is sent either
+        // way, and discarding them silently is the defect this replaced.
+        if (ctx.mutable_request) {
+            if (auto reason = apply_pm_request_writeback (js_ctx, *ctx.mutable_request)) {
+                result.success       = false;
+                result.error_message = result.error_message.empty () ?
+                *reason :
+                result.error_message + " (and pm.request was not applied: " + *reason + ")";
+            }
+        }
 
         // Copy results
         result.tests          = std::move (ctx_data.tests);
@@ -1252,7 +2097,7 @@ ScriptResult ScriptEngine::execute_prerequest (const std::string& script,
 Request& request,
 Environment& env) {
     ScriptContext ctx;
-    ctx.request     = &request;
+    ctx.make_request_mutable (request);
     ctx.environment = &env;
     return execute (script, ctx);
 }

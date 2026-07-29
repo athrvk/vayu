@@ -31,6 +31,8 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
+import { TooltipProvider } from "@/components/ui";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Dock } from "./Dock";
 import { TabStrip } from "./TabStrip";
 import { Launcher } from "@/modules/welcome/Launcher";
@@ -45,7 +47,13 @@ vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ data: [], isLoading: false, isError: false }),
 	useEnvironmentsQuery: () => ({ data: [], isLoading: false, isError: false }),
 	useGlobalsQuery: () => ({ data: undefined, isLoading: false, error: null }),
-	useRequestQuery: () => ({ data: undefined, isLoading: false, isError: false }),
+	// TabStrip resolves labels through one `useQueries`, so these are options.
+	requestDetailOptions: () => ({
+		queryKey: ["request"],
+		queryFn: async () => undefined,
+		enabled: false,
+	}),
+	runDetailOptions: () => ({ queryKey: ["run"], queryFn: async () => undefined, enabled: false }),
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({
@@ -66,9 +74,21 @@ function iconNames(root: Element): string[] {
 
 beforeEach(cleanup);
 
+/**
+ * `Dock` no longer mounts its own `TooltipProvider` - the delay is set once at
+ * the app root (`main.tsx`), and a bare nested provider would have reset this
+ * strip to Radix's 700ms. So the harness supplies one, as the app does.
+ */
+const renderDock = () =>
+	render(
+		<TooltipProvider>
+			<Dock />
+		</TooltipProvider>
+	);
+
 describe("the variables icon", () => {
 	it("is Braces in the Dock, not the load-test bolt", () => {
-		render(<Dock />);
+		renderDock();
 		const button = screen.getByRole("button", { name: "Variables" });
 
 		const names = iconNames(button);
@@ -80,7 +100,7 @@ describe("the variables icon", () => {
 	});
 
 	it("does not reuse an icon another Dock button already owns", () => {
-		render(<Dock />);
+		renderDock();
 		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
 		const buttons = Array.from(nav.querySelectorAll("button"));
 
@@ -92,7 +112,7 @@ describe("the variables icon", () => {
 	it("keeps the bolt out of the drawer switchers entirely", () => {
 		// `Zap` means "load test" in this app. Any of the four wearing it would
 		// re-introduce the same misreading in a different slot.
-		render(<Dock />);
+		renderDock();
 		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
 		expect(iconNames(nav)).not.toContain("zap");
 	});
@@ -105,7 +125,12 @@ describe("the variables icon", () => {
 			openTabs: [{ id: "t1", type: "variables", entityId: null }],
 			activeTabId: "t1",
 		});
-		render(<TabStrip />);
+		// TabStrip resolves every tab's label through `useQueries` now.
+		render(
+			<QueryClientProvider client={new QueryClient()}>
+				<TabStrip />
+			</QueryClientProvider>
+		);
 		const tab = screen.getByRole("tab", { name: /Variables/ });
 
 		const names = iconNames(tab);

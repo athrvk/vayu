@@ -8,7 +8,7 @@
 /**
  * AuthInheritBanner
  *
- * Shown in the request AuthPanel when authType === "inherit". Walks the
+ * Shown in the request AuthPanel when the request's auth mode is "inherit". Walks the
  * ancestor chain of the request's collection, finds the nearest collection
  * with auth.mode !== "none", and renders:
  *   - a summary line: effective auth type + resolved source name
@@ -18,34 +18,37 @@
  * Per handoff §"Auth inherit resolution banner".
  */
 
+import { Fragment } from "react";
 import { Folder, Info, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCollectionAncestors } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { VARIABLE_SPLIT_PATTERN, isVariableToken } from "@/constants/variables";
+import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
+import ChainCard from "./ChainCard";
 
 interface AuthInheritBannerProps {
 	collectionId: string | null | undefined;
 }
 
+/**
+ * What to call this collection's auth, and the credential hint to preview under
+ * it. The name comes from the shared registry: this used to hold a fourth
+ * private list, which had drifted to rendering raw `OAUTH2` / `AWS` for modes
+ * the two pickers called "OAuth 2.0" and "AWS Signature".
+ */
 function describeAuth(c: Collection): { label: string; secret: string | null } {
 	const auth = c.auth;
+	const label = AUTH_MODE_LABELS[auth.mode];
 	switch (auth.mode) {
-		case "none":
-			return { label: "No Auth", secret: null };
 		case "bearer":
-			return { label: "Bearer Token", secret: auth.token || null };
+			return { label, secret: auth.token || null };
 		case "basic":
-			return { label: "Basic Auth", secret: auth.username || null };
+			return { label, secret: auth.username || null };
 		case "apikey":
-			return { label: "API Key", secret: auth.key || null };
-		case "oauth2":
-		case "digest":
-		case "aws":
-		case "ntlm":
-			return { label: auth.mode.toUpperCase(), secret: null };
+			return { label, secret: auth.key || null };
 		default:
-			return { label: "No Auth", secret: null };
+			return { label, secret: null };
 	}
 }
 
@@ -94,11 +97,10 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 	const { label: authLabel, secret } = describeAuth(source);
 
 	return (
-		<div className="rounded-md border border-primary/30 bg-primary/10">
-			{/* Summary */}
-			<div className="flex items-start gap-2 px-3 py-2.5 border-b border-primary/20">
-				<Info className="w-3.5 h-3.5 text-primary shrink-0 mt-px" />
-				<div className="flex-1 min-w-0">
+		<ChainCard
+			caption="Resolution chain"
+			summary={
+				<>
 					<p className="m-0 text-xs leading-relaxed text-foreground">
 						Inheriting <span className="font-semibold text-primary">{authLabel}</span>{" "}
 						from <span className="font-mono font-medium">{source.name}</span>.
@@ -108,68 +110,56 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 							{renderWithVariables(secret)}
 						</p>
 					)}
-				</div>
-			</div>
+				</>
+			}
+		>
+			{ancestors.map((c, i) => {
+				const isSource = c.id === source.id;
+				const { label } = describeAuth(c);
 
-			{/* Chain */}
-			<div className="px-3 py-2">
-				<div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground mb-1.5">
-					Resolution chain
-				</div>
-				{ancestors.map((c, i) => {
-					const isSource = c.id === source.id;
-					const isLast = i === ancestors.length - 1;
-					const indent = i * 12;
-					const { label } = describeAuth(c);
-
-					return (
-						<div
-							key={c.id}
-							className={cn(
-								"flex items-center gap-2 py-1",
-								!isLast && "border-b border-primary/10"
-							)}
+				return (
+					<Fragment key={c.id}>
+						<span
+							// Depth by indent, so a deep chain reads as a tree rather
+							// than a flat list of equals.
+							style={{ paddingLeft: i * 12 }}
+							className="flex items-center gap-1.5 flex-1 min-w-0"
 						>
-							<span
-								style={{ paddingLeft: indent }}
-								className="flex items-center gap-1.5 flex-1 min-w-0"
-							>
-								<Folder
-									className={cn(
-										"w-3 h-3 shrink-0",
-										isSource ? "text-primary" : "text-muted-foreground"
-									)}
-								/>
-								<span
-									className={cn(
-										"text-[11px] font-mono truncate",
-										isSource
-											? "text-foreground font-semibold"
-											: "text-muted-foreground"
-									)}
-								>
-									{c.name}
-								</span>
-							</span>
-
-							<span
+							<Folder
 								className={cn(
-									"text-[10px] font-mono shrink-0",
+									"w-3 h-3 shrink-0",
 									isSource ? "text-primary" : "text-muted-foreground"
 								)}
+							/>
+							<span
+								className={cn(
+									"text-[11px] font-mono truncate",
+									isSource
+										? "text-foreground font-semibold"
+										: "text-muted-foreground"
+								)}
 							>
-								{label}
+								{c.name}
 							</span>
+						</span>
 
-							{isSource && (
-								<span className="text-[10px] font-bold bg-primary/15 text-primary px-1.5 py-px rounded-sm shrink-0">
-									SOURCE
-								</span>
+						<span
+							className={cn(
+								"text-[10px] font-mono shrink-0",
+								isSource ? "text-primary" : "text-muted-foreground"
 							)}
-						</div>
-					);
-				})}
-			</div>
-		</div>
+						>
+							{label}
+						</span>
+
+						{isSource && (
+							<span className="text-[10px] font-bold bg-primary/15 text-primary px-1.5 py-px rounded-sm shrink-0">
+								SOURCE
+							</span>
+						)}
+					</Fragment>
+				);
+			})}
+		</ChainCard>
 	);
 }

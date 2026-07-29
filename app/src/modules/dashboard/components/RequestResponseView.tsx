@@ -12,33 +12,20 @@
  */
 
 import { useState } from "react";
-import {
-	Card,
-	CardContent,
-	CardHeader,
-	CardTitle,
-	Badge,
-	Button,
-	ScrollArea,
-} from "@/components/ui";
+import { Card, CardContent, CardHeader, CardTitle, Badge, ScrollArea } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Clock } from "lucide-react";
+import { Clock, XCircle } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
+import {
+	CompactHeadersViewer,
+	ResponseBody,
+	SampledExchange,
+	phasesFromAverages,
+	phasesFromTrace,
+} from "@/components/shared/response-viewer";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
-
-// Per-phase explanations for the network timing breakdown. Kept in sync with
-// the wording in ResponseTimingTab (request-builder), which explains the same
-// DNS → Connect → TLS → TTFB → Download sequence.
-const PHASE_TIPS = {
-	dns: "Hostname → IP resolution. Usually a few ms once cached; >50ms suggests slow DNS or a fresh lookup.",
-	connect: "TCP three-way handshake. Zero on connection reuse (HTTP keep-alive / HTTP/2).",
-	tls: "SSL/TLS handshake (HTTPS only). Zero for plain HTTP and on resumed connections.",
-	ttfb: "Time to first byte - server processing + propagation. If this dominates, the bottleneck is the server, not the network.",
-	download:
-		"Response body transfer time. Large for big payloads or slow links; near-zero for small JSON.",
-} as const;
 
 // Helper to format timestamp
 function formatTime(timestamp: number): string {
@@ -52,14 +39,6 @@ function formatTime(timestamp: number): string {
 	// Add milliseconds manually
 	const ms = String(date.getMilliseconds()).padStart(3, "0");
 	return `${timeStr}.${ms}`;
-}
-
-// Helper to get status badge variant
-function getStatusBadgeVariant(code: number): "default" | "secondary" | "destructive" | "outline" {
-	if (code === 0) return "destructive";
-	if (code >= 200 && code < 300) return "default";
-	if (code >= 400) return "destructive";
-	return "secondary";
 }
 
 export default function RequestResponseView({ report }: RequestResponseViewProps) {
@@ -161,61 +140,34 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<CardTitle className="text-lg">Timing Breakdown</CardTitle>
 					</CardHeader>
 					<CardContent>
+						{/* Run-level averages: five label/value pairs, driven by the
+						    shared phase descriptor. This card is the one renderer with
+						    room for the spelled-out label, so it reads `longLabel`
+						    ("First Byte") where the dense ones read "TTFB". */}
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
-							<div>
-								<p className="text-sm text-muted-foreground">
-									DNS <InfoChip tip={PHASE_TIPS.dns} />
-								</p>
-								<p className="font-bold">
-									{formatPhaseDuration(report.timingBreakdown.avgDnsMs).value}
-									{formatPhaseDuration(report.timingBreakdown.avgDnsMs).unit}
-								</p>
-							</div>
-							<div>
-								<p className="text-sm text-muted-foreground">
-									Connect <InfoChip tip={PHASE_TIPS.connect} />
-								</p>
-								<p className="font-bold">
-									{formatPhaseDuration(report.timingBreakdown.avgConnectMs).value}
-									{formatPhaseDuration(report.timingBreakdown.avgConnectMs).unit}
-								</p>
-							</div>
-							<div>
-								<p className="text-sm text-muted-foreground">
-									TLS <InfoChip tip={PHASE_TIPS.tls} />
-								</p>
-								<p className="font-bold">
-									{formatPhaseDuration(report.timingBreakdown.avgTlsMs).value}
-									{formatPhaseDuration(report.timingBreakdown.avgTlsMs).unit}
-								</p>
-							</div>
-							<div>
-								<p className="text-sm text-muted-foreground">
-									First Byte <InfoChip tip={PHASE_TIPS.ttfb} />
-								</p>
-								<p className="font-bold">
-									{
-										formatPhaseDuration(report.timingBreakdown.avgFirstByteMs)
-											.value
-									}
-									{
-										formatPhaseDuration(report.timingBreakdown.avgFirstByteMs)
-											.unit
-									}
-								</p>
-							</div>
-							<div>
-								<p className="text-sm text-muted-foreground">
-									Download <InfoChip tip={PHASE_TIPS.download} />
-								</p>
-								<p className="font-bold">
-									{
-										formatPhaseDuration(report.timingBreakdown.avgDownloadMs)
-											.value
-									}
-									{formatPhaseDuration(report.timingBreakdown.avgDownloadMs).unit}
-								</p>
-							</div>
+							{phasesFromAverages(report.timingBreakdown).map((phase) => {
+								const duration =
+									phase.value !== undefined
+										? formatPhaseDuration(phase.value)
+										: undefined;
+								return (
+									<div key={phase.key}>
+										<p className="text-sm text-muted-foreground">
+											{phase.longLabel} <InfoChip tip={phase.tip} />
+										</p>
+										<p className="font-bold">
+											{duration ? (
+												<>
+													{duration.value}
+													{duration.unit}
+												</>
+											) : (
+												<span className="text-subtle-foreground">-</span>
+											)}
+										</p>
+									</div>
+								);
+							})}
 						</div>
 					</CardContent>
 				</Card>
@@ -304,289 +256,126 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						<ScrollArea className="h-[400px]">
 							<div className="divide-y">
 								{report.results.map((result, index) => {
-									const isExpanded = expandedResults.has(index);
-									const isError = !!result.error || result.statusCode === 0;
-									const isSlow = result.trace?.isSlow;
+									const trace = result.trace;
+
+									// The phases this sample actually reported, in wire order, from the
+									// shared descriptor. Absent ones are dropped: a trace with no TLS is
+									// plain HTTP, which is not the same statement as "the handshake took
+									// 0ms".
+									const phases = phasesFromTrace(trace);
 
 									return (
-										<div key={index} className="border-b last:border-b-0">
-											{/* Result Header - Clickable */}
-											<Button
-												variant="ghost"
-												className="w-full justify-start px-4 py-3 h-auto hover:bg-muted/50"
-												onClick={() => toggleResult(index)}
-											>
-												<div className="flex flex-wrap items-center gap-x-3 gap-y-2 w-full">
-													{isExpanded ? (
-														<ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-													) : (
-														<ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-													)}
-
-													{/* Status Icon */}
-													{isError ? (
-														<AlertCircle className="w-4 h-4 text-destructive-text shrink-0" />
-													) : isSlow ? (
-														<Clock className="w-4 h-4 text-status-stopped-text shrink-0" />
-													) : (
-														<CheckCircle2 className="w-4 h-4 text-status-success-text shrink-0" />
-													)}
-
-													{/* Request Number */}
-													<span className="text-xs text-muted-foreground font-mono min-w-8">
-														#{result.trace?.request_number ?? index}
-													</span>
-
-													{/* Status Code */}
-													<Badge
-														variant={getStatusBadgeVariant(
-															result.statusCode
+										<SampledExchange
+											key={index}
+											label={trace?.request_number ?? index}
+											statusCode={result.statusCode}
+											statusText={result.statusText}
+											latencyMs={result.latencyMs}
+											timestamp={formatTime(result.timestamp)}
+											error={result.error}
+											isSlow={trace?.isSlow}
+											phases={phases}
+											isExpanded={expandedResults.has(index)}
+											onToggle={() => toggleResult(index)}
+											className="border-b last:border-b-0"
+											details={
+												trace && (
+													<>
+														{trace.error_type && (
+															<div className="flex gap-4 text-sm">
+																<span className="text-muted-foreground">
+																	Error Type:
+																</span>
+																<span className="font-mono">
+																	{trace.error_type}
+																</span>
+															</div>
 														)}
-														className="font-mono shrink-0"
-													>
-														{result.statusCode === 0
-															? "ERR"
-															: result.statusCode}
-													</Badge>
 
-													{/* Latency */}
-													<span
-														className={cn(
-															"text-sm font-mono shrink-0",
-															isSlow && "text-status-stopped-text"
-														)}
-													>
-														{result.latencyMs.toFixed(1)}ms
-													</span>
-
-													{/* Timestamp */}
-													<span className="text-xs text-muted-foreground sm:ml-auto">
-														{formatTime(result.timestamp)}
-													</span>
-
-													{/* Error preview */}
-													{isError && result.error && (
-														<span className="text-xs text-destructive-text truncate basis-full sm:basis-auto sm:max-w-[200px]">
-															{result.error.split(":")[0]}
-														</span>
-													)}
-												</div>
-											</Button>
-
-											{/* Expanded Details */}
-											{isExpanded && (
-												<div className="px-4 py-3 bg-muted/30 space-y-3">
-													{/* Error Message */}
-													{result.error && (
-														<div className="space-y-1">
-															<p className="text-xs font-medium text-muted-foreground">
-																Error
-															</p>
-															<p className="text-sm bg-destructive/10 text-destructive-text p-2 rounded-md font-mono text-xs break-all">
-																{result.error}
-															</p>
-														</div>
-													)}
-
-													{/* Trace Info */}
-													{result.trace && (
-														<>
-															{result.trace.error_type && (
-																<div className="flex gap-4 text-sm">
-																	<span className="text-muted-foreground">
-																		Error Type:
-																	</span>
-																	<span className="font-mono">
-																		{result.trace.error_type}
-																	</span>
-																</div>
-															)}
-
-															{/* Timing Breakdown - using camelCase field names from backend */}
-															{(result.trace.dnsMs !== undefined ||
-																result.trace.connectMs !==
-																	undefined ||
-																result.trace.tlsMs !== undefined ||
-																result.trace.firstByteMs !==
-																	undefined ||
-																result.trace.downloadMs !==
-																	undefined) && (
+														{/* Per-test validation failures (`validate_scripts` in
+														    run_manager.cpp). Before #111 the summary row showed
+														    only the opaque `ERR` chip and a count - never which
+														    assertions failed or why. Modelled on the
+														    request-builder Tests tab. */}
+														{trace.failures &&
+															trace.failures.length > 0 && (
 																<div className="space-y-1">
 																	<p className="text-xs font-medium text-muted-foreground">
-																		Timing Breakdown
-																	</p>
-																	<div className="grid grid-cols-[repeat(auto-fit,minmax(90px,1fr))] gap-2 text-xs">
-																		{result.trace.dnsMs !==
+																		Failed Tests
+																		{trace.totalFailed !==
 																			undefined && (
-																			<div className="bg-card border border-border rounded-md p-2 text-center">
-																				<p className="text-muted-foreground">
-																					DNS{" "}
-																					<InfoChip
-																						tip={
-																							PHASE_TIPS.dns
-																						}
-																					/>
-																				</p>
-																				<p className="font-mono font-medium">
-																					{result.trace.dnsMs.toFixed(
-																						1
-																					)}
-																					ms
-																				</p>
-																			</div>
-																		)}
-																		{result.trace.connectMs !==
-																			undefined && (
-																			<div className="bg-card border border-border rounded-md p-2 text-center">
-																				<p className="text-muted-foreground">
-																					Connect{" "}
-																					<InfoChip
-																						tip={
-																							PHASE_TIPS.connect
-																						}
-																					/>
-																				</p>
-																				<p className="font-mono font-medium">
-																					{result.trace.connectMs.toFixed(
-																						1
-																					)}
-																					ms
-																				</p>
-																			</div>
-																		)}
-																		{result.trace.tlsMs !==
-																			undefined && (
-																			<div className="bg-card border border-border rounded-md p-2 text-center">
-																				<p className="text-muted-foreground">
-																					TLS{" "}
-																					<InfoChip
-																						tip={
-																							PHASE_TIPS.tls
-																						}
-																					/>
-																				</p>
-																				<p className="font-mono font-medium">
-																					{result.trace.tlsMs.toFixed(
-																						1
-																					)}
-																					ms
-																				</p>
-																			</div>
-																		)}
-																		{result.trace
-																			.firstByteMs !==
-																			undefined && (
-																			<div className="bg-card border border-border rounded-md p-2 text-center">
-																				<p className="text-muted-foreground">
-																					TTFB{" "}
-																					<InfoChip
-																						tip={
-																							PHASE_TIPS.ttfb
-																						}
-																					/>
-																				</p>
-																				<p className="font-mono font-medium">
-																					{result.trace.firstByteMs.toFixed(
-																						1
-																					)}
-																					ms
-																				</p>
-																			</div>
-																		)}
-																		{result.trace.downloadMs !==
-																			undefined && (
-																			<div className="bg-card border border-border rounded-md p-2 text-center">
-																				<p className="text-muted-foreground">
-																					Download{" "}
-																					<InfoChip
-																						tip={
-																							PHASE_TIPS.download
-																						}
-																					/>
-																				</p>
-																				<p className="font-mono font-medium">
-																					{result.trace.downloadMs.toFixed(
-																						1
-																					)}
-																					ms
-																				</p>
-																			</div>
-																		)}
-																	</div>
-																</div>
-															)}
-
-															{/* Slow Request Warning */}
-															{result.trace.isSlow && (
-																<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive-text p-2 rounded-md">
-																	<Clock className="w-3 h-3" />
-																	<span>
-																		Slow request:{" "}
-																		{result.trace.totalMs?.toFixed(
-																			1
-																		)}
-																		ms
-																		{result.trace
-																			.thresholdMs && (
-																			<span className="text-muted-foreground ml-1">
-																				(threshold:{" "}
-																				{
-																					result.trace
-																						.thresholdMs
-																				}
-																				ms)
+																			<span className="ml-1">
+																				({trace.totalFailed}
+																				)
 																			</span>
 																		)}
-																	</span>
-																</div>
-															)}
-
-															{/* Response Headers */}
-															{result.trace.headers &&
-																Object.keys(result.trace.headers)
-																	.length > 0 && (
-																	<div className="space-y-1">
-																		<p className="text-xs font-medium text-muted-foreground">
-																			Response Headers
-																		</p>
-																		<div className="bg-muted p-2 rounded-md text-xs font-mono max-h-32 overflow-auto">
-																			{Object.entries(
-																				result.trace.headers
-																			).map(
-																				([key, value]) => (
-																					<div
-																						key={key}
-																						className="flex gap-2"
-																					>
-																						<span className="text-muted-foreground">
-																							{key}:
-																						</span>
-																						<span className="break-all">
-																							{value}
-																						</span>
-																					</div>
-																				)
-																			)}
-																		</div>
-																	</div>
-																)}
-
-															{/* Response Body */}
-															{result.trace.body && (
-																<div className="space-y-1">
-																	<p className="text-xs font-medium text-muted-foreground">
-																		Response Body
 																	</p>
-																	<pre className="bg-muted p-2 rounded-md text-xs font-mono max-h-48 overflow-auto whitespace-pre-wrap break-all">
-																		{result.trace.body}
-																	</pre>
+																	<div className="space-y-1.5">
+																		{trace.failures.map(
+																			(failure, i) => (
+																				<div
+																					key={i}
+																					className="flex items-start gap-2 bg-status-error/10 border border-status-error/20 rounded-md p-2"
+																				>
+																					<XCircle className="w-4 h-4 text-status-error-text mt-0.5 shrink-0" />
+																					<pre className="text-xs text-status-error-text font-mono whitespace-pre-wrap break-words flex-1 min-w-0">
+																						{failure}
+																					</pre>
+																				</div>
+																			)
+																		)}
+																	</div>
 																</div>
 															)}
-														</>
-													)}
+													</>
+												)
+											}
+										>
+											{/* Slow Request Warning */}
+											{trace?.isSlow && (
+												<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive-text p-2 rounded-md">
+													<Clock className="w-3 h-3" />
+													<span>
+														Slow request: {trace.totalMs?.toFixed(1)}ms
+														{trace.thresholdMs && (
+															<span className="text-muted-foreground ml-1">
+																(threshold: {trace.thresholdMs}ms)
+															</span>
+														)}
+													</span>
 												</div>
 											)}
-										</div>
+
+											{/* Response Headers - the shared compact viewer. It declares its
+											    own `surface-sunken`, so its row rules resolve correctly on the
+											    shell's `bg-muted/30` panel where a bare `border-rule` would
+											    fall back to invisible. */}
+											{trace?.headers && (
+												<CompactHeadersViewer
+													headers={trace.headers}
+													title="Response Headers"
+													className="max-h-40 overflow-auto"
+												/>
+											)}
+
+											{/* Response Body - the shared viewer (pretty/raw/preview with
+											    body-type detection), not a raw `<pre>`. */}
+											{trace?.body && (
+												<div className="space-y-1">
+													<p className="text-xs font-medium text-muted-foreground">
+														Response Body
+													</p>
+													<div className="h-48 overflow-hidden rounded-md border border-rule">
+														<ResponseBody
+															body={trace.body}
+															headers={trace.headers || {}}
+															height="100%"
+															compact
+														/>
+													</div>
+												</div>
+											)}
+										</SampledExchange>
 									);
 								})}
 							</div>

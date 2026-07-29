@@ -10,17 +10,22 @@
  *
  * Monaco-backed editor for a collection's pre- or post-request script.
  *
- * Composition order:
- *   - pre:  outer → inner → request (parent collection first, then child folders,
- *           then the request's own script)
- *   - post: request → inner → outer (request first, unwinding outward)
+ * Composition order is the same for both kinds: outer → inner → request. The
+ * collection chain runs root-first, then the request's own script last
+ * (`scriptParts` in request-builder/utils, and its MCP twin in resolve.ts;
+ * the engine joins the parts and runs them as one script).
+ *
+ * This used to claim post ran request-first and unwound outward. It never did -
+ * both paths have always built the chain root-first and appended the request's
+ * own. The banner below said so to users, which is worse than saying it here.
  *
  * Used by both the Pre-request and Post-request tabs in CollectionDetail.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, Button, CodeEditor } from "@/components/ui";
+import { useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed } from "./shared";
@@ -42,32 +47,25 @@ const QUICK_REF: Array<[string, string]> = [
 export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 	const isPre = kind === "pre";
 	const fieldKey = isPre ? "preRequestScript" : "postRequestScript";
-	const initial = collection[fieldKey] ?? "";
 
-	const [script, setScript] = useState(initial);
 	const [showRef, setShowRef] = useState(false);
 	const updateCollection = useUpdateCollectionMutation();
 
-	// Resync the editable script draft when the collection or script kind
-	// (pre/post) changes (component renders inline, not remounted per-collection).
-	// Can't be derived: `script` is a user-editable Monaco draft that
-	// intentionally diverges from props between edits and save. A value-keyed
-	// render-phase reset would miss switches to a different collection whose
-	// script happens to equal the current draft.
-	useEffect(() => {
-		// eslint-disable-next-line react-hooks/set-state-in-effect
-		setScript(collection[fieldKey] ?? "");
-	}, [collection.id, collection, fieldKey]);
-
-	// The other half of that resync - see AuthTab. This component is reused
-	// across collection switches, and a mutation holds `isError` until the next
-	// mutate, so the failure notice has to be cleared with the draft.
-	const resetSave = updateCollection.reset;
-	useEffect(() => {
-		resetSave();
-	}, [collection.id, resetSave]);
-
-	const isDirty = script !== (collection[fieldKey] ?? "");
+	// Draft/resync/isDirty/mutation-reset all live in the shared hook - the
+	// three collection tabs used to hand-roll it one each. See useEntityDraft.
+	//
+	// The kind is part of the entity key: pre and post are two different things
+	// to edit, even though only one of them is mounted at a time (the tab shell
+	// renders just the active panel).
+	const {
+		draft: script,
+		setDraft: setScript,
+		isDirty,
+	} = useEntityDraft<string>({
+		entityKey: `${collection.id}:${fieldKey}`,
+		value: collection[fieldKey] ?? "",
+		mutation: updateCollection,
+	});
 
 	const usedVars = useMemo(() => {
 		const envPattern =
@@ -91,11 +89,8 @@ export default function ScriptTab({ collection, kind }: ScriptTabProps) {
 		<div className="max-w-[680px] flex flex-col gap-3.5">
 			<InfoBanner>
 				This script runs <strong>{isPre ? "before" : "after"} every request</strong> in this
-				collection.{" "}
-				{isPre
-					? "Scripts compose outer→inner: the parent collection runs first, then child folders, then the request's own script."
-					: "Scripts compose inner→outer: the request's script runs first, then its folder, then parent collections."}{" "}
-				This enables centralized{" "}
+				collection. Scripts compose outer→inner: the parent collection runs first, then
+				child folders, then the request&apos;s own script. This enables centralized{" "}
 				{isPre
 					? "auth refresh and pre-flight setup"
 					: "shared test assertions and teardown"}

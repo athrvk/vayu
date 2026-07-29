@@ -13,12 +13,19 @@
  * adding an ephemeral `id` for stable React keys and a `system` flag.
  */
 
+// Type-only, and therefore safe despite `body-drafts` importing `BodyMode` back
+// from here: `import type` is erased, so no runtime cycle exists.
+import type { BodyDrafts } from "./utils/body-drafts";
 import type {
 	BodyMode,
 	HttpMethod,
+	HttpVersion,
 	KeyValueEntry,
-	OAuth2Config,
+	RequestAuth,
 	ResolvedVariable,
+	ResponseTiming,
+	ScriptPart,
+	VariableOrigin,
 	VariableScope,
 } from "@/types";
 
@@ -41,13 +48,8 @@ export interface KeyValueItem extends KeyValueEntry {
 // ============================================================================
 
 export type RequestTab =
-	| "params"
-	| "headers"
-	| "body"
-	| "auth"
-	| "pre-script"
-	| "test-script"
-	| "settings";
+	/** The request's own documentation. First in the row - see InfoPanel. */
+	"info" | "params" | "headers" | "body" | "auth" | "pre-script" | "test-script" | "settings";
 
 export interface TabInfo {
 	id: RequestTab;
@@ -59,39 +61,21 @@ export interface TabInfo {
 // Auth Types
 // ============================================================================
 
-export type AuthType = "none" | "inherit" | "bearer" | "basic" | "api-key" | "oauth2";
-
 /**
- * Flat auth fields backing the request builder's Auth tab. Which fields are
- * populated depends on the active {@link AuthType}. The Auth tab, request
- * execution, and the curl importer all read/write this flat shape. OAuth 2.0
- * keeps its (larger) config in a nested object rather than flattening it.
+ * The builder holds the domain {@link RequestAuth} verbatim - `mode`, and
+ * `apikey`'s `in`. It used to carry a second, flat vocabulary of its own
+ * (`AuthType` + `AuthConfigState`, where `apikey` was `api-key` and `in` was
+ * `addTo`), which existed only so the Auth tab could edit it, and which a
+ * translation layer had to keep in step with the domain on every load, save and
+ * execute. One shape means the shared `AuthFields` editor serves this host and
+ * the collection editor unchanged, and nothing can be lost in translation.
+ *
+ * `digest` / `aws` / `ntlm` are not offered in the picker - the engine cannot
+ * resolve them - but a request can be stored with one (imports produce them), so
+ * the union carries them and the panel surfaces them rather than collapsing them
+ * to "none" and rewriting them away on the next autosave.
  */
-export interface AuthConfigState {
-	token?: string;
-	username?: string;
-	password?: string;
-	key?: string;
-	value?: string;
-	addTo?: "header" | "query";
-	oauth2?: OAuth2Config;
-}
-
-export interface AuthConfig {
-	type: AuthType;
-	bearer?: {
-		token: string;
-	};
-	basic?: {
-		username: string;
-		password: string;
-	};
-	apiKey?: {
-		key: string;
-		value: string;
-		addTo: "header" | "query";
-	};
-}
+export type { RequestAuth };
 
 // ============================================================================
 // Body Types
@@ -106,6 +90,25 @@ export interface BodyConfig {
 	raw?: string;
 	formData?: KeyValueItem[];
 	urlEncoded?: KeyValueItem[];
+}
+
+/**
+ * The Content-Type row a body mode added on its way in, so leaving that mode can
+ * take it back. Written by `BodyPanel` through the context accessors; the rule
+ * that reads it is in `components/RequestTabs/panels/body/content-type.ts`.
+ *
+ * By **row id**, not by value: `Content-Type: application/json` typed by the
+ * user and the identical row this panel wrote look the same and must not be
+ * treated the same. `value` is kept beside it so a row the user has since
+ * retyped is recognised as no longer ours.
+ *
+ * Ephemeral, like the body drafts - `requestId` says whose row it is, and a
+ * record belonging to another request is dropped rather than applied.
+ */
+export interface AutoContentType {
+	requestId: string | null;
+	rowId: string;
+	value: string;
 }
 
 // ============================================================================
@@ -132,8 +135,7 @@ export interface RequestState {
 	urlEncoded: KeyValueItem[]; // Fields for x-www-form-urlencoded mode
 
 	// Auth
-	authType: AuthType;
-	authConfig: AuthConfigState;
+	auth: RequestAuth;
 
 	// Scripts
 	preRequestScript: string;
@@ -142,6 +144,8 @@ export interface RequestState {
 	// Execution settings (Settings tab)
 	followRedirects: boolean;
 	maxRedirects: number;
+	/** Protocol to negotiate. See `Request.httpVersion` for the full rationale. */
+	httpVersion: HttpVersion;
 }
 
 // ============================================================================
@@ -149,25 +153,18 @@ export interface RequestState {
 // ============================================================================
 
 /**
- * Per-request timing breakdown (milliseconds). Phase fields (dns…download) are
- * sequential segments of the request; `wire` is libcurl's transfer time and
- * `queueWait` is generator-side overhead (total − wire).
- *
+ * Per-request timing breakdown. Declared once in the domain types (it is the
+ * `POST /execute` wire shape) and re-exported here for the builder's consumers.
  * Present on a live execute, and again when a response is restored from the
- * last stored design run - the engine writes the five phases into that run's
- * trace (`store_result`, engine/src/http/routes/execution.cpp). `wire` and
- * `queueWait` are the two the design-mode writer omits, so they are absent on a
- * restored response; every consumer must treat both as optional.
+ * last stored design run (`restore-response.ts`).
  */
-export interface ResponseTiming {
-	total: number;
-	wire?: number;
-	queueWait?: number;
-	dns: number;
-	connect: number;
-	tls: number;
-	firstByte: number;
-	download: number;
+export type { ResponseTiming } from "@/types";
+
+/** Which stored run a response was rebuilt from, and when that run happened. */
+export interface RestoredFrom {
+	runId?: string;
+	/** ISO timestamp of the run result. */
+	at: string;
 }
 
 export interface ResponseState {
@@ -180,9 +177,47 @@ export interface ResponseState {
 	bodyRaw?: string;
 	bodyType: "json" | "html" | "xml" | "text" | "binary";
 	size: number;
+	/**
+	 * Set when this response was restored from a stored run whose body the engine
+	 * truncated for storage (`maxTraceBodyBytes`). `body` then holds only the
+	 * stored slice, and `bodyBytes` is the original length. Drives the truncation
+	 * notice in the response viewer; re-sending fetches the full body.
+	 */
+	bodyTruncated?: boolean;
+	/** The response body's original byte length, present only when truncated. */
+	bodyBytes?: number;
 	time: number;
 	timing?: ResponseTiming;
-	timestamp?: string;
+	/**
+	 * The protocol actually negotiated for this exchange - `"HTTP/2"`,
+	 * `"HTTP/1.1"`, etc, or `""` when the transfer never got far enough to
+	 * negotiate one (e.g. a connection error). This is a *display* string the
+	 * engine reports after the transfer (`response.http_version` /
+	 * `Response::http_version` in `engine/src/http/client.cpp`), not a member
+	 * of the `HttpVersion` request-side union (`auto` | `http1.1` | `http2`) -
+	 * do not unify the two types.
+	 */
+	httpVersion?: string;
+	/**
+	 * When this response arrived, ISO. Set on a live send only.
+	 *
+	 * The pane's status bar reads it as an age - "just now", "4m ago" - which
+	 * answers the question a duration cannot: whether what you are looking at is
+	 * the response to the request beside it *as it is now*, or to a version of
+	 * it from twenty minutes and several edits ago.
+	 *
+	 * A bare `timestamp` used to live here and was removed for having one writer
+	 * and no reader. This one has a reader; that is the whole difference, and
+	 * `response-age.test.tsx` is what keeps it true.
+	 */
+	receivedAt?: string;
+	/**
+	 * Set only when this response was rebuilt from a stored run rather than sent
+	 * just now - a cold start, or a run opened from History. Drives the same age
+	 * chip, labelled "from run" so the two cases stay distinguishable: the
+	 * request beside it may have been edited since. Gone after the next send.
+	 */
+	restoredFrom?: RestoredFrom;
 	errorCode?: string;
 	errorMessage?: string;
 	consoleLogs?: string[];
@@ -201,9 +236,54 @@ export interface RequestBuilderContextValue {
 	setRequest: (request: Partial<RequestState>) => void;
 	updateField: <K extends keyof RequestState>(field: K, value: RequestState[K]) => void;
 
+	/**
+	 * What the body modes you are not looking at were holding, so switching mode
+	 * does not destroy them. See `utils/body-drafts.ts` for why there are two
+	 * buckets and not six.
+	 *
+	 * Backed by a ref in the provider, for two reasons that pull the same way:
+	 * nothing renders from it, so writing it must not cause a re-render
+	 * mid-switch; and Radix unmounts an inactive `TabsContent`, so a ref inside
+	 * `BodyPanel` would be thrown away the moment you glance at the Headers tab.
+	 *
+	 * A pair of accessors rather than the ref itself. Handing the ref out means
+	 * consumers assign to `.current` on a value they got from context, which the
+	 * React compiler's immutability rule rejects - correctly, since a context
+	 * value is meant to be read.
+	 */
+	getBodyDrafts: () => BodyDrafts;
+	setBodyDrafts: (drafts: BodyDrafts) => void;
+
+	/**
+	 * The Content-Type row `BodyPanel` wrote when a mode required one, so that
+	 * leaving the mode can take it back. Behind accessors and living in the
+	 * provider for the same reasons as the drafts above - and for one more: the
+	 * record has to outlive the panel, or the header outlives the mode that
+	 * needed it, which is the bug it exists to fix.
+	 */
+	getAutoContentType: () => AutoContentType | null;
+	setAutoContentType: (auto: AutoContentType | null) => void;
+
 	// Response State
 	response: ResponseState | null;
 	setResponse: (response: ResponseState | null) => void;
+
+	/**
+	 * Collection script parts to list as "runs before your own", overriding the
+	 * live collection chain. Set only by the History run view, which shows what
+	 * a stored run recorded; undefined everywhere else, where the script panels
+	 * walk the chain themselves.
+	 */
+	inheritedPreScripts?: ScriptPart[];
+	inheritedPostScripts?: ScriptPart[];
+
+	/**
+	 * The whole glued script a pre-script-parts run recorded. Set only by the
+	 * History run view; the editor is empty for such a run, so this is the only
+	 * place its script text appears.
+	 */
+	legacyPreScript?: string;
+	legacyPostScript?: string;
 
 	// UI State
 	activeTab: RequestTab;
@@ -218,16 +298,36 @@ export interface RequestBuilderContextValue {
 	resolveVariables: (input: string) => string;
 	getVariable: (name: string) => ResolvedVariable | null;
 	getAllVariables: () => Record<string, ResolvedVariable>;
+	/** Every definition of a name, winner and losers alike. Display-only. */
+	getVariableOrigins: (name: string) => VariableOrigin[];
 	updateVariable: (name: string, value: string, scope: VariableScope) => void;
+	/**
+	 * The scopes `updateVariable` can actually write to right now.
+	 *
+	 * Each of its branches begins with a guard - `if (!activeEnvironmentId)
+	 * return`, `if (!collectionId) return` - so writing to a scope with no target
+	 * is a silent no-op. Nothing surfaced that, because the only caller edited an
+	 * already-resolved variable, which by definition had a target. Creating one
+	 * does not, so a scope picker offering "Environment" with none active would
+	 * hand the user a Create button that does nothing.
+	 */
+	writableScopes: VariableScope[];
 
 	// Actions
 	executeRequest: () => Promise<void>;
 	saveRequest: () => Promise<void>;
 	startLoadTest: () => void;
+	/**
+	 * Whether this builder can start a load test at all. False for a detached
+	 * copy (a past design run replayed in the builder), which is given no
+	 * `onStartLoadTest` - so the UrlBar hides the Load Test button rather than
+	 * showing one that does nothing.
+	 */
+	canStartLoadTest: boolean;
 }
 
 // Re-export from centralized types for backward compatibility
-export type { ResolvedVariable as VariableInfo, VariableScope } from "@/types";
+export type { ResolvedVariable as VariableInfo, VariableScope, VariableOrigin } from "@/types";
 
 // ============================================================================
 // Component Props Types

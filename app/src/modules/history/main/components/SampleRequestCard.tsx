@@ -8,14 +8,21 @@
 /**
  * SampleRequestCard Component
  *
- * Displays a single sampled request with expandable details.
+ * A single stored sampled request, expandable. The row, the expansion chrome,
+ * the error block and the timing tiles are the shared `SampledExchange` - the
+ * dashboard's live sample list renders the same shell (#76). What is left here
+ * is what is genuinely history's: the outcome-tinted card border, a stored
+ * run's date formatting, and the two sections this side shows (request headers,
+ * then the response through `UnifiedResponseViewer`).
  */
 
-import { CheckCircle, XCircle } from "lucide-react";
-import { Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import TimingBreakdown from "./TimingBreakdown";
-import { UnifiedResponseViewer } from "@/components/shared/response-viewer";
+import {
+	UnifiedResponseViewer,
+	HeadersViewer,
+	SampledExchange,
+	phasesFromTrace,
+} from "@/components/shared/response-viewer";
 import type { SampleResult } from "../../types";
 
 interface SampleRequestCardProps {
@@ -31,119 +38,61 @@ export default function SampleRequestCard({
 	isExpanded,
 	onToggle,
 }: SampleRequestCardProps) {
-	const formatTimestamp = (ts: string | number) => {
-		const date = new Date(ts);
-		return date.toLocaleString();
-	};
-
 	const isError = !!sample.error || sample.statusCode === 0;
 	const isSuccess = sample.statusCode >= 200 && sample.statusCode < 300;
 
+	// A stored sample is dating a run, not placing a moment inside one, so this
+	// side wants the day where the dashboard's live row wants milliseconds.
+	const timestamp = new Date(sample.timestamp).toLocaleString();
+
+	// Gating on the phases themselves, not on `sample.trace`. The two used to be
+	// decided separately - the wrapper rendered whenever a trace existed, while
+	// the breakdown inside it returned null unless DNS, connect or TLS was
+	// present - so a trace carrying only TTFB and download printed a "Timing
+	// Breakdown" heading with nothing under it. `SampledExchange` gates on the
+	// list, so the heading cannot outlive its content.
+	const phases = phasesFromTrace(sample.trace);
+
 	return (
-		<div
+		<SampledExchange
+			label={index + 1}
+			statusCode={sample.statusCode}
+			latencyMs={sample.latencyMs}
+			timestamp={timestamp}
+			error={sample.error}
+			phases={phases}
+			isExpanded={isExpanded}
+			onToggle={onToggle}
 			className={cn(
-				"border overflow-hidden transition-colors",
+				"border transition-colors",
 				isError && "border-destructive/30",
-				// status-success, matching the CheckCircle this border frames.
+				// status-success, matching the CheckCircle2 this border frames.
 				isSuccess && "border-status-success/20"
 			)}
 		>
-			{/* Header - Always Visible */}
-			<button
-				onClick={onToggle}
-				className="w-full flex items-center gap-3 p-3 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
-			>
-				<span className="text-xs font-mono text-muted-foreground w-8">#{index + 1}</span>
-
-				{isError ? (
-					<XCircle className="w-4 h-4 text-destructive-text shrink-0" />
-				) : (
-					<CheckCircle className="w-4 h-4 text-status-success-text shrink-0" />
-				)}
-
-				<Badge
-					variant={isError ? "destructive" : isSuccess ? "default" : "outline"}
-					className="font-mono text-xs"
-				>
-					{sample.statusCode === 0 ? "ERR" : sample.statusCode}
-				</Badge>
-
-				<span className="text-sm font-medium font-mono">
-					{sample.latencyMs.toFixed(1)}ms
-				</span>
-
-				<span className="text-xs text-muted-foreground ml-auto">
-					{formatTimestamp(sample.timestamp)}
-				</span>
-
-				<div className={cn("w-2 h-2 transition-transform", isExpanded && "rotate-180")}>
-					<div className="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[6px] border-l-transparent border-r-transparent border-t-muted-foreground" />
-				</div>
-			</button>
-
-			{/* Expanded Details */}
-			{isExpanded && (
-				<div className="p-4 space-y-4 bg-card border-t">
-					{/* Error Message */}
-					{sample.error && (
-						<div className="p-3 bg-destructive/10 border border-destructive/20">
-							<p className="text-xs font-medium text-destructive-text mb-1">Error</p>
-							<p className="text-sm text-destructive-text font-mono break-all">
-								{sample.error}
-							</p>
-						</div>
-					)}
-
-					{/* Timing Breakdown */}
-					{sample.trace && (
-						<div>
-							<h4 className="text-xs font-semibold text-muted-foreground mb-2 uppercase">
-								Timing Breakdown
-							</h4>
-							<TimingBreakdown
-								dnsMs={sample.trace.dnsMs}
-								connectMs={sample.trace.connectMs}
-								tlsMs={sample.trace.tlsMs}
-								firstByteMs={sample.trace.firstByteMs}
-								downloadMs={sample.trace.downloadMs}
-								compact
-							/>
-						</div>
-					)}
-
-					{/* Request Headers */}
-					{sample.trace?.request?.headers && (
-						<div>
-							<h4 className="text-xs font-semibold text-muted-foreground mb-2 uppercase">
-								Request Headers
-							</h4>
-							<pre className="bg-muted p-3 text-xs overflow-x-auto max-h-40">
-								{typeof sample.trace.request.headers === "object"
-									? JSON.stringify(sample.trace.request.headers, null, 2)
-									: sample.trace.request.headers}
-							</pre>
-						</div>
-					)}
-
-					{/* Response using UnifiedResponseViewer */}
-					{(sample.trace?.response?.body || sample.trace?.response?.headers) && (
-						<UnifiedResponseViewer
-							response={{
-								body:
-									typeof sample.trace.response.body === "object"
-										? JSON.stringify(sample.trace.response.body, null, 2)
-										: sample.trace.response.body || "",
-								headers: sample.trace.response.headers || {},
-								status: sample.statusCode,
-							}}
-							compact
-							showActions={false}
-							hiddenTabs={["request"]}
-							className="max-h-[400px]"
-						/>
-					)}
-				</div>
+			{/* Request Headers - the shared collapsible table, not a raw JSON
+			    dump. It sat directly above a UnifiedResponseViewer that already
+			    renders headers properly; the two treatments no longer differ. */}
+			{sample.trace?.request?.headers && (
+				<HeadersViewer headers={sample.trace.request.headers} variant="request" />
 			)}
-		</div>
+
+			{/* Response using UnifiedResponseViewer */}
+			{(sample.trace?.response?.body || sample.trace?.response?.headers) && (
+				<UnifiedResponseViewer
+					response={{
+						body:
+							typeof sample.trace.response.body === "string"
+								? sample.trace.response.body
+								: sample.trace.response.body == null
+									? ""
+									: JSON.stringify(sample.trace.response.body, null, 2),
+						headers: sample.trace.response.headers || {},
+						status: sample.statusCode,
+					}}
+					className="max-h-[400px]"
+				/>
+			)}
+		</SampledExchange>
 	);
 }

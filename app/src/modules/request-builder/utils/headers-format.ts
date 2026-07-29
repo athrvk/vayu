@@ -30,6 +30,7 @@
 
 import type { KeyValueItem } from "../types";
 import { generateId } from "./id";
+import { splitKeyValueLine, HEADER_SEPARATORS } from "./kv-line";
 import { VERSION_HEADER_KEY } from "./system-headers";
 
 /**
@@ -52,27 +53,16 @@ export const formatHeadersToText = (headers: KeyValueItem[]): string => {
 /**
  * Split one line at whichever of `:` or `=` comes first.
  *
+ * A header name may contain neither, so the earliest of the two is always the
+ * separator - which is why this cannot simply be shared with the params parser,
+ * whose keys *may* contain a colon. See `kv-line.ts` for the rule both follow.
+ *
  * Returns null when the line carries neither, or when the separator is the first
  * character - `: value` names no header, and writing an empty key into the table
  * would produce a row the user cannot identify.
  */
-const splitHeaderLine = (line: string): { key: string; value: string } | null => {
-	const colon = line.indexOf(":");
-	const equals = line.indexOf("=");
-
-	// -1 means absent; pick the smaller of the two positions that exist.
-	let at: number;
-	if (colon === -1) at = equals;
-	else if (equals === -1) at = colon;
-	else at = Math.min(colon, equals);
-
-	if (at <= 0) return null;
-
-	const key = line.slice(0, at).trim();
-	if (!key) return null;
-
-	return { key, value: line.slice(at + 1).trim() };
-};
+const splitHeaderLine = (line: string): { key: string; value: string } | null =>
+	splitKeyValueLine(line, HEADER_SEPARATORS);
 
 /**
  * Parse text format to headers array

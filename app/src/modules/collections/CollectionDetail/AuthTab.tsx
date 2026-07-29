@@ -8,79 +8,58 @@
 /**
  * AuthTab - collection auth source.
  *
- * Collections never use `inherit` - they ARE the source. Only None / Bearer /
- * Basic / API Key are exposed here. The bottom shows the inheritance chain so
- * the user can see which ancestor a child request would resolve to.
+ * Collections never use `inherit` - they ARE the source, so this tab offers the
+ * editable modes and nothing else. The fields are the shared `AuthFields`, the
+ * same component the request builder's Auth tab renders. The bottom shows the
+ * inheritance chain so the user can see which ancestor a child request would
+ * resolve to.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { Lock } from "lucide-react";
 import {
 	Button,
-	Input,
-	SecretInput,
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui";
-import { Callout } from "@/components/shared";
-import { cn } from "@/lib/utils";
+import { AuthFields, Callout } from "@/components/shared";
+import {
+	AUTH_MODE_LABELS,
+	EDITABLE_AUTH_MODES,
+	isEditableAuthMode,
+	uneditableAuthLabel,
+	type EditableAuthMode,
+} from "@/constants/auth-modes";
+import { useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
 import InheritanceChain from "./InheritanceChain";
-import OAuth2Form from "@/components/shared/OAuth2Form/OAuth2Form";
 import { defaultOAuth2Config } from "@/services/oauth/defaults";
 
-type CollectionAuthMode = "none" | "bearer" | "basic" | "apikey" | "oauth2";
 type CollectionAuth = Collection["auth"];
 
-/**
- * Display names for the modes this tab stores but cannot edit.
+/*
+ * The one collection-specific extra, layered on the shared mode registry: an
+ * inheritance-worded hint per mode. Labels and the mode list itself come from
+ * `@/constants/auth-modes`, which the request `AuthPanel` reads too - they used
+ * to be two arrays that had already drifted.
  *
- * OAuth 2.0 used to be here. It is editable now: the engine resolves it, an
- * import can produce it, requests inherit it, and `OAuth2Form` was written to be
- * shared - its own contract mentions "the collection editor supplies a plain
- * Input" - so the collection side was anticipated and simply never wired up.
- *
- * digest/aws/ntlm stay: the engine has no resolution for them, so offering them
- * here would let you configure something that silently does nothing.
+ * OAuth 2.0 was once listed as uneditable here. It is editable now: the engine
+ * resolves it, an import can produce it, requests inherit it, and `OAuth2Form`
+ * was written to be shared - so the collection side was anticipated and simply
+ * never wired up. digest/aws/ntlm stay uneditable: the engine has no resolution
+ * for them, so offering them would let you configure something that silently
+ * does nothing.
  */
-const UNEDITABLE_LABELS: Record<string, string> = {
-	digest: "Digest",
-	aws: "AWS Signature",
-	ntlm: "NTLM",
+const AUTH_MODE_HINTS: Record<EditableAuthMode, string> = {
+	none: "Requests use no authentication unless they set their own.",
+	bearer: 'Token is inherited by requests that use "Inherit from collection".',
+	basic: 'Credentials are inherited by requests that use "Inherit from collection".',
+	apikey: 'API key is inherited by requests that use "Inherit from collection".',
+	oauth2: 'Token is fetched once and inherited by requests that use "Inherit from collection".',
 };
-
-const AUTH_OPTIONS: { value: CollectionAuthMode; label: string; hint: string }[] = [
-	{
-		value: "none",
-		label: "No Auth",
-		hint: "Requests use no authentication unless they set their own.",
-	},
-	{
-		value: "bearer",
-		label: "Bearer Token",
-		hint: 'Token is inherited by requests that use "Inherit from collection".',
-	},
-	{
-		value: "basic",
-		label: "Basic Auth",
-		hint: 'Credentials are inherited by requests that use "Inherit from collection".',
-	},
-	{
-		value: "apikey",
-		label: "API Key",
-		hint: 'API key is inherited by requests that use "Inherit from collection".',
-	},
-	{
-		value: "oauth2",
-		label: "OAuth 2.0",
-		hint: 'Token is fetched once and inherited by requests that use "Inherit from collection".',
-	},
-];
 
 // Narrow the broader Collection auth union to the modes we expose.
 // digest/aws/ntlm return null: they are stored (an import can produce
@@ -89,20 +68,11 @@ const AUTH_OPTIONS: { value: CollectionAuthMode; label: string; hint: string }[]
 // this tab state "No authentication for this collection. Requests using
 // 'Inherit from collection' will send no auth." about a collection that does
 // have auth - contradicting the inheritance chain three lines below it.
-function asEditable(auth: CollectionAuth): CollectionAuthMode | null {
-	if (
-		auth.mode === "none" ||
-		auth.mode === "bearer" ||
-		auth.mode === "basic" ||
-		auth.mode === "apikey" ||
-		auth.mode === "oauth2"
-	) {
-		return auth.mode;
-	}
-	return null;
+function asEditable(auth: CollectionAuth): EditableAuthMode | null {
+	return isEditableAuthMode(auth.mode) ? auth.mode : null;
 }
 
-function defaultsFor(mode: CollectionAuthMode): CollectionAuth {
+function defaultsFor(mode: EditableAuthMode): CollectionAuth {
 	switch (mode) {
 		case "none":
 			return { mode: "none" };
@@ -124,45 +94,30 @@ interface AuthTabProps {
 export default function AuthTab({ collection }: AuthTabProps) {
 	const updateCollection = useUpdateCollectionMutation();
 
-	const [auth, setAuth] = useState<CollectionAuth>(collection.auth);
-
-	// Resync the editable draft when the underlying collection changes (the
-	// component is not remounted per-collection - the parent renders it inline,
-	// so a different collection can arrive via props). Can't be derived: `auth`
-	// is a user-editable draft that intentionally diverges from props between
-	// edits and save. Render-phase reset keyed on value would miss switches to a
-	// different collection whose auth happens to equal the current draft.
-	useEffect(() => {
-		// eslint-disable-next-line react-hooks/set-state-in-effect
-		setAuth(collection.auth);
-	}, [collection.id, collection.auth]);
-
-	// The other half of that resync. Shell renders <CollectionDetail /> with no
-	// key, so switching collection tabs while staying on this inner tab reuses
-	// this component *and its mutation* - and TanStack holds `isError` until the
-	// next mutate. Without this, a save that failed on one collection would keep
-	// claiming to have failed on the next one, which the user never tried to
-	// save. `reset` is bound once in the observer, so it is a stable dep.
-	const resetSave = updateCollection.reset;
-	useEffect(() => {
-		resetSave();
-	}, [collection.id, resetSave]);
+	// Draft/resync/isDirty/mutation-reset all live in the shared hook - the
+	// three collection tabs used to hand-roll it one each. See useEntityDraft.
+	const {
+		draft: auth,
+		setDraft: setAuth,
+		isDirty,
+		reset: resetDraft,
+	} = useEntityDraft<CollectionAuth>({
+		entityKey: collection.id,
+		value: collection.auth,
+		mutation: updateCollection,
+	});
 
 	const mode = asEditable(auth);
-	const uneditableLabel = mode === null ? (UNEDITABLE_LABELS[auth.mode] ?? auth.mode) : null;
-	const hint = useMemo(() => AUTH_OPTIONS.find((o) => o.value === mode)?.hint, [mode]);
-
-	const isDirty = useMemo(
-		() => JSON.stringify(auth) !== JSON.stringify(collection.auth),
-		[auth, collection.auth]
-	);
+	// `mode === null` is exactly the digest/aws/ntlm set.
+	const uneditableLabel = uneditableAuthLabel(auth.mode);
+	const hint = mode ? AUTH_MODE_HINTS[mode] : undefined;
 
 	const handleSave = () => {
 		if (!isDirty) return;
 		updateCollection.mutate({ id: collection.id, auth });
 	};
 
-	const handleModeChange = (next: CollectionAuthMode) => {
+	const handleModeChange = (next: EditableAuthMode) => {
 		setAuth(defaultsFor(next));
 	};
 
@@ -191,13 +146,13 @@ export default function AuthTab({ collection }: AuthTabProps) {
 				<SectionLabel>Authentication type</SectionLabel>
 				<div className="max-w-[280px]">
 					{/*
-					 * `value=""` when the stored mode isn't one of the four below, so
-					 * the trigger shows the placeholder naming the real mode instead
-					 * of falsely reading "No Auth".
+					 * `value=""` when the stored mode isn't one of the editable ones,
+					 * so the trigger shows the placeholder naming the real mode
+					 * instead of falsely reading "No Auth".
 					 */}
 					<Select
 						value={mode ?? ""}
-						onValueChange={(v) => handleModeChange(v as CollectionAuthMode)}
+						onValueChange={(v) => handleModeChange(v as EditableAuthMode)}
 					>
 						<SelectTrigger className="h-9 text-sm">
 							<SelectValue
@@ -207,9 +162,9 @@ export default function AuthTab({ collection }: AuthTabProps) {
 							/>
 						</SelectTrigger>
 						<SelectContent>
-							{AUTH_OPTIONS.map((o) => (
-								<SelectItem key={o.value} value={o.value}>
-									{o.label}
+							{EDITABLE_AUTH_MODES.map((m) => (
+								<SelectItem key={m} value={m}>
+									{AUTH_MODE_LABELS[m]}
 								</SelectItem>
 							))}
 						</SelectContent>
@@ -218,7 +173,24 @@ export default function AuthTab({ collection }: AuthTabProps) {
 				{hint && <div className="text-[11px] text-muted-foreground mt-1.5">{hint}</div>}
 			</div>
 
-			<AuthConfig auth={auth} onChange={setAuth} />
+			{/*
+			 * The same fields the request builder's Auth tab renders. No
+			 * `TextInput` is injected: a collection has no per-request variable
+			 * scope to resolve against at edit time, so the shared default -
+			 * a plain input that accents `{{var}}` - is the right one here.
+			 */}
+			<AuthFields
+				value={auth}
+				onChange={setAuth}
+				noAuthDescription={
+					<>
+						No authentication for this collection.
+						<div className="text-[11px] text-muted-foreground mt-1">
+							Requests using "Inherit from collection" will send no auth.
+						</div>
+					</>
+				}
+			/>
 
 			<SaveFailed mutation={updateCollection} what="auth" className="mt-6" />
 
@@ -233,7 +205,7 @@ export default function AuthTab({ collection }: AuthTabProps) {
 					</Button>
 					<Button
 						variant="outline"
-						onClick={() => setAuth(collection.auth)}
+						onClick={resetDraft}
 						disabled={!isDirty || updateCollection.isPending}
 					>
 						Reset
@@ -256,137 +228,4 @@ export default function AuthTab({ collection }: AuthTabProps) {
 			<InheritanceChain collectionId={collection.id} />
 		</div>
 	);
-}
-
-interface AuthConfigProps {
-	auth: CollectionAuth;
-	onChange: (next: CollectionAuth) => void;
-}
-
-function AuthConfig({ auth, onChange }: AuthConfigProps) {
-	if (auth.mode === "none") {
-		return (
-			<div className="p-6 text-center bg-card border border-border rounded-md">
-				<Lock className="w-3.5 h-3.5 mx-auto text-subtle-foreground mb-2" />
-				<div className="text-sm text-muted-foreground">
-					No authentication for this collection.
-				</div>
-				<div className="text-[11px] text-muted-foreground mt-1">
-					Requests using "Inherit from collection" will send no auth.
-				</div>
-			</div>
-		);
-	}
-
-	if (auth.mode === "bearer") {
-		return (
-			<div>
-				<SectionLabel>Token</SectionLabel>
-				<Input
-					value={auth.token}
-					onChange={(e) => onChange({ ...auth, token: e.target.value })}
-					placeholder="Bearer token or {{variable}}"
-					className={cn("font-mono", auth.token.includes("{{") && "text-variable")}
-				/>
-				<div className="text-[11px] text-muted-foreground mt-1.5">
-					Sent as{" "}
-					<code className="font-mono text-[10px] bg-accent px-1 rounded-sm">
-						Authorization: Bearer &lt;token&gt;
-					</code>
-				</div>
-			</div>
-		);
-	}
-
-	if (auth.mode === "basic") {
-		return (
-			<div className="grid grid-cols-2 gap-3">
-				<div>
-					<SectionLabel>Username</SectionLabel>
-					<Input
-						value={auth.username}
-						onChange={(e) => onChange({ ...auth, username: e.target.value })}
-						placeholder="{{username}}"
-						className={cn("font-mono", auth.username.includes("{{") && "text-variable")}
-					/>
-				</div>
-				<div>
-					<SectionLabel>Password</SectionLabel>
-					<SecretInput
-						value={auth.password}
-						onChange={(password) => onChange({ ...auth, password })}
-						placeholder="{{password}}"
-					/>
-				</div>
-			</div>
-		);
-	}
-
-	if (auth.mode === "apikey") {
-		return (
-			<div className="flex flex-col gap-3.5">
-				<div className="grid grid-cols-2 gap-3">
-					<div>
-						<SectionLabel>Key name</SectionLabel>
-						<Input
-							value={auth.key}
-							onChange={(e) => onChange({ ...auth, key: e.target.value })}
-							placeholder="X-API-Key"
-							className="font-mono"
-						/>
-					</div>
-					<div>
-						<SectionLabel>Value</SectionLabel>
-						<Input
-							value={auth.value}
-							onChange={(e) => onChange({ ...auth, value: e.target.value })}
-							placeholder="{{apiKey}}"
-							className={cn(
-								"font-mono",
-								auth.value.includes("{{") && "text-variable"
-							)}
-						/>
-					</div>
-				</div>
-				<div>
-					<SectionLabel>Add to</SectionLabel>
-					<div className="flex gap-2">
-						{(["header", "query"] as const).map((loc) => {
-							const active = auth.in === loc;
-							return (
-								<button
-									key={loc}
-									type="button"
-									onClick={() => onChange({ ...auth, in: loc })}
-									className={cn(
-										"px-3.5 py-1.5 rounded-md text-xs font-medium border transition-colors",
-										active
-											? "bg-primary/10 border-primary text-primary"
-											: "bg-card border-border text-foreground hover:border-primary/40"
-									)}
-								>
-									{loc === "header" ? "Header" : "Query param"}
-								</button>
-							);
-						})}
-					</div>
-				</div>
-			</div>
-		);
-	}
-
-	if (auth.mode === "oauth2") {
-		/*
-		 * The same form the request builder uses. `OAuth2Form` takes an injected
-		 * `TextInput` precisely so the two hosts can differ - the request side
-		 * passes a variable-aware input, and this one takes the default plain
-		 * input, because a collection has no per-request variable scope to
-		 * resolve against at edit time.
-		 */
-		return (
-			<OAuth2Form value={auth.config} onChange={(config) => onChange({ ...auth, config })} />
-		);
-	}
-
-	return null;
 }

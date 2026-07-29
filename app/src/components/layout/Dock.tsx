@@ -9,7 +9,7 @@ import { FolderOpen, Clock, Braces, PanelRight, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
 import { useLayoutStore, useEngineStore, useSaveStore, type DrawerView } from "@/stores";
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 
 interface DrawerButton {
 	view: DrawerView;
@@ -122,11 +122,19 @@ export function Dock() {
 	const { drawerOpen, drawerView, activateDrawerView, contextBarOpen, toggleContextBar } =
 		useLayoutStore();
 	const { isEngineConnected } = useEngineStore();
-	const { status: saveStatus, errorMessage: saveError } = useSaveStore();
+	const saveStatus = useSaveStore((s) => s.status);
 
+	// No TooltipProvider of its own. A bare nested one would reset this strip to
+	// Radix's 700ms default, ignoring the app-wide delay set in main.tsx.
 	return (
-		<TooltipProvider>
-			<div className="flex items-center h-8 px-2 gap-2 border-t border-border bg-panel shrink-0">
+		<>
+			{/*
+			 * Height comes from --dock-height, not a bare `h-8`, because the toast
+			 * viewport is `fixed` and has to offset itself above this strip - see
+			 * `ui/toast.tsx`. Same value (2rem); the token is what keeps the two
+			 * from drifting apart.
+			 */}
+			<div className="flex items-center h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0">
 				{/* Left - drawer switchers.
 				    <nav>: these four choose what the sidebar shows, which is the
 				    app's primary navigation. Not role="toolbar" - that promises
@@ -173,24 +181,19 @@ export function Dock() {
 						<span className="text-xs text-muted-foreground">Saved</span>
 					)}
 					{/*
-					 * The reason, not just the fact. `save-store` records an
-					 * `errorMessage` on every failure - "database is locked", "disk
-					 * full" - and nothing read it, so every failure looked the same
-					 * and none of them said what to do about it. Same shape as three
-					 * failures found in the dashboard: state written, never read.
+					 * No error line here any more, on purpose.
 					 *
-					 * `title` carries the full text because the strip is narrow and
-					 * the message comes from the engine, so its length is not ours to
-					 * predict.
+					 * This strip used to render `save-store`'s `errorMessage`,
+					 * added because a bare "Save failed" never said *why*. The
+					 * reason still has to reach the user; it now arrives as a
+					 * toast, which is where every other failure in the app is
+					 * reported, and which - unlike a 60-character truncated span
+					 * with the rest in a `title` - has room for an engine message
+					 * like "database is locked".
+					 *
+					 * Guarded by `Dock.save-error.test.tsx`: same requirement, a
+					 * failure says why, asserted against the toast instead.
 					 */}
-					{saveStatus === "error" && (
-						<span
-							className="max-w-60 truncate text-xs text-destructive-text"
-							title={saveError ?? undefined}
-						>
-							{saveError ? `Save failed - ${saveError}` : "Save failed"}
-						</span>
-					)}
 
 					{/*
 					 * Full muted-foreground, not /50. At half opacity the version
@@ -215,6 +218,6 @@ export function Dock() {
 					</DockButton>
 				</div>
 			</div>
-		</TooltipProvider>
+		</>
 	);
 }

@@ -124,14 +124,6 @@ export interface DashboardDerived {
 	breakpoint: Breakpoint;
 }
 
-export interface MetricCardProps {
-	title: string;
-	value: string | number;
-	subtitle?: string;
-	trend?: "up" | "down" | "neutral";
-	color?: "default" | "success" | "warning" | "danger";
-}
-
 export interface RequestResponseViewProps {
 	report: RunReport | null;
 }

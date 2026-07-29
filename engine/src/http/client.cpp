@@ -20,7 +20,9 @@
 #endif
 
 #include "vayu/http/client.hpp"
+#include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/debug_redact.hpp"
+#include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/status.hpp"
 
 #include <curl/curl.h>
@@ -40,6 +42,7 @@ namespace vayu::http {
 // ============================================================================
 
 namespace {
+
 int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, void* userptr) {
     (void)handle;
     (void)userptr;
@@ -211,6 +214,17 @@ Client::Client (Client&&) noexcept            = default;
 Client& Client::operator= (Client&&) noexcept = default;
 
 Result<Response> Client::send (const Request& request) {
+    // Same gate as the event loop's: a request curl cannot send as written is
+    // refused rather than silently sent as something else. Reported as a
+    // status-0 response, not an Error, because send() never returns an Error -
+    // every caller (including /execute, which calls .value() unguarded) reads
+    // the failure off the response.
+    if (auto invalid = detail::validate_transferable (request)) {
+        Response refused        = detail::error_response (*invalid);
+        refused.request_headers = request.headers;
+        return refused;
+    }
+
     impl_->reset ();
     CURL* curl = impl_->curl;
 
@@ -227,31 +241,9 @@ Result<Response> Client::send (const Request& request) {
     // Set URL
     curl_easy_setopt (curl, CURLOPT_URL, request.url.c_str ());
 
-    // Set method
-    switch (request.method) {
-    case HttpMethod::GET: curl_easy_setopt (curl, CURLOPT_HTTPGET, 1L); break;
-    case HttpMethod::POST: curl_easy_setopt (curl, CURLOPT_POST, 1L); break;
-    case HttpMethod::PUT:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "PUT");
-        break;
-    case HttpMethod::DELETE:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-        break;
-    case HttpMethod::PATCH:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "PATCH");
-        break;
-    case HttpMethod::HEAD: curl_easy_setopt (curl, CURLOPT_NOBODY, 1L); break;
-    case HttpMethod::OPTIONS:
-        curl_easy_setopt (curl, CURLOPT_CUSTOMREQUEST, "OPTIONS");
-        break;
-    }
-
-    // Set request body
-    if (request.body.mode != BodyMode::None && !request.body.content.empty ()) {
-        curl_easy_setopt (curl, CURLOPT_POSTFIELDS, request.body.content.c_str ());
-        curl_easy_setopt (curl, CURLOPT_POSTFIELDSIZE,
-        static_cast<long> (request.body.content.size ()));
-    }
+    // Set method and body (shared with the event loop path so the two cannot
+    // disagree about what goes on the wire - see apply_method_and_body)
+    detail::apply_method_and_body (curl, request);
 
     // Set headers
     struct curl_slist* headers_list = nullptr;
@@ -273,7 +265,90 @@ Result<Response> Client::send (const Request& request) {
         curl_easy_setopt (curl, CURLOPT_HTTPHEADER, headers_list);
     }
 
-    // Build raw request string (proper HTTP/1.1 format)
+    // rawRequest's request line names the negotiated protocol, so it can only
+    // be built after the transfer completes - see below, just before the
+    // error-path early return.
+
+    // Set callbacks
+    curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt (curl, CURLOPT_WRITEDATA, &response_body);
+    curl_easy_setopt (curl, CURLOPT_HEADERFUNCTION, header_callback);
+    curl_easy_setopt (curl, CURLOPT_HEADERDATA, &response);
+
+    // Set timeout
+    curl_easy_setopt (curl, CURLOPT_TIMEOUT_MS, static_cast<long> (request.timeout_ms));
+
+    // Set redirect options
+    if (request.follow_redirects) {
+        curl_easy_setopt (curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt (curl, CURLOPT_MAXREDIRS, static_cast<long> (request.max_redirects));
+    }
+
+    // SSL verification
+    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYPEER, request.verify_ssl ? 1L : 0L);
+    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYHOST, request.verify_ssl ? 2L : 0L);
+
+    // Protocol selection. This path (POST /execute, "Send") previously set no
+    // CURLOPT_HTTP_VERSION at all and ran at libcurl's implicit default -
+    // the same NONE value Auto maps to, but not by anything that named the
+    // request's field, so a Send and a load test of the same request had no
+    // structural guarantee of agreeing. Both drivers now go through the one
+    // shared mapping.
+    curl_easy_setopt (curl, CURLOPT_HTTP_VERSION,
+    vayu::http::to_curl_http_version (request.http_version));
+
+    // Verbose output for debugging
+    if (impl_->config.verbose) {
+        curl_easy_setopt (curl, CURLOPT_VERBOSE, 1L);
+        curl_easy_setopt (curl, CURLOPT_DEBUGFUNCTION, debug_callback);
+    }
+
+    // Proxy
+    if (!impl_->config.proxy_url.empty ()) {
+        curl_easy_setopt (curl, CURLOPT_PROXY, impl_->config.proxy_url.c_str ());
+    }
+
+    // Perform the request. Stamp submission just before perform so that
+    // perceived latency excludes our own setup cost above but covers everything
+    // libcurl does on this thread. For single-shot sends there is no generator
+    // queue, so queue_wait_ms will be near zero - that's the correct contract.
+    auto submitted_at = std::chrono::steady_clock::now ();
+    CURLcode res = curl_easy_perform (curl);
+    auto completion = std::chrono::steady_clock::now ();
+
+    // Cleanup headers
+    if (headers_list) {
+        curl_slist_free_all (headers_list);
+    }
+
+    // Get timing info (try to get even on errors, as curl may have partial timing)
+    const detail::CurlPhaseTimes phase_times = detail::read_phase_times (curl);
+
+    // Match the event-loop semantics: total_ms is perceived (submit→completion),
+    // wire_ms is libcurl's view, queue_wait_ms is the delta. See curl_utils.cpp.
+    double perceived_ms = std::chrono::duration<double, std::milli> (
+        completion - submitted_at).count ();
+    double wire_ms = phase_times.total * 1000.0;
+
+    response.timing.total_ms      = perceived_ms;
+    response.timing.wire_ms       = wire_ms;
+    response.timing.queue_wait_ms = std::max (0.0, perceived_ms - wire_ms);
+    // Per-phase durations, clamped and TLS-collapsed by the shared helper -
+    // the event loop had drifted from this code and rendered negative TLS ms.
+    detail::apply_phase_timings (response.timing, phase_times);
+
+    // Negotiated protocol (try to get even on errors, same as timing above -
+    // a transfer that fails after the connection was established still knows
+    // what it negotiated). Empty when nothing was negotiated at all, e.g. a
+    // connection that never reached a server - see http_version_from_curl.
+    long negotiated_version = 0;
+    curl_easy_getinfo (curl, CURLINFO_HTTP_VERSION, &negotiated_version);
+    response.http_version = vayu::http::http_version_from_curl (negotiated_version);
+
+    // Build raw request string. Only buildable now: the request line names
+    // the negotiated protocol, which isn't known until after curl_easy_perform
+    // returns. Everything else here (host/path/headers/body) was already
+    // fixed before the transfer ran.
     std::stringstream raw_req;
 
     // Parse URL to extract host and path
@@ -302,8 +377,20 @@ Result<Response> Client::send (const Request& request) {
         }
     }
 
-    // Request line: METHOD /path HTTP/1.1
-    raw_req << to_string (request.method) << " " << path << " HTTP/1.1\r\n";
+    // Request line: METHOD /path <version>. Normally the negotiated version.
+    // When nothing was negotiated (connection refused, DNS failure) this line
+    // still has to read as syntactically valid HTTP, so it cannot be blank the
+    // way response.http_version is - but it falls back to what was *requested*
+    // rather than a flat HTTP/1.1. Printing HTTP/1.1 after the user asked for
+    // http2 and never reached a server would contradict both their intent and
+    // the outcome, which is the kind of confident wrong answer this whole task
+    // exists to remove. The fallback never reaches response.http_version.
+    std::string display_version = response.http_version;
+    if (display_version.empty ()) {
+        display_version =
+        request.http_version == HttpVersion::Http2 ? "HTTP/2" : "HTTP/1.1";
+    }
+    raw_req << to_string (request.method) << " " << path << " " << display_version << "\r\n";
 
     // Host header (required for HTTP/1.1)
     raw_req << "Host: " << host << "\r\n";
@@ -329,83 +416,6 @@ Result<Response> Client::send (const Request& request) {
         raw_req << request.body.content;
     }
     response.raw_request = raw_req.str ();
-
-    // Set callbacks
-    curl_easy_setopt (curl, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt (curl, CURLOPT_WRITEDATA, &response_body);
-    curl_easy_setopt (curl, CURLOPT_HEADERFUNCTION, header_callback);
-    curl_easy_setopt (curl, CURLOPT_HEADERDATA, &response);
-
-    // Set timeout
-    curl_easy_setopt (curl, CURLOPT_TIMEOUT_MS, static_cast<long> (request.timeout_ms));
-
-    // Set redirect options
-    if (request.follow_redirects) {
-        curl_easy_setopt (curl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt (curl, CURLOPT_MAXREDIRS, static_cast<long> (request.max_redirects));
-    }
-
-    // SSL verification
-    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYPEER, request.verify_ssl ? 1L : 0L);
-    curl_easy_setopt (curl, CURLOPT_SSL_VERIFYHOST, request.verify_ssl ? 2L : 0L);
-
-    // Verbose output for debugging
-    if (impl_->config.verbose) {
-        curl_easy_setopt (curl, CURLOPT_VERBOSE, 1L);
-        curl_easy_setopt (curl, CURLOPT_DEBUGFUNCTION, debug_callback);
-    }
-
-    // Proxy
-    if (!impl_->config.proxy_url.empty ()) {
-        curl_easy_setopt (curl, CURLOPT_PROXY, impl_->config.proxy_url.c_str ());
-    }
-
-    // Perform the request. Stamp submission just before perform so that
-    // perceived latency excludes our own setup cost above but covers everything
-    // libcurl does on this thread. For single-shot sends there is no generator
-    // queue, so queue_wait_ms will be near zero - that's the correct contract.
-    auto submitted_at = std::chrono::steady_clock::now ();
-    CURLcode res = curl_easy_perform (curl);
-    auto completion = std::chrono::steady_clock::now ();
-
-    // Cleanup headers
-    if (headers_list) {
-        curl_slist_free_all (headers_list);
-    }
-
-    // Get timing info (try to get even on errors, as curl may have partial timing)
-    double wire_seconds = 0, namelookup_time = 0, connect_time = 0;
-    double appconnect_time = 0, starttransfer_time = 0;
-
-    curl_easy_getinfo (curl, CURLINFO_TOTAL_TIME, &wire_seconds);
-    curl_easy_getinfo (curl, CURLINFO_NAMELOOKUP_TIME, &namelookup_time);
-    curl_easy_getinfo (curl, CURLINFO_CONNECT_TIME, &connect_time);
-    curl_easy_getinfo (curl, CURLINFO_APPCONNECT_TIME, &appconnect_time);
-    curl_easy_getinfo (curl, CURLINFO_STARTTRANSFER_TIME, &starttransfer_time);
-
-    // Match the event-loop semantics: total_ms is perceived (submit→completion),
-    // wire_ms is libcurl's view, queue_wait_ms is the delta. See curl_utils.cpp.
-    double perceived_ms = std::chrono::duration<double, std::milli> (
-        completion - submitted_at).count ();
-    double wire_ms = wire_seconds * 1000.0;
-
-    response.timing.total_ms      = perceived_ms;
-    response.timing.wire_ms       = wire_ms;
-    response.timing.queue_wait_ms = std::max (0.0, perceived_ms - wire_ms);
-    // curl phase timers are cumulative from request start; a skipped phase
-    // reports 0. APPCONNECT_TIME is 0 for plain HTTP and for reused keep-alive
-    // connections, which made the naive successive differences render TLS as a
-    // negative "-0ms" and over-count TTFB (it absorbed the connect time). Treat
-    // a zero appconnect as "no TLS phase" by collapsing it onto connect_time,
-    // and clamp every delta at 0 (mirrors the queue_wait_ms guard above).
-    double appconnect = appconnect_time > 0.0 ? appconnect_time : connect_time;
-    response.timing.dns_ms = std::max (0.0, namelookup_time * 1000.0);
-    response.timing.connect_ms = std::max (0.0, (connect_time - namelookup_time) * 1000.0);
-    response.timing.tls_ms = std::max (0.0, (appconnect - connect_time) * 1000.0);
-    response.timing.first_byte_ms =
-    std::max (0.0, (starttransfer_time - appconnect) * 1000.0);
-    response.timing.download_ms =
-    std::max (0.0, (wire_seconds - starttransfer_time) * 1000.0);
 
     // Check for errors
     if (res != CURLE_OK) {

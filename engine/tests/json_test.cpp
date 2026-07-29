@@ -135,6 +135,7 @@ TEST (JsonTest, SerializesResponse) {
     response.body                    = R"({"success": true})";
     response.body_size               = response.body.size ();
     response.timing.total_ms         = 123.45;
+    response.http_version            = "HTTP/2";
 
     auto json = serialize (response);
 
@@ -142,7 +143,22 @@ TEST (JsonTest, SerializesResponse) {
     EXPECT_EQ (json["statusText"], "OK");
     EXPECT_EQ (json["headers"]["content-type"], "application/json");
     EXPECT_EQ (json["body"]["success"], true); // Parsed as JSON
-    EXPECT_DOUBLE_EQ (json["timing"]["total"], 123.45);
+    EXPECT_DOUBLE_EQ (json["timing"]["totalMs"], 123.45);
+    EXPECT_EQ (json["httpVersion"], "HTTP/2");
+}
+
+// A response that never got far enough to negotiate anything (e.g. a
+// connection-refused error) has http_version == "" - the default. That must
+// serialize as an honest empty string, not be dropped or coerced into a
+// guess like "HTTP/1.1".
+TEST (JsonTest, SerializesUnnegotiatedResponseHttpVersionAsEmptyString) {
+    Response response;
+    response.status_code = 0;
+
+    auto json = serialize (response);
+
+    ASSERT_TRUE (json.contains ("httpVersion"));
+    EXPECT_EQ (json["httpVersion"], "");
 }
 
 TEST (JsonTest, SerializesError) {
@@ -206,6 +222,38 @@ TEST (JsonTest, HandlesAllHttpMethods) {
     }
 }
 
+TEST (JsonRequest, ParsesHttpVersion) {
+    auto json = nlohmann::json::parse (
+    R"({"method":"GET","url":"https://x/y","httpVersion":"http2"})");
+    auto result = vayu::json::deserialize_request (json);
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().http_version, vayu::HttpVersion::Http2);
+}
+
+TEST (JsonRequest, DefaultsHttpVersionWhenAbsent) {
+    auto json = nlohmann::json::parse (R"({"method":"GET","url":"https://x/y"})");
+    auto result = vayu::json::deserialize_request (json);
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().http_version, vayu::DEFAULT_HTTP_VERSION);
+}
+
+TEST (JsonRequest, CoercesAGarbageStoredValueToAuto) {
+    // A corrupted or downgraded row must not execute as something arbitrary.
+    auto json = nlohmann::json::parse (
+    R"({"method":"GET","url":"https://x/y","httpVersion":"quic"})");
+    auto result = vayu::json::deserialize_request (json);
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().http_version, vayu::HttpVersion::Auto);
+}
+
+TEST (JsonRequest, SerializesHttpVersion) {
+    vayu::Request req;
+    req.method       = vayu::HttpMethod::GET;
+    req.url          = "https://x/y";
+    req.http_version = vayu::HttpVersion::Http1_1;
+    EXPECT_EQ (vayu::json::serialize (req)["httpVersion"], "http1.1");
+}
+
 TEST (JsonTest, SerializesRun) {
     vayu::db::Run run;
     run.id              = "run_123";
@@ -246,6 +294,89 @@ TEST (JsonTest, SerializesMetric) {
     EXPECT_EQ (json["name"], "rps");
     EXPECT_EQ (json["value"], 50.5);
     EXPECT_EQ (json["labels"]["region"], "us-east-1");
+}
+
+// ============================================================================
+// cap_trace_bodies - body caps + truncation metadata
+//
+// The full trace is built by build_result_trace (execution.cpp, pinned by
+// execution_trace_test.cpp); cap_trace_bodies is the storage-size guard applied
+// on top of it, so these tests exercise it on trace literals of that shape.
+// ============================================================================
+
+namespace {
+
+nlohmann::json make_trace (const std::string& request_body, const std::string& response_body) {
+    return nlohmann::json{
+        { "request",
+        { { "method", "POST" }, { "url", "http://example.test/" },
+        { "headers", nlohmann::json::object () }, { "body", request_body } } },
+        { "response",
+        { { "headers", nlohmann::json::object () }, { "body", response_body } } }
+    };
+}
+
+} // namespace
+
+TEST (CapTraceBodies, TruncatesOversizedBodiesAndRecordsMetadata) {
+    const size_t cap = 8;
+    auto trace = make_trace ("REQUESTBODY", "RESPONSEBODY"); // 11 / 12 bytes
+
+    cap_trace_bodies (trace, cap);
+
+    // Response body: stored slice is exactly the cap, metadata reflects the original.
+    ASSERT_TRUE (trace["response"].contains ("body"));
+    EXPECT_EQ (trace["response"]["body"].get<std::string> ().size (), cap);
+    EXPECT_EQ (trace["response"]["body"], "RESPONSE");
+    EXPECT_TRUE (trace["response"]["bodyTruncated"].get<bool> ());
+    EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 12u);
+
+    // Request body is capped the same way.
+    EXPECT_EQ (trace["request"]["body"].get<std::string> ().size (), cap);
+    EXPECT_EQ (trace["request"]["body"], "REQUESTB");
+    EXPECT_TRUE (trace["request"]["bodyTruncated"].get<bool> ());
+    EXPECT_EQ (trace["request"]["bodyBytes"].get<size_t> (), 11u);
+}
+
+TEST (CapTraceBodies, LeavesUnderCapBodiesVerbatimWithoutMetadata) {
+    auto trace = make_trace ("small-request", "small-response");
+
+    cap_trace_bodies (trace, 1024);
+
+    EXPECT_EQ (trace["response"]["body"], "small-response");
+    EXPECT_FALSE (trace["response"].contains ("bodyTruncated"));
+    EXPECT_FALSE (trace["response"].contains ("bodyBytes"));
+
+    EXPECT_EQ (trace["request"]["body"], "small-request");
+    EXPECT_FALSE (trace["request"].contains ("bodyTruncated"));
+    EXPECT_FALSE (trace["request"].contains ("bodyBytes"));
+}
+
+TEST (CapTraceBodies, InvalidUtf8SliceDumpsWithReplacement) {
+    // A cap that splits a multi-byte UTF-8 sequence must not make dump() throw.
+    // "abc" + a 2-byte sequence (0xC3 0xA9 = e-acute); cap 4 keeps the lead byte only.
+    auto trace = make_trace ("x", std::string ("abc\xC3\xA9"));
+
+    cap_trace_bodies (trace, 4);
+
+    EXPECT_TRUE (trace["response"]["bodyTruncated"].get<bool> ());
+    EXPECT_NO_THROW (
+    (void)trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace));
+}
+
+TEST (CapTraceBodies, IgnoresAnErrorTraceWithNoResponseBody) {
+    // An error trace carries error_type/error_message and no response node - the
+    // cap must leave it untouched rather than fabricate a body.
+    nlohmann::json trace{ { "request",
+                          { { "method", "GET" }, { "url", "http://x/" },
+                          { "headers", nlohmann::json::object () } } },
+        { "error_type", "CONNECTION_FAILED" },
+        { "error_message", "could not connect" } };
+
+    EXPECT_NO_THROW (cap_trace_bodies (trace, 4));
+    EXPECT_FALSE (trace.contains ("response"));
+    EXPECT_FALSE (trace["request"].contains ("bodyTruncated"));
+    EXPECT_EQ (trace["error_type"], "CONNECTION_FAILED");
 }
 
 } // namespace

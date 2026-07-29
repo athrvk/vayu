@@ -9,6 +9,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
+import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import LoadTestDetail from "../LoadTestDetail";
@@ -22,7 +23,13 @@ import type { RunReport } from "@/types";
  */
 function renderWithClient(ui: ReactElement) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-	return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+	// Components here use `InfoChip`, which no longer brings its own
+	// `TooltipProvider` - the delay is set once at the app root (main.tsx).
+	return render(
+		<QueryClientProvider client={qc}>
+			<TooltipProvider>{ui}</TooltipProvider>
+		</QueryClientProvider>
+	);
 }
 
 function report(mode: string, cfg: Record<string, unknown>): RunReport {
@@ -73,16 +80,10 @@ function report(mode: string, cfg: Record<string, unknown>): RunReport {
 	};
 }
 
-const noop = () => {};
-
 describe("LoadTestDetail (mode-adaptive)", () => {
 	it("constant_rps", () => {
 		const { container } = renderWithClient(
-			<LoadTestDetail
-				report={report("constant_rps", { targetRps: 200 })}
-				onBack={noop}
-				runId="r"
-			/>
+			<LoadTestDetail report={report("constant_rps", { targetRps: 200 })} runId="r" />
 		);
 		expect(container.innerHTML).toMatchSnapshot();
 	});
@@ -90,7 +91,6 @@ describe("LoadTestDetail (mode-adaptive)", () => {
 		const { container } = renderWithClient(
 			<LoadTestDetail
 				report={report("constant_concurrency", { concurrency: 50 })}
-				onBack={noop}
 				runId="r"
 			/>
 		);
@@ -98,11 +98,7 @@ describe("LoadTestDetail (mode-adaptive)", () => {
 	});
 	it("iterations", () => {
 		const { container } = renderWithClient(
-			<LoadTestDetail
-				report={report("iterations", { concurrency: 20 })}
-				onBack={noop}
-				runId="r"
-			/>
+			<LoadTestDetail report={report("iterations", { concurrency: 20 })} runId="r" />
 		);
 		expect(container.innerHTML).toMatchSnapshot();
 	});
@@ -114,7 +110,6 @@ describe("LoadTestDetail (mode-adaptive)", () => {
 					startConcurrency: 1,
 					rampUpDuration: "2s",
 				})}
-				onBack={noop}
 				runId="r"
 			/>
 		);

@@ -19,6 +19,8 @@
 
 import { create } from "zustand";
 
+import { useToastStore } from "./toast-store";
+
 export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 
 /** Save context - represents a saveable entity in the app */
@@ -33,11 +35,28 @@ export interface SaveContext {
 	hasPendingChanges: boolean;
 }
 
+/**
+ * Every failure is reported by a toast, and `failSave` is the single place that
+ * does it.
+ *
+ * Failures used to arrive on two different surfaces depending on which file you
+ * were in: `showToast` in the dialogs, the dashboard, MCP and OAuth, and this
+ * store -> the Dock everywhere else. Worse, "everywhere else" included things
+ * that are not saves at all - `CollectionTree` routed a failed *delete* through
+ * here, so deleting a collection and failing produced "Save failed - ...".
+ *
+ * Doing it here rather than at the call sites is deliberate: there were eight of
+ * them, and a missed one is a failure that reports nowhere at all.
+ *
+ * This also removes the `errorMessage` field the store used to hold. Its only
+ * reader was the Dock's error line, which this replaces; the copy re-exported
+ * from `useSaveManager` already had no reader. Keeping a field nothing reads is
+ * the defect this codebase hits most often, so it goes.
+ */
 interface SaveState {
 	// Save status
 	status: SaveStatus;
 	lastSavedAt: number | null;
-	errorMessage: string | null;
 
 	// Pending save tracking
 	pendingSaveId: string | null;
@@ -54,7 +73,6 @@ interface SaveState {
 	startSaving: () => void;
 	completeSave: () => void;
 	failSave: (error: string) => void;
-	clearError: () => void;
 	reset: () => void;
 
 	// Context management
@@ -75,32 +93,26 @@ export const useSaveStore = create<SaveState>((set, get) => {
 	// Internal helper - runs a save for the given context and updates store state.
 	// Caller must own the in-progress guard if needed.
 	const runSave = async (context: SaveContext) => {
-		set({ status: "saving", errorMessage: null });
+		set({ status: "saving" });
 		try {
 			await context.save();
 			set({
 				status: "saved",
 				lastSavedAt: Date.now(),
 				pendingSaveId: null,
-				errorMessage: null,
 			});
 			setTimeout(() => {
 				// Only reset to idle if we're still in the "saved" state
 				if (get().status === "saved") get().setStatus("idle");
 			}, 2000);
 		} catch (error) {
-			set({
-				status: "error",
-				errorMessage: error instanceof Error ? error.message : "Save failed",
-				pendingSaveId: null,
-			});
+			get().failSave(error instanceof Error ? error.message : "Save failed");
 		}
 	};
 
 	return {
 		status: "idle",
 		lastSavedAt: null,
-		errorMessage: null,
 		pendingSaveId: null,
 		activeContextId: null,
 		contexts: new Map(),
@@ -111,41 +123,26 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			set({
 				status: "pending",
 				pendingSaveId: id,
-				errorMessage: null,
 			}),
 
-		startSaving: () =>
-			set({
-				status: "saving",
-				errorMessage: null,
-			}),
+		startSaving: () => set({ status: "saving" }),
 
 		completeSave: () =>
 			set({
 				status: "saved",
 				lastSavedAt: Date.now(),
 				pendingSaveId: null,
-				errorMessage: null,
 			}),
 
-		failSave: (error) =>
-			set({
-				status: "error",
-				errorMessage: error,
-				pendingSaveId: null,
-			}),
-
-		clearError: () =>
-			set({
-				status: "idle",
-				errorMessage: null,
-			}),
+		failSave: (error) => {
+			set({ status: "error", pendingSaveId: null });
+			useToastStore.getState().showToast(error, "error");
+		},
 
 		reset: () =>
 			set({
 				status: "idle",
 				lastSavedAt: null,
-				errorMessage: null,
 				pendingSaveId: null,
 			}),
 

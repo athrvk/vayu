@@ -38,7 +38,11 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		health: async () => ({ status: "ok", version: "9.9.9" }),
 		getConfig: async () => ({ entries: [{ key: "workers", value: "8" }] }),
 		getRunReport: async () => REPORT,
-		listRuns: async () => [{ id: "run_1" }, { id: "run_2" }],
+		// The paginated envelope the engine now returns (rows carry a summary).
+		listRuns: async () => ({
+			data: [{ id: "run_1" }, { id: "run_2" }],
+			pagination: { total: 2, limit: 100, offset: 0, hasMore: false, returned: 2 },
+		}),
 		listCollections: async () => [{ id: "col_1", name: "API" }],
 		listEnvironments: async () => [],
 		startRun: vi.fn().mockResolvedValue({ runId: "run_1", status: "running" }),

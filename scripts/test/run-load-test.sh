@@ -66,7 +66,13 @@ if [ -z "$RUN_ID" ]; then
 fi
 
 DAEMON_URL="http://127.0.0.1:9876"
-LIVE_METRICS_URL="$DAEMON_URL/metrics/live/$RUN_ID"
+LIVE_METRICS_URL="$DAEMON_URL/runs/$RUN_ID/live"
+# Deliberately /stats/:id, not /runs/:id/metrics. This is streamed as SSE by
+# stream_sse below; /stats/:id in its SSE mode is legacy DB-polling that was
+# retained wholesale and has no canonical rename. /runs/:id/metrics is the
+# rename of /stats/:id?format=json only - it returns a {data,pagination} JSON
+# body, so swapping it in here would feed curl -N something with no
+# event:/data: lines and the fallback would silently stream nothing.
 STATS_URL="$DAEMON_URL/stats/$RUN_ID"
 
 echo ""

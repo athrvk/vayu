@@ -9,38 +9,36 @@
  */
 
 /**
- * A restored tab must find its request on a cold start.
+ * A restored tab must find its request on a cold start - in one lookup.
  *
  * `openTabs` is persisted, so on launch every restored request tab calls
- * `useRequestQuery` immediately - before anything has fetched a collection's
- * request list. The old implementation only *read* the cache: detail cache,
- * then the `requests.lists()` caches, then throw. So on a cold start it threw,
- * retried 3× at 100ms, and gave up.
+ * `useRequestQuery` immediately. It now hits `GET /requests/:id` directly, so
+ * there is no window to lose: the engine either returns the request or a
+ * definitive 404. The old implementation scanned every collection's list
+ * (the N+1 fan-out) and, worse, only *read* the cache - so on a cold start it
+ * threw, and `staleTime: Infinity` parked that error permanently.
  *
- * The part that made it permanent rather than transient: `staleTime: Infinity`
- * parks the error, so when `usePrefetchCollectionsAndRequests` finally filled
- * those lists a second later, nothing re-ran. The tab showed "Request not
- * found" until you clicked the request in the sidebar again.
- *
- * These tests start from a genuinely empty QueryClient - no seeding - because
- * seeding the cache reproduces the state *after* the race, which is the one
- * case that always worked.
+ * The load-bearing behaviour these tests lock is the error split: a 404 is a
+ * genuine deletion (`RequestNotFoundError`), and everything else - a 5xx, an
+ * unreachable engine - is a transport failure that must NOT be mistaken for one.
+ * That is the bug the old `.catch(() => [])` scan could not avoid.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useRequestQuery } from "./collections";
+import { useRequestQuery, isRequestNotFound } from "./collections";
 import { queryKeys } from "./keys";
+import { ApiError } from "@/services";
 
-const listCollections = vi.fn();
-const listRequests = vi.fn();
+const getRequest = vi.fn();
 
+// Only apiService is mocked; ApiError stays the real class from ./http-client,
+// so `error instanceof ApiError` in the hook matches what we throw here.
 vi.mock("@/services/api", () => ({
 	apiService: {
-		listCollections: (...a: unknown[]) => listCollections(...a),
-		listRequests: (...a: unknown[]) => listRequests(...a),
+		getRequest: (...a: unknown[]) => getRequest(...a),
 	},
 }));
 
@@ -65,16 +63,12 @@ function wrapper(client: QueryClient) {
 }
 
 beforeEach(() => {
-	listCollections.mockReset();
-	listRequests.mockReset();
-	listCollections.mockResolvedValue([{ id: "col_a" }, { id: "col_b" }]);
-	listRequests.mockImplementation(({ collectionId }: { collectionId: string }) =>
-		Promise.resolve(collectionId === "col_b" ? [REQ] : [{ id: "req_1", collectionId: "col_a" }])
-	);
+	getRequest.mockReset();
 });
 
 describe("cold start, nothing cached", () => {
-	it("finds the request instead of reporting it missing", async () => {
+	it("finds the request in a single lookup", async () => {
+		getRequest.mockResolvedValue(REQ);
 		const client = makeClient();
 		const { result } = renderHook(() => useRequestQuery("req_2"), {
 			wrapper: wrapper(client),
@@ -83,33 +77,13 @@ describe("cold start, nothing cached", () => {
 		await waitFor(() => expect(result.current.isLoading).toBe(false));
 		expect(result.current.data).toMatchObject({ id: "req_2", name: "Get user" });
 		expect(result.current.isError).toBe(false);
-	});
-
-	it("fetches the lists itself rather than waiting for a prefetch", async () => {
-		const client = makeClient();
-		const { result } = renderHook(() => useRequestQuery("req_2"), {
-			wrapper: wrapper(client),
-		});
-
-		await waitFor(() => expect(result.current.data).toBeTruthy());
-		expect(listCollections).toHaveBeenCalled();
-		expect(listRequests).toHaveBeenCalledWith({ collectionId: "col_b" });
-	});
-
-	it("hydrates the shared list cache, so the sidebar does not refetch", async () => {
-		const client = makeClient();
-		const { result } = renderHook(() => useRequestQuery("req_2"), {
-			wrapper: wrapper(client),
-		});
-
-		await waitFor(() => expect(result.current.data).toBeTruthy());
-		expect(client.getQueryData(queryKeys.requests.listByCollection("col_b"))).toEqual([REQ]);
+		expect(getRequest).toHaveBeenCalledWith("req_2");
 	});
 });
 
 describe("when the request really is gone", () => {
-	it("errors, so the pane can say so honestly", async () => {
-		listRequests.mockResolvedValue([]);
+	it("errors as a RequestNotFoundError, so the pane can say so honestly", async () => {
+		getRequest.mockRejectedValue(new ApiError(404, "not_found", "gone"));
 		const client = makeClient();
 		const { result } = renderHook(() => useRequestQuery("req_gone"), {
 			wrapper: wrapper(client),
@@ -117,34 +91,60 @@ describe("when the request really is gone", () => {
 
 		await waitFor(() => expect(result.current.isError).toBe(true));
 		expect(result.current.data).toBeUndefined();
+		expect(isRequestNotFound(result.current.error)).toBe(true);
+	});
+
+	it("does not retry a definitive 404", async () => {
+		getRequest.mockRejectedValue(new ApiError(404, "not_found", "gone"));
+		const client = makeClient();
+		const { result } = renderHook(() => useRequestQuery("req_gone"), {
+			wrapper: wrapper(client),
+		});
+
+		await waitFor(() => expect(result.current.isError).toBe(true));
+		// A 404 is final - one call, no retry storm.
+		expect(getRequest).toHaveBeenCalledTimes(1);
 	});
 });
 
-describe("resilience", () => {
-	it("one unreadable collection does not hide a request in another", async () => {
-		listRequests.mockImplementation(({ collectionId }: { collectionId: string }) =>
-			collectionId === "col_a" ? Promise.reject(new Error("boom")) : Promise.resolve([REQ])
-		);
+describe("a transport failure is not a deletion", () => {
+	it("does not turn a 5xx into RequestNotFoundError", async () => {
+		getRequest.mockRejectedValue(new ApiError(500, "engine_error", "boom"));
 		const client = makeClient();
 		const { result } = renderHook(() => useRequestQuery("req_2"), {
 			wrapper: wrapper(client),
 		});
 
-		await waitFor(() => expect(result.current.isLoading).toBe(false));
-		expect(result.current.data).toMatchObject({ id: "req_2" });
+		// A non-404 retries a bounded number of times before settling.
+		await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 2000 });
+		// The bug fix: a 5xx must stay a transport failure, so callers like
+		// DesignRunView do not replay an orphan's recorded headers by mistake.
+		expect(isRequestNotFound(result.current.error)).toBe(false);
 	});
 
-	it("still prefers the cache and makes no network call when already loaded", async () => {
+	it("does not turn an unreachable engine into RequestNotFoundError", async () => {
+		getRequest.mockRejectedValue(new Error("Network error: connection refused"));
 		const client = makeClient();
-		client.setQueryData(queryKeys.requests.listByCollection("col_b"), [REQ]);
+		const { result } = renderHook(() => useRequestQuery("req_2"), {
+			wrapper: wrapper(client),
+		});
+
+		await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 2000 });
+		expect(isRequestNotFound(result.current.error)).toBe(false);
+	});
+});
+
+describe("cache and gating", () => {
+	it("serves an already-cached request without a network call", async () => {
+		const client = makeClient();
+		client.setQueryData(queryKeys.requests.detail("req_2"), REQ);
 
 		const { result } = renderHook(() => useRequestQuery("req_2"), {
 			wrapper: wrapper(client),
 		});
 
 		await waitFor(() => expect(result.current.data).toBeTruthy());
-		expect(listCollections).not.toHaveBeenCalled();
-		expect(listRequests).not.toHaveBeenCalled();
+		expect(getRequest).not.toHaveBeenCalled();
 	});
 
 	it("is disabled without an id", () => {
@@ -153,6 +153,6 @@ describe("resilience", () => {
 			wrapper: wrapper(client),
 		});
 		expect(result.current.fetchStatus).toBe("idle");
-		expect(listCollections).not.toHaveBeenCalled();
+		expect(getRequest).not.toHaveBeenCalled();
 	});
 });

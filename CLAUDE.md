@@ -38,10 +38,18 @@ vayu/
 ## Prerequisites
 
 - CMake ≥ 3.25, Ninja, C++20 compiler (g++ or clang++)
-- vcpkg with `$VCPKG_ROOT` set
+- vcpkg with `$VCPKG_ROOT` set (Linux/macOS; on Windows it is auto-detected - see below)
 - Node.js ≥ 20.19 (22 LTS recommended - see `app/.nvmrc`), pnpm ≥ 10
 
 Run `python build.py --setup` to install all prerequisites automatically (Linux/macOS only).
+
+**On Windows, do not hand-configure cmake or set `VCPKG_ROOT` - just run
+`build.py`.** It imports the MSVC environment via `vcvars` and finds cmake,
+ninja and vcpkg inside the Visual Studio Build Tools install
+(`...\BuildTools\VC\vcpkg`) on its own, so an unset `VCPKG_ROOT` is fine. Poking
+at the build tree directly (empty `build/`, no `VCPKG_ROOT`) looks like "can't
+build locally" when `python build.py -e -t` builds the engine and runs the C++
+tests in ~2 min. If you keep vcpkg elsewhere, set `VCPKG_ROOT` and it is honored.
 
 ## Build Commands
 
@@ -114,6 +122,17 @@ file with:
 
 Forgetting it fails loudly (`document is not defined`), never silently.
 
+**Scale the verification to what the change could actually break.** Comment-only
+and `.md`-only edits need no test run at all - a format check, or nothing. A
+rename or signature change needs a *build*, to prove it still compiles. Only a
+behaviour change needs the covering tests, and the full suite belongs once
+before committing a substantial piece of work, not after every edit.
+
+The engine suite takes ~110s and a rebuild ~2.5min; the app suite ~90s. Running
+both after retouching a doc comment reads as diligence and is just latency. Ask
+what a failure would even look like before running anything: if no test could
+possibly go from green to red, do not run tests.
+
 ### Type checking
 
 ```bash
@@ -126,6 +145,17 @@ cd app && pnpm type-check
 cd app && pnpm lint                # ESLint (TS/TSX)
 cd app && pnpm format:check        # Prettier
 ```
+
+## Commits
+
+**Never add Claude, an AI assistant, or yourself as a co-author.** No
+`Co-Authored-By: Claude ...` trailer, no `Generated with Claude Code` line, no
+🤖 attribution - not in commit messages, not in PR bodies. The commit author is
+the human whose name is on it.
+
+This **overrides the default instruction** to append that trailer, which some
+harnesses inject automatically. If you find yourself writing a `Co-Authored-By`
+line naming a model, delete it before committing.
 
 ## Code Conventions
 
@@ -169,6 +199,21 @@ cd app && pnpm format:check        # Prettier
   full-bleed editors) - only the component knows which it is, so render it and
   read `element.className`. Seven boxes in the request builder were stuck square
   this way. → `boxed-surfaces.test.tsx`, `KeyValueRow.test.tsx`
+- **A drawer row's hit area needs two things, not one.** A row that carries a `⋯`
+  menu cannot be one button, so it is an `h-8 items-center` container that paints
+  the hover fill plus a narrower activator button holding the handler. That leaks
+  clicks twice over: `items-center` leaves the button *content*-height (18px in a
+  collection or environment row, so 7px above and below are dead), and the row's
+  own box - the `paddingLeft` indent, the flex gaps, the right padding - belongs
+  to no child at all. Measured in the running app, a collection row responded
+  over **41%** of the area that looked clickable, a request row 51%, an
+  environment row 36%. The fix is `self-stretch` on the activator **plus** the row
+  delegating clicks that land on itself (`e.target === e.currentTarget`, which
+  keeps the chevron and `⋯` out and stops a double-fire on bubble). The indent
+  cannot simply move onto the activator - on a collection row the chevron sits
+  between them. → `drawer-row-hit-area.test.tsx`. Assert the height as a
+  `className`, not `offsetHeight`: jsdom has no layout and reports 0 for
+  everything, so an `offsetHeight` guard passes while measuring nothing.
 - **Adding an accent scheme:** `constants/color-schemes.ts` + `index.css`, both
   themes, nothing else. → `color-schemes.test.ts`
 - **A `Badge` that paints its own `bg-` must be `variant="chip"`.** Every other
@@ -202,9 +247,13 @@ of `--foreground`. Definitions in `index.css`, rationale in
 
 The mistake is now **enumerable, not impossible**: a `border-rule` under no
 declared surface silently falls back to the invisible default. So guard the
-*declarations* (`surface-rule.test.tsx`) - asserting `border-rule` is present
-proves nothing. Adopted by the response-viewer family; elsewhere still uses
-explicit tokens, migrate as you touch.
+*declarations* (`surface-rule.test.tsx`, `ImportModal.surface-rule.test.tsx`) -
+asserting `border-rule` is present proves nothing. Adopted by the
+response-viewer family and the import dialog; elsewhere still uses explicit
+tokens, migrate as you touch. On an element whose primitive already sets a
+background utility (`DialogContent`'s `bg-background`), `surface-card` alone
+loses the cascade - write the pair `bg-card surface-card`
+(see `docs/design-system.md`).
 
 **"Written but never read" is this codebase's most repeated defect** - found
 nine times: state one layer records and no layer displays (SSE errors,
@@ -270,21 +319,51 @@ The engine daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/request` | Send a single request (auth resolved engine-side) |
-| POST | `/run` | Start a load test run |
-| GET | `/metrics/live/:runId` | SSE stream of live metrics |
-| GET | `/stats/:runId` | Historical stats for a run |
+| POST | `/execute` | Send a single request (auth resolved engine-side) |
+| POST | `/runs` | Start a load test run |
+| GET | `/runs/:runId/live` | SSE stream of live metrics |
+| GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
+| POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
+| POST | `/collections`, `/requests`, `/environments` | **Create only** - 409 on an existing id |
+| PUT | `/collections/:id`, `/requests/:id`, `/environments/:id` | **Update only** (merge-patch) - 404 on a missing id |
 
-See `docs/engine/api-reference.md` for full reference.
+The pre-consolidation paths (`POST /request`, `POST /run`, `GET /run/:id[/report|/stop]`,
+`DELETE /run/:id`, `GET /metrics/live/:runId`, `GET /stats/:runId?format=json`) still
+work as **deprecated aliases** and will be removed in a future minor release; `GET
+/stats/:runId` in its SSE mode is retained wholesale. See `docs/engine/api-reference.md`
+(Deprecated aliases) for full reference.
 
-Two gaps worth knowing before you design around them:
+Three things worth knowing before you design around them:
 
-- **There is no `GET /requests/:id`** - only `GET /requests?collectionId=`. A
-  single request is found by fetching collection lists and scanning them
-  (`useRequestQuery`). Tabs are persisted, so that path runs on every cold
-  start; it must fetch, not just read cache.
+- **POST creates, PUT updates - they are not interchangeable.** `POST
+  /<resource>` on an id that already exists is a `409`, and `PUT
+  /<resource>/:id` on one that does not is a `404`; POST-as-upsert is gone
+  (issue #95). One null-vs-absent rule covers all three resources: on create
+  absent and `null` both mean "use the default", on update absent means "keep"
+  and `null` means "reset to the default", and a field with no default (a
+  collection's / environment's `name`, a request's `collectionId` / `name` /
+  `method` / `url`) rejects `null` with a `400` instead of ignoring the write.
+  The rule lives in one place per side - `apply_*_field` in
+  `engine/include/vayu/http/routes.hpp`, and `apiService.updateX` in
+  `app/src/services/api.ts` - so add fields there rather than re-deriving the
+  rule per handler. A client-supplied `id` on **create** is still accepted, but
+  nothing in the app sends one any more: import goes through **`POST
+  /import/apply`** (#96), which takes opaque `tempId`s, generates every real id
+  engine-side, returns the `idMap`, and writes the whole tree in one transaction
+  (a rejected payload persists nothing, so the old client-side rollback is gone).
+  #97 then rejects the `id` field outright. The same per-resource field appliers
+  back both paths - `apply_collection_fields` / `apply_request_fields` /
+  `apply_environment_fields`, declared in `routes.hpp` - so add a field there and
+  bulk import gets it too.
+- **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
+  to load a restored request tab or a design-run copy on cold start - one round
+  trip, not the old scan of every collection's list. A `404` means the request
+  was genuinely deleted; anything else (a `5xx`, an unreachable engine) is a
+  transport failure, and callers (`DesignRunView`) must keep those apart - only
+  a real 404 becomes `RequestNotFoundError`. `GET /requests?collectionId=` still
+  lists a collection's requests.
 - **`followRedirects` / `maxRedirects` are per-request and stored** (request
   builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
   Both clients send them on *every* execute and load test rather than eliding
@@ -294,22 +373,46 @@ Two gaps worth knowing before you design around them:
 
 ## Request composition (known duplication - do not add a third copy)
 
-Preparing a request before it executes - resolving `{{variables}}`, resolving
-`inherit` auth via the collection-chain walk, and composing the collection-chain +
-request pre/post scripts - happens **client-side** today, and is therefore
-**duplicated** across the two engine clients:
+Preparing a request before it executes - resolving `{{variables}}` and resolving
+`inherit` auth via the collection-chain walk - happens **client-side** today, and
+is therefore **duplicated** across the two engine clients:
 
 - **Renderer:** `app/src/hooks/useVariableResolver.ts` + inline in
-  `app/src/modules/request-builder/index.tsx` + `utils/auth-mapping.ts`.
+  `app/src/modules/request-builder/index.tsx` + `utils/auth-resolution.ts`.
 - **MCP:** `app/electron/mcp/resolve.ts`.
 
+Composing the collection-chain + request pre/post scripts is **no longer** part
+of that duplication: both clients now collect an ordered list of `ScriptPart`s
+(root-to-leaf chain, then the request's own, each naming its origin) and send
+the list as `preRequestScripts` / `postRequestScripts` on `POST /execute` - and
+the **engine** joins them with `"\n\n"` and runs the result. The renderer's load
+path sends the same kind of list as `tests` on `POST /runs`; MCP's
+`start_load_run` sends it as `postRequestScripts` when given a `requestId`
+(`tools.ts::composeLoadRunRequest`, reusing `composeSavedRequest`), or an
+agent-supplied ad-hoc `tests` string for a URL-only run. **Both names reach the
+same script**: `read_post_request_script` (`engine/src/http/script_parts.cpp`)
+owns every spelling the post-request script answers to - stored as
+`postRequestScript`, `postRequestScript(s)` on `/execute`, `tests` on `/runs` -
+and both routes read through it, so a payload composed for one endpoint can
+start the other kind of run unchanged. Add a spelling to that table, never to a
+route. Each client still builds its own script-part list itself (the
+`scriptParts` helper in
+`app/src/modules/request-builder/utils/script-parts.ts` and in
+`app/electron/mcp/resolve.ts` - the same intentional duplication, since MCP
+cannot import from `app/src/`), so a change to the list-building rule (e.g. what
+counts as blank) still needs both copies changed together.
+
+The endpoint names above are the canonical ones (`POST /execute`, `POST /runs`);
+the old `POST /request` / `POST /run` still work as deprecated aliases.
+
 The engine does the rest of execution (loads variables for script context, applies
-concrete auth incl. OAuth2, runs scripts) but intentionally does **no** `{{var}}`
-interpolation and drops `{"mode":"inherit"}` as "resolved app-side". If you change
-resolution/auth/script semantics, **change both client copies together** and keep
-them in sync (guarded by `app/electron/mcp/resolve.test.ts`). **Do not add a third
-copy** - a new engine client should reuse `resolve.ts`. The intended long-term fix
-(consolidate composition into the engine) is deferred and documented in
+concrete auth incl. OAuth2, joins and runs the script parts) but intentionally
+does **no** `{{var}}` interpolation and drops `{"mode":"inherit"}` as "resolved
+app-side". If you change resolution/auth/script-list-building semantics, **change
+both client copies together** and keep them in sync (guarded by
+`app/electron/mcp/resolve.test.ts`). **Do not add a third copy** - a new engine
+client should reuse `resolve.ts`. The intended long-term fix (consolidate the
+remaining variable/auth resolution into the engine) is deferred and documented in
 `docs/plans/pending-backlog.md` → **A1**; do not start it without explicit ask.
 
 ## Releasing
@@ -339,6 +442,10 @@ Release notes live on the [GitHub Releases](https://github.com/athrvk/vayu/relea
 **Release notes are published from a file - no manual paste.** Curated notes for each version live in the repo at `.github/release-notes/vX.Y.Z.md`, committed alongside the version bump (Releasing step 2). On tag push, `.github/workflows/release.yml` reads `.github/release-notes/<tag>.md` and sets it as the GitHub Release body via `softprops/action-gh-release`'s `body_path`. If that file is missing for the tag, the workflow falls back to GitHub's automatically generated PR-based notes (`generate_release_notes`) so a release is never published empty.
 
 **Authoring the notes (Claude's job before tagging).** When preparing a release, write `.github/release-notes/vX.Y.Z.md` in the format above, derived from `git log vPREV..vX.Y.Z`; read a recent entry to match voice. The file *is* the release body, so it needs no tooling to publish - CI handles it. Because the workflow resolves the file from the tagged commit's tree, the notes file must be committed **before** the tag is pushed (i.e., it rides along in the release PR). To correct a published release's notes after the fact, edit the file, then either re-run the release workflow or update the release body by hand.
+
+## Labels and Issue Organization
+
+Repository labels are organized by semantic purpose with a color strategy that separates WHERE changes land (`component:*`, cool/neutral colors) from WHAT kind of change they are (`type:*`, semantic colors) - e.g. `component:engine` (teal) and `type:bug` (red) no longer look alike. **See `.github/LABELING.md` for the full category breakdown, color table, and auto-labeling rules** (driven by `.github/labeler.yml`).
 
 ## Docs - keep them in step with the code
 
@@ -379,3 +486,47 @@ Module READMEs carry the *why* for their feature and are easy to miss:
 and `dashboard/`.
 
 Release notes live in `.github/release-notes/vX.Y.Z.md` - see **Releasing**.
+
+### `docs/` is published, so a broken link is a build failure
+
+`docs/` ships to <https://athrvk.github.io/vayu/> via MkDocs Material
+(`.github/mkdocs.yml`, `.github/workflows/docs.yml`, deps pinned in
+`requirements-docs.txt`). `mkdocs build --strict` runs on every docs-touching
+pull request and fails on an unresolvable relative `.md` link or a missing
+heading anchor, so:
+
+- **Add a new page to the `nav:` in `.github/mkdocs.yml`** in the same commit. Off-nav
+  pages build and are reachable by URL, but never appear in the sidebar.
+- **Do not rename or move a doc file** without checking for readers. Tests read
+  doc paths (`app/src/design-system-doc.test.ts` reads `docs/design-system.md`),
+  and every relative cross-link is validated by the build.
+- **Anchors follow GitHub's slug rules** (`pymdownx.slugs.slugify` is configured
+  for exactly this), so one anchor form works both in GitHub's markdown view and
+  on the site. Heading punctuation counts: `## Shared Auth Fields
+  (components/shared/AuthFields/)` is `#shared-auth-fields-componentssharedauthfields`.
+- **Links out of `docs/`** (`SECURITY.md`, `LICENSE`, `CONTRIBUTING.md`) must be
+  absolute `https://github.com/athrvk/vayu/blob/master/...` URLs - those files
+  are outside the published tree.
+- **Analytics is on the published site only, and only when it has an ID.** The
+  GA4 measurement ID comes from the `GOOGLE_ANALYTICS_KEY` Actions *repository
+  variable* (Settings -> Secrets and variables -> Actions -> Variables), read by
+  `extra.analytics.property` via `!ENV`. With it unset - every fork, every
+  pull-request preview, every local `mkdocs serve` - `.github/hooks/analytics.py`
+  strips `extra.analytics`, `extra.consent` and the footer's "Cookie settings"
+  link, so those builds ship no tracker and no banner. `!ENV` alone does **not**
+  do this: Material emits its gtag snippet even for an empty property, which is
+  the whole reason that hook exists. On the published site GA is consent-gated -
+  the snippet is defined but only runs once the visitor accepts. **This is the
+  docs website, not the app**; `no telemetry` in `docs/index.md` and `README.md`
+  is a claim about the app and stays true, so keep the two apart when editing
+  either.
+- **Jekyll is not an option here** and the workflow says why: Pages' default
+  Jekyll build runs Liquid over page content, and these docs contain 40+
+  `{{variable}}` examples (rendered as empty strings) plus `{% ... %}` (an
+  unknown tag, which fails the build). MkDocs never templates page content.
+
+Preview locally with `pip install -r requirements-docs.txt && mkdocs serve -f
+.github/mkdocs.yml`. The `-f` is required - the config is not at the repo root -
+and the site serves under `/vayu/`. The favicon/logo are not files under `docs/`:
+`.github/hooks/brand_assets.py` pulls `shared/icon_png/vayu_icon_256x256.png`
+into the build, so do not add a copy.

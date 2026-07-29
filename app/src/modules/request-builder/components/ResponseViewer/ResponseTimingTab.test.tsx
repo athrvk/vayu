@@ -7,23 +7,35 @@
 
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { TooltipProvider } from "@/components/ui";
 import ResponseTimingTab from "./ResponseTimingTab";
 import type { ResponseTiming } from "../../types";
 
 const sample: ResponseTiming = {
-	total: 1011,
-	wire: 1008,
-	queueWait: 0.2,
-	dns: 64,
-	connect: 214,
-	tls: 517,
-	firstByte: 213,
-	download: 0,
+	totalMs: 1011,
+	wireMs: 1008,
+	queueWaitMs: 0.2,
+	dnsMs: 64,
+	connectMs: 214,
+	tlsMs: 517,
+	firstByteMs: 213,
+	downloadMs: 0,
 };
+
+/**
+ * The tab no longer mounts its own `TooltipProvider` - the delay is set once at
+ * the app root (`main.tsx`). So the harness supplies one, as the app does.
+ */
+const renderTab = (props: React.ComponentProps<typeof ResponseTimingTab>) =>
+	render(
+		<TooltipProvider>
+			<ResponseTimingTab {...props} />
+		</TooltipProvider>
+	);
 
 describe("ResponseTimingTab", () => {
 	it("renders all five phases with their millisecond values", () => {
-		render(<ResponseTimingTab timing={sample} />);
+		renderTab({ timing: sample });
 		for (const label of ["DNS", "Connect", "TLS", "TTFB", "Download"]) {
 			expect(screen.getByText(label)).toBeInTheDocument();
 		}
@@ -34,7 +46,7 @@ describe("ResponseTimingTab", () => {
 	});
 
 	it("computes each phase as a percentage of the summed network phases", () => {
-		render(<ResponseTimingTab timing={sample} />);
+		renderTab({ timing: sample });
 		// phaseSum = 64+214+517+213+0 = 1008. TLS = 517/1008 ≈ 51%.
 		expect(screen.getByText("51%")).toBeInTheDocument();
 		// Download = 0 → 0%.
@@ -42,7 +54,7 @@ describe("ResponseTimingTab", () => {
 	});
 
 	it("shows Wire, Queue and Total in the summary", () => {
-		render(<ResponseTimingTab timing={sample} />);
+		renderTab({ timing: sample });
 		expect(screen.getByText("Wire")).toBeInTheDocument();
 		expect(screen.getByText("Queue")).toBeInTheDocument();
 		expect(screen.getByText("Total")).toBeInTheDocument();
@@ -59,14 +71,14 @@ describe("ResponseTimingTab", () => {
 
 	it("omits Wire and Queue when those fields are absent (restored responses)", () => {
 		const minimal: ResponseTiming = {
-			total: 42,
-			dns: 5,
-			connect: 10,
-			tls: 20,
-			firstByte: 7,
-			download: 0,
+			totalMs: 42,
+			dnsMs: 5,
+			connectMs: 10,
+			tlsMs: 20,
+			firstByteMs: 7,
+			downloadMs: 0,
 		};
-		render(<ResponseTimingTab timing={minimal} />);
+		renderTab({ timing: minimal });
 		expect(screen.queryByText("Wire")).not.toBeInTheDocument();
 		expect(screen.queryByText("Queue")).not.toBeInTheDocument();
 		expect(screen.getByText("Total")).toBeInTheDocument();
@@ -74,16 +86,16 @@ describe("ResponseTimingTab", () => {
 
 	it("handles all-zero phases without dividing by zero", () => {
 		const zero: ResponseTiming = {
-			total: 0,
-			wire: 0,
-			queueWait: 0,
-			dns: 0,
-			connect: 0,
-			tls: 0,
-			firstByte: 0,
-			download: 0,
+			totalMs: 0,
+			wireMs: 0,
+			queueWaitMs: 0,
+			dnsMs: 0,
+			connectMs: 0,
+			tlsMs: 0,
+			firstByteMs: 0,
+			downloadMs: 0,
 		};
-		render(<ResponseTimingTab timing={zero} />);
+		renderTab({ timing: zero });
 		// Every phase share is 0% - at least the five legend rows render it.
 		expect(screen.getAllByText("0%").length).toBeGreaterThanOrEqual(5);
 	});

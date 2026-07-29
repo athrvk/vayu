@@ -1,0 +1,224 @@
+site_name: Vayu
+# Kept under 160 characters: search results truncate past roughly that, and this
+# string is both the fallback <meta name="description"> for every page and the
+# product description in the home page's structured data.
+site_description: >-
+  Free, open source desktop API client for REST and GraphQL with a native load tester and a built-in MCP server for coding agents. Offline, no account.
+site_url: https://athrvk.github.io/vayu/
+site_author: athrvk
+
+repo_url: https://github.com/athrvk/vayu
+repo_name: athrvk/vayu
+edit_uri: edit/master/docs/
+
+docs_dir: ../docs
+site_dir: ../site
+
+# A "Cookie settings" link is appended to this by .github/hooks/analytics.py, but
+# only on a build that actually has analytics - see the note there. It is not
+# written in here because a `#__consent` anchor with no consent dialog behind it
+# is a dead link, which is what every local preview would show.
+copyright: Engine AGPL-3.0 &middot; App Apache-2.0
+
+theme:
+  name: material
+  language: en
+  # Adds Open Graph / Twitter card tags and the product's structured data, which
+  # Material does not emit by itself. Path is relative to this config file.
+  custom_dir: overrides
+  # Inter, plus the app's mono (--font-mono in app/src/index.css). Both are
+  # already in the app's own font list (app/index.html), so the site and the UI
+  # draw from one family set. Material fetches them from Google Fonts, which it
+  # already did for its default Roboto - this changes which fonts are requested,
+  # not whether any are.
+  font:
+    text: Inter
+    code: JetBrains Mono
+  # Both are the app's own icon. There is no such file under docs/ - the path is
+  # populated at build time by .github/hooks/brand_assets.py, which reads
+  # shared/icon_png/vayu_icon_256x256.png (the same source setup_icons in
+  # build.py hands to the installers) so the site cannot drift from the app's
+  # icon. Without these the site shows Material's default book glyph in the tab
+  # and the header.
+  favicon: images/vayu-icon.png
+  logo: images/vayu-icon.png
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - content.action.edit
+    - content.code.annotate
+    - content.code.copy
+    - navigation.footer
+    - navigation.indexes
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.path
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+
+nav:
+  # "Get Started" used to hold the architecture doc and the C++ build guide -
+  # a visitor clicking it expecting "how do I install this" got a CMake page.
+  # Installing now lives on Home, and the build guides are grouped as what they
+  # are. "App" became "Desktop App" because the site talks about the engine and
+  # the app in the same breath and only one of them is a thing you download.
+  - Home: index.md
+  - How It Works: architecture.md
+  - Engine:
+      - Overview: engine/architecture.md
+      - HTTP API: engine/api-reference.md
+      - Test Scripting: engine/scripting.md
+      - Local Database: engine/db-schema.md
+      - Command Line: engine/cli.md
+      - MCP Server: engine/mcp.md
+      - Benchmarks: engine/benchmarks.md
+  - Desktop App:
+      - Overview: app/architecture.md
+      - UI Components: app/COMPONENTS.md
+      - Design System: design-system.md
+      - State Management: app/state-management.md
+      - Talking to the Engine: app/api-integration.md
+      - Variables: app/variable-resolution.md
+      - Postman Script Support: app/pm-api-compatibility.md
+      - File Naming: app/file-name-conventions.md
+      - Importing Collections:
+          - How Import Works: app/import-collections/README.md
+          - Postman: app/import-collections/postman.md
+          - Postman Environment and Globals: app/import-collections/postman-environment.md
+          - Insomnia v4: app/import-collections/insomnia-v4.md
+          - OpenAPI 3.0: app/import-collections/openapi-v3.md
+          - Swagger 2.0: app/import-collections/openapi-v2.md
+  - Build from Source:
+      - Overview: building.md
+      - Engine: engine/building.md
+      - Desktop App: app/building.md
+  - Design Notes:
+      - Request Storage: request-storage-design.md
+      - Lock Files: lock-file-handling.md
+      - Deferred Work: plans/pending-backlog.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  # GitHub-compatible heading slugs. Both renderings share one anchor scheme, so
+  # links like `#url--path-parameters` (double dash from "URL / Path") resolve on
+  # the site and in GitHub's markdown view. Do not swap this for the default
+  # Python-Markdown slugify, which collapses the dashes and 404s those anchors.
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search
+
+hooks:
+  - hooks/brand_assets.py
+  # Turns the analytics + consent blocks below off when GOOGLE_ANALYTICS_KEY is
+  # unset, which an empty `!ENV` value does not do on its own.
+  - hooks/analytics.py
+
+# Broken cross-references are a build failure in CI (`mkdocs build --strict`),
+# which is the point: these docs cross-link heavily by relative `.md` path.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/athrvk/vayu
+      name: Vayu on GitHub
+
+  # Google Analytics 4 for this documentation site only. The measurement ID is
+  # deliberately *not* checked in: `.github/workflows/docs.yml` passes it from
+  # the `GOOGLE_ANALYTICS_KEY` Actions repository variable (Settings -> Secrets
+  # and variables -> Actions -> Variables), so a fork, a pull-request preview or
+  # a local `mkdocs serve` builds with the variable unset and gets no analytics
+  # and no cookie banner. `!ENV` with no default yields None when unset, which is
+  # a supported state rather than a build failure - but note that Material still
+  # emits its (inert) gtag snippet for an empty property, so the actual removal
+  # is done by hooks/analytics.py. Empty the variable to switch analytics off
+  # site-wide without a commit.
+  #
+  # An ID is not a secret (it ships in the page source of every built page), but
+  # a repository variable keeps forks from polluting the property, which is the
+  # thing that actually matters.
+  analytics:
+    provider: google
+    property: !ENV GOOGLE_ANALYTICS_KEY
+
+  # Nothing is loaded until the visitor acts: Material defers the gtag snippet
+  # behind `__md_analytics()` and only calls it once `analytics` is in the stored
+  # consent. Removing this block would make GA load on first paint for everyone,
+  # so the two settings belong together.
+  #
+  # The `analytics` key is not arbitrary - Material matches that exact name to
+  # decide whether the analytics provider above may run. Renaming it silently
+  # leaves GA permanently off.
+  consent:
+    title: Cookies on this site
+    # Says which site, because the product's own claim is the opposite and both
+    # are true: the Vayu app ships no telemetry, this docs website measures page
+    # views. Conflating them would make one of the two statements a lie.
+    description: >-
+      This documentation site uses Google Analytics to count page views, so we
+      can see which docs people actually read. The Vayu app itself sends
+      nothing - it runs fully offline, with no account and no telemetry.
+    cookies:
+      # Checked by default so the primary "Accept" button means what it looks
+      # like it means. This is not pre-consent: nothing is stored, and no script
+      # runs, until one of the buttons below is pressed.
+      analytics:
+        name: Google Analytics
+        checked: true
+    actions:
+      - accept
+      - reject
+      - manage

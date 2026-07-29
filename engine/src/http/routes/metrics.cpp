@@ -10,6 +10,7 @@
  * @brief Metrics streaming routes (SSE endpoints for real-time stats)
  */
 
+#include <map>
 #include <thread>
 
 #include "vayu/http/routes.hpp"
@@ -17,14 +18,312 @@
 
 namespace vayu::http::routes {
 
+namespace {
+
+// Wrap the per-tick objects in the `{data, pagination}` envelope both storage
+// paths return. `returned` counts the rows the query yielded, so `hasMore`
+// stays correct even if one stored payload had to be skipped.
+nlohmann::json time_series_envelope (nlohmann::json data,
+int64_t total_count,
+int64_t limit,
+int64_t offset,
+size_t returned) {
+    nlohmann::json response;
+    response["data"]                   = std::move (data);
+    response["pagination"]["total"]    = total_count;
+    response["pagination"]["limit"]    = limit;
+    response["pagination"]["offset"]   = offset;
+    response["pagination"]["hasMore"]  = (offset + static_cast<int64_t> (returned)) < total_count;
+    response["pagination"]["returned"] = returned;
+    return response;
+}
+
+/**
+ * The current path: each `metric_ticks` row already *is* one `data[]` entry, so
+ * the reader parses and forwards it. Pagination is tick-aligned by
+ * construction - a page boundary can no longer land inside a tick and hand the
+ * client a half-populated bucket.
+ */
+nlohmann::json tick_time_series (vayu::db::Database& db,
+const std::string& run_id,
+int64_t total_count,
+int64_t limit,
+int64_t offset) {
+    auto ticks = db.get_metric_ticks_paginated (run_id, limit, offset);
+
+    nlohmann::json data_array = nlohmann::json::array ();
+    for (const auto& tick : ticks) {
+        try {
+            auto payload = nlohmann::json::parse (tick.payload);
+            if (!payload.is_object ()) {
+                throw std::runtime_error ("payload is not an object");
+            }
+            data_array.push_back (std::move (payload));
+        } catch (const std::exception& e) {
+            // A payload this engine wrote always parses; a corrupt one is a
+            // damaged row, not a client error - skip it loudly rather than
+            // failing the whole page.
+            vayu::utils::log_warning ("Skipping unreadable metric tick for run " +
+            run_id + " (id=" + std::to_string (tick.id) + "): " + e.what ());
+        }
+    }
+    return time_series_envelope (
+    std::move (data_array), total_count, limit, offset, ticks.size ());
+}
+
+} // namespace
+
+/**
+ * Testable core of the time-series JSON endpoint, returning {http_status,
+ * json_body}. Serves both `GET /runs/:id/metrics` (canonical) and the legacy
+ * `GET /stats/:id?format=json`, so the two paths cannot drift.
+ *
+ * A missing run is a definitive 404 with the flat `{"error": message}` shape
+ * `send_error` uses. Otherwise it returns the run's per-tick objects (the app's
+ * snake_case `LoadTestMetrics` shape, consumed without a transformer) in the
+ * `{data, pagination}` envelope - read straight from `metric_ticks`, or, for a
+ * run recorded before that table existed, regrouped from its legacy EAV rows.
+ *
+ * `limit`/`offset` arrive already parsed and clamped by the caller (limit
+ * default 5000, capped at 50000; offset floored at 0) - the raw query-param
+ * parsing stays in the route. Extracted so the wiring (404 vs 200 + envelope,
+ * grouping, pagination) is covered without an in-process HTTP server - see
+ * stats_route_test.cpp. Exceptions propagate to the route's try/catch (500).
+ */
+std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
+const std::string& run_id, int64_t limit, int64_t offset) {
+    auto run = db.get_run (run_id);
+    if (!run) {
+        return { 404, nlohmann::json{ { "error", "Run not found" } } };
+    }
+
+    // Ticks decide the path: a run has them or it predates the table. Counting
+    // is also the pagination total, so this is not an extra query.
+    const int64_t tick_count = db.count_metric_ticks (run_id);
+    if (tick_count > 0) {
+        return { 200, tick_time_series (db, run_id, tick_count, limit, offset) };
+    }
+
+    // Legacy EAV path, unchanged - kept until pre-metric_ticks runs age out.
+    // Get total count for pagination
+    int64_t total_count = db.count_metrics (run_id);
+
+    // Get paginated metrics
+    auto metrics = db.get_metrics_paginated (run_id, limit, offset);
+
+    // Group metrics by timestamp into LoadTestMetrics-compatible format
+    std::map<int64_t, nlohmann::json> time_buckets;
+    int64_t start_time = 0;
+
+    for (const auto& metric : metrics) {
+        if (start_time == 0) {
+            start_time = metric.timestamp;
+        }
+
+        auto& bucket = time_buckets[metric.timestamp];
+        if (!bucket.contains ("timestamp")) {
+            bucket["timestamp"] = metric.timestamp;
+            bucket["elapsed_seconds"] = static_cast<double> (metric.timestamp - start_time) / 1000.0;
+            // Initialize with defaults (only metrics stored periodically during test)
+            bucket["requests_completed"] = 0;
+            bucket["requests_failed"] = 0;
+            bucket["current_rps"] = 0.0;
+            bucket["current_concurrency"] = 0;
+            bucket["send_rate"] = 0.0;
+            bucket["throughput"] = 0.0;
+            bucket["backpressure"] = 0;
+            bucket["error_rate"] = 0.0;
+            bucket["dropped_requests"] = 0;
+            bucket["bytes_sent"] = 0;
+            bucket["bytes_received"] = 0;
+            bucket["status_codes"] = nlohmann::json::object ();
+            // Windowed per-tick latency percentiles (0 until a tick
+            // carries them). Snake_case keys match the app's
+            // LoadTestMetrics shape (consumed without a transformer).
+            bucket["latency_p50_ms"] = 0.0;
+            bucket["latency_p95_ms"] = 0.0;
+            bucket["latency_p99_ms"] = 0.0;
+        }
+
+        // Map metric values to LoadTestMetrics fields. Latency percentiles
+        // are now persisted per-tick as windowed (rolling) values -
+        // unlabeled rows; the labeled cumulative final-summary rows are
+        // skipped here so the series stays purely windowed.
+        if (metric.name == vayu::MetricName::Rps) {
+            bucket["current_rps"] = metric.value;
+        } else if (metric.name == vayu::MetricName::ErrorRate) {
+            bucket["error_rate"] = metric.value;
+        } else if (metric.name == vayu::MetricName::ConnectionsActive) {
+            bucket["current_concurrency"] = static_cast<int> (metric.value);
+        } else if (metric.name == vayu::MetricName::RequestsSent ||
+        metric.name == vayu::MetricName::TotalRequests) {
+            bucket["requests_completed"] = static_cast<int> (metric.value);
+        } else if (metric.name == vayu::MetricName::SendRate) {
+            bucket["send_rate"] = metric.value;
+        } else if (metric.name == vayu::MetricName::Throughput) {
+            bucket["throughput"] = metric.value;
+        } else if (metric.name == vayu::MetricName::Backpressure) {
+            bucket["backpressure"] = static_cast<int> (metric.value);
+        } else if (metric.name == vayu::MetricName::DroppedRequests) {
+            bucket["dropped_requests"] = static_cast<int> (metric.value);
+        } else if (metric.name == vayu::MetricName::BytesSent) {
+            bucket["bytes_sent"] = static_cast<size_t> (metric.value);
+        } else if (metric.name == vayu::MetricName::BytesReceived) {
+            bucket["bytes_received"] = static_cast<size_t> (metric.value);
+        } else if (metric.name == vayu::MetricName::LatencyP50 &&
+        metric.labels.empty ()) {
+            bucket["latency_p50_ms"] = metric.value;
+        } else if (metric.name == vayu::MetricName::LatencyP95 &&
+        metric.labels.empty ()) {
+            bucket["latency_p95_ms"] = metric.value;
+        } else if (metric.name == vayu::MetricName::LatencyP99 &&
+        metric.labels.empty ()) {
+            bucket["latency_p99_ms"] = metric.value;
+        } else if (metric.name == vayu::MetricName::StatusCodes &&
+        !metric.labels.empty ()) {
+            // Last-write-wins per timestamp (the final StatusCodes row
+            // shares this name and lands in the last bucket).
+            try {
+                bucket["status_codes"] = nlohmann::json::parse (metric.labels);
+            } catch (...) {
+                // leave default {}
+            }
+        }
+    }
+
+    // Derive requests_failed in a second pass, once every row for the tick has
+    // been folded in. Deriving it inside the ErrorRate branch made it depend on
+    // RequestsSent having already been seen for the same timestamp - and the
+    // producer inserts ErrorRate first, so it read requests_completed == 0 and
+    // stored a failed count of 0 for every bucket of every run.
+    for (auto& [ts, bucket] : time_buckets) {
+        double error_rate = bucket.value ("error_rate", 0.0);
+        int completed     = bucket.value ("requests_completed", 0);
+        bucket["requests_failed"] =
+        static_cast<int> ((error_rate / 100.0) * completed + 0.5);
+    }
+
+    // Convert map to sorted array
+    nlohmann::json data_array = nlohmann::json::array ();
+    for (const auto& [ts, bucket] : time_buckets) {
+        data_array.push_back (bucket);
+    }
+
+    return { 200, time_series_envelope (std::move (data_array), total_count, limit,
+                  offset, metrics.size ()) };
+}
+
+namespace {
+
+/**
+ * Fold one stored tick into the legacy `/stats/:id` SSE aggregate.
+ *
+ * That stream predates `metric_ticks` and read the EAV rows directly; every
+ * field it carries comes from the tick object instead, one-for-one - except
+ * `avgLatencyMs`, which the per-tick object has never carried (the canonical
+ * `GET /runs/:id/live` stream serves it from the in-memory collector). Returns
+ * false for an unreadable payload, leaving the aggregate untouched.
+ */
+bool apply_tick_to_stream (const vayu::db::MetricTick& tick,
+nlohmann::json& aggregate,
+const std::string& run_id) {
+    nlohmann::json payload;
+    try {
+        payload = nlohmann::json::parse (tick.payload);
+    } catch (...) {
+        return false;
+    }
+    if (!payload.is_object ()) {
+        return false;
+    }
+
+    const int total_req = payload.value ("requests_completed", 0);
+    const int errors    = payload.value ("requests_failed", 0);
+    aggregate["currentRps"]        = payload.value ("current_rps", 0.0);
+    aggregate["errorRate"]         = payload.value ("error_rate", 0.0);
+    aggregate["activeConnections"] = payload.value ("current_concurrency", 0);
+    aggregate["totalRequests"]     = total_req;
+    aggregate["sendRate"]          = payload.value ("send_rate", 0.0);
+    aggregate["throughput"]        = payload.value ("throughput", 0.0);
+    aggregate["backpressure"]      = payload.value ("backpressure", 0);
+    aggregate["totalErrors"]       = errors;
+    aggregate["totalSuccess"]      = total_req > errors ? total_req - errors : 0;
+    aggregate["elapsedSeconds"]    = payload.value ("elapsed_seconds", 0.0);
+    aggregate["timestamp"]         = payload.value ("timestamp", tick.timestamp);
+    aggregate["runId"]             = run_id;
+    return true;
+}
+
+// Parse and clamp the pagination query params shared by the time-series routes.
+// Raw parsing stays here; the extracted core is handed clean, clamped ints.
+// limit: default 5000, invalid/<=0 -> 5000, capped at 50000. offset: <0 -> 0.
+std::pair<int64_t, int64_t> parse_time_series_pagination (const httplib::Request& req) {
+    int64_t limit = 5000;
+    int64_t offset = 0;
+    if (req.has_param ("limit")) {
+        try {
+            limit = std::stoll (req.get_param_value ("limit"));
+            if (limit <= 0) limit = 5000;
+            if (limit > 50000) limit = 50000; // Cap at 50k for safety
+        } catch (...) {
+            limit = 5000;
+        }
+    }
+    if (req.has_param ("offset")) {
+        try {
+            offset = std::stoll (req.get_param_value ("offset"));
+            if (offset < 0) offset = 0;
+        } catch (...) {
+            offset = 0;
+        }
+    }
+    return { limit, offset };
+}
+
+} // namespace
+
 void register_metrics_routes (RouteContext& ctx) {
     /**
-     * GET /stats/:runId
+     * GET /runs/:runId/metrics
+     * Returns the paginated time-series (JSON) for a load test run's charts.
+     * Always JSON - any `format` query param is ignored. This is the canonical
+     * replacement for the legacy `GET /stats/:id?format=json`; both call
+     * run_time_series_response so they cannot drift.
+     *
+     * Query Parameters:
+     * - limit: Max records per page (default 5000, capped at 50000)
+     * - offset: Skip N records (default 0)
+     */
+    ctx.server.Get (R"(/runs/([^/]+)/metrics)",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        std::string run_id = req.matches[1];
+        vayu::utils::log_info (
+        "GET /runs/:id/metrics - Fetching time-series for run: " + run_id);
+        auto [limit, offset] = parse_time_series_pagination (req);
+        try {
+            auto [status, body] = run_time_series_response (ctx.db, run_id, limit, offset);
+            if (status == 404) {
+                vayu::utils::log_warning (
+                "GET /runs/:id/metrics - Run not found: " + run_id);
+            }
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "GET /runs/:id/metrics - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
+        }
+    });
+
+    /**
+     * GET /stats/:runId  (legacy, retained wholesale)
      * Streams real-time statistics for a load test run using Server-Sent Events
      * (SSE). Uses database polling for historical data.
      *
      * Query Parameters:
-     * - format=json: Return JSON instead of SSE (for historical chart data)
+     * - format=json: Return JSON instead of SSE (for historical chart data).
+     *   This branch is legacy; new callers should use GET /runs/:id/metrics,
+     *   which shares the same run_time_series_response core.
      * - limit: Max records per page (default 5000, for format=json only)
      * - offset: Skip N records (default 0, for format=json only)
      */
@@ -39,139 +338,15 @@ void register_metrics_routes (RouteContext& ctx) {
             vayu::utils::log_info (
             "GET /stats/:id?format=json - Fetching time-series for run: " + run_id);
 
-            // Parse pagination params
-            int64_t limit = 5000;
-            int64_t offset = 0;
-            if (req.has_param ("limit")) {
-                try {
-                    limit = std::stoll (req.get_param_value ("limit"));
-                    if (limit <= 0) limit = 5000;
-                    if (limit > 50000) limit = 50000; // Cap at 50k for safety
-                } catch (...) {
-                    limit = 5000;
-                }
-            }
-            if (req.has_param ("offset")) {
-                try {
-                    offset = std::stoll (req.get_param_value ("offset"));
-                    if (offset < 0) offset = 0;
-                } catch (...) {
-                    offset = 0;
-                }
-            }
-
+            auto [limit, offset] = parse_time_series_pagination (req);
             try {
-                auto run = ctx.db.get_run (run_id);
-                if (!run) {
+                auto [status, body] =
+                run_time_series_response (ctx.db, run_id, limit, offset);
+                if (status == 404) {
                     vayu::utils::log_warning ("GET /stats/:id - Run not found: " + run_id);
-                    send_error (res, 404, "Run not found");
-                    return;
                 }
-
-                // Get total count for pagination
-                int64_t total_count = ctx.db.count_metrics (run_id);
-
-                // Get paginated metrics
-                auto metrics = ctx.db.get_metrics_paginated (run_id, limit, offset);
-
-                // Group metrics by timestamp into LoadTestMetrics-compatible format
-                std::map<int64_t, nlohmann::json> time_buckets;
-                int64_t start_time = 0;
-
-                for (const auto& metric : metrics) {
-                    if (start_time == 0) {
-                        start_time = metric.timestamp;
-                    }
-
-                    auto& bucket = time_buckets[metric.timestamp];
-                    if (!bucket.contains ("timestamp")) {
-                        bucket["timestamp"] = metric.timestamp;
-                        bucket["elapsed_seconds"] = static_cast<double> (metric.timestamp - start_time) / 1000.0;
-                        // Initialize with defaults (only metrics stored periodically during test)
-                        bucket["requests_completed"] = 0;
-                        bucket["requests_failed"] = 0;
-                        bucket["current_rps"] = 0.0;
-                        bucket["current_concurrency"] = 0;
-                        bucket["send_rate"] = 0.0;
-                        bucket["throughput"] = 0.0;
-                        bucket["backpressure"] = 0;
-                        bucket["error_rate"] = 0.0;
-                        bucket["dropped_requests"] = 0;
-                        bucket["bytes_sent"] = 0;
-                        bucket["bytes_received"] = 0;
-                        bucket["status_codes"] = nlohmann::json::object ();
-                        // Windowed per-tick latency percentiles (0 until a tick
-                        // carries them). Snake_case keys match the app's
-                        // LoadTestMetrics shape (consumed without a transformer).
-                        bucket["latency_p50_ms"] = 0.0;
-                        bucket["latency_p95_ms"] = 0.0;
-                        bucket["latency_p99_ms"] = 0.0;
-                    }
-
-                    // Map metric values to LoadTestMetrics fields. Latency percentiles
-                    // are now persisted per-tick as windowed (rolling) values -
-                    // unlabeled rows; the labeled cumulative final-summary rows are
-                    // skipped here so the series stays purely windowed.
-                    if (metric.name == vayu::MetricName::Rps) {
-                        bucket["current_rps"] = metric.value;
-                    } else if (metric.name == vayu::MetricName::ErrorRate) {
-                        bucket["error_rate"] = metric.value;
-                        int total_req = bucket.value ("requests_completed", 0);
-                        bucket["requests_failed"] = static_cast<int> ((metric.value / 100.0) * total_req);
-                    } else if (metric.name == vayu::MetricName::ConnectionsActive) {
-                        bucket["current_concurrency"] = static_cast<int> (metric.value);
-                    } else if (metric.name == vayu::MetricName::RequestsSent ||
-                    metric.name == vayu::MetricName::TotalRequests) {
-                        bucket["requests_completed"] = static_cast<int> (metric.value);
-                    } else if (metric.name == vayu::MetricName::SendRate) {
-                        bucket["send_rate"] = metric.value;
-                    } else if (metric.name == vayu::MetricName::Throughput) {
-                        bucket["throughput"] = metric.value;
-                    } else if (metric.name == vayu::MetricName::Backpressure) {
-                        bucket["backpressure"] = static_cast<int> (metric.value);
-                    } else if (metric.name == vayu::MetricName::DroppedRequests) {
-                        bucket["dropped_requests"] = static_cast<int> (metric.value);
-                    } else if (metric.name == vayu::MetricName::BytesSent) {
-                        bucket["bytes_sent"] = static_cast<size_t> (metric.value);
-                    } else if (metric.name == vayu::MetricName::BytesReceived) {
-                        bucket["bytes_received"] = static_cast<size_t> (metric.value);
-                    } else if (metric.name == vayu::MetricName::LatencyP50 &&
-                    metric.labels.empty ()) {
-                        bucket["latency_p50_ms"] = metric.value;
-                    } else if (metric.name == vayu::MetricName::LatencyP95 &&
-                    metric.labels.empty ()) {
-                        bucket["latency_p95_ms"] = metric.value;
-                    } else if (metric.name == vayu::MetricName::LatencyP99 &&
-                    metric.labels.empty ()) {
-                        bucket["latency_p99_ms"] = metric.value;
-                    } else if (metric.name == vayu::MetricName::StatusCodes &&
-                    !metric.labels.empty ()) {
-                        // Last-write-wins per timestamp (the final StatusCodes row
-                        // shares this name and lands in the last bucket).
-                        try {
-                            bucket["status_codes"] = nlohmann::json::parse (metric.labels);
-                        } catch (...) {
-                            // leave default {}
-                        }
-                    }
-                }
-
-                // Convert map to sorted array
-                nlohmann::json data_array = nlohmann::json::array ();
-                for (const auto& [ts, bucket] : time_buckets) {
-                    data_array.push_back (bucket);
-                }
-
-                // Build response with pagination metadata
-                nlohmann::json response;
-                response["data"] = data_array;
-                response["pagination"]["total"] = total_count;
-                response["pagination"]["limit"] = limit;
-                response["pagination"]["offset"] = offset;
-                response["pagination"]["hasMore"] = (offset + static_cast<int64_t> (metrics.size ())) < total_count;
-                response["pagination"]["returned"] = metrics.size ();
-
-                res.set_content (response.dump (), "application/json");
+                res.status = status;
+                res.set_content (body.dump (), "application/json");
             } catch (const std::exception& e) {
                 vayu::utils::log_error ("GET /stats/:id?format=json - Error: " + std::string (e.what ()));
                 send_error (res, 500, e.what ());
@@ -198,9 +373,10 @@ void register_metrics_routes (RouteContext& ctx) {
 
         res.set_content_provider ("text/event-stream",
         [&ctx, run_id] (size_t offset, httplib::DataSink& sink) {
-            int64_t last_id     = 0;
-            bool test_completed = false;
-            int64_t start_time  = 0;
+            int64_t last_id      = 0; // legacy EAV cursor
+            int64_t last_tick_id = 0; // metric_ticks cursor
+            bool test_completed  = false;
+            int64_t start_time   = 0;
 
             nlohmann::json aggregated_metrics;
             aggregated_metrics["totalRequests"]     = 0;
@@ -221,6 +397,28 @@ void register_metrics_routes (RouteContext& ctx) {
                 }
 
                 try {
+                    // A current run writes wide ticks; a run recorded before
+                    // that table existed only has EAV rows. Poll ticks first
+                    // and fall back, so this deprecated stream serves both.
+                    auto ticks = ctx.db.get_metric_ticks_since (run_id, last_tick_id);
+                    if (!ticks.empty ()) {
+                        bool tick_updates = false;
+                        for (const auto& tick : ticks) {
+                            last_tick_id = tick.id;
+                            tick_updates |= apply_tick_to_stream (
+                            tick, aggregated_metrics, run_id);
+                        }
+                        if (tick_updates) {
+                            std::string payload = "event: metrics\ndata: " +
+                            aggregated_metrics.dump () + "\n\n";
+                            if (!sink.write (payload.data (), payload.size ())) {
+                                return false;
+                            }
+                        }
+                        std::this_thread::sleep_for (std::chrono::milliseconds (500));
+                        continue;
+                    }
+
                     auto metrics = ctx.db.get_metrics_since (run_id, last_id);
                     bool has_updates = false;
 
@@ -335,10 +533,10 @@ void register_metrics_routes (RouteContext& ctx) {
     });
 
     /**
-     * GET /metrics/live/:runId
+     * GET /runs/:runId/live  (alias: GET /metrics/live/:runId, deprecated)
      * Streams real-time metrics directly from MetricsCollector (lock-free, faster).
      */
-    ctx.server.Get (R"(/metrics/live/([^/]+))",
+    httplib::Server::Handler live_metrics =
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string run_id = req.matches[1];
 
@@ -351,7 +549,7 @@ void register_metrics_routes (RouteContext& ctx) {
             res.status = 404;
             nlohmann::json error;
             error["error"] = "Run not found or expired";
-            error["hint"]  = "Use /run/" + run_id + "/report for the stored report";
+            error["hint"]  = "Use /runs/" + run_id + "/report for the stored report";
             res.set_content (error.dump (), "application/json");
             return;
         }
@@ -371,10 +569,12 @@ void register_metrics_routes (RouteContext& ctx) {
                 if (!sink.is_writable ()) return false;
 
                 auto batch = context->ticks_since (offset);
-                for (const auto& payload : batch) {
+                for (const auto& payload : batch.payloads) {
                     if (!sink.write (payload.data (), payload.size ())) return false;
                 }
-                offset += batch.size ();
+                // Adopt the producer's offset rather than advancing by the batch
+                // size: a resume from before the retained window skips ahead.
+                offset = batch.next_offset;
 
                 // Terminate only once the producer has appended its final tick
                 // (closed) AND we have drained the buffer - never gate on
@@ -383,7 +583,7 @@ void register_metrics_routes (RouteContext& ctx) {
                 offset >= context->published_count.load (std::memory_order_acquire)) {
                     break;
                 }
-                if (batch.empty ()) {
+                if (batch.payloads.empty ()) {
                     std::this_thread::sleep_for (std::chrono::milliseconds (50));
                 }
             }
@@ -396,7 +596,9 @@ void register_metrics_routes (RouteContext& ctx) {
             sink.write (payload.data (), payload.size ());
             return false;
         });
-    });
+    };
+    ctx.server.Get (R"(/runs/([^/]+)/live)", live_metrics);
+    ctx.server.Get (R"(/metrics/live/([^/]+))", deprecated_alias (live_metrics));
 }
 
 } // namespace vayu::http::routes

@@ -5,9 +5,26 @@ name: PR CI - run tests
 # "Expected" forever and the pull request can only be merged by an admin
 # bypassing the rule. A docs-only change would be blocked outright.
 #
-# The filtering happens at the job level instead: `changes` always runs, `test`
-# is skipped when nothing outside docs was touched, and `ci-gate` still reports.
-# That is the case its "or skipped" branch was always written for.
+# The filtering happens at the job level instead: `changes` always runs, the
+# work jobs are skipped when nothing they own was touched, and `ci-gate` still
+# reports. That is the case its "or skipped" branch was always written for.
+#
+# The work is split by tree - `app`, `engine`, `installer` - rather than run as
+# one job per OS, because the two trees have wildly different costs and are
+# rarely touched together. Measured over the last 28 runs (median 14.0 min, p90
+# 16.6 min), with warm vcpkg and sccache caches:
+#
+#                                  ubuntu    macos   windows
+#   engine (vcpkg -> build -> ctest)  5m20     9m10     11m00
+#   app (install -> tsc -> vitest)    2m10     2m30      3m40
+#
+# The engine was 68-73% of every job and the app steps ran *after* it in the
+# same job, so on an app-only pull request the type-check first executed almost
+# twelve minutes in. Over the last 200 non-merge commits, 63 were app-only, 20
+# engine-only and 20 touched both - so nearly half of all code changes were
+# paying for a full three-platform C++ build that could not be affected by the
+# diff. Split, an app-only pull request reports in roughly four minutes and an
+# engine-only one stops paying for three Node installs.
 on:
   pull_request:
     branches:
@@ -21,17 +38,26 @@ jobs:
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
-    # The filter reads the PR's file list from the API rather than cloning, so
-    # this is all it needs. Stated explicitly rather than inherited, since a
+    # Both filters read the PR's file list from the API rather than cloning, so
+    # this is all they need. Stated explicitly rather than inherited, since a
     # fork PR's token is read-only regardless and this job must work for those.
     permissions:
       pull-requests: read
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      code: ${{ steps.code.outputs.code }}
+      app: ${{ steps.area.outputs.app }}
+      engine: ${{ steps.area.outputs.engine }}
+      installer: ${{ steps.area.outputs.installer }}
     steps:
+      # Two invocations, because `predicate-quantifier` applies to the whole
+      # action and the two kinds of filter need opposite ones. This one answers
+      # "is there anything here a build could care about at all", which is only
+      # expressible as `**` minus a list; the area filters below are plain
+      # unions and need the default. Both are API calls, so the second costs no
+      # runner time.
       - name: Check whether anything outside docs changed
-        uses: dorny/paths-filter@v3
-        id: filter
+        uses: dorny/paths-filter@v4
+        id: code
         with:
           # `every`, not the default `some`. The default means "include the file
           # if it matches at least one pattern" - and `**` matches everything,
@@ -44,6 +70,12 @@ jobs:
           # Same list the trigger used to carry. Both `*.md` and `**/*.md` are
           # present because the first covers root-level files like README.md and
           # the second covers nested ones.
+          # The docs-site build machinery is excluded for the same reason
+          # `docs/**` is: none of it can affect the engine or the app. It is
+          # enumerated rather than covered by a `!.github/**` blanket, because a
+          # change to *this* workflow, or to codeql/labeler/release, must still
+          # run the matrix. Each of these is checked by the `Docs site` workflow
+          # instead, which runs `mkdocs build --strict` on the same paths.
           filters: |
             code:
               - '**'
@@ -53,12 +85,106 @@ jobs:
               - '!LICENSE'
               - '!.gitignore'
               - '!scripts/install-git-hooks.sh'
+              - '!.github/mkdocs.yml'
+              - '!.github/hooks/**'
+              - '!.github/workflows/docs.yml'
+              - '!requirements-docs.txt'
 
-  test:
-    name: Test on ${{ matrix.os }}
+      # Default quantifier (`some`) on purpose: each filter below is a union of
+      # paths, so "matched at least one" is the question being asked. These are
+      # deliberately *not* responsible for excluding documentation - a change to
+      # app/src/modules/README.md matches `app/**` here and is rejected by
+      # `code` above instead, so the docs rule stays written down once.
+      - name: Route to the trees the change can affect
+        uses: dorny/paths-filter@v4
+        id: area
+        with:
+          # `shared/**` belongs to the app: vitest and vite both alias it to
+          # `@shared`, so an icon or asset there is compiled into the renderer.
+          # `build.py` and `VERSION` are listed under both trees because either
+          # can change how either side builds, and a version bump touches both
+          # anyway. This workflow is listed everywhere so that a change to the
+          # split itself is exercised by every job it describes.
+          #
+          # A change can be `code` and still match no area, and that is a pass,
+          # not a hole. Replaying the last 120 non-merge commits through these
+          # globs, every such commit was repository metadata - .github/labeler.yml,
+          # codeql.yml, dependabot.yml, CODEOWNERS, .github/scripts/ - none of
+          # which can alter a build artifact, and each of which has its own
+          # workflow where it applies. They used to run the full three-platform
+          # matrix and prove nothing. If you add something under `.github/` that
+          # *is* load-bearing for a build, give it an area here.
+          filters: |
+            app:
+              - 'app/**'
+              - 'shared/**'
+              - 'build.py'
+              - 'VERSION'
+              - '.github/workflows/pr-tests.yml'
+            engine:
+              - 'engine/**'
+              - 'build.py'
+              - 'VERSION'
+              - '.github/workflows/pr-tests.yml'
+            installer:
+              - 'install.sh'
+              - 'scripts/test/install_test.sh'
+              - '.github/workflows/pr-tests.yml'
+
+  app:
+    name: App on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true'
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # All three, even though nothing here compiles. The suite asserts
+        # platform behaviour (`platform.test.ts`, `updater.test.ts`) and the
+        # macOS runner is the only one that has ever caught a regression in the
+        # macOS branch - see the testing section of CLAUDE.md.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    # Roughly 4 minutes on the slowest runner; the ceiling is for a cold pnpm
+    # store, not for the steady state.
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check frontend
+        working-directory: app
+        run: pnpm type-check
+
+      - name: Run frontend tests
+        working-directory: app
+        run: pnpm test
+
+  engine:
+    name: Engine on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true'
     permissions:
       contents: read
       checks: write
@@ -81,7 +207,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -93,36 +219,14 @@ jobs:
             ninja-build \
             build-essential \
             pkg-config \
-            ca-certificates \
-            shellcheck
+            ca-certificates
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
-        run: |
-          command -v ninja || brew install ninja
-          brew install shellcheck
-
-      - name: Lint and test installer script
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          shellcheck install.sh
-          bash scripts/test/install_test.sh
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: app/pnpm-lock.yaml
+        run: command -v ninja || brew install ninja
 
       - name: Cache vcpkg compiled packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
           key: vcpkg-${{ runner.os }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
@@ -174,38 +278,82 @@ jobs:
           report_paths: 'engine/test-results.xml'
           check_name: 'C++ Tests (${{ matrix.os }})'
 
-      - name: Install frontend dependencies
-        working-directory: app
-        run: pnpm install --frozen-lockfile
+  installer:
+    name: Installer script on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.installer == 'true'
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS as well as Linux because install.sh is the macOS installer and
+        # its dry-run test exercises the real `codesign`/`xattr` call sites.
+        # Windows is absent for the same reason it was absent before the split:
+        # there is no shell to run it in.
+        os: [ubuntu-latest, macos-latest]
+    timeout-minutes: 10
 
-      - name: Type-check frontend
-        working-directory: app
-        run: pnpm type-check
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
 
-      - name: Run frontend tests
-        working-directory: app
-        run: pnpm test
+      - name: Install shellcheck (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Install shellcheck (macOS)
+        if: runner.os == 'macOS'
+        run: command -v shellcheck || brew install shellcheck
+
+      - name: Lint and test installer script
+        shell: bash
+        run: |
+          shellcheck install.sh
+          bash scripts/test/install_test.sh
 
   ci-gate:
     name: CI gate
     runs-on: ubuntu-latest
-    # `changes` is a dependency as well as `test`, so a failure in the filter
-    # cannot be read as "nothing to test". Without it, a broken `changes` job
-    # skips `test`, and "skipped" would pass this gate on a change nobody ran.
-    needs: [changes, test]
+    # `changes` is a dependency as well as the work jobs, so a failure in the
+    # filter cannot be read as "nothing to test". Without it, a broken `changes`
+    # job skips everything, and "skipped" would pass this gate on a change
+    # nobody ran.
+    needs: [changes, app, engine, installer]
     if: always()
     steps:
-      - name: Pass if tests succeeded or were skipped
+      - name: Pass if every job succeeded or was skipped
         run: |
           changes="${{ needs.changes.result }}"
-          result="${{ needs.test.result }}"
           if [[ "$changes" != "success" ]]; then
             echo "CI failed (change detection: $changes)"
             exit 1
           fi
-          if [[ "$result" == "success" || "$result" == "skipped" ]]; then
-            echo "CI passed (tests: $result)"
-          else
-            echo "CI failed (tests: $result)"
+
+          # Each work job is skipped when its tree was untouched, which is the
+          # whole point of the split - so "skipped" passes here exactly as it
+          # did when there was a single `test` job. Anything else (failure,
+          # cancelled) fails the gate.
+          status=0
+          check() {
+            if [[ "$2" == "success" || "$2" == "skipped" ]]; then
+              echo "  $1: $2"
+            else
+              echo "  $1: $2  <-- failed"
+              status=1
+            fi
+          }
+          check app       "${{ needs.app.result }}"
+          check engine    "${{ needs.engine.result }}"
+          check installer "${{ needs.installer.result }}"
+
+          if [[ $status -ne 0 ]]; then
+            echo "CI failed"
             exit 1
           fi
+          echo "CI passed"

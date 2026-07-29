@@ -46,17 +46,6 @@ export interface RequestData {
 	body?: string;
 }
 
-// Full HTTP trace data
-export interface TraceData {
-	request?: RequestData;
-	response?: ResponseData;
-	dnsMs?: number;
-	connectMs?: number;
-	tlsMs?: number;
-	firstByteMs?: number;
-	downloadMs?: number;
-}
-
 // Props for response body component
 export interface ResponseBodyProps {
 	body: string;
@@ -78,12 +67,5 @@ export interface HeadersViewerProps {
 export interface UnifiedResponseViewerProps {
 	response?: ResponseData | null;
 	request?: RequestData | null;
-	trace?: TraceData | null;
-	/** Compact mode for embedded views (history cards) */
-	compact?: boolean;
-	/** Show copy/download actions */
-	showActions?: boolean;
-	/** Additional tabs to hide */
-	hiddenTabs?: string[];
 	className?: string;
 }

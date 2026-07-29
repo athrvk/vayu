@@ -10,7 +10,13 @@ import collectionItemSrc from "@/modules/collections/CollectionItem.tsx?raw";
 import requestItemSrc from "@/modules/collections/RequestItem.tsx?raw";
 
 vi.mock("@/queries", () => ({
-	useRequestQuery: () => ({ data: undefined }),
+	// TabStrip resolves labels through one `useQueries`, so these are options.
+	requestDetailOptions: () => ({
+		queryKey: ["request"],
+		queryFn: async () => undefined,
+		enabled: false,
+	}),
+	runDetailOptions: () => ({ queryKey: ["run"], queryFn: async () => undefined, enabled: false }),
 	useCollectionsQuery: () => ({ data: [] }),
 }));
 

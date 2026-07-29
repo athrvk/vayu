@@ -156,7 +156,7 @@ export class SSEClient {
 				// shown and clobbering live RPS / throughput visuals. The browser's
 				// own intra-connection retry (while in CONNECTING) does carry
 				// Last-Event-ID and is fine; once the browser gives up (CLOSED), the
-				// canonical recovery is to converge on `GET /run/:id/report`, which
+				// canonical recovery is to converge on `GET /runs/:id/report`, which
 				// the load-test service does in its onClose handler.
 				if (this.eventSource?.readyState === EventSource.CLOSED) {
 					console.log("SSE connection closed unexpectedly - treating as terminal");

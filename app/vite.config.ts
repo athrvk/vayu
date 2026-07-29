@@ -7,6 +7,7 @@
 
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { readFileSync } from "fs";
 
@@ -14,7 +15,13 @@ import { readFileSync } from "fs";
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, "./package.json"), "utf-8"));
 
 export default defineConfig({
-	plugins: [react()],
+	// Tailwind v4 runs as a Vite plugin, not a PostCSS plugin. As a PostCSS
+	// plugin it injected generated declarations with no `source.input.file`,
+	// which tripped Vite's own url-rewrite plugin into warning "did not pass the
+	// `from` option to `postcss.parse`" on every dev CSS transform. As a Vite
+	// plugin its output is re-parsed with a real `from`, so no fromless nodes.
+	// Autoprefixer stays in postcss.config.cjs, so vendor prefixing is unchanged.
+	plugins: [react(), tailwindcss()],
 	define: {
 		__VAYU_VERSION__: JSON.stringify(packageJson.version),
 	},

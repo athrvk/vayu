@@ -14,12 +14,20 @@
  * Resolution priority (highest wins): Environment > Collection chain (leaf → root) > Global
  * Within the collection chain, variables closer to the leaf override those closer to the root.
  * Cached per (collectionId, environmentId) via useMemo.
+ *
+ * **The MCP copy (`app/electron/mcp/resolve.ts`) is deliberately not changed
+ * alongside this file.** CLAUDE.md requires the two resolution copies to move
+ * together when *semantics* change, and they have not: the winner is still the
+ * last enabled definition in the same precedence order, byte for byte. What is
+ * new here is `getVariableOrigins`, which keeps the definitions that lost so the
+ * UI can explain the winner. MCP renders nothing and has no use for it, so
+ * duplicating it there would add a second copy of something with no reader.
  */
 
 import { useMemo, useCallback } from "react";
 import { useGlobalsQuery, useCollectionsQuery, useEnvironmentsQuery } from "@/queries";
 import { useSessionStore } from "@/stores";
-import type { VariableValue, ResolvedVariable, Collection } from "@/types";
+import type { VariableValue, ResolvedVariable, VariableOrigin, Collection } from "@/types";
 import { castByType } from "@/lib/variable-cast";
 
 interface UseVariableResolverOptions {
@@ -32,6 +40,14 @@ interface UseVariableResolverReturn {
 	getVariable: (name: string) => ResolvedVariable | null;
 	getAllVariables: () => Record<string, ResolvedVariable>;
 	hasUnresolvedVariables: (input: string) => boolean;
+	/**
+	 * Every definition of a name, lowest precedence first, including the disabled
+	 * ones that never resolve. Empty array for a name nothing defines.
+	 *
+	 * Display-only: nothing about execution reads this. See the note on
+	 * `VariableOrigin` for why the losers are worth keeping.
+	 */
+	getVariableOrigins: (name: string) => VariableOrigin[];
 }
 
 const VARIABLE_PATTERN = /\{\{([^{}]+)\}\}/g;
@@ -59,36 +75,52 @@ export function useVariableResolver(
 	const { activeEnvironmentId, activeCollectionId: storeCollectionId } = useSessionStore();
 	const activeCollectionId = options?.collectionId || storeCollectionId;
 
-	// Build variable map with hierarchical resolution:
-	// globals < collection chain (root → leaf) < environment
-	const variableMap = useMemo(() => {
-		const result: Record<string, ResolvedVariable> = {};
+	/**
+	 * Every definition of every name, in precedence order (lowest first):
+	 * globals < collection chain (root → leaf) < environment.
+	 *
+	 * Disabled definitions are collected too. They never resolve, but they are
+	 * the answer to "why is this not the value I set?" more often than shadowing
+	 * is, and a list built by skipping them cannot say so.
+	 *
+	 * The winner is marked here rather than inferred by position: once disabled
+	 * definitions are in the list, "last" and "wins" are different things.
+	 */
+	const originsByName = useMemo(() => {
+		const result: Record<string, VariableOrigin[]> = {};
 
-		const resolve = (v: VariableValue, scope: ResolvedVariable["scope"]): ResolvedVariable => ({
-			value: v.value,
-			scope,
-			secret: v.secret,
-			type: v.type,
-			typedValue: castByType(v.value, v.type),
-		});
+		const push = (
+			name: string,
+			v: VariableValue,
+			scope: VariableOrigin["scope"],
+			source?: { id: string; name: string }
+		) => {
+			(result[name] ??= []).push({
+				scope,
+				sourceId: source?.id,
+				sourceName: source?.name,
+				value: v.value,
+				secret: v.secret,
+				type: v.type,
+				enabled: !!v.enabled,
+				// Filled in below, once the whole list for this name exists.
+				winner: false,
+			});
+		};
 
-		// 1. Globals (lowest priority)
-		if (globalsData?.variables) {
-			for (const [key, val] of Object.entries(globalsData.variables)) {
-				const v = val as VariableValue;
-				if (v.enabled) result[key] = resolve(v, "global");
-			}
+		// 1. Globals (lowest priority). A singleton, so no source name.
+		for (const [key, val] of Object.entries(globalsData?.variables ?? {})) {
+			push(key, val as VariableValue, "global");
 		}
 
-		// 2. Collection chain - root-first so leaf variables override parent variables
+		// 2. Collection chain - root-first so leaf variables override parent ones.
+		//    Each collection is its own origin: two collections in one chain both
+		//    have scope "collection", and collapsing them by scope would hide the
+		//    override that actually happened.
 		if (activeCollectionId) {
-			const chain = buildCollectionChain(activeCollectionId, collections);
-			for (const col of chain) {
-				if (col.variables) {
-					for (const [key, val] of Object.entries(col.variables)) {
-						const v = val as VariableValue;
-						if (v.enabled) result[key] = resolve(v, "collection");
-					}
+			for (const col of buildCollectionChain(activeCollectionId, collections)) {
+				for (const [key, val] of Object.entries(col.variables ?? {})) {
+					push(key, val as VariableValue, "collection", { id: col.id, name: col.name });
 				}
 			}
 		}
@@ -96,16 +128,51 @@ export function useVariableResolver(
 		// 3. Environment (highest priority)
 		if (activeEnvironmentId) {
 			const env = environments.find((e) => e.id === activeEnvironmentId);
-			if (env?.variables) {
-				for (const [key, val] of Object.entries(env.variables)) {
-					const v = val as VariableValue;
-					if (v.enabled) result[key] = resolve(v, "environment");
+			if (env) {
+				for (const [key, val] of Object.entries(env.variables ?? {})) {
+					push(key, val as VariableValue, "environment", { id: env.id, name: env.name });
+				}
+			}
+		}
+
+		// The winner is the *last enabled* definition, which is exactly the value
+		// the old overwrite-as-you-go loop arrived at.
+		for (const list of Object.values(result)) {
+			for (let i = list.length - 1; i >= 0; i--) {
+				if (list[i].enabled) {
+					list[i].winner = true;
+					break;
 				}
 			}
 		}
 
 		return result;
 	}, [globalsData, collections, environments, activeCollectionId, activeEnvironmentId]);
+
+	/**
+	 * The resolved value per name - derived from the origins rather than built
+	 * alongside them, so the two cannot disagree about which definition won.
+	 */
+	const variableMap = useMemo(() => {
+		const result: Record<string, ResolvedVariable> = {};
+		for (const [name, origins] of Object.entries(originsByName)) {
+			const won = origins.find((o) => o.winner);
+			// Every definition disabled: the name resolves to nothing, exactly as
+			// before. `hasUnresolvedVariables` and the red token both depend on it
+			// being absent rather than present-and-empty.
+			if (!won) continue;
+			result[name] = {
+				value: won.value,
+				scope: won.scope,
+				secret: won.secret,
+				sourceId: won.sourceId,
+				sourceName: won.sourceName,
+				type: won.type,
+				typedValue: castByType(won.value, won.type),
+			};
+		}
+		return result;
+	}, [originsByName]);
 
 	const getVariable = useCallback(
 		(name: string): ResolvedVariable | null => variableMap[name] || null,
@@ -115,6 +182,11 @@ export function useVariableResolver(
 	const getAllVariables = useCallback(
 		(): Record<string, ResolvedVariable> => ({ ...variableMap }),
 		[variableMap]
+	);
+
+	const getVariableOrigins = useCallback(
+		(name: string): VariableOrigin[] => originsByName[name] ?? [],
+		[originsByName]
 	);
 
 	const resolveString = useCallback(
@@ -160,5 +232,12 @@ export function useVariableResolver(
 		[variableMap]
 	);
 
-	return { resolveString, resolveObject, getVariable, getAllVariables, hasUnresolvedVariables };
+	return {
+		resolveString,
+		resolveObject,
+		getVariable,
+		getAllVariables,
+		hasUnresolvedVariables,
+		getVariableOrigins,
+	};
 }

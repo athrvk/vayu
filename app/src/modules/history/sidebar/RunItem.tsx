@@ -11,6 +11,7 @@ import type { Run } from "@/types";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { MethodBadge } from "@/components/shared";
+import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import {
 	CheckCircle2,
 	XCircle,
@@ -20,6 +21,7 @@ import {
 	Loader2,
 	Trash2,
 	Zap,
+	Network,
 } from "lucide-react";
 
 interface RunItemProps {
@@ -43,16 +45,29 @@ export default function RunItem({
 		return formatRelativeTime(new Date(timestamp).toISOString());
 	};
 
-	// Get URL and method from configSnapshot (unified flat structure)
+	// Read from the compact list-row summary (paginated GET /runs). The full
+	// configSnapshot lives only on GET /runs/:id, which the list does not fetch.
 	const getRequestInfo = () => {
-		if (!run.configSnapshot) return { url: null, method: null };
-		const url = run.configSnapshot.url || null;
-		const method = run.configSnapshot.method || "GET";
-		const type = run.configSnapshot.mode;
-		return { url, method, type };
+		if (!run.summary) return { url: null, method: null };
+		const url = run.summary.url || null;
+		const method = run.summary.method || "GET";
+		const type = run.summary.mode;
+		// Requested protocol only - see design-run-seed.ts's doc comment for the
+		// requested-vs-negotiated distinction. A load run's summary has no single
+		// negotiated protocol to show (many exchanges, one requested setting).
+		const httpVersion = run.summary.httpVersion;
+		return { url, method, type, httpVersion };
 	};
 
-	const { url: requestUrl, method, type: loadTestType } = getRequestInfo();
+	const {
+		url: requestUrl,
+		method,
+		type: loadTestType,
+		httpVersion: requestedHttpVersion,
+	} = getRequestInfo();
+	const protocolLabel = isHttpVersion(requestedHttpVersion)
+		? HTTP_VERSIONS.find((v) => v.value === requestedHttpVersion)?.label
+		: undefined;
 
 	// Get status icon and color
 	const getStatusIcon = () => {
@@ -170,18 +185,18 @@ export default function RunItem({
 				)}
 
 				{/* Config Info (if load test) */}
-				{run.type === "load" && run.configSnapshot && (
+				{run.type === "load" && run.summary && (
 					<div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1.5 flex-wrap">
-						{run.configSnapshot.duration && (
+						{run.summary.duration && (
 							<span className="flex items-center gap-1 shrink-0">
 								<Clock className="w-3 h-3" />
-								{run.configSnapshot.duration}
+								{run.summary.duration}
 							</span>
 						)}
-						{run.configSnapshot.concurrency && (
+						{run.summary.concurrency && (
 							<span className="flex items-center gap-1 shrink-0">
 								<Activity className="w-3 h-3" />
-								{run.configSnapshot.concurrency} workers
+								{run.summary.concurrency} workers
 							</span>
 						)}
 						{loadTestType && (
@@ -190,13 +205,19 @@ export default function RunItem({
 								{loadTestTypeToLabel(loadTestType)}
 							</span>
 						)}
+						{protocolLabel && (
+							<span className="flex items-center gap-1 shrink-0">
+								<Network className="w-3 h-3" />
+								{protocolLabel}
+							</span>
+						)}
 					</div>
 				)}
 
 				{/* Comment if exists */}
-				{run.configSnapshot?.comment && (
+				{run.summary?.comment && (
 					<p className="text-xs text-muted-foreground italic mt-1.5 break-words">
-						"{run.configSnapshot.comment}"
+						"{run.summary.comment}"
 					</p>
 				)}
 			</div>

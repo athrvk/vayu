@@ -15,9 +15,9 @@
  * with nothing distinguishing one row from the next - the only way to find out
  * which run was which was to open it.
  *
- * The identifier is the method and URL from `configSnapshot`, not the request's
- * name: runs store no name, and `requestId` is set only for design runs, so
- * every load test would have nothing to look up.
+ * The identifier is the method and URL from the run `summary` (the compact list
+ * row), not the request's name: runs store no name, and `requestId` is set only
+ * for design runs, so every load test would have nothing to look up.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -33,7 +33,7 @@ function run(over: Partial<Run> = {}): Run {
 		status: "completed",
 		startTime: Date.now() - 60_000,
 		endTime: Date.now(),
-		configSnapshot: { url: "http://localhost:8080/fast", method: "GET" },
+		summary: { url: "http://localhost:8080/fast", method: "GET" },
 		...over,
 	} as Run;
 }
@@ -56,12 +56,12 @@ describe("RecentRuns", () => {
 				runs={[
 					run({
 						id: "a",
-						configSnapshot: { url: "https://api.test/one", method: "GET" },
+						summary: { url: "https://api.test/one", method: "GET" },
 					}),
 					run({
 						id: "b",
 						startTime: Date.now() - 120_000,
-						configSnapshot: { url: "https://api.test/two", method: "POST" },
+						summary: { url: "https://api.test/two", method: "POST" },
 					}),
 				]}
 			/>
@@ -80,9 +80,9 @@ describe("RecentRuns", () => {
 	});
 
 	it("says so rather than rendering a blank row when no URL was recorded", () => {
-		// `configSnapshot` is optional on the type and absent on older runs; a
-		// bare row would read as a rendering failure.
-		render(<RecentRuns runs={[run({ configSnapshot: undefined })]} />);
+		// `summary` is optional on the type and absent on older runs; a bare row
+		// would read as a rendering failure.
+		render(<RecentRuns runs={[run({ summary: undefined })]} />);
 		expect(screen.getByText(/No URL recorded/i)).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: /Open load test run/i })).toBeInTheDocument();
 	});

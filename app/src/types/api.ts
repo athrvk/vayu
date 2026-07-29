@@ -21,6 +21,8 @@ import type {
 	RequestAuth,
 	OAuth2Config,
 	LoadTestMode,
+	ScriptPart,
+	HttpVersion,
 } from "./domain";
 
 // API Response wrapper
@@ -131,6 +133,7 @@ export interface CreateRequestRequest {
 	postRequestScript?: string;
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	httpVersion?: HttpVersion;
 	order?: number;
 }
 
@@ -149,6 +152,7 @@ export interface UpdateRequestRequest {
 	postRequestScript?: string;
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	httpVersion?: HttpVersion;
 	order?: number;
 }
 
@@ -191,8 +195,8 @@ export interface ExecuteRequestRequest {
 	headers?: Record<string, string>;
 	body?: unknown;
 	auth?: Record<string, unknown>;
-	preRequestScript?: string;
-	postRequestScript?: string;
+	preRequestScripts?: ScriptPart[];
+	postRequestScripts?: ScriptPart[];
 	/**
 	 * Redirect policy. Omitted means the engine's own defaults apply (follow,
 	 * cap at 10) - send them explicitly so a request that opts out of following
@@ -200,6 +204,15 @@ export interface ExecuteRequestRequest {
 	 */
 	followRedirects?: boolean;
 	maxRedirects?: number;
+	/**
+	 * Protocol to negotiate. Sent on *every* execute, never elided when it
+	 * equals the default - exactly like the redirect policy above, and for the
+	 * same reason: an omitted field lets an engine-side default win silently,
+	 * which is not a decision the client should hand over. Both engine clients
+	 * (renderer and MCP) must agree on this; see CLAUDE.md's request-composition
+	 * section.
+	 */
+	httpVersion?: HttpVersion;
 	requestId?: string;
 	environmentId?: string;
 }
@@ -226,6 +239,9 @@ export interface StartLoadTestRequest {
 	followRedirects?: boolean;
 	maxRedirects?: number;
 
+	/** Protocol to negotiate - same rationale as `followRedirects` above. */
+	httpVersion?: HttpVersion;
+
 	// Load test strategy
 	mode: LoadTestMode;
 
@@ -250,10 +266,15 @@ export interface StartLoadTestRequest {
 	maxInFlight?: number; // Max concurrent in-flight requests before drops/queue. Default per-strategy.
 
 	// Data capture options
-	success_sample_rate?: number; // 0-100
+	// Sampling period, not a percentage: the engine keeps a trace when
+	// `counter % success_sample_rate == 0`, so 1 keeps every response and 100
+	// keeps 1%. A 0 is a division by zero engine-side, and the engine rejects
+	// it with a 400. Build it with `successSamplePeriod`, which converts from
+	// the percentage the UI shows.
+	success_sample_rate?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
-	tests?: string;
+	tests?: ScriptPart[];
 }
 
 export interface StartLoadTestResponse {
@@ -314,4 +335,61 @@ export interface UpdateConfigRequest {
 export interface ImportFetchResponse {
 	content: string;
 	contentType: string;
+}
+
+/**
+ * POST /import/apply - the whole parsed import in one atomic call.
+ *
+ * Items reference each other by opaque `tempId`s that never reach the database;
+ * the engine assigns every real id and returns the translation in `idMap`. That
+ * is why none of these shapes carries an `id` - the engine rejects one (it owns
+ * ID generation for this path). Field names and defaults are otherwise identical
+ * to the matching `Create*Request`, because the engine runs the same per-resource
+ * field appliers for both.
+ */
+export interface ImportApplyCollection {
+	tempId: string;
+	parentTempId?: string | null;
+	name: string;
+	description?: string;
+	order?: number;
+	variables?: Record<string, VariableValue>;
+	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
+	preRequestScript?: string;
+	postRequestScript?: string;
+}
+
+export interface ImportApplyRequestItem {
+	tempId: string;
+	collectionTempId: string;
+	name: string;
+	description?: string;
+	method: string;
+	url: string;
+	params?: KeyValueEntry[];
+	headers?: KeyValueEntry[];
+	body?: RequestBody;
+	bodyType?: string;
+	auth?: RequestAuth;
+	preRequestScript?: string;
+	postRequestScript?: string;
+	order?: number;
+}
+
+export interface ImportApplyEnvironment {
+	tempId: string;
+	name: string;
+	description?: string;
+	variables?: Record<string, VariableValue>;
+}
+
+export interface ImportApplyRequest {
+	collections: ImportApplyCollection[];
+	requests: ImportApplyRequestItem[];
+	environments: ImportApplyEnvironment[];
+}
+
+export interface ImportApplyResponse {
+	/** Every `tempId` sent, mapped to the engine-generated id it became. */
+	idMap: Record<string, string>;
 }

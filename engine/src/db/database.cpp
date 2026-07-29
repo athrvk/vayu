@@ -19,7 +19,8 @@
  *
  * EXECUTION ENGINE:
  *   runs         - Test execution records (load tests, design mode)
- *   metrics      - Time-series performance data per run
+ *   metric_ticks - One wide row per metrics tick (the time series)
+ *   metrics      - Legacy EAV time-series; read-only, pre-metric_ticks runs
  *   results      - Individual request results with timing
  *
  * CONFIGURATION:
@@ -32,13 +33,18 @@
 #include <sqlite3.h>
 #include <sqlite_orm/sqlite_orm.h>
 
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <sstream>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/utils/logger.hpp"
@@ -179,6 +185,28 @@ namespace vayu::db {
 inline auto make_storage (const std::string& path) {
     return sqlite_orm::make_storage (path,
 
+    // ─────────────── INDEXES ───────────────
+    // sqlite_orm requires indexes to precede the tables in the argument list.
+    // sync_schema() creates them on fresh and pre-existing databases alike, so
+    // this is additive and needs no migration.
+    //
+    // metrics/results are the unbounded-growth tables (a load run writes ~20
+    // metric rows/sec), so a run_id scan slows down with every run ever
+    // recorded, not just the current one. get_metrics_since is polled every
+    // 500ms by the legacy SSE loop.
+    make_index ("idx_metrics_run_id", &Metric::run_id),
+    make_index ("idx_metric_ticks_run_id", &MetricTick::run_id),
+    make_index ("idx_results_run_id", &Result::run_id),
+    // Sidebar load (get_requests_in_collection) and cascade delete.
+    make_index ("idx_requests_collection_id", &Request::collection_id),
+    // The cascade-delete BFS in delete_collection walks one lookup per node.
+    make_index ("idx_collections_parent_id", &Collection::parent_id),
+    // get_all_runs / get_runs_paginated sort the whole table on every GET /runs.
+    make_index ("idx_runs_start_time", &Run::start_time),
+    // GET /runs?requestId= (and useLastDesignRunQuery's single-run lookup)
+    // filter on request_id; the design-run seed hits this per opened request.
+    make_index ("idx_runs_request_id", &Run::request_id),
+
     // ─────────────── PROJECT MANAGEMENT TABLES ───────────────
 
     // Collections: Folder hierarchy for organizing requests
@@ -213,6 +241,10 @@ inline auto make_storage (const std::string& path) {
     // pre-existing rows backfill to the engine defaults (follow, cap at 10).
     make_column ("follow_redirects", &Request::follow_redirects, default_value (true)),
     make_column ("max_redirects", &Request::max_redirects, default_value (10)),
+    // Protocol selection. TEXT (not an ordinal) so a stored value survives a
+    // reorder of the HttpVersion enum. NOT NULL with a default_value so
+    // sync_schema can ALTER TABLE ADD COLUMN onto an existing requests table.
+    make_column ("http_version", &Request::http_version, default_value ("auto")),
     make_column ("created_at", &Request::created_at),
     make_column ("updated_at", &Request::updated_at)),
 
@@ -234,9 +266,22 @@ inline auto make_storage (const std::string& path) {
     make_column ("type", &Run::type),     // "design" or "load"
     make_column ("status", &Run::status), // pending/running/completed/failed
     make_column ("config_snapshot", &Run::config_snapshot), // JSON: full request copy
-    make_column ("start_time", &Run::start_time), make_column ("end_time", &Run::end_time)),
+    make_column ("start_time", &Run::start_time), make_column ("end_time", &Run::end_time),
+    // Whole-run results written once at terminal status. NOT NULL, so the
+    // default_value is what lets sync_schema ALTER TABLE ADD COLUMN it onto an
+    // existing, non-empty runs table - pre-existing rows backfill to `""`,
+    // which the report route reads as "fall back to the legacy metrics rows".
+    make_column ("summary", &Run::summary, default_value (""))),
 
-    // Metrics: Time-series performance data (RPS, latency percentiles, etc.)
+    // Metric ticks: one wide row per persisted tick (replaces the EAV rows below)
+    make_table ("metric_ticks",
+    make_column ("id", &MetricTick::id, primary_key ().autoincrement ()),
+    make_column ("run_id", &MetricTick::run_id),
+    make_column ("timestamp", &MetricTick::timestamp),
+    make_column ("payload", &MetricTick::payload)), // JSON: the whole tick object
+
+    // Metrics: legacy EAV time-series (one row per name/tick). No longer
+    // written - kept so runs recorded before metric_ticks still render.
     make_table ("metrics", make_column ("id", &Metric::id, primary_key ().autoincrement ()),
     make_column ("run_id", &Metric::run_id), make_column ("timestamp", &Metric::timestamp),
     make_column ("name", &Metric::name), make_column ("value", &Metric::value),
@@ -261,6 +306,7 @@ inline auto make_storage (const std::string& path) {
     make_column ("default_value", &ConfigEntry::default_value),
     make_column ("min_value", &ConfigEntry::min_value),
     make_column ("max_value", &ConfigEntry::max_value),
+    make_column ("options", &ConfigEntry::options),
     make_column ("updated_at", &ConfigEntry::updated_at)),
 
     // Globals: App-wide variables (singleton row with id="globals")
@@ -512,6 +558,26 @@ void Database::init () {
     "wal_checkpoint=" + std::to_string (wal_checkpoint) + " pages, " +
     "busy_timeout=" + std::to_string (busy_timeout) + "ms, " +
     "synchronous=" + std::to_string (synchronous) + ")");
+
+    // Close out runs abandoned by a previous process before pruning, so an
+    // orphan becomes a terminal (and therefore prunable) row in the same
+    // startup. Best-effort: neither pass may block a successful startup.
+    try {
+        reconcile_orphaned_runs ();
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "Startup run reconciliation failed: " + std::string (e.what ()));
+    }
+
+    // Trim accumulated run history on startup (design-mode clicks and load runs
+    // are otherwise append-only). Best-effort: a prune failure must not block a
+    // successful startup.
+    try {
+        prune_runs_configured ();
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "Startup run pruning failed: " + std::string (e.what ()));
+    }
 }
 
 // ============================================================================
@@ -538,28 +604,46 @@ std::optional<Collection> Database::get_collection (const std::string& id) {
 }
 
 // Cascade delete: recursively removes all descendant collections and their requests.
-// BFS discovers all descendant IDs, then deletes deepest-first.
+// BFS discovers all descendant IDs, then deletes deepest-first inside a single
+// transaction.
 void Database::delete_collection (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("Deleting collection (cascade): id=" + id);
 
-    // 1. Collect all descendant IDs via BFS (root first)
-    std::vector<std::string> to_delete = { id };
-    size_t idx                         = 0;
+    // 1. Collect all descendant IDs via BFS (root first). The visited set makes
+    //    the walk terminate even on cyclic parent_id data - a self-parent or an
+    //    A -> B -> A loop that may have been written before write-time
+    //    validation existed. Without it, `to_delete` grows forever while this
+    //    method holds the global DB mutex, hanging every endpoint including
+    //    /health until the daemon is restarted (issue #79).
+    std::vector<std::string> to_delete;
+    std::unordered_set<std::string> visited;
+    to_delete.push_back (id);
+    visited.insert (id);
+    size_t idx = 0;
     while (idx < to_delete.size ()) {
         auto children = impl_->storage.get_all<Collection> (
         where (c (&Collection::parent_id) == to_delete[idx]));
         for (const auto& child : children) {
-            to_delete.push_back (child.id);
+            if (visited.insert (child.id).second) {
+                to_delete.push_back (child.id);
+            }
         }
         ++idx;
     }
 
-    // 2. Delete deepest-first so foreign-key integrity holds at each step
-    for (auto it = to_delete.rbegin (); it != to_delete.rend (); ++it) {
-        impl_->storage.remove_all<Request> (where (c (&Request::collection_id) == *it));
-        impl_->storage.remove_all<Collection> (where (c (&Collection::id) == *it));
-    }
+    // 2. Delete deepest-first so foreign-key integrity holds at each step,
+    //    wrapped in a single transaction so a crash mid-cascade cannot leave a
+    //    half-deleted subtree. Safe under the recursive mutex already held -
+    //    the lambda only calls sqlite_orm on the same storage handle (same
+    //    pattern as add_metrics_batch).
+    impl_->storage.transaction ([&] {
+        for (auto it = to_delete.rbegin (); it != to_delete.rend (); ++it) {
+            impl_->storage.remove_all<Request> (where (c (&Request::collection_id) == *it));
+            impl_->storage.remove_all<Collection> (where (c (&Collection::id) == *it));
+        }
+        return true; // Commit
+    });
 }
 
 // ============================================================================
@@ -583,21 +667,47 @@ std::optional<Request> Database::get_request (const std::string& id) {
 std::vector<Request> Database::get_requests_in_collection (const std::string& collection_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<Request> (
-    where (c (&Request::collection_id) == collection_id));
-}
-
-// Helper function to get all requests for iteration (needed because template can't access impl_)
-std::vector<Request> Database::_get_all_requests_for_collection (
-const std::string& collection_id) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    return impl_->storage.get_all<Request> (
-    where (c (&Request::collection_id) == collection_id));
+    where (c (&Request::collection_id) == collection_id), order_by (&Request::order));
 }
 
 void Database::delete_request (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("Deleting request: id=" + id);
     impl_->storage.remove_all<Request> (where (c (&Request::id) == id));
+}
+
+// ============================================================================
+// Bulk import - collections + requests + environments in one transaction
+// ============================================================================
+
+// A payload that fails to write leaves nothing behind (issue #96). Same shape as
+// add_metrics_batch: retry_on_busy holds the recursive mutex while the lambda
+// runs, and the lambda only touches the same storage handle.
+void Database::import_apply (const std::vector<Collection>& collections,
+const std::vector<Request>& requests,
+const std::vector<Environment>& environments) {
+    if (collections.empty () && requests.empty () && environments.empty ()) {
+        return;
+    }
+
+    vayu::utils::log_debug ("Applying import: " + std::to_string (collections.size ()) +
+    " collections, " + std::to_string (requests.size ()) + " requests, " +
+    std::to_string (environments.size ()) + " environments");
+
+    retry_on_busy ("apply import", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            for (const auto& c : collections) {
+                impl_->storage.replace (c);
+            }
+            for (const auto& r : requests) {
+                impl_->storage.replace (r);
+            }
+            for (const auto& e : environments) {
+                impl_->storage.replace (e);
+            }
+            return true; // Commit
+        });
+    });
 }
 
 // ============================================================================
@@ -718,37 +828,10 @@ void Database::update_run_end_time (const std::string& id) {
 }
 
 void Database::update_run_status_with_retry (const std::string& id, RunStatus status, int max_retries) {
-    for (int attempt = 0; attempt < max_retries; attempt++) {
-        try {
-            update_run_status (id, status);
-            return; // Success
-        } catch (const std::system_error& e) {
-            std::string error_msg = e.what ();
-            // Check if it's a database lock error
-            if (error_msg.find ("database is locked") != std::string::npos ||
-            error_msg.find ("SQLITE_BUSY") != std::string::npos) {
-                if (attempt == max_retries - 1) {
-                    // Last attempt failed, rethrow
-                    vayu::utils::log_error (
-                    "Failed to update run status after " +
-                    std::to_string (max_retries) + " attempts: " + error_msg);
-                    throw;
-                }
-                // Wait before retry with exponential backoff
-                vayu::utils::log_debug ("Database locked, retrying in " +
-                std::to_string (100 * (attempt + 1)) + "ms (attempt " +
-                std::to_string (attempt + 1) + "/" + std::to_string (max_retries) + ")");
-                std::this_thread::sleep_for (
-                std::chrono::milliseconds (100 * (attempt + 1)));
-            } else {
-                // Different error, rethrow immediately
-                throw;
-            }
-        } catch (...) {
-            // Non-system_error exceptions, rethrow immediately
-            throw;
-        }
-    }
+    // Public signature is unchanged (real callers in runs.cpp, execution.cpp,
+    // load_strategy.cpp); delegate to the shared busy-retry helper.
+    retry_on_busy ("update run status", max_retries,
+    std::chrono::milliseconds (100), [&] { update_run_status (id, status); });
 }
 
 std::vector<Run> Database::get_all_runs () {
@@ -756,12 +839,173 @@ std::vector<Run> Database::get_all_runs () {
     return impl_->storage.get_all<Run> (order_by (&Run::start_time).desc ());
 }
 
-// Cascade delete: removes metrics and results first
-void Database::delete_run (const std::string& id) {
+namespace {
+// Compose the sqlite_orm WHERE for a RunFilter. Each optional filter becomes
+// `(column == value) OR <inactive>`, where <inactive> is a bound `true` when
+// the filter is unset - so an unset field is a wildcard and the same compiled
+// expression serves every filter combination (no per-combination branching).
+// `q` is a substring LIKE over config_snapshot (see RunFilter's contract).
+auto run_filter_where (const RunFilter& filter) {
+    const bool no_type   = !filter.type.has_value ();
+    const bool no_status = !filter.status.has_value ();
+    const bool no_req    = !filter.request_id.has_value ();
+    const bool no_q      = !filter.q.has_value () || filter.q->empty ();
+
+    const RunType type_val     = filter.type.value_or (RunType::Design);
+    const RunStatus status_val = filter.status.value_or (RunStatus::Pending);
+    const std::string req_val  = filter.request_id.value_or ("");
+    const std::string q_pat    = "%" + (filter.q ? *filter.q : std::string{}) + "%";
+
+    return where ((c (&Run::type) == type_val || no_type) &&
+    (c (&Run::status) == status_val || no_status) &&
+    (c (&Run::request_id) == req_val || no_req) &&
+    (like (&Run::config_snapshot, q_pat) || no_q));
+}
+} // namespace
+
+std::vector<Run> Database::get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<Run> (run_filter_where (filter),
+    order_by (&Run::start_time).desc (), sqlite_orm::limit (offset, limit));
+}
+
+int64_t Database::count_runs (const RunFilter& filter) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<Run> (run_filter_where (filter));
+}
+
+// The run cascade in one place: every child table a run owns, deleted before
+// the run row itself. delete_run and prune_runs both go through this, so a new
+// child table cannot be added to one and forgotten in the other (metric_ticks
+// was added to both by editing only this function). Caller holds the mutex.
+void Database::remove_run_cascade_locked (const std::string& id) {
+    impl_->storage.remove_all<MetricTick> (where (c (&MetricTick::run_id) == id));
     impl_->storage.remove_all<Metric> (where (c (&Metric::run_id) == id));
     impl_->storage.remove_all<Result> (where (c (&Result::run_id) == id));
     impl_->storage.remove<Run> (id);
+}
+
+// Cascade delete: removes ticks, metrics and results first
+void Database::delete_run (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    remove_run_cascade_locked (id);
+}
+
+// Retried like every other write here, and for a sharper reason: this row is
+// now the *only* record of a run's whole-run aggregates. The final metric batch
+// it replaced was written under add_metrics_batch's retry, and a lock lost here
+// is not a lost tick - it is a report that falls back to legacy rows that do
+// not exist and renders the run as empty, permanently. The read-modify-write
+// runs inside the retried callback so a retry re-reads the row rather than
+// replaying a stale copy over a status the worker updated in between.
+void Database::update_run_summary (const std::string& id, const std::string& summary) {
+    retry_on_busy ("store run summary", 5, std::chrono::milliseconds (100), [&] {
+        auto run = get_run (id);
+        if (!run) {
+            vayu::utils::log_warning (
+            "Run summary write skipped, run not found: " + id);
+            return;
+        }
+        run->summary = summary;
+        impl_->storage.update (*run);
+    });
+}
+
+// Retention: drop runs beyond the count cap and/or older than the age cap.
+void Database::prune_runs (int max_runs, int max_age_days) {
+    // Both limits off - nothing to do (0 = unlimited for each).
+    if (max_runs <= 0 && max_age_days <= 0) {
+        return;
+    }
+
+    // 1. Select victim ids under the lock, then release it before deleting so
+    //    the (potentially large) delete loop batches its own locking below.
+    std::vector<std::string> victims;
+    {
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+
+        // Newest first, matching get_all_runs / the count cap's "most-recent N".
+        auto runs = impl_->storage.get_all<Run> (order_by (&Run::start_time).desc ());
+
+        const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                            .count ();
+        // 0 disables the age cap; guard the multiply against overflow.
+        const int64_t age_cutoff =
+        max_age_days > 0 ? now - static_cast<int64_t> (max_age_days) * 86'400'000LL : 0;
+
+        int kept = 0;
+        for (const auto& run : runs) {
+            // In-flight runs are never pruned and do not count toward the cap.
+            if (run.status == RunStatus::Running || run.status == RunStatus::Pending) {
+                continue;
+            }
+            const bool over_count = (max_runs > 0) && (kept >= max_runs);
+            const bool too_old = (max_age_days > 0) && (run.start_time < age_cutoff);
+            if (over_count || too_old) {
+                victims.push_back (run.id);
+            } else {
+                ++kept;
+            }
+        }
+    }
+
+    if (victims.empty ()) {
+        return;
+    }
+
+    // 2. Delete via the delete_run cascade, batched so a huge backlog does not
+    //    hold the DB mutex for seconds. The lock is re-taken per batch and
+    //    released between them, letting /health, SSE and the runs poll interleave.
+    constexpr size_t BATCH_SIZE = 100;
+    for (size_t start = 0; start < victims.size (); start += BATCH_SIZE) {
+        const size_t end = std::min (start + BATCH_SIZE, victims.size ());
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+        impl_->storage.transaction ([&] {
+            for (size_t i = start; i < end; ++i) {
+                remove_run_cascade_locked (victims[i]);
+            }
+            return true; // Commit
+        });
+    }
+
+    vayu::utils::log_info ("Pruned " + std::to_string (victims.size ()) +
+    " old run(s) (max_runs=" + std::to_string (max_runs) +
+    ", max_age_days=" + std::to_string (max_age_days) + ")");
+}
+
+size_t Database::reconcile_orphaned_runs () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+
+    auto orphans = impl_->storage.get_all<Run> (where (
+    c (&Run::status) == RunStatus::Running || c (&Run::status) == RunStatus::Pending));
+    if (orphans.empty ()) {
+        return 0;
+    }
+
+    // end_time is deliberately left as recorded. When the process died is
+    // unknowable now, and stamping the restart time would invent a duration
+    // spanning however long the daemon was down; create_run already seeds
+    // end_time = start_time, and update_run_end_time may have refined it.
+    impl_->storage.transaction ([&] {
+        for (auto& run : orphans) {
+            run.status = RunStatus::Failed;
+            impl_->storage.update (run);
+        }
+        return true; // Commit
+    });
+
+    vayu::utils::log_info ("Reconciled " + std::to_string (orphans.size ()) +
+    " run(s) left in-flight by a previous process (marked failed)");
+    return orphans.size ();
+}
+
+void Database::prune_runs_configured () {
+    const int max_runs =
+    get_config_int ("maxRunsRetained", vayu::core::constants::database::MAX_RUNS_RETAINED);
+    const int max_age_days =
+    get_config_int ("runRetentionDays", vayu::core::constants::database::RUN_RETENTION_DAYS);
+    prune_runs (max_runs, max_age_days);
 }
 
 // ============================================================================
@@ -769,82 +1013,24 @@ void Database::delete_run (const std::string& id) {
 // ============================================================================
 
 void Database::add_metric (const Metric& metric) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    const int max_retries = 3;
-    for (int attempt = 0; attempt < max_retries; attempt++) {
-        try {
-            impl_->storage.insert (metric);
-            return; // Success
-        } catch (const std::system_error& e) {
-            std::string error_msg = e.what ();
-            // Check if it's a database lock error
-            if (error_msg.find ("database is locked") != std::string::npos ||
-            error_msg.find ("SQLITE_BUSY") != std::string::npos) {
-                if (attempt == max_retries - 1) {
-                    // Last attempt failed, rethrow
-                    vayu::utils::log_error ("Failed to add metric after " +
-                    std::to_string (max_retries) + " attempts: " + error_msg);
-                    throw;
-                }
-                // Wait before retry with exponential backoff
-                std::this_thread::sleep_for (
-                std::chrono::milliseconds (50 * (attempt + 1)));
-            } else {
-                // Different error, rethrow immediately
-                throw;
-            }
-        } catch (...) {
-            // Non-system_error exceptions, rethrow immediately
-            throw;
-        }
-    }
+    retry_on_busy ("add metric", 5, std::chrono::milliseconds (100),
+    [&] { impl_->storage.insert (metric); });
 }
 
 // Batch insert with transaction for better performance and reduced lock
 // contention Includes retry logic to handle database lock contention
 void Database::add_metrics_batch (const std::vector<Metric>& metrics) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     if (metrics.empty ())
         return;
 
-    const int max_retries = 5;
-    for (int attempt = 0; attempt < max_retries; attempt++) {
-        try {
-            impl_->storage.transaction ([&] {
-                for (const auto& metric : metrics) {
-                    impl_->storage.insert (metric);
-                }
-                return true; // Commit
-            });
-            return; // Success
-        } catch (const std::system_error& e) {
-            std::string error_msg = e.what ();
-            // Check if it's a database lock error
-            if (error_msg.find ("database is locked") != std::string::npos ||
-            error_msg.find ("SQLITE_BUSY") != std::string::npos) {
-                if (attempt == max_retries - 1) {
-                    // Last attempt failed, rethrow
-                    vayu::utils::log_error (
-                    "Failed to store metrics batch after " +
-                    std::to_string (max_retries) + " attempts: " + error_msg);
-                    throw;
-                }
-                // Wait before retry with exponential backoff
-                vayu::utils::log_debug (
-                "Database locked during metrics batch, retrying in " +
-                std::to_string (100 * (attempt + 1)) + "ms (attempt " +
-                std::to_string (attempt + 1) + "/" + std::to_string (max_retries) + ")");
-                std::this_thread::sleep_for (
-                std::chrono::milliseconds (100 * (attempt + 1)));
-            } else {
-                // Different error, rethrow immediately
-                throw;
+    retry_on_busy ("store metrics batch", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            for (const auto& metric : metrics) {
+                impl_->storage.insert (metric);
             }
-        } catch (...) {
-            // Non-system_error exceptions, rethrow immediately
-            throw;
-        }
-    }
+            return true; // Commit
+        });
+    });
 }
 
 std::vector<Metric> Database::get_metrics (const std::string& run_id) {
@@ -863,9 +1049,14 @@ std::vector<Metric> Database::get_metrics_since (const std::string& run_id, int6
 // Get metrics with pagination for historical data retrieval
 std::vector<Metric> Database::get_metrics_paginated (const std::string& run_id, int64_t limit, int64_t offset) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    // Many rows share one timestamp (a tick inserts ~18 of them), and there is
+    // no index on timestamp - so ordering by timestamp alone leaves ties in
+    // whatever order the scan produced, which makes a page boundary able to
+    // repeat or skip a row. id is the insertion order, so it is the stable
+    // tiebreaker.
     return impl_->storage.get_all<Metric> (
     where (c (&Metric::run_id) == run_id),
-    order_by (&Metric::timestamp),
+    multi_order_by (order_by (&Metric::timestamp), order_by (&Metric::id)),
     sqlite_orm::limit (offset, limit));
 }
 
@@ -873,6 +1064,41 @@ std::vector<Metric> Database::get_metrics_paginated (const std::string& run_id, 
 int64_t Database::count_metrics (const std::string& run_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.count<Metric> (where (c (&Metric::run_id) == run_id));
+}
+
+// ============================================================================
+// Metric ticks - one wide row per tick (the current time-series storage)
+// ============================================================================
+
+void Database::add_metric_tick (const MetricTick& tick) {
+    retry_on_busy ("add metric tick", 5, std::chrono::milliseconds (100),
+    [&] { impl_->storage.insert (tick); });
+}
+
+// Ordered by (timestamp, id): the timestamp is the tick's sort key and `id`
+// breaks a tie deterministically, so a page boundary always falls between two
+// whole ticks - never mid-tick, the way row-paginating the EAV table did.
+std::vector<MetricTick>
+Database::get_metric_ticks_paginated (const std::string& run_id, int64_t limit, int64_t offset) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<MetricTick> (
+    where (c (&MetricTick::run_id) == run_id),
+    multi_order_by (order_by (&MetricTick::timestamp), order_by (&MetricTick::id)),
+    sqlite_orm::limit (offset, limit));
+}
+
+// Ticks added after a specific id (incremental polling by the legacy SSE loop).
+std::vector<MetricTick>
+Database::get_metric_ticks_since (const std::string& run_id, int64_t last_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<MetricTick> (
+    where (c (&MetricTick::run_id) == run_id && c (&MetricTick::id) > last_id),
+    order_by (&MetricTick::id));
+}
+
+int64_t Database::count_metric_ticks (const std::string& run_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.count<MetricTick> (where (c (&MetricTick::run_id) == run_id));
 }
 
 // ============================================================================
@@ -887,48 +1113,17 @@ void Database::add_result (const Result& result) {
 // Batch insert with transaction for better performance
 // Includes retry logic to handle database lock contention
 void Database::add_results_batch (const std::vector<Result>& results) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     if (results.empty ())
         return;
 
-    const int max_retries = 5;
-    for (int attempt = 0; attempt < max_retries; attempt++) {
-        try {
-            impl_->storage.transaction ([&] {
-                for (const auto& result : results) {
-                    impl_->storage.insert (result);
-                }
-                return true; // Commit
-            });
-            return; // Success
-        } catch (const std::system_error& e) {
-            std::string error_msg = e.what ();
-            // Check if it's a database lock error
-            if (error_msg.find ("database is locked") != std::string::npos ||
-            error_msg.find ("SQLITE_BUSY") != std::string::npos) {
-                if (attempt == max_retries - 1) {
-                    // Last attempt failed, rethrow
-                    vayu::utils::log_error (
-                    "Failed to flush results batch after " +
-                    std::to_string (max_retries) + " attempts: " + error_msg);
-                    throw;
-                }
-                // Wait before retry with exponential backoff
-                vayu::utils::log_debug (
-                "Database locked during results batch, retrying in " +
-                std::to_string (100 * (attempt + 1)) + "ms (attempt " +
-                std::to_string (attempt + 1) + "/" + std::to_string (max_retries) + ")");
-                std::this_thread::sleep_for (
-                std::chrono::milliseconds (100 * (attempt + 1)));
-            } else {
-                // Different error, rethrow immediately
-                throw;
+    retry_on_busy ("flush results batch", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            for (const auto& result : results) {
+                impl_->storage.insert (result);
             }
-        } catch (...) {
-            // Non-system_error exceptions, rethrow immediately
-            throw;
-        }
-    }
+            return true; // Commit
+        });
+    });
 }
 
 std::vector<Result> Database::get_results (const std::string& run_id) {
@@ -937,22 +1132,42 @@ std::vector<Result> Database::get_results (const std::string& run_id) {
 }
 
 // ============================================================================
-// Transaction Helpers
+// Busy-retry helper - shared by the four write paths above
 // ============================================================================
 
-void Database::begin_transaction () {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    impl_->storage.begin_transaction ();
-}
-
-void Database::commit_transaction () {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    impl_->storage.commit ();
-}
-
-void Database::rollback_transaction () {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    impl_->storage.rollback ();
+void Database::retry_on_busy (const char* what,
+int attempts,
+std::chrono::milliseconds base,
+const std::function<void ()>& fn) {
+    for (int attempt = 0; attempt < attempts; attempt++) {
+        try {
+            std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+            fn ();
+            return; // Success
+        } catch (const std::system_error& e) {
+            std::string error_msg = e.what ();
+            // Only SQLite busy/locked errors are retried; sqlite_orm surfaces
+            // them as std::system_error with these substrings in what().
+            const bool busy = error_msg.find ("database is locked") != std::string::npos ||
+            error_msg.find ("SQLITE_BUSY") != std::string::npos;
+            if (!busy) {
+                throw; // Different error, rethrow immediately
+            }
+            if (attempt == attempts - 1) {
+                // Busy persisted through every attempt - log and rethrow.
+                vayu::utils::log_error (std::string ("Failed to ") + what +
+                " after " + std::to_string (attempts) + " attempts: " + error_msg);
+                throw;
+            }
+            vayu::utils::log_debug (std::string ("Database locked during ") + what +
+            ", retrying in " + std::to_string (base.count () * (attempt + 1)) + "ms (attempt " +
+            std::to_string (attempt + 1) + "/" + std::to_string (attempts) + ")");
+        }
+        // The lock_guard scope above has ended: we sleep *without* holding the
+        // mutex so a busy retry never stalls other endpoints (/health, SSE,
+        // the runs poll) that serialize on the same lock.
+        std::this_thread::sleep_for (base * (attempt + 1));
+    }
 }
 
 // ============================================================================
@@ -1028,8 +1243,31 @@ double Database::get_config_double (const std::string& key, double default_value
     }
 }
 
+namespace {
+// Serialize all_http_versions() to the `{value,label}` JSON array the
+// "defaultHttpVersion" config entry stores in its `options` column. Derived
+// from the domain enumeration rather than a literal list, so a change to
+// HttpVersion cannot silently drift out of sync with the seeded options.
+std::string http_version_options_json () {
+    nlohmann::json options = nlohmann::json::array ();
+    for (const auto version : vayu::all_http_versions ()) {
+        options.push_back ({ { "value", vayu::to_string (version) },
+        { "label", vayu::http_version_label (version) } });
+    }
+    return options.dump ();
+}
+} // namespace
+
 void Database::seed_default_config () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+
+    // Retired settings: "requestBatchSize" drove the removed batched request
+    // iteration and is no longer read anywhere. Delete any row left behind by
+    // an older version so the Settings UI (which renders engine entries
+    // dynamically from GET /config) stops offering a dead knob.
+    impl_->storage.remove_all<ConfigEntry> (
+    where (c (&ConfigEntry::key) == "requestBatchSize"));
+
     // Get existing config entries (if any) to preserve user-modified values
     auto existing = impl_->storage.get_all<ConfigEntry> ();
     std::unordered_map<std::string, ConfigEntry> existing_map;
@@ -1070,7 +1308,7 @@ void Database::seed_default_config () {
     "Default equals CPU core count. Changes require engine restart to take "
     "effect.",
     "general_engine", std::to_string (std::thread::hardware_concurrency ()),
-    "1", "128", now });
+    "1", "128", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "maxConnections",
     std::to_string (vayu::core::constants::server::MAX_CONNECTIONS), "integer",
@@ -1079,7 +1317,7 @@ void Database::seed_default_config () {
     "beyond system limits (ulimit) may cause instability. "
     "Changes require engine restart to take effect.",
     "general_engine", std::to_string (vayu::core::constants::server::MAX_CONNECTIONS),
-    "100", "100000", now });
+    "100", "100000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "defaultTimeout",
     std::to_string (vayu::core::constants::server::DEFAULT_TIMEOUT_MS), "integer", "Default Request Timeout",
@@ -1089,17 +1327,15 @@ void Database::seed_default_config () {
     "general_engine", std::to_string (vayu::core::constants::server::DEFAULT_TIMEOUT_MS),
     "1000",   // min: 1 second
     "300000", // max: 5 minutes
-    now });
+    std::nullopt, now });
 
-    upsert_config (ConfigEntry{ "requestBatchSize",
-    std::to_string (vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE),
-    "integer", "Request Batch Size",
-    "Batch size when fetching large collections from DB. Smaller batches save "
-    "RAM; "
-    "larger batches load faster. "
-    "Default is optimized for most cases.",
-    "general_engine", std::to_string (vayu::core::constants::db_streaming::REQUEST_BATCH_SIZE),
-    "1", "1000", now });
+    upsert_config (ConfigEntry{ "defaultHttpVersion",
+    vayu::to_string (vayu::DEFAULT_HTTP_VERSION), "enum", "Default HTTP Version",
+    "Protocol a newly created request starts with. Auto lets the server and "
+    "client negotiate (HTTP/2 where available, falling back to HTTP/1.1). "
+    "Changing this does not alter requests that already exist.",
+    "general_engine", vayu::to_string (vayu::DEFAULT_HTTP_VERSION),
+    std::nullopt, std::nullopt, http_version_options_json (), now });
 
     // =========================================================================
     // DATABASE PERFORMANCE CONFIGURATION
@@ -1118,7 +1354,7 @@ void Database::seed_default_config () {
     "database_performance", std::to_string (vayu::core::constants::database::CACHE_SIZE_BYTES),
     "1048576",    // min: 1MB in bytes
     "1073741824", // max: 1GB in bytes
-    now });
+    std::nullopt, now });
 
     upsert_config (ConfigEntry{ "dbTempStore",
     std::to_string (vayu::core::constants::database::TEMP_STORE), "integer",
@@ -1130,8 +1366,8 @@ void Database::seed_default_config () {
     "calculations during "
     "active tests. "
     "Recommended for high-frequency reporting. Default: Memory.",
-    "database_performance",
-    std::to_string (vayu::core::constants::database::TEMP_STORE), "0", "2", now });
+    "database_performance", std::to_string (vayu::core::constants::database::TEMP_STORE),
+    "0", "2", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "dbMmapSize",
     std::to_string (vayu::core::constants::database::MMAP_SIZE_BYTES),
@@ -1146,7 +1382,7 @@ void Database::seed_default_config () {
     "database_performance", std::to_string (vayu::core::constants::database::MMAP_SIZE_BYTES),
     "0",          // min: disabled
     "1073741824", // max: 1GB
-    now });
+    std::nullopt, now });
 
     upsert_config (ConfigEntry{ "dbWalAutocheckpoint",
     std::to_string (vayu::core::constants::database::WAL_AUTOCHECKPOINT),
@@ -1160,7 +1396,7 @@ void Database::seed_default_config () {
     "grows larger). "
     "Recommended: 1000-2000 for tests with 50K+ requests. Default: 1000 pages.",
     "database_performance", std::to_string (vayu::core::constants::database::WAL_AUTOCHECKPOINT),
-    "100", "10000", now });
+    "100", "10000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "dbBusyTimeout",
     std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS),
@@ -1177,20 +1413,22 @@ void Database::seed_default_config () {
     "database_performance", std::to_string (vayu::core::constants::database::BUSY_TIMEOUT_MS),
     "1000",  // min: 1 second
     "60000", // max: 60 seconds
-    now });
+    std::nullopt, now });
 
     upsert_config (ConfigEntry{ "dbSynchronous",
     std::to_string (vayu::core::constants::database::SYNCHRONOUS), "integer",
     "Data Safety Mode (Requires Restart)",
     "How aggressively SQLite ensures test results are written to disk. "
-    "Options: 0 = Off (fastest, safe with WAL mode), 1 = Normal "
-    "(balanced), 2 = Full (safest, slowest). "
-    "For load testing, Off (0) is recommended - WAL mode provides "
-    "durability while maximizing write throughput for storing results. "
+    "Options: 0 = Off (fastest; the database stays consistent after a crash, "
+    "but the most recent results may be lost on power failure or OS crash - "
+    "acceptable for test telemetry), 1 = Normal (balanced), 2 = Full (safest, "
+    "slowest). "
+    "For load testing, Off (0) is recommended - it maximizes write throughput "
+    "for storing results while keeping the database uncorrupted. "
     "This setting directly impacts how fast results can be saved during "
     "high-RPS tests. Default: Off.",
-    "database_performance",
-    std::to_string (vayu::core::constants::database::SYNCHRONOUS), "0", "2", now });
+    "database_performance", std::to_string (vayu::core::constants::database::SYNCHRONOUS),
+    "0", "2", std::nullopt, now });
 
     // =========================================================================
     // NETWORK & CONNECTIVITY CONFIGURATION
@@ -1203,7 +1441,7 @@ void Database::seed_default_config () {
     "Throughput cap per worker. Higher values use more file descriptors. "
     "Applied when starting a new load test run.",
     "network_performance", std::to_string (vayu::core::constants::event_loop::MAX_CONCURRENT),
-    "1", "10000", now });
+    "1", "10000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "eventLoopMaxPerHost",
     std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST), "integer", "Max connections per host (per worker)",
@@ -1212,7 +1450,7 @@ void Database::seed_default_config () {
     "Lower values are gentler on the target; higher values maximize "
     "throughput.",
     "network_performance", std::to_string (vayu::core::constants::event_loop::MAX_PER_HOST),
-    "1", "1000", now });
+    "1", "1000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "dnsCacheTimeout",
     std::to_string (vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS),
@@ -1224,7 +1462,7 @@ void Database::seed_default_config () {
     std::to_string (vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS),
     "0",    // Disable cache
     "3600", // 1 hour
-    now });
+    std::nullopt, now });
 
     upsert_config (ConfigEntry{ "tcpKeepAliveIdle",
     std::to_string (vayu::core::constants::event_loop::TCP_KEEPALIVE_IDLE_SECONDS),
@@ -1234,7 +1472,7 @@ void Database::seed_default_config () {
     "Lower values detect dead connections faster.",
     "network_performance",
     std::to_string (vayu::core::constants::event_loop::TCP_KEEPALIVE_IDLE_SECONDS),
-    "1", "300", now });
+    "1", "300", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "tcpKeepAliveInterval",
     std::to_string (vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS),
@@ -1243,7 +1481,7 @@ void Database::seed_default_config () {
     "Usually set to the same value as Keep-Alive Idle Time.",
     "network_performance",
     std::to_string (vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS),
-    "1", "300", now });
+    "1", "300", std::nullopt, now });
 
     // =========================================================================
     // SCRIPTING ENVIRONMENT CONFIGURATION
@@ -1252,10 +1490,12 @@ void Database::seed_default_config () {
 
     upsert_config (ConfigEntry{ "scriptTimeout",
     std::to_string (vayu::core::constants::script_engine::TIMEOUT_MS), "integer", "Script Execution Timeout",
-    "Max runtime for pre/post-request scripts. Prevents infinite loops. "
-    "Value is in milliseconds (5000 = 5 seconds).",
+    "Max runtime in milliseconds for pre/post-request scripts "
+    "(5000 = 5 seconds). A script that exceeds this is aborted and "
+    "reported as an error, so an infinite loop cannot hang the "
+    "engine. Set to 0 to disable the limit (not recommended).",
     "scripting_sandbox", std::to_string (vayu::core::constants::script_engine::TIMEOUT_MS),
-    "100", "60000", now });
+    "0", "60000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "scriptEnableConsole",
     vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
@@ -1265,7 +1505,7 @@ void Database::seed_default_config () {
     "When enabled, script console output is visible in the response viewer for "
     "debugging.",
     "scripting_sandbox", vayu::core::constants::script_engine::ENABLE_CONSOLE ? "true" : "false",
-    std::nullopt, std::nullopt, now });
+    std::nullopt, std::nullopt, std::nullopt, now });
 
     upsert_config (ConfigEntry{ "contextPoolSize",
     std::to_string (vayu::core::constants::server::CONTEXT_POOL_SIZE), "integer", "Script Context Pool Size",
@@ -1273,7 +1513,7 @@ void Database::seed_default_config () {
     "script workloads. "
     "Each context uses ~2-5MB of memory.",
     "scripting_sandbox", std::to_string (vayu::core::constants::server::CONTEXT_POOL_SIZE),
-    "1", "256", now });
+    "1", "256", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "scriptMemoryLimit",
     std::to_string (vayu::core::constants::script_engine::MEMORY_LIMIT), "integer", "Script Memory Limit",
@@ -1282,7 +1522,7 @@ void Database::seed_default_config () {
     "scripting_sandbox", std::to_string (vayu::core::constants::script_engine::MEMORY_LIMIT),
     "1048576",   // 1MB
     "268435456", // 256MB
-    now });
+    std::nullopt, now });
 
     upsert_config (ConfigEntry{ "scriptStackSize",
     std::to_string (vayu::core::constants::script_engine::STACK_SIZE), "integer", "Script Stack Size",
@@ -1292,7 +1532,7 @@ void Database::seed_default_config () {
     "scripting_sandbox", std::to_string (vayu::core::constants::script_engine::STACK_SIZE),
     "65536",   // 64KB
     "1048576", // 1MB
-    now });
+    std::nullopt, now });
 
     // =========================================================================
     // OBSERVABILITY & DATA CONFIGURATION
@@ -1306,7 +1546,7 @@ void Database::seed_default_config () {
     "CPU overhead. "
     "Recommended: 100-500ms for most use cases.",
     "observability", std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
-    "10", "10000", now });
+    "10", "10000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "liveTickIntervalMs",
     std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
@@ -1316,7 +1556,52 @@ void Database::seed_default_config () {
     "CPU. Capped at 1s since slower ticks defeat live smoothness. Does not "
     "affect the 1Hz historical DB sampling.",
     "observability", std::to_string (vayu::core::constants::server::STATS_INTERVAL_MS),
-    "10", "1000", now });
+    "10", "1000", std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "liveReplayWindowMs",
+    std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
+    "integer", "Live Chart Window (ms)",
+    "How much recent live-metrics history to keep: the span the dashboard's live "
+    "charts show, and the span the engine holds in memory per run so the "
+    "dashboard can rebuild those charts when it attaches - or re-attaches - "
+    "mid-run. One setting drives both, so they cannot disagree; the dashboard's "
+    "Live Dashboard panel edits this same value. Expressed as time, so it "
+    "survives a change to the tick interval. 0 means the full run (no time "
+    "limit). Memory is bounded at 20,000 ticks per run either way, so a fast "
+    "tick interval reaches that ceiling before a long window does.",
+    "observability",
+    std::to_string (vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
+    "0", "3600000", std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "liveMaxRetainedTicks",
+    std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS),
+    "integer", "Live Metrics Tick Ceiling",
+    "Hard ceiling on live-metrics data points held in memory per run, on both "
+    "sides - the engine's replay ring and the dashboard's chart history. It is a "
+    "memory bound, not a rendering one: the charts bucket points before plotting, "
+    "so a full window reaches the screen as a few thousand points however many "
+    "are retained. It costs nothing at stock settings, because the chart window "
+    "is what sizes the buffer; it only binds when the window divided by the tick "
+    "interval exceeds it - a long window at a fast tick interval. Raise it if a "
+    "long window is being cut short; each point is roughly 1 KB.",
+    "observability",
+    std::to_string (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS),
+    "1000", "500000", std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "maxStoredErrors",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
+    "integer", "Stored Error Records Per Run",
+    "How many individual error records a run keeps for its report. The error "
+    "total, the failed-request count, the error rate and the status-code "
+    "breakdown are always exact - this bounds only the per-error detail, which "
+    "is what the report's 'By Error Type' breakdown is built from. On a run with "
+    "more errors than this, that breakdown covers the first N and so will not sum "
+    "to the total shown beside it; raise this to keep it complete, at the cost of "
+    "memory on a heavily failing run. 0 means unlimited, which against a fully "
+    "refusing target grows for the life of the run - not recommended.",
+    "observability",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS),
+    "0", "10000000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "liveRetentionMs",
     "60000",
@@ -1327,7 +1612,7 @@ void Database::seed_default_config () {
     "report. Set to 0 to disable retention (the dashboard falls back to the "
     "stored report immediately).",
     "observability", "60000",
-    "0", "600000", now });
+    "0", "600000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "maxJsonFieldSize",
     std::to_string (vayu::core::constants::json::MAX_FIELD_SIZE), "integer", "Maximum JSON Field Size",
@@ -1340,7 +1625,54 @@ void Database::seed_default_config () {
     "observability", std::to_string (vayu::core::constants::json::MAX_FIELD_SIZE),
     "1024",      // 1KB
     "104857600", // 100MB
-    now });
+    std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "maxTraceBodyBytes",
+    std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES), "integer",
+    "Maximum Stored Trace Body Size",
+    "Largest request/response body kept in a design run's stored trace. "
+    "Bodies over this size are truncated in the database (the response viewer "
+    "shows a notice and re-sending fetches the full body), so downloading one "
+    "huge response does not bloat storage forever. Default 5MB.",
+    "observability", std::to_string (vayu::core::constants::json::MAX_TRACE_BODY_BYTES),
+    "1024",       // 1KB
+    "104857600",  // 100MB
+    std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "maxResponseBodyBytes",
+    std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),
+    "integer", "Maximum Load-Test Response Body",
+    "Largest response body a single load-test request will read into memory. "
+    "A response over this size fails that request with an error instead of "
+    "being buffered, so load testing a large download or a streaming endpoint "
+    "cannot exhaust memory (every in-flight request holds its own body). "
+    "Design "
+    "mode sends are not affected. Default 32MB.",
+    "observability", std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),
+    "1024",       // 1KB
+    "1073741824", // 1GB
+    std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "maxRunsRetained",
+    std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED), "integer",
+    "Maximum Runs Retained",
+    "Keep at most this many most-recent runs; older runs (and their metrics and "
+    "results) are pruned automatically at startup and after each run finishes. "
+    "Higher values - or 0 for unlimited - keep more history but grow the database "
+    "file on disk and slow down loading the run history. In-progress runs are "
+    "never pruned. Default 200.",
+    "observability", std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED),
+    "0", "100000", std::nullopt, now });
+
+    upsert_config (ConfigEntry{ "runRetentionDays",
+    std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS), "integer",
+    "Run Retention (Days)",
+    "Delete runs older than this many days (with their metrics and results) "
+    "automatically at startup and after each run finishes. Higher values - or 0 "
+    "to keep runs forever - retain more history at the cost of a larger database "
+    "file on disk. In-progress runs are never pruned. Default 30.",
+    "observability", std::to_string (vayu::core::constants::database::RUN_RETENTION_DAYS),
+    "0", "3650", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "sseConnectTimeout",
     std::to_string (vayu::core::constants::sse::CONNECT_TIMEOUT_MS), "integer", "SSE Connection Timeout",
@@ -1348,7 +1680,7 @@ void Database::seed_default_config () {
     "Increase if the UI shows connection errors during heavy load tests. "
     "Value is in milliseconds (30000 = 30 seconds).",
     "observability", std::to_string (vayu::core::constants::sse::CONNECT_TIMEOUT_MS),
-    "1000", "300000", now });
+    "1000", "300000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "sseMaxRetry",
     std::to_string (vayu::core::constants::sse::MAX_RETRY_MS), "integer", "SSE Max Retry Interval",
@@ -1356,13 +1688,13 @@ void Database::seed_default_config () {
     "Lower values reconnect faster but may cause rapid retries if the engine "
     "is busy.",
     "observability", std::to_string (vayu::core::constants::sse::MAX_RETRY_MS),
-    "1000", "300000", now });
+    "1000", "300000", std::nullopt, now });
 
     upsert_config (ConfigEntry{ "sseSendLastEventId",
     vayu::core::constants::sse::SEND_LAST_EVENT_ID ? "true" : "false", "boolean",
     "SSE Send Last Event ID", "Resumes data streams from the last received event. Disable if using incompatible proxies.",
     "observability", vayu::core::constants::sse::SEND_LAST_EVENT_ID ? "true" : "false",
-    std::nullopt, std::nullopt, now });
+    std::nullopt, std::nullopt, std::nullopt, now });
 
     if (existing.empty ()) {
         vayu::utils::log_info ("Seeded default configuration values");

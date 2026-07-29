@@ -10,7 +10,7 @@ and proxies the engine's REST API on `:9876`. The **C++ engine is not modified**
 the MCP layer is Apache-2.0 like the rest of the app.
 
 Once Vayu is running, any agent opts in with one command; if Vayu is down, the
-agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`](../../SECURITY.md).
+agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md).
 
 ## Overview
 
@@ -125,18 +125,18 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_collections`     | read     | `GET /collections`                           | -                          |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | -                          |
 | `list_environments`    | read     | `GET /environments`                          | -                          |
-| `list_runs`            | read     | `GET /runs`                                  | -                          |
-| `get_run_report`       | read     | `GET /run/:id/report`                        | -                          |
+| `list_runs`            | read     | `GET /runs?limit=100`                        | First page (100) of the `{data, pagination}` envelope; rows carry a compact summary |
+| `get_run_report`       | read     | `GET /runs/:id/report`                       | -                          |
 | `get_engine_config`    | read     | `GET /config`                                | -                          |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | -                          |
-| `compare_runs`         | read     | 2× `GET /run/:id/report` → diff (structured) | -                          |
-| `run_request`          | execute  | `POST /request`                              | allowlist                  |
-| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /request` (×N)     | allowlist per host         |
+| `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| -                          |
+| `run_request`          | execute  | `POST /execute`                              | allowlist                  |
+| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /execute` (×N)     | allowlist per host         |
 | `create_request`       | write    | `POST /requests`                             | write toggle               |
-| `update_environment`   | write    | `GET`+`POST /environments` (fetch-merge)     | write toggle               |
+| `update_environment`   | write    | `GET`+`PUT /environments/:id` (fetch-merge)  | write toggle               |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `start_load_run`       | load     | `POST /run`                                  | allowlist + caps + confirm |
-| `stop_run`             | load     | `POST /run/:id/stop`                         | -                          |
+| `start_load_run`       | load     | `POST /runs` (+ `GET /requests/:id` with `requestId`) | allowlist + caps + confirm |
+| `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 
 Notes:
 
@@ -150,8 +150,11 @@ Notes:
   entry's label). Such values are saved, but the running engine keeps the old
   value until it is restarted, so the tool says so in its text output too.
 - **`update_environment`** fetches the environment and merges the supplied
-  variables (the engine's upsert replaces the whole variables blob), so partial
-  updates preserve untouched variables and the name.
+  variables (`PUT /environments/:id` replaces the whole variables blob), so
+  partial updates preserve untouched variables and the name. It is a `PUT`, not
+  a `POST`: since #95 the engine's `POST /environments` is create-only and would
+  answer an existing id with a `409`. `create_request` stays a `POST` for the
+  same reason - it creates, and lets the engine assign the id.
 - **`run_collection_smoke`** runs each saved request once and returns a structured
   pass/fail matrix (2xx–3xx status + all tests passing = pass). Each request is
   composed exactly as the app's **Send** would (see *Request composition* below).
@@ -163,17 +166,48 @@ Notes:
 ### Request composition
 
 In Vayu the **renderer** - not the engine - prepares a request before sending
-it: it resolves `{{variables}}`, walks the collection ancestor chain to resolve
-`inherit` auth, and composes the collection-chain pre/post scripts with the
-request's own. The engine only *applies* a concrete `auth` block (bearer / basic
-/ apikey / oauth2, incl. its token cache) and *runs* whatever script strings
-arrive in the body; it performs **no** `{{var}}` interpolation and drops
-`{"mode":"inherit"}` as "resolved app-side" (`auth_resolver.cpp::parse_auth`).
+it: it resolves `{{variables}}` and walks the collection ancestor chain to
+resolve `inherit` auth. The engine *applies* a concrete `auth` block (bearer /
+basic / apikey / oauth2, incl. its token cache); it performs **no** `{{var}}`
+interpolation and drops `{"mode":"inherit"}` as "resolved app-side"
+(`auth_resolver.cpp::parse_auth`).
+
+Scripts are handled differently: both clients collect the collection-chain
+pre/post scripts (root→leaf) and the request's own as an ordered list of parts,
+each naming where it came from (`{ origin, id, name?, script }`), and send the
+list as `preRequestScripts` / `postRequestScripts` on `POST /execute` - the
+**engine** joins the parts with `"\n\n"` and runs the result (parts whose
+script is blank are dropped). The renderer's load path builds the same kind of
+list for its `tests` field on `POST /runs`; MCP's only `POST /runs` caller
+(`start_load_run`) has no collection to chain-compose from - it forwards an
+agent-supplied ad-hoc string as-is, the same as `run_request`'s ad-hoc
+`preRequestScript`/`postRequestScript`, not a chain-built list. Composing the
+*content* of a script list is engine-side now; building the ordered *list* is
+still client-side, so it still needs both clients to agree.
+
+**One validation script, one name.** The post-response script is one field in
+the app - the request builder's **Tests** tab - and has historically reached the
+engine under two key names: `postRequestScript` on `POST /execute`, `tests` on
+`POST /runs`. Both endpoints now accept both names, so MCP declares
+**`postRequestScript` on both `run_request` and `start_load_run`**, and a script
+an agent writes for one carries to the other unchanged. It is still placed under
+`tests` on a run payload (`tools.ts::readValidationScript` +
+`composeLoadRunRequest`), because that is the name a run's own composed scripts
+do *not* use - which is what lets an explicit script displace them rather than
+sit beside them. `tests` stays accepted on both as the
+engine's own spelling - a Zod object strips keys it does not declare, so
+removing it would turn a script the agent believes is running into silence.
+Passing both names is rejected with a `ToolArgError` rather than resolved by
+precedence: they are one slot, and dropping either would report a run as
+validated by assertions that never ran. Under load the script runs against
+*sampled* responses (`max_response_samples` / `response_sample_rate`), not every
+one.
 
 Because MCP talks to the engine directly, it must do that preparation itself.
 `resolve.ts` is the main-process port of the renderer pipeline
-(`useVariableResolver.ts` + `request-builder/index.tsx` + `auth-mapping.ts`) and
-is applied so a tool call behaves like the app clicking Send:
+(`useVariableResolver.ts` + `request-builder/index.tsx` + `auth-resolution.ts` +
+`utils/script-parts.ts`) and is applied so a tool call behaves like the app
+clicking Send:
 
 - **Variables** - resolved in URL, headers, and body with the app's precedence
   (environment > collection chain, leaf→root > globals; enabled only; unknown →
@@ -182,9 +216,54 @@ is applied so a tool call behaves like the app clicking Send:
   (`inherit` resolves against the collection chain); `run_request` /
   `start_load_run` accept an explicit `auth` block. In all cases variables inside
   the block are resolved and the engine applies it (oauth2 uses its token cache).
-- **Scripts** - `run_collection_smoke` composes the collection-chain pre/post
-  scripts (root→leaf) with the request's own and sends them for the engine to
-  run, so a request's tests and setup actually execute.
+- **Scripts** - `run_collection_smoke` collects the collection-chain pre/post
+  script parts (root→leaf) and the request's own, and sends the list for the
+  engine to join and run, so a request's tests and setup actually execute.
+  `run_request` takes an agent-written `preRequestScript` / `postRequestScript`
+  instead, since an ad-hoc call has no chain to compose from; `start_load_run`
+  takes the same `postRequestScript` for a URL-only run.
+- **Protocol** - `run_request` and `start_load_run` both take an optional
+  `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
+  mirroring the request builder's Settings-tab picker. `run_collection_smoke`
+  has no such arg: it replays each saved request exactly as-is, so its stored
+  `httpVersion` goes through `composeSavedRequest` unconditionally, the same
+  path the renderer uses. `start_load_run` with a `requestId` composes the same
+  way, and a stated `httpVersion` overrides the composed one like any other
+  agent-stated field - it is read with those overrides rather than with the
+  ad-hoc payload fields, which that branch never builds. On a URL-only call
+  there is no saved row behind the request, so `httpVersion` is forwarded only
+  when the caller actually supplies it - unlike the saved-request path, there is
+  nothing concrete to protect from an engine-side default by always sending it.
+- **One post-request script, three names, all accepted everywhere.** It is
+  stored as `postRequestScript` (on a request and on a collection), sent as
+  `postRequestScripts` / `postRequestScript` to `POST /execute`, and as `tests`
+  to `POST /runs`. Both routes read every spelling through
+  `read_post_request_script`, so a payload composed for one endpoint starts the
+  other kind of run unchanged - which is what lets `start_load_run` send a saved
+  request's composed `postRequestScripts` to `/runs`. The names are tried in a
+  fixed order and the first non-blank wins; they are never merged. MCP still
+  shows the agent a single name (see *One validation script, one name* above) -
+  that is now a courtesy rather than a translation the wire depends on.
+- **Load-testing a saved request** - `start_load_run` with a `requestId`
+  composes it through the same `composeSavedRequest` that backs
+  `run_collection_smoke`: variables resolved, stored auth applied through the
+  collection chain, and the chain's + its own test scripts attached. Any field
+  stated explicitly (url, method, headers, body, httpVersion, postRequestScript)
+  overrides the composed one; an explicit script *replaces* the composed ones rather than
+  joining them. Without a `requestId` the run is ad-hoc and `url` is required.
+  A saved request's **pre-request** script cannot run under load - `POST /runs`
+  has no such hook - so it is left out of the payload and the count of dropped
+  scripts is reported in the tool's result rather than passing silently.
+- **Request mutation** - a pre-request script's `pm.request` edits (url, method,
+  headers, body) are applied to the request that is sent, so an agent can sign a
+  request or override the engine-applied auth from `run_request`, and a saved
+  request's stored pre-request script does the same under
+  `run_collection_smoke`. The write-back is engine-side
+  ([scripting.md](scripting.md#mutating-the-request-pre-request-scripts)), so
+  both tools get it without composing anything extra. A rejected edit comes back
+  as `preScriptError` in the response. `start_load_run` has no pre-request hook
+  at all - `POST /runs` runs only the deferred `tests` script - so it does not
+  offer the field rather than accepting one that would never run.
 
 Resolution only fetches the variable sources when a call needs them (a field
 carries a `{{template}}`, or auth is `inherit`); a fully-literal call skips the
@@ -193,12 +272,12 @@ and `collectionId` to scope resolution.
 
 > **Known duplication (deferred).** `resolve.ts` is a deliberate port of the
 > renderer's composition pipeline, so the same semantics now live in two places
-> (renderer + MCP). This is because the engine only does composition halfway (it
-> loads variables and applies auth/scripts, but does not interpolate `{{var}}`,
-> resolve `inherit`, or compose chain scripts). The intended fix is to finish
-> composition in the engine and let clients go thin. Until then, **keep the two
-> copies in sync and don't add a third.** See `docs/plans/pending-backlog.md` →
-> **A1**.
+> (renderer + MCP). This is because the engine only does composition partway (it
+> loads variables, applies auth, and joins/runs script parts, but does not
+> interpolate `{{var}}`, resolve `inherit`, or build the ordered script-part
+> list). The intended fix is to finish composition in the engine and let clients
+> go thin. Until then, **keep the two copies in sync and don't add a third.**
+> See `docs/plans/pending-backlog.md` → **A1**.
 
 ## Resources
 
@@ -206,7 +285,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 
 | URI                         | Contents                         |
 | --------------------------- | -------------------------------- |
-| `vayu://runs`               | All runs, newest first.          |
+| `vayu://runs`               | Recent runs (first page, 100), newest first. |
 | `vayu://collections`        | All request collections.         |
 | `vayu://environments`       | All environments.                |
 | `vayu://config`             | Engine configuration entries.    |
@@ -237,6 +316,15 @@ never modified. All configurable in **Settings → MCP** and persisted.
   bypasses the list (still rejects unresolved `{{variables}}`); off by default.
 - **Hard caps** - max RPS / concurrency / duration on `start_load_run`; over-cap
   requests are rejected. With the allowlist, these are the real limits on load.
+  The caps bound values from above; `concurrency` is additionally constrained to
+  a positive integer by the tool's own schema, because "unlimited" is an obvious
+  guess to spell `-1` or `0` and the engine reads it as an eager per-worker
+  pre-allocation count (see the accepted ranges under
+  [POST /runs](api-reference.md#post-runs)).
+  `duration` / `rampUpDuration` are also rejected when they are not durations at
+  all (`ms`/`s`/`m`/`h`, or a bare number of seconds - the same grammar the
+  engine parses), since the engine now fails such a run rather than quietly
+  substituting 60s.
 - **Load-run confirmation** - anti-accident, not anti-adversary: it stops a stray
   tool call from starting load, but on HTTP it is agent-side (the caps/allowlist
   are the enforcement). Elicitation upgrades it to a human prompt where supported.
@@ -280,22 +368,22 @@ live and writing it to disk.
 Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 `EngineSidecar`.
 
-| File               | Responsibility                                                      |
-| ------------------ | ------------------------------------------------------------------- |
-| `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer. |
-| `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                |
-| `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.  |
-| `compare.ts`       | Pure two-report diff for `compare_runs`.                            |
-| `resolve.ts`       | Request composition: `{{var}}` resolution, inherit-auth, scripts.   |
-| `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`.    |
-| `resources.ts`     | Static + templated resource definitions.                            |
-| `prompts.ts`       | Prompt definitions (build messages from engine data).               |
-| `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts.      |
-| `http.ts`          | Stateless Streamable HTTP host (DNS-rebinding on).                  |
-| `cli.ts`           | Standalone stdio server (env-configured).                           |
-| `connect.ts`       | One-click connect: shells out to `claude` / `code` CLIs.            |
-| `store.ts`         | Persist safety config + enabled preference (`electron-store`).      |
-| `index.ts`         | `VayuMcpService` facade consumed by `main.ts`.                      |
+| File               | Responsibility                                                              |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer.          |
+| `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                        |
+| `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
+| `compare.ts`       | Pure two-report diff for `compare_runs`.                                    |
+| `resolve.ts`       | Request composition: `{{var}}` resolution, inherit-auth, script-part lists. |
+| `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`.            |
+| `resources.ts`     | Static + templated resource definitions.                                    |
+| `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
+| `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts.              |
+| `http.ts`          | Stateless Streamable HTTP host (DNS-rebinding on).                          |
+| `cli.ts`           | Standalone stdio server (env-configured).                                   |
+| `connect.ts`       | One-click connect: shells out to `claude` / `code` CLIs.                    |
+| `store.ts`         | Persist safety config + enabled preference (`electron-store`).              |
+| `index.ts`         | `VayuMcpService` facade consumed by `main.ts`.                              |
 
 ### Lifecycle & IPC
 
@@ -375,4 +463,4 @@ builds on the mechanism the spec is deprecating and the payoff is client-depende
   [Codex](https://developers.openai.com/codex/mcp) ·
   [Cursor](https://cursor.com/docs/mcp)
 - Engine API surface: [`api-reference.md`](./api-reference.md) · Threat model:
-  [`SECURITY.md`](../../SECURITY.md)
+  [`SECURITY.md`](https://github.com/athrvk/vayu/blob/master/SECURITY.md)

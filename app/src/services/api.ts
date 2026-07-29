@@ -22,6 +22,8 @@ import type {
 	GlobalVariables,
 	VariableValue,
 	Run,
+	RunListResponse,
+	RunListParams,
 	RunReport,
 	EngineHealth,
 	SanityResult,
@@ -43,6 +45,8 @@ import type {
 	UpdateConfigRequest,
 	GlobalsResponse,
 	ImportFetchResponse,
+	ImportApplyRequest,
+	ImportApplyResponse,
 	OAuth2TokenRequest,
 	OAuth2TokenResponse,
 	OAuth2TokenStatusResponse,
@@ -57,6 +61,7 @@ import {
 	PROXIED_TIMEOUT_GRACE_MS,
 	ENGINE_MAX_DEFAULT_TIMEOUT_MS,
 	STATS_PAGE_LIMIT,
+	RUNS_PAGE_LIMIT,
 } from "@/config/network";
 
 /**
@@ -108,7 +113,12 @@ export const apiService = {
 	},
 
 	async updateCollection(data: UpdateCollectionRequest): Promise<Collection> {
-		const response = await httpClient.post<any>(API_ENDPOINTS.COLLECTIONS, data);
+		// PUT, not POST: since #95 the engine's POST is create-only and answers a
+		// known id with 409. The id travels in the path (it is the identity);
+		// the rest of the object is a merge-patch, where an omitted field keeps
+		// its stored value and an explicit null resets it to the default.
+		const { id, ...patch } = data;
+		const response = await httpClient.put<any>(API_ENDPOINTS.COLLECTIONS_UPDATE(id), patch);
 		return CollectionTransformer.toFrontend(response);
 	},
 
@@ -142,7 +152,9 @@ export const apiService = {
 
 	async updateRequest(data: UpdateRequestRequest): Promise<Request> {
 		console.log("Updating request with data:", data);
-		const response = await httpClient.post<Request>(API_ENDPOINTS.REQUESTS, data);
+		// PUT, not POST - see updateCollection above for why.
+		const { id, ...patch } = data;
+		const response = await httpClient.put<Request>(API_ENDPOINTS.REQUESTS_UPDATE(id), patch);
 		return RequestTransformer.toFrontend(response);
 	},
 
@@ -165,7 +177,9 @@ export const apiService = {
 	},
 
 	async updateEnvironment(data: UpdateEnvironmentRequest): Promise<Environment> {
-		return await httpClient.post<Environment>(API_ENDPOINTS.ENVIRONMENTS, data);
+		// PUT, not POST - see updateCollection above for why.
+		const { id, ...patch } = data;
+		return await httpClient.put<Environment>(API_ENDPOINTS.ENVIRONMENTS_UPDATE(id), patch);
 	},
 
 	async deleteEnvironment(id: string): Promise<void> {
@@ -197,9 +211,36 @@ export const apiService = {
 	},
 
 	// Run Management
-	async listRuns(): Promise<Run[]> {
-		// Backend returns flat array directly
-		return await httpClient.get<Run[]>(API_ENDPOINTS.RUNS);
+	/**
+	 * List runs, newest first, as a `{data, pagination}` envelope. Passing
+	 * pagination/filter params opts into the envelope; the history sidebar polls
+	 * the first page and pages older runs in on demand.
+	 */
+	async listRuns(params: RunListParams = {}): Promise<RunListResponse> {
+		const { limit = RUNS_PAGE_LIMIT, offset = 0, type, status, requestId, q } = params;
+		return await httpClient.get<RunListResponse>(
+			API_ENDPOINTS.RUNS_LIST({ limit, offset, type, status, requestId, q })
+		);
+	},
+
+	/**
+	 * Fetch every run matching @p params by paging to exhaustion. For callers
+	 * that genuinely need the whole set (clearing all history, counting) rather
+	 * than a polled page. Rows still carry the compact `summary`, so this stays
+	 * cheap even over a large history.
+	 */
+	async listAllRuns(params: Omit<RunListParams, "limit" | "offset"> = {}): Promise<Run[]> {
+		const limit = 500; // Engine's max page size.
+		const all: Run[] = [];
+		let offset = 0;
+		// Bounded by pagination.hasMore; the engine caps limit at 500.
+		for (;;) {
+			const page = await this.listRuns({ ...params, limit, offset });
+			all.push(...page.data);
+			if (!page.pagination.hasMore) break;
+			offset += page.pagination.limit;
+		}
+		return all;
 	},
 
 	async getRun(id: string): Promise<Run> {
@@ -246,6 +287,15 @@ export const apiService = {
 			{ url },
 			{ timeout: proxiedRequestTimeoutMs() }
 		);
+	},
+
+	/**
+	 * Persist a whole parsed import in one call. All-or-nothing: a rejected
+	 * payload wrote nothing, so there is no partial tree to clean up. The engine
+	 * owns every id here and returns the temp-id -> real-id map.
+	 */
+	async applyImport(payload: ImportApplyRequest): Promise<ImportApplyResponse> {
+		return await httpClient.post<ImportApplyResponse>(API_ENDPOINTS.IMPORT_APPLY, payload);
 	},
 
 	// OAuth 2.0 - the engine proxies the token endpoint, so use the longer

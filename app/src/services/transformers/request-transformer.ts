@@ -15,9 +15,12 @@
 import type { Request, KeyValueEntry, RequestBody, RequestAuth } from "@/types";
 import {
 	DEFAULT_FOLLOW_REDIRECTS,
+	DEFAULT_HTTP_VERSION,
 	DEFAULT_MAX_REDIRECTS,
 	MAX_MAX_REDIRECTS,
 	MIN_MAX_REDIRECTS,
+	isHttpVersion,
+	type HttpVersion,
 } from "@/constants/request";
 
 export type BackendRequest = Omit<Request, "createdAt" | "updatedAt"> & {
@@ -34,6 +37,17 @@ export type BackendRequest = Omit<Request, "createdAt" | "updatedAt"> & {
 function clampMaxRedirects(raw: unknown): number {
 	if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_MAX_REDIRECTS;
 	return Math.min(MAX_MAX_REDIRECTS, Math.max(MIN_MAX_REDIRECTS, Math.trunc(raw)));
+}
+
+/**
+ * Coerce a raw `httpVersion` into a value the app knows how to render. A row
+ * saved before this column existed comes back without it, and a row written
+ * by a newer engine version (or a corrupted one) can carry a protocol this
+ * build has never heard of - both must read as the engine default rather than
+ * as `undefined`, which the Settings tab picker can't select.
+ */
+function coerceHttpVersion(raw: unknown): HttpVersion {
+	return isHttpVersion(raw) ? raw : DEFAULT_HTTP_VERSION;
 }
 
 export class RequestTransformer {
@@ -80,6 +94,10 @@ export class RequestTransformer {
 					? raw.followRedirects
 					: DEFAULT_FOLLOW_REDIRECTS,
 			maxRedirects: clampMaxRedirects(raw.maxRedirects),
+			// HTTP protocol: a row stored before this column existed, or one
+			// carrying a value this build doesn't recognise, reads as the
+			// engine default rather than as an unselectable value.
+			httpVersion: coerceHttpVersion(raw.httpVersion),
 			order: raw.order ?? 0,
 			createdAt: new Date(raw.createdAt).toISOString(),
 			updatedAt: new Date(raw.updatedAt).toISOString(),

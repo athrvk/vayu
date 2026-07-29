@@ -10,15 +10,20 @@
  */
 
 /**
- * The two script panels, which are near-identical by construction.
+ * The script panel, rendered as both of its variants.
  *
- * `PreScriptPanel` and `TestScriptPanel` differ only in the field they bind, the
- * sentence at the top and the quick-reference block; the variable-scanning and
- * variable-listing machinery is duplicated line for line. That duplication is
- * left in place deliberately (see the note in each file), so every test here
- * runs against both - a fix applied to one and not the other fails.
+ * `PreScriptPanel` and `TestScriptPanel` used to be two ~155-line files that a
+ * normalised `diff` showed differing in three places, and each asked the next
+ * reader to "change them together". This suite existed to make that safe by
+ * running every assertion twice.
  *
- * Two defects:
+ * They are one `ScriptPanel` now, so these cases no longer guard a one-sided
+ * fix. They guard something else: that the extraction kept **three** distinct
+ * bindings per variant - the `RequestState` field, and the two context keys for
+ * inherited and legacy scripts. Crossing any of them renders a panel that looks
+ * entirely correct, which is why each has a marker only it carries.
+ *
+ * Two defects the panels carried before that:
  *
  *   - The scope chips in the full variable list were hand-rolled as
  *     `<Badge variant="outline">{scope[0].toUpperCase()}</Badge>`, bypassing
@@ -34,8 +39,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
-import PreScriptPanel from "./PreScriptPanel";
-import TestScriptPanel from "./TestScriptPanel";
+import ScriptPanel from "./script/ScriptPanel";
 
 /** Monaco does not run under jsdom; nothing here tests the editor. */
 vi.mock("@/components/ui", async (importOriginal) => ({
@@ -45,6 +49,15 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 
 const SCRIPT = `pm.environment.get("token"); const u = "{{base_url}}"; pm.globals.get("run_id");`;
 
+/*
+ * The two fields hold *different* scripts. They used to hold the same string,
+ * which meant a panel bound to the wrong field rendered identically and every
+ * test below passed - the one defect the extraction could introduce was the
+ * one thing nothing checked.
+ */
+const PRE_ONLY = "pm.environment.get('pre_only_marker');";
+const POST_ONLY = "pm.environment.get('post_only_marker');";
+
 const ALL_VARIABLES = {
 	token: { value: "abc123", scope: "environment" as const },
 	base_url: { value: "https://api.example.com", scope: "collection" as const },
@@ -53,16 +66,36 @@ const ALL_VARIABLES = {
 
 vi.mock("../../../context", () => ({
 	useRequestBuilderContext: () => ({
-		request: { preRequestScript: SCRIPT, testScript: SCRIPT },
+		request: {
+			preRequestScript: `${SCRIPT} ${PRE_ONLY}`,
+			testScript: `${SCRIPT} ${POST_ONLY}`,
+			collectionId: null,
+		},
 		updateField: () => {},
 		getAllVariables: () => ALL_VARIABLES,
+		// Distinct per end of the run, so a panel reading the wrong context key
+		// shows the other end's collection name / recorded script.
+		inheritedPreScripts: [{ origin: "collection", id: "c1", name: "PreChain", script: "x" }],
+		inheritedPostScripts: [{ origin: "collection", id: "c2", name: "PostChain", script: "x" }],
+		legacyPreScript: "recorded_pre_script_marker",
+		legacyPostScript: "recorded_post_script_marker",
 	}),
 }));
 
-/** Both panels, so a one-sided fix cannot pass. */
+/**
+ * `collectionId: null` above means InheritedScriptsNotice has nothing to
+ * inherit, but it still calls `useCollectionAncestors`, which needs a
+ * QueryClient this test never sets up. Mocked here, not tested here -
+ * InheritedScriptsNotice.test.tsx covers its own behaviour.
+ */
+vi.mock("@/queries/collections", () => ({
+	useCollectionAncestors: () => [],
+}));
+
+/** Each variant, with the three markers only it should ever render. */
 const PANELS = [
-	["pre-request", PreScriptPanel],
-	["tests", TestScriptPanel],
+	["pre-request", "pre", "pre_only_marker", "PreChain", "recorded_pre_script_marker"],
+	["tests", "post", "post_only_marker", "PostChain", "recorded_post_script_marker"],
 ] as const;
 
 /** The compact scope chips inside the full variable list. */
@@ -80,7 +113,9 @@ function openFullList(container: HTMLElement) {
 	fireEvent.click(button!);
 }
 
-describe.each(PANELS)("%s panel", (_name, Panel) => {
+describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegacy) => {
+	const Panel = () => <ScriptPanel variant={variant} />;
+
 	it("lists the variables the script references", () => {
 		const { container } = render(<Panel />);
 		expect(container.textContent).toContain("Referenced:");
@@ -118,5 +153,122 @@ describe.each(PANELS)("%s panel", (_name, Panel) => {
 		for (const cls of classes) {
 			expect(cls).toMatch(/\btext-scope-(global|collection|environment)\b/);
 		}
+	});
+
+	it("reads its own field and not the other panel's", () => {
+		/*
+		 * The one defect the extraction could introduce. Both fields hold a
+		 * marker only they contain, so a panel wired to the wrong one names the
+		 * other's marker in its Referenced chips.
+		 */
+		const { container } = render(<Panel />);
+		const other = ownMarker === "pre_only_marker" ? "post_only_marker" : "pre_only_marker";
+
+		expect(container.textContent).toContain(ownMarker);
+		expect(container.textContent).not.toContain(other);
+	});
+
+	it("takes its inherited scripts and legacy script from its own end of the run", () => {
+		/*
+		 * Three bindings, not one. The field is the obvious one to cross; the
+		 * two context keys are the quiet ones, and nothing checked them - a
+		 * `post` panel reading `inheritedPreScripts` listed the wrong
+		 * collections and every other test still passed.
+		 */
+		const { container } = render(<Panel />);
+		const otherChain = ownChain === "PreChain" ? "PostChain" : "PreChain";
+		const otherLegacy =
+			ownLegacy === "recorded_pre_script_marker"
+				? "recorded_post_script_marker"
+				: "recorded_pre_script_marker";
+
+		expect(container.textContent).toContain(ownChain);
+		expect(container.textContent).not.toContain(otherChain);
+		expect(container.textContent).toContain(ownLegacy);
+		expect(container.textContent).not.toContain(otherLegacy);
+	});
+
+	/*
+	 * `--muted` is the one surface where no border token works: it sits between
+	 * `--border` (L 10%) and `--border-strong` (L 18%) in dark, so the old
+	 * `bg-muted/50 ... border border-input` drew an edge that was wrong in one
+	 * theme or the other. `surface-sunken` declares a `--rule` that reads on it.
+	 *
+	 * Only the *declaration* is checkable here - a `border-rule` under no
+	 * declared surface silently falls back to the invisible default, so
+	 * asserting `border-rule` alone proves nothing, and the colour it resolves
+	 * to is a computed-style question jsdom cannot answer.
+	 */
+	/*
+	 * A pre-request script can now change the outgoing request, and none of the
+	 * rules that govern it are visible from a snippet: that the object is
+	 * authoritative, that it beats the Auth tab, that a bad value refuses the
+	 * whole edit. Leaving those only in `docs/engine/scripting.md` puts them
+	 * where the person writing the script is not - so the panel carries them,
+	 * and this checks it still does.
+	 */
+	it("tells the reader what its scripts can and cannot change", () => {
+		const { container } = render(<Panel />);
+		const text = container.textContent ?? "";
+
+		// Both variants render notes at all - an empty list would pass every
+		// substring check below by never contradicting one.
+		expect(container.querySelectorAll("ul li").length).toBeGreaterThan(0);
+
+		if (variant === "pre") {
+			expect(text).toContain("what is actually sent");
+			expect(text).toMatch(/wins over the Auth tab|beats the/i);
+			expect(text).toMatch(/case-sensitive/i);
+			// The failure path is the half a user only meets when it bites.
+			expect(text).toMatch(/rejects the whole edit/i);
+			expect(text).toMatch(/load tests do not run pre-request scripts/i);
+		} else {
+			// The other half of the contract: writing here is a no-op.
+			expect(text).toMatch(/writing to it does nothing/i);
+		}
+	});
+
+	/*
+	 * The quick reference is copy-paste bait: it sits next to the editor and a
+	 * script author types what it shows. It showed
+	 * `pm.response.headers.get("Content-Type")` for as long as the panel has
+	 * existed, and that throws `TypeError: not a function` - the runtime builds
+	 * `headers` as a plain object (`script_engine.cpp`, `setup_pm_response`),
+	 * with keys the HTTP client has already lower-cased.
+	 */
+	it("suggests only header reads that the runtime supports", () => {
+		const { container } = render(<Panel />);
+		const text = container.textContent ?? "";
+
+		expect(text).not.toContain("headers.get(");
+		if (variant === "post") {
+			expect(text).toContain('pm.response.headers["content-type"]');
+			// The rule the snippet cannot show: why the key is lower-cased.
+			expect(text).toMatch(/lower-cases every key/i);
+		}
+	});
+
+	describe("the sunken slabs", () => {
+		it("declares the surface its rule reads from", () => {
+			const { container } = render(<Panel />);
+			openFullList(container);
+
+			const slabs = container.querySelectorAll(".surface-sunken");
+			expect(
+				slabs.length,
+				"the full variable list, the quick reference, and the legacy script"
+			).toBe(3);
+			for (const slab of slabs) {
+				expect(slab.className).toContain("border-rule");
+			}
+		});
+
+		it("leaves no border token on a muted surface", () => {
+			const { container } = render(<Panel />);
+			openFullList(container);
+
+			expect(container.innerHTML).not.toContain("border-input");
+			expect(container.innerHTML).not.toContain("bg-muted/50");
+		});
 	});
 });

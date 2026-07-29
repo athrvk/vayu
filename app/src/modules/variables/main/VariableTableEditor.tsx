@@ -212,7 +212,10 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		variablesRef.current = variables;
 	}, [variables]);
 
-	// Sort by createdAt ascending (oldest first, newest at bottom); tie-break by key
+	// Sort by createdAt ascending (oldest first, newest at bottom); tie-break by
+	// key. A missing createdAt sorts as 0 - "older than everything" - so rows
+	// with no known creation time stay together at the top instead of drifting
+	// one at a time as they happen to be saved.
 	const sortByCreatedAt = useCallback(
 		(entries: [string, VariableValue][]) =>
 			[...entries].sort(([ka, a], [kb, b]) => {
@@ -237,7 +240,15 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 						enabled: v.enabled,
 						secret: v.secret ?? false,
 						type: v.type ?? "string",
-						createdAt: v.createdAt ?? Date.now(),
+						// Never backfill to `Date.now()`. A row whose creation
+						// time is unknown - one written before the field
+						// existed, or stripped by an older engine - would get
+						// stamped at whatever moment its scope happened to be
+						// saved, which is *after* the row the user just typed,
+						// so the pre-existing row leapfrogged the new one
+						// (issue #135). Unknown stays unknown; the sort reads it
+						// as older than everything, which is stable.
+						...(v.createdAt !== undefined && { createdAt: v.createdAt }),
 					},
 				]);
 			}
@@ -571,7 +582,14 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				/>
 			)}
 
-			{/* Variables Table */}
+			{/*
+			 * This scrolls, and `overflow-y-auto` computes `overflow-x` to `auto`
+			 * too, so the box clips on all four sides at its padding box. Embedded
+			 * (Collection Detail) it carries `p-0`, so anything flush against the
+			 * left edge loses the outer half of its focus ring; standalone it
+			 * carries `p-4` and nothing notices. The clearance that fixes it lives
+			 * on the checkbox cell below, not here - see the comment there.
+			 */}
 			<div className={cn("flex-1 overflow-y-auto", embedded ? "p-0" : "p-4")}>
 				<table className="w-full">
 					<thead>
@@ -598,7 +616,21 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 							return (
 								<tr key={index} className="group">
-									<td className="py-1">
+									{/*
+									 * `px-1` is clearance for the focus ring, not decoration.
+									 * The baseline draws it 1px wide at `outline-offset: 2px`,
+									 * i.e. 3px outside the box, and this cell sits against the
+									 * scroll container's clip edge when embedded - so with no
+									 * horizontal padding the ring lost its left side.
+									 *
+									 * Clearance rather than `.panel-clip` on the container: the
+									 * same native checkbox appears in the request builder's
+									 * key-value rows, where `KeyValueRow`'s `p-1` gives it the
+									 * same 4px and the ring reads as an outset hairline with a
+									 * gap. Tucking this one inward would have made one control
+									 * look like two, depending on the screen.
+									 */}
+									<td className="py-1 px-1">
 										<input
 											type="checkbox"
 											checked={variable.enabled}

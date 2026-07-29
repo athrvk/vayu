@@ -107,6 +107,16 @@ export class EngineClient {
 		);
 	}
 
+	/**
+	 * Fetch a single saved request. Unlike environments, the engine does have a
+	 * `GET /requests/:id` route, so this is one round trip rather than a scan of
+	 * every collection's list. A `404` surfaces as an `EngineRequestError`, which
+	 * is what distinguishes "that request was deleted" from an unreachable engine.
+	 */
+	getRequest(id: string, signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", `/requests/${encodeURIComponent(id)}`, undefined, signal);
+	}
+
 	listEnvironments(signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", "/environments", undefined, signal);
 	}
@@ -128,12 +138,17 @@ export class EngineClient {
 		return arr.find((e) => e && typeof e === "object" && e.id === id) ?? null;
 	}
 
+	/**
+	 * First page of run history (newest first), bounded so an agent never pulls
+	 * unbounded history. Returns the `{data, pagination}` envelope; `data` rows
+	 * carry the compact `summary`, not the full config_snapshot.
+	 */
 	listRuns(signal?: AbortSignal): Promise<unknown> {
-		return this.request("GET", "/runs", undefined, signal);
+		return this.request("GET", "/runs?limit=100&offset=0", undefined, signal);
 	}
 
 	getRunReport(runId: string, signal?: AbortSignal): Promise<unknown> {
-		return this.request("GET", `/run/${encodeURIComponent(runId)}/report`, undefined, signal);
+		return this.request("GET", `/runs/${encodeURIComponent(runId)}/report`, undefined, signal);
 	}
 
 	// --- Engine configuration ------------------------------------------------
@@ -146,29 +161,34 @@ export class EngineClient {
 		return this.request("POST", "/config", payload, signal);
 	}
 
-	// --- Write: saved requests / environments (upserts) ----------------------
+	// --- Write: saved requests / environments --------------------------------
+	//
+	// POST creates, PUT updates - the engine split the verbs in #95, so these
+	// are no longer interchangeable: a POST carrying a known id is a 409, and a
+	// PUT to an unknown id is a 404.
 
+	/** Create a saved request: `POST /requests` (the engine assigns the id). */
 	createRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/requests", payload, signal);
 	}
 
-	/** Upsert an environment: `POST /environments` (include `id` to update). */
-	upsertEnvironment(payload: unknown, signal?: AbortSignal): Promise<unknown> {
-		return this.request("POST", "/environments", payload, signal);
+	/** Update an environment: `PUT /environments/:id` (merge-patch body). */
+	updateEnvironment(id: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
+		return this.request("PUT", `/environments/${encodeURIComponent(id)}`, payload, signal);
 	}
 
 	// --- Execute -------------------------------------------------------------
 
 	executeRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
-		return this.request("POST", "/request", payload, signal);
+		return this.request("POST", "/execute", payload, signal);
 	}
 
 	startRun(payload: unknown, signal?: AbortSignal): Promise<unknown> {
-		return this.request("POST", "/run", payload, signal);
+		return this.request("POST", "/runs", payload, signal);
 	}
 
 	stopRun(runId: string, signal?: AbortSignal): Promise<unknown> {
-		return this.request("POST", `/run/${encodeURIComponent(runId)}/stop`, undefined, signal);
+		return this.request("POST", `/runs/${encodeURIComponent(runId)}/stop`, undefined, signal);
 	}
 
 	/**
@@ -191,7 +211,7 @@ export class EngineClient {
 		const ticks: MetricsTick[] = [];
 		try {
 			const res = await this.fetchImpl(
-				`${this.baseUrl}/metrics/live/${encodeURIComponent(runId)}`,
+				`${this.baseUrl}/runs/${encodeURIComponent(runId)}/live`,
 				{
 					method: "GET",
 					headers: { Accept: "text/event-stream" },
@@ -201,7 +221,7 @@ export class EngineClient {
 			if (!res.ok) {
 				const text = await res.text().catch(() => "");
 				throw new EngineRequestError(
-					`Engine responded ${res.status} for GET /metrics/live/${runId}`,
+					`Engine responded ${res.status} for GET /runs/${runId}/live`,
 					res.status,
 					text
 				);

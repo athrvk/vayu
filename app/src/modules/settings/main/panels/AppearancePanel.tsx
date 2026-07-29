@@ -31,6 +31,7 @@ import {
 	CardDescription,
 	CardHeader,
 	CardTitle,
+	Eyebrow,
 	Skeleton,
 } from "@/components/ui";
 import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
@@ -250,9 +251,7 @@ export default function AppearancePanel() {
 				</CardHeader>
 				<CardContent className="space-y-5">
 					<div>
-						<p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-							Font
-						</p>
+						<Eyebrow className="mb-2">Font</Eyebrow>
 						<FontPicker
 							options={UI_FONTS}
 							value={font}
@@ -266,10 +265,10 @@ export default function AppearancePanel() {
 					</div>
 
 					<div>
-						<p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+						<Eyebrow className="mb-2 flex items-center gap-1.5">
 							<Maximize2 className="w-3.5 h-3.5" />
 							Scale
-						</p>
+						</Eyebrow>
 						<div className="grid grid-cols-3 gap-3">
 							{UI_SCALES.map((option) => {
 								const isSelected = scale === option.value;
@@ -299,10 +298,10 @@ export default function AppearancePanel() {
 					</div>
 
 					<div>
-						<p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+						<Eyebrow className="mb-2 flex items-center gap-1.5">
 							<Squircle className="w-3.5 h-3.5" />
 							Roundedness
-						</p>
+						</Eyebrow>
 						<div className="grid grid-cols-3 gap-3">
 							{UI_RADII.map((option) => {
 								const isSelected = radius === option.value;

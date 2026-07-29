@@ -66,15 +66,41 @@ The event loop manages concurrent HTTP request execution using libcurl's multi i
 **Architecture:**
 - **Multi-worker design**: One event loop per CPU core (auto-detected)
 - **SPSC queues**: Lock-free single-producer single-consumer queues for request submission
-- **Rate limiting**: Token bucket algorithm for precise RPS control
+- **Rate limiting**: Token bucket algorithm for precise RPS control. `targetRps` is an
+  **aggregate** budget: each worker owns a private bucket and submissions are sharded
+  round-robin, so the rate and burst are split N ways when the loop is built (with a
+  one-token burst floor, since a sub-token bucket could never start a transfer)
 - **Connection pooling**: Reuses connections with keep-alive
 - **DNS caching**: 5-minute cache to avoid resolver saturation
+
+**DNS pre-resolution.** Hostnames are resolved once and pinned onto each
+transfer with `CURLOPT_RESOLVE`, which keeps a high-RPS run from saturating the
+system resolver. Three rules make that safe:
+
+- **Entries expire** after `dnsCacheTimeout` (default 300s). curl treats a
+  pinned address as authoritative, so an entry that never expired would survive
+  a DNS change - a blue/green deploy of the target - and fail every request for
+  the rest of the daemon's life. The cache is a process-wide static shared by
+  every worker and every run, which is what made that permanent.
+- **Failed lookups are remembered** for 5s. Resolution is a blocking
+  `getaddrinfo` on the worker thread, so it stalls every in-flight transfer
+  that worker owns; without a negative entry an unresolvable host paid that
+  cost on every single request. Moving resolution off the IO thread entirely is
+  the deeper fix and is not done.
+- **IP-literal URLs are never pinned** - `http://127.0.0.1/`,
+  `http://[::1]:8080/` - since there is nothing to resolve. Parsing an
+  authority also handles userinfo (`http://user:pass@host/`), whose colon is
+  not a port separator.
 
 **Configuration:**
 - Max concurrent requests per worker: 1000 (configurable)
 - Max connections per host: 100
-- Poll timeout: 10ms
+- Poll timeout: 1ms (kept short because a submission interrupts the poll via
+  `curl_multi_wakeup`)
 - TCP keep-alive: 60s idle, 30s probe interval
+- Max response body per transfer: 32MB (`maxResponseBodyBytes`); a larger
+  response fails that request rather than being buffered, since every in-flight
+  request holds its own body
 
 ### Run Manager
 
@@ -86,23 +112,54 @@ Manages the lifecycle of load test runs:
 - **Retained finished runs**: Completed/failed/stopped runs are moved to a separate retained
   map rather than unregistered immediately, so a late SSE client still receives the full metric
   series. A TTL sweep evicts them after `liveRetentionMs` (default 60s).
-- **Graceful shutdown**: Stops active runs on daemon shutdown
+- **Stop discards, completion drains (with a deadline)**: a stopped run throws away its queued
+  backlog and cancels in-flight transfers, so a stop is not paced by the upstream; a run that
+  reaches the end of its duration waits for genuine in-flight requests, but no longer than
+  `timeout` + 2s. Cancelled requests are recorded as errors, so a run's submitted and recorded
+  counts still agree.
+- **The move to the retained map is the "worker is finished" signal**: it happens after the
+  final metrics flush and status update, which is what `DELETE /runs/:id` waits on before
+  removing rows (see the API reference). It is *not* the "worker thread has exited" signal -
+  the move is the worker's last statement, and the thread is still unwinding after it.
+- **Graceful shutdown drains, then joins**: `RunManager::shutdown()` sets `should_stop` on
+  every active run, waits up to 5s (`RUN_SHUTDOWN_GRACE_MS`) for them to reach a terminal
+  status, and then **joins** every worker thread. The manager owns those thread handles -
+  a worker holds a `shared_ptr` to its own `RunContext`, so a context that owned its thread
+  could end up joining itself. The wait is bounded; the join is not, because abandoning a
+  worker leaves it writing through references to a `Database` that `main` is about to
+  destroy. A run started while the drain is in progress is refused with a `503`.
+- **Finished workers are reaped on the next `start_run`**: a thread cannot join itself, so
+  its handle outlives it until another thread collects it.
 
 ### Metrics Collector
 
 High-performance in-memory metrics collection optimized for 60k+ RPS:
 
 - **Pre-allocated storage**: Avoids reallocation during tests
-- **Lock-free atomics + HdrHistogram**: Zero-contention counter updates; latency recorded in a
-  lock-free HdrHistogram (µs resolution)
+- **Lock-free atomics + HdrHistogram**: Zero-contention counter updates; latency recorded in an
+  HdrHistogram (µs resolution). Every event-loop worker records on its own thread, so both the
+  cumulative histogram and the rolling interval recorder are written through the library's
+  **atomic** entry points (`hdr_record_value_atomic` / `hdr_interval_recorder_record_value_atomic`).
+  The plain variants are a non-atomic `counts[i] += 1; total_count += 1` and lose samples under
+  concurrency - silently, since the run still reports percentiles, just computed from fewer
+  samples than it served. The interval recorder's phaser orders the once-per-tick reader against
+  writers; it is not mutual exclusion *between* writers, so it does not make the plain write safe.
 - **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a
   request spent inside the engine), not just libcurl's wire time. Wire time and the
   generator-internal `queue_wait` are tracked separately.
 - **Rich counters**: bytes sent/received, dropped requests (backpressure), queue-wait average,
   peak in-flight, and a full per-status-code distribution
-- **Batch DB writes**: Per-request results written after test completion; per-tick time-series
-  metrics persisted by the metrics thread during the run
-- **Error preservation**: All errors stored, success results sampled
+- **Batch DB writes**: Per-request results written after test completion; the metrics thread
+  persists one wide `metric_ticks` row per second during the run (the complete tick object,
+  built once at write time), and the whole-run `runs.summary` is written once at completion
+- **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only
+  the first `maxStoredErrors` (default 10,000) individual records are kept; the rest are counted by
+  `errors_dropped()` and logged once. A fully-failing target produces errors at close to the
+  completion rate, each carrying a message and a trace blob, so an unlimited store grows for the
+  whole run and then flushes as one enormous transaction. Success results are sampled.
+  Because the final report's per-type error breakdown is built by walking those stored
+  records, a run with more errors than the cap gets a breakdown that does not sum to its
+  (exact) total - raise `maxStoredErrors` to keep it complete, or set `0` for unlimited.
 - **Response sampling**: Stores samples for deferred script validation
 
 ### Script Engine (`QuickJS`)
@@ -110,6 +167,8 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
 JavaScript execution engine for pre-request and test scripts:
 
 - **Postman-compatible API**: `pm.test()`, `pm.expect()`, `pm.response`, etc.
+- **Mutable request**: a pre-request script's `pm.request` writes are applied to the
+  request before it is sent (see `docs/engine/scripting.md`)
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script
 - **Sandboxed**: No filesystem or network access
@@ -126,7 +185,7 @@ applied to the outgoing request rather than being left to the UI. This lives in
 
 - **`request_builder`** (`build_request`) - the single request-construction
   pipeline: deserialize the payload, apply the resolved timeout, then resolve
-  auth. Both `POST /request` and `POST /run` go through it.
+  auth. Both `POST /execute` and `POST /runs` go through it.
 - **`auth_resolver`** (`apply_auth` / `preflight_auth`) - a typed `Auth` variant
   with an exhaustive per-mode handler: bearer/basic/api-key are injected inline;
   `oauth2` delegates to the token client. A user-supplied `Authorization` header
@@ -145,22 +204,32 @@ the [API reference](api-reference.md#authentication) for the `/oauth2/*` routes.
 
 ### Request composition boundary (client-side today)
 
-The engine composes a request only **partway**. On `POST /request` it loads the
+The engine composes a request only **partway**. On `POST /execute` it loads the
 environment, globals, and the request's collection variables (into the QuickJS
-script context), resolves/applies concrete auth, and runs the pre/post scripts -
-but it does **not**:
+script context), resolves/applies concrete auth, and now also **joins and runs
+the pre/post script parts** - but it does **not**:
 
 - interpolate `{{variables}}` into the URL / headers / body (no `{{}}` handling
-  exists anywhere in `engine/`),
+  exists anywhere in `engine/`), or
 - resolve `inherit` auth by walking the collection ancestor chain (`parse_auth`
-  drops `{"mode":"inherit"}` as "resolved app-side"), or
-- compose the collection-chain pre/post scripts with the request's own.
+  drops `{"mode":"inherit"}` as "resolved app-side").
 
-Those three steps are done **client-side**, so they are duplicated in the app
+Those two steps are done **client-side**, so they are duplicated in the app
 renderer and the MCP layer (`app/electron/mcp/resolve.ts`). Consolidating them
 into the engine - so clients pass a `requestId` + `environmentId` and the engine
 composes - is a deferred maintainability item: see
 `docs/plans/pending-backlog.md` → **A1**. Do not start it without an explicit ask.
+
+Script composition moved partly server-side already: clients send an ordered
+list of parts (`{ origin: "collection" | "request", id?, name?, script }` -
+`preRequestScripts` / `postRequestScripts` on `POST /execute`, `tests` on
+`POST /runs`; the legacy single-string field still works) built by walking the
+collection chain root-to-leaf then appending the request's own (`scriptParts`
+in `app/src/modules/request-builder/utils/script-parts.ts` and in
+`app/electron/mcp/resolve.ts`). The engine joins the parts with `"\n\n"`,
+dropping any whose script is empty or only whitespace, and runs the result once
+(`engine/src/http/script_parts.cpp::read_script`). Building that ordered list -
+not joining it - is what remains client-side.
 
 ### Database (`SQLite`)
 
@@ -179,19 +248,35 @@ Persistent storage using sqlite_orm:
 
 See [Database Schema](db-schema.md) for the full column list.
 
+**Startup housekeeping** (`Database::init()`, before the sweeper and HTTP server start):
+
+1. **Reconciliation**: runs still `running`/`pending` were abandoned by a previous
+   process (a crash or a kill - a graceful shutdown stops and joins every worker, so
+   it writes a terminal status) - nothing else would ever move them off those
+   statuses, so `GET /runs` reported them as running forever. They are marked
+   `failed`; `end_time` is left as recorded, since when the process died is
+   unknowable at restart.
+2. **Pruning**: run history is trimmed per `maxRunsRetained` / `runRetentionDays`.
+   Reconciliation runs first so an orphan is terminal, and therefore prunable, in the
+   same startup.
+
+Both passes are best-effort: a failure is logged and never blocks startup.
+
 ## Request Flow
 
 ### Design Mode (Single Request)
 
 ```
-1. POST /request
+1. POST /execute
    ↓
 2. Build request: parse JSON + apply timeout + resolve auth (bearer/basic/
    apikey/oauth2). Auth is resolved BEFORE the script so pm.request is accurate
    ↓
 3. Create Run record (type: Design)
    ↓
-4. Execute pre-request script (if provided)
+4. Execute pre-request script (if provided). Its pm.request edits - method, url,
+   headers, body - are written back into the request, so they override the auth
+   resolved in step 2
    ↓
 5. Send HTTP request via libcurl
    ↓
@@ -205,7 +290,7 @@ See [Database Schema](db-schema.md) for the full column list.
 ### Load Test Mode
 
 ```
-1. POST /run
+1. POST /runs
    ↓
 2. Parse config + pre-flight auth (oauth2 tokens acquired & cache warmed;
    409 up front if interactive sign-in is required)
@@ -223,12 +308,37 @@ See [Database Schema](db-schema.md) for the full column list.
 8. Metrics collector aggregates results in-memory; metrics thread
    writes per-tick snapshots into the retained tick topic + DB
    ↓
-9. Client streams ticks via SSE (/metrics/live/:runId), replayed
-   from offset 0 then tailed to the `complete` event
+9. Client streams ticks via SSE (/runs/:runId/live), replayed
+   from the oldest retained tick then tailed to the `complete` event
    ↓
 10. On completion: batch-write results to DB; run retained (TTL) so
     late clients still get the full series
 ```
+
+The metrics thread's exit is gated on `is_running`, not on `should_stop`. A stop
+request only asks the worker to stop; the worker then blocks in `event_loop->stop`
+- cancelling on a user stop, draining to a deadline at the natural end - and
+clears `is_running` afterwards. Exiting on `should_stop` emitted the final tick
+and set `closed` while requests were still settling, so the live view froze at
+the stop click while the stored report - written after the worker returned -
+counted everything that landed in between.
+
+The tick topic itself is a bounded ring. Run duration is user-controlled with no
+upper bound, so an append-only buffer is a slow OOM on an overnight soak. The
+bound is expressed as a **duration** - `liveReplayWindowMs` (default 5 min, `0`
+= full run) - and `live_ring_size()` converts it to a tick count against the
+run's cadence, `liveTickIntervalMs`, clamping to `liveMaxRetainedTicks`
+(default 50,000, matching the renderer's own ceiling - it reads the same key). That same entry *is* the
+app's live-chart window - the dashboard's picker reads and writes it through
+`/config` - so the retained span and the displayed span are one number, not two
+that have to be kept aligned. A fixed count would be the wrong unit:
+the cadence spans 10–1000ms, so 3000 ticks is 30 seconds at one end and 50
+minutes at the other, and the dashboard's live-window setting the ring has to
+serve is itself a duration. `collect_metrics` reads the pair once, before tick
+0; a mid-run change would leave ids the dashboard already holds pointing into a
+differently-sized window. `published_count` keeps counting past an eviction, so
+SSE event ids stay monotonic and a `Last-Event-ID` resume from before the window
+is fast-forwarded to the oldest retained tick rather than replaying from 0.
 
 ## Load Test Strategies
 
@@ -287,6 +397,12 @@ prompt cancellation rather than waiting for in-flight requests to drain.
 - **Metrics Thread**: One per active load test (aggregates and streams metrics)
 - **Event Loop Threads**: One per CPU core (handles curl_multi I/O)
 
+Shutdown unwinds that in a fixed order, because every one of these threads
+holds references to state `main` owns: HTTP server stopped → run workers
+signalled and joined (each joins its own metrics thread and stops its event
+loop first) → `curl_global_cleanup` → `Database` / `RunManager` destroyed at
+scope exit. Nothing is detached.
+
 ## Performance Characteristics
 
 - **Throughput**: 60,000+ requests per second (on capable hardware)
@@ -304,7 +420,8 @@ Default configuration values (from `constants.hpp`):
 | Max Concurrent | 1000 | Per worker event loop |
 | Max Per Host | 100 | Connections per hostname |
 | Poll Timeout | 10ms | Event loop poll interval |
-| DNS Cache | 300s | DNS cache timeout |
+| DNS Cache | 300s | DNS cache timeout (curl's cache and the pre-resolution pin cache) |
+| Max Response Body | 32MB | Per load-test transfer; larger fails the request |
 | Script Memory | 64MB | QuickJS memory limit |
 | Script Timeout | 5s | Script execution timeout |
 | Stats Interval | 100ms | Metrics collection interval |
