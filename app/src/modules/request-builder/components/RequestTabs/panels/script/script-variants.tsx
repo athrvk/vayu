@@ -128,9 +128,15 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 			"});",
 			"pm.response.json()",
 			"pm.response.text()",
-			'pm.response.headers.get("Content-Type")',
+			'pm.response.headers["content-type"]',
 		],
 		notes: [
+			<>
+				<code className={CODE_CLASS}>pm.response.headers</code> is a plain object, not
+				Postman&apos;s <code className={CODE_CLASS}>HeaderList</code>: there is no{" "}
+				<code className={CODE_CLASS}>.get()</code>, and the engine lower-cases every key as
+				it parses the response, so index it with the lower-cased name.
+			</>,
 			<>
 				<code className={CODE_CLASS}>pm.request</code> is readable here as a record of what
 				was sent, but writing to it does nothing - the request has already gone out. Change
