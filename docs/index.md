@@ -18,7 +18,7 @@ of it on your machine: no account, no cloud sync, no telemetry.
 [Use it from your agent](#drive-vayu-from-your-coding-agent){ .md-button }
 [See what it does](#what-you-can-do){ .md-button }
 
-![The load-test dashboard: throughput, latency percentiles and error counters streaming live from the C++ engine while the UI stays responsive.](images/vayu-loadtest.png){ .shot }
+![The load-test dashboard mid-run at 51,922 req/s: throughput, latency percentiles and error counters streaming live from the C++ engine while the UI stays responsive.](images/vayu-loadtest4.png){ .shot }
 
 ## Install
 
@@ -289,10 +289,13 @@ persists.
 
 ??? question "How fast is the load testing, really?"
 
-    The engine reaches roughly 93% of [wrk](https://github.com/wg/wrk) and holds
-    par with [vegeta](https://github.com/tsenart/vegeta), converging on the same
-    system throughput ceiling. Full method, concurrency sweep, and a
-    one-command reproduction are in the [benchmarks](engine/benchmarks.md).
+    On a laptop against a loopback target, the engine matches
+    [wrk](https://github.com/wg/wrk) (56,880 vs 54,280 req/s measured in the same
+    session) and edges past [vegeta](https://github.com/tsenart/vegeta), with all
+    three converging on the same ~57k system throughput ceiling. Driven from the
+    app's own UI, a 60-second run sustained 51,922 req/s and 3.1 M requests with
+    zero errors. Full method, concurrency sweep, and a one-command reproduction
+    are in the [benchmarks](engine/benchmarks.md).
 
 ??? question "Which platforms are supported?"
 

@@ -20,8 +20,8 @@ Vayu is a free, open source desktop app for Windows, macOS, and Linux that merge
 
 ## See it in action
 
-![Load test dashboard](docs/images/vayu-loadtest.png)
-*The load-test dashboard. Throughput, latency percentiles, and error counters stream live from the C++ engine while the UI stays responsive.*
+![Load test dashboard](docs/images/vayu-loadtest4.png)
+*The load-test dashboard, mid-run at 51,922 req/s. Throughput, latency percentiles, and error counters stream live from the C++ engine while the UI stays responsive.*
 
 ![GraphQL request builder](docs/images/vayu-graphql.png)
 *REST and GraphQL request builder with collections, layered environments, and Postman-compatible scripting.*
@@ -40,15 +40,17 @@ Vayu collapses that workflow into one app. Build a request once, point the load 
 
 The HTTP core is a multi-worker libcurl event loop in C++20, isolated from the Electron UI by a local HTTP sidecar so rendering never blocks on the request load. In practice that lets a single laptop saturate a gigabit link while the dashboard keeps streaming metrics frame-by-frame - well past what Node.js-backed Electron tools manage on the same hardware.
 
-**Proof - head-to-head vs `wrk` and `vegeta`.** Same mock server, same machine, matched concurrency, measured from the CLI:
+**Proof - head-to-head vs `wrk` and `vegeta`.** Same mock server, same machine, same session, matched concurrency (64), measured from a standalone engine:
 
-| Client | req/s @ 128 conns |
-|---|---:|
-| wrk | 56,802 |
-| vegeta | 53,811 |
-| **Vayu** | **52,825** |
+| Client | req/s | vs wrk |
+|---|---:|:---:|
+| **Vayu** | **56,880** | **105%** |
+| wrk | 54,280 | 100% |
+| vegeta | 51,847 | 96% |
 
-Vayu lands at **~93% of wrk and on par with vegeta** (and edges past vegeta at 256 connections) - all three converge on the same system throughput ceiling. Full methodology, the concurrency sweep, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](docs/engine/benchmarks.md)**.
+Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same ~57k system throughput ceiling, and at that ceiling the machine is still 79% idle, so it is the target saturating, not the client. Full methodology, the concurrency sweep, the `workers` A/B, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](docs/engine/benchmarks.md)**.
+
+**And from the UI, not just the CLI.** The dashboard [above](#see-it-in-action) is a 60-second run started from the app's own Load Test panel: **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout.
 
 A broader comparison against k6, JMeter, and the Postman collection runner is in progress - follow [the issues board](https://github.com/athrvk/vayu/issues) to track it.
 
