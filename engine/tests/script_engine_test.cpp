@@ -464,6 +464,159 @@ TEST_F (ScriptEngineTest, ResponseJsonBodyNoArgFailsOnNonJson) {
     EXPECT_FALSE (result.tests[0].passed);
 }
 
+// ============================================================================
+// pm.response.to.be Tests
+// ============================================================================
+//
+// `to.be` was an empty object, so every assertion hanging off it evaluated to
+// undefined and, as an expression statement, asserted nothing: a test whose
+// only line was `pm.response.to.be.ok` reported PASS against a 500. The first
+// two tests below are the mutation check - restore the empty placeholder and
+// ResponseToBeOkFailsOnServerError goes green while the API stays broken.
+
+TEST_F (ScriptEngineTest, ResponseToBeOkFailsOnServerError) {
+    response.status_code = 500;
+    response.status_text = "Internal Server Error";
+
+    auto result = engine.execute_test (R"(
+        pm.test("api is healthy", function() {
+            pm.response.to.be.ok;
+        });
+    )",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("500"), std::string::npos)
+    << "the failure must name the status it got: " << result.tests[0].error_message;
+}
+
+TEST_F (ScriptEngineTest, ResponseToBeOkPassesOnSuccess) {
+    auto result = engine.execute_test (R"(
+        pm.test("api is healthy", function() {
+            pm.response.to.be.ok;
+            pm.response.to.be.success;
+        });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_TRUE (result.tests[0].passed);
+}
+
+// Each matcher, on both sides of its boundary. A matcher that passed
+// unconditionally would satisfy the first half of every pair and fail here.
+TEST_F (ScriptEngineTest, ResponseToBeStatusClassMatchersAssertOnBothSides) {
+    struct Case {
+        int status;
+        const char* matches;
+        const char* does_not_match;
+    };
+    const Case cases[] = {
+        { 100, "info", "ok" },
+        { 202, "accepted", "notFound" },
+        { 301, "redirection", "success" },
+        { 400, "badRequest", "serverError" },
+        { 401, "unauthorized", "forbidden" },
+        { 403, "forbidden", "unauthorized" },
+        { 404, "notFound", "badRequest" },
+        { 429, "rateLimited", "serverError" },
+        { 404, "clientError", "serverError" },
+        { 503, "serverError", "clientError" },
+        { 503, "error", "redirection" },
+        { 404, "error", "info" },
+    };
+
+    for (const auto& c : cases) {
+        response.status_code = c.status;
+
+        const std::string passing = std::string ("pm.test(\"t\", function() { "
+                                                 "pm.response.to.be.") +
+        c.matches + "; });";
+        auto pass_result = engine.execute_test (passing, request, response, env);
+        ASSERT_EQ (pass_result.tests.size (), 1u) << passing;
+        EXPECT_TRUE (pass_result.tests[0].passed)
+        << c.matches << " should match status " << c.status << ": "
+        << pass_result.tests[0].error_message;
+
+        const std::string failing = std::string ("pm.test(\"t\", function() { "
+                                                 "pm.response.to.be.") +
+        c.does_not_match + "; });";
+        auto fail_result = engine.execute_test (failing, request, response, env);
+        ASSERT_EQ (fail_result.tests.size (), 1u) << failing;
+        EXPECT_FALSE (fail_result.tests[0].passed)
+        << c.does_not_match << " must not match status " << c.status;
+    }
+}
+
+TEST_F (ScriptEngineTest, ResponseToBeJsonAndWithBody) {
+    auto json_result = engine.execute_test (R"(
+        pm.test("json body", function() {
+            pm.response.to.be.json;
+            pm.response.to.be.withBody;
+        });
+    )",
+    request, response, env);
+    EXPECT_TRUE (json_result.success) << json_result.tests[0].error_message;
+
+    response.body   = "not json at all";
+    auto not_json   = engine.execute_test (R"(
+        pm.test("json body", function() { pm.response.to.be.json; });
+    )",
+      request, response, env);
+    ASSERT_EQ (not_json.tests.size (), 1u);
+    EXPECT_FALSE (not_json.tests[0].passed);
+
+    response.body   = "";
+    auto empty_body = engine.execute_test (R"(
+        pm.test("has a body", function() { pm.response.to.be.withBody; });
+    )",
+    request, response, env);
+    ASSERT_EQ (empty_body.tests.size (), 1u);
+    EXPECT_FALSE (empty_body.tests[0].passed);
+}
+
+// A name nothing implements must fail loudly. Silently returning undefined is
+// the whole defect - a misspelled matcher would otherwise report PASS.
+TEST_F (ScriptEngineTest, ResponseToChainRejectsUnknownAssertions) {
+    const char* scripts[] = {
+        R"(pm.test("t", function() { pm.response.to.be.definitelyNotAMatcher; });)",
+        R"(pm.test("t", function() { pm.response.to.have.definitelyNotAMatcher; });)",
+        R"(pm.test("t", function() { pm.response.to.definitelyNotAMatcher; });)",
+        // The negated form is not implemented; it must throw, not pass.
+        R"(pm.test("t", function() { pm.response.to.not.be.ok; });)",
+    };
+
+    for (const char* script : scripts) {
+        auto result = engine.execute_test (script, request, response, env);
+        ASSERT_EQ (result.tests.size (), 1u) << script;
+        EXPECT_FALSE (result.tests[0].passed) << script;
+        EXPECT_NE (result.tests[0].error_message.find ("not a supported assertion"), std::string::npos)
+        << script << " -> " << result.tests[0].error_message;
+    }
+}
+
+// The exotic hook only rejects assertion names: the object still has to behave
+// like an object for the plumbing that touches it (printing, serialising).
+TEST_F (ScriptEngineTest, ResponseToChainStillBehavesLikeAnObject) {
+    auto result = engine.execute_test (R"(
+        pm.test("printable", function() {
+            var label = String(pm.response.to.be);
+            pm.expect(label).to.include("object");
+            pm.expect(typeof pm.response.to.have.status).to.equal("function");
+            // console.log(pm.response) serialises the whole response; a chain
+            // link that rejected `toJSON` would turn that into a throw.
+            pm.expect(JSON.stringify(pm.response)).to.include("to");
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
 TEST_F (ScriptEngineTest, ResponseHeaders) {
     auto result = engine.execute_test (R"(
         pm.test("Content-Type header", function() {

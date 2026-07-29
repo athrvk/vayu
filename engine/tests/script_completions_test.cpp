@@ -17,6 +17,9 @@
 
 #include <string>
 
+#include "vayu/runtime/script_engine.hpp"
+#include "vayu/types.hpp"
+
 namespace vayu::http::routes {
 // Defined in scripting.cpp.
 nlohmann::json get_script_completions ();
@@ -121,6 +124,48 @@ TEST (ScriptCompletions, TheMutationSnippetsAreOfferedAndReachable) {
     EXPECT_TRUE (has_set_header) << "no snippet for setting a header";
     EXPECT_TRUE (has_delete_header) << "no snippet for removing a header";
     EXPECT_TRUE (has_body_rewrite) << "no snippet for rewriting the body";
+}
+
+// The list and the runtime are in different translation units, so nothing but
+// this stops them drifting: an offered `to.be` matcher the runtime does not
+// implement now throws "not a supported assertion" the moment it is used, which
+// makes the editor's suggestion the source of a failing test.
+TEST (ScriptCompletions, EveryOfferedResponseStatusClassExistsInTheRuntime) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    request.method       = vayu::HttpMethod::GET;
+    request.url          = "https://api.example.com/users";
+    response.status_code = 200;
+    response.body        = R"({"ok": true})";
+
+    int offered = 0;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label.rfind ("pm.response.to.be.", 0) != 0) {
+            continue;
+        }
+        offered++;
+
+        const std::string insert = item.value ("insertText", std::string{});
+        EXPECT_EQ (insert.find ('('), std::string::npos)
+        << label << " is a getter - offering parentheses would call its result";
+
+        // Whether the assertion passes against this response is beside the
+        // point; only "the runtime has no such member" is a list defect.
+        const std::string script = "pm.test(\"t\", function() { " + insert + "; });";
+        auto result              = engine.execute_test (script, request, response, env);
+        ASSERT_EQ (result.tests.size (), 1u) << script;
+        EXPECT_EQ (result.tests[0].error_message.find ("not a supported assertion"),
+        std::string::npos)
+        << label << " is offered but the runtime does not implement it";
+    }
+
+    EXPECT_GE (offered, 10)
+    << "the pm.response.to.be matchers are missing from the completion list";
 }
 
 } // namespace

@@ -1125,9 +1125,190 @@ JSValue js_response_have_jsonBody (JSContext* ctx, JSValueConst this_val, int ar
     return JS_UNDEFINED;
 }
 
+// ============================================================================
+// pm.response.to.be Status-Class Assertions
+// ============================================================================
+
+// Each matcher asserts the status code falls in [lo, hi]. Single-code matchers
+// set lo == hi. `expectation` completes "Expected response to have ...".
+struct StatusClassMatcher {
+    const char* name;
+    int lo;
+    int hi;
+    const char* expectation;
+};
+
+// Status ranges only. The body-shape assertions (`json`, `withBody`) are not
+// ranges, so they get their own getters below.
+constexpr StatusClassMatcher status_class_matchers[] = {
+    { "info", 100, 199, "a 1xx status code" },
+    { "ok", 200, 299, "a 2xx status code" },
+    { "success", 200, 299, "a 2xx status code" },
+    { "accepted", 202, 202, "status 202" },
+    { "redirection", 300, 399, "a 3xx status code" },
+    { "clientError", 400, 499, "a 4xx status code" },
+    { "badRequest", 400, 400, "status 400" },
+    { "unauthorized", 401, 401, "status 401" },
+    { "forbidden", 403, 403, "status 403" },
+    { "notFound", 404, 404, "status 404" },
+    { "rateLimited", 429, 429, "status 429" },
+    { "serverError", 500, 599, "a 5xx status code" },
+    { "error", 400, 599, "a 4xx or 5xx status code" },
+};
+
+// `magic` indexes status_class_matchers. Registered as a getter, never a plain
+// property: `pm.response.to.be.ok` is written without parentheses, so a
+// function-valued property would be a discarded reference that asserts nothing
+// (the defect ExpectTrueFalseAssertsOnAccess pins for pm.expect).
+JSValue js_response_be_status_class (
+JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto* data = get_context_data (ctx);
+    if (!data || !data->response) {
+        return JS_ThrowInternalError (ctx, "No response available");
+    }
+
+    const StatusClassMatcher& matcher = status_class_matchers[magic];
+    const int code                    = data->response->status_code;
+    if (code < matcher.lo || code > matcher.hi) {
+        std::string msg = std::string ("Expected response to have ") +
+        matcher.expectation + " but got " + std::to_string (code);
+        return JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    }
+
+    return JS_UNDEFINED;
+}
+
+JSValue js_response_be_json (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto* data = get_context_data (ctx);
+    if (!data || !data->response) {
+        return JS_ThrowInternalError (ctx, "No response available");
+    }
+
+    JSValue json = JS_ParseJSON (ctx, data->response->body.c_str (),
+    data->response->body.size (), "<response>");
+    if (JS_IsException (json)) {
+        return JS_ThrowTypeError (ctx, "Expected response body to be valid JSON");
+    }
+    JS_FreeValue (ctx, json);
+
+    return JS_UNDEFINED;
+}
+
+JSValue js_response_be_with_body (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto* data = get_context_data (ctx);
+    if (!data || !data->response) {
+        return JS_ThrowInternalError (ctx, "No response available");
+    }
+
+    if (data->response->body.empty ()) {
+        return JS_ThrowTypeError (ctx, "Expected response to have a body");
+    }
+
+    return JS_UNDEFINED;
+}
+
+// ============================================================================
+// pm.response.to chain objects
+// ============================================================================
+
+// Every link in the chain carries this class. Its exotic hook turns an
+// unrecognised member into a throw: `pm.response.to.be.ok` is an expression
+// statement, so a member that does not exist evaluates to undefined and
+// asserts nothing - a green test against a broken API, which is strictly worse
+// than a missing matcher that fails loudly. Own properties are resolved before
+// the hook runs, so it only ever sees names nothing implements.
+JSClassID response_chain_class_id = 0;
+
+// Names the engine itself probes on an arbitrary value. Answering "no own
+// property" for them keeps JSON.stringify and promise resolution working;
+// reporting them as misspelled assertions would make console.log(pm.response)
+// throw. They are not on Object.prototype, so the prototype check below does
+// not cover them.
+constexpr const char* response_chain_passthrough[] = { "toJSON", "then" };
+
+int response_chain_unknown_member (
+JSContext* ctx, JSPropertyDescriptor* desc, JSValueConst obj, JSAtom prop) {
+    (void)desc;
+
+    // The opaque path doubles as the armed flag. Defining a property looks up
+    // the existing own property first, so a hook that threw from the moment the
+    // object existed would reject the chain's own members as they are installed
+    // - arm_response_chain_object runs last, once every member is in place.
+    const auto* path =
+    static_cast<const char*> (JS_GetOpaque (obj, response_chain_class_id));
+    if (!path) {
+        return 0;
+    }
+
+    // Symbol keys (Symbol.toPrimitive, Symbol.toStringTag) are plumbing too.
+    JSValue key              = JS_AtomToValue (ctx, prop);
+    const bool is_string_key = JS_IsString (key);
+    JS_FreeValue (ctx, key);
+    if (!is_string_key) {
+        return 0;
+    }
+
+    const char* name_cstr = JS_AtomToCString (ctx, prop);
+    const std::string name (name_cstr ? name_cstr : "<unknown>");
+    JS_FreeCString (ctx, name_cstr);
+
+    for (const char* passthrough : response_chain_passthrough) {
+        if (name == passthrough) {
+            return 0;
+        }
+    }
+
+    // Anything the prototype answers (toString, hasOwnProperty) is not an
+    // assertion either; let the normal lookup continue to it.
+    JSValue proto      = JS_GetPrototype (ctx, obj);
+    const int on_proto = JS_IsObject (proto) ? JS_HasProperty (ctx, proto, prop) : 0;
+    JS_FreeValue (ctx, proto);
+    if (on_proto != 0) {
+        return on_proto < 0 ? -1 : 0;
+    }
+
+    const std::string msg = std::string (path) + "." + name + " is not a supported assertion";
+    JS_ThrowTypeError (ctx, "%s", msg.c_str ());
+    return -1;
+}
+
+JSClassExoticMethods response_chain_exotic = {
+    .get_own_property = response_chain_unknown_member,
+};
+
+JSClassDef response_chain_class = { .class_name = "ResponseAssertionChain",
+    .finalizer                                  = nullptr,
+    .gc_mark                                    = nullptr,
+    .call                                       = nullptr,
+    .exotic                                     = &response_chain_exotic };
+
+JSValue create_response_chain_object (JSContext* ctx) {
+    return JS_NewObjectClass (ctx, static_cast<int> (response_chain_class_id));
+}
+
+// Arms the unknown-member hook. Call once the object holds every member it is
+// meant to have; `path` names the chain in the error and must outlive the
+// object, so every caller passes a string literal and the class needs no
+// finalizer.
+void arm_response_chain_object (JSValue obj, const char* path) {
+    (void)JS_SetOpaque (obj, const_cast<char*> (path));
+}
+
 // Create the pm.response.to.have chain object
 JSValue create_response_have_object (JSContext* ctx) {
-    JSValue have = JS_NewObject (ctx);
+    JSValue have = create_response_chain_object (ctx);
+    if (JS_IsException (have)) {
+        return have;
+    }
     JS_SetPropertyStr (ctx, have, "status",
     JS_NewCFunction (ctx, js_response_have_status, "status", 1));
     JS_SetPropertyStr (ctx, have, "header",
@@ -1136,14 +1317,51 @@ JSValue create_response_have_object (JSContext* ctx) {
     ctx, have, "body", JS_NewCFunction (ctx, js_response_have_body, "body", 1));
     JS_SetPropertyStr (ctx, have, "jsonBody",
     JS_NewCFunction (ctx, js_response_have_jsonBody, "jsonBody", 1));
+    arm_response_chain_object (have, "pm.response.to.have");
     return have;
+}
+
+// Create the pm.response.to.be chain object
+JSValue create_response_be_object (JSContext* ctx) {
+    JSValue be = create_response_chain_object (ctx);
+    if (JS_IsException (be)) {
+        return be;
+    }
+
+    int magic = 0;
+    for (const auto& matcher : status_class_matchers) {
+        JSAtom atom = JS_NewAtom (ctx, matcher.name);
+        JS_DefinePropertyGetSet (ctx, be, atom,
+        JS_NewCFunctionMagic (ctx, js_response_be_status_class, matcher.name, 0,
+        JS_CFUNC_generic_magic, magic),
+        JS_UNDEFINED, 0);
+        JS_FreeAtom (ctx, atom);
+        magic++;
+    }
+
+    JSAtom json_atom = JS_NewAtom (ctx, "json");
+    JS_DefinePropertyGetSet (ctx, be, json_atom,
+    JS_NewCFunction (ctx, js_response_be_json, "json", 0), JS_UNDEFINED, 0);
+    JS_FreeAtom (ctx, json_atom);
+
+    JSAtom with_body_atom = JS_NewAtom (ctx, "withBody");
+    JS_DefinePropertyGetSet (ctx, be, with_body_atom,
+    JS_NewCFunction (ctx, js_response_be_with_body, "withBody", 0), JS_UNDEFINED, 0);
+    JS_FreeAtom (ctx, with_body_atom);
+
+    arm_response_chain_object (be, "pm.response.to.be");
+    return be;
 }
 
 // Create the pm.response.to chain object
 JSValue create_response_to_object (JSContext* ctx) {
-    JSValue to = JS_NewObject (ctx);
+    JSValue to = create_response_chain_object (ctx);
+    if (JS_IsException (to)) {
+        return to;
+    }
     JS_SetPropertyStr (ctx, to, "have", create_response_have_object (ctx));
-    JS_SetPropertyStr (ctx, to, "be", JS_NewObject (ctx)); // placeholder for future assertions
+    JS_SetPropertyStr (ctx, to, "be", create_response_be_object (ctx));
+    arm_response_chain_object (to, "pm.response.to");
     return to;
 }
 
@@ -1617,6 +1835,15 @@ void setup_pm_object (JSContext* ctx) {
     JSValue global = JS_GetGlobalObject (ctx);
     JSValue pm     = JS_NewObject (ctx);
 
+    // A class registered with JS_NewClass has no prototype until one is set, so
+    // without this the pm.response.to.* objects would answer nothing but their
+    // own members - toString, hasOwnProperty and friends would reach the
+    // unknown-member hook and throw.
+    JSValue plain        = JS_NewObject (ctx);
+    JSValue object_proto = JS_GetPrototype (ctx, plain);
+    JS_FreeValue (ctx, plain);
+    JS_SetClassProto (ctx, response_chain_class_id, object_proto);
+
     // pm.test()
     JS_SetPropertyStr (ctx, pm, "test", JS_NewCFunction (ctx, js_pm_test, "test", 2));
 
@@ -1718,6 +1945,13 @@ class ScriptEngine::Impl {
             QJS_NewClassID (rt, &expect_class_id);
         }
         JS_NewClass (rt, expect_class_id, &expect_class);
+
+        // Register the pm.response.to.* chain class, whose exotic hook makes an
+        // unknown assertion throw instead of silently evaluating to undefined.
+        if (response_chain_class_id == 0) {
+            QJS_NewClassID (rt, &response_chain_class_id);
+        }
+        JS_NewClass (rt, response_chain_class_id, &response_chain_class);
 
         JSContext* ctx = JS_NewContext (rt);
         if (ctx) {
