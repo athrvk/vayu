@@ -58,7 +58,9 @@ draft.
 
 This used to mint real `col_…` / `req_…` / `env_…` UUIDs, because the orchestrator created
 items one POST at a time and had to wire the tree itself - which is the only reason
-`POST /<resource>` ever accepted a client-supplied `id`.
+`POST /<resource>` ever accepted a client-supplied `id`. It no longer does: since #97 a
+create carrying an `id` is a `400`, on the single-resource routes and per item in
+`/import/apply` alike.
 
 ### 3. Persist - `orchestrator.ts`
 
