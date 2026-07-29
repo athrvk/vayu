@@ -126,6 +126,20 @@ class Database {
      */
     void prune_runs_configured ();
 
+    /**
+     * @brief Mark runs left `running`/`pending` by a previous process as failed.
+     *
+     * A crash or a kill abandons in-flight runs with no terminal status write,
+     * so `GET /runs` keeps reporting them as running forever. A graceful
+     * shutdown is not one of those paths - `RunManager::shutdown` stops and
+     * joins every worker, which writes the terminal status. Called from
+     * `init()` - before the sweeper and the HTTP server start - so no live run
+     * can be caught by it.
+     *
+     * @return Number of rows reconciled.
+     */
+    size_t reconcile_orphaned_runs ();
+
     // Metric ticks - one wide row per tick; the current time-series storage.
     void add_metric_tick (const MetricTick& tick);
     // Ordered (timestamp, id) so a page boundary never splits a tick.

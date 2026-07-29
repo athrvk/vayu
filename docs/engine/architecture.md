@@ -66,7 +66,10 @@ The event loop manages concurrent HTTP request execution using libcurl's multi i
 **Architecture:**
 - **Multi-worker design**: One event loop per CPU core (auto-detected)
 - **SPSC queues**: Lock-free single-producer single-consumer queues for request submission
-- **Rate limiting**: Token bucket algorithm for precise RPS control
+- **Rate limiting**: Token bucket algorithm for precise RPS control. `targetRps` is an
+  **aggregate** budget: each worker owns a private bucket and submissions are sharded
+  round-robin, so the rate and burst are split N ways when the loop is built (with a
+  one-token burst floor, since a sub-token bucket could never start a transfer)
 - **Connection pooling**: Reuses connections with keep-alive
 - **DNS caching**: 5-minute cache to avoid resolver saturation
 
@@ -92,7 +95,8 @@ system resolver. Three rules make that safe:
 **Configuration:**
 - Max concurrent requests per worker: 1000 (configurable)
 - Max connections per host: 100
-- Poll timeout: 10ms
+- Poll timeout: 1ms (kept short because a submission interrupts the poll via
+  `curl_multi_wakeup`)
 - TCP keep-alive: 60s idle, 30s probe interval
 - Max response body per transfer: 32MB (`maxResponseBodyBytes`); a larger
   response fails that request rather than being buffered, since every in-flight
@@ -241,6 +245,20 @@ Persistent storage using sqlite_orm:
 - `config_entries`: Engine configuration registry (read/written via `/config`)
 
 See [Database Schema](db-schema.md) for the full column list.
+
+**Startup housekeeping** (`Database::init()`, before the sweeper and HTTP server start):
+
+1. **Reconciliation**: runs still `running`/`pending` were abandoned by a previous
+   process (a crash or a kill - a graceful shutdown stops and joins every worker, so
+   it writes a terminal status) - nothing else would ever move them off those
+   statuses, so `GET /runs` reported them as running forever. They are marked
+   `failed`; `end_time` is left as recorded, since when the process died is
+   unknowable at restart.
+2. **Pruning**: run history is trimmed per `maxRunsRetained` / `runRetentionDays`.
+   Reconciliation runs first so an orphan is terminal, and therefore prunable, in the
+   same startup.
+
+Both passes are best-effort: a failure is logged and never blocks startup.
 
 ## Request Flow
 

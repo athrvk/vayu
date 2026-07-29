@@ -13,6 +13,7 @@
 #include <thread>
 
 #include "vayu/http/client.hpp"
+#include "vayu/http/thread_pool.hpp"
 
 namespace {
 const std::string INVALID_URL =

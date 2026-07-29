@@ -552,6 +552,16 @@ void Database::init () {
     "busy_timeout=" + std::to_string (busy_timeout) + "ms, " +
     "synchronous=" + std::to_string (synchronous) + ")");
 
+    // Close out runs abandoned by a previous process before pruning, so an
+    // orphan becomes a terminal (and therefore prunable) row in the same
+    // startup. Best-effort: neither pass may block a successful startup.
+    try {
+        reconcile_orphaned_runs ();
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "Startup run reconciliation failed: " + std::string (e.what ()));
+    }
+
     // Trim accumulated run history on startup (design-mode clicks and load runs
     // are otherwise append-only). Best-effort: a prune failure must not block a
     // successful startup.
@@ -955,6 +965,32 @@ void Database::prune_runs (int max_runs, int max_age_days) {
     vayu::utils::log_info ("Pruned " + std::to_string (victims.size ()) +
     " old run(s) (max_runs=" + std::to_string (max_runs) +
     ", max_age_days=" + std::to_string (max_age_days) + ")");
+}
+
+size_t Database::reconcile_orphaned_runs () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+
+    auto orphans = impl_->storage.get_all<Run> (where (
+    c (&Run::status) == RunStatus::Running || c (&Run::status) == RunStatus::Pending));
+    if (orphans.empty ()) {
+        return 0;
+    }
+
+    // end_time is deliberately left as recorded. When the process died is
+    // unknowable now, and stamping the restart time would invent a duration
+    // spanning however long the daemon was down; create_run already seeds
+    // end_time = start_time, and update_run_end_time may have refined it.
+    impl_->storage.transaction ([&] {
+        for (auto& run : orphans) {
+            run.status = RunStatus::Failed;
+            impl_->storage.update (run);
+        }
+        return true; // Commit
+    });
+
+    vayu::utils::log_info ("Reconciled " + std::to_string (orphans.size ()) +
+    " run(s) left in-flight by a previous process (marked failed)");
+    return orphans.size ();
 }
 
 void Database::prune_runs_configured () {

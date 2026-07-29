@@ -247,7 +247,6 @@ add_library(vayu_core STATIC
     src/http/event_loop/event_loop_impl.cpp
     src/http/thread_pool.cpp
     src/http/rate_limiter.cpp
-    src/http/sse.cpp
     src/http/script_parts.cpp
     src/utils/json.cpp
     src/utils/logger.cpp
@@ -378,7 +377,6 @@ if(VAYU_BUILD_TESTS)
         tests/json_test.cpp
         tests/script_engine_test.cpp
         tests/event_loop_test.cpp
-        tests/sse_test.cpp
         tests/db_test.cpp
         tests/db_concurrency_test.cpp
         tests/rate_limit_test.cpp

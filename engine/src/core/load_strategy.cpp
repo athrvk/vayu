@@ -25,15 +25,21 @@
 namespace vayu::core {
 
 namespace {
-/**
- * @brief Handle a completed HTTP request result
- *
- * This function records metrics to the in-memory MetricsCollector instead of
- * writing directly to the database. This enables high-throughput load testing
- * (60k+ RPS) by avoiding database contention during the test.
- *
- * Results are batch-written to the database after test completion.
- */
+const char* error_type_name (vayu::ErrorCode code) {
+    switch (code) {
+    case vayu::ErrorCode::Timeout: return "timeout";
+    case vayu::ErrorCode::ConnectionFailed: return "connection_failed";
+    case vayu::ErrorCode::DnsError: return "dns_failed";
+    case vayu::ErrorCode::SslError: return "ssl_error";
+    case vayu::ErrorCode::InvalidUrl: return "invalid_url";
+    case vayu::ErrorCode::InvalidMethod: return "invalid_method";
+    case vayu::ErrorCode::ScriptError: return "script_error";
+    case vayu::ErrorCode::InternalError: return "internal_error";
+    default: return "unknown";
+    }
+}
+} // namespace
+
 void handle_result (std::shared_ptr<RunContext> context,
 vayu::db::Database& /* db - unused, kept for API compat */,
 vayu::Result<vayu::Response> result) {
@@ -41,16 +47,17 @@ vayu::Result<vayu::Response> result) {
     int slow_threshold_ms = context->config.value ("slow_threshold_ms", 1000);
     bool save_timing_breakdown = context->config.value ("save_timing_breakdown", false);
 
-    // A completed transfer always returns Response (never Error), with
-    // error_code set when it failed on the wire. An Error arrives only when the
-    // transfer never reached the wire at all - today that is cancellation on
-    // stop. Record it: the request was counted in requests_sent, so dropping it
-    // here would leave in_flight() permanently non-zero and under-count the
-    // run's total against what it actually submitted.
+    // A transfer usually completes as a Response carrying error_code, but two
+    // paths still produce a real Error: curl-handle creation failure, and the
+    // stop(false) cancellation drain. Both raise ErrorCode::InternalError, so
+    // the type is read off the code rather than assumed to be cancellation.
+    // Dropping either would leave requests_sent counted with no completion,
+    // permanently inflating in_flight() and shrinking effective concurrency
+    // for the rest of the run.
     if (result.is_error ()) {
         const auto& error = result.error ();
         nlohmann::json error_json = { { "error_code", static_cast<int> (error.code) },
-            { "error_type", "cancelled" }, { "message", error.message },
+            { "error_type", error_type_name (error.code) }, { "message", error.message },
             { "request_number", context->total_requests () } };
         context->metrics_collector->record_error (
         error.code, error.message, error_json.dump ());
@@ -61,28 +68,13 @@ vayu::Result<vayu::Response> result) {
         return;
     }
 
-    const auto& response = result.value ();
-
-    // Check if response has a client-side error
-    if (response.has_error ()) {
+    if (result.value ().has_error ()) {
+        // Response carrying a client-side error
+        const auto& response = result.value ();
 
         // Build detailed error trace data
         nlohmann::json error_json = { { "error_code", static_cast<int> (response.error_code) },
-            { "error_type",
-            [&response] () {
-                switch (response.error_code) {
-                case vayu::ErrorCode::Timeout: return "timeout";
-                case vayu::ErrorCode::ConnectionFailed:
-                    return "connection_failed";
-                case vayu::ErrorCode::DnsError: return "dns_failed";
-                case vayu::ErrorCode::SslError: return "ssl_error";
-                case vayu::ErrorCode::InvalidUrl: return "invalid_url";
-                case vayu::ErrorCode::InvalidMethod: return "invalid_method";
-                case vayu::ErrorCode::ScriptError: return "script_error";
-                case vayu::ErrorCode::InternalError: return "internal_error";
-                default: return "unknown";
-                }
-            }() },
+            { "error_type", error_type_name (response.error_code) },
             { "message", response.error_message },
             { "request_number", context->total_requests () } };
 
@@ -104,7 +96,8 @@ vayu::Result<vayu::Response> result) {
         response.timing.bytes_up, response.timing.bytes_down);
     } else {
         // Successful response
-        double latency = response.timing.total_ms;
+        const auto& response = result.value ();
+        double latency       = response.timing.total_ms;
 
         // Build trace data if configured
         std::string trace_data;
@@ -145,6 +138,8 @@ vayu::Result<vayu::Response> result) {
         context->notify_refill ();
     }
 }
+
+namespace {
 
 /**
  * @brief Read a duration field ("30s", "500ms", "5m", "2h") as milliseconds.
@@ -409,9 +404,6 @@ class IterationsLoadStrategy : public LoadStrategy {
         const auto& config = context->config;
         size_t iterations = static_cast<size_t> (config.value ("iterations", 1000));
         size_t concurrency = static_cast<size_t> (config.value ("concurrency", 10));
-        double target_rps = config.value ("rps", 0.0);
-        if (target_rps == 0.0)
-            target_rps = config.value ("targetRps", 0.0);
 
         vayu::utils::log_info ("Starting Iterations Load Test");
         vayu::utils::log_info ("  Iterations: " + std::to_string (iterations));

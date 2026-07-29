@@ -32,7 +32,6 @@ namespace vayu::http {
 // Forward declarations for Pimpl idiom
 namespace detail {
 class EventLoopImpl;
-class ThreadPoolImpl;
 } // namespace detail
 
 /**
@@ -70,9 +69,6 @@ struct EventLoopConfig {
 
     /// Proxy URL (optional)
     std::string proxy_url;
-
-    /// Event loop poll timeout in milliseconds
-    int poll_timeout_ms = vayu::core::constants::event_loop::POLL_TIMEOUT_MS;
 
     /// DNS cache timeout in seconds (0 = no caching, negative = never expires).
     /// Governs curl's own resolver cache and the pre-resolution pin cache.
@@ -237,66 +233,9 @@ class EventLoop {
     std::unique_ptr<detail::EventLoopImpl> impl_;
 };
 
-/**
- * @brief Simple thread pool for parallel request execution
- *
- * Uses multiple synchronous clients rather than curl_multi.
- * Simpler but may use more resources for very high concurrency.
- */
-class ThreadPool {
-    public:
-    /**
-     * @brief Construct a thread pool
-     * @param num_threads Number of worker threads (default: hardware concurrency)
-     */
-    explicit ThreadPool (size_t num_threads = 0);
-
-    /**
-     * @brief Destructor - stops all threads
-     */
-    ~ThreadPool ();
-
-    // Non-copyable, non-movable
-    ThreadPool (const ThreadPool&)            = delete;
-    ThreadPool& operator= (const ThreadPool&) = delete;
-
-    /**
-     * @brief Execute requests in parallel using the pool
-     */
-    [[nodiscard]] BatchResult execute_batch (const std::vector<Request>& requests);
-
-    /**
-     * @brief Get number of worker threads
-     */
-    [[nodiscard]] size_t thread_count () const;
-
-    /**
-     * @brief Get number of queued tasks
-     */
-    [[nodiscard]] size_t queue_size () const;
-
-    /**
-     * @brief Submit a task to the thread pool
-     */
-    template <typename F, typename... Args>
-    auto submit (F&& f, Args&&... args)
-    -> std::future<std::invoke_result_t<F, Args...>> {
-        using return_type = std::invoke_result_t<F, Args...>;
-
-        auto task = std::make_shared<std::packaged_task<return_type ()>> (
-        std::bind (std::forward<F> (f), std::forward<Args> (args)...));
-
-        std::future<return_type> result = task->get_future ();
-
-        submit_impl ([task] () { (*task) (); });
-
-        return result;
-    }
-
-    private:
-    void submit_impl (std::function<void ()> task);
-
-    std::unique_ptr<detail::ThreadPoolImpl> impl_;
-};
+// vayu::http::ThreadPool lives in "vayu/http/thread_pool.hpp" - it used to be
+// declared here as well, a second class of the same name in the same namespace
+// whose only definition was thread_pool.cpp's. That is an ODR violation that
+// linked purely because both had a single unique_ptr member; do not re-add it.
 
 } // namespace vayu::http
