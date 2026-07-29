@@ -371,6 +371,51 @@ TEST_F (ImportApplyRouteTest, RejectsANonObjectBody) {
     EXPECT_EQ (stored_rows (), 0u);
 }
 
+TEST_F (ImportApplyRouteTest, RejectsAnObjectFieldGivenANonObject) {
+    // #148 made `apply_json_field` reject a wrong *shape* (`{"auth": "bearer"}`
+    // stored a string every reader then silently dropped, so a request the user
+    // believed carried credentials went out bare). Bulk import inherits that
+    // guard for free because it routes through the same appliers rather than
+    // copying them - this pins that it does, for all six object-shaped fields.
+    // A copy made in import.cpp would pass every other test in this file.
+    struct Case {
+        const char* section;
+        json item;
+        const char* field;
+    };
+    json collection = collection_item ("c1", "root");
+    json request    = request_item ("r1", "c1", "get users");
+    json environment{ { "tempId", "e1" }, { "name", "Prod" } };
+
+    const Case cases[] = {
+        { "collections", collection, "variables" },
+        { "collections", collection, "auth" },
+        { "requests", request, "body" },
+        { "requests", request, "auth" },
+        { "environments", environment, "variables" },
+    };
+
+    for (const auto& c : cases) {
+        for (const json bad_shape :
+        { json (42), json ("bearer"), json::array ({ 1, 2 }) }) {
+            json item     = c.item;
+            item[c.field] = bad_shape;
+            json body     = { { c.section, json::array ({ item }) } };
+            // A request needs its owner collection in the payload to get as far
+            // as its own field application.
+            if (std::string (c.section) == "requests") {
+                body["collections"] = json::array ({ collection });
+            }
+
+            auto [status, response] = import_apply_response (*db_, body);
+            EXPECT_EQ (status, 400) << c.field << " = " << bad_shape.dump ();
+            EXPECT_NE (response["error"].get<std::string> ().find (c.field), std::string::npos)
+            << "the 400 must name the offending field, got " << response.dump ();
+            EXPECT_EQ (stored_rows (), 0u) << c.field << " = " << bad_shape.dump ();
+        }
+    }
+}
+
 TEST_F (ImportApplyRouteTest, PerItemCreateStillWorksForThirdPartyClients) {
     // The bulk endpoint replaces the app's usage of POST /collections, not the
     // public create API - removing that is #97.
