@@ -199,6 +199,8 @@ function buildExecutionPayload(
 	// script, not collection-chain composition - there is no chain to collect
 	// parts from, so this deliberately keeps sending the legacy singular key
 	// (still accepted by the engine's `read_script`), not `ScriptPart[]`.
+	// Only `run_request` declares them: the engine runs a pre-request script on
+	// `POST /execute` alone, so a load run has nowhere to run one.
 	for (const key of ["requestId", "environmentId", "preRequestScript", "postRequestScript"]) {
 		const v = str(args, key);
 		if (v !== undefined) payload[key] = v;
@@ -476,7 +478,7 @@ export const TOOLS: McpTool[] = [
 		name: "run_request",
 		category: "execute",
 		description:
-			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.)",
+			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.)",
 		readOnly: false,
 		annotations: {
 			title: "Send a request",
@@ -499,6 +501,18 @@ export const TOOLS: McpTool[] = [
 			requestId: z.string().optional().describe("Optional saved request ID to link."),
 			environmentId: environmentIdInput,
 			collectionId: collectionIdInput,
+			preRequestScript: z
+				.string()
+				.optional()
+				.describe(
+					"JavaScript run before the request is sent. It may edit pm.request.url / .method / .headers / .body, and those edits are what gets sent - a script-set header overrides the engine-applied auth."
+				),
+			postRequestScript: z
+				.string()
+				.optional()
+				.describe(
+					"JavaScript run after the response arrives; use pm.test(...) for assertions, returned as test results."
+				),
 		},
 		handler: async (args, ctx, signal) => {
 			const rc = await resolutionScopeFor(args, ctx.client, signal);

@@ -202,6 +202,18 @@ clicking Send:
 - **Scripts** - `run_collection_smoke` collects the collection-chain pre/post
   script parts (root→leaf) and the request's own, and sends the list for the
   engine to join and run, so a request's tests and setup actually execute.
+  `run_request` takes an agent-written `preRequestScript` / `postRequestScript`
+  instead, since an ad-hoc call has no chain to compose from.
+- **Request mutation** - a pre-request script's `pm.request` edits (url, method,
+  headers, body) are applied to the request that is sent, so an agent can sign a
+  request or override the engine-applied auth from `run_request`, and a saved
+  request's stored pre-request script does the same under
+  `run_collection_smoke`. The write-back is engine-side
+  ([scripting.md](scripting.md#mutating-the-request-pre-request-scripts)), so
+  both tools get it without composing anything extra. A rejected edit comes back
+  as `preScriptError` in the response. `start_load_run` has no pre-request hook
+  at all - `POST /runs` runs only the deferred `tests` script - so it does not
+  offer the field rather than accepting one that would never run.
 
 Resolution only fetches the variable sources when a call needs them (a field
 carries a `{{template}}`, or auth is `inherit`); a fully-literal call skips the

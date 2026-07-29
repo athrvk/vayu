@@ -373,6 +373,44 @@ describe("dispatchTool", () => {
 		});
 	});
 
+	test("run_request forwards an ad-hoc pre-request script the agent supplied", async () => {
+		// Parsed through the tool's own inputSchema first, because that is the
+		// only thing standing between the agent and the engine: `registerTool`
+		// hands the SDK this shape, and a zod object *strips* keys it does not
+		// declare. `buildExecutionPayload` has always read `preRequestScript`
+		// off `args`, but until it was declared here nothing could put it there
+		// - so a request the agent asked to have signed went out unsigned.
+		// dispatchTool alone does not validate, so asserting on it would pass
+		// with the field removed and prove nothing.
+		const tool = TOOLS.find((t) => t.name === "run_request");
+		const args = z.object(tool!.inputSchema as Record<string, z.ZodTypeAny>).parse({
+			url: "https://api.example.com/users",
+			preRequestScript: "pm.request.headers['X-Signature'] = 'abc';",
+			postRequestScript: "pm.test('ok', function () {});",
+		});
+
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			args,
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.preRequestScript).toBe("pm.request.headers['X-Signature'] = 'abc';");
+		expect(payload.postRequestScript).toBe("pm.test('ok', function () {});");
+	});
+
+	test("start_load_run does not offer a pre-request script", () => {
+		// POST /runs never runs one - only the deferred `tests` script - so
+		// offering the field would promise a hook that silently does nothing.
+		const loadRun = TOOLS.find((t) => t.name === "start_load_run");
+		expect(loadRun).toBeDefined();
+		expect(Object.keys(loadRun!.inputSchema)).not.toContain("preRequestScript");
+		expect(Object.keys(loadRun!.inputSchema)).toContain("tests");
+	});
+
 	test("run_request resolves {{variables}} in the URL from the environment", async () => {
 		const client = fakeClient({
 			getEnvironment: vi.fn().mockResolvedValue({
