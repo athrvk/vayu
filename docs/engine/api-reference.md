@@ -912,6 +912,21 @@ assertions are now actually checked under load - previously only the
 request's own `tests` string was ever sent, so a collection-level assertion
 passed in design mode and was silently never validated by a load run.
 
+**`tests` and `postRequestScript(s)` are the same field.** The post-request
+script is stored as `postRequestScript`, `POST /execute` grew up calling it
+`postRequestScript(s)`, and this endpoint calls it `tests`. All three names are
+accepted on **both** endpoints, so a payload composed for one can start the
+other kind of run unchanged - which is how a saved request's composed test
+scripts reach a load run. The names are tried in a fixed order
+(`postRequestScripts`, `postRequestScript`, then `tests`) and the first that
+yields a non-blank script wins; they are never merged. Previously each route
+knew only its own spelling and silently dropped the other.
+
+**There is no pre-request hook on this endpoint.** `preRequestScript(s)` in a
+run payload is not an error, but nothing runs it - only `POST /execute` executes
+a pre-request script. A request that signs itself in one is sent unsigned under
+load.
+
 **Accepted ranges.** The numeric config is range-checked **before the run row is
 created**, so a rejected request leaves no `pending` row behind. A violation is
 a `400` carrying the nested error shape (`{"error": {"code":

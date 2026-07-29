@@ -27,6 +27,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 		getConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "8" }] }),
 		updateConfig: vi.fn().mockResolvedValue({ entries: [{ key: "workers", value: "16" }] }),
 		getGlobals: vi.fn().mockResolvedValue({ variables: {} }),
+		getRequest: vi.fn().mockResolvedValue(null),
 		createRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "New" }),
 		getEnvironment: vi.fn().mockResolvedValue({
 			id: "env_1",
@@ -541,6 +542,168 @@ describe("dispatchTool", () => {
 		);
 		expect(res.isError).toBeFalsy();
 		expect(client.startRun).toHaveBeenCalledTimes(1);
+	});
+
+	// --- Load-testing a saved request (#176) --------------------------------
+	//
+	// The gap these close: `start_load_run` used to send only an ad-hoc `tests`
+	// string, so "load test this saved request" through MCP ran none of the
+	// assertions the same request runs in the app. Composition is now
+	// `composeSavedRequest` - the same function run_collection_smoke uses - and
+	// the composed scripts ride under `postRequestScripts`, which POST /runs
+	// reads as an alias of `tests`.
+
+	const savedRequest = {
+		id: "req_1",
+		collectionId: "col_1",
+		name: "Get users",
+		method: "post",
+		url: "https://api.example.com/users",
+		headers: [{ key: "X-Api", value: "v1", enabled: true }],
+		body: { mode: "json", content: '{"a":1}' },
+		preRequestScript: "pm.request.headers['X-Sig'] = 'abc';",
+		postRequestScript: "pm.test('own', function () {});",
+	};
+
+	const savedRequestClient = (over: Record<string, unknown> = {}) =>
+		fakeClient({
+			getRequest: vi.fn().mockResolvedValue(savedRequest),
+			listCollections: vi.fn().mockResolvedValue([
+				{
+					id: "col_1",
+					name: "API",
+					postRequestScript: "pm.test('chain', function () {});",
+				},
+			]),
+			...over,
+		});
+
+	test("start_load_run composes a saved request, chain test scripts included", async () => {
+		const client = savedRequestClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// The saved request defines the target - no `url` was passed at all.
+		expect(payload.url).toBe("https://api.example.com/users");
+		expect(payload.method).toBe("POST");
+		expect(payload.headers).toMatchObject({ "X-Api": "v1" });
+		expect(payload.requestId).toBe("req_1");
+		// The whole point: the collection's assertion and the request's own both
+		// travel, in chain-then-own order, under the key /runs now reads.
+		expect(payload.postRequestScripts).toEqual([
+			{
+				origin: "collection",
+				id: "col_1",
+				name: "API",
+				script: "pm.test('chain', function () {});",
+			},
+			{ origin: "request", id: "req_1", script: "pm.test('own', function () {});" },
+		]);
+	});
+
+	test("start_load_run reports the pre-request script it cannot run", async () => {
+		const client = savedRequestClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// POST /runs has no pre-request hook, so the script must not be sent
+		// pretending it will run...
+		expect(payload.preRequestScripts).toBeUndefined();
+		// ...and the agent has to be told, or a request that signs itself goes
+		// out unsigned with nothing saying so.
+		const text = res.content.map((c) => c.text).join("\n");
+		expect(text).toMatch(/pre-request script\(s\).*NOT applied/i);
+	});
+
+	test("start_load_run: an explicit tests string replaces the composed scripts", async () => {
+		const client = savedRequestClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				requestId: "req_1",
+				tests: "pm.test('adhoc', function () {});",
+				duration: "30s",
+				confirmed: true,
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.tests).toBe("pm.test('adhoc', function () {});");
+		// Must be cleared, not merely accompanied: the engine prefers
+		// postRequestScripts, so leaving it would run the composed script and
+		// silently ignore what the agent asked for.
+		expect(payload.postRequestScripts).toBeUndefined();
+	});
+
+	test("start_load_run: an explicit url retargets the saved request", async () => {
+		const client = savedRequestClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				requestId: "req_1",
+				url: "https://staging.example.com/users",
+				duration: "30s",
+				confirmed: true,
+			},
+			ctxWith(client, { allowlist: ["staging.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.url).toBe("https://staging.example.com/users");
+		// Only the stated field is overridden; the rest of the request stands.
+		expect(payload.method).toBe("POST");
+		expect(payload.postRequestScripts).toHaveLength(2);
+	});
+
+	test("start_load_run checks the allowlist against the saved request's host", async () => {
+		const client = savedRequestClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_1", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["elsewhere.example.com"] })
+		);
+
+		expect(res.isError).toBe(true);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("start_load_run needs a url or a requestId, and says so", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/requestId/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("start_load_run reports an unknown requestId instead of running an empty request", async () => {
+		const client = fakeClient({ getRequest: vi.fn().mockResolvedValue(null) });
+		const res = await dispatchTool(
+			"start_load_run",
+			{ requestId: "req_missing", duration: "30s", confirmed: true },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/req_missing/);
+		expect(client.startRun).not.toHaveBeenCalled();
 	});
 
 	test("start_load_run enforces caps before any engine call", async () => {

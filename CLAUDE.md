@@ -368,12 +368,17 @@ of that duplication: both clients now collect an ordered list of `ScriptPart`s
 (root-to-leaf chain, then the request's own, each naming its origin) and send
 the list as `preRequestScripts` / `postRequestScripts` on `POST /execute` - and
 the **engine** joins them with `"\n\n"` and runs the result. The renderer's load
-path sends the same kind of list as `tests` on `POST /runs`. MCP has no
-chain-composing `/runs` caller: `start_load_run` takes an agent-supplied ad-hoc
-`tests` string (like its ad-hoc `preRequestScript`/`postRequestScript`, see
-`tools.ts::buildExecutionPayload`), not a chain-built list, so this is not "both
-clients send the list on `/runs`". Each client still builds its own script-part
-list itself (the `scriptParts` helper in
+path sends the same kind of list as `tests` on `POST /runs`; MCP's
+`start_load_run` sends it as `postRequestScripts` when given a `requestId`
+(`tools.ts::composeLoadRunRequest`, reusing `composeSavedRequest`), or an
+agent-supplied ad-hoc `tests` string for a URL-only run. **Both names reach the
+same script**: `read_post_request_script` (`engine/src/http/script_parts.cpp`)
+owns every spelling the post-request script answers to - stored as
+`postRequestScript`, `postRequestScript(s)` on `/execute`, `tests` on `/runs` -
+and both routes read through it, so a payload composed for one endpoint can
+start the other kind of run unchanged. Add a spelling to that table, never to a
+route. Each client still builds its own script-part list itself (the
+`scriptParts` helper in
 `app/src/modules/request-builder/utils/script-parts.ts` and in
 `app/electron/mcp/resolve.ts` - the same intentional duplication, since MCP
 cannot import from `app/src/`), so a change to the list-building rule (e.g. what

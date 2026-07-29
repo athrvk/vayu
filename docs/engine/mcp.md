@@ -135,7 +135,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_request`       | write    | `POST /requests`                             | write toggle               |
 | `update_environment`   | write    | `GET`+`PUT /environments/:id` (fetch-merge)  | write toggle               |
 | `update_engine_config` | write    | `POST /config`                               | write toggle               |
-| `start_load_run`       | load     | `POST /runs`                                 | allowlist + caps + confirm |
+| `start_load_run`       | load     | `POST /runs` (+ `GET /requests/:id` with `requestId`) | allowlist + caps + confirm |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 
 Notes:
@@ -204,14 +204,24 @@ clicking Send:
   engine to join and run, so a request's tests and setup actually execute.
   `run_request` takes an agent-written `preRequestScript` / `postRequestScript`
   instead, since an ad-hoc call has no chain to compose from.
-- **One post-request script, three names.** It is stored as
-  `postRequestScript` (on a request and on a collection), sent as
+- **One post-request script, three names, all accepted everywhere.** It is
+  stored as `postRequestScript` (on a request and on a collection), sent as
   `postRequestScripts` / `postRequestScript` to `POST /execute`, and as `tests`
-  to `POST /runs` - the engine reads *only* the endpoint's own key, they are not
-  interchangeable. Both clients map the one script onto whichever key the target
-  endpoint reads, so MCP's `run_request.postRequestScript` and
-  `start_load_run.tests` are the same script under the two engine names, exactly
-  as the app's single Tests tab feeds both a Send and a load run.
+  to `POST /runs`. Both routes read every spelling through
+  `read_post_request_script`, so a payload composed for one endpoint starts the
+  other kind of run unchanged - which is what lets `start_load_run` send a saved
+  request's composed `postRequestScripts` to `/runs`. The names are tried in a
+  fixed order and the first non-blank wins; they are never merged.
+- **Load-testing a saved request** - `start_load_run` with a `requestId`
+  composes it through the same `composeSavedRequest` that backs
+  `run_collection_smoke`: variables resolved, stored auth applied through the
+  collection chain, and the chain's + its own test scripts attached. Any field
+  stated explicitly (url, method, headers, body, auth, tests) overrides the
+  composed one; an explicit `tests` *replaces* the composed scripts rather than
+  joining them. Without a `requestId` the run is ad-hoc and `url` is required.
+  A saved request's **pre-request** script cannot run under load - `POST /runs`
+  has no such hook - so it is left out of the payload and the count of dropped
+  scripts is reported in the tool's result rather than passing silently.
 - **Request mutation** - a pre-request script's `pm.request` edits (url, method,
   headers, body) are applied to the request that is sent, so an agent can sign a
   request or override the engine-applied auth from `run_request`, and a saved

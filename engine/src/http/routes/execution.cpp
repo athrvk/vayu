@@ -459,10 +459,8 @@ void register_execution_routes (RouteContext& ctx) {
         }
 
         // Extract scripts
-        std::string pre_request_script =
-        vayu::http::read_script (json, "preRequestScripts", "preRequestScript");
-        std::string post_request_script =
-        vayu::http::read_script (json, "postRequestScripts", "postRequestScript");
+        std::string pre_request_script = vayu::http::read_pre_request_script (json);
+        std::string post_request_script = vayu::http::read_post_request_script (json);
 
         // Create Run record
         run_id = vayu::utils::generate_id ("run_");
