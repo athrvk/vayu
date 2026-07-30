@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "vayu/http/status.hpp"
 #include "vayu/utils/json.hpp"
 
 #ifdef VAYU_HAS_QUICKJS
@@ -1365,6 +1366,333 @@ JSValue create_response_to_object (JSContext* ctx) {
     return to;
 }
 
+// ============================================================================
+// Header accessors (pm.request.headers / pm.response.headers)
+// ============================================================================
+
+// Name a rejected value the way the script author wrote it, so the error says
+// "got number" rather than showing them a coerced "[object Object]". Shared by
+// the header methods below and by the pm.request write-back further down.
+const char* js_type_name (JSContext* ctx, JSValueConst value) {
+    if (JS_IsUndefined (value))
+        return "undefined";
+    if (JS_IsNull (value))
+        return "null";
+    if (JS_IsBool (value))
+        return "boolean";
+    if (JS_IsNumber (value))
+        return "number";
+    if (JS_IsString (value))
+        return "string";
+    if (JS_IsFunction (ctx, value))
+        return "function";
+    if (QJS_IsArray (ctx, value))
+        return "array";
+    if (JS_IsObject (value))
+        return "object";
+    return "value";
+}
+
+// The methods live on the very object that holds the header entries, because
+// `apply_pm_request_writeback` reads *that* object - so a header added by
+// `add()` and one added by assignment have to be the same property or the two
+// views disagree about what is sent.
+//
+// They must therefore be invisible to the write-back, which enumerates own
+// **enumerable** string properties: an enumerable `get` would be read as a
+// header whose value is a function and would fail the whole write-back. Hence
+// the two flag sets below - methods without JS_PROP_ENUMERABLE, entries with
+// JS_PROP_C_W_E. Entries are *defined* rather than set so a header literally
+// named `get` overwrites the method attributes as well as its value and still
+// reaches the wire; a silently dropped header is the defect this whole surface
+// exists to avoid, and a shadowed method throws loudly instead.
+constexpr int HEADER_METHOD_FLAGS = JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
+
+void define_header_entry (JSContext* ctx, JSValue headers, const std::string& name, const std::string& value) {
+    JS_DefinePropertyValueStr (
+    ctx, headers, name.c_str (), JS_NewString (ctx, value.c_str ()), JS_PROP_C_W_E);
+}
+
+bool header_names_equal (const std::string& a, const std::string& b) {
+    return a.size () == b.size () &&
+    std::equal (a.begin (), a.end (), b.begin (), [] (unsigned char c1, unsigned char c2) {
+        return std::tolower (c1) == std::tolower (c2);
+    });
+}
+
+// The own enumerable key naming `name`, spelled the way the object spells it.
+// HTTP header names are case-insensitive and JS object keys are not, so an
+// exact lookup would miss `Content-Type` on a response (whose keys the HTTP
+// client has lower-cased) and `content-type` on a request (whose keys keep
+// whatever the user typed).
+std::optional<std::string>
+find_header_key (JSContext* ctx, JSValueConst headers, const std::string& name) {
+    JSPropertyEnum* props = nullptr;
+    uint32_t count        = 0;
+    if (JS_GetOwnPropertyNames (ctx, &props, &count, headers,
+        JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0) {
+        return std::nullopt;
+    }
+
+    std::optional<std::string> found;
+    for (uint32_t i = 0; i < count; i++) {
+        if (!found) {
+            const char* raw = JS_AtomToCString (ctx, props[i].atom);
+            if (raw) {
+                if (header_names_equal (raw, name)) {
+                    found = std::string (raw);
+                }
+                JS_FreeCString (ctx, raw);
+            }
+        }
+        JS_FreeAtom (ctx, props[i].atom);
+    }
+    js_free (ctx, props);
+    return found;
+}
+
+// `this` is the header object the method was reached through. Detaching a
+// method from it (`const get = pm.response.headers.get; get('x')`) leaves
+// `this` undefined, which would otherwise read as "no such header" - a wrong
+// answer dressed as a real one.
+bool header_this_is_usable (JSContext* ctx, JSValueConst this_val, const char* member) {
+    if (JS_IsObject (this_val) && !JS_IsFunction (ctx, this_val)) {
+        return true;
+    }
+    JS_ThrowTypeError (ctx,
+    "headers.%s must be called on a headers object (got %s) - call it as "
+    "pm.request.headers.%s(...) rather than detaching it",
+    member, js_type_name (ctx, this_val), member);
+    return false;
+}
+
+// A header name is a non-empty string or nothing. Coercing a number here would
+// invent a field name; the write-back refuses non-primitive values for the same
+// reason.
+std::optional<std::string>
+read_header_name_arg (JSContext* ctx, const char* member, int argc, JSValueConst* argv) {
+    if (argc < 1 || !JS_IsString (argv[0])) {
+        JS_ThrowTypeError (ctx, "headers.%s(name) needs a header name string, got %s",
+        member, argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
+        return std::nullopt;
+    }
+    std::string name = js_to_string (ctx, argv[0]);
+    if (name.empty ()) {
+        JS_ThrowTypeError (ctx, "headers.%s(name) needs a non-empty header name", member);
+        return std::nullopt;
+    }
+    return name;
+}
+
+// The same primitive set the write-back accepts, so a value that survives a
+// method call is a value that survives being sent.
+std::optional<std::string>
+read_header_value_arg (JSContext* ctx, const char* member, const std::string& name, JSValueConst value) {
+    if (JS_IsString (value) || JS_IsNumber (value) || JS_IsBool (value)) {
+        return js_to_string (ctx, value);
+    }
+    JS_ThrowTypeError (ctx,
+    "headers.%s: value for '%s' must be a string, number or boolean, got %s",
+    member, name.c_str (), js_type_name (ctx, value));
+    return std::nullopt;
+}
+
+JSValue js_headers_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (!header_this_is_usable (ctx, this_val, "get")) {
+        return JS_EXCEPTION;
+    }
+    auto name = read_header_name_arg (ctx, "get", argc, argv);
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    auto key = find_header_key (ctx, this_val, *name);
+    if (!key) {
+        // Postman returns undefined for an absent header; a throw here would
+        // make the common `if (headers.get(x))` guard unwritable.
+        return JS_UNDEFINED;
+    }
+    return JS_GetPropertyStr (ctx, this_val, key->c_str ());
+}
+
+JSValue js_headers_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (!header_this_is_usable (ctx, this_val, "has")) {
+        return JS_EXCEPTION;
+    }
+    auto name = read_header_name_arg (ctx, "has", argc, argv);
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    return JS_NewBool (ctx, find_header_key (ctx, this_val, *name).has_value ());
+}
+
+// Postman spells this `add({ key, value })`; Bruno spells it `(name, value)`.
+// Both are accepted because both are idioms a user pastes in, and getting it
+// wrong in either direction would otherwise name a header "[object Object]".
+struct HeaderPair {
+    std::string name;
+    std::string value;
+};
+
+std::optional<HeaderPair>
+read_header_pair_args (JSContext* ctx, const char* member, int argc, JSValueConst* argv) {
+    if (argc >= 2) {
+        auto name = read_header_name_arg (ctx, member, argc, argv);
+        if (!name) {
+            return std::nullopt;
+        }
+        auto value = read_header_value_arg (ctx, member, *name, argv[1]);
+        if (!value) {
+            return std::nullopt;
+        }
+        return HeaderPair{ *name, *value };
+    }
+
+    if (argc == 1 && JS_IsObject (argv[0]) && !JS_IsFunction (ctx, argv[0]) &&
+    !QJS_IsArray (ctx, argv[0])) {
+        JSValue js_key   = JS_GetPropertyStr (ctx, argv[0], "key");
+        JSValue js_value = JS_GetPropertyStr (ctx, argv[0], "value");
+        JSValueConst pair[2]{ js_key, js_value };
+        auto name = read_header_name_arg (ctx, member, 1, pair);
+        std::optional<std::string> value;
+        if (name) {
+            value = read_header_value_arg (ctx, member, *name, js_value);
+        }
+        JS_FreeValue (ctx, js_key);
+        JS_FreeValue (ctx, js_value);
+        if (!name || !value) {
+            return std::nullopt;
+        }
+        return HeaderPair{ *name, *value };
+    }
+
+    JS_ThrowTypeError (ctx,
+    "headers.%s takes ({ key, value }) or (name, value)", member);
+    return std::nullopt;
+}
+
+// magic: 0 = add (refuses an existing name), 1 = upsert (replaces it).
+JSValue js_request_headers_add_or_upsert (
+JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    const bool is_upsert = magic == 1;
+    const char* member   = is_upsert ? "upsert" : "add";
+    if (!header_this_is_usable (ctx, this_val, member)) {
+        return JS_EXCEPTION;
+    }
+    auto pair = read_header_pair_args (ctx, member, argc, argv);
+    if (!pair) {
+        return JS_EXCEPTION;
+    }
+
+    auto existing = find_header_key (ctx, this_val, pair->name);
+    if (existing && !is_upsert) {
+        // Postman's HeaderList holds duplicates and `add` appends one. This
+        // object cannot: it is a JS object read into a case-insensitive
+        // `Headers` map, so a second `X-Foo` has nowhere to live. Silently
+        // behaving as `upsert` would hide the difference; refusing names it.
+        return JS_ThrowTypeError (ctx,
+        "headers.add: '%s' is already set (as '%s') and a request cannot carry "
+        "it twice - use headers.upsert() to replace it",
+        pair->name.c_str (), existing->c_str ());
+    }
+
+    // Write through the spelling already present, so `upsert('content-type')`
+    // on a request holding `Content-Type` replaces it instead of creating a
+    // second casing the write-back would then refuse as a clash.
+    define_header_entry (ctx, this_val, existing ? *existing : pair->name, pair->value);
+    return JS_UNDEFINED;
+}
+
+JSValue js_request_headers_remove (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (!header_this_is_usable (ctx, this_val, "remove")) {
+        return JS_EXCEPTION;
+    }
+    auto name = read_header_name_arg (ctx, "remove", argc, argv);
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    // Removing a header that is not there is idempotent, not a mistake -
+    // `remove('Authorization')` on a request that never had one is exactly what
+    // a defensive script writes.
+    if (auto key = find_header_key (ctx, this_val, *name)) {
+        JSAtom atom = JS_NewAtom (ctx, key->c_str ());
+        JS_DeleteProperty (ctx, this_val, atom, 0);
+        JS_FreeAtom (ctx, atom);
+    }
+    return JS_UNDEFINED;
+}
+
+// `mutators` gates the three that only mean something before the request is
+// sent. They are still installed on a test script's pm.request.headers, where
+// they mutate an object nothing reads back - the same no-op that assignment
+// already is there, documented in both script docs.
+void install_header_methods (JSContext* ctx, JSValue headers, bool mutators) {
+    JS_DefinePropertyValueStr (ctx, headers, "get",
+    JS_NewCFunction (ctx, js_headers_get, "get", 1), HEADER_METHOD_FLAGS);
+    JS_DefinePropertyValueStr (ctx, headers, "has",
+    JS_NewCFunction (ctx, js_headers_has, "has", 1), HEADER_METHOD_FLAGS);
+
+    if (!mutators) {
+        return;
+    }
+    JS_DefinePropertyValueStr (ctx, headers, "add",
+    JS_NewCFunctionMagic (ctx, js_request_headers_add_or_upsert, "add", 2, JS_CFUNC_generic_magic, 0),
+    HEADER_METHOD_FLAGS);
+    JS_DefinePropertyValueStr (ctx, headers, "upsert",
+    JS_NewCFunctionMagic (ctx, js_request_headers_add_or_upsert, "upsert", 2, JS_CFUNC_generic_magic, 1),
+    HEADER_METHOD_FLAGS);
+    JS_DefinePropertyValueStr (ctx, headers, "remove",
+    JS_NewCFunction (ctx, js_request_headers_remove, "remove", 1), HEADER_METHOD_FLAGS);
+}
+
+// pm.response.reason() - the status line's reason phrase. Postman returns null
+// when there is none; vayu always has one, because status 0 (its synthetic
+// value for a client-side failure) is in the canonical table as "Error".
+JSValue js_response_reason (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto* data = get_context_data (ctx);
+    if (!data || !data->response) {
+        return JS_ThrowInternalError (ctx, "No response available");
+    }
+    if (!data->response->status_text.empty ()) {
+        return JS_NewString (ctx, data->response->status_text.c_str ());
+    }
+    return JS_NewString (
+    ctx, vayu::http::status_text (data->response->status_code).c_str ());
+}
+
+// pm.response.size() -> { body, header, total }, in bytes.
+//
+// `body` is the body the script can actually read through text(), so
+// size().body and text().length agree for an ASCII body. `header` is the
+// serialised block - "Name: Value\r\n" each - reconstructed from the parsed
+// headers rather than measured off the wire, so it will not match a
+// Content-Length-derived figure to the byte.
+JSValue js_response_size (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    auto* data = get_context_data (ctx);
+    if (!data || !data->response) {
+        return JS_ThrowInternalError (ctx, "No response available");
+    }
+
+    constexpr size_t separator_and_crlf = 4; // ": " + "\r\n"
+    size_t header_bytes                 = 0;
+    for (const auto& [key, value] : data->response->headers) {
+        header_bytes += key.size () + value.size () + separator_and_crlf;
+    }
+    const size_t body_bytes = data->response->body.size ();
+
+    JSValue size = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, size, "body", JS_NewInt64 (ctx, static_cast<int64_t> (body_bytes)));
+    JS_SetPropertyStr (ctx, size, "header", JS_NewInt64 (ctx, static_cast<int64_t> (header_bytes)));
+    JS_SetPropertyStr (ctx, size, "total",
+    JS_NewInt64 (ctx, static_cast<int64_t> (body_bytes + header_bytes)));
+    return size;
+}
+
 void setup_pm_response (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
 
@@ -1411,11 +1739,21 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         JS_SetPropertyStr (ctx, response, "text",
         JS_NewCFunction (ctx, js_response_text, "text", 0));
 
-        // pm.response.headers
+        // pm.response.reason()
+        JS_SetPropertyStr (ctx, response, "reason",
+        JS_NewCFunction (ctx, js_response_reason, "reason", 0));
+
+        // pm.response.size()
+        JS_SetPropertyStr (ctx, response, "size",
+        JS_NewCFunction (ctx, js_response_size, "size", 0));
+
+        // pm.response.headers - a plain object with get()/has() over it. No
+        // mutators: the response has already arrived, so a header method that
+        // appeared to change it would be a lie.
         JSValue headers = JS_NewObject (ctx);
+        install_header_methods (ctx, headers, /*mutators=*/false);
         for (const auto& [key, value] : data->response->headers) {
-            JS_SetPropertyStr (
-            ctx, headers, key.c_str (), JS_NewString (ctx, value.c_str ()));
+            define_header_entry (ctx, headers, key, value);
         }
         JS_SetPropertyStr (ctx, response, "headers", headers);
 
@@ -1446,11 +1784,12 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
         JS_SetPropertyStr (ctx, request, "method",
         JS_NewString (ctx, to_string (data->request->method)));
 
-        // pm.request.headers
+        // pm.request.headers - the object the write-back reads, so its methods
+        // and plain assignment reach the same property set.
         JSValue headers = JS_NewObject (ctx);
+        install_header_methods (ctx, headers, /*mutators=*/true);
         for (const auto& [key, value] : data->request->headers) {
-            JS_SetPropertyStr (
-            ctx, headers, key.c_str (), JS_NewString (ctx, value.c_str ()));
+            define_header_entry (ctx, headers, key, value);
         }
         JS_SetPropertyStr (ctx, request, "headers", headers);
 
@@ -1487,28 +1826,6 @@ class ScopedValue {
     JSContext* ctx_;
     JSValue value_;
 };
-
-// Name a rejected value the way the script author wrote it, so the error says
-// "got number" rather than showing them a coerced "[object Object]".
-const char* js_type_name (JSContext* ctx, JSValueConst value) {
-    if (JS_IsUndefined (value))
-        return "undefined";
-    if (JS_IsNull (value))
-        return "null";
-    if (JS_IsBool (value))
-        return "boolean";
-    if (JS_IsNumber (value))
-        return "number";
-    if (JS_IsString (value))
-        return "string";
-    if (JS_IsFunction (ctx, value))
-        return "function";
-    if (QJS_IsArray (ctx, value))
-        return "array";
-    if (JS_IsObject (value))
-        return "object";
-    return "value";
-}
 
 // Read the header object the script left behind into `out`.
 // @return why the headers were rejected, or nullopt when `out` is filled.

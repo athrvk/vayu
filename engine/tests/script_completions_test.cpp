@@ -168,4 +168,47 @@ TEST (ScriptCompletions, EveryOfferedResponseStatusClassExistsInTheRuntime) {
     << "the pm.response.to.be matchers are missing from the completion list";
 }
 
+// Same drift risk one level down: `pm.response.headers.get` is offered as a
+// call, so an author types it and it must be a function at run time. That
+// exact line was suggested by the app's Tests panel for months while the
+// runtime had no such member (#182), which is what this guards against
+// returning.
+TEST (ScriptCompletions, EveryOfferedHeaderMemberIsCallableInTheRuntime) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    request.method       = vayu::HttpMethod::GET;
+    request.url          = "https://api.example.com/users";
+    request.headers      = { { "Authorization", "Bearer t" } };
+    response.status_code = 200;
+    response.headers     = { { "content-type", "application/json" } };
+    response.body        = R"({"ok": true})";
+
+    // Labels of the form pm.<request|response>.<member> or
+    // pm.<...>.headers.<member> that the list offers as a call.
+    int offered = 0;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        const bool is_member = label.rfind ("pm.request.headers.", 0) == 0 ||
+        label.rfind ("pm.response.headers.", 0) == 0 ||
+        label == "pm.response.reason" || label == "pm.response.size";
+        if (!is_member) {
+            continue;
+        }
+        offered++;
+
+        const std::string script =
+        "pm.environment.set('t', typeof " + label + ");";
+        auto result = engine.execute_test (script, request, response, env);
+        ASSERT_TRUE (result.success) << label << ": " << result.error_message;
+        EXPECT_EQ (env["t"].value, "function")
+        << label << " is offered as a call but the runtime does not implement it";
+    }
+
+    EXPECT_GE (offered, 7) << "the header accessors are missing from the completion list";
+}
+
 } // namespace

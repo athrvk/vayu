@@ -68,13 +68,42 @@ pm.response.responseTimeWire  // CURLINFO_TOTAL_TIME in ms - DNS + TCP + TLS +
 pm.response.responseTimeQueueWait // Generator-side queue overhead in ms,
                               // i.e. responseTime − responseTimeWire (clamped
                               // to >= 0). For single-shot sends this is ~0.
-pm.response.headers           // Plain object, lower-cased keys. Read it with
-                              // pm.response.headers['content-type'] - it is not
-                              // Postman's HeaderList, so there is no .get()/.has().
+pm.response.headers           // Plain object, lower-cased keys, with
+                              // case-insensitive get()/has() over it - see below
 pm.response.body              // Raw body string
 pm.response.text()            // Body as string
 pm.response.json()            // Parse JSON (throws if invalid)
+pm.response.reason()          // Status reason phrase ('OK', 'Not Found')
+pm.response.size()            // { body, header, total } in bytes
 ```
+
+`reason()` reports the reason phrase from the status line. Where none was
+received it falls back to the canonical text for the code, so a client-side
+failure - vayu's synthetic status `0` - reads `"Error"` rather than an empty
+string. (Postman returns `null` in that case; vayu always returns a string.)
+
+`size()` counts the body the script can read through `text()`, so
+`size().body === pm.response.text().length` for an ASCII body. `size().header`
+is the serialised header block - `Name: Value\r\n` per header - reconstructed
+from the parsed headers, so it is close to but not byte-exact with what came off
+the wire. An empty body reports `0`, not an absent property.
+
+### Reading response headers
+
+```javascript
+pm.response.headers.get('Content-Type');   // case-insensitive; undefined if absent
+pm.response.headers.has('X-Request-Id');   // boolean
+pm.response.headers['content-type'];       // indexing: exact key only
+```
+
+`headers` is a plain object, not Postman's `HeaderList`, but `get()` and `has()`
+are on it and behave the way HTTP header names do - case-insensitively. Indexing
+does not: the engine lower-cases every response header name as it parses it, so
+`headers['Content-Type']` is `undefined` while `headers.get('Content-Type')`
+works. Prefer the methods unless you know the exact key.
+
+The response object has **no** `add`/`upsert`/`remove` - the response has
+already arrived, so a mutator there would only appear to change something.
 
 ### Response Assertions
 
@@ -119,7 +148,7 @@ Access request data:
 ```javascript
 pm.request.method            // HTTP method (string)
 pm.request.url               // Full URL (string)
-pm.request.headers           // Request headers (object)
+pm.request.headers           // Request headers (object, with the methods below)
 pm.request.body              // Request body (string, if any)
 ```
 
@@ -157,6 +186,50 @@ Rules worth knowing before you rely on them:
   request's URL, assign `pm.request.url` directly.
 - **Load tests do not run pre-request scripts** - only the `tests` (post-request)
   script runs there, so this applies to Send / Design Mode.
+
+### Header methods (`pm.request.headers`)
+
+```javascript
+pm.request.headers.get('authorization');                  // case-insensitive
+pm.request.headers.has('Authorization');                  // boolean
+pm.request.headers.upsert({ key: 'X-Trace', value: id }); // add or replace
+pm.request.headers.upsert('X-Trace', id);                 // same, two-arg form
+pm.request.headers.add({ key: 'X-New', value: '1' });     // add; throws if present
+pm.request.headers.remove('Authorization');               // case-insensitive
+```
+
+These act on the **same object** as indexing and `delete`, so the two styles
+mix freely and the write-back sees one header set either way. They are
+non-enumerable properties of it, so they never appear in `Object.keys()`,
+`JSON.stringify()` or on the wire.
+
+Three behaviours worth knowing:
+
+- **The methods are case-insensitive; indexing is not.** `upsert('authorization', v)`
+  replaces an existing `Authorization` rather than adding a second spelling -
+  which matters, because the write-back refuses a header set holding two casings
+  of one name.
+- **`add` refuses a name that is already there**, and says to use `upsert`.
+  Postman's `HeaderList` holds duplicates and `add` appends one; a request here
+  carries a single value per name, so the difference is reported rather than
+  silently collapsed into an `upsert`.
+- **`remove` on an absent header is a no-op**, not an error.
+
+A bad argument fails loudly: a name must be a non-empty string and a value a
+string, number or boolean - the same set plain assignment accepts. Detaching a
+method from its object (`const get = pm.request.headers.get`) throws rather than
+answering as though the header were missing.
+
+### URL parts are not exposed (deferred)
+
+Postman has `pm.request.url.query` / `.path` / `.host`. Vayu does not, and it is
+not an oversight: `pm.request.url` is a **writable string**, and the write-back
+requires it to still be one when the script returns. A JS string primitive
+cannot carry properties, and boxing it into a `String` object to hang them off
+would make the write-back reject every request. Any URL-parts accessor therefore
+has to be a separate member (something like `pm.request.getUrlParts()`) rather
+than `url.*`; that shape has not been decided, so parsing the URL remains string
+work - see [Add or replace a query parameter](#add-or-replace-a-query-parameter).
 
 ## Environment Variables (`pm.environment`)
 
@@ -286,7 +359,7 @@ pm.test('Returns array of users', function() {
 ```javascript
 pm.test('Has Content-Type header', function() {
   pm.response.to.have.header('Content-Type');
-  pm.expect(pm.response.headers['content-type']).to.include('application/json');
+  pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json');
 });
 ```
 
@@ -454,9 +527,12 @@ built-ins. **Not** available: `crypto`, `btoa` / `atob`, `TextEncoder`, `URL`,
 
 The practical consequences: no HMAC or SHA signing, no base64 (so no
 hand-rolled Basic auth header - use the request's Auth tab, which the engine
-applies), no URL parsing helper, and nothing asynchronous. Both halves of this
-list are pinned by tests in `engine/tests/script_engine_test.cpp`, so if a
-global is ever added this section is what needs rewriting.
+applies), no URL parsing helper - which is why `pm.request.url` has no `.query`
+/ `.path` accessors either, see
+[URL parts are not exposed](#url-parts-are-not-exposed-deferred) - and nothing
+asynchronous. Both halves of this list are pinned by tests in
+`engine/tests/script_engine_test.cpp`, so if a global is ever added this section
+is what needs rewriting.
 
 ## Limitations
 

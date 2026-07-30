@@ -230,21 +230,28 @@ describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegac
 
 	/*
 	 * The quick reference is copy-paste bait: it sits next to the editor and a
-	 * script author types what it shows. It showed
-	 * `pm.response.headers.get("Content-Type")` for as long as the panel has
-	 * existed, and that throws `TypeError: not a function` - the runtime builds
-	 * `headers` as a plain object (`script_engine.cpp`, `setup_pm_response`),
-	 * with keys the HTTP client has already lower-cased.
+	 * script author types what it shows. It suggested
+	 * `pm.response.headers.get("Content-Type")` for as long as the panel had
+	 * existed while the runtime had no such member (#182), so the line was
+	 * pulled; #185 added `get`/`has` to both header objects and it went back.
+	 * These now pin the restored form, so dropping the runtime methods without
+	 * pulling the suggestion again fails here.
 	 */
-	it("suggests only header reads that the runtime supports", () => {
+	it("suggests the header reads the runtime implements", () => {
 		const { container } = render(<Panel />);
 		const text = container.textContent ?? "";
 
-		expect(text).not.toContain("headers.get(");
 		if (variant === "post") {
-			expect(text).toContain('pm.response.headers["content-type"]');
-			// The rule the snippet cannot show: why the key is lower-cased.
+			expect(text).toContain('pm.response.headers.get("Content-Type")');
+			// The distinction the snippet cannot show: get() is case-insensitive,
+			// indexing is not, and the engine lower-cases what it parses.
 			expect(text).toMatch(/lower-cases every key/i);
+			expect(text).toMatch(/case-insensitive/i);
+		} else {
+			// The pre-request half: the mutators, and the one that refuses a
+			// name it already holds.
+			expect(text).toContain("pm.request.headers.upsert(");
+			expect(text).toMatch(/add.*throws/is);
 		}
 	});
 

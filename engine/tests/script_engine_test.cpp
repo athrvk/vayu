@@ -1119,6 +1119,124 @@ TEST_F (ScriptEngineTest, PreRequestScriptThatChangesNothingLeavesTheRequestIden
 }
 
 // ============================================================================
+// Request header methods reach the wire
+// ============================================================================
+//
+// The interaction most likely to break: the methods write the same JS object
+// the write-back reads, so every assertion below is on the sent `Request`, not
+// on the JS object. Install them on a copy of the header set instead and these
+// all still pass in JS while nothing changes on the wire.
+
+TEST_F (ScriptEngineTest, PreRequestHeaderUpsertReachesTheOutgoingRequest) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers.upsert({ key: 'X-Signature', value: 'abc123' });
+        pm.request.headers.upsert('X-Retry', 2);
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_TRUE (request.headers.contains ("X-Signature"));
+    EXPECT_EQ (request.headers.at ("X-Signature"), "abc123");
+    // (name, value) is Bruno's spelling and the two-arg form users reach for;
+    // a number has one honest wire form, same rule as plain assignment.
+    EXPECT_EQ (request.headers.at ("X-Retry"), "2");
+}
+
+TEST_F (ScriptEngineTest, PreRequestHeaderUpsertReplacesThroughADifferentCasing) {
+    // `Headers` is case-insensitive, so writing 'authorization' as a second key
+    // would leave the write-back with two spellings of one header - which it
+    // refuses outright. upsert writes through the spelling already present.
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers.upsert('authorization', 'Bearer script-token');
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.headers.at ("Authorization"), "Bearer script-token");
+    EXPECT_EQ (request.headers.count ("Authorization"), 1u);
+}
+
+TEST_F (ScriptEngineTest, PreRequestHeaderAddRefusesAnExistingName) {
+    // Postman's HeaderList holds duplicates and `add` appends one; a single
+    // `Headers` map cannot, so the divergence is named rather than hidden
+    // behind add-behaving-as-upsert.
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers.add({ key: 'authorization', value: 'Bearer second' });
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("use headers.upsert()"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (request.headers.at ("Authorization"), "Bearer token123")
+    << "a refused add must leave the request untouched";
+}
+
+TEST_F (ScriptEngineTest, PreRequestHeaderRemoveIsCaseInsensitiveAndIdempotent) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers.remove('AUTHORIZATION');
+        pm.request.headers.remove('X-Never-Was');
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("Authorization"));
+    EXPECT_TRUE (request.headers.contains ("Content-Type"));
+}
+
+TEST_F (ScriptEngineTest, PreRequestHeaderMethodsAndAssignmentShareOneSet) {
+    // Two views of one header set is the failure this pins: a method call, a
+    // plain assignment and a delete, interleaved, must compose into exactly the
+    // set that goes on the wire.
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers.upsert('X-One', '1');
+        pm.request.headers['X-Two'] = '2';
+        pm.expect(pm.request.headers['X-One']).to.equal('1');
+        pm.expect(pm.request.headers.get('x-two')).to.equal('2');
+        pm.request.headers.remove('X-One');
+        delete pm.request.headers['Content-Type'];
+        pm.expect(pm.request.headers.has('X-One')).to.be.false;
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("X-One"));
+    EXPECT_EQ (request.headers.at ("X-Two"), "2");
+    EXPECT_FALSE (request.headers.contains ("Content-Type"));
+    EXPECT_TRUE (request.headers.contains ("Authorization"));
+}
+
+TEST_F (ScriptEngineTest, PreRequestHeaderAddRefusesAValueItCannotSend) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.headers.add({ key: 'X-Object', value: { nested: true } });
+    )JS",
+    request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("must be a string, number or boolean"),
+    std::string::npos)
+    << result.error_message;
+    EXPECT_FALSE (request.headers.contains ("X-Object"));
+}
+
+TEST_F (ScriptEngineTest, PreRequestAHeaderNamedLikeAMethodStillReachesTheWire) {
+    // The methods are non-enumerable properties of the header object itself, so
+    // a header field literally named `get` collides with one. Data wins: the
+    // entry is defined over the method and is sent. Losing it silently would be
+    // the exact defect this surface was added to avoid.
+    request.headers["get"] = "not-a-method";
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('getType', typeof pm.request.headers.get);
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["getType"].value, "string");
+    EXPECT_EQ (request.headers.at ("get"), "not-a-method");
+}
+
+// ============================================================================
 // Complex Script Tests
 // ============================================================================
 
@@ -1354,7 +1472,18 @@ TEST_F (ScriptEngineTest, PmVariablesIsAbsentAndTheScopedAccessorsAreNot) {
     << "pm.variables now exists; both docs say it does not";
 }
 
-TEST_F (ScriptEngineTest, ResponseHeadersIsAPlainObjectReadByLowerCasedKey) {
+// ============================================================================
+// Header accessors (pm.response.headers / pm.request.headers)
+// ============================================================================
+//
+// The lookup is case-insensitive because HTTP header names are and JS object
+// keys are not: a response's keys arrive lower-cased from `client.cpp`, a
+// request's keep whatever the user typed, and indexing therefore only works if
+// you happen to know which. That mismatch is what made the Tests panel's
+// suggested `pm.response.headers.get("Content-Type")` throw for as long as it
+// was offered.
+
+TEST_F (ScriptEngineTest, ResponseHeadersGetAndHasAreCaseInsensitive) {
     // The header names a real response arrives with: `client.cpp` lower-cases
     // every key as it parses, so this - not the fixture's mixed-case default -
     // is the shape a script actually sees.
@@ -1363,22 +1492,160 @@ TEST_F (ScriptEngineTest, ResponseHeadersIsAPlainObjectReadByLowerCasedKey) {
 
     auto result = engine.execute_test (R"JS(
         pm.test("the form the Tests panel suggests reads the header", function() {
+            pm.expect(pm.response.headers.get('Content-Type')).to.equal('application/json');
+            pm.expect(pm.response.headers.get('content-type')).to.equal('application/json');
+            pm.expect(pm.response.headers.get('CONTENT-TYPE')).to.equal('application/json');
+        });
+        pm.test("indexing by the stored key still works", function() {
             pm.expect(pm.response.headers['content-type']).to.equal('application/json');
         });
-        pm.environment.set('getType', typeof pm.response.headers.get);
-        pm.environment.set('hasType', typeof pm.response.headers.has);
+        pm.test("has() answers both ways", function() {
+            pm.expect(pm.response.headers.has('X-Request-Id')).to.be.true;
+            pm.expect(pm.response.headers.has('x-nope')).to.be.false;
+        });
+        pm.environment.set('missing', String(pm.response.headers.get('X-Absent')));
     )JS",
     request, response, env);
 
     ASSERT_TRUE (result.success) << result.error_message;
-    ASSERT_EQ (result.tests.size (), 1u);
-    EXPECT_TRUE (result.tests[0].passed);
-    // Postman's `headers` is a HeaderList with these; ours is a bag. The Tests
-    // panel taught `.get("Content-Type")`, which threw "not a function".
-    EXPECT_EQ (env["getType"].value, "undefined")
-    << "pm.response.headers.get exists now - say so in pm-api-compatibility.md "
-       "and put it back in the Tests panel quick reference";
-    EXPECT_EQ (env["hasType"].value, "undefined");
+    ASSERT_EQ (result.tests.size (), 3u);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+    // An absent header is undefined, not a throw - `if (headers.get(x))` is the
+    // idiom this exists to make writable.
+    EXPECT_EQ (env["missing"].value, "undefined");
+}
+
+TEST_F (ScriptEngineTest, HeaderMethodsAreInvisibleToEnumerationAndJson) {
+    // The write-back reads own *enumerable* string properties as the outgoing
+    // header set. If the methods were enumerable it would see a header whose
+    // value is a function and refuse the whole edit - so this is the guard that
+    // keeps them off the wire, and it also keeps console.log(headers) honest.
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('responseKeys', Object.keys(pm.response.headers).sort().join(','));
+        pm.environment.set('requestKeys', Object.keys(pm.request.headers).sort().join(','));
+        pm.environment.set('json', JSON.stringify(pm.request.headers));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["responseKeys"].value, "Content-Type,X-Request-Id");
+    EXPECT_EQ (env["requestKeys"].value, "Authorization,Content-Type");
+    EXPECT_EQ (env["json"].value,
+    R"({"Authorization":"Bearer token123","Content-Type":"application/json"})");
+}
+
+TEST_F (ScriptEngineTest, HeaderMethodsRefuseBadInputByName) {
+    auto result = engine.execute_test (R"JS(
+        function reason(fn) {
+            try { fn(); return 'no throw'; } catch (e) { return String(e.message || e); }
+        }
+        pm.environment.set('noArg', reason(function() { pm.response.headers.get(); }));
+        pm.environment.set('number', reason(function() { pm.response.headers.get(42); }));
+        pm.environment.set('empty', reason(function() { pm.response.headers.has(''); }));
+        pm.environment.set('detached', reason(function() {
+            var get = pm.response.headers.get;
+            get('Content-Type');
+        }));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_NE (env["noArg"].value.find ("needs a header name string"), std::string::npos)
+    << env["noArg"].value;
+    EXPECT_NE (env["number"].value.find ("got number"), std::string::npos)
+    << env["number"].value;
+    EXPECT_NE (env["empty"].value.find ("non-empty"), std::string::npos)
+    << env["empty"].value;
+    // Detaching leaves `this` undefined, which would otherwise read as "no such
+    // header" - a wrong answer dressed as a real one.
+    EXPECT_NE (env["detached"].value.find ("must be called on a headers object"),
+    std::string::npos)
+    << env["detached"].value;
+}
+
+TEST_F (ScriptEngineTest, ResponseHeadersHaveNoMutators) {
+    // The response has already arrived; a method that appeared to change it
+    // would be a lie, so only the two readers are installed there.
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('add', typeof pm.response.headers.add);
+        pm.environment.set('upsert', typeof pm.response.headers.upsert);
+        pm.environment.set('remove', typeof pm.response.headers.remove);
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["add"].value, "undefined");
+    EXPECT_EQ (env["upsert"].value, "undefined");
+    EXPECT_EQ (env["remove"].value, "undefined");
+}
+
+TEST_F (ScriptEngineTest, ResponseReasonReportsTheStatusText) {
+    response.status_code = 404;
+    response.status_text = "Not Found";
+
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('reason', pm.response.reason());
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["reason"].value, "Not Found");
+}
+
+TEST_F (ScriptEngineTest, ResponseReasonFallsBackToTheCanonicalTextIncludingStatusZero) {
+    // Status 0 is vayu's synthetic value for a client-side failure, where no
+    // server ever sent a reason phrase. `vayu::http::status_text` has an answer
+    // for it, so reason() is a string there rather than an empty one.
+    response.status_code = 0;
+    response.status_text.clear ();
+
+    auto result = engine.execute_test (R"JS(
+        pm.environment.set('reason', pm.response.reason());
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["reason"].value, "Error");
+}
+
+TEST_F (ScriptEngineTest, ResponseSizeTotalsBodyAndHeaders) {
+    response.headers = { { "content-type", "application/json" } };
+    response.body    = R"({"n":1})";
+
+    auto result = engine.execute_test (R"JS(
+        var size = pm.response.size();
+        pm.environment.set('body', String(size.body));
+        pm.environment.set('header', String(size.header));
+        pm.environment.set('total', String(size.total));
+        pm.environment.set('matchesText', String(size.body === pm.response.text().length));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["body"].value, "7");
+    // "content-type" + ": " + "application/json" + CRLF
+    EXPECT_EQ (env["header"].value, "32");
+    EXPECT_EQ (env["total"].value, "39");
+    EXPECT_EQ (env["matchesText"].value, "true");
+}
+
+TEST_F (ScriptEngineTest, ResponseSizeReportsZeroForAnEmptyBody) {
+    response.headers.clear ();
+    response.body.clear ();
+
+    auto result = engine.execute_test (R"JS(
+        var size = pm.response.size();
+        pm.environment.set('body', String(size.body));
+        pm.environment.set('total', String(size.total));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    // Reported as 0, not omitted - an absent property would read as "unknown".
+    EXPECT_EQ (env["body"].value, "0");
+    EXPECT_EQ (env["total"].value, "0");
 }
 
 // ============================================================================
