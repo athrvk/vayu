@@ -445,10 +445,34 @@ TEST_F (MetricsCollectorTest, SuccessCountNeverExceedsTotalRequests) {
         writer_done.store (true);
     });
 
+    // Sample success_count() *before* total_requests(), and into locals: the
+    // two reads must be ordered, and this is the only order the invariant is
+    // stated over. success_count() loads total_requests_ first internally, so a
+    // total read afterwards is never stale relative to it. Passing both calls
+    // straight to ASSERT_LE left their evaluation order unspecified - compilers
+    // commonly take the right operand first, which reads a total from before
+    // the writer's increment and compares it against a success count from
+    // after, reporting a violation the collector does not have.
+    //
+    // The check is non-fatal so a real violation joins the writer before
+    // reporting. A fatal assertion returns from the test body with `writer`
+    // still joinable, and ~std::thread then calls std::terminate - killing the
+    // process before gtest prints why.
+    size_t observed_success = 0;
+    size_t observed_total   = 0;
+    bool inverted           = false;
     while (!writer_done.load ()) {
-        ASSERT_LE (collector->success_count (), collector->total_requests ());
+        observed_success = collector->success_count ();
+        observed_total   = collector->total_requests ();
+        if (observed_success > observed_total) {
+            inverted = true;
+            break;
+        }
     }
     writer.join ();
+
+    EXPECT_FALSE (inverted) << "success_count() " << observed_success
+                            << " exceeded total_requests() " << observed_total;
 
     EXPECT_EQ (collector->success_count (), 0u);
     EXPECT_EQ (collector->total_errors (), static_cast<size_t> (kIterations));

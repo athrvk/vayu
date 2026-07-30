@@ -168,4 +168,88 @@ TEST (ScriptCompletions, EveryOfferedResponseStatusClassExistsInTheRuntime) {
     << "the pm.response.to.be matchers are missing from the completion list";
 }
 
+// The same drift, on the variable scopes: `pm.variables` was offered by
+// `scripting.md` for months while the runtime had no such object, and every
+// scope method added in #184 is invisible in the editor until it is listed
+// here. Both directions are defects, so both are checked - an offered method
+// the runtime lacks throws "is not a function" the moment it is accepted, and a
+// runtime method nobody lists is a feature no user can find.
+TEST (ScriptCompletions, TheOfferedVariableScopeMethodsAreExactlyWhatTheRuntimeHas) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Environment env;
+    vayu::Environment globals;
+    vayu::Environment collection_variables;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = "https://api.example.com/users";
+
+    vayu::runtime::ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &env;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &collection_variables;
+
+    // Every offered `pm.<scope>.<method>` exists as a function.
+    int offered = 0;
+    std::string probe;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        for (const char* accessor : { "pm.environment.", "pm.globals.",
+             "pm.collectionVariables.", "pm.variables." }) {
+            if (label.rfind (accessor, 0) != 0) {
+                continue;
+            }
+            offered++;
+            probe += "if (typeof " + label + " !== 'function') missing.push('" + label + "');\n";
+        }
+    }
+    ASSERT_GT (offered, 0)
+    << "no variable-scope completions at all - the loop below proves nothing";
+
+    auto result = engine.execute (
+    "var missing = [];\n" + probe + "pm.environment.set('missing', missing.join(','));", ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["missing"].value, "")
+    << "offered by the completion list, absent from the runtime";
+
+    // And nothing the runtime has is missing from the list. Read off the
+    // runtime rather than hardcoded, so a method added to
+    // setup_pm_variable_scope has to be listed rather than merely renamed here.
+    env.clear ();
+    auto installed = engine.execute (R"JS(
+        var names = [];
+        var scopes = ['environment', 'globals', 'collectionVariables', 'variables'];
+        for (var i = 0; i < scopes.length; i++) {
+            var scope = pm[scopes[i]];
+            for (var key in scope) {
+                if (typeof scope[key] === 'function') names.push('pm.' + scopes[i] + '.' + key);
+            }
+        }
+        pm.environment.set('names', names.join(','));
+    )JS",
+    ctx);
+    ASSERT_TRUE (installed.success) << installed.error_message;
+
+    const std::string names = env["names"].value;
+    ASSERT_FALSE (names.empty ())
+    << "the runtime enumeration found nothing to check";
+    for (size_t start = 0; start <= names.size ();) {
+        const size_t comma     = names.find (',', start);
+        const std::string name = names.substr (
+        start, comma == std::string::npos ? std::string::npos : comma - start);
+        // pm.variables.set exists only to throw and name the three real scopes;
+        // offering it in the editor would be suggesting a call that cannot work.
+        if (!name.empty () && name != "pm.variables.set") {
+            EXPECT_NE (find_by_label (completions, name), nullptr)
+            << name << " is in the runtime but not in the completion list";
+        }
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+}
+
 } // namespace
