@@ -151,19 +151,20 @@ bool is_create) {
  * POST used to be a silent upsert, so a stale or typo'd id quietly created a
  * second record instead of failing, and an id collision merged two records into
  * one. Now an id that already exists is a 409 and the caller is told to use
- * PUT; POST only ever creates. A client-supplied id is still honoured on create
- * because the import orchestrator pre-assigns ids to wire the tree together
- * before persisting (that need goes away with #96, and #97 then rejects the
- * field outright); an absent id is generated engine-side.
+ * PUT; POST only ever creates. A body `id` is rejected outright (#97) - the
+ * engine owns id generation, and bulk import wires a tree together with the
+ * temp ids of `POST /import/apply` (#96) rather than pre-assigning real ones.
+ *
+ * The 409 therefore only fires on a `generate_id` collision, which 122 bits of
+ * entropy make unreachable in practice. It stays because the alternative on
+ * that one-in-2^122 draw is `create_collection` overwriting a live record.
  */
 std::pair<int, nlohmann::json>
 create_collection_response (vayu::db::Database& db, const nlohmann::json& json) {
-    std::string id;
-    if (json.contains ("id") && !json["id"].is_null ()) {
-        id = json["id"].get<std::string> ();
-    } else {
-        id = vayu::utils::generate_id ("col_");
+    if (auto err = reject_client_supplied_id (json)) {
+        return *err;
     }
+    const std::string id = vayu::utils::generate_id ("col_");
 
     if (db.get_collection (id).has_value ()) {
         return { 409,
@@ -191,11 +192,15 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
  * Semantics are merge-patch: absent fields keep their stored value. We use PUT
  * loosely rather than adding a separate PATCH verb (documented in
  * api-reference.md) because that is what the update branch has always done and
- * what every renderer call site expects.
+ * what every renderer call site expects. A body `id` that disagrees with the
+ * path is a 400 (#97); the path is the identity.
  */
 std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json) {
+    if (auto err = reject_mismatched_body_id (json, id)) {
+        return *err;
+    }
     auto existing = db.get_collection (id);
     if (!existing) {
         return { 404, nlohmann::json{ { "error", "Collection not found" } } };
@@ -233,11 +238,12 @@ void register_collection_routes (RouteContext& ctx) {
     /**
      * POST /collections
      * Creates a collection. Create only - an `id` that already exists is a 409
-     * pointing at PUT, never a silent update (issue #95).
-     * Body params: id (optional string - generated when absent), name
-     * (required string), description, parentId, order, variables, auth,
-     * preRequestScript, postRequestScript.
-     * Returns: The created collection object, 409 on an existing id, or 400.
+     * pointing at PUT, never a silent update (issue #95). The engine assigns
+     * the id; a body carrying one is a 400 (issue #97).
+     * Body params: name (required string), description, parentId, order,
+     * variables, auth, preRequestScript, postRequestScript.
+     * Returns: The created collection object, or 400 (body `id`, missing
+     * `name`, bad field shape, cycle).
      */
     ctx.server.Post ("/collections",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

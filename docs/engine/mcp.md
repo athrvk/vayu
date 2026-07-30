@@ -152,9 +152,11 @@ Notes:
 - **`update_environment`** fetches the environment and merges the supplied
   variables (`PUT /environments/:id` replaces the whole variables blob), so
   partial updates preserve untouched variables and the name. It is a `PUT`, not
-  a `POST`: since #95 the engine's `POST /environments` is create-only and would
-  answer an existing id with a `409`. `create_request` stays a `POST` for the
-  same reason - it creates, and lets the engine assign the id.
+  a `POST`: since #95 the engine's `POST /environments` is create-only, and since
+  #97 it rejects a body carrying an `id` outright. `create_request` stays a
+  `POST` for the same reason - it creates, and lets the engine assign the id.
+  Neither tool sends an `id` in a body: on the `PUT` the path is the identity,
+  and a body `id` disagreeing with it is a `400`.
 - **`run_collection_smoke`** runs each saved request once and returns a structured
   pass/fail matrix (2xx–3xx status + all tests passing = pass). Each request is
   composed exactly as the app's **Send** would (see *Request composition* below).

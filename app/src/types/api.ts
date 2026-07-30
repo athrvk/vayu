@@ -87,6 +87,14 @@ export interface ListCollectionsResponse {
 }
 
 export interface CreateCollectionRequest {
+	/**
+	 * Never sent: the engine assigns every id and rejects a create that carries
+	 * one with a 400 (#97). Declared as `never` rather than omitted so a literal
+	 * with an `id` is a type error at the call site, not a runtime 400 - and
+	 * `apiService.createCollection` strips it anyway, for the spread-through
+	 * cases the type system cannot see.
+	 */
+	id?: never;
 	name: string;
 	description?: string;
 	parentId?: string;
@@ -119,6 +127,8 @@ export interface ListRequestsResponse {
 }
 
 export interface CreateRequestRequest {
+	/** Engine-assigned - see CreateCollectionRequest.id. */
+	id?: never;
 	collectionId: string;
 	name: string;
 	description?: string;
@@ -162,6 +172,8 @@ export interface ListEnvironmentsResponse {
 }
 
 export interface CreateEnvironmentRequest {
+	/** Engine-assigned - see CreateCollectionRequest.id. */
+	id?: never;
 	name: string;
 	description?: string; // engine accepts this (environments.cpp); was missing from the TS type
 	variables: Record<string, VariableValue>;

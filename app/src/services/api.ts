@@ -83,6 +83,23 @@ function proxiedRequestTimeoutMs(): number {
 	return base + PROXIED_TIMEOUT_GRACE_MS;
 }
 
+/**
+ * Drop `id` from a create payload before it is sent.
+ *
+ * Since #97 the engine assigns every id and answers a create carrying one with a
+ * `400`, so this is the difference between a save working and failing, not
+ * cosmetics. The `Create*Request` types already have no `id`, but that is not a
+ * guarantee: excess-property checking only fires on object literals, so a call
+ * site that spreads a whole record (a duplicate flow, a restored tab, a
+ * transformer output) passes one through unnoticed. Stripping it in the one
+ * place every create goes through makes the payload correct by construction
+ * rather than by review of each new call site.
+ */
+function withoutId<T extends object>(data: T): Omit<T, "id"> {
+	const { id: _engineAssigned, ...rest } = data as T & { id?: unknown };
+	return rest;
+}
+
 export const apiService = {
 	// Health & Configuration
 	async getHealth(): Promise<EngineHealth> {
@@ -108,7 +125,7 @@ export const apiService = {
 	},
 
 	async createCollection(data: CreateCollectionRequest): Promise<Collection> {
-		const response = await httpClient.post<any>(API_ENDPOINTS.COLLECTIONS, data);
+		const response = await httpClient.post<any>(API_ENDPOINTS.COLLECTIONS, withoutId(data));
 		return CollectionTransformer.toFrontend(response);
 	},
 
@@ -146,7 +163,7 @@ export const apiService = {
 
 	async createRequest(data: CreateRequestRequest): Promise<Request> {
 		console.log("Creating request with data:", data);
-		const response = await httpClient.post<Request>(API_ENDPOINTS.REQUESTS, data);
+		const response = await httpClient.post<Request>(API_ENDPOINTS.REQUESTS, withoutId(data));
 		return RequestTransformer.toFrontend(response);
 	},
 
@@ -173,7 +190,7 @@ export const apiService = {
 	},
 
 	async createEnvironment(data: CreateEnvironmentRequest): Promise<Environment> {
-		return await httpClient.post<Environment>(API_ENDPOINTS.ENVIRONMENTS, data);
+		return await httpClient.post<Environment>(API_ENDPOINTS.ENVIRONMENTS, withoutId(data));
 	},
 
 	async updateEnvironment(data: UpdateEnvironmentRequest): Promise<Environment> {
