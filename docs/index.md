@@ -42,6 +42,15 @@ Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
 
 === "Windows"
 
+    ```powershell
+    winget install athrvk.Vayu
+    ```
+
+    Installs the latest release with
+    [winget](https://learn.microsoft.com/windows/package-manager/winget/).
+
+    Or download the installer directly:
+
     1. Download [**Vayu-x64.exe**](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe).
     2. Run the installer and follow the wizard.
     3. Launch **Vayu** from the Start menu.
