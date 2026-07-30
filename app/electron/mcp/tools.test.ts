@@ -188,6 +188,26 @@ describe("data-write tools", () => {
 			// Canonical body shape keys off `mode` (round-trips with the app).
 			body: { mode: "json", content: '{"a":1}' },
 		});
+		// The engine assigns ids and answers a create carrying one with a 400
+		// (#97). toMatchObject above ignores extra keys, so the absence has to be
+		// asserted outright - including an `id: undefined` that would serialize
+		// to `"id": null` and be rejected just the same.
+		expect(Object.keys(payload as object)).not.toContain("id");
+	});
+
+	test("update_environment sends no body id - the path is the identity", async () => {
+		// A body id that disagrees with the path is a 400 since #97, and one that
+		// agrees is dead weight. Same reason the renderer's PUT sends a patch only.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", variables: { apiKey: "secret" } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const [id, payload] = (client.updateEnvironment as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(id).toBe("env_1");
+		expect(Object.keys(payload as object)).not.toContain("id");
 	});
 
 	test("update_environment merges variables and preserves the existing name", async () => {

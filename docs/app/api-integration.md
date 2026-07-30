@@ -106,18 +106,22 @@ apiService.updateConfig(config): Promise<EngineConfig>
 #### Create vs update
 
 For collections, requests and environments the engine splits the write verbs:
-`POST /<resource>` creates and answers a known `id` with `409`;
-`PUT /<resource>/:id` updates and answers an unknown `id` with `404`. They are
-not interchangeable, so `apiService` keeps one method per verb:
+`POST /<resource>` creates and never updates; `PUT /<resource>/:id` updates and
+answers an unknown `id` with `404`. They are not interchangeable, so `apiService`
+keeps one method per verb:
 
-- `createX(data)` posts the whole object to the collection path. `data` never
-  carries an `id` - the engine generates every one. (Import used to be the
-  exception, pre-assigning ids to wire `parentId` / `collectionId` across a tree
-  before anything was persisted; it sends one `applyImport` call now, see below.)
+- `createX(data)` posts the object to the collection path **with `id` stripped**
+  (`withoutId` in `api.ts`). The engine assigns every id and answers a create
+  carrying one with a `400`, and the `Create*Request` types declare `id?: never` -
+  but TypeScript only excess-property-checks object literals, so a call site that
+  spreads a whole record (a duplicate flow, a restored tab) would slip one
+  through. The strip is what actually holds. (Import used to be the exception,
+  pre-assigning ids to wire `parentId` / `collectionId` across a tree before
+  anything was persisted; it sends one `applyImport` call now, see below.)
 - `updateX(data)` takes `data.id`, puts it in the **path**, and sends the rest
   of the object as a merge-patch body - an omitted field keeps its stored value,
   an explicit `null` resets it to the default. The `id` is not repeated in the
-  body.
+  body; a body `id` disagreeing with the path is a `400`.
 
 The full contract, including the null-vs-absent table and which fields have no
 default, is in [engine/api-reference.md](../engine/api-reference.md) under

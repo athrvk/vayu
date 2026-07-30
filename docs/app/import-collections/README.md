@@ -58,7 +58,9 @@ draft.
 
 This used to mint real `col_…` / `req_…` / `env_…` UUIDs, because the orchestrator created
 items one POST at a time and had to wire the tree itself - which is the only reason
-`POST /<resource>` ever accepted a client-supplied `id`.
+`POST /<resource>` ever accepted a client-supplied `id`. It no longer does: since #97 a
+create carrying an `id` is a `400`, on the single-resource routes and per item in
+`/import/apply` alike.
 
 ### 3. Persist - `orchestrator.ts`
 
@@ -74,12 +76,18 @@ items one POST at a time and had to wire the tree itself - which is the only rea
 - The engine generates every real id and returns an `idMap` keyed by temp id. The
   orchestrator checks that map covers every item it sent and throws
   `Import incomplete: …` otherwise - a silently skipped item would otherwise read as a
-  clean import. Nothing else consumes the real ids: `useImportMutation` invalidates the
-  collection / request / environment queries, which refetch.
-- **No rollback.** The engine write is atomic (validation over the whole payload, then one
-  transaction), so a failure means nothing was persisted and the error the modal shows is
-  the engine's, naming the item that broke. The old per-item loop needed best-effort
-  deletion of already-created roots; that code is gone.
+  clean import. Note this throw happens *after* the tree is committed. Nothing else
+  consumes the real ids: `useImportMutation` invalidates the collection / request /
+  environment / globals queries, which refetch.
+- **No rollback, and no retry.** The engine write is atomic (validation over the whole
+  payload, then one transaction), so a *rejected* payload persisted nothing and the error
+  the modal shows is the engine's, naming the item that broke. The old per-item loop needed
+  best-effort deletion of already-created roots; that code is gone. What atomicity does
+  **not** cover is a lost response: `/import/apply` has no idempotency key and mints fresh
+  ids per temp id on every call, so a second attempt after a committed-but-unanswered write
+  is a second copy of the whole tree. `useImportMutation` therefore sets `retry: false`,
+  overriding the QueryClient's `retry: 1` mutation default, and invalidates in `onSettled`
+  rather than `onSuccess` so a tree that landed behind a later failure is still visible.
 - **Globals are the one write outside that payload.** They are an engine singleton behind
   `POST /globals`, not a tree item with a temp id, so `applyGlobals` runs as a second
   request *after* the apply and its id-map check - nothing may fail behind it, since it is
@@ -122,6 +130,7 @@ Parsers emit drafts, not engine rows. A draft's `tempId` is absent until
 |---|---|---|
 | `collections` | `CollectionDraft[]` | Root collections (`parentId = null`) |
 | `environments` | `EnvironmentDraft[]` | Persisted only if `importEnvironments` |
+| `globals` | `Record<string, VariableValue>` | Variables for the globals scope, keyed by name. Not a draft list - globals are an engine singleton, so there is no name and no temp id to assign. Required, so every parser states its answer: `{}` for all but the Postman globals export |
 | `meta` | `ImportMeta` | Counts + lossy-import signals for the Preview UI |
 
 **`CollectionDraft`** - `name`, `description`, `variables: Record<string, VariableValue>`,
@@ -137,7 +146,7 @@ execution time), `preRequestScript`, `postRequestScript`.
 **`EnvironmentDraft`** - `name`, `description`, `variables: Record<string, VariableValue>`.
 
 **`ImportMeta`** - `format`, `fileName?`, `requestCount`, `folderCount`,
-`environmentCount`, `skipped: SkippedItem[]`, `nonExecutableAuth: number`.
+`environmentCount`, `globalCount`, `skipped: SkippedItem[]`, `nonExecutableAuth: number`.
 
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "unsupported_method" | "malformed_spec", count }`.
@@ -174,6 +183,7 @@ the environment drafts). Honoring is **per-parser**:
 | Parser | `importScripts` | `importEnvironments` |
 |---|---|---|
 | Postman v2.1 / v2.0 | Honored - scripts emitted as `""` when false | Moot - collection files embed no environments |
+| Postman Environment / Globals | Moot - this shape carries no scripts | Honored - gates both `environments` and `globals` at parse time, so the Preview counts report 0 |
 | Insomnia v4 | Honored | Honored - `environment` resources become `EnvironmentDraft`s |
 | OpenAPI 3.0 | Ignored - never generates scripts | Ignored - never generates environments |
 | OpenAPI 2.0 (Swagger) | Ignored | Ignored |

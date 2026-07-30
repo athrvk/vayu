@@ -53,16 +53,16 @@ apply_environment_fields (vayu::db::Environment& e, const nlohmann::json& json, 
 /**
  * Testable core of POST /environments - **create only**, returning
  * {http_status, json_body}. An id that already exists is a 409 pointing at PUT;
- * POST never updates (issue #95).
+ * POST never updates (issue #95). A body `id` is rejected outright (#97) - see
+ * create_collection_response for why the 409 stays behind an engine-generated
+ * id.
  */
 std::pair<int, nlohmann::json>
 create_environment_response (vayu::db::Database& db, const nlohmann::json& json) {
-    std::string id;
-    if (json.contains ("id") && !json["id"].is_null ()) {
-        id = json["id"].get<std::string> ();
-    } else {
-        id = vayu::utils::generate_id ("env_");
+    if (auto err = reject_client_supplied_id (json)) {
+        return *err;
     }
+    const std::string id = vayu::utils::generate_id ("env_");
 
     if (db.get_environment (id).has_value ()) {
         return { 409,
@@ -86,11 +86,15 @@ create_environment_response (vayu::db::Database& db, const nlohmann::json& json)
 /**
  * Testable core of PUT /environments/:id - **update only**, returning
  * {http_status, json_body}. A missing id is a 404 rather than a silent create.
- * Merge-patch semantics, same as collections and requests.
+ * Merge-patch semantics, same as collections and requests - including the 400
+ * on a body `id` that disagrees with the path (#97).
  */
 std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json) {
+    if (auto err = reject_mismatched_body_id (json, id)) {
+        return *err;
+    }
     auto existing = db.get_environment (id);
     if (!existing) {
         return { 404, nlohmann::json{ { "error", "Environment not found" } } };
@@ -128,10 +132,12 @@ void register_environment_routes (RouteContext& ctx) {
     /**
      * POST /environments
      * Creates an environment. Create only - an `id` that already exists is a
-     * 409 pointing at PUT, never a silent update (issue #95).
-     * Body params: id (optional string - generated when absent), name
-     * (required string), description, variables (object), isActive (bool).
-     * Returns: The created environment object, 409 on an existing id, or 400.
+     * 409 pointing at PUT, never a silent update (issue #95). The engine
+     * assigns the id; a body carrying one is a 400 (issue #97).
+     * Body params: name (required string), description, variables (object),
+     * isActive (bool).
+     * Returns: The created environment object, or 400 (body `id`, missing
+     * `name`, bad field shape).
      */
     ctx.server.Post ("/environments",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

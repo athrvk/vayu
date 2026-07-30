@@ -6,7 +6,8 @@
  */
 
 /**
- * Payload-level guard for the create/update verb split (issue #95).
+ * Payload-level guard for the create/update verb split (issue #95) and for
+ * engine-owned ids (issue #97).
  *
  * The engine's `POST /<resource>` is create-only and answers a known id with a
  * 409; `PUT /<resource>/:id` is update-only and answers an unknown id with a
@@ -16,9 +17,11 @@
  * that can catch it, so assert on the captured method, path and body rather
  * than on the returned object.
  *
- * The id is the *path*, not a body field: sending it in both is how a PUT to
- * one id carrying another id's body becomes possible, which #97 turns into an
- * explicit 400.
+ * The id is the *path*, not a body field, on both verbs: since #97 the engine
+ * assigns every id and rejects a create carrying one with a 400, and a PUT whose
+ * body id disagrees with the path is a 400 too. The renderer's types have no
+ * `id` on a create, but only the captured body proves what a spread-through call
+ * site actually sent.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -98,13 +101,40 @@ describe("resource writes use POST to create and PUT to update", () => {
 		expect(put.mock.calls[0][1]).not.toHaveProperty("id");
 	});
 
-	it("keeps the import path on POST - client ids on create are still legal", async () => {
-		// The import orchestrator pre-assigns ids so it can wire parentId /
-		// collectionId across the whole tree before anything is persisted. That
-		// stays a create (#96 replaces it with a bulk endpoint); routing it to
-		// PUT would 404 on every item, since none of them exist yet.
+	// Every create strips `id`, whatever the caller passed. A payload builder
+	// that spreads a whole record is the case the types cannot catch: the
+	// `Create*Request` types declare `id?: never`, but that only fires on an
+	// object literal, so the runtime strip is what actually holds. Each of these
+	// would fail with the strip removed - the engine's 400 would surface as a
+	// broken save instead.
+	it("strips a client-supplied id from a collection create", async () => {
 		await apiService.createCollection({ id: "col_temp", name: "Imported" } as never);
 		expect(put).not.toHaveBeenCalled();
-		expect(post).toHaveBeenCalledWith("/collections", { id: "col_temp", name: "Imported" });
+		expect(post).toHaveBeenCalledWith("/collections", { name: "Imported" });
+		expect(post.mock.calls[0][1]).not.toHaveProperty("id");
+	});
+
+	it("strips a client-supplied id from a request create", async () => {
+		await apiService.createRequest({
+			id: "req_temp",
+			collectionId: "col_1",
+			name: "R",
+			method: "GET",
+			url: "https://example.com",
+		} as never);
+		expect(put).not.toHaveBeenCalled();
+		expect(post.mock.calls[0][0]).toBe("/requests");
+		expect(post.mock.calls[0][1]).not.toHaveProperty("id");
+	});
+
+	it("strips a client-supplied id from an environment create", async () => {
+		await apiService.createEnvironment({
+			id: "env_temp",
+			name: "Dev",
+			variables: {},
+		} as never);
+		expect(put).not.toHaveBeenCalled();
+		expect(post).toHaveBeenCalledWith("/environments", { name: "Dev", variables: {} });
+		expect(post.mock.calls[0][1]).not.toHaveProperty("id");
 	});
 });
