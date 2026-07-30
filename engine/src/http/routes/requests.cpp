@@ -225,17 +225,16 @@ bool is_create) {
 /**
  * Testable core of POST /requests - **create only**, returning
  * {http_status, json_body}. An id that already exists is a 409 pointing at PUT;
- * POST never updates (issue #95). A client-supplied id is still honoured on
- * create for the import orchestrator's benefit until #96 lands.
+ * POST never updates (issue #95). A body `id` is rejected outright (#97) - see
+ * create_collection_response for why the 409 stays behind an engine-generated
+ * id.
  */
 std::pair<int, nlohmann::json>
 create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
-    std::string id;
-    if (json.contains ("id") && !json["id"].is_null ()) {
-        id = json["id"].get<std::string> ();
-    } else {
-        id = vayu::utils::generate_id ("req_");
+    if (auto err = reject_client_supplied_id (json)) {
+        return *err;
     }
+    const std::string id = vayu::utils::generate_id ("req_");
 
     if (db.get_request (id).has_value ()) {
         return { 409,
@@ -259,11 +258,15 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
 /**
  * Testable core of PUT /requests/:id - **update only**, returning
  * {http_status, json_body}. A missing id is a 404 rather than a silent create.
- * Merge-patch semantics, same as collections.
+ * Merge-patch semantics, same as collections - including the 400 on a body `id`
+ * that disagrees with the path (#97).
  */
 std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json) {
+    if (auto err = reject_mismatched_body_id (json, id)) {
+        return *err;
+    }
     auto existing = db.get_request (id);
     if (!existing) {
         return { 404, nlohmann::json{ { "error", "Request not found" } } };
@@ -336,14 +339,16 @@ void register_request_routes (RouteContext& ctx) {
     /**
      * POST /requests
      * Creates a request. Create only - an `id` that already exists is a 409
-     * pointing at PUT, never a silent update (issue #95).
-     * Body params: id (optional string - generated when absent), collectionId,
-     * name, method, url (all required), description, params/headers (arrays of
-     * KeyValueEntry), body, bodyType, auth, preRequestScript,
-     * postRequestScript, order, followRedirects, maxRedirects, httpVersion
-     * (absent/null seeds from the "defaultHttpVersion" config entry; an
-     * unrecognized value is a 400, never silently coerced).
-     * Returns: The created request object, 409 on an existing id, or 400.
+     * pointing at PUT, never a silent update (issue #95). The engine assigns
+     * the id; a body carrying one is a 400 (issue #97).
+     * Body params: collectionId, name, method, url (all required), description,
+     * params/headers (arrays of KeyValueEntry), body, bodyType, auth,
+     * preRequestScript, postRequestScript, order, followRedirects,
+     * maxRedirects, httpVersion (absent/null seeds from the
+     * "defaultHttpVersion" config entry; an unrecognized value is a 400, never
+     * silently coerced).
+     * Returns: The created request object, or 400 (body `id`, missing required
+     * field, bad field shape).
      */
     ctx.server.Post (
     "/requests", [&ctx] (const httplib::Request& req, httplib::Response& res) {
