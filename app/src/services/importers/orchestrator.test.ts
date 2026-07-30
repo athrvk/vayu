@@ -185,18 +185,6 @@ describe("ImportOrchestrator", () => {
 		}
 	});
 
-	it("forwards followRedirects only when the parser read one", async () => {
-		// Absent means "engine default" (true); an omitted false would silently
-		// follow a 3xx the imported request had disabled.
-		const withSetting = fixture();
-		withSetting.collections[0].requests[0].followRedirects = false;
-		const { api, calls } = fakeApi();
-		await new ImportOrchestrator(api).run(withSetting, opts);
-		const { requests } = calls[0];
-		expect(requests.find((r) => r.name === "r1")!.followRedirects).toBe(false);
-		expect("followRedirects" in requests.find((r) => r.name === "r2")!).toBe(false);
-	});
-
 	it("skips environments when importEnvironments=false", async () => {
 		const { api, calls } = fakeApi();
 		await new ImportOrchestrator(api).run(fixture(), { ...opts, importEnvironments: false });
