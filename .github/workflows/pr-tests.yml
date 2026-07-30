@@ -266,6 +266,18 @@ jobs:
           buildPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
 
+      # The engine must depend on nothing outside Windows itself. ctest below
+      # runs on a runner that already has the Visual C++ redistributable, so it
+      # cannot tell a self-contained binary from one that only works here -
+      # which is exactly how v0.10.0 and v0.11.0 shipped an engine that could
+      # not start on a clean machine. This inspects the import table instead.
+      - name: Verify engine has no non-Windows dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m pip install --quiet pefile
+          python scripts/check-windows-deps.py engine/build-release/vayu-engine.exe
+
       - name: Run engine tests
         working-directory: engine
         shell: bash

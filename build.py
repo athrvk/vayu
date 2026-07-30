@@ -1190,10 +1190,15 @@ def build_app(dev_mode: bool, engine_binary: Optional[Path], project_root: Path)
 
             system_name, _ = detect_platform()
             if system_name == "Windows":
+                # No DLLs are copied: the windows-* presets build against
+                # x64-windows-static with a static MSVC runtime, so the engine
+                # is self-contained. This used to glob "*.dll" out of the build
+                # directory, which shipped gtest.dll/gtest_main.dll to users and
+                # still missed the MSVC runtime (VCRUNTIME140.dll and friends
+                # never land in the build directory), so the engine could not
+                # start on a machine without the Visual C++ redistributable.
+                # scripts/check-windows-deps.py enforces this in CI.
                 target_name = "vayu-engine.exe"
-                dll_dir = engine_binary.parent
-                for dll in dll_dir.glob("*.dll"):
-                    shutil.copy(dll, resources_dir)
             else:
                 target_name = "vayu-engine"
 

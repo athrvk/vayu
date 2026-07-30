@@ -184,6 +184,13 @@ jobs:
             ls -1 app/build/icons
           fi
 
+      - name: Verify engine has no non-Windows dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m pip install --quiet pefile
+          python scripts/check-windows-deps.py engine/build-release/vayu-engine.exe
+
       - name: Copy engine binary to resources (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -195,11 +202,14 @@ jobs:
           # (that's the Visual Studio multi-config layout).
           Copy-Item "engine/build-release/vayu-engine.exe" "$resourcesDir/vayu-engine.exe"
 
-          # Copy runtime DLLs
-          $dllDir = "engine/build-release"
-          Get-ChildItem -Path $dllDir -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
-            Copy-Item $_.FullName -Destination $resourcesDir
-          }
+          # No DLLs are copied: windows-prod builds against x64-windows-static
+          # with a static MSVC runtime, so the engine is self-contained. The
+          # glob that used to live here copied "*.dll" from the build directory,
+          # which was wrong in both directions - it swept in gtest.dll and
+          # gtest_main.dll (test libraries, shipped to users for two releases)
+          # while missing the MSVC runtime entirely, because that never lands in
+          # the build directory. The step above proves the binary needs nothing
+          # beside it, which is a stronger guarantee than any copy list.
 
       - name: Copy engine binary to resources (macOS)
         if: runner.os == 'macOS'

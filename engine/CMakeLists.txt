@@ -25,6 +25,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# CMAKE_MSVC_RUNTIME_LIBRARY (set by the windows-* presets to link the MSVC
+# runtime statically) is only honoured where policy CMP0091 is NEW. This
+# project's cmake_minimum_required(3.25) makes it NEW here - but vendored
+# quickjs-ng declares its own cmake_minimum_required(3.10), which resets
+# policies to 3.10 defaults inside that subdirectory and would leave the `qjs`
+# target on the dynamic runtime (/MD) while everything else is static (/MT).
+# Two CRTs in one process is not a build error; it corrupts the heap at
+# runtime. Forcing the default for subprojects keeps the whole tree on one
+# runtime. Must be set before any add_subdirectory().
+set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
+
 # Position independent code (required for shared libraries)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
