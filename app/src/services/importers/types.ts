@@ -64,7 +64,8 @@ export interface RequestDraft {
 	postRequestScript: string;
 	/**
 	 * Per-request redirect settings, when the source states them (Postman's
-	 * item-level `protocolProfileBehavior`). Absent means "engine default" -
+	 * item-level `protocolProfileBehavior`; Insomnia's `settingFollowRedirects`,
+	 * which has no limit to go with it). Absent means "engine default" -
 	 * `followRedirects: true`, `maxRedirects: 10` - which is why they are optional
 	 * rather than defaulted here: a parser that says nothing must not look like a
 	 * parser that said `true`.

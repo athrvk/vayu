@@ -40,6 +40,20 @@ describe("completionReplaceStartColumn", () => {
 		expect(at("pm.expect(x).to")).toBe(14);
 	});
 
+	/*
+	 * The matcher chains the engine offers are up to four segments deep
+	 * (`to.have.nested.property`, `to.have.all.keys`), so the chain a user has
+	 * typed before the cursor can be longer than one member. Replacing only the
+	 * last segment would leave `to.have.nested.` in place and insert the full
+	 * path after it.
+	 */
+	it("replaces a multi-segment matcher chain typed after a call", () => {
+		// "pm.expect(x).to.have.nested." -> chain starts at column 14
+		expect(at("pm.expect(x).to.have.nested.")).toBe(14);
+		expect(at("pm.expect(x).to.deep.")).toBe(14);
+		expect(at("pm.expect(x).to.have.all.k")).toBe(14);
+	});
+
 	it("returns the cursor column on empty / whitespace prefixes", () => {
 		expect(at("")).toBe(1);
 		expect(at("   ")).toBe(4);
