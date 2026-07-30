@@ -116,8 +116,10 @@ stays in the output rather than becoming an empty string).
 ## Auth inheritance
 
 When a request's auth mode is `"inherit"`, Vayu walks the collection ancestor chain
-**leaf-first** (most specific wins) and uses the first collection whose auth mode is
-not `"none"`. This is resolved in `RequestBuilder` before sending to the engine:
+**leaf-first** (most specific wins) and uses the first collection that defines auth.
+The walk lives in `resolveAuthSource`
+(`modules/request-builder/utils/auth-resolution.ts`) and is resolved in
+`RequestBuilder` before sending to the engine:
 
 ```
 Users auth  →  checked first  (leaf, most specific)
@@ -125,7 +127,22 @@ API auth    →  checked second
 Root auth   →  checked last   (root, least specific)
 ```
 
-If no ancestor has non-none auth the request executes without auth.
+Two collection modes mean "no credentials here" and the walk treats them
+differently:
+
+| Collection `auth.mode` | Meaning | Effect on the walk |
+|---|---|---|
+| `none` | nothing configured at this level | stepped over - keep climbing |
+| `noauth` | configured to send nothing | **stops the walk** - the request sends no auth |
+
+`noauth` exists because Postman's folder-level *No Auth* terminates inheritance,
+and collapsing it into `none` meant an imported No Auth folder's requests silently
+regained the parent collection's credentials. A collection *below* a `noauth` one
+may still define its own auth - termination is about what is inherited, not a lock
+on the subtree. The MCP server resolves auth the same way in
+`electron/mcp/resolve.ts` (`composeAuth`); the two copies must change together.
+
+If no ancestor defines auth the request executes without auth.
 
 Auth variable placeholders (e.g. `{{bearer_token}}`) are resolved through the same
 variable map before the value is sent to the engine.
@@ -151,6 +168,25 @@ The app builds the ordered list of script parts (empty or whitespace-only
 scripts are dropped); the **engine** joins the surviving parts with a blank
 line and runs the result. See `docs/engine/architecture.md` → *Request
 composition boundary* for the wire shape.
+
+### Reading a variable from a script
+
+A script does not see `{{name}}` - those are already resolved by the time the
+payload reaches the engine. It reads a scope by name (`pm.environment.get`,
+`pm.collectionVariables.get`, `pm.globals.get`) or reads across all three with
+`pm.variables.get`, which walks **environment → collection → global** and stops
+at the first scope that has the name enabled - this page's priority order, read
+from the top down.
+
+One difference to know about: the script side has a single collection scope, and
+the engine fills it from the request's **immediate parent collection only**
+(`execution.cpp`, where `collectionVariables` is loaded). The chain merge
+described above is done app-side for `{{name}}`, so a variable defined on an
+ancestor collection is visible to `{{name}}` and *not* to
+`pm.collectionVariables.get` / `pm.variables.get`. Read such a value from the
+environment or globals, or define it on the request's own collection. See
+[pm API compatibility](./pm-api-compatibility.md) and
+[scripting.md](../engine/scripting.md#variables-pmvariables).
 
 ---
 

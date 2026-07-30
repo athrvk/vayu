@@ -180,6 +180,21 @@ describe("what the two editors are allowed to differ on", () => {
 		request.unmount();
 
 		renderCollectionEditor({ mode: "none" });
-		expect(screen.getByText(/No authentication for this collection/i)).toBeInTheDocument();
+		expect(screen.getByText(/No authentication set on this collection/i)).toBeInTheDocument();
+	});
+
+	it("only the collection may block inheriting", () => {
+		// `noauth` is the collection-only terminal "send nothing" - on a request,
+		// `none` already means that, so a second option would do one job twice.
+		const request = renderRequestEditor({ mode: "none" });
+		fireEvent.click(screen.getAllByRole("combobox")[0]);
+		expect(
+			screen.queryByRole("option", { name: /blocks inheriting/i })
+		).not.toBeInTheDocument();
+		request.unmount();
+
+		renderCollectionEditor({ mode: "none" });
+		fireEvent.click(screen.getAllByRole("combobox")[0]);
+		expect(screen.getByRole("option", { name: /blocks inheriting/i })).toBeInTheDocument();
 	});
 });

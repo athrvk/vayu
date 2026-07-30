@@ -127,6 +127,25 @@ function fixture(): ImportResult {
 const opts = { importEnvironments: true, importScripts: true };
 
 describe("ImportOrchestrator", () => {
+	it("forwards a draft's redirect settings, and omits them when unstated", async () => {
+		// `followRedirects`/`maxRedirects` are optional on the draft precisely so an
+		// import that says nothing is distinguishable from one that said `true` -
+		// the engine seeds its own defaults for an absent field. A key present with
+		// `undefined` would blur that, so presence is what is asserted.
+		const result = fixture();
+		result.collections[0].requests[0].followRedirects = false;
+		result.collections[0].requests[0].maxRedirects = 3;
+
+		const { api, calls } = fakeApi();
+		await new ImportOrchestrator(api).run(result, opts);
+
+		const [stated, unstated] = calls[0].requests;
+		expect(stated.followRedirects).toBe(false);
+		expect(stated.maxRedirects).toBe(3);
+		expect(Object.keys(unstated)).not.toContain("followRedirects");
+		expect(Object.keys(unstated)).not.toContain("maxRedirects");
+	});
+
 	it("sends the whole tree in exactly one /import/apply call", async () => {
 		const { api, calls } = fakeApi();
 		await new ImportOrchestrator(api).run(fixture(), opts);

@@ -148,8 +148,16 @@ execution time), `preRequestScript`, `postRequestScript`.
 **`ImportMeta`** - `format`, `fileName?`, `requestCount`, `folderCount`,
 `environmentCount`, `globalCount`, `skipped: SkippedItem[]`, `nonExecutableAuth: number`.
 
-**`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body", count }`.
+**`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
+"malformed_item" | "unsupported_method" | "malformed_spec", count }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
+Three of the kinds are not about representability: `unsupported_method` is an operation whose
+HTTP method has no `HttpMethod` (OpenAPI 3's `trace`), and `malformed_item` / `malformed_spec`
+are shapes the source file got wrong - a Postman `item[]` entry that is not an object (see
+[postman.md](./postman.md)), an OpenAPI path item or `parameters` list that is not what the
+spec allows - stepped over so the rest of the file still imports. The two OpenAPI kinds are
+counted via `SkipTally` in `openapi-shared.ts`, shared by both OpenAPI parsers: they are
+structural clones, and a second copy would drift.
 
 Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`
@@ -157,10 +165,13 @@ Supporting value types:
 - `VariableValue`: `{ value: string, enabled: boolean, secret? }` - all values are strings.
 - `RequestBody`: `{mode:"none"}` | `{mode:"json"|"text"|"graphql", content}` |
   `{mode:"form-data"|"x-www-form-urlencoded", fields: KeyValueEntry[]}`.
-- `RequestAuth`: `{mode:"none"}` | `{mode:"inherit"}` | `{mode:"bearer", token}` |
+- `RequestAuth`: `{mode:"none"}` | `{mode:"noauth"}` | `{mode:"inherit"}` | `{mode:"bearer", token}` |
   `{mode:"basic", username, password}` | `{mode:"apikey", key, value, in}` |
   `{mode:"oauth2", config: OAuth2Config}` (executable) |
   `{mode:"digest"|"aws"|"ntlm", config}` (stored, not executed).
+  On a collection, `none` means "nothing set here" (a descendant's `inherit` keeps
+  climbing) and `noauth` means "send nothing" (the walk stops there) - see
+  [Postman auth mapping](./postman.md#auth-mapping).
 
 ---
 
@@ -212,8 +223,10 @@ and **preserves duplicates and disabled rows**. (`shared.ts`)
 Reads the per-type detail via `authDetail`, which handles both v2.1's array shape
 (`[{key, value}]`) and v2.0's object shape. Maps `bearer`/`basic`/`apikey` to concrete auth,
 maps `oauth2` to an **executable** `{mode:"oauth2", config}` via `mapPostmanOAuth2` (below),
-stores `digest`/`aws`/`ntlm` as `{mode, config}` (not executed), `noauth` → `none`, and
-missing/`inherit` → `inherit`. (`shared.ts`)
+stores `digest`/`aws`/`ntlm` as `{mode, config}` (not executed), maps the real AWS wire type
+`awsv4` → the internal `{mode:"aws", config}`, `noauth` → `none`, and missing/`inherit` →
+`inherit`. A collection/folder `noauth` is handled by `collectionAuth` in `postman.ts` instead,
+which maps it to the terminal `{mode:"noauth"}`. (`shared.ts`)
 
 ### OAuth 2.0 mapping (`oauth2-import.ts`)
 Turns each source format's OAuth 2.0 block into Vayu's typed `OAuth2Config`, so imported
@@ -238,11 +251,14 @@ with no explicit language it sniffs via `JSON.parse` (success → `json`, else `
 `event.script.exec[]` with `\n` (or returns a string `exec` as-is). (`shared.ts`)
 
 ### normalizeVars
-`normalizeVars(input)` - normalizes foreign template syntax to Vayu `{{var}}`:
-`{{ x }}` / `{{ _.x }}` → `{{x}}` (trimmed, `_.` prefix stripped) and OpenAPI single-brace
-`{x}` → `{{x}}` (without touching an existing `{{…}}` pair). Nunjucks tags `{% … %}` and
-filtered vars `{{ x | filter }}` are left **verbatim** - Vayu has no equivalent and renders
-them as literal text. (`var-normalize.ts`)
+`normalizeVars(input, opts?)` - normalizes foreign template syntax to Vayu `{{var}}`:
+`{{ x }}` / `{{ _.x }}` → `{{x}}` (trimmed, `_.` prefix stripped). With
+`{ pathTemplates: true }` it additionally rewrites single-brace `{x}` → `{{x}}` (without
+touching an existing `{{…}}` pair); **only the OpenAPI/Swagger parsers pass it**, because in
+Postman and Insomnia a single brace is literal text (`/tags/{beta}`, `fields=friends{name}`)
+and rewriting it invents a variable reference that resolves to nothing. Nunjucks tags
+`{% … %}` and filtered vars `{{ x | filter }}` are left **verbatim** - Vayu has no equivalent
+and renders them as literal text. (`var-normalize.ts`)
 
 ### sampleSchema
 `sampleSchema(schema, resolveRef)` - generates a sample value for an OpenAPI/Swagger schema,
@@ -251,11 +267,18 @@ used to build request-body stubs. It is **bounded and resilient**, not a naive o
 - Recurses up to `MAX_DEPTH = 6`.
 - Resolves `$ref` via the injected `resolveRef`, with a per-path `Set` **cycle guard**
   (a re-seen ref → `{}`); a failed/`null` resolution → `{}`.
-- Returns a schema's `example` verbatim when present.
+- Returns a pinned value verbatim, `const` → `example` → `examples[0]`. `const` wins because
+  JSON Schema makes it the only permitted value; `examples` is OpenAPI 3.1's plural form.
 - For `allOf` / `oneOf` / `anyOf`, walks the **first** branch (precedence `allOf → oneOf → anyOf`).
+- Samples a 3.1 type array (`type: ["string", "null"]`) from its first non-`"null"` member.
 - Type defaults: `string` → `""` (or `enum[0]`), `integer`/`number` → `0`, `boolean` →
-  `false`, `array` → `[sample(items)]` (or `[]`), `object`/untyped → expands `properties`
-  recursively (else `{}`).
+  `false`, `null` → `null`, `array` → `[sample(items)]` (or `[]`), `object`/untyped → expands
+  `properties` recursively (else `{}`).
+
+`schemaFieldNames(schema, resolveRef)` in the same module returns the sampled stub's own keys
+(`[]` when it samples to a non-object). It is how the v3 parser reads urlencoded / multipart
+field names, so a form schema behind `$ref` or `allOf` resolves as far as a JSON body does
+instead of reading a `properties` key that isn't there.
 
 (`schema-sampler.ts`)
 

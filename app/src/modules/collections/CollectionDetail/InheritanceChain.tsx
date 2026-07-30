@@ -13,8 +13,9 @@
  * `Inherit from collection`.
  *
  * Rules:
- *   - The nearest ancestor (inclusive of this collection) with auth.mode !== "none"
- *     is the resolved source.
+ *   - The nearest ancestor (inclusive of this collection) that defines auth is
+ *     the resolved source, unless an ancestor explicitly set to No Auth
+ *     (`noauth`) blocks inheriting first - see `resolveAuthSource`.
  *   - The current collection is tagged THIS.
  *   - If a request explicitly overrides auth, that's noted in the row.
  */
@@ -22,7 +23,9 @@
 import { Folder } from "lucide-react";
 import { Eyebrow } from "@/components/ui";
 import { useCollectionAncestors } from "@/queries/collections";
+import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
 import { cn } from "@/lib/utils";
+import { resolveAuthSource } from "@/modules/request-builder/utils/auth-resolution";
 import type { Collection } from "@/types";
 
 interface InheritanceChainProps {
@@ -48,7 +51,11 @@ function describeAuth(c: Collection): string {
 	const auth = c.auth;
 	switch (auth.mode) {
 		case "none":
-			return "No Auth";
+			return AUTH_MODE_LABELS.none;
+		// Named from the registry rather than restated, because the point of the
+		// row is that this label differs from plain "No Auth": it blocks inheriting.
+		case "noauth":
+			return AUTH_MODE_LABELS.noauth;
 		case "bearer":
 			return "Bearer Token";
 		case "basic":
@@ -62,7 +69,7 @@ function describeAuth(c: Collection): string {
 		case "ntlm":
 			return auth.mode.toUpperCase();
 		default:
-			return "No Auth";
+			return AUTH_MODE_LABELS.none;
 	}
 }
 
@@ -71,9 +78,12 @@ export default function InheritanceChain({ collectionId }: InheritanceChainProps
 
 	if (ancestors.length === 0) return null;
 
-	// Resolution walks root → leaf and picks the nearest non-none auth (handoff
-	// says nested folders take precedence, i.e. closer to leaf wins).
-	const sourceId = [...ancestors].reverse().find((c) => c.auth.mode !== "none")?.id;
+	// Resolution walks leaf → root and picks the nearest collection that defines
+	// auth (nested folders take precedence, i.e. closer to leaf wins), stopping at
+	// one explicitly set to No Auth. Shared with what execution actually sends, so
+	// this panel cannot claim a SOURCE the request would not use.
+	const { source, blockedBy } = resolveAuthSource(ancestors);
+	const sourceId = source?.id;
 
 	return (
 		<div className="mt-7 p-3.5 px-4 bg-card border border-border rounded-md">
@@ -141,6 +151,13 @@ export default function InheritanceChain({ collectionId }: InheritanceChainProps
 					</div>
 				);
 			})}
+
+			{blockedBy && (
+				<p className="mt-2.5 m-0 text-[11px] text-muted-foreground">
+					<span className="font-mono">{blockedBy.name}</span> is set to No Auth, so
+					requests below it inherit nothing.
+				</p>
+			)}
 		</div>
 	);
 }
