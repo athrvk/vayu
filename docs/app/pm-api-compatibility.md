@@ -47,20 +47,43 @@ alternatives (persisting to the environment, or dropping the write) would misrep
 what happened. The error names the three scoped setters. See
 [scripting.md](../engine/scripting.md#variables-pmvariables).
 
-### Assertion chains (`pm.expect` / `pm.response.to`)
+### Assertion chains (`pm.expect`)
 
-Chai-style chains, implemented in the QuickJS runtime:
+Chai-style chains on a `pm.expect(value)` expectation, implemented in the QuickJS
+runtime. `pm.response.to` is a **separate** object: it answers only to the
+response assertions in the table above and the status classes below, not to
+these:
 
 ```
-.to.equal(v)      .to.eql(v)        .to.exist
-.to.be.true       .to.be.false      .to.be.null      .to.be.undefined
-.to.be.ok         .to.be.empty
-.to.be.above(n)   .to.be.below(n)   .to.be.at.least(n)   .to.be.at.most(n)
-.to.have.property(name)             .to.have.length(n)   .to.have.lengthOf(n)
-.to.include(v)    .to.contain(v)
-.to.be.a(type)    .to.be.an(type)   .to.match(/regex/)
+.to.equal(v)      .to.eql(v) / .to.eqls(v)             .to.deep.equal(v)
+.to.exist         .to.be.true       .to.be.false
+.to.be.null       .to.be.undefined  .to.be.ok          .to.be.empty
+.to.be.above(n)   .to.be.below(n)   .to.be.at.least(n) .to.be.at.most(n)
+.to.be.closeTo(v, delta)            .to.be.oneOf([…])
+.to.be.a(type)    .to.be.an(type)   .to.be.instanceOf(Ctor)
+.to.have.property(name[, v])        .to.have.nested.property('a.b[0].c'[, v])
+.to.have.length(n)                  .to.have.lengthOf(n)
+.to.have.keys(…) / .to.have.key(k)  .to.have.members([…])
+.to.include(v)    .to.contain(v)    .to.have.string(sub)
+.to.match(/regex/)                  .to.satisfy(fn)
+.to.throw([msg | /regex/]) / .to.throws(…)
 .to.not …         (negates the chain)
+.deep …           (deep comparison for equal / include / property / members / oneOf)
+.nested …         (dotted or indexed path for property)
+.and …            (continues a chain; flags, `not` included, carry over)
+.all …            (accepted before .keys, chai's default, changes nothing)
 ```
+
+**`equal` is `===`; `eql` (and `deep.equal`) is deep.** So
+`expect({a:1}).to.equal({a:1})` **fails** - different references - and
+`expect({a:1,b:2}).to.eql({b:2,a:1})` **passes**: key order is not part of deep
+equality. `include`, `property(name, value)`, `members` and `oneOf` compare
+strictly too, unless a `deep` appears in the chain.
+
+`have.keys` asserts *exactly* those keys. `Map` / `Set` / typed arrays are
+reported unequal by `eql` rather than compared (their contents are not
+properties); `Date` compares by instant, `RegExp` by pattern; a cyclic value
+raises a `RangeError` after 64 levels rather than hanging.
 
 ### Response status classes (`pm.response.to.be`)
 
@@ -110,6 +133,10 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   job (see below)
 - `pm.info`, `pm.execution`, `pm.visualizer`
 - The `tests["name"] = bool` legacy assertion style (use `pm.test`)
+- Chai matchers outside the list above: `.include.keys` (the subset form),
+  `.any.keys`, `.change`/`.increase`/`.decrease`, `.own.property`, `.respondTo`,
+  and the `require()`-able libraries (`chai`, `lodash`, `moment`, …). Each throws
+  a `TypeError` rather than reporting a pass
 
 ---
 

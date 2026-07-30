@@ -33,22 +33,86 @@ pm.test('Test name', function() {
 
 Create Chai-style expectations for assertions.
 
+**`equal` is strict, `eql` is deep.** `equal` is `===`, so two objects with the
+same contents are *not* equal - only the same reference is. `eql` (and its alias
+`deep.equal`) compares contents recursively and does not care about key order.
+This matches chai, which is what Postman scripts are written against; picking the
+wrong one is the most common porting mistake.
+
 ```javascript
-pm.expect(value).to.equal(expected);
-pm.expect(value).to.not.equal(expected);
+pm.expect({ a: 1 }).to.equal({ a: 1 });      // fails - different references
+pm.expect({ a: 1 }).to.eql({ a: 1 });        // passes
+pm.expect({ a: 1, b: 2 }).to.eql({ b: 2, a: 1 }); // passes - order is not part of it
+```
+
+The full matcher inventory:
+
+```javascript
+// Equality
+pm.expect(value).to.equal(expected);         // strict (===)
+pm.expect(value).to.eql(expected);           // deep; alias .eqls
+pm.expect(value).to.deep.equal(expected);    // same as .eql
+pm.expect(value).to.be.oneOf([a, b]);
+pm.expect(value).to.be.closeTo(expected, delta);
+
+// Truthiness and existence (paren-less: accessing them asserts)
 pm.expect(value).to.be.true;
 pm.expect(value).to.be.false;
 pm.expect(value).to.be.null;
 pm.expect(value).to.be.undefined;
+pm.expect(value).to.be.ok;
+pm.expect(value).to.be.empty;
 pm.expect(value).to.exist;
-pm.expect(value).to.be.a('string');
-pm.expect(value).to.be.an('array');
-pm.expect(value).to.include(item);
-pm.expect(value).to.have.length(n);
+
+// Numbers
 pm.expect(value).to.be.above(n);
 pm.expect(value).to.be.below(n);
+pm.expect(value).to.be.at.least(n);
+pm.expect(value).to.be.at.most(n);
+
+// Types
+pm.expect(value).to.be.a('string');
+pm.expect(value).to.be.an('array');
+pm.expect(value).to.be.instanceOf(Array);
+
+// Strings, collections and objects
+pm.expect(value).to.include(item);           // alias .contain
+pm.expect(value).to.have.string(substring);  // string target only
+pm.expect(value).to.match(/regex/);
+pm.expect(value).to.have.length(n);          // alias .lengthOf
 pm.expect(value).to.have.property('key');
+pm.expect(value).to.have.property('key', expectedValue);
+pm.expect(value).to.have.nested.property('a.b[0].c');
+pm.expect(value).to.have.keys('a', 'b');     // exactly these keys; alias .key
+pm.expect(value).to.have.members([1, 2, 3]); // same members, any order
+
+// Functions
+pm.expect(fn).to.throw();                    // alias .throws
+pm.expect(fn).to.throw('message substring');
+pm.expect(fn).to.throw(/pattern/);
+pm.expect(value).to.satisfy(function (v) { return v > 0; });
+
+// Chainers
+pm.expect(value).to.not.equal(expected);     // negates the rest of the chain
+pm.expect(value).to.be.above(0).and.to.be.below(10);
+pm.expect(value).to.deep.include({ a: 1 });  // deep applies to include, property,
+                                             // members and oneOf as well
 ```
+
+Notes on the edges:
+
+- **`deep` changes the comparison, it is not a matcher.** `include`, `property`,
+  `members` and `oneOf` compare strictly unless a `deep` appears in the chain.
+- **`keys` means exactly these keys**, as in chai's `have.keys`. The subset form
+  (`include.keys`) is not implemented; `all` is accepted and changes nothing,
+  `any` is not.
+- **`eql` refuses containers it cannot inspect.** `Map`, `Set` and typed arrays
+  keep their contents outside the property list, so two distinct ones report
+  *not* equal rather than silently passing. `Date` compares by instant and
+  `RegExp` by pattern.
+- **A cycle fails loudly.** Deep equality gives up after 64 levels with a
+  `RangeError` naming the cause.
+- **`.and` carries the chain's flags**, `not` included, exactly as in chai.
 
 ## Response Object (`pm.response`)
 

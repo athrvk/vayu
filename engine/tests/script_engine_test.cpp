@@ -404,6 +404,300 @@ TEST_F (ScriptEngineTest, ExpectContain) {
 }
 
 // ============================================================================
+// equal vs eql, the deep/nested chainers, and the matchers that used to throw
+//
+// `equal` and `eql` were bound to the same JSON-string comparison, so Vayu
+// passed `expect({a:1}).to.equal({a:1})` (Postman fails it - different
+// references) and failed `expect({a:1,b:2}).to.eql({b:2,a:1})` (Postman passes
+// it - key order is not part of deep equality). The false pass is the one that
+// matters: a ported test asserting reference identity silently became a value
+// comparison.
+// ============================================================================
+
+// The pair this issue exists for. Re-alias `equal` to the deep comparison and
+// the first case flips to PASS; make `eql` strict and the second flips to FAIL.
+TEST_F (ScriptEngineTest, ExpectEqualIsStrictAndEqlIsDeep) {
+    auto result = engine.execute_test (R"(
+        pm.test("equal on two objects", function() { pm.expect({a:1}).to.equal({a:1}); });
+        pm.test("eql on two objects", function() { pm.expect({a:1}).to.eql({a:1}); });
+        pm.test("equal on one reference", function() { var o = {a:1}; pm.expect(o).to.equal(o); });
+        pm.test("deep.equal is eql", function() { pm.expect({a:1}).to.deep.equal({a:1}); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 4);
+    EXPECT_FALSE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+    EXPECT_TRUE (result.tests[2].passed) << result.tests[2].error_message;
+    EXPECT_TRUE (result.tests[3].passed) << result.tests[3].error_message;
+}
+
+TEST_F (ScriptEngineTest, ExpectEqualKeepsPrimitiveSemantics) {
+    auto result = engine.execute_test (R"(
+        pm.test("numbers", function() { pm.expect(42).to.equal(42); });
+        pm.test("strings", function() { pm.expect("a").to.equal("a"); });
+        pm.test("booleans", function() { pm.expect(true).to.equal(true); });
+        pm.test("null", function() { pm.expect(null).to.equal(null); });
+        pm.test("no coercion", function() { pm.expect("1").to.not.equal(1); });
+        pm.test("NaN is not itself", function() { pm.expect(NaN).to.not.equal(NaN); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+// Key order, nesting, `NaN`, `null` vs `undefined` and the members JSON drops:
+// every one of these is a case `JSON.stringify` comparison got wrong.
+TEST_F (ScriptEngineTest, ExpectEqlIsAStructuralCompare) {
+    auto result = engine.execute_test (R"(
+        pm.test("key order", function() { pm.expect({a:1,b:2}).to.eql({b:2,a:1}); });
+        pm.test("nested", function() { pm.expect({a:{b:[1,{c:2}]}}).to.eql({a:{b:[1,{c:2}]}}); });
+        pm.test("nested differs", function() { pm.expect({a:{b:[1]}}).to.not.eql({a:{b:[2]}}); });
+        pm.test("array order matters", function() { pm.expect([1,2]).to.not.eql([2,1]); });
+        pm.test("array length matters", function() { pm.expect([1]).to.not.eql([1,2]); });
+        pm.test("NaN", function() { pm.expect(NaN).to.eql(NaN); });
+        pm.test("null is not undefined", function() { pm.expect(null).to.not.eql(undefined); });
+        pm.test("undefined member counts", function() { pm.expect({a:undefined}).to.not.eql({}); });
+        pm.test("mixed types", function() { pm.expect({a:1}).to.not.eql({a:"1"}); });
+        pm.test("array is not an object", function() { pm.expect({0:1,length:1}).to.not.eql([1]); });
+        pm.test("dates by instant", function() { pm.expect(new Date(5)).to.eql(new Date(5)); });
+        pm.test("dates differ", function() { pm.expect(new Date(5)).to.not.eql(new Date(6)); });
+        pm.test("regexps by pattern", function() { pm.expect(/x/g).to.eql(/x/g); });
+        pm.test("regexps differ", function() { pm.expect(/x/g).to.not.eql(/y/g); });
+        pm.test("eqls alias", function() { pm.expect({a:1}).to.eqls({a:1}); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+}
+
+// A Map keeps its contents outside the own-property list, so a structural
+// compare sees two empty objects. Reporting them equal would be a false pass.
+TEST_F (ScriptEngineTest, ExpectEqlRefusesContainersItCannotSee) {
+    auto result = engine.execute_test (R"(
+        pm.test("distinct maps", function() {
+            var a = new Map(); a.set("k", 1);
+            var b = new Map(); b.set("k", 1);
+            pm.expect(a).to.not.eql(b);
+        });
+        pm.test("same map", function() { var a = new Map(); pm.expect(a).to.eql(a); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+}
+
+// A cycle has to end in a thrown error, not a hang or a stack overflow.
+TEST_F (ScriptEngineTest, ExpectEqlOnCyclicValuesFailsLoudly) {
+    auto result = engine.execute_test (R"(
+        pm.test("cyclic", function() {
+            var a = {}; a.self = a;
+            var b = {}; b.self = b;
+            pm.expect(a).to.eql(b);
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("cyclic"), std::string::npos)
+    << result.tests[0].error_message;
+}
+
+// Every matcher hands the expectation back, which is what `.and` continues.
+TEST_F (ScriptEngineTest, ExpectAndChainsAndKeepsAssertingAfterTheJoin) {
+    auto result = engine.execute_test (R"(
+        pm.test("both hold", function() { pm.expect(5).to.be.above(1).and.to.be.below(9); });
+        pm.test("after a getter", function() { pm.expect(true).to.be.true.and.to.equal(true); });
+        pm.test("second half fails", function() { pm.expect(5).to.be.above(1).and.to.be.below(3); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 3);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+    EXPECT_FALSE (result.tests[2].passed) << "the assertion after .and did not run";
+}
+
+TEST_F (ScriptEngineTest, ExpectOneOf) {
+    auto result = engine.execute_test (R"(
+        pm.test("hit", function() { pm.expect(200).to.be.oneOf([200, 201]); });
+        pm.test("miss", function() { pm.expect(404).to.be.oneOf([200, 201]); });
+        pm.test("strict by default", function() { pm.expect({a:1}).to.not.be.oneOf([{a:1}]); });
+        pm.test("deep on request", function() { pm.expect({a:1}).to.be.deep.oneOf([{a:1}]); });
+        pm.test("needs an array", function() { pm.expect(1).to.be.oneOf(1); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 5);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_FALSE (result.tests[1].passed);
+    EXPECT_TRUE (result.tests[2].passed) << result.tests[2].error_message;
+    EXPECT_TRUE (result.tests[3].passed) << result.tests[3].error_message;
+    EXPECT_FALSE (result.tests[4].passed);
+    EXPECT_NE (result.tests[4].error_message.find ("array"), std::string::npos)
+    << result.tests[4].error_message;
+}
+
+TEST_F (ScriptEngineTest, ExpectKeys) {
+    auto result = engine.execute_test (R"(
+        pm.test("exact varargs", function() { pm.expect({a:1,b:2}).to.have.keys("a", "b"); });
+        pm.test("exact array", function() { pm.expect({a:1,b:2}).to.have.keys(["b", "a"]); });
+        pm.test("all chainer", function() { pm.expect({a:1}).to.have.all.keys("a"); });
+        pm.test("key alias", function() { pm.expect({a:1}).to.have.key("a"); });
+        pm.test("negated", function() { pm.expect({a:1}).to.not.have.keys("b"); });
+        pm.test("a subset is not all", function() { pm.expect({a:1,b:2}).to.have.keys("a"); });
+        pm.test("needs an object", function() { pm.expect(1).to.have.keys("a"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 7);
+    for (size_t i = 0; i < 5; i++) {
+        EXPECT_TRUE (result.tests[i].passed)
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+    EXPECT_FALSE (result.tests[5].passed);
+    EXPECT_FALSE (result.tests[6].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectMembers) {
+    auto result = engine.execute_test (R"(
+        pm.test("any order", function() { pm.expect([1,2,3]).to.have.members([3,2,1]); });
+        pm.test("deep members", function() { pm.expect([{a:1}]).to.have.deep.members([{a:1}]); });
+        pm.test("strict by default", function() { pm.expect([{a:1}]).to.not.have.members([{a:1}]); });
+        pm.test("duplicates count", function() { pm.expect([1,1,2]).to.have.members([1,2,2]); });
+        pm.test("length matters", function() { pm.expect([1,2]).to.have.members([1,2,3]); });
+        pm.test("needs an array target", function() { pm.expect(1).to.have.members([1]); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 6);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.tests[1].passed) << result.tests[1].error_message;
+    EXPECT_TRUE (result.tests[2].passed) << result.tests[2].error_message;
+    EXPECT_FALSE (result.tests[3].passed);
+    EXPECT_FALSE (result.tests[4].passed);
+    EXPECT_FALSE (result.tests[5].passed);
+}
+
+TEST_F (ScriptEngineTest, ExpectThrow) {
+    auto result = engine.execute_test (R"(
+        pm.test("any error", function() {
+            pm.expect(function() { throw new Error("boom"); }).to.throw();
+        });
+        pm.test("message substring", function() {
+            pm.expect(function() { throw new Error("boom"); }).to.throw("boom");
+        });
+        pm.test("message pattern", function() {
+            pm.expect(function() { throw new Error("boom 42"); }).to.throw(/[0-9]+/);
+        });
+        pm.test("does not throw", function() { pm.expect(function() { return 1; }).to.not.throw(); });
+        pm.test("throws alias", function() {
+            pm.expect(function() { throw new Error("x"); }).to.throws();
+        });
+        pm.test("wrong substring", function() {
+            pm.expect(function() { throw new Error("boom"); }).to.throw("bang");
+        });
+        pm.test("expected a throw", function() { pm.expect(function() { return 1; }).to.throw(); });
+        pm.test("needs a function", function() { pm.expect(1).to.throw(); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 8);
+    for (size_t i = 0; i < 5; i++) {
+        EXPECT_TRUE (result.tests[i].passed)
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+    EXPECT_FALSE (result.tests[5].passed);
+    EXPECT_FALSE (result.tests[6].passed);
+    EXPECT_FALSE (result.tests[7].passed);
+    EXPECT_NE (result.tests[7].error_message.find ("function"), std::string::npos)
+    << result.tests[7].error_message;
+}
+
+TEST_F (ScriptEngineTest, ExpectInstanceOfCloseToSatisfyAndString) {
+    auto result = engine.execute_test (R"(
+        pm.test("instanceOf hit", function() { pm.expect([]).to.be.instanceOf(Array); });
+        pm.test("instanceOf miss", function() { pm.expect({}).to.not.be.instanceOf(Array); });
+        pm.test("closeTo inside", function() { pm.expect(1.05).to.be.closeTo(1.0, 0.1); });
+        pm.test("closeTo outside", function() { pm.expect(1.5).to.not.be.closeTo(1.0, 0.1); });
+        pm.test("satisfy", function() { pm.expect(4).to.satisfy(function(n) { return n % 2 === 0; }); });
+        pm.test("string", function() { pm.expect("hello world").to.have.string("world"); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+}
+
+// The failing half: each of these has to fail, since a matcher that cannot fail
+// is the stubbed-assertion defect this series started from.
+TEST_F (ScriptEngineTest, ExpectNewMatchersCanFail) {
+    auto result = engine.execute_test (R"(
+        pm.test("instanceOf", function() { pm.expect({}).to.be.instanceOf(Array); });
+        pm.test("instanceOf needs a constructor", function() { pm.expect([]).to.be.instanceOf(1); });
+        pm.test("closeTo", function() { pm.expect(1.5).to.be.closeTo(1.0, 0.1); });
+        pm.test("closeTo needs a delta", function() { pm.expect(1).to.be.closeTo(1); });
+        pm.test("satisfy", function() { pm.expect(5).to.satisfy(function(n) { return n % 2 === 0; }); });
+        pm.test("satisfy needs a predicate", function() { pm.expect(5).to.satisfy(5); });
+        pm.test("string", function() { pm.expect("hello").to.have.string("world"); });
+        pm.test("string needs a string", function() { pm.expect(5).to.have.string("5"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 8);
+    for (const auto& test : result.tests) {
+        EXPECT_FALSE (test.passed) << test.name << " passed but should not";
+        EXPECT_FALSE (test.error_message.empty ()) << test.name;
+    }
+}
+
+TEST_F (ScriptEngineTest, ExpectNestedProperty) {
+    auto result = engine.execute_test (R"(
+        pm.test("dotted path", function() { pm.expect({a:{b:{c:1}}}).to.have.nested.property("a.b.c"); });
+        pm.test("dotted value", function() { pm.expect({a:{b:{c:1}}}).to.have.nested.property("a.b.c", 1); });
+        pm.test("index path", function() { pm.expect({a:[{b:2}]}).to.have.nested.property("a[0].b", 2); });
+        pm.test("missing link", function() { pm.expect({a:1}).to.not.have.nested.property("a.b.c"); });
+        pm.test("plain property keeps the dot", function() { pm.expect({"a.b":1}).to.have.property("a.b"); });
+        pm.test("wrong nested value", function() { pm.expect({a:{b:1}}).to.have.nested.property("a.b", 2); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 6);
+    for (size_t i = 0; i < 5; i++) {
+        EXPECT_TRUE (result.tests[i].passed)
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+    EXPECT_FALSE (result.tests[5].passed);
+}
+
+// `property(name, value)` and array membership compared `JS_ToCString` forms,
+// under which every object matched every other object - both render as
+// "[object Object]". Both now follow the chain's comparison rule.
+TEST_F (ScriptEngineTest, ExpectPropertyValueAndIncludeCompareByValueNotByToString) {
+    auto result = engine.execute_test (R"(
+        pm.test("property is strict", function() { pm.expect({a:{b:1}}).to.not.have.property("a", {b:1}); });
+        pm.test("deep property", function() { pm.expect({a:{b:1}}).to.have.deep.property("a", {b:1}); });
+        pm.test("property primitive", function() { pm.expect({age:30}).to.have.property("age", 30); });
+        pm.test("include is strict", function() { pm.expect([{a:1}]).to.not.include({a:1}); });
+        pm.test("deep include", function() { pm.expect([{a:1}]).to.deep.include({a:1}); });
+        pm.test("include primitive", function() { pm.expect([1,2]).to.include(2); });
+        pm.test("include miss", function() { pm.expect([1,2]).to.not.include(3); });
+    )",
+    request, response, env);
+
+    EXPECT_TRUE (result.success);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << ": " << test.error_message;
+    }
+}
+
+// ============================================================================
 // pm.response Tests
 // ============================================================================
 

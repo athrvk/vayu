@@ -66,9 +66,11 @@ nlohmann::json get_script_completions () {
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "pm.expect(value: any)" },
     { "documentation",
     "Create a Chai-style expectation for assertions.\n\nChain with:\n- "
-    ".to.equal(expected)\n- .to.eql(expected) - deep equality\n- .to.be.true / "
+    ".to.equal(expected) - strict (===), so two objects with the same contents "
+    "are not equal\n- .to.eql(expected) / .to.deep.equal(expected) - deep "
+    "equality, key order insensitive\n- .to.be.true / "
     ".to.be.false\n- .to.exist\n- .to.have.property(name)\n- "
-    ".to.include(value)" },
+    ".to.include(value)\n- .and to continue a chain" },
     { "sortText", "0_pm_expect" } });
 
     // ========================================
@@ -490,17 +492,29 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "to.equal" }, { "kind", KIND_FUNCTION },
     { "insertText", "to.equal(${1:expected})" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.equal(expected: any)" },
-    { "documentation", "Assert strict equality (===).\n\nExample:\npm.expect(status).to.equal(200);" },
+    { "documentation",
+    "Assert strict equality (===). Objects and arrays compare by reference, so "
+    "use .to.eql for contents.\n\nExample:\npm.expect(status).to.equal(200);" },
     { "sortText", "2_to_equal" }, { "filterText", ".to.equal" } });
 
     completions.push_back ({ { "label", "to.eql" }, { "kind", KIND_FUNCTION },
     { "insertText", "to.eql(${1:expected})" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.eql(expected: any)" },
     { "documentation",
-    "Assert deep equality (for "
-    "objects/arrays).\n\nExample:\npm.expect(data).to.eql({id: 1, "
+    "Assert deep equality (for objects/arrays). Key order does not "
+    "matter.\n\nExample:\npm.expect(data).to.eql({id: 1, "
     "name: 'test'});" },
     { "sortText", "2_to_eql" }, { "filterText", ".to.eql" } });
+
+    completions.push_back ({ { "label", "to.deep.equal" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.deep.equal(${1:expected})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.deep.equal(expected: any)" },
+    { "documentation",
+    "Assert deep equality (alias for .to.eql). The `deep` chainer also applies "
+    "to .include, .property, .members and "
+    ".oneOf.\n\nExample:\npm.expect(data).to.deep.equal({id: 1});" },
+    { "sortText", "2_to_deep_equal" }, { "filterText", ".to.deep.equal" } });
 
     completions.push_back ({ { "label", "to.be.true" }, { "kind", KIND_FIELD },
     { "insertText", "to.be.true" }, { "detail", ".to.be.true" },
@@ -628,6 +642,119 @@ nlohmann::json get_script_completions () {
     { "insertText", "to.not" }, { "detail", ".to.not" },
     { "documentation", "Negate the assertion chain.\n\nExample:\npm.expect(value).to.not.equal(0);" },
     { "sortText", "2_to_not" }, { "filterText", ".to.not" } });
+
+    completions.push_back ({ { "label", "to.be.oneOf" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.be.oneOf([${1:values}])" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.oneOf(values: any[])" },
+    { "documentation",
+    "Assert the value is one of the given "
+    "candidates.\n\nExample:\npm.expect(pm.response.code).to.be.oneOf([200, 201]);" },
+    { "sortText", "2_to_be_oneOf" }, { "filterText", ".to.be.oneOf" } });
+
+    completions.push_back ({ { "label", "to.eqls" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.eqls(${1:expected})" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.eqls(expected: any)" },
+    { "documentation", "Assert deep equality (alias for .to.eql)." },
+    { "sortText", "2_to_eqls" }, { "filterText", ".to.eqls" } });
+
+    completions.push_back ({ { "label", "to.have.keys" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.have.keys(\"${1:key}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.have.keys(...keys: string[])" },
+    { "documentation",
+    "Assert the object has exactly these keys - not a subset. Accepts names or "
+    "one array.\n\nExample:\npm.expect(json).to.have.keys(\"id\", \"name\");" },
+    { "sortText", "2_to_have_keys" }, { "filterText", ".to.have.keys" } });
+
+    completions.push_back ({ { "label", "to.have.all.keys" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.have.all.keys(\"${1:key}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.have.all.keys(...keys: string[])" },
+    { "documentation",
+    "Assert the object has exactly these keys. `all` is chai's default and "
+    "changes nothing; `any` is not supported." },
+    { "sortText", "2_to_have_all_keys" }, { "filterText", ".to.have.all.keys" } });
+
+    completions.push_back ({ { "label", "to.have.key" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.have.key(\"${1:key}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.key(key: string)" },
+    { "documentation", "Assert the object has exactly this key (alias for .to.have.keys)." },
+    { "sortText", "2_to_have_key" }, { "filterText", ".to.have.key" } });
+
+    completions.push_back ({ { "label", "to.have.members" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.have.members([${1:values}])" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.have.members(values: any[])" },
+    { "documentation",
+    "Assert the array has the same members in any order. Prefix with `deep` to "
+    "compare object members by "
+    "value.\n\nExample:\npm.expect(ids).to.have.members([3, 1, 2]);" },
+    { "sortText", "2_to_have_members" }, { "filterText", ".to.have.members" } });
+
+    completions.push_back ({ { "label", "to.have.nested.property" },
+    { "kind", KIND_FUNCTION },
+    { "insertText", "to.have.nested.property(\"${1:a.b.c}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.have.nested.property(path: string, value?: any)" },
+    { "documentation",
+    "Assert a property at a dotted or indexed path exists (and optionally "
+    "equals a value).\n\nExample:\npm.expect(json).to.have.nested.property(\"data.items[0].id\");" },
+    { "sortText", "2_to_have_nested_property" },
+    { "filterText", ".to.have.nested.property" } });
+
+    completions.push_back ({ { "label", "to.have.string" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.have.string(\"${1:substring}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.string(substring: string)" },
+    { "documentation",
+    "Assert the string contains a substring. Unlike .to.include it refuses a "
+    "non-string target.\n\nExample:\npm.expect(pm.response.text()).to.have.string(\"ok\");" },
+    { "sortText", "2_to_have_string" }, { "filterText", ".to.have.string" } });
+
+    completions.push_back ({ { "label", "to.throw" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.throw()" }, { "detail", ".to.throw(message?: string | RegExp)" },
+    { "documentation",
+    "Assert the function throws, optionally matching the message.\n\nExample:\n"
+    "pm.expect(function() { JSON.parse(\"{\"); }).to.throw();" },
+    { "sortText", "2_to_throw" }, { "filterText", ".to.throw" } });
+
+    completions.push_back ({ { "label", "to.throws" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.throws()" }, { "detail", ".to.throws(message?: string | RegExp)" },
+    { "documentation", "Assert the function throws (alias for .to.throw)." },
+    { "sortText", "2_to_throws" }, { "filterText", ".to.throws" } });
+
+    completions.push_back ({ { "label", "to.be.instanceOf" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.be.instanceOf(${1:Array})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.instanceOf(constructor: Function)" },
+    { "documentation",
+    "Assert the value is an instance of a "
+    "constructor.\n\nExample:\npm.expect(json.items).to.be.instanceOf(Array);" },
+    { "sortText", "2_to_be_instanceOf" }, { "filterText", ".to.be.instanceOf" } });
+
+    completions.push_back ({ { "label", "to.be.closeTo" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.be.closeTo(${1:expected}, ${2:delta})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.closeTo(expected: number, delta: number)" },
+    { "documentation",
+    "Assert the number is within delta of expected. The delta is "
+    "required.\n\nExample:\npm.expect(total).to.be.closeTo(9.99, 0.01);" },
+    { "sortText", "2_to_be_closeTo" }, { "filterText", ".to.be.closeTo" } });
+
+    completions.push_back ({ { "label", "to.satisfy" }, { "kind", KIND_FUNCTION },
+    { "insertText", "to.satisfy(function(value) { return ${1:true}; })" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.satisfy(predicate: (value: any) => boolean)" },
+    { "documentation",
+    "Assert the predicate returns a truthy value for the "
+    "target.\n\nExample:\npm.expect(n).to.satisfy(function(v) { return v % 2 === 0; });" },
+    { "sortText", "2_to_satisfy" }, { "filterText", ".to.satisfy" } });
+
+    completions.push_back ({ { "label", "and" }, { "kind", KIND_FIELD },
+    { "insertText", "and" }, { "detail", ".and" },
+    { "documentation",
+    "Continue an assertion chain. Flags already set (including `not`) carry "
+    "over.\n\nExample:\npm.expect(n).to.be.above(0).and.to.be.below(10);" },
+    { "sortText", "2_and" }, { "filterText", ".and" } });
 
     // ========================================
     // Common snippets / templates
