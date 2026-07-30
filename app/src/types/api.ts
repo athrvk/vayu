@@ -373,6 +373,11 @@ export interface ImportApplyRequestItem {
 	auth?: RequestAuth;
 	preRequestScript?: string;
 	postRequestScript?: string;
+	/**
+	 * Omitted unless the imported file stated it - the engine defaults it to `true`,
+	 * and `apply_request_fields` treats absent as "use the default" on create.
+	 */
+	followRedirects?: boolean;
 	order?: number;
 }
 

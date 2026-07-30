@@ -132,7 +132,15 @@ sources), `preRequestScript`, `postRequestScript`, `children: CollectionDraft[]`
 **`RequestDraft`** - `name`, `description`, `method: HttpMethod`, `url`,
 `params: KeyValueEntry[]`, `headers: KeyValueEntry[]`, `body: RequestBody`,
 `auth: RequestAuth` (**`inherit` allowed**, resolved against the collection chain at
-execution time), `preRequestScript`, `postRequestScript`.
+execution time), `preRequestScript`, `postRequestScript`, `followRedirects?: boolean`.
+
+`followRedirects` is optional because absent means "leave the engine's default",
+which is `true`: a parser sets it only when the source file states it, and the
+orchestrator forwards it to `POST /import/apply` only when set. Sending an omitted
+`false` as `true` would follow a 3xx the user disabled; sending an absent value as
+`false` would stop one they never touched. Insomnia's `settingFollowRedirects` is
+the only producer today; no format in the pipeline carries a per-request redirect
+*limit*, so there is no `maxRedirects` on the draft.
 
 **`EnvironmentDraft`** - `name`, `description`, `variables: Record<string, VariableValue>`.
 

@@ -7,8 +7,38 @@ const raw = readFileSync(join(__dirname, "__fixtures__/insomnia-v4.json"), "utf8
 const parsed = JSON.parse(raw);
 const opts = { importEnvironments: true, importScripts: true };
 
+/** A minimal one-workspace export carrying the given resources. */
+function doc(...resources: Record<string, unknown>[]): unknown {
+	return {
+		_type: "export",
+		__export_format: 4,
+		resources: [{ _id: "w", _type: "workspace", name: "W" }, ...resources],
+	};
+}
+
+function bearerRequest(authentication: Record<string, unknown>): unknown {
+	return doc({
+		_id: "r",
+		_type: "request",
+		parentId: "w",
+		name: "R",
+		method: "get",
+		url: "https://x",
+		authentication,
+	});
+}
+
 describe("InsomniaV4Parser", () => {
 	const p = new InsomniaV4Parser();
+
+	/** Parse a doc (or a single request resource) and return its first request draft. */
+	const firstRequest = (input: unknown | Record<string, unknown>) => {
+		const document =
+			(input as { _type?: string })._type === "export"
+				? input
+				: doc(input as Record<string, unknown>);
+		return p.parse(document, "", opts).collections[0].requests[0];
+	};
 
 	it("detects by _type+__export_format", () => {
 		expect(p.detect(parsed, raw)).toBe(true);
@@ -129,6 +159,229 @@ describe("InsomniaV4Parser", () => {
 		expect((iam.auth as { config: Record<string, unknown> }).config.accessKeyId).toBe("AK");
 		expect(ntlm.auth.mode).toBe("ntlm");
 		expect(result.meta.nonExecutableAuth).toBe(2);
+	});
+
+	it("keeps an unlisted text body (XML) instead of emptying it", () => {
+		const req = firstRequest(
+			doc({
+				_id: "r",
+				_type: "request",
+				parentId: "w",
+				name: "Soap",
+				method: "post",
+				url: "https://x",
+				body: { mimeType: "application/xml", text: "<a>{{ _.id }}</a>" },
+			})
+		);
+		expect(req.body).toEqual({ mode: "text", content: "<a>{{id}}</a>" });
+	});
+
+	it("drops a binary body but counts it as file_body", () => {
+		const result = p.parse(
+			doc({
+				_id: "r",
+				_type: "request",
+				parentId: "w",
+				name: "Upload",
+				method: "post",
+				url: "https://x",
+				body: { mimeType: "application/octet-stream", fileName: "/tmp/a.bin" },
+			}),
+			"",
+			opts
+		);
+		expect(result.collections[0].requests[0].body).toEqual({ mode: "none" });
+		expect(result.meta.skipped.find((s) => s.kind === "file_body")?.count).toBe(1);
+	});
+
+	it("counts dropped multipart file parts as file_body and keeps the text ones", () => {
+		const result = p.parse(
+			doc({
+				_id: "r",
+				_type: "request",
+				parentId: "w",
+				name: "Form",
+				method: "post",
+				url: "https://x",
+				body: {
+					mimeType: "multipart/form-data",
+					params: [
+						{ name: "note", value: "hi" },
+						{ name: "avatar", type: "file", fileName: "/tmp/a.png" },
+					],
+				},
+			}),
+			"",
+			opts
+		);
+		expect(result.collections[0].requests[0].body).toEqual({
+			mode: "form-data",
+			fields: [{ key: "note", value: "hi", enabled: true }],
+		});
+		expect(result.meta.skipped.find((s) => s.kind === "file_body")?.count).toBe(1);
+	});
+
+	it("leaves meta.skipped free of file_body when nothing was dropped", () => {
+		const meta = p.parse(parsed, raw, opts).meta;
+		expect(meta.skipped.some((s) => s.kind === "file_body")).toBe(false);
+	});
+
+	it("preserves a non-Bearer bearer prefix as an explicit Authorization header", () => {
+		const req = firstRequest(
+			bearerRequest({ type: "bearer", token: "{{ _.tok }}", prefix: "Token" })
+		);
+		expect(req.auth).toEqual({
+			mode: "apikey",
+			key: "Authorization",
+			value: "Token {{tok}}",
+			in: "header",
+		});
+	});
+
+	it("keeps the native bearer mode when the prefix is absent, empty or Bearer", () => {
+		for (const prefix of [undefined, "", "  ", "Bearer", "bearer"]) {
+			const req = firstRequest(bearerRequest({ type: "bearer", token: "T", prefix }));
+			expect(req.auth).toEqual({ mode: "bearer", token: "T" });
+		}
+	});
+
+	it("imports request_group scripts, and honors importScripts=false", () => {
+		const withFolder = doc(
+			{
+				_id: "g",
+				_type: "request_group",
+				parentId: "w",
+				name: "Users",
+				preRequestScript: "console.log('pre')",
+				afterResponseScript: "console.log('post')",
+			},
+			{
+				_id: "r",
+				_type: "request",
+				parentId: "g",
+				name: "R",
+				method: "get",
+				url: "https://x",
+			}
+		);
+		const folder = p.parse(withFolder, "", opts).collections[0].children[0];
+		expect(folder.preRequestScript).toBe("console.log('pre')");
+		expect(folder.postRequestScript).toBe("console.log('post')");
+
+		const off = p.parse(withFolder, "", { ...opts, importScripts: false }).collections[0]
+			.children[0];
+		expect(off.preRequestScript).toBe("");
+		expect(off.postRequestScript).toBe("");
+	});
+
+	it("preserves header and param descriptions", () => {
+		const req = firstRequest({
+			_id: "r",
+			_type: "request",
+			parentId: "w",
+			name: "R",
+			method: "get",
+			url: "https://x",
+			parameters: [{ name: "page", value: "1", description: "which page" }],
+			headers: [{ name: "X-Trace", value: "1", description: "trace id" }],
+		});
+		expect(req.params[0].description).toBe("which page");
+		expect(req.headers[0].description).toBe("trace id");
+	});
+
+	it("imports settingFollowRedirects, leaving 'global' to the engine default", () => {
+		const draft = (setting?: string) =>
+			firstRequest({
+				_id: "r",
+				_type: "request",
+				parentId: "w",
+				name: "R",
+				method: "get",
+				url: "https://x",
+				...(setting === undefined ? {} : { settingFollowRedirects: setting }),
+			});
+		expect(draft("off").followRedirects).toBe(false);
+		expect(draft("on").followRedirects).toBe(true);
+		expect("followRedirects" in draft("global")).toBe(false);
+		expect("followRedirects" in draft()).toBe(false);
+	});
+
+	describe("malformed exports fail with a named error", () => {
+		const cases: Array<[string, unknown]> = [
+			["non-array resources", { _type: "export", __export_format: 4, resources: {} }],
+			[
+				"non-object resource entry",
+				{ _type: "export", __export_format: 4, resources: [null] },
+			],
+			[
+				"non-array parameters",
+				doc({
+					_id: "r",
+					_type: "request",
+					parentId: "w",
+					name: "R",
+					method: "get",
+					url: "https://x",
+					parameters: "page=1",
+				}),
+			],
+			[
+				"non-array headers",
+				doc({
+					_id: "r",
+					_type: "request",
+					parentId: "w",
+					name: "R",
+					method: "get",
+					url: "https://x",
+					headers: {},
+				}),
+			],
+			[
+				"non-array body.params",
+				doc({
+					_id: "r",
+					_type: "request",
+					parentId: "w",
+					name: "R",
+					method: "post",
+					url: "https://x",
+					body: { mimeType: "application/x-www-form-urlencoded", params: "a=1" },
+				}),
+			],
+			[
+				"non-string mimeType",
+				doc({
+					_id: "r",
+					_type: "request",
+					parentId: "w",
+					name: "R",
+					method: "post",
+					url: "https://x",
+					body: { mimeType: 7, text: "x" },
+				}),
+			],
+			[
+				// A duplicated `_id` is the only way a v4 file can close a parentId
+				// loop; the walk used to recurse until it blew the stack.
+				"a folder cycle from a duplicated _id",
+				{
+					_type: "export",
+					__export_format: 4,
+					resources: [
+						{ _id: "w", _type: "workspace", name: "W" },
+						{ _id: "g", _type: "request_group", parentId: "w", name: "G" },
+						{ _id: "g2", _type: "request_group", parentId: "g", name: "G2" },
+						{ _id: "g", _type: "request_group", parentId: "g2", name: "G again" },
+					],
+				},
+			],
+		];
+		for (const [label, input] of cases) {
+			it(label, () => {
+				expect(() => p.parse(input, "", opts)).toThrow(/^Malformed Insomnia export: /);
+			});
+		}
 	});
 
 	it("base environment with no sub-envs becomes one Environment named after the base", () => {

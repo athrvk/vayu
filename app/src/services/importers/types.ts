@@ -46,6 +46,13 @@ export interface RequestDraft {
 	auth: RequestAuth; // "inherit" allowed; resolved at execution
 	preRequestScript: string;
 	postRequestScript: string;
+	/**
+	 * Follow 3xx `Location` responses. Absent means "leave the engine's default",
+	 * which is `true` - so a parser sets this only when the source file states it.
+	 * Sending an omitted `false` as `true` would follow a redirect the user turned
+	 * off; sending an absent value as `false` would stop one they never touched.
+	 */
+	followRedirects?: boolean;
 }
 
 export interface CollectionDraft {

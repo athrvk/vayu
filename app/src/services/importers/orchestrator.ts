@@ -144,6 +144,9 @@ function flatten(
 			auth: r.auth,
 			preRequestScript: r.preRequestScript,
 			postRequestScript: r.postRequestScript,
+			// Absent is meaningful here: it means "engine default". Only forward a
+			// value the parser actually read out of the file.
+			...(r.followRedirects === undefined ? {} : { followRedirects: r.followRedirects }),
 			order: i,
 		});
 	}

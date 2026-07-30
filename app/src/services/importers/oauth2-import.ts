@@ -10,7 +10,8 @@
  * typed {@link OAuth2Config}. Kept in one place so the Postman/Insomnia/OpenAPI
  * importers share the grant-type normalization and defaults.
  *
- * Field references: docs/oauth/02-postman-bruno.md §1.5 (Postman v2.1 keys).
+ * Field references: docs/app/import-collections/postman.md (Postman v2.1 keys) and
+ * docs/app/import-collections/insomnia-v4.md (Insomnia v4 keys).
  */
 
 import { defaultOAuth2Config } from "@/services/oauth/defaults";
@@ -118,6 +119,9 @@ export function mapInsomniaOAuth2(auth: Record<string, unknown>): RequestAuth {
 		audience: nv(auth.audience),
 		resource: nv(auth.resource),
 		credentialsPlacement: auth.credentialsInBody === true ? "body" : "basic_auth_header",
+		// Insomnia's "Token Prefix"; Vayu executes OAuth2, so an unread prefix would
+		// send "Bearer" and 401. Mirrors mapPostmanOAuth2's `headerPrefix` above.
+		headerPrefix: auth.tokenPrefix ? nv(auth.tokenPrefix) : "Bearer",
 	};
 	return { mode: "oauth2", config };
 }

@@ -51,7 +51,9 @@ Key internal functions: `parse` (entry), `buildCollection`, `buildRequest`, `ins
 | `unit_test_suite` | **Dropped** | `meta.skipped` kind `"unit_test"` (folded into the same `unit_test` bucket). |
 | anything else (e.g. `cookie_jar`, `proto_file`, `request_meta`, `environment` outside its pass) | **Dropped silently** | Not counted in `meta.skipped`. |
 
-**Skip counting nuance.** Only the five `_type`s listed above (`grpc_request`, `websocket_request`, `api_spec`, `unit_test`, `unit_test_suite`) are tallied in `skippedCounts`, and only when they appear as a **direct child of a workspace or request_group** during the tree walk. A dropped resource parented under something else (or any other `_type`) does not increment `meta.skipped`. When emitting `SkippedItem[]`, the raw keys are remapped: `grpc_request → "grpc"`, `websocket_request → "websocket"`, `unit_test_suite → "unit_test"`; `unit_test` and `api_spec` pass through unchanged. Because `unit_test` and `unit_test_suite` both map to `"unit_test"` but are aggregated by their raw key first, an export containing both can yield **two** separate `SkippedItem` entries with `kind: "unit_test"`.
+**Skip counting nuance.** Only the five `_type`s listed above (`grpc_request`, `websocket_request`, `api_spec`, `unit_test`, `unit_test_suite`) are tallied in `skippedCounts` by the tree walk, and only when they appear as a **direct child of a workspace or request_group**. A dropped resource parented under something else (or any other `_type`) does not increment `meta.skipped`. When emitting `SkippedItem[]`, the raw keys are remapped: `grpc_request → "grpc"`, `websocket_request → "websocket"`, `unit_test_suite → "unit_test"`; `unit_test` and `api_spec` pass through unchanged. Because `unit_test` and `unit_test_suite` both map to `"unit_test"` but are aggregated by their raw key first, an export containing both can yield **two** separate `SkippedItem` entries with `kind: "unit_test"`.
+
+A sixth kind, `file_body`, does not come from a resource `_type` at all: it counts bodies Vayu cannot store (binary bodies and `multipart/form-data` file parts - see [Body mapping](#body-mapping)) and is appended once, after the walk, when the count is non-zero.
 
 ## Field mapping
 
@@ -65,7 +67,7 @@ Both build through `buildCollection`. Differences are gated by `isWorkspace`.
 | `description` | `description` | Falls back to `""`. |
 | `environment` (object, workspace only) | `variables` | `toEnvVars(node.environment ?? {})` for workspaces; **request_groups always get `variables: {}`** (their inline environment, if any, is not read). |
 | `authentication` | `auth` | Mapped via `insomniaAuth`. Collections may not be `inherit`: a resulting `inherit` is coerced to `{ mode: "none" }`. |
-| - | `preRequestScript` / `postRequestScript` | Always `""` for collections (workspace/group-level scripts are not imported). |
+| `preRequestScript` / `afterResponseScript` | `preRequestScript` / `postRequestScript` | Only if `opts.importScripts`; else `""`. Folder-level scripts are a real Insomnia 9.3+ feature, and its v4 export writes model fields verbatim, so these are the same key names the request path reads. **The names are not pinned by a live 9.x export in this repo** - an export that spells them differently reads as absent, i.e. the empty strings this parser produced before. |
 | (reconstructed children) | `children` / `requests` | Built from `byParent`. |
 
 ### Request
@@ -78,8 +80,9 @@ Built by `buildRequest`.
 | `description` | `description` | Falls back to `""`. |
 | `method` | `method` | Upper-cased; restricted to `GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS`, otherwise defaults to `GET`. |
 | `url` | `url` | `normalizeVars(asString(url))`. |
-| `parameters[]` (`{name,value,disabled}`) | `params` | `mapKeyValues`: `name → key`, `disabled !== true → enabled`. Rows without a `key` are dropped. |
-| `headers[]` (`{name,value,disabled}`) | `headers` | Same mapping as params. |
+| `parameters[]` (`{name,value,disabled,description}`) | `params` | `mapKeyValues`: `name → key`, `disabled !== true → enabled`. A string `description` is forwarded (any other type is ignored). Rows without a `key` are dropped. |
+| `headers[]` (`{name,value,disabled,description}`) | `headers` | Same mapping as params. |
+| `settingFollowRedirects` (`"global" \| "on" \| "off"`) | `followRedirects` | `"off" → false`, `"on" → true`; `"global"` (Insomnia's default, meaning "use the app setting", which follows redirects) and an absent field leave the draft field **absent**, so the engine default (`true`) applies. Insomnia has no per-request redirect limit, so `maxRedirects` is never imported. |
 | `body` | `body` | Via `insomniaBody`. See [Body mapping](#body-mapping). |
 | `authentication` | `auth` | Via `insomniaAuth`. See [Auth mapping](#auth-mapping). |
 | `preRequestScript` | `preRequestScript` | Only if `opts.importScripts`; else `""`. |
@@ -108,8 +111,10 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 | `text/plain` | `{ mode: "text", content }` | `content = normalizeVars(body.text)`. |
 | `application/graphql` | `{ mode: "graphql", content }` | `content = normalizeVars(body.text)`. |
 | `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `body.params[]` → `mapKeyValues` (`name → key`, `disabled` honored). |
-| `multipart/form-data` | `{ mode: "form-data", fields }` | `body.params[]` **filtered to drop entries where `type === "file"`**, then `mapKeyValues`. File parts are silently discarded - note this is **not** recorded in `meta.skipped` (no `"file_body"` item is emitted by this parser). |
-| anything else, missing, or empty | `{ mode: "none" }` | Includes raw/binary/file-only bodies. |
+| `multipart/form-data` | `{ mode: "form-data", fields }` | `body.params[]` **filtered to drop entries where `type === "file"`**, then `mapKeyValues`. Each dropped file part increments the `file_body` count in `meta.skipped` (parity with the Postman parser's `skippedFileBody`). |
+| anything else carrying text (`application/xml`, `application/yaml`, `text/csv`, Insomnia's "Other") | `{ mode: "text", content }` | `content = normalizeVars(body.text)`. Reserved for a non-empty **string** `body.text`; the sibling Postman parser's `rawBody()` fallback behaves the same way. No JSON sniffing happens here - Insomnia states the mime, so an XML body stays `text`. |
+| anything else with no text (binary / file-only: `body.fileName` set) | `{ mode: "none" }` | Counted as `file_body` in `meta.skipped` - Vayu has no file body mode, and the file lives outside the export anyway. |
+| missing or empty body | `{ mode: "none" }` | Nothing was lost, so nothing is counted. |
 
 ## Auth mapping
 
@@ -119,7 +124,8 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 |--------------------------------|--------------------|----------------------|
 | (absent / no `type`) | `{ mode: "inherit" }` | no |
 | any type with `disabled === true` | `{ mode: "none" }` | no |
-| `bearer` | `{ mode: "bearer", token }` | no |
+| `bearer` (no `prefix`, or a `prefix` that is `Bearer` in any case) | `{ mode: "bearer", token }` | no |
+| `bearer` with another `prefix` (e.g. `Token`, `JWT`) | `{ mode: "apikey", key: "Authorization", value: "<prefix> <token>", in: "header" }` | no |
 | `basic` | `{ mode: "basic", username, password }` | no |
 | `apikey` | `{ mode: "apikey", key, value, in }` - `in` is `"query"` when `addTo === "queryParams"`, else `"header"` | no |
 | `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` via `mapInsomniaOAuth2` - **executable** | no |
@@ -130,6 +136,8 @@ Applied to: request `url`; every `params` and `headers` value (inside `mapKeyVal
 
 Notes:
 
+- **Bearer PREFIX.** Insomnia sends `Authorization: <prefix> <token>`, defaulting an empty PREFIX to `Bearer`. Vayu's bearer mode always writes `Bearer`, so a different scheme is preserved as an explicit `Authorization` header through the `apikey` mode - the engine writes an `apikey` header value verbatim, so the wire bytes match what Insomnia sent. A prefix differing only in case (`bearer`) keeps the native bearer mode: HTTP auth schemes are case-insensitive (RFC 7235 §2.1). The prefix itself goes through `normalizeVars` and the composed value is trimmed, so an empty token yields just the scheme.
+- **OAuth2 `tokenPrefix`** maps to `OAuth2Config.headerPrefix` (absent or empty → `"Bearer"`), matching `mapPostmanOAuth2`'s `headerPrefix`. Vayu executes OAuth2, so an unread prefix would send `Bearer` and 401 against a server expecting another scheme.
 - **`disabled` takes precedence over `type`.** If `authentication.disabled === true`, the result is `{ mode: "none" }` regardless of `type`. If `authentication` is missing or has no `type` (and is not disabled), the result is `{ mode: "inherit" }`.
 - `oauth2` is mapped to an executable `OAuth2Config` (`mapInsomniaOAuth2`) and does **not** count. `digest`/`ntlm`/`iam` are stored as opaque `config` bags (the auth object with `type` and `disabled` removed) and are **not executed** by Vayu - each occurrence increments `meta.nonExecutableAuth`.
 - The same `insomniaAuth` is called for **collection-level** auth (workspace/request_group), sharing the same `authCtx`. So a non-executable auth on a workspace or folder also counts toward `nonExecutableAuth`. For collections, an `inherit` result is coerced to `{ mode: "none" }` (collections can never inherit).
@@ -152,18 +160,35 @@ Each variable is produced by `toEnvVars`: keys come straight from the env `data`
 
 `ImportOptions`:
 
-- **`importScripts`** - when false, request `preRequestScript`/`postRequestScript` are forced to `""`. When true, they come from `preRequestScript` and `afterResponseScript`. (Collection-level scripts are always `""` regardless.)
+- **`importScripts`** - when false, every `preRequestScript`/`postRequestScript` is forced to `""`. When true, they come from `preRequestScript` and `afterResponseScript`, on requests **and** on workspaces/request_groups (see the caveat in the collection field table).
 - **`importEnvironments`** - when false, the entire environment pass is skipped; `environments` is `[]` and `environmentCount` is `0`. Workspace-level `environment` data still populates the root collection's `variables` independently of this flag.
 
 Lossy / dropped, summary:
 
 - gRPC, WebSocket, API spec, unit test, and unit-test-suite resources are dropped and counted in `meta.skipped` (only when encountered as direct children of a workspace/request_group during the tree walk; see counting nuance above).
-- `multipart/form-data` file parts are dropped silently - **not** reflected in `meta.skipped`.
+- `multipart/form-data` file parts and binary bodies are dropped and counted as `file_body` in `meta.skipped`.
 - Non-executable auth types (`digest`, `ntlm`, `iam→aws`) are stored but not run; each occurrence (request or collection level) increments `meta.nonExecutableAuth`. `oauth2` is executable and excluded.
 - Nunjucks tags and filtered template expressions are preserved as literal text.
-- request_group inline environments, collection/group scripts, and resource `_id`s are not carried into the draft model.
+- request_group inline environments and resource `_id`s are not carried into the draft model.
+- No per-request redirect **limit** is imported (Insomnia keeps that as an app-wide setting), and no other `setting*` field is read - cookie handling, URL encoding and timeline size have no Vayu equivalent.
 
-`meta`: `{ format: "Insomnia Export v4", requestCount, folderCount, environmentCount, skipped, nonExecutableAuth }` (no `fileName` set by the parser itself).
+`meta`: `{ format: "Insomnia Export v4", requestCount, folderCount, environmentCount, globalCount: 0, skipped, nonExecutableAuth }` (no `fileName` set by the parser itself; `globals` is always `{}` - Insomnia has no globals scope).
+
+## Malformed exports
+
+Insomnia itself only emits arrays and string mime types, so the shapes below mean a hand-edited or script-mangled file. Each throws `Error("Malformed Insomnia export: <detail>")`, which `ImportModal` shows verbatim - previously they surfaced as a raw `TypeError` ("Cannot read properties of undefined (reading 'map')") or, for a cycle, a `RangeError`. Nothing is persisted either way: the parse happens before any write.
+
+| Input | Detail |
+|-------|--------|
+| `resources` present but not an array | `` `resources` must be an array `` |
+| a `resources` entry that is not an object (e.g. `null`) | `` `resources[<i>]` must be an object `` |
+| a request's `parameters` / `headers` present but not an array | `request "<name>": \`parameters\` must be an array` |
+| `body.params` present but not an array | `` `body.params` must be an array `` |
+| `body` present but not an object | ``a request `body` must be an object`` |
+| `body.mimeType` present but not a string | `` `body.mimeType` must be a string `` |
+| a `parentId` loop (only reachable via a duplicated `_id`) | `resource "<id>" appears twice in the folder tree` |
+
+An **absent** field is not an error anywhere in that table - only a present-but-wrong shape is.
 
 ## Shared helpers used
 
