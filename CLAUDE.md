@@ -338,9 +338,9 @@ work as **deprecated aliases** and will be removed in a future minor release; `G
 Three things worth knowing before you design around them:
 
 - **POST creates, PUT updates - they are not interchangeable.** `POST
-  /<resource>` on an id that already exists is a `409`, and `PUT
-  /<resource>/:id` on one that does not is a `404`; POST-as-upsert is gone
-  (issue #95). One null-vs-absent rule covers all three resources: on create
+  /<resource>` never updates and `PUT /<resource>/:id` on an id that does not
+  exist is a `404`; POST-as-upsert is gone (issue #95). One null-vs-absent rule
+  covers all three resources: on create
   absent and `null` both mean "use the default", on update absent means "keep"
   and `null` means "reset to the default", and a field with no default (a
   collection's / environment's `name`, a request's `collectionId` / `name` /
@@ -348,13 +348,18 @@ Three things worth knowing before you design around them:
   The rule lives in one place per side - `apply_*_field` in
   `engine/include/vayu/http/routes.hpp`, and `apiService.updateX` in
   `app/src/services/api.ts` - so add fields there rather than re-deriving the
-  rule per handler. A client-supplied `id` on **create** is still accepted, but
-  nothing in the app sends one any more: import goes through **`POST
-  /import/apply`** (#96), which takes opaque `tempId`s, generates every real id
-  engine-side, returns the `idMap`, and writes the whole tree in one transaction
-  (a rejected payload persists nothing, so the old client-side rollback is gone).
-  #97 then rejects the `id` field outright. The same per-resource field appliers
-  back both paths - `apply_collection_fields` / `apply_request_fields` /
+  rule per handler. **The engine owns every id** (#97): a create carrying an `id`
+  is a `400` (presence alone, `null` included - `id` is outside the null rule),
+  and a `PUT` whose body `id` disagrees with the path is a `400` too, so the 409
+  on an existing id now only guards a `generate_id` collision.
+  `reject_client_supplied_id` / `reject_mismatched_body_id` in `routes.hpp` are
+  the one copy of that; `apiService.createX` strips `id` on the renderer side
+  because TypeScript only excess-property-checks object literals. Bulk import
+  goes through **`POST /import/apply`** (#96), which takes opaque `tempId`s,
+  generates every real id engine-side, returns the `idMap`, and writes the whole
+  tree in one transaction (a rejected payload persists nothing, so the old
+  client-side rollback is gone). The same per-resource field appliers back both
+  paths - `apply_collection_fields` / `apply_request_fields` /
   `apply_environment_fields`, declared in `routes.hpp` - so add a field there and
   bulk import gets it too.
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it

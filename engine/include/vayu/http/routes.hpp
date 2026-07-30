@@ -280,6 +280,53 @@ apply_required_string_field (const nlohmann::json& json, const char* key, std::s
 }
 
 /**
+ * `id` is engine-owned (issue #97): every id in the database comes from
+ * `generate_id`, so a create that carries one is a 400 rather than a silently
+ * honoured - or silently ignored - field. `POST /import/apply` already rejects
+ * a per-item `id` the same way (`claim_temp_id` in import.cpp), so neither
+ * route lets a client mint ids and the two cannot drift on the answer.
+ *
+ * Presence alone is the trigger, `null` included. This is the one place the
+ * null-vs-absent rule does not apply, because `id` is not a settable field with
+ * a default: a payload builder that spreads a whole record into a create body
+ * is exactly the caller this catches, and accepting `{"id": null}` would leave
+ * it believing the field is honoured.
+ */
+inline std::optional<std::pair<int, nlohmann::json>> reject_client_supplied_id (
+const nlohmann::json& json) {
+    if (!json.contains ("id")) {
+        return std::nullopt;
+    }
+    return std::make_pair (400,
+    nlohmann::json{ { "error",
+    "id is assigned by the engine; omit it "
+    "(bulk import: POST /import/apply)" } });
+}
+
+/**
+ * On update the path parameter is the identity, so a body `id` is at best
+ * redundant. A body `id` that disagrees with it is a 400 rather than a silently
+ * ignored field: the payload describes a write to two different records, and
+ * guessing which one the caller meant is how a PUT to one id carrying another
+ * id's body quietly rewrites the wrong record (issue #97).
+ *
+ * Runs before the record lookup, so the answer to a malformed body does not
+ * depend on whether the target happens to exist.
+ */
+inline std::optional<std::pair<int, nlohmann::json>>
+reject_mismatched_body_id (const nlohmann::json& json, const std::string& path_id) {
+    if (!json.contains ("id")) {
+        return std::nullopt;
+    }
+    if (json["id"].is_string () && json["id"].get<std::string> () == path_id) {
+        return std::nullopt;
+    }
+    return std::make_pair (400,
+    nlohmann::json{ { "error",
+    "Body 'id' must match the id in the path ('" + path_id + "') or be omitted" } });
+}
+
+/**
  * The per-resource field appliers, shared by the single-resource create/update
  * cores and by `POST /import/apply` (issue #96). Bulk import must store exactly
  * what `POST /<resource>` would store, so it calls these rather than re-deriving

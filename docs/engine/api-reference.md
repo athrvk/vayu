@@ -62,11 +62,8 @@ as a create (see [POST /globals](#post-globals)).
 
 | Verb | Path | Meaning | Wrong-target status |
 |------|------|---------|---------------------|
-| `POST` | `/<resource>` | **Create only.** | `409` when the `id` already exists |
+| `POST` | `/<resource>` | **Create only.** | `400` when the body carries an `id` |
 | `PUT` | `/<resource>/:id` | **Update only** (merge-patch). | `404` when the `id` does not exist |
-
-The `409` body names the update path, e.g.
-`{"error": "Collection 'col_1' already exists; use PUT /collections/:id to update"}`.
 
 `PUT` is used loosely as a merge-patch rather than a whole-record replace: an
 omitted field keeps its stored value. We deliberately did not add a separate
@@ -74,13 +71,37 @@ omitted field keeps its stored value. We deliberately did not add a separate
 client call site expects it. The `:id` in the path is the record's identity; the
 body carries the changed fields only.
 
-A `POST` may still carry its own `id` on create, and when `id` is omitted the
-engine generates one via `generate_id`, giving the `<prefix>_<uuidv4>` form. That
-field existed for the import orchestrator, which pre-assigned ids so it could
-wire `parentId` / `collectionId` across a whole tree before anything was
-persisted; import now sends one
-[`POST /import/apply`](#post-importapply) instead and supplies no ids, so the
-field remains only for third-party clients (issue #97 removes it).
+### The engine owns every id
+
+A create must **not** carry an `id`. The engine generates one via `generate_id`,
+giving the `<prefix>_<uuidv4>` form, and a body containing the field is a `400`:
+
+```json
+{"error": "id is assigned by the engine; omit it (bulk import: POST /import/apply)"}
+```
+
+Presence alone is rejected, `null` included - `id` is not a settable field with a
+default, so the [null-vs-absent rule](#the-null-vs-absent-rule) below does not
+reach it, and accepting `{"id": null}` would leave a caller believing the field
+is honoured. The field existed for the import orchestrator, which pre-assigned
+ids so it could wire `parentId` / `collectionId` across a whole tree before
+anything was persisted; import sends one
+[`POST /import/apply`](#post-importapply) instead, referencing items by opaque
+`tempId` and reading the real ids back from `idMap` (issues #96, #97).
+
+On `PUT`, the path is the identity. A body `id` matching it is accepted and
+ignored; one that disagrees - including `null` - is a `400`
+(`{"error": "Body 'id' must match the id in the path ('col_1') or be omitted"}`),
+because the payload otherwise names two different records and guessing between
+them is how a `PUT` to one id rewrites another. This is checked before the record
+is looked up, so a malformed body answers `400` whether or not the target exists.
+
+Since no create can select an id, the pre-existing "id already exists" `409` -
+whose body names the update path, e.g.
+`{"error": "Collection 'col_1' already exists; use PUT /collections/:id to update"}` -
+is now reachable only on a `generate_id` collision, which 122 bits of entropy put
+out of reach. It stays as a guard: on that draw the alternative is overwriting a
+live record.
 
 ### The null-vs-absent rule
 
@@ -132,10 +153,16 @@ stored value is left untouched.
 
 ### Behavior change (pre-1.0)
 
+**A create carrying an `id` is now a `400`** on all three resources. External
+scripts that minted their own ids must drop the field and read the engine's id
+out of the response, or use [`POST /import/apply`](#post-importapply) for a whole
+tree. A `PUT` whose body `id` disagrees with the path id is a `400` for the same
+reason (it used to be silently ignored, so the write landed on the path id).
+
 `POST /<resource>` used to be a silent upsert on all three resources, so a
-client could send an update as a POST. That no longer works and now returns
-`409`; external scripts that relied on POST-as-update must switch to
-`PUT /<resource>/:id`. Two bugs went with the old behavior and are fixed here:
+client could send an update as a POST. That no longer works; external scripts
+that relied on POST-as-update must switch to `PUT /<resource>/:id`. Two bugs went
+with the old behavior and are fixed here:
 
 - A stale or typo'd `id` silently **created** a second record instead of
   failing, and an `id` collision silently **merged** two records into one.
@@ -304,7 +331,6 @@ the null-vs-absent rule.
 **Request:**
 ```json
 {
-  "id": "col_1234567890",  // Optional, engine-generated if omitted
   "name": "My API",        // Required, no default (null is a 400)
   "parentId": null,         // Optional, null for root
   "order": 0,               // Optional, appended after siblings if omitted
@@ -312,10 +338,11 @@ the null-vs-absent rule.
 }
 ```
 
-**Response:** The created collection object.
+**Response:** The created collection object, carrying the engine-generated `id`.
 
-**Errors:** `409` if `id` already exists (use `PUT /collections/:id`); `400` if
-`name` is missing or `null`, or on a cycle (below).
+**Errors:** `400` if the body carries an `id`
+([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
+`null`, or on a cycle (below).
 
 ### PUT /collections/:id
 
@@ -461,7 +488,6 @@ the null-vs-absent rule.
 **Request:**
 ```json
 {
-  "id": "req_1234567890",           // Optional, engine-generated if omitted
   "collectionId": "col_1234567890", // Required, no default (null is a 400)
   "name": "Get Users",               // Required, no default (null is a 400)
   "method": "GET",                   // Required: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS
@@ -481,9 +507,10 @@ the null-vs-absent rule.
 }
 ```
 
-**Response:** The created request object.
+**Response:** The created request object, carrying the engine-generated `id`.
 
-**Errors:** `409` if `id` already exists (use `PUT /requests/:id`); `400` if a
+**Errors:** `400` if the body carries an `id`
+([the engine owns it](#the-engine-owns-every-id)), if a
 required field is missing or `null`, on an unrecognized `method`, on a
 `params` / `headers` entry that is not `{key: string, value: string, enabled: bool}`,
 or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
@@ -571,9 +598,9 @@ client invents; the engine generates every real id via `generate_id` and returns
 the translation in `idMap`.
 
 This is what replaced ~500 sequential `POST /collections` + `POST /requests`
-calls for a 500-request import, and with it the only reason those endpoints
-accept a client-supplied `id` at all (see
-[Resource writes](#resource-writes-create-vs-update)).
+calls for a 500-request import, and with it the only reason those endpoints ever
+accepted a client-supplied `id` - which they no longer do (see
+[The engine owns every id](#the-engine-owns-every-id)).
 
 **Request:**
 ```json
@@ -685,7 +712,6 @@ the null-vs-absent rule.
 **Request:**
 ```json
 {
-  "id": "env_1234567890",  // Optional, engine-generated if omitted
   "name": "Production",    // Required, no default (null is a 400)
   "description": "",        // Optional
   "isActive": false,        // Optional
@@ -699,10 +725,11 @@ the null-vs-absent rule.
 }
 ```
 
-**Response:** The created environment object.
+**Response:** The created environment object, carrying the engine-generated `id`.
 
-**Errors:** `409` if `id` already exists (use `PUT /environments/:id`); `400` if
-`name` is missing or `null`.
+**Errors:** `400` if the body carries an `id`
+([the engine owns it](#the-engine-owns-every-id)), or if `name` is missing or
+`null`.
 
 ### PUT /environments/:id
 
