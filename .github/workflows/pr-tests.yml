@@ -242,18 +242,27 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      # sccache is skipped on Windows: mozilla-actions/sccache-action@v0.0.10
-      # (latest available, Apr 2022) fails its install step on the Windows Server
-      # 2025 + Visual Studio 2026 image GitHub is rolling out across windows-latest
-      # in June 2026. The install error surfaces as "Unable to locate executable
-      # file: undefined" in the post-step and skips all downstream build/test
-      # steps. Builds on Windows are slower without sccache but reliable.
+      # sccache used to be skipped on Windows. sccache-action@v0.0.10 failed its
+      # install step on the Windows Server 2025 + Visual Studio 2026 image
+      # GitHub rolled across windows-latest in June 2026: "Unable to locate
+      # executable file: undefined" in the post-step, which took every
+      # downstream build and test step with it.
+      #
+      # v0.0.11 bumps @actions/io from 2.x to 3.x, and `which()` in that package
+      # is what raises exactly that error, so the skip is lifted here to find
+      # out whether it is fixed. Windows was the one runner that had never
+      # exercised this action, and a skip cannot tell you it is still needed.
+      # If the engine job goes red on windows-latest, put
+      # `if: runner.os != 'Windows'` back on both steps; the build is slower
+      # without sccache but reliable.
+      #
+      # The launcher is safe on MSVC here because windows-prod is a Release
+      # build - CMake passes no /Zi, so there is no separate PDB for sccache to
+      # choke on. Check that again before enabling it for windows-dev (Debug).
       - name: Setup sccache
-        if: runner.os != 'Windows'
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
 
-      - name: Configure sccache compiler launcher (non-Windows)
-        if: runner.os != 'Windows'
+      - name: Configure sccache compiler launcher
         shell: bash
         run: |
           echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
