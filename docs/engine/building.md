@@ -143,6 +143,45 @@ The build script will:
 - Uses vcpkg for all dependencies
 - CMake generator defaults to Visual Studio solution
 
+#### The Windows build is fully static - keep it that way
+
+The `windows-dev` and `windows-prod` presets build against
+**`x64-windows-static`** and set `CMAKE_MSVC_RUNTIME_LIBRARY` to the static
+MSVC runtime. `vayu-engine.exe` therefore ships as a single self-contained
+binary with **no DLLs beside it** - nothing is copied into
+`app/build/resources/bin` except the executable itself.
+
+This is not a size optimisation, it is a correctness requirement. The engine
+used to link dynamically, so the shipped binary imported `MSVCP140.dll` and
+`VCRUNTIME140.dll` from the Visual C++ redistributable. That redistributable is
+**not** part of a clean Windows install, and it was never bundled. On any
+machine without it - a fresh VM, a user who has never installed a C++ app -
+Windows refused to load the binary, the sidecar died the moment Electron
+spawned it, and the app showed only "Disconnected". v0.10.0 and v0.11.0 both
+shipped this way. Every developer machine has the redistributable (Visual
+Studio installs it), and so does every CI runner, which is why building and
+testing the engine never caught it.
+
+Two consequences worth knowing before you change the build:
+
+- **`set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)` in `engine/CMakeLists.txt` is
+  load-bearing.** `CMAKE_MSVC_RUNTIME_LIBRARY` is only honoured where policy
+  CMP0091 is NEW. Vendored quickjs-ng declares its own
+  `cmake_minimum_required(3.10)`, which resets policies inside that
+  subdirectory and would leave `qjs` on the dynamic runtime while the rest of
+  the tree is static. Mixing two CRTs in one process is not a build error - it
+  corrupts the heap at runtime.
+- **`.github/check-windows-deps.py` enforces this in CI**, on both PRs and
+  releases. It reads the built binary's PE import table and fails if anything
+  outside a Windows-OS allowlist appears. Allowlisting the OS rather than
+  denylisting the CRT is deliberate: it also catches a new third-party
+  dependency nobody has thought of. Run it locally the same way:
+
+  ```powershell
+  python -m pip install pefile
+  python .github/check-windows-deps.py engine/build-release/vayu-engine.exe
+  ```
+
 ## Running Tests
 
 ```bash
