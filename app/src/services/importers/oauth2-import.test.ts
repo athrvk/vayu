@@ -107,6 +107,12 @@ describe("mapInsomniaOAuth2", () => {
 		});
 	});
 
+	it("imports tokenPrefix as headerPrefix, defaulting to Bearer", () => {
+		expect(cfg(mapInsomniaOAuth2({ tokenPrefix: "JWT" })).headerPrefix).toBe("JWT");
+		expect(cfg(mapInsomniaOAuth2({ tokenPrefix: "" })).headerPrefix).toBe("Bearer");
+		expect(cfg(mapInsomniaOAuth2({})).headerPrefix).toBe("Bearer");
+	});
+
 	it("carries usePkce and redirectUrl for auth code", () => {
 		const r = mapInsomniaOAuth2({
 			grantType: "authorization_code",

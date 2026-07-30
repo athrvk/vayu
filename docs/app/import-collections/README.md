@@ -141,7 +141,17 @@ sources), `preRequestScript`, `postRequestScript`, `children: CollectionDraft[]`
 **`RequestDraft`** - `name`, `description`, `method: HttpMethod`, `url`,
 `params: KeyValueEntry[]`, `headers: KeyValueEntry[]`, `body: RequestBody`,
 `auth: RequestAuth` (**`inherit` allowed**, resolved against the collection chain at
-execution time), `preRequestScript`, `postRequestScript`.
+execution time), `preRequestScript`, `postRequestScript`, `followRedirects?: boolean`,
+`maxRedirects?: number`.
+
+Both redirect fields are optional because absent means "leave the engine's default"
+(`followRedirects: true`, `maxRedirects: 10`): a parser sets one only when the source
+file states it, and the orchestrator forwards it to `POST /import/apply` only when set.
+Sending an omitted `false` as `true` would follow a 3xx the user disabled; sending an
+absent value as `false` would stop one they never touched. Producers: Postman's
+item-level `protocolProfileBehavior` (both fields, see [postman.md](./postman.md)) and
+Insomnia's `settingFollowRedirects` (`followRedirects` only - its redirect *limit* is an
+app-wide setting, not a per-request field, see [insomnia-v4.md](./insomnia-v4.md)).
 
 **`EnvironmentDraft`** - `name`, `description`, `variables: Record<string, VariableValue>`.
 

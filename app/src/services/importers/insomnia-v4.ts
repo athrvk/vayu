@@ -34,13 +34,52 @@ interface Resource {
 	[k: string]: unknown;
 }
 
-function insomniaAuth(auth: any, ctx: { nonExec: number }): RequestAuth {
+/** Counters the tree walk accumulates so a nested helper can record a loss. */
+interface Ctx {
+	nonExec: number;
+	/** Bodies Vayu cannot store at all: binary bodies and multipart file parts. */
+	fileBody: number;
+}
+
+/**
+ * Insomnia itself only emits arrays and string mime types, so any of the shapes
+ * guarded below means a hand-edited or script-mangled file. `ImportModal` shows
+ * `Error.message` verbatim, so name the format and the field rather than letting
+ * a raw `TypeError`/`RangeError` surface as "Cannot read properties of undefined".
+ */
+function malformed(detail: string): Error {
+	return new Error(`Malformed Insomnia export: ${detail}`);
+}
+
+/** A row array that may be absent but must not be another type. */
+function rowsOrThrow(value: unknown, what: string): any[] {
+	if (value == null) return [];
+	if (!Array.isArray(value)) throw malformed(`${what} must be an array`);
+	return value;
+}
+
+/** `{name,value,disabled,description}` row → the shape `mapKeyValues` reads. */
+function kvRow(row: any): {
+	key?: string;
+	value?: unknown;
+	disabled?: boolean;
+	description?: string;
+} {
+	return {
+		key: row?.name,
+		value: row?.value,
+		disabled: row?.disabled,
+		...(typeof row?.description === "string" ? { description: row.description } : {}),
+	};
+}
+
+function insomniaAuth(auth: any, ctx: Ctx): RequestAuth {
 	if (!auth || !auth.type || auth.disabled === true) {
 		return auth?.disabled === true ? { mode: "none" } : { mode: "inherit" };
 	}
 	switch (auth.type) {
 		case "bearer":
-			return { mode: "bearer", token: normalizeVars(asString(auth.token)) };
+			return insomniaBearer(auth);
 		case "basic":
 			return {
 				mode: "basic",
@@ -73,8 +112,36 @@ function insomniaAuth(auth: any, ctx: { nonExec: number }): RequestAuth {
 	}
 }
 
-function insomniaBody(body: any): RequestBody {
-	const mime = (body?.mimeType ?? "").split(";")[0].trim();
+/**
+ * Insomnia sends `Authorization: <prefix> <token>`, where an empty PREFIX field
+ * means "Bearer". Vayu's bearer mode always writes "Bearer", so a different
+ * scheme (`Token`, `JWT`, ...) is preserved as an explicit Authorization header
+ * instead of being silently rewritten - the engine sends an `apikey` header
+ * value verbatim, so the wire bytes match what Insomnia would have sent.
+ * A prefix that only differs in case is left on the native bearer mode: HTTP
+ * auth schemes are case-insensitive (RFC 7235 §2.1).
+ */
+function insomniaBearer(auth: any): RequestAuth {
+	const token = normalizeVars(asString(auth.token));
+	const prefix = normalizeVars(asString(auth.prefix)).trim();
+	if (prefix !== "" && prefix.toLowerCase() !== "bearer") {
+		return {
+			mode: "apikey",
+			key: "Authorization",
+			value: `${prefix} ${token}`.trim(),
+			in: "header",
+		};
+	}
+	return { mode: "bearer", token };
+}
+
+function insomniaBody(body: any, ctx: Ctx): RequestBody {
+	if (body == null) return { mode: "none" };
+	if (typeof body !== "object") throw malformed("a request `body` must be an object");
+	if (body.mimeType != null && typeof body.mimeType !== "string") {
+		throw malformed("`body.mimeType` must be a string");
+	}
+	const mime = (body.mimeType ?? "").split(";")[0].trim();
 	switch (mime) {
 		case "application/json":
 			return { mode: "json", content: normalizeVars(asString(body.text)) };
@@ -85,26 +152,48 @@ function insomniaBody(body: any): RequestBody {
 		case "application/x-www-form-urlencoded":
 			return {
 				mode: "x-www-form-urlencoded",
-				fields: mapKeyValues(
-					(body.params ?? []).map((p: any) => ({
-						key: p.name,
-						value: p.value,
-						disabled: p.disabled,
-					}))
-				),
+				fields: mapKeyValues(rowsOrThrow(body.params, "`body.params`").map(kvRow)),
 			};
 		case "multipart/form-data": {
-			const text = (body.params ?? []).filter((p: any) => p.type !== "file");
-			return {
-				mode: "form-data",
-				fields: mapKeyValues(
-					text.map((p: any) => ({ key: p.name, value: p.value, disabled: p.disabled }))
-				),
-			};
+			const rows = rowsOrThrow(body.params, "`body.params`");
+			const text = rows.filter((p: any) => p?.type !== "file");
+			// Vayu has no file part; count the drop so the preview can show it (parity
+			// with the Postman parser's `skippedFileBody`).
+			ctx.fileBody += rows.length - text.length;
+			return { mode: "form-data", fields: mapKeyValues(text.map(kvRow)) };
 		}
 		default:
-			return { mode: "none" };
+			return unlistedBody(body, ctx);
 	}
+}
+
+/**
+ * Any mime outside the five above. Insomnia's XML/YAML/CSV/"Other" bodies are
+ * plain text in `body.text`, so they import as `text` rather than being dropped
+ * (the sibling Postman parser's `rawBody()` fallback does the same). A binary
+ * body carries a `fileName` and no text - that one Vayu genuinely cannot store,
+ * so it is dropped and counted instead of vanishing.
+ */
+function unlistedBody(body: any, ctx: Ctx): RequestBody {
+	if (typeof body.text === "string" && body.text !== "") {
+		return { mode: "text", content: normalizeVars(body.text) };
+	}
+	if (typeof body.fileName === "string" && body.fileName !== "") ctx.fileBody += 1;
+	return { mode: "none" };
+}
+
+/**
+ * Insomnia's per-request redirect choice is `"global" | "on" | "off"`, where
+ * `"global"` defers to an app-level setting that follows redirects. Only an
+ * explicit `"on"`/`"off"` is imported: the field stays absent otherwise, because
+ * the engine's default is `true` and an omitted `false` would silently follow a
+ * 3xx the user disabled. Insomnia has no per-request redirect *limit* (it is an
+ * app-wide setting), so `maxRedirects` is never imported.
+ */
+function insomniaFollowRedirects(setting: unknown): boolean | undefined {
+	if (setting === "off") return false;
+	if (setting === "on") return true;
+	return undefined;
 }
 
 export class InsomniaV4Parser implements ImportParser {
@@ -117,48 +206,57 @@ export class InsomniaV4Parser implements ImportParser {
 	}
 
 	parse(parsed: unknown, _raw: string, opts: ImportOptions): ImportResult {
-		const resources: Resource[] = ((parsed as any)?.resources ?? []) as Resource[];
+		const rawResources = (parsed as any)?.resources;
+		if (rawResources != null && !Array.isArray(rawResources)) {
+			throw malformed("`resources` must be an array");
+		}
+		const resources: Resource[] = (rawResources ?? []) as Resource[];
 		const byParent = new Map<string, Resource[]>();
-		for (const r of resources) {
+		for (let i = 0; i < resources.length; i++) {
+			const r = resources[i];
+			if (r == null || typeof r !== "object") {
+				throw malformed(`\`resources[${i}]\` must be an object`);
+			}
 			const key = r.parentId ?? "";
 			if (!byParent.has(key)) byParent.set(key, []);
 			byParent.get(key)!.push(r);
 		}
 
 		const skippedCounts: Record<string, number> = {};
-		const authCtx = { nonExec: 0 };
+		const ctx: Ctx = { nonExec: 0, fileBody: 0 };
 		let requestCount = 0;
 		let folderCount = 0;
 
 		const buildRequest = (r: Resource): RequestDraft => {
 			requestCount += 1;
+			const label = `request "${r.name ?? r._id}"`;
+			const followRedirects = insomniaFollowRedirects(r.settingFollowRedirects);
 			return {
 				name: r.name ?? "Untitled",
 				description: r.description ?? "",
 				method: toMethod(r.method),
 				url: normalizeVars(asString(r.url)),
 				params: mapKeyValues(
-					((r.parameters as any[]) ?? []).map((p) => ({
-						key: p.name,
-						value: p.value,
-						disabled: p.disabled,
-					}))
+					rowsOrThrow(r.parameters, `${label}: \`parameters\``).map(kvRow)
 				),
-				headers: mapKeyValues(
-					((r.headers as any[]) ?? []).map((h) => ({
-						key: h.name,
-						value: h.value,
-						disabled: h.disabled,
-					}))
-				),
-				body: insomniaBody(r.body),
-				auth: insomniaAuth(r.authentication, authCtx),
+				headers: mapKeyValues(rowsOrThrow(r.headers, `${label}: \`headers\``).map(kvRow)),
+				body: insomniaBody(r.body, ctx),
+				auth: insomniaAuth(r.authentication, ctx),
 				preRequestScript: opts.importScripts ? asString(r.preRequestScript) : "",
 				postRequestScript: opts.importScripts ? asString(r.afterResponseScript) : "",
+				...(followRedirects === undefined ? {} : { followRedirects }),
 			};
 		};
 
+		// Insomnia cannot emit a cycle (`parentId` is a single edge), but a mangled
+		// file can - and an unguarded walk answers that with a bare RangeError.
+		const visited = new Set<string>();
+
 		const buildCollection = (node: Resource, isWorkspace: boolean): CollectionDraft => {
+			if (visited.has(node._id)) {
+				throw malformed(`resource "${node._id}" appears twice in the folder tree`);
+			}
+			visited.add(node._id);
 			const children: CollectionDraft[] = [];
 			const requests: RequestDraft[] = [];
 			for (const child of byParent.get(node._id) ?? []) {
@@ -184,11 +282,14 @@ export class InsomniaV4Parser implements ImportParser {
 				description: node.description ?? "",
 				variables: isWorkspace ? toEnvVars((node.environment as any) ?? {}) : {},
 				auth: ((): Exclude<RequestAuth, { mode: "inherit" }> => {
-					const a = insomniaAuth((node as any).authentication, authCtx);
+					const a = insomniaAuth((node as any).authentication, ctx);
 					return a.mode === "inherit" ? { mode: "none" } : a;
 				})(),
-				preRequestScript: "",
-				postRequestScript: "",
+				// Insomnia 9.3+ lets a folder carry scripts, and its v4 export writes
+				// model fields verbatim - so these are the request-level key names. An
+				// export that spells them differently reads as absent, i.e. as before.
+				preRequestScript: opts.importScripts ? asString(node.preRequestScript) : "",
+				postRequestScript: opts.importScripts ? asString(node.afterResponseScript) : "",
 				children,
 				requests,
 			};
@@ -229,6 +330,8 @@ export class InsomniaV4Parser implements ImportParser {
 			}
 		}
 
+		if (ctx.fileBody > 0) skippedCounts.file_body = ctx.fileBody;
+
 		const skipped: SkippedItem[] = Object.entries(skippedCounts).map(([kind, count]) => ({
 			kind: (kind === "grpc_request"
 				? "grpc"
@@ -251,7 +354,7 @@ export class InsomniaV4Parser implements ImportParser {
 				environmentCount: environments.length,
 				globalCount: 0,
 				skipped,
-				nonExecutableAuth: authCtx.nonExec,
+				nonExecutableAuth: ctx.nonExec,
 			},
 		};
 	}
