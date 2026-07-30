@@ -126,6 +126,12 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   as `pm.response.headers['content-type']`. The engine's HTTP client lower-cases
   every response header name as it parses it (`client.cpp`), so a mixed-case key
   reads back `undefined`.
+- **Dynamic variables in scripts** - `pm.variables.get("$guid")`,
+  `$timestamp`, `$random*` and the rest resolve only in `{{…}}` interpolation,
+  which happens app-side before the payload reaches the engine. A script that
+  wants a generated value has to write the JavaScript for it. The supported set
+  and the reasoning are in
+  [variable resolution](./variable-resolution.md#dynamic-variables)
 - `pm.iterationData.*` - data-file driven runs
 - `pm.cookies.*`
 - Postman's header *methods* - `pm.request.headers.add/upsert/remove(...)`. Vayu's

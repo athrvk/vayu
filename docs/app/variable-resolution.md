@@ -108,8 +108,72 @@ winner is still the last enabled definition in the same precedence order. The
 origins list is display metadata, and MCP renders nothing.
 
 The resolved map is then used by `resolveString(input)` which replaces all
-`{{name}}` occurrences. Unresolved variables are left as-is (e.g. `{{unknown}}`
-stays in the output rather than becoming an empty string).
+`{{name}}` occurrences. An ordinary name nothing defines resolves to the **empty
+string** - the token disappears from the outgoing request. A `{{$name}}` is the
+exception; see below.
+
+---
+
+## Dynamic variables
+
+A name starting with `$` is not looked up in any scope. It names a **generator**
+in `app/src/lib/dynamic-variables.ts`, called where it is written:
+
+| Name | Value |
+|---|---|
+| `$guid`, `$randomUUID` | UUID v4 |
+| `$timestamp` | Unix time in seconds |
+| `$isoTimestamp` | ISO 8601 UTC timestamp |
+| `$randomInt` | integer 0 - 1000 |
+| `$randomAlphaNumeric` | one alphanumeric character |
+| `$randomBoolean` | `"true"` or `"false"` |
+| `$randomEmail` | email address |
+| `$randomFirstName`, `$randomLastName`, `$randomFullName` | person name |
+| `$randomCompanyName` | company name |
+| `$randomUrl` | absolute `https://` URL |
+| `$randomIP` | IPv4 address |
+| `$randomPassword` | 15-character password |
+
+They resolve anywhere `{{name}}` does - URL, headers, body, form fields - and the
+`{{` autocomplete offers them under a **Dynamic** heading in both the plain
+fields and the body editors.
+
+Three rules decide what happens at a token:
+
+1. **Scopes win.** A workspace that defines a variable literally named `$guid`
+   keeps that value; only a name nothing defines reaches a generator. So adding
+   this table cannot change what an existing request sends.
+2. **One value per occurrence.** Two `{{$guid}}` in one body are two different
+   ids, which is the reason to write them. The table holds functions, not
+   precomputed values.
+3. **An unknown `$name` keeps its braces.** `{{$randomInteger}}` (not a name
+   Vayu has) is sent as that literal text rather than resolving to `""`. The `$`
+   is a declaration of intent, and a typo that silently emptied a field is the
+   defect this feature was added to fix - so it is left where it can be seen, and
+   the token stays marked unresolved in the UI.
+
+### What this does not cover
+
+**Scripts.** `pm.variables.get("$guid")` does **not** work. Interpolation happens
+app-side, before the payload reaches the engine; scripts run engine-side, and the
+engine does no `{{…}}` interpolation at all. Generating a value in a script means
+writing the JavaScript for it. See
+[pm API compatibility](./pm-api-compatibility.md).
+
+**Load runs generate once, not per iteration.** A run's payload is interpolated
+once, here, and then sent to the engine, which repeats it - so every request in
+the run carries the *same* `{{$guid}}`. The load-test dialog says so when the
+request contains one. Per-iteration values would require the engine to do the
+interpolation, which is deferred backlog item **A1**
+(`docs/plans/pending-backlog.md`); this feature deliberately does not start it.
+
+### The MCP copy
+
+`app/electron/mcp/dynamic-variables.ts` is a duplicate of the table for the MCP
+client, which shares no module graph with `app/src/`. It is the same deliberate
+duplication as the rest of resolution: **the two must change together**, and
+`electron/mcp/resolve.test.ts` compares the two name sets so a name added to one
+copy fails the suite.
 
 ---
 
@@ -172,7 +236,8 @@ composition boundary* for the wire shape.
 ### Reading a variable from a script
 
 A script does not see `{{name}}` - those are already resolved by the time the
-payload reaches the engine. It reads a scope by name (`pm.environment.get`,
+payload reaches the engine, and that includes the dynamic variables above:
+`pm.variables.get("$guid")` is not a thing Vayu supports. It reads a scope by name (`pm.environment.get`,
 `pm.collectionVariables.get`, `pm.globals.get`) or reads across all three with
 `pm.variables.get`, which walks **environment → collection → global** and stops
 at the first scope that has the name enabled - this page's priority order, read

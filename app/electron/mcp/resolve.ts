@@ -23,8 +23,8 @@
  * module MCP requests would ship unresolved `{{vars}}`, no auth, and no scripts.
  * This module is the main-process counterpart of the renderer pipeline
  * (`useVariableResolver.ts` + `request-builder/index.tsx` +
- * `utils/auth-resolution.ts`); the two must stay in agreement on precedence and
- * `inherit`/script semantics. Everything here is pure and transport-agnostic
+ * `utils/auth-resolution.ts`); the two must stay in agreement on precedence,
+ * dynamic variables (`./dynamic-variables.ts`) and `inherit`/script semantics. Everything here is pure and transport-agnostic
  * except {@link loadResolutionContext}, which reads the data it needs via the
  * engine client.
  *
@@ -32,6 +32,7 @@
  */
 
 import type { EngineClient } from "./engine-client.js";
+import { isDynamicVariableName, resolveDynamicVariable } from "./dynamic-variables.js";
 
 // --- Engine JSON shapes (loose; validated defensively) -----------------------
 
@@ -177,11 +178,25 @@ export interface Resolver {
 	resolveObject: <T>(value: T) => T;
 }
 
-/** Build a {@link Resolver} over a variable map. */
+/**
+ * Build a {@link Resolver} over a variable map.
+ *
+ * Scopes first, then the dynamic-variable table, exactly as the renderer's
+ * `useVariableResolver` does it: a variable literally named `$guid` wins over
+ * the generator, a name nothing defines falls through to it, and an unknown
+ * `$name` keeps its braces instead of becoming "". Each generator is called
+ * inside the replace callback, so two `{{$guid}}` in one payload differ.
+ */
 export function makeResolver(vars: Map<string, string>): Resolver {
 	const resolveString = (input: string): string => {
 		if (typeof input !== "string" || input.length === 0) return input;
-		return input.replace(VARIABLE_PATTERN, (_m, name: string) => vars.get(name.trim()) ?? "");
+		return input.replace(VARIABLE_PATTERN, (match: string, raw: string) => {
+			const name = raw.trim();
+			const defined = vars.get(name);
+			if (defined !== undefined) return defined;
+			if (isDynamicVariableName(name)) return resolveDynamicVariable(name) ?? match;
+			return "";
+		});
 	};
 	const resolveObject = <T>(value: T): T => {
 		if (typeof value === "string") return resolveString(value) as unknown as T;

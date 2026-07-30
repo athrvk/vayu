@@ -17,6 +17,17 @@ import {
 	composeSavedRequest,
 	type CollectionLike,
 } from "./resolve.js";
+import {
+	DYNAMIC_VARIABLES as MCP_DYNAMIC_VARIABLES,
+	isKnownDynamicVariable,
+} from "./dynamic-variables.js";
+// Test-only import across the renderer/main boundary: the two tables are a
+// deliberate duplication, and comparing them is the only thing that keeps them
+// honest. Production code in `electron/` must never do this.
+import {
+	DYNAMIC_VARIABLES as RENDERER_DYNAMIC_VARIABLES,
+	isKnownDynamicVariable as rendererIsKnown,
+} from "@/lib/dynamic-variables";
 
 const enabled = (value: string) => ({ value, enabled: true });
 
@@ -429,5 +440,76 @@ describe("protocol (httpVersion) parity with the renderer", () => {
 			resolver
 		);
 		expect(out.httpVersion).toBe("auto");
+	});
+});
+
+/*
+ * Dynamic variables (issue #186). MCP resolves `{{$guid}}` and friends because
+ * it is a second engine client doing the app's interpolation - a collection
+ * imported from Postman is full of them, and an MCP agent replaying one of its
+ * requests must not send the empty fields the renderer no longer sends.
+ *
+ * The table is duplicated (`./dynamic-variables.ts` mirrors
+ * `app/src/lib/dynamic-variables.ts`) because `electron/` cannot import from
+ * `app/src/`. Production code cannot cross that line; this test can, and does,
+ * so a name added to one copy and not the other fails here rather than in a
+ * user's request months later.
+ */
+describe("dynamic variables", () => {
+	const empty = () => makeResolver(new Map());
+
+	test("resolves a known generator no scope defines", () => {
+		expect(empty().resolveString("id={{$guid}}")).toMatch(/^id=[0-9a-f-]{36}$/);
+	});
+
+	test("generates once per occurrence", () => {
+		const [a, b] = empty().resolveString("{{$guid}}|{{$guid}}").split("|");
+		expect(a).not.toBe(b);
+	});
+
+	test("a defined variable of the same name wins over the generator", () => {
+		const { resolveString } = makeResolver(new Map([["$guid", "pinned"]]));
+		expect(resolveString("{{$guid}}")).toBe("pinned");
+	});
+
+	test("an unknown $name keeps its braces, an unknown plain name still empties", () => {
+		expect(empty().resolveString("a={{$randomInteger}}")).toBe("a={{$randomInteger}}");
+		expect(empty().resolveString("a={{nope}}")).toBe("a=");
+	});
+
+	test("reaches the URL, headers and body of a composed request", () => {
+		const out = composeSavedRequest(
+			{
+				method: "POST",
+				url: "https://x/y?id={{$guid}}",
+				headers: [{ key: "X-Trace", value: "{{$guid}}" }],
+				body: { mode: "json", content: '{"at":"{{$isoTimestamp}}"}' },
+			},
+			[],
+			empty()
+		);
+		expect(out.url).toMatch(/id=[0-9a-f-]{36}$/);
+		expect(out.headers?.["X-Trace"]).toMatch(/^[0-9a-f-]{36}$/);
+		expect(out.body?.content).not.toContain("{{$isoTimestamp}}");
+	});
+
+	test("the MCP table and the renderer table offer exactly the same names", () => {
+		const mcpNames = MCP_DYNAMIC_VARIABLES.map((v) => v.name).sort();
+		const rendererNames = RENDERER_DYNAMIC_VARIABLES.map((v) => v.name).sort();
+		expect(mcpNames).toEqual(rendererNames);
+	});
+
+	test("and describe them the same way", () => {
+		// Descriptions are what the autocomplete shows; a name whose two copies
+		// generate different kinds of value would show up here first.
+		const describeAll = (table: readonly { name: string; description: string }[]) =>
+			Object.fromEntries(table.map((v) => [v.name, v.description]));
+		expect(describeAll(MCP_DYNAMIC_VARIABLES)).toEqual(describeAll(RENDERER_DYNAMIC_VARIABLES));
+	});
+
+	test("both copies answer the same way about what they can generate", () => {
+		for (const name of ["$guid", "$randomInteger", "baseUrl", "$timestamp"]) {
+			expect(isKnownDynamicVariable(name)).toBe(rendererIsKnown(name));
+		}
 	});
 });

@@ -35,6 +35,7 @@ function open(props: Partial<React.ComponentProps<typeof LoadTestConfigDialog>> 
 			onStart={onStart}
 			isStarting={false}
 			hasPreRequestScript={false}
+			hasDynamicVariables={false}
 			{...props}
 		/>
 	);
@@ -137,6 +138,27 @@ describe("notices", () => {
 		);
 		expect(alerts).toHaveLength(2);
 		expect(alerts[0]).toHaveTextContent("Ramp is longer than the run");
+	});
+
+	/*
+	 * Interpolation happens once, app-side, before the run payload is sent, so a
+	 * `{{$guid}}` is the *same* id on every iteration. That is the least visible
+	 * way to get a load test wrong - the run succeeds and the data is quietly
+	 * degenerate - so the dialog has to say it out loud.
+	 */
+	it("warns that a run generates a dynamic variable only once", () => {
+		open({ hasDynamicVariables: true });
+		expect(screen.getByText(/Dynamic variables are generated once/)).toBeInTheDocument();
+	});
+
+	it("says nothing when the request has no dynamic variable", () => {
+		open();
+		expect(screen.queryByText(/Dynamic variables are generated once/)).toBeNull();
+	});
+
+	it("keeps the warning advisory - it does not gate Start", () => {
+		open({ hasDynamicVariables: true });
+		expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled();
 	});
 
 	it("disables Start while a blocking notice is live", () => {

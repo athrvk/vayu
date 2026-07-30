@@ -214,6 +214,13 @@ clicking Send:
 - **Variables** - resolved in URL, headers, and body with the app's precedence
   (environment > collection chain, leaf→root > globals; enabled only; unknown →
   empty string). The allowlist is checked against the **resolved** host.
+  Dynamic variables (`{{$guid}}`, `{{$timestamp}}`, `{{$random*}}`) are generated
+  per occurrence from `electron/mcp/dynamic-variables.ts`, the main-process copy
+  of the renderer's table - a scope that defines the name wins, and an unknown
+  `$name` keeps its braces rather than emptying. `start_load_run` interpolates
+  once like the app does, so a run repeats one generated value across its
+  iterations; see
+  [variable resolution](../app/variable-resolution.md#dynamic-variables).
 - **Auth** - `run_collection_smoke` applies each saved request's stored auth
   (`inherit` resolves against the collection chain); `run_request` /
   `start_load_run` accept an explicit `auth` block. In all cases variables inside

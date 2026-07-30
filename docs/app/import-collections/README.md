@@ -270,6 +270,20 @@ and rewriting it invents a variable reference that resolves to nothing. Nunjucks
 `{% … %}` and filtered vars `{{ x | filter }}` are left **verbatim** - Vayu has no equivalent
 and renders them as literal text. (`var-normalize.ts`)
 
+### Dynamic variables in imported collections
+
+Postman and Bruno collections routinely contain `{{$guid}}`, `{{$timestamp}}`
+and the `{{$random*}}` faker names. The importers pass them through untouched -
+`normalizeVars` only trims and strips a `_.` prefix - and **they now resolve**
+at send time from the generator table described in
+[variable resolution](../variable-resolution.md#dynamic-variables). Before that
+table existed they resolved to an empty string, so an imported request whose
+body carried a `{{$guid}}` sent an empty field and the import looked successful.
+
+A `$name` outside the supported set is left written as `{{$name}}` in the
+outgoing request rather than emptied, so an imported collection using a faker
+value Vayu does not have shows it instead of hiding it.
+
 ### sampleSchema
 `sampleSchema(schema, resolveRef)` - generates a sample value for an OpenAPI/Swagger schema,
 used to build request-body stubs. It is **bounded and resilient**, not a naive one-level walk:

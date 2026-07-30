@@ -20,6 +20,7 @@ import { Command, CommandList, CommandEmpty, CommandGroup, CommandItem } from ".
 import { VariableScopeBadge } from "./variable-scope-badge";
 import { cn } from "@/lib/utils";
 import type { ResolvedVariable } from "@/types";
+import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 
 // Re-export ResolvedVariable as VariableInfo for backward compatibility
 export type { ResolvedVariable as VariableInfo };
@@ -49,7 +50,21 @@ export function VariableAutocomplete({
 		return entries.filter(([name]) => name.toLowerCase().includes(lowerQuery));
 	}, [variables, searchQuery]);
 
-	if (filteredVariables.length === 0) {
+	/*
+	 * Dynamic variables are offered from the table rather than from `variables`,
+	 * which holds what the workspace defines. They are a second group, below,
+	 * because they exist in every workspace and would otherwise dilute the list
+	 * of names the user actually created. One that a real variable shadows is
+	 * dropped: the resolver would ignore the generator there.
+	 */
+	const filteredDynamic = useMemo(() => {
+		const lowerQuery = searchQuery.toLowerCase();
+		return DYNAMIC_VARIABLES.filter(
+			(v) => !(v.name in variables) && v.name.toLowerCase().includes(lowerQuery)
+		);
+	}, [variables, searchQuery]);
+
+	if (filteredVariables.length === 0 && filteredDynamic.length === 0) {
 		return null;
 	}
 
@@ -58,19 +73,38 @@ export function VariableAutocomplete({
 			<Command shouldFilter={false}>
 				<CommandList>
 					<CommandEmpty>No variables found.</CommandEmpty>
-					<CommandGroup heading="Variables">
-						{filteredVariables.map(([name, varInfo]) => (
-							<CommandItem
-								key={name}
-								value={name}
-								onSelect={() => onSelect(name)}
-								className="flex items-center justify-between cursor-pointer"
-							>
-								<span className="font-mono text-sm">{name}</span>
-								<VariableScopeBadge scope={varInfo.scope} variant="compact" />
-							</CommandItem>
-						))}
-					</CommandGroup>
+					{filteredVariables.length > 0 && (
+						<CommandGroup heading="Variables">
+							{filteredVariables.map(([name, varInfo]) => (
+								<CommandItem
+									key={name}
+									value={name}
+									onSelect={() => onSelect(name)}
+									className="flex items-center justify-between cursor-pointer"
+								>
+									<span className="font-mono text-sm">{name}</span>
+									<VariableScopeBadge scope={varInfo.scope} variant="compact" />
+								</CommandItem>
+							))}
+						</CommandGroup>
+					)}
+					{filteredDynamic.length > 0 && (
+						<CommandGroup heading="Dynamic">
+							{filteredDynamic.map((dynamic) => (
+								<CommandItem
+									key={dynamic.name}
+									value={dynamic.name}
+									onSelect={() => onSelect(dynamic.name)}
+									className="flex items-center justify-between cursor-pointer"
+								>
+									<span className="font-mono text-sm">{dynamic.name}</span>
+									<span className="ml-2 truncate text-[11px] text-muted-foreground">
+										{dynamic.description}
+									</span>
+								</CommandItem>
+							))}
+						</CommandGroup>
+					)}
 				</CommandList>
 			</Command>
 		</div>
