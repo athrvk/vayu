@@ -129,7 +129,24 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 			</div>
 
 			<div className="text-xs text-muted-foreground space-y-1">
-				<p className="font-medium">Quick Reference:</p>
+				{/*
+				 * The quick reference is six lines; the scripting guide is the rest
+				 * of the API - every matcher, every `pm.*` member, and the rules
+				 * these notes only summarise. It goes to the published docs site
+				 * through the keyed `openAppLink` channel, which is the only way
+				 * the renderer can reach the system browser (a plain anchor would
+				 * spawn an unmanaged Electron window).
+				 */}
+				<div className="flex items-center justify-between gap-2">
+					<p className="font-medium">Quick Reference:</p>
+					<button
+						type="button"
+						className="text-primary-text underline underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+						onClick={() => window.electronAPI?.openAppLink("scripting")}
+					>
+						Scripting docs
+					</button>
+				</div>
 				<pre className="m-0 p-2 surface-sunken rounded-md border border-rule font-mono whitespace-pre-wrap">
 					{config.quickReference.join("\n")}
 				</pre>
