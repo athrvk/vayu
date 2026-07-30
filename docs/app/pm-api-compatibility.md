@@ -17,17 +17,22 @@ intent is that the most common Postman scripts paste in and run unchanged.
 | Group               | API                                                                              |
 | ------------------- | -------------------------------------------------------------------------------- |
 | Core                | `pm`, `pm.test(name, fn)`, `pm.expect(value)`                                    |
-| Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()` |
+| Response            | `pm.response.code`, `.status`, `.responseTime`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()` |
+| Response headers    | `pm.response.headers.get(name)`, `.has(name)` - case-insensitive              |
 | Response assertions | `pm.response.to.have.status(code)`, `.header(name)`, `.jsonBody()`, and the `pm.response.to.be.*` status classes below |
 | Request             | `pm.request.url`, `.method`, `.headers`, `.body`                                 |
+| Request headers     | `pm.request.headers.get/has(name)`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
 | Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()` - read-only, see below     |
 | Console             | `console.log/info/warn/error`                                                    |
 
-`pm.response.headers` is a plain object keyed by the **lower-cased** header name -
-`pm.response.headers['content-type']`, not Postman's `HeaderList` (see below).
+`pm.response.headers` is a plain object keyed by the **lower-cased** header name, not
+Postman's `HeaderList` - but it carries `get()` / `has()`, and those are
+case-insensitive the way HTTP header names are. Indexing is not, so
+`headers['Content-Type']` reads back `undefined` while
+`headers.get('Content-Type')` works (see [Header methods](#header-methods)).
 
 Variable writes persist to the scope they target (environment / collection / globals) and
 participate in [variable resolution](./variable-resolution.md). Calling `set(name, value)`
@@ -121,16 +126,15 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   The engine does no `{{var}}` interpolation at all (it is resolved app-side
   before the payload arrives), so there is nothing to expose
 - `pm.environment.name` - the active environment's name
-- `pm.response.headers.get/has(...)` - Postman's `headers` is a `HeaderList`;
-  Vayu's is a plain object keyed by the **lower-cased** header name, so read it
-  as `pm.response.headers['content-type']`. The engine's HTTP client lower-cases
-  every response header name as it parses it (`client.cpp`), so a mixed-case key
-  reads back `undefined`.
 - `pm.iterationData.*` - data-file driven runs
-- `pm.cookies.*`
-- Postman's header *methods* - `pm.request.headers.add/upsert/remove(...)`. Vayu's
-  `pm.request.headers` is a plain object, so assignment and `delete` do the same
-  job (see below)
+- `pm.cookies.*`, and `pm.response.cookies`
+- `pm.request.url.query` / `.path` / `.host` - and any other `url.*` accessor.
+  `pm.request.url` is a writable **string** that the write-back requires to still
+  be one, and a JS string primitive cannot carry properties; boxing it would
+  reject every request. A separate accessor (`pm.request.getUrlParts()`-shaped)
+  could work, but that shape has not been decided, so URL parsing is string work
+  today. Deferred deliberately - see
+  [scripting.md](../engine/scripting.md#url-parts-are-not-exposed-deferred).
 - `pm.info`, `pm.execution`, `pm.visualizer`
 - The `tests["name"] = bool` legacy assertion style (use `pm.test`)
 - Chai matchers outside the list above: `.include.keys` (the subset form),
@@ -176,8 +180,42 @@ pm.request.body = JSON.stringify({ n: 2 });
   capability.
 
 This goes **further than Postman** on the URL, method and body, which Postman's docs mark
-immutable or provide no mutators for, and reaches the same end as its
-`pm.request.headers.add/upsert/remove` by plain-object assignment and `delete`.
+immutable or provide no mutators for.
+
+### Header methods
+
+Both header objects carry `get(name)` and `has(name)`; `pm.request.headers` also carries
+`upsert`, `add` and `remove`. They are **non-enumerable properties of the header object
+itself**, which is what makes them safe: `apply_pm_request_writeback` reads that object's
+own *enumerable* string properties as the outgoing header set, so an enumerable method
+would be read as a header whose value is a function and would fail the whole write-back.
+Being on the same object is also what makes a method call and a plain assignment agree -
+there is one property set, not two views of one.
+
+```javascript
+pm.request.headers.get('authorization');                  // case-insensitive
+pm.request.headers.has('Authorization');
+pm.request.headers.upsert({ key: 'X-Trace', value: id }); // or ('X-Trace', id)
+pm.request.headers.add({ key: 'X-New', value: '1' });     // throws if already set
+pm.request.headers.remove('Authorization');               // no-op if absent
+```
+
+Three deliberate divergences from Postman:
+
+- **The methods are case-insensitive, indexing is not.** `upsert('authorization', v)`
+  replaces an existing `Authorization` instead of adding a second spelling - which the
+  write-back would refuse as a clash, since `Headers` is a case-insensitive map.
+- **`add` refuses a name that is already present** and names `upsert` in the error.
+  Postman's `HeaderList` holds duplicates and `add` appends one; a single-valued
+  `Headers` map cannot represent that, and silently behaving as `upsert` would hide the
+  difference rather than report it.
+- **A header field literally named `get`/`has`/`add`/`upsert`/`remove` wins.** Entries are
+  *defined* over the method, attributes included, so the header still reaches the wire
+  and the shadowed method throws loudly. A dropped header would be the worse failure.
+
+Bad input fails loudly: a name must be a non-empty string, a value a string, number or
+boolean (the set plain assignment already accepts), and calling a method detached from
+its object throws rather than answering as though the header were missing.
 
 ### TODO (future)
 
