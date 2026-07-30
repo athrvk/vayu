@@ -242,15 +242,20 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      # sccache is skipped on Windows: mozilla-actions/sccache-action@v0.0.10
-      # (latest available, Apr 2022) fails its install step on the Windows Server
-      # 2025 + Visual Studio 2026 image GitHub is rolling out across windows-latest
-      # in June 2026. The install error surfaces as "Unable to locate executable
-      # file: undefined" in the post-step and skips all downstream build/test
-      # steps. Builds on Windows are slower without sccache but reliable.
+      # sccache is skipped on Windows: sccache-action fails its install step on
+      # the Windows Server 2025 + Visual Studio 2026 image GitHub is rolling out
+      # across windows-latest in June 2026. The install error surfaces as
+      # "Unable to locate executable file: undefined" in the post-step and skips
+      # all downstream build/test steps. Builds on Windows are slower without
+      # sccache but reliable.
+      #
+      # That was diagnosed against v0.0.10. v0.0.11 (Jul 2026) bumps
+      # @actions/io, which is where `which()` raises exactly that error, so it
+      # may well be fixed - but the skip below means no Windows run has ever
+      # exercised it. Drop the `if:` on a throwaway branch to find out.
       - name: Setup sccache
         if: runner.os != 'Windows'
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Configure sccache compiler launcher (non-Windows)
         if: runner.os != 'Windows'

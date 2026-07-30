@@ -79,13 +79,15 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
-      # sccache is skipped on Windows: mozilla-actions/sccache-action@v0.0.10
-      # (latest available, Apr 2022) fails its install step on the Windows Server
-      # 2025 + Visual Studio 2026 image GitHub is rolling out across windows-latest
-      # in June 2026. Builds on Windows are slower without sccache but reliable.
+      # sccache is skipped on Windows: sccache-action fails its install step on
+      # the Windows Server 2025 + Visual Studio 2026 image GitHub is rolling out
+      # across windows-latest in June 2026. Builds on Windows are slower without
+      # sccache but reliable. Diagnosed against v0.0.10 and never retested since,
+      # because the skip means no Windows run exercises it - see the longer note
+      # in pr-tests.yml.
       - name: Setup sccache
         if: runner.os != 'Windows'
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Configure sccache compiler launcher (non-Windows)
         if: runner.os != 'Windows'
